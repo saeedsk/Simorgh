@@ -765,3 +765,17 @@ Still ahead, roughly in order:
     `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
     derived from real operating experience -- worth revisiting once
     there's an actual track record.
+55. **`DeploymentManager` (milestone 7, `src/orchestrator/deployment.py`)
+    is fully built and tested but has no live caller.** `build_router()`
+    registers each sub-agent directly; nothing ever constructs a
+    `DeploymentManager` or calls `deploy()`/`stage_candidate()`. Found
+    while auditing this document against the actual code for drift (the
+    same pass that caught the stale `SkillResearchAgent` claim, above).
+    Deliberately not wired up as part of that same pass: unlike every
+    other "build then wire" fix in this project's history (`SkillsAgent`,
+    `HealthMonitor`, `InterestTracker`), connecting this one to the
+    self-patch pipeline would mean LLM-drafted code becoming live-
+    executing via hot-swap instead of through `relaunch()`'s self-check
+    subprocess -- a change to the safety model that self-patching relies
+    on, not a plumbing fix, and warrants its own explicit decision with
+    the creator rather than being bundled into a doc/drift cleanup pass.
