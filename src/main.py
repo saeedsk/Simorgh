@@ -132,6 +132,12 @@ MAX_EVOLVE_COUNT = 10
 DEFAULT_EVOLVE_MAX_ATTEMPTS = 2
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 DEFAULT_HISTORY_PATH = Path.home() / ".simorgh" / "cli_history"
+# One-shot handoff for ShortTermMemory across exactly one relaunch (see
+# ShortTermMemory.save/load_and_clear) -- os.execv wipes the in-memory
+# conversation window outright, so this is how a patch/evolve relaunch
+# hands the next process something to restore instead of dropping the
+# creator's mid-conversation context silently.
+DEFAULT_RELAUNCH_CONTEXT_PATH = Path.home() / ".simorgh" / "relaunch_context.json"
 HISTORY_LENGTH = 1000
 
 # Command names autocorrect_command below will guess against -- kept as
@@ -656,7 +662,7 @@ def _print_takeaway(reflection_agent: ReflectionAgent | None, outcome: Outcome) 
 def run_cli() -> None:
     _setup_readline()
     store = build_memory_store()
-    short_term = ShortTermMemory()
+    short_term = ShortTermMemory.load_and_clear(DEFAULT_RELAUNCH_CONTEXT_PATH) or ShortTermMemory()
     activity_log = ActivityLog(store)
     cognition, budget_guards = build_cognition_router(store)
     web_fetch = WebFetchTool(store)
@@ -688,14 +694,14 @@ def run_cli() -> None:
         activity_log=activity_log,
         propose_skill_fn=lambda topic: propose_skill(skill_research, audit_gate, store, topic),
         propose_patch_fn=lambda path, desc: propose_self_patch(
-            self_patch_agent, audit_gate, store, activity_log, path, desc
+            self_patch_agent, audit_gate, store, activity_log, path, desc, short_term=short_term
         ),
         propose_batch_fn=lambda theme, count: propose_skill_batch(
             cognition, skill_research, audit_gate, store, theme, count
         ),
         plan_fn=lambda goal, count: plan_goal(cognition, task_store, goal, count),
         propose_evolve_fn=lambda goal, count: propose_patch_batch(
-            cognition, self_patch_agent, audit_gate, store, activity_log, goal, count
+            cognition, self_patch_agent, audit_gate, store, activity_log, goal, count, short_term=short_term
         ),
     )
 
@@ -705,12 +711,20 @@ def run_cli() -> None:
         activity_clock,
         perform_action=lambda: _autonomous_action(
             task_store, reflection_agent, store, skill_research, self_patch_agent,
-            audit_gate, activity_log, cognition,
+            audit_gate, activity_log, cognition, short_term=short_term,
         ),
     )
 
     _print_banner()
     _print_cognition_status(budget_guards)
+    if len(short_term) > 0:
+        print(
+            style(
+                f"🧠 restored {len(short_term)} turn(s) of conversation context from "
+                "before the last relaunch",
+                "cyan",
+            )
+        )
     _print_resume_notice(task_store)
     print(
         style(
@@ -742,6 +756,7 @@ def _autonomous_action(
     activity_log: ActivityLog,
     cognition: CognitionRouter,
     repo_root: Path | None = None,
+    short_term: ShortTermMemory | None = None,
 ) -> bool:
     """One autonomous unit of work, called by AutonomyController.tick()
     only once every gate (enabled, idle long enough, past cooldown,
@@ -778,6 +793,7 @@ def _autonomous_action(
         cognition,
         repo_root=repo_root,
         label="autonomous",
+        short_term=short_term,
     )
     print(style("> ", "cyan", "bold"), end="", flush=True)
     return True
@@ -856,7 +872,10 @@ def _run_cli_loop(
         patch_args = extract_patch_args(user_input, lowered)
         if patch_args is not None:
             subject, description = patch_args
-            propose_self_patch(self_patch_agent, audit_gate, store, activity_log, subject, description)
+            propose_self_patch(
+                self_patch_agent, audit_gate, store, activity_log, subject, description,
+                short_term=short_term,
+            )
             continue
         batch_args = extract_batch_args(user_input, lowered)
         if batch_args is not None:
@@ -872,7 +891,8 @@ def _run_cli_loop(
         if evolve_args is not None:
             count, goal = evolve_args
             propose_patch_batch(
-                cognition, self_patch_agent, audit_gate, store, activity_log, goal, count
+                cognition, self_patch_agent, audit_gate, store, activity_log, goal, count,
+                short_term=short_term,
             )
             continue
         if lowered == DISCOVER_COMMAND:
@@ -884,7 +904,7 @@ def _run_cli_loop(
         if lowered == WORK_COMMAND:
             work_on_next_task(
                 task_store, skill_research, self_patch_agent, audit_gate, store,
-                activity_log, cognition,
+                activity_log, cognition, short_term=short_term,
             )
             continue
         if lowered == "autonomous" or lowered.startswith(AUTONOMOUS_PREFIX):
@@ -1216,6 +1236,7 @@ def propose_self_patch(
     repo_root: Path | None = None,
     max_attempts: int = 3,
     do_relaunch: bool = True,
+    short_term: ShortTermMemory | None = None,
 ) -> str:
     """Draft a revision to an EXISTING source file at `subject`, run it
     through the same audit gate a drafted skill goes through, and -- if
@@ -1327,7 +1348,7 @@ def propose_self_patch(
         print(style(f"⚠️  [git] {commit_result.output}", "yellow"))
 
     if do_relaunch and commit_result.committed:
-        reverted_message = _relaunch_or_rollback(repo_root, target)
+        reverted_message = _relaunch_or_rollback(repo_root, target, short_term=short_term)
         if reverted_message is not None:
             message = reverted_message
             _print_status(message)
@@ -1335,7 +1356,9 @@ def propose_self_patch(
     return message
 
 
-def _relaunch_or_rollback(repo_root: Path | None, target: Path) -> str | None:
+def _relaunch_or_rollback(
+    repo_root: Path | None, target: Path, short_term: ShortTermMemory | None = None
+) -> str | None:
     """Shared by propose_self_patch (a human-typed `patch`) and the
     autonomous task runner below -- relaunch() verifies the new code
     actually starts (see src/orchestrator/self_patch.py) before
@@ -1346,6 +1369,8 @@ def _relaunch_or_rollback(repo_root: Path | None, target: Path) -> str | None:
     in production) success path -- a real relaunch replaces the process
     outright and never returns here at all.
     """
+    if short_term is not None and len(short_term) > 0:
+        short_term.save(DEFAULT_RELAUNCH_CONTEXT_PATH)
     print("🔍 [patch] verifying the new code actually starts before relaunching into it...")
     relaunch_result = relaunch()
     if relaunch_result.succeeded:
@@ -1445,6 +1470,7 @@ def propose_patch_batch(
     count: int,
     repo_root: Path | None = None,
     do_relaunch: bool = True,
+    short_term: ShortTermMemory | None = None,
 ) -> str:
     """The creator's direct ask, "I want Sim to evolve itself, not just
     add a bunch of new skill files" -- batch/plan only ever call
@@ -1518,6 +1544,8 @@ def propose_patch_batch(
     if applied == 0 or not do_relaunch:
         return message
 
+    if short_term is not None and len(short_term) > 0:
+        short_term.save(DEFAULT_RELAUNCH_CONTEXT_PATH)
     print("🔍 [evolve] verifying the new code actually starts before relaunching into it...")
     relaunch_result = relaunch()
     if relaunch_result.succeeded:
@@ -1670,6 +1698,7 @@ def work_on_next_task(
     cognition: CognitionRouter,
     repo_root: Path | None = None,
     label: str = "work",
+    short_term: ShortTermMemory | None = None,
 ) -> str:
     """Pick and run exactly one task from the persisted backlog. `label`
     lets the autonomous loop (src/orchestrator/autonomy.py) reuse this
@@ -1697,7 +1726,7 @@ def work_on_next_task(
     )
     if needs_relaunch:
         target = Path(repo_root or Path.cwd()) / task.subject
-        reverted_message = _relaunch_or_rollback(repo_root, target)
+        reverted_message = _relaunch_or_rollback(repo_root, target, short_term=short_term)
         if reverted_message is not None:
             task_store.update_status(task.id, BLOCKED, note=reverted_message)
             result = reverted_message

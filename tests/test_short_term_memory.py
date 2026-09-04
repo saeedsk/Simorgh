@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from src.memory.short_term import ShortTermMemory
 
@@ -70,6 +72,77 @@ class TestShortTermMemory(unittest.TestCase):
     def test_invalid_max_chars_raises(self):
         with self.assertRaises(ValueError):
             ShortTermMemory(max_chars=0)
+
+
+class TestSaveAndLoadAndClear(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmpdir.name) / "nested" / "relaunch_context.json"
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_save_then_load_round_trips_turns_oldest_first(self):
+        memory = ShortTermMemory()
+        memory.add("hi", "hello")
+        memory.add("how are you", "fine")
+
+        memory.save(self.path)
+        restored = ShortTermMemory.load_and_clear(self.path)
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(
+            [t.request_text for t in restored.recent()], ["hi", "how are you"]
+        )
+        self.assertEqual(
+            [t.response_text for t in restored.recent()], ["hello", "fine"]
+        )
+
+    def test_load_and_clear_deletes_the_file_one_shot(self):
+        memory = ShortTermMemory()
+        memory.add("hi", "hello")
+        memory.save(self.path)
+
+        self.assertTrue(self.path.exists())
+        ShortTermMemory.load_and_clear(self.path)
+
+        self.assertFalse(self.path.exists())
+        self.assertIsNone(ShortTermMemory.load_and_clear(self.path))
+
+    def test_load_and_clear_missing_file_returns_none(self):
+        self.assertIsNone(ShortTermMemory.load_and_clear(self.path))
+
+    def test_load_and_clear_corrupt_file_returns_none_and_removes_it(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text("not valid json{{{")
+
+        result = ShortTermMemory.load_and_clear(self.path)
+
+        self.assertIsNone(result)
+        self.assertFalse(self.path.exists())
+
+    def test_load_and_clear_ignores_malformed_entries(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(
+            '[{"request_text": "ok", "response_text": "fine"}, '
+            '{"request_text": 5, "response_text": "bad type"}, '
+            '"not even a dict"]'
+        )
+
+        restored = ShortTermMemory.load_and_clear(self.path)
+
+        self.assertIsNotNone(restored)
+        self.assertEqual([t.request_text for t in restored.recent()], ["ok"])
+
+    def test_restored_memory_still_respects_max_turns(self):
+        memory = ShortTermMemory(max_turns=100)
+        for i in range(5):
+            memory.add(str(i), str(i))
+        memory.save(self.path)
+
+        restored = ShortTermMemory.load_and_clear(self.path, max_turns=2)
+
+        self.assertEqual([t.request_text for t in restored.recent()], ["3", "4"])
 
 
 if __name__ == "__main__":

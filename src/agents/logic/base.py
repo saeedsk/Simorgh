@@ -20,7 +20,7 @@ SkillResearchAgent's drafting loop enforces). This is what lets Sim
 actually retry a failed fetch with a corrected URL itself, rather than
 just reporting the failure and asking the user to try again -- see
 docs/SOUL.md, "Resourceful, takes ownership." There is still no raw
-WRITE tool or shell here: FETCH/RUN/READ/RECALL/REMIND can never write
+WRITE tool or shell here: FETCH/RUN/READ/LIST/RECALL/REMIND can never write
 to disk directly. Self-modification -- via the PROPOSE/PATCH/BATCH/PLAN
 markers below, when `propose_skill_fn`/etc. are given -- is reachable
 from this loop too now, since the creator explicitly authorized it (see
@@ -34,7 +34,7 @@ network denylist, and the protected files are unmoved regardless of
 which of the three triggers started the pipeline. See docs/SOUL.md,
 "On changing this hierarchy."
 
-If `activity_log` is given, every FETCH/RUN/READ step this loop takes is
+If `activity_log` is given, every FETCH/RUN/READ/LIST step this loop takes is
 recorded durably (kind="tool_call"), not just print()ed for whoever
 happens to be watching the terminal -- see
 src/orchestrator/activity_log.py.
@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.cognition.provider import CognitionRouter, ProviderUnavailable
-from src.cognition.tool_protocol import parse_marker, preview, safe_read_file
+from src.cognition.tool_protocol import parse_marker, preview, safe_list_dir, safe_read_file
 from src.memory.shared_bus import SharedMemoryBus
 from src.memory.short_term import ShortTermMemory
 from src.orchestrator.activity_log import ActivityLog
@@ -101,9 +101,11 @@ _PERSONA_PREFIX = (
     "'use <skill name>' -- no restart, since it was never loaded into "
     "the running process; a patch or evolve batch DOES relaunch the "
     "process to take effect, since it's changing code that's already "
-    "loaded in memory -- warn the user their conversation is about to "
-    "end abruptly before using PATCH or EVOLVE successfully, don't just "
-    "go silent mid-turn. Separately: an idle-triggered autonomous loop "
+    "loaded in memory -- warn the user their session is about to restart "
+    "before using PATCH or EVOLVE successfully, don't just go silent "
+    "mid-turn. The recent conversation itself is saved just before the "
+    "relaunch and restored right after, so say it'll pick back up "
+    "afterward, not that it's gone for good. Separately: an idle-triggered autonomous loop "
     "(explicitly authorized and enabled by the creator) does pick up "
     "pending work on its own after the CLI sits unused for a while, "
     "roughly every several minutes once idle -- this already IS a "
@@ -183,7 +185,7 @@ class LogicAgent(SubAgent):
 
     def _draft_via_llm(self, text: str, mood: EmotionalState) -> str | None:
         """Returns the LLM's final response text after a bounded tool-use
-        loop (FETCH/RUN/READ/RECALL, whichever were configured), or None
+        loop (FETCH/RUN/READ/LIST/RECALL, whichever were configured), or None
         if no real provider was reachable at all, or -- even on the
         forced final turn below -- it produced nothing usable.
 
@@ -226,6 +228,9 @@ class LogicAgent(SubAgent):
             if kind == "read":
                 prompt += self._read_tool_turn(payload)
                 continue
+            if kind == "list":
+                prompt += self._list_tool_turn(payload)
+                continue
             if kind == "recall":
                 prompt += self._recall_tool_turn(payload)
                 continue
@@ -260,6 +265,7 @@ class LogicAgent(SubAgent):
         if self._activity_log is not None:
             markers.append("RECALL")
         markers.append("READ")
+        markers.append("LIST")
         markers.append("REMIND")
         if self._propose_skill_fn is not None:
             markers.append("PROPOSE")
@@ -302,6 +308,15 @@ class LogicAgent(SubAgent):
             )
         lines.append(
             "READ: <path>  -- read a file from this codebase (src/docs/tests only) for context."
+        )
+        lines.append(
+            "LIST: <path>  -- list the files/folders directly under <path> (src/docs/tests "
+            "only; empty or '.' lists those three top-level areas). Use this FIRST when you "
+            "need to discover what files exist -- e.g. reviewing your own architecture or "
+            "finding a module by topic -- rather than guessing a path for READ, and instead "
+            "of RUN: RUN executes in an isolated sandbox that cannot see this real "
+            "repository at all, so os.listdir()/os.walk() there will never show you anything "
+            "real."
         )
         lines.append(
             "REMIND: <duration> <message>  -- actually schedule a one-off reminder that "
@@ -402,6 +417,14 @@ class LogicAgent(SubAgent):
         content = safe_read_file(self._repo_root, path)
         self._record_tool_call("READ", preview(path), f"{len(content)} chars", True)
         return f"\n\n[READ {path!r} result]\n{content}\n{_CONTINUE_HINT}"
+
+    def _list_tool_turn(self, raw_path: str) -> str:
+        path = raw_path.strip()
+        print(f"[Sim] listing {preview(path) or '.'!r}...")
+        content = safe_list_dir(self._repo_root, path)
+        line_count = content.count("\n") + 1
+        self._record_tool_call("LIST", preview(path) or ".", f"{line_count} entries", True)
+        return f"\n\n[LIST {path!r} result]\n{content}\n{_CONTINUE_HINT}"
 
     def _recall_tool_turn(self, raw_arg: str) -> str:
         from src.orchestrator.activity_log import ActivityLog
@@ -527,6 +550,6 @@ _CONTINUE_HINT = (
 _FINAL_TURN_HINT = (
     "\n\nThis is your last turn -- no more tool calls will be honored. "
     "Answer now, directly, using whatever you've already learned above "
-    "(even if incomplete); do not write a marker like FETCH:/RUN:/READ:/"
+    "(even if incomplete); do not write a marker like FETCH:/RUN:/READ:/LIST:/"
     "RECALL:, it will be used as your literal final answer verbatim."
 )

@@ -608,6 +608,51 @@ class TestProposeSelfPatch(unittest.TestCase):
             (self.repo_root / "src" / "orchestrator" / "target.py").read_text(), "VALUE = 1\n"
         )
 
+    def test_relaunch_saves_short_term_context_first(self):
+        import subprocess
+        from unittest.mock import patch
+
+        from src.memory.short_term import ShortTermMemory
+        from src.orchestrator.self_patch import RelaunchResult
+
+        subprocess.run(["git", "init", "-q"], cwd=self.repo_root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"], cwd=self.repo_root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True)
+        self._write_passing_test()
+        subprocess.run(["git", "add", "-A"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=self.repo_root, check=True)
+
+        store = InMemoryStore()
+        proposal = ModificationProposal(
+            subject="src/orchestrator/target.py", code="VALUE = 2\n", rationale="bump it"
+        )
+        agent = FakeSelfPatchAgent([proposal])
+        short_term = ShortTermMemory()
+        short_term.add("what should we build next", "let's evolve the patch pipeline")
+        context_path = self.repo_root / "relaunch_context.json"
+
+        with patch("src.main.DEFAULT_RELAUNCH_CONTEXT_PATH", context_path), patch(
+            "src.main.relaunch",
+            return_value=RelaunchResult(succeeded=True, detail=""),
+        ):
+            propose_self_patch(
+                agent,
+                AuditGate(),
+                store,
+                ActivityLog(store),
+                "src/orchestrator/target.py",
+                "bump the value",
+                repo_root=self.repo_root,
+                do_relaunch=True,
+                short_term=short_term,
+            )
+
+        restored = ShortTermMemory.load_and_clear(context_path)
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.recent()[0].request_text, "what should we build next")
+
     def test_isolated_suite_failure_prevents_apply(self):
         self._write_failing_test()
         store = InMemoryStore()
