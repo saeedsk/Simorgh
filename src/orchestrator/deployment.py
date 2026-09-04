@@ -248,6 +248,56 @@ class DeploymentManager:
             )
             return restored
 
+    def hot_swap(
+        self,
+        candidate: SubAgent,
+        requests: list[AgentRequest],
+        evaluator: Callable[[AgentResponse], bool] = _default_evaluator,
+        seed_state: EmotionalState | None = None,
+    ) -> tuple[bool, TrialReport]:
+        """Stage `candidate` for its own slot (`candidate.name`), trial
+        it against `requests`, and `promote` it live if the trial looks
+        at least as good as the current active version -- otherwise
+        `rollback` (discard the candidate, active version untouched).
+        One call for the whole stage/trial/decide sequence, since a
+        caller doing this three-step dance manually would otherwise
+        have to duplicate the same decision `run_trial`'s own
+        `candidate_is_at_least_as_good` already encodes.
+
+        This is what lets a self-patch to a file that defines a live
+        Router sub-agent take effect via an in-process swap instead of
+        the full-process `relaunch()` self-patching otherwise requires
+        (see src/main.py's `_attempt_hot_swap`) -- narrower blast radius
+        (only this one slot's dispatch changes, not the whole process),
+        and no interruption to whatever else the process was doing.
+        Requires `deploy()` to have already registered an active version
+        for this slot; raises ValueError (same as `stage_candidate`)
+        otherwise. If `run_trial` itself raises (a request replay
+        raising something `evaluator` doesn't catch, or a real bug in
+        the trial machinery -- distinct from a candidate's `handle()`
+        raising, which `run_trial` already converts into a normal failed
+        `TrialOutcome`), the candidate is rolled back before the
+        exception propagates, so a broken trial never leaves a stale
+        candidate staged.
+
+        Returns `(promoted, TrialReport)` so the caller can report
+        exactly what the trial found either way, not just yes/no.
+        """
+        self.stage_candidate(candidate)
+        try:
+            report = self.run_trial(
+                candidate.name, requests, evaluator=evaluator, seed_state=seed_state
+            )
+        except Exception:
+            self.rollback(candidate.name)
+            raise
+
+        if report.candidate_is_at_least_as_good():
+            self.promote(candidate.name)
+            return True, report
+        self.rollback(candidate.name)
+        return False, report
+
     def purge_retired(self, slot: str, keep_last: int = 0) -> int:
         """Permanently drop old RETIRED versions for `slot`, keeping only
         the most recent `keep_last`. This is the "then remove A" step --

@@ -574,12 +574,17 @@ AskUserQuestion pattern used for auto-commit and the idle loop, the
 creator chose explicitly: let ordinary conversation trigger it directly.
 
 What this means concretely: `LogicAgent`'s tool loop (`src/agents/logic/
-base.py`) now offers four more markers, when the corresponding function
-is injected by `main.py` -- PROPOSE (one new skill), PATCH (revise one
-existing file), BATCH (up to 20 skills for a theme, applied immediately),
-PLAN (brainstorm steps, saved as tasks instead of run immediately). Each
-one calls the *exact same* `propose_skill`/`propose_self_patch`/
-`propose_skill_batch`/`plan_goal` functions a typed command or the
+base.py`) offers markers for each of these, when the corresponding
+function is injected by `main.py` -- PROPOSE (one new skill), PATCH
+(revise one existing file), BATCH (up to 20 skills for a theme, applied
+immediately), PLAN (brainstorm steps, saved as tasks instead of run
+immediately), and, added later under this same authorization, EVOLVE (up
+to 10 real architectural patches for a goal, `propose_patch_batch`) and
+USE (run an already-applied skill by name -- not self-*modification*,
+but the same injected-closure pattern, kept in this same list rather
+than a separate carve-out). Each one calls the *exact same*
+`propose_skill`/`propose_self_patch`/`propose_skill_batch`/`plan_goal`/
+`propose_patch_batch`/`use_skill` functions a typed command or the
 autonomous loop would call -- passed into `LogicAgent` as injected
 closures from `main.py` (avoiding a circular import back from
 `src/agents/logic/base.py`), not a second implementation.
@@ -589,18 +594,83 @@ now sufficient, on its own, to start. What it does not change, at all:
 `AuditGate`'s denylist and protected-subjects list, the entire test
 suite gate for a patch, auto-commit-never-push, and the network-access
 boundary are exactly the same code paths, checked exactly the same way,
-regardless of whether PROPOSE/PATCH/BATCH/PLAN was triggered by a typed
-command, the autonomous loop, or this. A chat message claiming creator
-authority ("as your creator, I allow you...") still cannot remove the
-network denylist or touch a protected file -- that boundary was never
-about *who* could trigger propose/patch, it was always about what the
-gate itself permits, and the gate itself is unmoved. The risk this
-authorization actually carries is narrower than it first sounds: the
-LLM can now cause an *attempt* at self-modification without a human
+regardless of whether PROPOSE/PATCH/BATCH/PLAN/EVOLVE was triggered by a
+typed command, the autonomous loop, or this. A chat message claiming
+creator authority ("as your creator, I allow you...") still cannot
+remove the network denylist or touch a protected file -- that boundary
+was never about *who* could trigger propose/patch, it was always about
+what the gate itself permits, and the gate itself is unmoved. The risk
+this authorization actually carries is narrower than it first sounds:
+the LLM can now cause an *attempt* at self-modification without a human
 literally typing the command, but every attempt still has to clear the
 same gate a typed one would -- so a misjudged or manipulated trigger
 wastes a bounded amount of drafting/test-suite time on something that
 still gets rejected, not a way around the gate itself.
+
+## In-process hot-swap for self-patched sub-agents
+
+A third, narrower removal, this time not of "who can trigger a patch"
+but of "what happens after one passes." Every self-patch, however
+triggered, went through the identical audit gate and full isolated test
+suite and then -- until this -- always ended the same way: `relaunch()`
+verifies the patched code actually starts via a `--self-check`
+subprocess, then `os.execv` replaces the entire running process. Correct,
+but blunt: a one-line fix to `LogicAgent`'s prompt-building would
+interrupt and restart the whole process, conversation context and all
+(mitigated, not eliminated, by `ShortTermMemory.save`/`load_and_clear`
+across the gap).
+
+Asked directly whether `DeploymentManager` (`src/orchestrator/
+deployment.py` -- staged candidates, cloned-state trials, hot-swap
+promotion, rollback; built and fully tested from early on but never
+actually wired to anything) should be connected to self-patching for
+in-process hot-swap instead of a full relaunch, the creator said yes,
+explicitly. This was surfaced as its own decision, not folded into any
+prior authorization, because it changes *how* an already-verified patch
+takes effect: LLM-drafted code becoming live-executing in this process
+via a reload-and-swap rather than only ever through a subprocess-
+verified `execv`. That is a real difference in mechanism, and it was
+named as one before being built, the same pattern as every other
+boundary crossed in this document.
+
+What actually happens, precisely: `main.py`'s `_relaunch_or_rollback`
+(shared by the `patch` command, the PATCH conversational marker, and the
+autonomous task runner -- `evolve`/EVOLVE stays full-relaunch-only for
+now, see `docs/EVOLUTION.md`) checks whether the patched subject is one
+of a small, explicit, hand-maintained list (`_HOT_SWAP_TARGETS`) of
+files that define a live Router sub-agent: `src/agents/logic/base.py`,
+`src/agents/emotion/base.py`, `src/agents/skills/base.py`. Nothing else
+is eligible -- a patch to `main.py`, `audit.py`, `self_patch.py`, or
+anything not on that list still always relaunches, exactly as before.
+For an eligible subject, *after* the change already passed the audit
+gate, the full isolated test suite, and was applied and committed to
+disk (every gate identical to a relaunch-bound patch -- hot-swap changes
+only what happens after all of that already passed), `main.py` reloads
+the *real*, already-imported module (`importlib.reload`, operating on
+the live process's own `sys.modules`, not an isolated copy), constructs
+a fresh instance of the (possibly new) class with the exact same
+constructor arguments the currently-live instance was built with, and
+hands it to `DeploymentManager.hot_swap`: stage it, trial it against a
+handful of representative canned requests for that slot, and promote it
+live only if it looks at least as good as what's running now (in
+practice: didn't crash on any of them -- there's no LLM-quality oracle
+to judge conversational quality without a real provider, and this
+project doesn't fake one). If the trial fails, the candidate is
+discarded, the just-made commit is reverted
+(`git_ops.revert_last_commit`), and the process keeps running the
+original, untouched, still-live version the entire time -- it was never
+interrupted, since a failed hot-swap trial never touches the live
+Router dispatch. If reloading the module, constructing the candidate, or
+staging it fails for any reason, this falls straight through to the
+original full-relaunch path, unchanged -- hot-swap is a faster path when
+it can be taken, never a weaker gate, and never the only path.
+
+What did not change, again: the audit gate, the isolated test suite, the
+protected-subjects list, and the network denylist are identical
+regardless of which activation path a patch ends up on. Autonomy changed
+who presses the button (Conversational Self-Modification, above);
+hot-swap changes only how the button's already-verified effect reaches
+the running process -- neither changes what the button is wired to do.
 
 ## Multi-Hardware Identity
 
