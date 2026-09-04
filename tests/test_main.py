@@ -33,7 +33,7 @@ from src.orchestrator.apply import APPLIED_KIND, APPLIED_PATCH_KIND
 from src.orchestrator.audit import AuditGate, ModificationProposal
 from src.orchestrator.health import HealthMonitor
 from src.orchestrator.reflection import OutcomeLog, ReflectionAgent
-from src.orchestrator.tasks import BLOCKED, DONE, PATCH_TASK, PENDING, SKILL_TASK, TaskStore
+from src.orchestrator.tasks import BLOCKED, DONE, FAILED, PATCH_TASK, PENDING, SKILL_TASK, TaskStore
 
 
 class TestMainCli(unittest.TestCase):
@@ -1077,6 +1077,88 @@ class TestWorkOnNextTask(unittest.TestCase):
 
         self.assertEqual(self.task_store.get(stale.id).status, DONE)
         self.assertEqual(self.task_store.get(self.task_store.all()[1].id).status, PENDING)
+
+    def test_reconsiders_a_blocked_task_when_nothing_else_is_pending(self):
+        task = self.task_store.add("rocketry", SKILL_TASK)
+        self.task_store.update_status(task.id, BLOCKED, note="denied: eval", attempt=True)
+
+        message = work_on_next_task(
+            self.task_store, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        # A blocked task is reset to PENDING and then actually worked in
+        # the same call -- deterministic-fallback drafting always
+        # succeeds for a plain SKILL_TASK, so this ends DONE, not stuck.
+        self.assertIn("APPLIED", message)
+        self.assertEqual(self.task_store.get(task.id).status, DONE)
+
+    def test_fresh_pending_work_takes_priority_over_a_blocked_task(self):
+        blocked = self.task_store.add("blocked one", SKILL_TASK)
+        self.task_store.update_status(blocked.id, BLOCKED, note="denied", attempt=True)
+        self.task_store.add("fresh one", SKILL_TASK)
+
+        work_on_next_task(
+            self.task_store, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertEqual(self.task_store.get(blocked.id).status, BLOCKED)
+
+
+class TestReconsiderBlockedTasks(unittest.TestCase):
+    def test_no_blocked_tasks_returns_none(self):
+        from src.main import _reconsider_blocked_tasks
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        task_store.add("fine", SKILL_TASK)
+
+        self.assertIsNone(_reconsider_blocked_tasks(task_store))
+
+    def test_resets_a_blocked_task_to_pending(self):
+        from src.main import _reconsider_blocked_tasks
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        task = task_store.add("stuck", SKILL_TASK)
+        task_store.update_status(task.id, BLOCKED, note="denied", attempt=True)
+
+        result = _reconsider_blocked_tasks(task_store)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(task_store.get(task.id).status, PENDING)
+
+    def test_gives_up_permanently_past_the_retry_ceiling(self):
+        from src.main import MAX_BLOCKED_RETRY_ATTEMPTS, _reconsider_blocked_tasks
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        task = task_store.add("truly stuck", SKILL_TASK)
+        for _ in range(MAX_BLOCKED_RETRY_ATTEMPTS):
+            task_store.update_status(task.id, BLOCKED, note="denied", attempt=True)
+
+        result = _reconsider_blocked_tasks(task_store)
+
+        self.assertIsNone(result)
+        self.assertEqual(task_store.get(task.id).status, FAILED)
+
+    def test_skips_a_permanently_failed_task_and_retries_a_retriable_one(self):
+        from src.main import MAX_BLOCKED_RETRY_ATTEMPTS, _reconsider_blocked_tasks
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        exhausted = task_store.add("exhausted", SKILL_TASK)
+        for _ in range(MAX_BLOCKED_RETRY_ATTEMPTS):
+            task_store.update_status(exhausted.id, BLOCKED, note="denied", attempt=True)
+        retriable = task_store.add("still worth a shot", SKILL_TASK)
+        task_store.update_status(retriable.id, BLOCKED, note="denied", attempt=True)
+
+        result = _reconsider_blocked_tasks(task_store)
+
+        self.assertEqual(result.id, retriable.id)
+        self.assertEqual(task_store.get(exhausted.id).status, FAILED)
+        self.assertEqual(task_store.get(retriable.id).status, PENDING)
 
 
 class TestDiscoverCommand(unittest.TestCase):

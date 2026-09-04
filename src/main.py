@@ -1369,17 +1369,57 @@ def run_task(
     return result, task.kind == PATCH_TASK
 
 
+MAX_BLOCKED_RETRY_ATTEMPTS = 9  # 3 more rounds of MAX_TASK_ATTEMPTS each
+
+
 def _next_task(task_store: TaskStore) -> Task | None:
     """Prefer resuming a task an earlier process left IN_PROGRESS
     (interrupted by a crash or relaunch mid-work) over starting a fresh
     PENDING one -- the direct mechanism behind "on restart, find pending
-    task and resume."
+    task and resume." Once there's no fresh work at all, reconsiders
+    BLOCKED tasks (see _reconsider_blocked_tasks) rather than leaving
+    them stuck forever -- the direct mechanism behind "check if you're
+    blocked and automatically unblock yourself."
     """
     unfinished = task_store.unfinished()
     in_progress = [t for t in unfinished if t.status == IN_PROGRESS]
     pending = [t for t in unfinished if t.status == PENDING]
     ordered = in_progress + pending
-    return ordered[0] if ordered else None
+    if ordered:
+        return ordered[0]
+    return _reconsider_blocked_tasks(task_store)
+
+
+def _reconsider_blocked_tasks(task_store: TaskStore) -> Task | None:
+    """Gives one BLOCKED task another shot by resetting it to PENDING,
+    so the next work_on_next_task() call (a human's 'work', or the
+    autonomous loop -- which already checks roughly every cooldown
+    period once idle, see src/orchestrator/autonomy.py) picks it up
+    fresh. Not every BLOCKED task is truly stuck: some failed because a
+    particular draft was wrong, not because the task itself is
+    impossible, and a fresh attempt (possibly with different randomness
+    in the LLM's response) can succeed where a prior one didn't.
+
+    Bounded, not infinite: once a task's total attempts reach
+    MAX_BLOCKED_RETRY_ATTEMPTS, this stops retrying it and marks it
+    FAILED instead -- a genuine terminal state, not indefinite limbo,
+    for the tasks that really are permanently blocked (e.g. a directive
+    violation no rephrasing will pass). Returns the task just reset to
+    PENDING, or None if nothing changed.
+    """
+    for task in task_store.all():
+        if task.status != BLOCKED:
+            continue
+        if task.attempts >= MAX_BLOCKED_RETRY_ATTEMPTS:
+            task_store.update_status(
+                task.id, FAILED, note=f"gave up after {task.attempts} attempts: {task.note}"
+            )
+            continue
+        task_store.update_status(
+            task.id, PENDING, note=f"retrying after being blocked: {task.note}"
+        )
+        return task_store.get(task.id)
+    return None
 
 
 def work_on_next_task(
