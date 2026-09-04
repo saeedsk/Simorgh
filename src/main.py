@@ -31,6 +31,7 @@ from __future__ import annotations
 import difflib
 import os
 import re
+import sys
 from pathlib import Path
 
 try:
@@ -68,7 +69,7 @@ from src.orchestrator.console_style import style
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
-from src.orchestrator.git_ops import commit_applied_change
+from src.orchestrator.git_ops import commit_applied_change, revert_last_commit
 from src.orchestrator.self_patch import SelfPatchAgent, check_main_py_invariants, relaunch, run_isolated_test_suite
 from src.sandboxing.sandbox import SandboxExecutor, SubprocessSandbox
 from src.tools.web_fetch import FetchRefused, WebFetchTool
@@ -1065,9 +1066,33 @@ def propose_self_patch(
     else:
         print(style(f"⚠️  [git] {commit_result.output}", "yellow"))
 
-    if do_relaunch:
-        print("🔁 [patch] relaunching now so the new code takes effect...")
-        relaunch()
+    if do_relaunch and commit_result.committed:
+        print("🔍 [patch] verifying the new code actually starts before relaunching into it...")
+        relaunch_result = relaunch()
+        if not relaunch_result.succeeded:
+            # relaunch() only returns on failure (a real success replaces
+            # the process via os.execv and never gets here) -- the patch
+            # passed the audit gate and the whole test suite, yet still
+            # can't start as a live process. Undo it rather than leaving
+            # a broken commit sitting on top of a working history.
+            print(style(f"🚫 [patch] self-check failed: {relaunch_result.detail}", "red", "bold"))
+            revert_result = revert_last_commit(repo_root or Path.cwd())
+            if revert_result.committed:
+                print(style("↩️  [patch] reverted -- the working tree is back to its prior state", "yellow"))
+            else:
+                print(
+                    style(
+                        f"⚠️  [patch] revert also failed ({revert_result.output}) -- "
+                        "the applied commit is still there; review it by hand",
+                        "red",
+                        "bold",
+                    )
+                )
+            message = (
+                f"[REVERTED] {target} passed every mechanical check but failed to start as a "
+                f"live process: {relaunch_result.detail}"
+            )
+            _print_status(message)
 
     return message
 
@@ -1247,5 +1272,33 @@ def _print_cognition_status(budget_guards: dict[str, BudgetGuard]) -> None:
         )
 
 
+def self_check() -> int:
+    """Smoke-test this process's own code without entering the
+    interactive loop: import everything relaunch() needs and construct
+    the core objects (router, audit gate, cognition router) the same way
+    run_cli() does. Used exclusively as `--self-check`, spawned by
+    src/orchestrator/self_patch.py's relaunch() *before* it replaces the
+    live process with this code via os.execv -- catches a startup-time
+    bug the test suite didn't happen to exercise, at the one point where
+    catching it is still possible (once execv runs, there is no "after"
+    left to notice a crash in). Returns a process exit code (0 = OK, 1 =
+    failed), never raises.
+    """
+    try:
+        store = build_memory_store()
+        cognition, _ = build_cognition_router(store)
+        build_router(cognition=cognition, repo_root=Path.cwd())
+        AuditGate(memory=store)
+    except Exception as exc:  # noqa: BLE001 -- this must report any startup
+        # failure as a clean exit code, not an uncaught traceback, since
+        # relaunch() only inspects the exit code and stderr text.
+        print(f"[self-check] FAILED: {exc!r}", file=sys.stderr)
+        return 1
+    print("[self-check] OK")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--self-check" in sys.argv:
+        sys.exit(self_check())
     run_cli()
