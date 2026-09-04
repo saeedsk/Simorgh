@@ -378,20 +378,93 @@ Built:
     propose/apply pipeline. Hard-bounded and budget-metered exactly like
     the drafting loop.
 
+28. `src/orchestrator/activity_log.py` -- `ActivityLog`: a unified,
+    queryable audit trail across everything Sim does, answering the
+    creator's ask to "log its action, conversation with user, tool usage
+    and tool output... in a way that you can monitor Sim... and catch its
+    mistakes." Adds two record kinds nothing durably captured before
+    (`conversation_turn` -- `ShortTermMemory` held this too, but only
+    in-process; `tool_call` -- every FETCH/RUN/READ/RECALL step in both
+    `LogicAgent` and `SkillResearchAgent`, previously only `print()`ed)
+    and a read layer (`recent()`, `since()`, `since_last_turn()`,
+    `format_entry()`) merging those plus every existing kind (outcomes,
+    applied skills/patches, rejections, spend, fetches, interests, the
+    new per-turn `takeaway` kind) into one chronological timeline. `log`
+    and `log last` expose it at the CLI; `since_last_turn` also backs the
+    new RECALL tool (below) so Sim itself can look back at what actually
+    happened, not just the person watching the terminal.
+29. `ReflectionAgent.reflect_on_outcome` -- immediate, per-turn takeaway
+    generation (see docs/SOUL.md, "Continuous reflection"), distinct from
+    the existing batched `reflect()`. A free heuristic, deliberately not
+    an LLM call, printed and durably logged (kind="takeaway") right after
+    any failed or creator-corrected outcome.
+30. Self-patching source code: `src/orchestrator/self_patch.py`
+    (`SelfPatchAgent`, `run_isolated_test_suite`, `check_main_py_invariants`,
+    `relaunch`) plus `apply_source_patch`/`APPLIED_PATCH_KIND`
+    (`src/orchestrator/apply.py`) and an expanded
+    `AuditGate._PROTECTED_SUBJECTS` (now also `apply.py`, `self_patch.py`).
+    Extends the propose/audit/apply pattern from new skill files only to
+    *any existing file under src/*, gated by the entire test suite run
+    fresh in an isolated repo copy (not just a sandboxed smoke run), plus
+    a narrow structural check for `src/main.py` patches specifically. A
+    patch that clears every check applies and relaunches the process
+    (`os.execv`) immediately -- see docs/SOUL.md, "Self-patching source
+    code," for the full reasoning and its stated limits. CLI: `patch
+    <path> <description>`.
+31. A RECALL tool added to `LogicAgent`'s existing FETCH/RUN/READ loop
+    (offered only when an `ActivityLog` is configured): lets Sim look
+    back at its own activity since the previous turn before answering,
+    read-only. `SelfPatchAgent`/`SkillResearchAgent` also log their own
+    tool steps to `ActivityLog` now, not just print them.
+32. CLI usability pass, independent of the above but landed alongside it:
+    `readline` wired in for real line editing and persistent cross-
+    session command history (`~/.simorgh/cli_history`); the startup
+    banner rewritten from one paragraph into a bulleted list with a
+    description and example per command; `src/orchestrator/console_style.py`
+    for minimal ANSI color (auto-disabled for non-TTY output or
+    `NO_COLOR`), used for the banner, the prompt, and status/log output;
+    `autocorrect_command` guesses a near-miss command typo (e.g.
+    `porpose` -> `propose`) via `difflib`, always announcing the
+    correction rather than guessing silently; `sim.sh` at the repo root
+    launches the CLI from anywhere.
+33. A real bug, found live while investigating why a running session had
+    silently lost LLM access: `ClaudeCodeProvider.complete()` checked only
+    the subprocess exit code, not the CLI's own `is_error` field --
+    `claude -p ...` can exit 0 while returning `{"is_error": true,
+    "result": "Not logged in · Please run /login"}`, which would have been
+    handed to the user as if it were a real drafted reply. Fixed to check
+    `is_error` too. Separately (not a bug, expected degradation working
+    as designed): Gemini's daily call cap being genuinely exhausted with
+    Claude Code CLI simultaneously unauthenticated is what actually
+    silenced LLM access in that session -- `handle_turn` now prints an
+    explicit orange `[notice]` whenever a turn falls back to rule-based
+    logic despite a real provider being configured, rather than that
+    degradation being visible only via a generic-sounding reply. The
+    creator also raised Gemini's default daily call cap 50 -> 1500 (the
+    $1.00/day dollar cap, unchanged, is the intended real limit -- a
+    Flash-tier call costs a small fraction of a cent, so 50 calls was
+    hitting the call-count ceiling long before the dollar one).
+
 Still ahead, roughly in order:
 
-28. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+34. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-29. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+35. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-30. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+36. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-31. There is still no mechanism that loads and invokes an applied skill
+37. There is still no mechanism that loads and invokes an applied skill
     file as a *registered sub-agent* mid-conversation -- `LogicAgent` can
     now RUN arbitrary code on request (milestone 27), which covers most of
     the practical need, but a specific applied skill file still isn't
     something Sim can call by name. Applied skills remain real, executable
     files sitting in `src/agents/skills/`, reachable via `run <code>`
     (copy the file's logic in) but not auto-discovered.
+38. Sim deciding *on its own*, with no human typing `patch`, that a
+    reflection or a RECALL-informed observation warrants a self-patch --
+    milestone 30 built the pipeline and 29 builds the reflection, but
+    connecting them without a human in the loop is a real, separate
+    autonomy decision this document does not yet consider settled (see
+    docs/SOUL.md, "Self-patching source code," closing bullet).

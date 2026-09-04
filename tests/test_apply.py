@@ -3,7 +3,13 @@ import unittest
 from pathlib import Path
 
 from src.memory.long_term import InMemoryStore
-from src.orchestrator.apply import APPLIED_KIND, ApplyRefused, apply_proposal
+from src.orchestrator.apply import (
+    APPLIED_KIND,
+    APPLIED_PATCH_KIND,
+    ApplyRefused,
+    apply_proposal,
+    apply_source_patch,
+)
 from src.orchestrator.audit import ModificationProposal
 
 
@@ -120,6 +126,70 @@ class TestApplyProposal(unittest.TestCase):
         target = apply_proposal(proposal, store, repo_root=self.root)
 
         self.assertTrue(target.exists())
+
+
+class TestApplySourcePatch(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmpdir.name)
+        (self.root / "src" / "orchestrator").mkdir(parents=True)
+        (self.root / "src" / "orchestrator" / "target.py").write_text("VALUE = 1\n")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_overwrites_an_existing_source_file(self):
+        store = InMemoryStore()
+        proposal = ModificationProposal(
+            subject="src/orchestrator/target.py", code="VALUE = 2\n", rationale="bump"
+        )
+
+        target = apply_source_patch(proposal, store, "10 tests passed", repo_root=self.root)
+
+        self.assertEqual(target.read_text(), "VALUE = 2\n")
+
+    def test_logs_an_applied_patch_record_with_test_summary(self):
+        store = InMemoryStore()
+        proposal = ModificationProposal(
+            subject="src/orchestrator/target.py", code="VALUE = 2\n", rationale="bump"
+        )
+
+        apply_source_patch(proposal, store, "10 tests passed", repo_root=self.root)
+
+        records = store.query(kind=APPLIED_PATCH_KIND)
+        self.assertEqual(len(records), 1)
+        self.assertTrue(records[0].metadata["overwrote_existing"])
+        self.assertEqual(records[0].metadata["test_summary"], "10 tests passed")
+
+    def test_allows_new_files_anywhere_under_src(self):
+        store = InMemoryStore()
+        proposal = ModificationProposal(
+            subject="src/orchestrator/brand_new.py", code="X = 1\n", rationale="new module"
+        )
+
+        target = apply_source_patch(proposal, store, "ok", repo_root=self.root)
+
+        self.assertTrue(target.exists())
+
+    def test_refuses_subject_outside_src(self):
+        store = InMemoryStore()
+        proposal = ModificationProposal(
+            subject="docs/SOUL.md", code="hijacked", rationale="not source"
+        )
+
+        with self.assertRaises(ApplyRefused):
+            apply_source_patch(proposal, store, "ok", repo_root=self.root)
+
+        self.assertFalse((self.root / "docs" / "SOUL.md").exists())
+
+    def test_refuses_path_traversal(self):
+        store = InMemoryStore()
+        proposal = ModificationProposal(
+            subject="src/../../../etc/passwd", code="pwned", rationale="escape"
+        )
+
+        with self.assertRaises(ApplyRefused):
+            apply_source_patch(proposal, store, "ok", repo_root=self.root)
 
 
 if __name__ == "__main__":

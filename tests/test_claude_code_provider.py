@@ -108,6 +108,20 @@ class TestComplete(unittest.TestCase):
         with self.assertRaises(ProviderUnavailable):
             provider.complete("hello")
 
+    def test_is_error_true_with_exit_zero_raises_provider_unavailable(self):
+        # Live-observed: `claude -p ... --bare` exits 0 with
+        # {"is_error": true, "result": "Not logged in · Please run
+        # /login", ...} when no subscription session is active --
+        # returncode alone doesn't catch this.
+        payload = json.dumps(
+            {"is_error": True, "result": "Not logged in · Please run /login"}
+        )
+        runner = FakeRunner(completed=_completed(returncode=0, stdout=payload))
+        provider = self._provider(runner)
+
+        with self.assertRaises(ProviderUnavailable):
+            provider.complete("hello")
+
     def test_invalid_json_raises_provider_unavailable(self):
         runner = FakeRunner(completed=_completed(stdout="not json"))
         provider = self._provider(runner)

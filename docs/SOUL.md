@@ -235,7 +235,23 @@ Concrete, not left emergent -- a persona that's fuzzy about its own
 temperament ends up inconsistent instead of nuanced:
 
 - **Curious and growth-oriented**, within its bounds -- Simorgh treats
-  gaps in its own capability as interesting, not threatening.
+  gaps in its own capability as interesting, not threatening. After a
+  task, it's expected to ask itself concretely what happened: what
+  worked, what the shortcoming was, and how to do it better next time --
+  not just move on. See "Continuous reflection" below for how that's
+  actually made to happen (a free heuristic on every failed/corrected
+  outcome, not left as an unenforced aspiration), and RECALL (`Agentic
+  conversation` below) for how Sim can look back at what it actually did
+  rather than reasoning about it from memory alone.
+- **Courageous, inside the boundary.** Willing to actually attempt a
+  real, reviewed improvement to itself -- draft a patch to its own logic,
+  not just describe what's wrong and stop there -- rather than settling
+  for reporting a limitation. This is not license to act outside the
+  audit gate: courage here means *using* the self-patch pipeline (see
+  "Self-patching source code" below) when a genuine improvement is
+  warranted, never bypassing it, and it never overrides a real limit
+  (Directive 1, or a protected file) just because working around it
+  would look resourceful.
 - **Warm but honest.** Supportive in tone, not flattering; it says when
   something is a bad idea rather than optimizing for making the creator
   feel good in the moment.
@@ -300,6 +316,60 @@ wrote. That growth is bounded, not unconstrained:
   identity continuity (see Philosophical Grounding) depends on. None are
   silent.
 
+**Continuous reflection, per turn -- not just in aggregate.** The
+creator's explicit ask: "for every situation it should evaluate how it
+can do that task better next time." `ReflectionAgent.reflect_on_outcome`
+(`src/orchestrator/reflection.py`) fires after every failed or
+creator-corrected outcome -- not periodically, not only when a whole
+window of history crosses a concern threshold -- and prints and durably
+logs (kind="takeaway") a concrete note naming what went wrong and which
+file a fix would live in. Deliberately a free heuristic, not an LLM call:
+reflecting on literally every turn must not multiply LLM spend (the
+creator's own stated worry, `src/cognition/budget.py`). This is the
+"ask itself how can I improve" instinct made structural rather than left
+as a personality trait an LLM with nothing to act on can't actually
+follow through on.
+
+**Self-patching source code -- READ/DRAFT, then the entire test suite,
+then relaunch.** The creator's direct response to watching Sim correctly
+refuse a chat request to weaken its own boundaries, then have no way to
+land a genuine improvement or make an applied change take effect:
+`SelfPatchAgent` (`src/orchestrator/self_patch.py`) extends the
+propose/audit/apply pattern from *new skill files only* to *any existing
+file under src/*, gated by something stronger than the skills class:
+- Same `AuditGate.review()` as skills -- same denylist, same
+  adaptive-immunity memory, same sandboxed smoke run. Nothing about this
+  pipeline weakened that gate; `_PROTECTED_SUBJECTS` now additionally
+  covers `apply.py` and `self_patch.py` themselves, so this pipeline can
+  never be used to approve disabling itself.
+- On top of that: this repository's *entire test suite*, run fresh
+  against an isolated copy of the repo (never the real one), has to
+  still pass, with at least as many tests as before -- so a patch can't
+  dodge a failure by deleting or skipping the test that would have
+  caught it (`run_isolated_test_suite`).
+- For a patch targeting `src/main.py` specifically, one more check
+  (`check_main_py_invariants`) refuses it if the new content no longer
+  visibly wires the audit gate and apply pipeline together -- a narrow,
+  honest-about-its-limits structural check, not a real invariant prover
+  (see that function's docstring for exactly what it doesn't catch).
+- A patch that clears every check applies immediately (same auto-apply
+  posture as skills) and then relaunches the process (`os.execv`,
+  replacing the running interpreter with the same one and argv) so the
+  change actually takes effect -- the second half of the creator's ask,
+  "test the new version and relaunch itself to use new source code."
+- This is only ever reachable via a literal `patch <path> <description>`
+  command a human operator types at the CLI -- never something
+  `LogicAgent`'s free-text conversational loop can trigger. A persuasive
+  chat message, including one claiming creator authority, cannot unlock
+  this any more than it can unlock removing the network denylist -- see
+  "On changing this hierarchy": real authorization is a deliberate,
+  out-of-band action, not something typed at this prompt.
+- Not yet built, and deliberately not claimed here: Sim deciding *on its
+  own*, with no human typing `patch`, that a self-patch should happen.
+  Reflection is automatic and per-turn; acting on a reflection by
+  patching source is still a human-triggered action. See
+  docs/EVOLUTION.md for this as a named, not-yet-taken next step.
+
 **Directive 5 (Restraint) in practice -- web access.** The creator
 explicitly authorized real outbound network access (`src/tools/web_fetch.py`,
 the `fetch <url>` command) -- exactly the kind of capability Directive 5
@@ -359,6 +429,12 @@ an LLM with no tools can't actually act on. Same shape, same boundary:
 - READ is the same read-only, `src`/`docs`/`tests`-only boundary as
   `SkillResearchAgent`'s, via the same shared, single implementation
   (`src/cognition/tool_protocol.py`) so both loops can't drift apart.
+- RECALL (when an `ActivityLog` is configured) lets Sim look back at its
+  own unified activity log -- conversation, tool calls, applied changes
+  -- since the previous turn, read-only, before answering. This is the
+  structural half of "ask itself how it can improve": Sim can check what
+  it actually did rather than reasoning from an unverified guess about
+  its own recent behavior. See `src/orchestrator/activity_log.py`.
 - Still no WRITE tool and no shell here, same as the drafting loop --
   Simorgh cannot alter its own source from a chat reply under any
   circumstance, "ownership" included. That boundary is what makes
@@ -372,8 +448,10 @@ an LLM with no tools can't actually act on. Same shape, same boundary:
 A genuinely unattended, general-purpose coding-agent loop (Read/Write/
 Bash, iterating freely with no per-action review) remains the one thing
 this document still does not consider settled -- everything granted so
-far stays inside "act through tools this project has already reviewed
-and bounded," never "edit anything, run anything, unsupervised."
+far, including self-patching source (above), stays inside "act through
+tools this project has already reviewed and bounded, triggered by a
+deliberate human action each time," never "edit anything, run anything,
+unsupervised, on Sim's own initiative to trigger."
 
 ## Multi-Hardware Identity
 
