@@ -224,6 +224,62 @@ class TestPurgeRetired(unittest.TestCase):
         self.assertEqual(len(manager.status("echo")["retired"]), 1)
 
 
+class TestHotSwap(unittest.TestCase):
+    def test_a_good_candidate_is_promoted(self):
+        router = Router()
+        manager = DeploymentManager(router)
+        manager.deploy(UppercaseAgent())
+
+        promoted, report = manager.hot_swap(ExclaimAgent(), [AgentRequest(text="hi")])
+
+        self.assertTrue(promoted)
+        self.assertTrue(report.candidate_is_at_least_as_good())
+        self.assertEqual(router.dispatch("echo", AgentRequest(text="x")).output, "x!")
+        self.assertIsNone(manager.status("echo")["candidate"])
+
+    def test_a_crashing_candidate_is_rolled_back_not_promoted(self):
+        router = Router()
+        manager = DeploymentManager(router)
+        manager.deploy(UppercaseAgent())
+
+        promoted, report = manager.hot_swap(CrashingAgent(), [AgentRequest(text="hi")])
+
+        self.assertFalse(promoted)
+        self.assertFalse(report.candidate_is_at_least_as_good())
+        # live dispatch is untouched -- still the original UppercaseAgent
+        self.assertEqual(router.dispatch("echo", AgentRequest(text="x")).output, "X")
+        self.assertIsNone(manager.status("echo")["candidate"])
+
+    def test_requires_an_active_version_for_the_slot(self):
+        router = Router()
+        manager = DeploymentManager(router)
+
+        with self.assertRaises(ValueError):
+            manager.hot_swap(ExclaimAgent(), [AgentRequest(text="hi")])
+
+    def test_full_flow_is_logged_to_memory_on_success(self):
+        router = Router()
+        memory = InMemoryStore()
+        manager = DeploymentManager(router, memory=memory)
+        manager.deploy(UppercaseAgent())
+
+        manager.hot_swap(ExclaimAgent(), [AgentRequest(text="hi")])
+
+        events = [r.metadata["event"] for r in memory.query(kind="lineage")]
+        self.assertEqual(list(reversed(events)), ["deploy", "stage_candidate", "promote"])
+
+    def test_full_flow_is_logged_to_memory_on_rollback(self):
+        router = Router()
+        memory = InMemoryStore()
+        manager = DeploymentManager(router, memory=memory)
+        manager.deploy(UppercaseAgent())
+
+        manager.hot_swap(CrashingAgent(), [AgentRequest(text="hi")])
+
+        events = [r.metadata["event"] for r in memory.query(kind="lineage")]
+        self.assertEqual(list(reversed(events)), ["deploy", "stage_candidate", "rollback"])
+
+
 class TestLineageLogging(unittest.TestCase):
     def test_full_ab_flow_is_logged_to_memory(self):
         router = Router()

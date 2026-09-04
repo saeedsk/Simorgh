@@ -43,6 +43,18 @@ class TestRouter(unittest.TestCase):
 
         self.assertEqual(responses["echo"].output, "HI")
 
+    def test_get_returns_the_registered_agent(self):
+        router = Router()
+        agent = EchoAgent()
+        router.register(agent)
+
+        self.assertIs(router.get("echo"), agent)
+
+    def test_get_returns_none_for_an_unknown_slot(self):
+        router = Router()
+
+        self.assertIsNone(router.get("missing"))
+
     def test_unregister_removes_agent(self):
         router = Router()
         router.register(EchoAgent())

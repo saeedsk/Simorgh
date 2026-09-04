@@ -801,6 +801,330 @@ class TestProposeSelfPatch(unittest.TestCase):
         self.assertTrue(any("eval" in (r or "") for r in agent.calls[1][2]))
 
 
+class TestAttemptHotSwap(unittest.TestCase):
+    """Unit-level tests for _attempt_hot_swap in isolation, with
+    `reload_class` injected so these never depend on a real file on disk
+    or mutate real sys.modules entries -- that side of the mechanism
+    (the real _reload_hot_swap_class default) is exercised separately in
+    TestSelfPatchHotSwap below, against the real LogicAgent.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        import subprocess
+
+        subprocess.run(["git", "init", "-q"], cwd=self.repo_root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"], cwd=self.repo_root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True)
+        (self.repo_root / "f.txt").write_text("v1")
+        subprocess.run(["git", "add", "-A"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=self.repo_root, check=True)
+        (self.repo_root / "f.txt").write_text("v2")
+        subprocess.run(["git", "add", "-A"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "the patch commit"], cwd=self.repo_root, check=True)
+        self.target = self.repo_root / "f.txt"
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_subject_not_in_registry_falls_through(self):
+        from src.main import _attempt_hot_swap
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import Router
+
+        manager = DeploymentManager(Router())
+
+        attempted, message = _attempt_hot_swap(
+            manager, {}, "src/main.py", self.repo_root, self.target
+        )
+
+        self.assertFalse(attempted)
+        self.assertIsNone(message)
+
+    def test_missing_factory_for_an_eligible_subject_falls_through(self):
+        from src.main import _attempt_hot_swap
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import Router
+
+        manager = DeploymentManager(Router())
+
+        attempted, message = _attempt_hot_swap(
+            manager, {}, "src/agents/logic/base.py", self.repo_root, self.target
+        )
+
+        self.assertFalse(attempted)
+
+    def test_reload_failure_falls_through_to_relaunch(self):
+        from src.main import _attempt_hot_swap
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import Router
+
+        manager = DeploymentManager(Router())
+
+        attempted, message = _attempt_hot_swap(
+            manager,
+            {"src/agents/logic/base.py": lambda cls: cls()},
+            "src/agents/logic/base.py",
+            self.repo_root,
+            self.target,
+            reload_class=lambda module_name, class_name: None,
+        )
+
+        self.assertFalse(attempted)
+        self.assertIsNone(message)
+
+    def test_candidate_construction_failure_falls_through(self):
+        from src.main import _attempt_hot_swap
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import Router, SubAgent
+
+        class FakeClass(SubAgent):
+            name = "logic"
+
+            def handle(self, request, bus):
+                raise NotImplementedError
+
+        def broken_factory(cls):
+            raise RuntimeError("cannot build it")
+
+        manager = DeploymentManager(Router())
+
+        attempted, message = _attempt_hot_swap(
+            manager,
+            {"src/agents/logic/base.py": broken_factory},
+            "src/agents/logic/base.py",
+            self.repo_root,
+            self.target,
+            reload_class=lambda module_name, class_name: FakeClass,
+        )
+
+        self.assertFalse(attempted)
+
+    def test_no_active_version_for_the_slot_falls_through(self):
+        from src.main import _attempt_hot_swap
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import Router, SubAgent
+
+        class FakeClass(SubAgent):
+            name = "logic"
+
+            def handle(self, request, bus):
+                from src.orchestrator.router import AgentResponse
+
+                return AgentResponse(agent=self.name, output="ok")
+
+        manager = DeploymentManager(Router())  # nothing deployed for "logic" yet
+
+        attempted, message = _attempt_hot_swap(
+            manager,
+            {"src/agents/logic/base.py": lambda cls: cls()},
+            "src/agents/logic/base.py",
+            self.repo_root,
+            self.target,
+            reload_class=lambda module_name, class_name: FakeClass,
+        )
+
+        self.assertFalse(attempted)
+
+    def test_a_working_candidate_is_promoted_without_reverting(self):
+        from src.main import _attempt_hot_swap
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import AgentResponse, Router, SubAgent
+
+        class BaselineAgent(SubAgent):
+            name = "logic"
+
+            def handle(self, request, bus):
+                return AgentResponse(agent=self.name, output="baseline")
+
+        class GoodCandidate(SubAgent):
+            name = "logic"
+
+            def handle(self, request, bus):
+                return AgentResponse(agent=self.name, output="candidate")
+
+        router = Router()
+        manager = DeploymentManager(router)
+        manager.deploy(BaselineAgent())
+
+        attempted, message = _attempt_hot_swap(
+            manager,
+            {"src/agents/logic/base.py": lambda cls: cls()},
+            "src/agents/logic/base.py",
+            self.repo_root,
+            self.target,
+            reload_class=lambda module_name, class_name: GoodCandidate,
+        )
+
+        self.assertTrue(attempted)
+        self.assertIsNotNone(message)
+        self.assertIn("APPLIED", message)
+        self.assertIn("hot-swapped", message)
+        # promoted live -- dispatch now reaches the candidate
+        from src.orchestrator.router import AgentRequest
+
+        self.assertEqual(router.dispatch("logic", AgentRequest(text="hi")).output, "candidate")
+        # the git commit was NOT reverted
+        self.assertEqual(self.target.read_text(), "v2")
+
+    def test_a_crashing_candidate_is_reverted_and_reported(self):
+        from src.main import _attempt_hot_swap
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import AgentResponse, Router, SubAgent
+
+        class BaselineAgent(SubAgent):
+            name = "logic"
+
+            def handle(self, request, bus):
+                return AgentResponse(agent=self.name, output="baseline")
+
+        class CrashingCandidate(SubAgent):
+            name = "logic"
+
+            def handle(self, request, bus):
+                raise RuntimeError("boom")
+
+        router = Router()
+        manager = DeploymentManager(router)
+        manager.deploy(BaselineAgent())
+
+        attempted, message = _attempt_hot_swap(
+            manager,
+            {"src/agents/logic/base.py": lambda cls: cls()},
+            "src/agents/logic/base.py",
+            self.repo_root,
+            self.target,
+            reload_class=lambda module_name, class_name: CrashingCandidate,
+        )
+
+        self.assertTrue(attempted)
+        self.assertIsNotNone(message)
+        self.assertIn("REVERTED", message)
+        self.assertIn("hot-swap", message)
+        # not promoted -- dispatch still reaches the original baseline
+        from src.orchestrator.router import AgentRequest
+
+        self.assertEqual(router.dispatch("logic", AgentRequest(text="hi")).output, "baseline")
+        # the git commit WAS reverted
+        self.assertEqual(self.target.read_text(), "v1")
+
+
+class TestSelfPatchHotSwap(unittest.TestCase):
+    """propose_self_patch's own wiring: does it actually call
+    _attempt_hot_swap (and skip relaunch()) when a subject is
+    hot-swap-eligible and deployment_manager/hot_swap_factories are
+    given? Uses the REAL LogicAgent class via the real, uninjected
+    reload path -- src.agents.logic.base is a real module in this
+    process, so importlib.reload genuinely reloads it; the patched
+    *content* written to the isolated repo_root here is irrelevant to
+    that reload (it reloads the real in-process module, not the copy on
+    disk in repo_root) -- which is the accurate real-world behavior this
+    is meant to lock in, not a limitation of the test.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        (self.repo_root / "src" / "agents" / "logic").mkdir(parents=True)
+        (self.repo_root / "src" / "agents" / "logic" / "base.py").write_text("X = 1\n")
+        (self.repo_root / "tests").mkdir()
+        (self.repo_root / "tests" / "__init__.py").write_text("")
+        (self.repo_root / "tests" / "test_toy.py").write_text(
+            "import unittest\n\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_ok(self):\n"
+            "        self.assertTrue(True)\n"
+        )
+        import subprocess
+
+        subprocess.run(["git", "init", "-q"], cwd=self.repo_root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"], cwd=self.repo_root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=self.repo_root, check=True)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_hot_swap_success_skips_relaunch_entirely(self):
+        from unittest.mock import patch
+
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import Router
+
+        from src.agents.logic.base import LogicAgent
+
+        router = Router()
+        manager = DeploymentManager(router)
+        manager.deploy(LogicAgent())
+
+        proposal = ModificationProposal(
+            subject="src/agents/logic/base.py", code="X = 2\n", rationale="tweak"
+        )
+        agent = FakeSelfPatchAgent([proposal])
+
+        with patch("src.main.relaunch") as mock_relaunch:
+            message = propose_self_patch(
+                agent,
+                AuditGate(),
+                InMemoryStore(),
+                ActivityLog(InMemoryStore()),
+                "src/agents/logic/base.py",
+                "tweak it",
+                repo_root=self.repo_root,
+                do_relaunch=True,
+                deployment_manager=manager,
+                hot_swap_factories={"src/agents/logic/base.py": lambda cls: cls()},
+            )
+
+        mock_relaunch.assert_not_called()
+        self.assertIn("APPLIED", message)
+        self.assertNotIn("REVERTED", message)
+
+    def test_subject_outside_the_registry_still_relaunches_as_before(self):
+        from unittest.mock import patch
+
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import Router
+        from src.orchestrator.self_patch import RelaunchResult
+
+        (self.repo_root / "src" / "orchestrator").mkdir(parents=True)
+        (self.repo_root / "src" / "orchestrator" / "target.py").write_text("VALUE = 1\n")
+        import subprocess
+
+        subprocess.run(["git", "add", "-A"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "add target"], cwd=self.repo_root, check=True)
+
+        proposal = ModificationProposal(
+            subject="src/orchestrator/target.py", code="VALUE = 2\n", rationale="tweak"
+        )
+        agent = FakeSelfPatchAgent([proposal])
+        manager = DeploymentManager(Router())
+
+        with patch(
+            "src.main.relaunch", return_value=RelaunchResult(succeeded=True, detail="")
+        ) as mock_relaunch:
+            propose_self_patch(
+                agent,
+                AuditGate(),
+                InMemoryStore(),
+                ActivityLog(InMemoryStore()),
+                "src/orchestrator/target.py",
+                "tweak it",
+                repo_root=self.repo_root,
+                do_relaunch=True,
+                deployment_manager=manager,
+                hot_swap_factories={"src/agents/logic/base.py": lambda cls: cls()},
+            )
+
+        mock_relaunch.assert_called_once()
+
+
 class TestProposePatchBatch(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -1473,6 +1797,75 @@ class TestWorkOnNextTask(unittest.TestCase):
         )
 
         self.assertEqual(self.task_store.get(blocked.id).status, BLOCKED)
+
+
+class TestWorkOnNextTaskHotSwap(unittest.TestCase):
+    """A PATCH_TASK (unlike a SKILL_TASK) sets needs_relaunch=True, so
+    work_on_next_task is what actually calls _relaunch_or_rollback --
+    this covers the DONE-vs-BLOCKED bookkeeping bug risk specifically: a
+    hot-swap SUCCESS must not be mistaken for a failure just because
+    _relaunch_or_rollback's return value is no longer None on success.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        (self.repo_root / "src" / "agents" / "logic").mkdir(parents=True)
+        (self.repo_root / "src" / "agents" / "logic" / "base.py").write_text("X = 1\n")
+        (self.repo_root / "tests").mkdir()
+        (self.repo_root / "tests" / "__init__.py").write_text("")
+        (self.repo_root / "tests" / "test_toy.py").write_text(
+            "import unittest\n\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_ok(self):\n"
+            "        self.assertTrue(True)\n"
+        )
+        import subprocess
+
+        subprocess.run(["git", "init", "-q"], cwd=self.repo_root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"], cwd=self.repo_root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=self.repo_root, check=True)
+        self.store = InMemoryStore()
+        self.task_store = TaskStore(self.store)
+        self.activity_log = ActivityLog(self.store)
+        self.audit_gate = AuditGate()
+        self.cognition = CognitionRouter()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_hot_swap_success_marks_the_task_done_not_blocked(self):
+        from src.orchestrator.deployment import DeploymentManager
+        from src.orchestrator.router import Router
+
+        from src.agents.logic.base import LogicAgent
+
+        router = Router()
+        manager = DeploymentManager(router)
+        manager.deploy(LogicAgent())
+
+        proposal = ModificationProposal(
+            subject="src/agents/logic/base.py", code="X = 2\n", rationale="tweak"
+        )
+        agent = FakeSelfPatchAgent([proposal])
+        task = self.task_store.add(
+            "tweak logic", PATCH_TASK, subject="src/agents/logic/base.py"
+        )
+
+        message = work_on_next_task(
+            self.task_store, SkillResearchAgent(), agent, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+            deployment_manager=manager,
+            hot_swap_factories={"src/agents/logic/base.py": lambda cls: cls()},
+        )
+
+        self.assertIn("APPLIED", message)
+        self.assertIn("hot-swapped", message)
+        self.assertEqual(self.task_store.get(task.id).status, DONE)
 
 
 class TestReconsiderBlockedTasks(unittest.TestCase):

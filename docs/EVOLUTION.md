@@ -749,33 +749,80 @@ Built:
     list -- `SkillResearchAgent` had already been drafting genuine
     working code, not template prose, since milestone 25 far below; the
     bullet just never got removed when that landed.)
+51. **`DeploymentManager` (milestone 7) wired into self-patching: an
+    in-process hot-swap for a patched sub-agent, instead of always a
+    full relaunch.** Milestone 7's `DeploymentManager` was fully built
+    and tested from early on but had no live caller -- `build_router()`
+    registered each sub-agent directly; nothing ever constructed a
+    `DeploymentManager`. Found while auditing this document against the
+    actual code for drift, and initially left that way on purpose:
+    connecting it to self-patching would mean LLM-drafted code becoming
+    live-executing via hot-swap instead of only ever through
+    `relaunch()`'s self-check subprocess -- a change to the safety model
+    self-patching relies on, not a plumbing fix. Surfaced to the creator
+    as exactly that framing; the creator said yes, explicitly (the same
+    AskUserQuestion-shaped pattern as auto-commit, the idle loop, and
+    conversational self-modification before it -- see `docs/SOUL.md`,
+    "In-process hot-swap for self-patched sub-agents," for the full
+    account of what was asked and what was decided).
+
+    What actually changed: `main.py`'s `run_cli()` now wraps the built
+    router (`deployment_manager = DeploymentManager(router,
+    memory=store)`) and `deploy()`s each already-registered slot.
+    `DeploymentManager.hot_swap(candidate, requests)` -- new, the
+    composite stage/trial/promote-or-rollback operation `main.py`
+    actually needed rather than three separate calls -- backs a new
+    `_attempt_hot_swap` in `main.py`: for a patch landing on one of a
+    small, explicit, hand-maintained `_HOT_SWAP_TARGETS` list (the three
+    files defining a live Router sub-agent -- `logic`/`emotion`/`skills`
+    -- nothing else), *after* the patch already passed the audit gate,
+    the full isolated test suite, and was applied and committed
+    (identical to a relaunch-bound patch up to this point), `main.py`
+    reloads the real, already-imported module in-process
+    (`importlib.reload`, operating on this process's own `sys.modules`,
+    not an isolated copy), builds a fresh instance with the exact same
+    constructor arguments the live one was built with (`logic_agent_kwargs`,
+    a dict shared between the original `build_router()` call and this
+    reconstruction, specifically so the two can't drift apart), and
+    trials it against a handful of representative canned requests for
+    that slot. Promoted live only if it looks at least as good as what's
+    running now (in practice: didn't crash -- there's no oracle for
+    conversational quality without a real LLM, and this project doesn't
+    fake one); on a failed trial, the candidate is discarded and the
+    just-made commit reverted, exactly like a failed relaunch self-check,
+    except the live process was never interrupted at all, since a
+    rejected candidate never touches live dispatch. Anything not on
+    `_HOT_SWAP_TARGETS`, or any hot-swap step that itself fails (module
+    won't reload, candidate won't construct, no active version staged
+    for that slot), falls straight through to the original, unchanged
+    full-relaunch path -- hot-swap is a faster path when available,
+    never a weaker gate, never the only path. Scoped to `patch`/PATCH
+    only for now, not `evolve`/EVOLVE (a batch can touch several files
+    at once; which slot(s) to trial and in what order is a separate
+    design question, left for later). Every downstream gate (audit gate,
+    isolated test suite, protected-subjects list, network denylist) is
+    identical regardless of which activation path a patch lands on --
+    same principle as every prior boundary crossing in this project:
+    autonomy/hot-swap changes who presses the button and how its effect
+    reaches the process, never what the button is wired to do.
 
 Still ahead, roughly in order:
 
-51. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+52. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-52. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+53. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-53. *Automatic* registration of an applied skill as a live `Router`
+54. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
     invocation rather than done reflexively).
-54. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+55. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and
     `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
     derived from real operating experience -- worth revisiting once
     there's an actual track record.
-55. **`DeploymentManager` (milestone 7, `src/orchestrator/deployment.py`)
-    is fully built and tested but has no live caller.** `build_router()`
-    registers each sub-agent directly; nothing ever constructs a
-    `DeploymentManager` or calls `deploy()`/`stage_candidate()`. Found
-    while auditing this document against the actual code for drift (the
-    same pass that caught the stale `SkillResearchAgent` claim, above).
-    Deliberately not wired up as part of that same pass: unlike every
-    other "build then wire" fix in this project's history (`SkillsAgent`,
-    `HealthMonitor`, `InterestTracker`), connecting this one to the
-    self-patch pipeline would mean LLM-drafted code becoming live-
-    executing via hot-swap instead of through `relaunch()`'s self-check
-    subprocess -- a change to the safety model that self-patching relies
-    on, not a plumbing fix, and warrants its own explicit decision with
-    the creator rather than being bundled into a doc/drift cleanup pass.
+56. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
+    -- extending hot-swap to a multi-file batch is a real design
+    question (which slot(s) to trial, in what order, how to roll back a
+    partial hot-swap alongside the multi-commit revert `evolve` already
+    does), not yet worked through.

@@ -72,6 +72,14 @@ class Router:
             raise ValueError("agent.name must be a non-empty string")
         self._agents[agent.name] = agent
 
+    def get(self, name: str) -> SubAgent | None:
+        """The currently-registered agent for `name`, or None -- unlike
+        `dispatch`, never raises for an unknown slot. Exists so a caller
+        (e.g. DeploymentManager) can inspect or re-register what's
+        already live without needing to keep its own separate reference.
+        """
+        return self._agents.get(name)
+
     def unregister(self, name: str) -> None:
         self._agents.pop(name, None)
 

@@ -29,6 +29,7 @@ commits or pushes.
 from __future__ import annotations
 
 import difflib
+import importlib
 import os
 import re
 import sys
@@ -69,6 +70,7 @@ from src.orchestrator.apply import (
 from src.orchestrator.audit import REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
 from src.orchestrator.console_style import format_code_block, style
+from src.orchestrator.deployment import DeploymentManager
 from src.orchestrator.discovery import discover_improvements
 from src.orchestrator.git_ops import (
     commit_applied_change,
@@ -79,7 +81,7 @@ from src.orchestrator.git_ops import (
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.reminders import parse_duration, schedule_reminder
-from src.orchestrator.router import AgentRequest, Router
+from src.orchestrator.router import AgentRequest, Router, SubAgent
 from src.orchestrator.self_patch import SelfPatchAgent, check_main_py_invariants, relaunch, run_isolated_test_suite
 from src.orchestrator.tasks import (
     BLOCKED,
@@ -696,7 +698,16 @@ def run_cli() -> None:
     # start the pipeline changed. Closures, not a LogicAgent -> main.py
     # import, to avoid a circular import (main.py already imports
     # LogicAgent).
-    router = build_router(
+    #
+    # Kept as its own dict, not inlined into build_router() below, for a
+    # second reason beyond readability: build_router()'s parameter names
+    # mirror LogicAgent's constructor exactly (by design), so this same
+    # dict doubles as the hot-swap recipe for a patched LogicAgent
+    # (hot_swap_factories below) -- reconstructing a candidate after a
+    # self-patch needs the exact same arguments the currently-live
+    # instance was built with, not a second, hand-copied list that could
+    # drift out of sync with this one.
+    logic_agent_kwargs: dict = dict(
         cognition=cognition,
         short_term=short_term,
         web_fetch=web_fetch,
@@ -704,7 +715,8 @@ def run_cli() -> None:
         activity_log=activity_log,
         propose_skill_fn=lambda topic: propose_skill(skill_research, audit_gate, store, topic),
         propose_patch_fn=lambda path, desc: propose_self_patch(
-            self_patch_agent, audit_gate, store, activity_log, path, desc, short_term=short_term
+            self_patch_agent, audit_gate, store, activity_log, path, desc, short_term=short_term,
+            deployment_manager=deployment_manager, hot_swap_factories=hot_swap_factories,
         ),
         propose_batch_fn=lambda theme, count: propose_skill_batch(
             cognition, skill_research, audit_gate, store, theme, count
@@ -715,6 +727,27 @@ def run_cli() -> None:
         ),
         use_skill_fn=lambda name: use_skill(router, outcome_log, activity_log, name),
     )
+    router = build_router(**logic_agent_kwargs)
+
+    # DeploymentManager (src/orchestrator/deployment.py): wraps the
+    # already-built router, taking over version bookkeeping for each
+    # slot build_router() just registered directly. This is what makes
+    # an in-process hot-swap possible for a self-patch that lands on one
+    # of _HOT_SWAP_TARGETS (see _attempt_hot_swap) -- explicitly
+    # authorized by the creator; every gate a patch already goes through
+    # (audit gate, isolated test suite) is unchanged, only how an
+    # already-verified change takes effect can now skip a full relaunch.
+    deployment_manager = DeploymentManager(router, memory=store)
+    for slot_name in router.agent_names():
+        agent = router.get(slot_name)
+        if agent is not None:
+            deployment_manager.deploy(agent, version_id="initial")
+
+    hot_swap_factories: dict[str, Callable[[type], SubAgent]] = {
+        "src/agents/logic/base.py": lambda cls: cls(**logic_agent_kwargs),
+        "src/agents/emotion/base.py": lambda cls: cls(),
+        "src/agents/skills/base.py": lambda cls: cls(),
+    }
 
     activity_clock = ActivityClock()
     # A one-slot mailbox between perform_action and last_action_succeeded
@@ -734,6 +767,7 @@ def run_cli() -> None:
             task_store, reflection_agent, store, skill_research, self_patch_agent,
             audit_gate, activity_log, cognition, short_term=short_term,
             outcome_sink=lambda succeeded: _last_autonomous_outcome.__setitem__(0, succeeded),
+            deployment_manager=deployment_manager, hot_swap_factories=hot_swap_factories,
         )
 
     autonomy = AutonomyController(
@@ -770,6 +804,7 @@ def run_cli() -> None:
             router, store, short_term, activity_log, outcome_log, reflection_agent,
             audit_gate, skill_research, self_patch_agent, interests, health_monitor,
             web_fetch, budget_guards, cognition, task_store, activity_clock, autonomy,
+            deployment_manager=deployment_manager, hot_swap_factories=hot_swap_factories,
         )
     finally:
         autonomy.stop()
@@ -788,6 +823,8 @@ def _autonomous_action(
     repo_root: Path | None = None,
     short_term: ShortTermMemory | None = None,
     outcome_sink: Callable[[bool | None], None] | None = None,
+    deployment_manager: DeploymentManager | None = None,
+    hot_swap_factories: dict[str, Callable[[type], SubAgent]] | None = None,
 ) -> bool:
     """One autonomous unit of work, called by AutonomyController.tick()
     only once every gate (enabled, idle long enough, past cooldown,
@@ -832,6 +869,8 @@ def _autonomous_action(
         repo_root=repo_root,
         label="autonomous",
         short_term=short_term,
+        deployment_manager=deployment_manager,
+        hot_swap_factories=hot_swap_factories,
     )
     if outcome_sink is not None:
         outcome_sink(result.startswith("[APPLIED]"))
@@ -874,6 +913,8 @@ def _run_cli_loop(
     task_store: TaskStore,
     activity_clock: ActivityClock,
     autonomy: AutonomyController,
+    deployment_manager: DeploymentManager | None = None,
+    hot_swap_factories: dict[str, Callable[[type], SubAgent]] | None = None,
 ) -> None:
     """The interactive read-eval-print loop, extracted out of run_cli so
     run_cli can guarantee readline history is saved on the way out
@@ -914,7 +955,8 @@ def _run_cli_loop(
             subject, description = patch_args
             propose_self_patch(
                 self_patch_agent, audit_gate, store, activity_log, subject, description,
-                short_term=short_term,
+                short_term=short_term, deployment_manager=deployment_manager,
+                hot_swap_factories=hot_swap_factories,
             )
             continue
         batch_args = extract_batch_args(user_input, lowered)
@@ -945,6 +987,7 @@ def _run_cli_loop(
             work_on_next_task(
                 task_store, skill_research, self_patch_agent, audit_gate, store,
                 activity_log, cognition, short_term=short_term,
+                deployment_manager=deployment_manager, hot_swap_factories=hot_swap_factories,
             )
             continue
         if lowered == "autonomous" or lowered.startswith(AUTONOMOUS_PREFIX):
@@ -1280,6 +1323,8 @@ def propose_self_patch(
     max_attempts: int = 3,
     do_relaunch: bool = True,
     short_term: ShortTermMemory | None = None,
+    deployment_manager: DeploymentManager | None = None,
+    hot_swap_factories: dict[str, Callable[[type], SubAgent]] | None = None,
 ) -> str:
     """Draft a revision to an EXISTING source file at `subject`, run it
     through the same audit gate a drafted skill goes through, and -- if
@@ -1294,8 +1339,14 @@ def propose_self_patch(
     here. A successful patch is then auto-committed (before the relaunch
     below, since os.execv never returns) -- same policy as propose_skill,
     never `git push`. `do_relaunch=False` lets tests exercise the full
-    pipeline without actually replacing the test process. Returns the
-    message printed, for testability.
+    pipeline without actually replacing the test process. `deployment_manager`/
+    `hot_swap_factories`, when both given, let a patch to one of
+    `_HOT_SWAP_TARGETS` (a file defining a live Router sub-agent) take
+    effect via an in-process hot-swap instead of a full relaunch -- see
+    `_relaunch_or_rollback`/`_attempt_hot_swap`. Every gate above this
+    point (audit gate, isolated test suite, apply, commit) is identical
+    either way; only how the already-verified change takes effect
+    differs. Returns the message printed, for testability.
     """
     if not subject or not topic:
         message = "[usage: patch <repo-relative path> <description of the change>]"
@@ -1391,34 +1442,78 @@ def propose_self_patch(
         print(style(f"⚠️  [git] {commit_result.output}", "yellow"))
 
     if do_relaunch and commit_result.committed:
-        reverted_message = _relaunch_or_rollback(repo_root, target, short_term=short_term)
-        if reverted_message is not None:
-            message = reverted_message
+        # None here means "no override" (the [APPLIED] message above
+        # already stands) -- only true for a real relaunch's unreachable
+        # success path. A hot-swap success returns its own descriptive
+        # message, same as a failure's [REVERTED] one; both override.
+        activation_message = _relaunch_or_rollback(
+            repo_root,
+            target,
+            short_term=short_term,
+            subject=proposal.subject,
+            deployment_manager=deployment_manager,
+            hot_swap_factories=hot_swap_factories,
+        )
+        if activation_message is not None:
+            message = activation_message
             _print_status(message)
 
     return message
 
 
-def _relaunch_or_rollback(
-    repo_root: Path | None, target: Path, short_term: ShortTermMemory | None = None
-) -> str | None:
-    """Shared by propose_self_patch (a human-typed `patch`) and the
-    autonomous task runner below -- relaunch() verifies the new code
-    actually starts (see src/orchestrator/self_patch.py) before
-    replacing this process with it; on failure, undo the just-made
-    commit (src/orchestrator/git_ops.py, revert_last_commit) rather than
-    leaving a broken commit sitting on top of a working history. Returns
-    a "[REVERTED] ..." message on failure, or None on the (unreachable
-    in production) success path -- a real relaunch replaces the process
-    outright and never returns here at all.
+# The narrow set of files this self-patching pipeline will try an
+# in-process hot-swap for instead of a full relaunch: exactly the
+# modules that define one of build_router()'s live Router sub-agents
+# (module path, class name). A patch to anything else -- main.py,
+# orchestrator internals, anything not on this list -- still always
+# relaunches, unchanged. Deliberately does NOT cover
+# propose_patch_batch/evolve (a batch may touch several files at once;
+# deciding which slot(s) to trial and in what order is a separate
+# design question left for later, see docs/EVOLUTION.md).
+_HOT_SWAP_TARGETS: dict[str, tuple[str, str]] = {
+    "src/agents/logic/base.py": ("src.agents.logic.base", "LogicAgent"),
+    "src/agents/emotion/base.py": ("src.agents.emotion.base", "EmotionAgent"),
+    "src/agents/skills/base.py": ("src.agents.skills.base", "SkillsAgent"),
+}
+
+# A handful of representative, safe canned requests per slot, used only
+# to smoke-test that a freshly reloaded, freshly constructed candidate
+# actually runs without raising -- the same thing relaunch()'s
+# --self-check subprocess verifies for a full relaunch, scoped to just
+# this one class instead of the whole process. Not a claim about
+# conversational quality (DeploymentManager's default evaluator only
+# checks "didn't raise"): there's no oracle to judge that without a real
+# LLM, and this project doesn't fake one.
+_HOT_SWAP_TRIAL_REQUESTS: dict[str, tuple[str, ...]] = {
+    "logic": ("hello", "how are you today?", "what can you help me with?"),
+    "emotion": ("I'm really happy about this!", "this is terrible news", "a neutral statement"),
+    "skills": ("print('hot-swap trial')",),
+}
+
+
+def _reload_hot_swap_class(module_name: str, class_name: str) -> type | None:
+    """The real reload step `_attempt_hot_swap` uses by default --
+    injectable there for tests, since this function's whole point is a
+    side effect (mutating `sys.modules`) a unit test shouldn't have to
+    depend on the real file on disk to exercise. Returns None instead of
+    raising if the module won't import, doesn't have `class_name`, or
+    `class_name` no longer names a SubAgent subclass after reload.
     """
-    if short_term is not None and len(short_term) > 0:
-        short_term.save(DEFAULT_RELAUNCH_CONTEXT_PATH)
-    print("🔍 [patch] verifying the new code actually starts before relaunching into it...")
-    relaunch_result = relaunch()
-    if relaunch_result.succeeded:
+    try:
+        module = importlib.reload(importlib.import_module(module_name))
+        cls = getattr(module, class_name, None)
+    except Exception:
         return None
-    print(style(f"🚫 [patch] self-check failed: {relaunch_result.detail}", "red", "bold"))
+    return cls if isinstance(cls, type) and issubclass(cls, SubAgent) else None
+
+
+def _revert_patch_commit(repo_root: Path | None, target: Path, detail: str) -> str:
+    """Shared by the relaunch-failure and hot-swap-trial-failure paths
+    below: undo the just-made commit (src/orchestrator/git_ops.py,
+    revert_last_commit) rather than leaving a broken commit sitting on
+    top of a working history, and report exactly what happened either
+    way.
+    """
     revert_result = revert_last_commit(repo_root or Path.cwd())
     if revert_result.committed:
         print(style("↩️  [patch] reverted -- the working tree is back to its prior state", "yellow"))
@@ -1431,9 +1526,153 @@ def _relaunch_or_rollback(
                 "bold",
             )
         )
-    return (
-        f"[REVERTED] {target} passed every mechanical check but failed to start as a "
-        f"live process: {relaunch_result.detail}"
+    return f"[REVERTED] {target} passed every mechanical check but {detail}"
+
+
+def _attempt_hot_swap(
+    deployment_manager: DeploymentManager,
+    hot_swap_factories: dict[str, Callable[[type], SubAgent]],
+    subject: str,
+    repo_root: Path | None,
+    target: Path,
+    reload_class: Callable[[str, str], type | None] = _reload_hot_swap_class,
+) -> tuple[bool, str | None]:
+    """Try an in-process hot-swap instead of a full relaunch, for a
+    patch that landed on one of `_HOT_SWAP_TARGETS`. Returns
+    `(attempted, message)`: `attempted=False` means the caller should
+    fall through to the normal relaunch path unchanged (this subject
+    isn't hot-swap-eligible, the module wouldn't reload cleanly, or
+    building a candidate instance raised); `attempted=True` means this
+    fully handled the outcome -- `message` is a descriptive
+    "[APPLIED] ... hot-swapped ..." string on a successful promotion (so
+    the caller reports what actually happened -- unlike a real relaunch,
+    a hot-swap success is a normal, reachable return, not something
+    replacing the process outright) or a "[REVERTED] ..." string on a
+    failed trial, exactly like `_relaunch_or_rollback`'s own contract on
+    failure, so the caller
+    can treat both the same way.
+    """
+    target_spec = _HOT_SWAP_TARGETS.get(subject)
+    if target_spec is None or subject not in hot_swap_factories:
+        return False, None
+
+    module_name, class_name = target_spec
+    cls = reload_class(module_name, class_name)
+    if cls is None:
+        print(
+            style(
+                f"⚠️  [patch] could not reload {module_name}.{class_name} for a hot-swap "
+                "candidate -- falling back to a full relaunch",
+                "yellow",
+            )
+        )
+        return False, None
+
+    try:
+        candidate = hot_swap_factories[subject](cls)
+    except Exception as exc:
+        print(
+            style(
+                f"⚠️  [patch] hot-swap candidate construction failed ({exc!r}) -- "
+                "falling back to a full relaunch",
+                "yellow",
+            )
+        )
+        return False, None
+
+    slot = candidate.name
+    trial_texts = _HOT_SWAP_TRIAL_REQUESTS.get(slot, ("hello",))
+    requests = [AgentRequest(text=t) for t in trial_texts]
+    print(
+        f"🔀 [patch] trialing the patched {slot!r} slot in-process "
+        f"({len(requests)} request(s), no restart if it passes)..."
+    )
+    try:
+        promoted, report = deployment_manager.hot_swap(candidate, requests)
+    except ValueError as exc:
+        # No active version staged for this slot yet (deploy() was never
+        # called for it) -- setup issue, not a candidate-quality issue.
+        print(
+            style(
+                f"⚠️  [patch] hot-swap unavailable for {slot!r} ({exc!r}) -- "
+                "falling back to a full relaunch",
+                "yellow",
+            )
+        )
+        return False, None
+
+    if promoted:
+        print(
+            style(
+                f"🔀 [patch] hot-swapped into the live {slot!r} slot -- "
+                "no restart needed, this conversation continues",
+                "green",
+                "bold",
+            )
+        )
+        return True, (
+            f"[APPLIED] {target} -- hot-swapped into the live {slot!r} slot, "
+            "no restart needed"
+        )
+
+    print(
+        style(
+            f"🚫 [patch] hot-swap trial failed for {slot!r} "
+            f"({report.candidate_success_rate:.0%} vs baseline {report.baseline_success_rate:.0%}) "
+            "-- reverting",
+            "red",
+            "bold",
+        )
+    )
+    return True, _revert_patch_commit(
+        repo_root, target, f"failed its in-process hot-swap trial for the {slot!r} slot"
+    )
+
+
+def _relaunch_or_rollback(
+    repo_root: Path | None,
+    target: Path,
+    short_term: ShortTermMemory | None = None,
+    subject: str | None = None,
+    deployment_manager: DeploymentManager | None = None,
+    hot_swap_factories: dict[str, Callable[[type], SubAgent]] | None = None,
+) -> str | None:
+    """Shared by propose_self_patch (a human-typed `patch`) and the
+    autonomous task runner below. If `subject` names a file
+    `_HOT_SWAP_TARGETS` recognizes and both `deployment_manager` and
+    `hot_swap_factories` are given, tries an in-process hot-swap first
+    (see `_attempt_hot_swap`) -- narrower, faster, and doesn't
+    interrupt the running process at all. Otherwise (or if hot-swap
+    wasn't attempted for any reason) falls through to the original
+    relaunch path: relaunch() verifies the new code actually starts
+    (see src/orchestrator/self_patch.py) before replacing this process
+    with it; on failure, undo the just-made commit
+    (src/orchestrator/git_ops.py, revert_last_commit) rather than
+    leaving a broken commit sitting on top of a working history. Returns
+    a "[REVERTED] ..." message on failure. On success, returns a
+    descriptive "[APPLIED] ... hot-swapped ..." message for a hot-swap
+    (a real, reachable return -- the caller should use it to replace its
+    default message), or None for a real relaunch (the caller's default
+    message stands -- this is actually unreachable in production, since
+    a real relaunch replaces the process outright and never returns here
+    at all).
+    """
+    if deployment_manager is not None and hot_swap_factories is not None and subject is not None:
+        attempted, message = _attempt_hot_swap(
+            deployment_manager, hot_swap_factories, subject, repo_root, target
+        )
+        if attempted:
+            return message
+
+    if short_term is not None and len(short_term) > 0:
+        short_term.save(DEFAULT_RELAUNCH_CONTEXT_PATH)
+    print("🔍 [patch] verifying the new code actually starts before relaunching into it...")
+    relaunch_result = relaunch()
+    if relaunch_result.succeeded:
+        return None
+    print(style(f"🚫 [patch] self-check failed: {relaunch_result.detail}", "red", "bold"))
+    return _revert_patch_commit(
+        repo_root, target, f"failed to start as a live process: {relaunch_result.detail}"
     )
 
 
@@ -1742,6 +1981,8 @@ def work_on_next_task(
     repo_root: Path | None = None,
     label: str = "work",
     short_term: ShortTermMemory | None = None,
+    deployment_manager: DeploymentManager | None = None,
+    hot_swap_factories: dict[str, Callable[[type], SubAgent]] | None = None,
 ) -> str:
     """Pick and run exactly one task from the persisted backlog. `label`
     lets the autonomous loop (src/orchestrator/autonomy.py) reuse this
@@ -1769,10 +2010,24 @@ def work_on_next_task(
     )
     if needs_relaunch:
         target = Path(repo_root or Path.cwd()) / task.subject
-        reverted_message = _relaunch_or_rollback(repo_root, target, short_term=short_term)
-        if reverted_message is not None:
-            task_store.update_status(task.id, BLOCKED, note=reverted_message)
-            result = reverted_message
+        # None means "no override" (unreachable relaunch-success path);
+        # a hot-swap success returns its own [APPLIED] message (a real,
+        # reachable return, unlike relaunch) and must NOT be treated as
+        # a failure -- only a [REVERTED] message means the task failed.
+        activation_message = _relaunch_or_rollback(
+            repo_root,
+            target,
+            short_term=short_term,
+            subject=task.subject,
+            deployment_manager=deployment_manager,
+            hot_swap_factories=hot_swap_factories,
+        )
+        if activation_message is not None:
+            result = activation_message
+            if activation_message.startswith("[REVERTED]"):
+                task_store.update_status(task.id, BLOCKED, note=activation_message)
+            else:
+                task_store.update_status(task.id, DONE, note=activation_message)
             _print_status(result)
     return result
 
