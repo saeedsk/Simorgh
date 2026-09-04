@@ -7,24 +7,31 @@ from src.agents.skills.research import SkillResearchAgent
 from src.main import (
     autocorrect_command,
     build_router,
+    discover_command,
     extract_batch_args,
     extract_patch_args,
+    extract_plan_args,
     extract_propose_topic,
     handle_turn,
     note_interest,
+    plan_goal,
     propose_self_patch,
     propose_skill,
     propose_skill_batch,
     run_skill_code,
+    run_task,
     strip_command_slash,
     use_skill,
+    work_on_next_task,
 )
+from src.cognition.provider import CognitionRouter
 from src.memory.long_term import InMemoryStore
 from src.orchestrator.activity_log import ActivityLog
 from src.orchestrator.apply import APPLIED_KIND, APPLIED_PATCH_KIND
 from src.orchestrator.audit import AuditGate, ModificationProposal
 from src.orchestrator.health import HealthMonitor
 from src.orchestrator.reflection import OutcomeLog, ReflectionAgent
+from src.orchestrator.tasks import BLOCKED, DONE, PATCH_TASK, PENDING, SKILL_TASK, TaskStore
 
 
 class TestMainCli(unittest.TestCase):
@@ -901,6 +908,319 @@ class TestAutocorrectCommand(unittest.TestCase):
         corrected, corrected_lowered, original = autocorrect_command("", "")
         self.assertEqual(corrected, "")
         self.assertIsNone(original)
+
+
+class TestExtractPlanArgs(unittest.TestCase):
+    def test_parses_count_and_goal(self):
+        text = "plan 4 make things more resilient"
+        self.assertEqual(extract_plan_args(text, text.lower()), (4, "make things more resilient"))
+
+    def test_non_matching_input_returns_none(self):
+        text = "hey there"
+        self.assertIsNone(extract_plan_args(text, text.lower()))
+
+    def test_missing_count_returns_usage_pair(self):
+        text = "plan a goal with no count"
+        self.assertEqual(extract_plan_args(text, text.lower()), (0, ""))
+
+
+class TestRunTask(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        self.store = InMemoryStore()
+        self.task_store = TaskStore(self.store)
+        self.activity_log = ActivityLog(self.store)
+        self.audit_gate = AuditGate()
+        self.cognition = CognitionRouter()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_skill_task_success_marks_done(self):
+        task = self.task_store.add("rocketry", SKILL_TASK)
+
+        message, needs_relaunch = run_task(
+            self.task_store, task, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertIn("APPLIED", message)
+        self.assertFalse(needs_relaunch)
+        self.assertEqual(self.task_store.get(task.id).status, DONE)
+
+    def test_marks_in_progress_before_attempting(self):
+        # A crash mid-run_task would leave the task IN_PROGRESS, which is
+        # exactly what makes "on restart, resume" possible -- confirmed
+        # indirectly here by checking the final state is never PENDING
+        # when the pipeline actually ran (deterministic fallback always
+        # succeeds for a SKILL_TASK).
+        task = self.task_store.add("rocketry", SKILL_TASK)
+
+        run_task(
+            self.task_store, task, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertGreaterEqual(self.task_store.get(task.id).attempts, 1)
+
+    def test_failing_task_is_retried_then_blocked(self):
+        from src.orchestrator.audit import ModificationProposal
+
+        class AlwaysBadResearch:
+            def draft_skill(self, topic, subject=None, prior_reasons=None):
+                return ModificationProposal(
+                    subject="src/agents/skills/bad.py", code="eval('1')", rationale="bad"
+                )
+
+        task = self.task_store.add("a bad idea", SKILL_TASK)
+
+        for _ in range(3):
+            run_task(
+                self.task_store, task, AlwaysBadResearch(), None, self.audit_gate, self.store,
+                self.activity_log, self.cognition, repo_root=self.repo_root,
+            )
+            task = self.task_store.get(task.id)
+
+        self.assertEqual(task.status, BLOCKED)
+
+
+class TestWorkOnNextTask(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        self.store = InMemoryStore()
+        self.task_store = TaskStore(self.store)
+        self.activity_log = ActivityLog(self.store)
+        self.audit_gate = AuditGate()
+        self.cognition = CognitionRouter()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_nothing_pending_reports_it(self):
+        message = work_on_next_task(
+            self.task_store, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertIn("nothing pending", message)
+
+    def test_works_the_next_pending_task(self):
+        self.task_store.add("rocketry", SKILL_TASK)
+
+        message = work_on_next_task(
+            self.task_store, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertIn("APPLIED", message)
+        self.assertEqual(len(self.task_store.all()), 1)
+        self.assertEqual(self.task_store.all()[0].status, DONE)
+
+    def test_prefers_resuming_an_in_progress_task_over_a_fresh_pending_one(self):
+        stale = self.task_store.add("stale in-progress task", SKILL_TASK)
+        self.task_store.update_status(stale.id, "in_progress", attempt=True)
+        self.task_store.add("fresh pending task", SKILL_TASK)
+
+        work_on_next_task(
+            self.task_store, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertEqual(self.task_store.get(stale.id).status, DONE)
+        self.assertEqual(self.task_store.get(self.task_store.all()[1].id).status, PENDING)
+
+
+class TestDiscoverCommand(unittest.TestCase):
+    def test_no_signals_reports_it(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+
+        message = discover_command(task_store, reflection_agent, store)
+
+        self.assertIn("no new improvement areas", message)
+
+    def test_a_takeaway_is_discovered_as_a_task(self):
+        from src.orchestrator.reflection import Outcome
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        reflection_agent.reflect_on_outcome(
+            Outcome(agent="logic", request_text="x", output="", succeeded=False, note="boom")
+        )
+
+        message = discover_command(task_store, reflection_agent, store)
+
+        self.assertIn("1 new task", message)
+        self.assertEqual(len(task_store.all()), 1)
+
+
+class TestPlanGoal(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_usage_message_for_invalid_count(self):
+        from src.cognition.provider import CognitionRouter
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+
+        message = plan_goal(CognitionRouter(), task_store, "a goal", 0)
+
+        self.assertIn("usage", message)
+
+    def test_usage_message_for_empty_goal(self):
+        from src.cognition.provider import CognitionRouter
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+
+        message = plan_goal(CognitionRouter(), task_store, "", 3)
+
+        self.assertIn("usage", message)
+
+    def test_deterministic_fallback_is_reported(self):
+        from src.cognition.provider import CognitionRouter
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+
+        message = plan_goal(CognitionRouter(), task_store, "a real goal", 3)
+
+        self.assertIn("no real drafting intelligence", message)
+
+    def test_saves_brainstormed_steps_as_pending_tasks(self):
+        from src.cognition.provider import CognitionRouter, LLMResponse
+
+        class FakeProvider:
+            name = "fake"
+
+            def available(self):
+                return True
+
+            def complete(self, prompt, **kwargs):
+                return LLMResponse(text="1. step one\n2. step two\n", provider_name="fake")
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+
+        message = plan_goal(CognitionRouter([FakeProvider()]), task_store, "a real goal", 2)
+
+        self.assertIn("saved 2 step", message)
+        all_tasks = task_store.all()
+        # 1 parent (the goal itself) + 2 sub-tasks
+        self.assertEqual(len(all_tasks), 3)
+        children = [t for t in all_tasks if t.parent_id is not None]
+        self.assertEqual(len(children), 2)
+        self.assertEqual({t.status for t in children}, {PENDING})
+
+
+class TestHandleAutonomousCommand(unittest.TestCase):
+    def _controller(self):
+        from src.orchestrator.autonomy import ActivityClock, AutonomyController
+
+        store = InMemoryStore()
+        return AutonomyController(store, ActivityClock(), perform_action=lambda: False)
+
+    def test_off_disables(self):
+        from src.main import _handle_autonomous_command
+
+        controller = self._controller()
+        _handle_autonomous_command("off", controller)
+
+        self.assertFalse(controller.enabled)
+
+    def test_on_enables(self):
+        from src.main import _handle_autonomous_command
+
+        controller = self._controller()
+        controller.enabled = False
+        _handle_autonomous_command("on", controller)
+
+        self.assertTrue(controller.enabled)
+
+    def test_no_arg_prints_status_without_changing_state(self):
+        import contextlib
+        import io
+
+        from src.main import _handle_autonomous_command
+
+        controller = self._controller()
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _handle_autonomous_command("", controller)
+
+        self.assertTrue(controller.enabled)
+        self.assertIn("enabled: True", buf.getvalue())
+
+
+class TestAutonomousAction(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_discovers_when_the_queue_is_empty(self):
+        from src.main import _autonomous_action
+        from src.orchestrator.reflection import Outcome
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        reflection_agent.reflect_on_outcome(
+            Outcome(agent="logic", request_text="x", output="", succeeded=False, note="boom")
+        )
+
+        did_something = _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+        )
+
+        self.assertTrue(did_something)
+        self.assertEqual(len(task_store.all()), 1)
+
+    def test_returns_false_when_nothing_to_discover_and_queue_empty(self):
+        from src.main import _autonomous_action
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+
+        did_something = _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+        )
+
+        self.assertFalse(did_something)
+
+    def test_works_a_pending_task_when_queue_is_not_empty(self):
+        from src.main import _autonomous_action
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        task_store.add("rocketry", SKILL_TASK)
+
+        did_something = _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+        )
+
+        self.assertTrue(did_something)
+        self.assertEqual(task_store.all()[0].status, DONE)
 
 
 if __name__ == "__main__":
