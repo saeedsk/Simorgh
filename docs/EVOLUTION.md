@@ -109,6 +109,16 @@ layered fallback, not a single point of failure:
    rather than silently answered worse and forgotten.
 4. **Disclosure.** Falling back is a Directive 8 (Transparency) event --
    it's surfaced, not hidden, exactly like a self-modification.
+5. **Rationing, not just failover.** "Starved" also means "affordable" --
+   a real provider that works but is expensive shouldn't be called
+   without a bound. `BudgetGuard` (`src/cognition/budget.py`) wraps any
+   real provider with a durable call/spend cap; hitting it raises the
+   same `ProviderUnavailable` an outage would, so `CognitionRouter` falls
+   through to the deterministic floor the same way either way. **Any real
+   provider must be wrapped in `BudgetGuard` before being registered** --
+   this is not optional, since Simorgh is meant to write code that draws
+   on it (`SkillResearchAgent`), and unbounded autonomous LLM calls are an
+   unbounded bill.
 
 ## Distributed Substrate (interfaces now, real backends later)
 
@@ -249,16 +259,28 @@ Built:
 11. `src/agents/interests.py` wired into `main.py` (`interest`,
     `interests`, `curious` commands) -- the companion/world-awareness
     piece is now actually reachable, not just a standalone module.
+12. `HealthMonitor` wired live into `main.py`'s `handle_turn` -- it existed
+    fully tested but inert; a CRITICAL finding now self-corrects mid-reply.
+13. `src/memory/short_term.py` implemented (`ShortTermMemory`, a bounded
+    non-durable rolling window) and wired to the CLI's `history` command.
+14. `SkillsAgent` registered by default in `build_router()` and reachable
+    via the CLI's `run <code>` command -- built early (Phase 3) but never
+    actually wired to anything runnable.
+15. `src/cognition/budget.py` -- `BudgetGuard`: a durable call/spend cap
+    any real `LLMProvider` must be wrapped in before registration, so
+    autonomous LLM use (e.g. `SkillResearchAgent`) can't produce an
+    unbounded bill.
 
 Still ahead, roughly in order:
 
-12. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+16. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-13. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+17. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-14. A real `WorldFeed` implementation (RSS/API-backed) -- `curious`
+18. A real `WorldFeed` implementation (RSS/API-backed) -- `curious`
     currently always reports no updates, honestly, since only
     `NullWorldFeed` exists.
-15. A real `LLMProvider` registered ahead of the fallback in
-    `CognitionRouter` -- until then, `SkillResearchAgent`'s drafts stay
-    minimal by construction, not by choice.
+19. A real `LLMProvider` (e.g. Claude or Gemini), wrapped in `BudgetGuard`,
+    registered ahead of the fallback in `CognitionRouter` -- until then,
+    `SkillResearchAgent`'s drafts stay minimal by construction, not by
+    choice. Blocked on the creator providing API credentials.
