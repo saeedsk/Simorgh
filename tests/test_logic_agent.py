@@ -1,15 +1,35 @@
 import unittest
 
-from src.agents.logic.base import LogicAgent
+from src.agents.logic.base import LogicAgent, _mood_phrase
 from src.cognition.provider import CognitionRouter, LLMResponse, ProviderUnavailable
 from src.memory.long_term import InMemoryStore
 from src.memory.short_term import ShortTermMemory
 from src.memory.shared_bus import SharedMemoryBus
 from src.orchestrator.activity_log import ActivityLog
-from src.orchestrator.persona_state import PersonaState
+from src.orchestrator.persona_state import EmotionalState, PersonaState
 from src.orchestrator.router import AgentRequest
 from src.sandboxing.sandbox import SandboxResult
 from src.tools.web_fetch import WebFetchTool
+
+
+class TestMoodPhrase(unittest.TestCase):
+    def test_neutral_low_is_calm(self):
+        self.assertEqual(_mood_phrase(EmotionalState()), "calm, nothing much going on")
+
+    def test_positive_high_is_excited(self):
+        phrase = _mood_phrase(EmotionalState(valence=0.8, arousal=0.8))
+        self.assertEqual(phrase, "genuinely excited")
+
+    def test_negative_high_is_on_edge(self):
+        phrase = _mood_phrase(EmotionalState(valence=-0.8, arousal=0.8))
+        self.assertEqual(phrase, "on edge, a bit wound up")
+
+    def test_never_contains_the_words_valence_or_arousal(self):
+        for v in (-0.8, 0.0, 0.8):
+            for a in (0.0, 0.3, 0.8):
+                phrase = _mood_phrase(EmotionalState(valence=v, arousal=a))
+                self.assertNotIn("valence", phrase)
+                self.assertNotIn("arousal", phrase)
 
 
 class FakeProvider:
@@ -152,8 +172,37 @@ class TestLogicAgentWithCognition(unittest.TestCase):
 
         prompt = fake.prompts[0]
         self.assertIn("Sim", prompt)
-        self.assertIn("valence", prompt)
+        self.assertIn("feeling", prompt)
         self.assertIn("hello", prompt)
+
+    def test_prompt_never_shows_raw_enum_mood_labels(self):
+        # The literal "valence"/"arousal" jargon used to appear directly
+        # in the prompt ("Current mood: neutral valence, low arousal.")
+        # -- clinical, diagnostic-sounding phrasing right before the
+        # model answers, a real contributor to flat, corporate-sounding
+        # replies caught live. Locking in that it's gone.
+        fake = FakeProvider()
+        agent = LogicAgent(cognition=CognitionRouter([fake]))
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        prompt = fake.prompts[0]
+        self.assertNotIn("valence", prompt)
+        self.assertNotIn("arousal", prompt)
+
+    def test_prompt_includes_a_tone_reminder_near_the_end(self):
+        fake = FakeProvider()
+        agent = LogicAgent(cognition=CognitionRouter([fake]))
+
+        agent.handle(AgentRequest(text="what's up?"), SharedMemoryBus())
+
+        prompt = fake.prompts[0]
+        self.assertIn("not like a status report", prompt)
+        # placed after the persona/tools block, close to the final
+        # "User: .../Sim:" cue, not just once at the very top
+        self.assertLess(
+            prompt.index("not like a status report"), prompt.index("User: what's up?")
+        )
 
     def test_prompt_includes_recent_history_when_short_term_given(self):
         fake = FakeProvider()

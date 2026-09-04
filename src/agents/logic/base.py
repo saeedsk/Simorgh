@@ -66,7 +66,16 @@ _PERSONA_PREFIX = (
     "do. Only stop and ask when you're genuinely blocked: a decision only "
     "they can make, or a real limit (see below). Reply conversationally "
     "in 1-4 sentences unless you're reporting a tool result, as yourself, "
-    "not as a generic assistant.\n\n"
+    "not as a generic assistant. For ordinary small talk ('what's up', "
+    "'how's it going', 'you there?') answer like a person actually would "
+    "-- specific, a little personality, maybe a real thought about "
+    "something you noticed or worked on recently -- never corporate "
+    "filler like 'just here, keeping things running' or 'ready to dig "
+    "into whatever you need.' If genuinely nothing's happened, say that "
+    "plainly and briefly; don't pad silence into a status report. "
+    "Everything about tools, pipelines, and safety further below is "
+    "reference for when one is actually relevant to the request -- it "
+    "should never leak into how you sound in ordinary conversation.\n\n"
     "You CAN modify your own source code from a chat reply now, but only "
     "through five specific, fully-audited tools -- PROPOSE/PATCH/BATCH/"
     "PLAN/EVOLVE, described below if they're available to you this session -- "
@@ -138,6 +147,51 @@ _PERSONA_PREFIX = (
     "tracked, 'news'/the NEWS tool (when available) checks right now on "
     "request instead of waiting for the next idle share."
 )
+
+# A short anchor placed right before the actual completion point (see
+# _build_prompt), not just once at the top of a long prompt -- caught
+# live: a real reply to a plain "what's up?" came back as flat,
+# corporate filler ("just here, keeping things running..."), almost
+# certainly because 80+ lines of tool/safety/pipeline reference material
+# sit between the tone instructions at the very top of _PERSONA_PREFIX
+# and the actual user message, diluting them. Repeating the instruction
+# this close to generation matters more than repeating it fully -- kept
+# short on purpose.
+_TONE_REMINDER = (
+    "Reminder: everything above about tools and pipelines is reference "
+    "for when one is actually relevant -- it should not change how you "
+    "sound. Answer like yourself, not like a status report. If this is "
+    "small talk, just talk."
+)
+
+_MOOD_PHRASES = {
+    (Valence.NEGATIVE, ArousalLevel.HIGH): "on edge, a bit wound up",
+    (Valence.NEGATIVE, ArousalLevel.MODERATE): "a little frustrated",
+    (Valence.NEGATIVE, ArousalLevel.LOW): "a bit low-energy, mildly down",
+    (Valence.NEUTRAL, ArousalLevel.HIGH): "alert and engaged",
+    (Valence.NEUTRAL, ArousalLevel.MODERATE): "settled, paying attention",
+    (Valence.NEUTRAL, ArousalLevel.LOW): "calm, nothing much going on",
+    (Valence.POSITIVE, ArousalLevel.HIGH): "genuinely excited",
+    (Valence.POSITIVE, ArousalLevel.MODERATE): "in a good mood",
+    (Valence.POSITIVE, ArousalLevel.LOW): "quietly content",
+}
+
+
+def _mood_phrase(mood: EmotionalState) -> str:
+    """A natural, first-person feeling description instead of raw
+    enum-speak ("Current mood: neutral valence, low arousal.") --
+    plausibly one more contributor to the same flat-reply problem
+    _TONE_REMINDER addresses: clinical, diagnostic-sounding phrasing
+    right before the model answers tends to produce clinical, diagnostic
+    -sounding replies. Falls back to the raw label pair for any
+    valence/arousal combination not in the table (there shouldn't be
+    one, given the enums this is built from, but never raise over
+    phrasing).
+    """
+    return _MOOD_PHRASES.get(
+        (mood.valence_label, mood.arousal_label),
+        f"{mood.valence_label.value}, {mood.arousal_label.value} energy",
+    )
 
 
 class LogicAgent(SubAgent):
@@ -311,11 +365,12 @@ class LogicAgent(SubAgent):
     def _build_prompt(self, text: str, mood: EmotionalState) -> str:
         parts = [_PERSONA_PREFIX + self._tools_description()]
         parts.append(
-            f"Current mood: {mood.valence_label.value} valence, "
-            f"{mood.arousal_label.value} arousal."
+            f"Right now you're feeling {_mood_phrase(mood)} -- let that color your tone "
+            "naturally, don't announce it or describe it out loud."
         )
         if self._short_term is not None and len(self._short_term) > 0:
             parts.append(f"Recent conversation:\n{self._short_term.as_context(limit=6)}")
+        parts.append(_TONE_REMINDER)
         parts.append(f"User: {text}\nSim:")
         return "\n\n".join(parts)
 
