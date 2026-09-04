@@ -16,11 +16,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.agents.emotion.base import EmotionAgent
+from src.agents.interests import InterestTracker
 from src.agents.logic.base import LogicAgent
 from src.agents.skills.research import SkillResearchAgent
 from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
-from src.orchestrator.audit import AuditGate
+from src.orchestrator.audit import REJECTED_KIND, AuditGate
+from src.orchestrator.consolidation import run_consolidation
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
 
@@ -29,6 +31,10 @@ REFLECT_COMMAND = "reflect"
 PENDING_COMMAND = "pending"
 PROPOSE_PREFIX = "propose "
 PENDING_KIND = "pending_approval"
+INTEREST_PREFIX = "interest "
+INTERESTS_COMMAND = "interests"
+CURIOUS_COMMAND = "curious"
+SLEEP_COMMAND = "sleep"
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 
 
@@ -106,9 +112,12 @@ def run_cli() -> None:
     reflection_agent = ReflectionAgent(outcome_log)
     audit_gate = AuditGate(memory=store)
     skill_research = SkillResearchAgent()
+    interests = InterestTracker(store)
     print(
         "Simorgh -- 'exit'/'quit' to leave, 'reflect' for outcome review, "
-        "'propose <topic>' to draft a skill, 'pending' for unmerged proposals."
+        "'propose <topic>' to draft a skill, 'pending' for unmerged proposals, "
+        "'interest <topic>'/'interests'/'curious' for world-awareness, "
+        "'sleep' for maintenance."
     )
     while True:
         try:
@@ -128,7 +137,21 @@ def run_cli() -> None:
             _print_pending(store)
             continue
         if lowered.startswith(PROPOSE_PREFIX):
-            propose_skill(skill_research, audit_gate, store, user_input[len(PROPOSE_PREFIX):].strip())
+            propose_skill(
+                skill_research, audit_gate, store, user_input[len(PROPOSE_PREFIX):].strip()
+            )
+            continue
+        if lowered.startswith(INTEREST_PREFIX):
+            note_interest(interests, user_input[len(INTEREST_PREFIX):].strip())
+            continue
+        if lowered == INTERESTS_COMMAND:
+            _print_interests(interests)
+            continue
+        if lowered == CURIOUS_COMMAND:
+            _follow_up(interests)
+            continue
+        if lowered == SLEEP_COMMAND:
+            _run_sleep(store, reflection_agent)
             continue
         print(handle_turn(router, user_input, outcome_log))
 
@@ -184,6 +207,57 @@ def _print_pending(store: MemoryStore) -> None:
         return
     for record in records:
         print(f"[pending] {record.content} -- {record.metadata.get('rationale', '')}")
+
+
+def note_interest(tracker: InterestTracker, topic: str) -> str:
+    """Start tracking `topic`. Returns the message printed, for testability."""
+    if not topic:
+        message = "[usage: interest <topic>]"
+        print(message)
+        return message
+    tracker.note_interest(topic, why="noted by the creator")
+    message = f"[noted] now tracking interest in {topic!r}"
+    print(message)
+    return message
+
+
+def _print_interests(tracker: InterestTracker) -> None:
+    interests = tracker.list_interests()
+    if not interests:
+        print("[no tracked interests yet -- try 'interest <topic>']")
+        return
+    for interest in interests:
+        status = "never followed up" if interest.last_followed_up is None else "followed up"
+        print(f"[interest] {interest.topic} ({status}) -- {interest.why}")
+
+
+def _follow_up(tracker: InterestTracker) -> None:
+    overdue = tracker.least_recently_followed_up()
+    if overdue is None:
+        print("[nothing to be curious about yet -- try 'interest <topic>' first]")
+        return
+    items = tracker.follow_up(overdue.topic)
+    if not items:
+        print(
+            f"[curious about {overdue.topic!r}] no updates available "
+            "(no real WorldFeed configured yet -- see src/agents/interests.py)"
+        )
+        return
+    for item in items:
+        print(f"[{overdue.topic}] {item.title}: {item.summary}")
+
+
+def _run_sleep(store: MemoryStore, reflection_agent: ReflectionAgent) -> None:
+    report = run_consolidation(
+        store, reflection_agent, keep_per_kind={"outcome": 200, REJECTED_KIND: 200}
+    )
+    pruned = ", ".join(f"{kind}: {count}" for kind, count in report.pruned_counts.items())
+    print(f"[sleep] pruned -- {pruned or 'nothing to prune'}")
+    if not report.proposals:
+        print("[sleep] no concerning patterns in recent outcomes")
+        return
+    for proposal in report.proposals:
+        print(f"[sleep proposal] {proposal.rationale}")
 
 
 if __name__ == "__main__":

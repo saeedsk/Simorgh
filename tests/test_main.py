@@ -1,7 +1,14 @@
 import unittest
 
+from src.agents.interests import InterestTracker
 from src.agents.skills.research import SkillResearchAgent
-from src.main import PENDING_KIND, build_router, handle_turn, propose_skill
+from src.main import (
+    PENDING_KIND,
+    build_router,
+    handle_turn,
+    note_interest,
+    propose_skill,
+)
 from src.memory.long_term import InMemoryStore
 from src.orchestrator.audit import AuditGate
 from src.orchestrator.reflection import OutcomeLog
@@ -67,6 +74,25 @@ class TestProposeSkill(unittest.TestCase):
 
         self.assertIn("usage", message)
         self.assertEqual(store.query(kind=PENDING_KIND), [])
+
+
+class TestNoteInterest(unittest.TestCase):
+    def test_notes_a_topic(self):
+        store = InMemoryStore()
+        tracker = InterestTracker(store)
+
+        message = note_interest(tracker, "rocketry")
+
+        self.assertIn("rocketry", message)
+        self.assertEqual(len(tracker.list_interests()), 1)
+
+    def test_empty_topic_shows_usage(self):
+        tracker = InterestTracker(InMemoryStore())
+
+        message = note_interest(tracker, "")
+
+        self.assertIn("usage", message)
+        self.assertEqual(tracker.list_interests(), [])
 
 
 if __name__ == "__main__":
