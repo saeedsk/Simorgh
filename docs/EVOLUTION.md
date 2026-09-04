@@ -684,17 +684,27 @@ Built:
     reach, not a narrow UX fix, so it's listed below as something to
     weigh deliberately later, not something this pass should have done
     incidentally.
+47. `RssWorldFeed` (`src/agents/interests.py`), a real
+    `InterestTracker`/`curious` implementation: fetches a feed via the
+    already-reviewed `WebFetchTool` (SSRF-safe, rate-limited, no
+    credentials needed for a public RSS/Atom feed) and parses items out
+    with the standard library's XML parser, RSS 2.0 and Atom both.
+    Deliberately never guesses or constructs a feed URL from a topic
+    string -- `note_interest`'s topic argument IS the feed URL to poll
+    (e.g. `interest https://hnrss.org/frontpage`); a bare topic word
+    like "rocketry" degrades to the same empty result `NullWorldFeed`
+    always gave, same guaranteed floor, just backed by something real
+    when the input is actually usable. Wired as `main.py`'s default
+    (`InterestTracker(store, feed=RssWorldFeed(web_fetch))`); the stale
+    "no real WorldFeed configured yet" message in `curious`'s empty-
+    result path is gone.
 
 Still ahead, roughly in order:
 
-47. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+48. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-48. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+49. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-49. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
-    command -- `WebFetchTool` now provides the primitive (a reviewed,
-    SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
-    RSS/API-parsing layer on top of it.
 50. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
