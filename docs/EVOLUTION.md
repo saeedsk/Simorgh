@@ -665,25 +665,41 @@ Built:
       raises) plus a new `LIST` marker on `LogicAgent` fill exactly that
       gap -- discovery, not broader access; still read-only, still the
       same three roots.
+46. `USE: <skill name>`, a sixth `LogicAgent` marker: `use <skill name>`
+    (from the earlier skill-registry work) was still a CLI-level command
+    only a human could type, unlike PROPOSE/PATCH/BATCH/PLAN/EVOLVE
+    (milestones 43-44) which chat can already trigger -- an odd
+    asymmetry once conversational self-modification existed but
+    conversational skill-*use* didn't. `use_skill_fn`, an injected
+    closure into `main.py`'s `build_router()` (same pattern as the other
+    five), lets a chat reply run an already-applied skill through the
+    exact same sandboxed path (`load_skill_source`/
+    `build_invocation_code`) as the typed command -- read-only re-import
+    from disk each time, no live in-process registration. Deliberately
+    NOT built: *automatic* registration of an applied skill as a live
+    `Router` sub-agent. That would mean importing LLM-drafted code
+    directly into the running process on every `propose`/`batch`,
+    instead of only running it, sandboxed, on explicit request -- a real
+    increase in what an applied-but-unreviewed-by-a-human skill can
+    reach, not a narrow UX fix, so it's listed below as something to
+    weigh deliberately later, not something this pass should have done
+    incidentally.
 
 Still ahead, roughly in order:
 
-46. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+47. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-47. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+48. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-48. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+49. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-49. `use <skill name>` (milestone from the earlier skill-registry work)
-    is still a CLI-level command a human types, not a marker
-    `LogicAgent`'s own conversational tool loop can reach (unlike
-    PROPOSE/PATCH/BATCH/PLAN/EVOLVE, milestones 43 and 44, `use` itself
-    never got a conversational marker), and there is still no
-    *automatic* registration of an applied skill as a live `Router`
-    sub-agent -- it remains a manual, on-demand invocation.
-50. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+50. *Automatic* registration of an applied skill as a live `Router`
+    sub-agent (the other half of the old milestone 49 -- see 46 above
+    for why this is deliberately still just a manual, on-demand
+    invocation rather than done reflexively).
+51. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, and now `MAX_BLOCKED_RETRY_ATTEMPTS`=9) are
     judgment calls, not values derived from
     real operating experience -- worth revisiting once there's an actual

@@ -384,6 +384,36 @@ class TestBuildRouterConversationalSelfMod(unittest.TestCase):
 
         self.assertEqual(calls, ["rocketry"])
 
+    def test_use_skill_fn_is_threaded_through_to_logic_agent(self):
+        from src.cognition.provider import LLMResponse
+        from src.orchestrator.router import AgentRequest
+
+        class ScriptedProvider:
+            name = "scripted"
+
+            def __init__(self, responses):
+                self._responses = responses
+                self.calls = 0
+
+            def available(self):
+                return True
+
+            def complete(self, prompt, **kwargs):
+                text = self._responses[min(self.calls, len(self._responses) - 1)]
+                self.calls += 1
+                return LLMResponse(text=text, provider_name=self.name)
+
+        calls = []
+        provider = ScriptedProvider(["USE: rocketry", "done"])
+        router = build_router(
+            cognition=CognitionRouter([provider]),
+            use_skill_fn=lambda name: calls.append(name) or "computed: 42",
+        )
+
+        router.dispatch("logic", AgentRequest(text="run the rocketry skill"))
+
+        self.assertEqual(calls, ["rocketry"])
+
 
 class TestRunSkillCode(unittest.TestCase):
     def test_build_router_registers_skills_agent(self):

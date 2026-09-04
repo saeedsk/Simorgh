@@ -627,6 +627,65 @@ class TestLogicAgentToolLoop(unittest.TestCase):
         tool_calls = store.query(kind="tool_call")
         self.assertFalse(tool_calls[0].metadata["succeeded"])
 
+    def test_use_marker_not_offered_without_a_use_fn(self):
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="run the rocketry skill"), SharedMemoryBus())
+
+        self.assertNotIn("USE:", provider.prompts[0])
+
+    def test_use_tool_calls_the_injected_function_with_the_skill_name(self):
+        calls = []
+        provider = ScriptedProvider([("USE: rocketry", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            use_skill_fn=lambda name: calls.append(name) or "computed: 42",
+        )
+
+        agent.handle(AgentRequest(text="run the rocketry skill"), SharedMemoryBus())
+
+        self.assertEqual(calls, ["rocketry"])
+
+    def test_use_tool_reports_missing_name(self):
+        provider = ScriptedProvider([("USE:", None), ("done", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]), use_skill_fn=lambda name: "unused")
+
+        agent.handle(AgentRequest(text="run a skill"), SharedMemoryBus())
+
+        self.assertIn("FAILED", provider.prompts[1])
+
+    def test_use_tool_records_success_correctly(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("USE: rocketry", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            activity_log=activity_log,
+            use_skill_fn=lambda name: "computed: 42",
+        )
+
+        agent.handle(AgentRequest(text="run rocketry"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(tool_calls[0].metadata["tool"], "USE")
+        self.assertTrue(tool_calls[0].metadata["succeeded"])
+
+    def test_use_tool_records_failure_when_skill_not_found(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("USE: nope", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            activity_log=activity_log,
+            use_skill_fn=lambda name: f"[not found] no applied skill named {name!r}",
+        )
+
+        agent.handle(AgentRequest(text="run nope"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertFalse(tool_calls[0].metadata["succeeded"])
+
     def test_propose_tool_records_itself_as_a_tool_call(self):
         store = InMemoryStore()
         activity_log = ActivityLog(store)
