@@ -38,6 +38,7 @@ EXIT_COMMANDS = {"exit", "quit"}
 REFLECT_COMMAND = "reflect"
 PENDING_COMMAND = "pending"
 PROPOSE_PREFIX = "propose "
+IMPROVE_PREFIX = "improve "
 PENDING_KIND = "pending_approval"
 INTEREST_PREFIX = "interest "
 INTERESTS_COMMAND = "interests"
@@ -83,6 +84,29 @@ def build_router(
     router.register(LogicAgent(cognition=cognition, short_term=short_term))
     router.register(SkillsAgent())
     return router
+
+
+def strip_command_slash(user_input: str) -> str:
+    """Accept a leading '/' as optional on any command (the common
+    slash-command convention, e.g. Claude Code's own) -- '/reflect' is
+    treated exactly like 'reflect' rather than silently falling through
+    to plain chat, which is what used to happen.
+    """
+    if user_input.startswith("/"):
+        return user_input[1:].strip()
+    return user_input
+
+
+def extract_propose_topic(user_input: str, lowered: str) -> str | None:
+    """Returns the topic if `user_input` starts with 'propose ' or
+    'improve ' (case-insensitively via `lowered`), else None. 'improve' is
+    accepted as a plain-language alias since that's the natural way to
+    ask Sim to change itself.
+    """
+    for prefix in (PROPOSE_PREFIX, IMPROVE_PREFIX):
+        if lowered.startswith(prefix):
+            return user_input[len(prefix):].strip()
+    return None
 
 
 def build_memory_store(path: Path = DEFAULT_MEMORY_PATH) -> MemoryStore:
@@ -226,10 +250,12 @@ def run_cli() -> None:
     health_monitor = HealthMonitor()
     print(
         "Simorgh -- 'exit'/'quit' to leave, 'reflect' for outcome review, "
-        "'propose <topic>' to draft a skill, 'pending' for unmerged proposals, "
+        "'propose <topic>' (or 'improve <topic>') to draft a skill for review, "
+        "'pending' for unmerged proposals, "
         "'interest <topic>'/'interests'/'curious' for world-awareness, "
         "'sleep' for maintenance, 'history' for this session's recent turns, "
-        "'run <code>' to execute sandboxed Python, 'budget' for LLM spend status."
+        "'run <code>' to execute sandboxed Python, 'budget' for LLM spend status. "
+        "A leading '/' is optional on any command."
     )
     _print_cognition_status(budget_guards)
     while True:
@@ -238,6 +264,9 @@ def run_cli() -> None:
         except (EOFError, KeyboardInterrupt):
             print()
             break
+        if not user_input:
+            continue
+        user_input = strip_command_slash(user_input)
         if not user_input:
             continue
         lowered = user_input.lower()
@@ -249,10 +278,9 @@ def run_cli() -> None:
         if lowered == PENDING_COMMAND:
             _print_pending(store)
             continue
-        if lowered.startswith(PROPOSE_PREFIX):
-            propose_skill(
-                skill_research, audit_gate, store, user_input[len(PROPOSE_PREFIX):].strip()
-            )
+        propose_topic = extract_propose_topic(user_input, lowered)
+        if propose_topic is not None:
+            propose_skill(skill_research, audit_gate, store, propose_topic)
             continue
         if lowered.startswith(INTEREST_PREFIX):
             note_interest(interests, user_input[len(INTEREST_PREFIX):].strip())

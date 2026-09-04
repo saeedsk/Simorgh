@@ -83,7 +83,18 @@ class GeminiProvider(LLMProvider):
 
     def _get_client(self) -> Any:
         if self._client is None:
+            import logging
+
             from google import genai  # optional dependency, imported lazily
+
+            # The SDK logs an "automatic function calling" usage-guidance
+            # warning on every call to generate_content when no `tools`
+            # are passed -- an internal implementation note, not something
+            # useful to surface to Simorgh's own users. Scoped to the
+            # SDK's own logger namespace (confirmed via its source:
+            # `logging.getLogger('google_genai.models')`) so nothing else
+            # is silenced.
+            logging.getLogger("google_genai").setLevel(logging.ERROR)
 
             self._client = genai.Client(api_key=self._api_key)
         return self._client

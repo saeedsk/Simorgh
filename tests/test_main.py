@@ -5,10 +5,12 @@ from src.agents.skills.research import SkillResearchAgent
 from src.main import (
     PENDING_KIND,
     build_router,
+    extract_propose_topic,
     handle_turn,
     note_interest,
     propose_skill,
     run_skill_code,
+    strip_command_slash,
 )
 from src.memory.long_term import InMemoryStore
 from src.orchestrator.audit import AuditGate
@@ -166,6 +168,48 @@ class TestRunSkillCode(unittest.TestCase):
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0].agent, "skills")
         self.assertTrue(outcomes[0].succeeded)
+
+
+class TestStripCommandSlash(unittest.TestCase):
+    def test_strips_a_leading_slash(self):
+        self.assertEqual(strip_command_slash("/reflect"), "reflect")
+
+    def test_strips_leading_slash_from_prefixed_command(self):
+        self.assertEqual(strip_command_slash("/propose a calculator"), "propose a calculator")
+
+    def test_leaves_input_without_a_leading_slash_unchanged(self):
+        self.assertEqual(strip_command_slash("reflect"), "reflect")
+        self.assertEqual(strip_command_slash("hey there"), "hey there")
+
+    def test_bare_slash_becomes_empty_string(self):
+        self.assertEqual(strip_command_slash("/"), "")
+
+    def test_only_strips_one_leading_slash(self):
+        self.assertEqual(strip_command_slash("//reflect"), "/reflect")
+
+
+class TestExtractProposeTopic(unittest.TestCase):
+    def test_propose_prefix_extracts_topic(self):
+        text = "propose a calculator"
+        self.assertEqual(extract_propose_topic(text, text.lower()), "a calculator")
+
+    def test_improve_prefix_also_extracts_topic(self):
+        text = "improve yourself with a calculator"
+        self.assertEqual(
+            extract_propose_topic(text, text.lower()), "yourself with a calculator"
+        )
+
+    def test_improve_prefix_is_case_insensitive(self):
+        text = "Improve error handling"
+        self.assertEqual(extract_propose_topic(text, text.lower()), "error handling")
+
+    def test_non_matching_input_returns_none(self):
+        text = "hey there"
+        self.assertIsNone(extract_propose_topic(text, text.lower()))
+
+    def test_word_containing_improve_is_not_mistaken_for_the_prefix(self):
+        text = "improvement tracking"
+        self.assertIsNone(extract_propose_topic(text, text.lower()))
 
 
 if __name__ == "__main__":
