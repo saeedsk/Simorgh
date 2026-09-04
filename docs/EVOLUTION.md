@@ -270,17 +270,24 @@ Built:
     any real `LLMProvider` must be wrapped in before registration, so
     autonomous LLM use (e.g. `SkillResearchAgent`) can't produce an
     unbounded bill.
+16. `src/cognition/gemini_provider.py` -- `GeminiProvider`, calling the
+    stable `generateContent` API. Wired into `main.py`'s
+    `build_cognition_router()`, always wrapped in `BudgetGuard`
+    (default $1.00/50 calls per 24h, both overridable via
+    `SIMORGH_LLM_DAILY_BUDGET_USD`/`SIMORGH_LLM_DAILY_MAX_CALLS`), and only
+    activated if `GEMINI_API_KEY`/`GOOGLE_API_KEY` is set -- no key means
+    no change from before. `SkillResearchAgent`'s drafts are genuinely
+    LLM-generated when a key is present, not just the deterministic echo.
 
 Still ahead, roughly in order:
 
-16. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+17. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-17. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+18. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-18. A real `WorldFeed` implementation (RSS/API-backed) -- `curious`
+19. A real `WorldFeed` implementation (RSS/API-backed) -- `curious`
     currently always reports no updates, honestly, since only
     `NullWorldFeed` exists.
-19. A real `LLMProvider` (e.g. Claude or Gemini), wrapped in `BudgetGuard`,
-    registered ahead of the fallback in `CognitionRouter` -- until then,
-    `SkillResearchAgent`'s drafts stay minimal by construction, not by
-    choice. Blocked on the creator providing API credentials.
+20. A second real `LLMProvider` (e.g. Claude), registered alongside Gemini
+    in `CognitionRouter` for genuine multi-provider failover -- the
+    interface already supports this; only credentials are missing.

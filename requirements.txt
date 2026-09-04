@@ -1,2 +1,5 @@
-# No third-party dependencies yet -- persona_state, shared_bus, router, and
-# sandboxing are built entirely on the Python standard library.
+# Everything else is stdlib-only. google-genai is an optional dependency:
+# GeminiProvider (src/cognition/gemini_provider.py) imports it lazily, only
+# when actually calling the API, so the rest of Simorgh runs with nothing
+# installed. Install this only if you're setting GEMINI_API_KEY.
+google-genai

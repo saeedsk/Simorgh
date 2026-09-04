@@ -5,3 +5,12 @@ venv/
 .pytest_cache/
 *.egg-info/
 .DS_Store
+
+# Never commit credentials. Simorgh reads API keys only from environment
+# variables at runtime (GEMINI_API_KEY, GOOGLE_API_KEY, ...) -- these
+# patterns are a backstop in case a local .env file or key dump ever
+# gets created.
+.env
+.env.*
+*.key
+secrets/
