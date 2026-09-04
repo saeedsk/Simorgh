@@ -57,6 +57,39 @@ ALL_KINDS = (
     "interest",
 )
 
+# Purely cosmetic (see console_style.style): one glyph per record kind so
+# a skimmed log reads by shape, not just by parsing text -- the creator's
+# ask that reading the log be "a pleasant and easy to do... activity."
+# Never load-bearing: format_entry falls back to a plain "•" for any kind
+# not listed here, so a new kind never breaks formatting.
+_KIND_ICONS = {
+    CONVERSATION_KIND: "💬",
+    TOOL_CALL_KIND: "🔧",
+    "outcome": "🎯",
+    "takeaway": "💡",
+    "applied_skill": "✨",
+    "applied_source_patch": "🛠️ ",
+    "rejected_proposal": "🚫",
+    "web_fetch": "🌐",
+    "llm_spend": "💰",
+    "interest": "🔭",
+}
+
+# Per-tool glyphs for TOOL_CALL_KIND entries specifically, layered on top
+# of the generic 🔧 above so FETCH/RUN/READ/RECALL/DRAFT/TEST_SUITE are
+# each visually distinct at a glance.
+_TOOL_ICONS = {
+    "FETCH": "🌐",
+    "RUN": "▶️ ",
+    "READ": "📖",
+    "RECALL": "🧠",
+    "DRAFT": "📝",
+    "TEST_SUITE": "🧪",
+}
+
+_OK = "✅"
+_FAIL = "❌"
+
 
 class ActivityLog:
     def __init__(self, store: MemoryStore) -> None:
@@ -134,50 +167,59 @@ class ActivityLog:
     @staticmethod
     def format_entry(record: MemoryRecord) -> str:
         ts = style(time.strftime("%H:%M:%S", time.localtime(record.created_at)), "dim")
+        icon = _KIND_ICONS.get(record.kind, "•")
         meta = record.metadata
+
+        def status_of(succeeded: object) -> str:
+            return style(_OK, "green") if succeeded else style(_FAIL, "red", "bold")
 
         if record.kind == CONVERSATION_KIND:
             return (
-                f"[{ts}] {style('user', 'cyan', 'bold')}: {record.content!r} -> "
-                f"{style('sim', 'magenta', 'bold')}: {meta.get('reply', '')!r}"
+                f"{ts} {icon} {style('you', 'cyan', 'bold')} {record.content!r}\n"
+                f"{'':>8} {style('↳ sim', 'magenta', 'bold')} {meta.get('reply', '')!r}"
             )
         if record.kind == TOOL_CALL_KIND:
-            ok = bool(meta.get("succeeded"))
-            status = style("ok", "green") if ok else style("FAILED", "red", "bold")
+            tool = str(meta.get("tool"))
+            tool_icon = _TOOL_ICONS.get(tool, "🔩")
             return (
-                f"[{ts}] {meta.get('agent')} used {style(str(meta.get('tool')), 'blue')} "
-                f"({status}): {meta.get('request')} -> {meta.get('result_summary')}"
+                f"{ts} {icon} {tool_icon} {style(tool, 'blue', 'bold')} "
+                f"({meta.get('agent')}) {status_of(meta.get('succeeded'))} "
+                f"{meta.get('request')} → {meta.get('result_summary')}"
             )
         if record.kind == "outcome":
-            ok = bool(meta.get("succeeded"))
-            status = style("ok", "green") if ok else style("FAILED", "red", "bold")
             return (
-                f"[{ts}] outcome/{meta.get('agent')} ({status}): "
-                f"{meta.get('request_text', '')!r} -> {record.content!r}"
+                f"{ts} {icon} {meta.get('agent')} {status_of(meta.get('succeeded'))} "
+                f"{meta.get('request_text', '')!r} → {record.content!r}"
             )
         if record.kind == "takeaway":
-            return f"[{ts}] {style('takeaway', 'yellow', 'bold')}/{meta.get('agent')}: {record.content}"
+            return (
+                f"{ts} {icon} {style('takeaway', 'yellow', 'bold')} "
+                f"({meta.get('agent')}) {record.content}"
+            )
         if record.kind == "applied_skill":
             return (
-                f"[{ts}] {style('APPLIED (skill)', 'green', 'bold')} {record.content} -- "
-                f"{meta.get('rationale', '')}"
+                f"{ts} {icon} {style('APPLIED · skill', 'green', 'bold')} "
+                f"{record.content} — {meta.get('rationale', '')}"
             )
         if record.kind == "applied_source_patch":
             return (
-                f"[{ts}] {style('APPLIED (self-patch)', 'green', 'bold')} {record.content} -- "
-                f"{meta.get('rationale', '')} [{meta.get('test_summary', '')}]"
+                f"{ts} {icon}{style('APPLIED · self-patch', 'green', 'bold')} "
+                f"{record.content} — {meta.get('rationale', '')} "
+                f"{style('(' + meta.get('test_summary', '') + ')', 'dim')}"
             )
         if record.kind == "rejected_proposal":
             return (
-                f"[{ts}] {style('REJECTED', 'red', 'bold')} proposal "
+                f"{ts} {icon} {style('REJECTED', 'red', 'bold')} "
                 f"(subject={meta.get('subject')}): {meta.get('reasons')}"
             )
         if record.kind == "web_fetch":
-            ok = bool(meta.get("succeeded"))
-            status = style("ok", "green") if ok else style("FAILED", "red", "bold")
-            return f"[{ts}] fetch ({status}): {record.content} -- {meta.get('note', '')}"
+            return (
+                f"{ts} {icon} fetch {status_of(meta.get('succeeded'))} "
+                f"{record.content} — {meta.get('note', '')}"
+            )
         if record.kind == "llm_spend":
-            return f"[{ts}] spend: {record.content} -- ${meta.get('cost_usd', 0):.4f}"
+            cost = f"${meta.get('cost_usd', 0):.4f}"
+            return f"{ts} {icon} {style(record.content, 'orange')} spent {style(cost, 'orange', 'bold')}"
         if record.kind == "interest":
-            return f"[{ts}] interest: {record.content} -- {meta.get('why', '')}"
-        return f"[{ts}] {record.kind}: {record.content}"
+            return f"{ts} {icon} {record.content} — {meta.get('why', '')}"
+        return f"{ts} {icon} {record.kind}: {record.content}"

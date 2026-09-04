@@ -471,6 +471,24 @@ def _dispatch_and_record(
     return response.output
 
 
+def _print_status(message: str) -> None:
+    """Icon/color a final status line for the live terminal narration --
+    purely cosmetic, the same way ActivityLog.format_entry decorates the
+    durable log. Never touches the string itself: callers still return
+    and test the plain `message`, this only decorates what's shown on
+    screen.
+    """
+    lowered = message.lower()
+    if lowered.startswith("[applied"):
+        print(style(f"✨ {message}", "green", "bold"))
+    elif lowered.startswith("[rejected"):
+        print(style(f"🚫 {message}", "red", "bold"))
+    elif lowered.startswith("[usage"):
+        print(style(message, "dim"))
+    else:
+        print(message)
+
+
 def _print_takeaway(reflection_agent: ReflectionAgent | None, outcome: Outcome) -> None:
     """The creator's ask that Sim evaluate 'how it can do that task
     better next time' for every situation, not only in aggregate -- see
@@ -660,7 +678,7 @@ def propose_skill(
     """
     if not topic:
         message = "[usage: propose <topic>]"
-        print(message)
+        _print_status(message)
         return message
 
     proposal = None
@@ -668,31 +686,31 @@ def propose_skill(
     prior_reasons: list[str] | None = None
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
-            print(f"[propose] drafting a skill for {topic!r}...")
+            print(f"🧪 [propose] drafting a skill for {topic!r}...")
         else:
-            print(f"[propose] attempt {attempt}/{max_attempts}: asking for a corrected draft...")
+            print(f"🧪 [propose] attempt {attempt}/{max_attempts}: asking for a corrected draft...")
         proposal = skill_research.draft_skill(topic, prior_reasons=prior_reasons)
         print(
-            f"[propose] drafted {proposal.subject} -- running it through the audit "
+            f"🔎 [propose] drafted {proposal.subject} -- running it through the audit "
             "gate (denylist, adaptive-immunity memory, then a real sandboxed run)..."
         )
         verdict = audit_gate.review(proposal)
         if verdict.approved_by_automation:
             break
-        print(f"[propose] attempt {attempt} failed: {'; '.join(verdict.reasons)}")
+        print(f"⚠️  [propose] attempt {attempt} failed: {'; '.join(verdict.reasons)}")
         prior_reasons = verdict.reasons
 
     if not verdict.approved_by_automation:
         message = f"[rejected after {max_attempts} attempt(s)] {'; '.join(verdict.reasons)}"
-        print(message)
+        _print_status(message)
         return message
 
-    print("[propose] passed every check -- writing to disk...")
+    print("✅ [propose] passed every check -- writing to disk...")
     try:
         target = apply_proposal(proposal, store, repo_root=repo_root)
     except ApplyRefused as exc:
         message = f"[rejected] {exc}"
-        print(message)
+        _print_status(message)
         return message
 
     message = (
@@ -700,7 +718,7 @@ def propose_skill(
         "(passed every check and was written to disk; review with git diff/status "
         "before committing)"
     )
-    print(message)
+    _print_status(message)
     return message
 
 
@@ -731,7 +749,7 @@ def propose_self_patch(
     """
     if not subject or not topic:
         message = "[usage: patch <repo-relative path> <description of the change>]"
-        print(message)
+        _print_status(message)
         return message
 
     proposal = None
@@ -739,31 +757,31 @@ def propose_self_patch(
     prior_reasons: list[str] | None = None
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
-            print(f"[patch] drafting a patch to {subject!r}: {topic!r}...")
+            print(f"🛠️  [patch] drafting a patch to {subject!r}: {topic!r}...")
         else:
-            print(f"[patch] attempt {attempt}/{max_attempts}: asking for a corrected draft...")
+            print(f"🛠️  [patch] attempt {attempt}/{max_attempts}: asking for a corrected draft...")
         proposal = self_patch_agent.draft_patch(subject, topic, prior_reasons=prior_reasons)
         if proposal is None:
             message = "[patch] no real drafting intelligence available -- nothing applied"
-            print(message)
+            _print_status(message)
             return message
 
         if subject.endswith("main.py"):
             invariant_reason = check_main_py_invariants(proposal.code)
             if invariant_reason is not None:
-                print(f"[patch] attempt {attempt} failed: {invariant_reason}")
+                print(f"⚠️  [patch] attempt {attempt} failed: {invariant_reason}")
                 prior_reasons = [invariant_reason]
                 verdict = None
                 continue
 
         print(
-            f"[patch] drafted a candidate for {subject} -- running it through the audit "
+            f"🔎 [patch] drafted a candidate for {subject} -- running it through the audit "
             "gate (denylist, adaptive-immunity memory, then a real sandboxed run)..."
         )
         verdict = audit_gate.review(proposal)
         if verdict.approved_by_automation:
             break
-        print(f"[patch] attempt {attempt} failed: {'; '.join(verdict.reasons)}")
+        print(f"⚠️  [patch] attempt {attempt} failed: {'; '.join(verdict.reasons)}")
         prior_reasons = verdict.reasons
 
     if verdict is None or not verdict.approved_by_automation:
@@ -774,31 +792,31 @@ def propose_self_patch(
         else:
             reasons = "no candidate passed review"
         message = f"[rejected after {max_attempts} attempt(s)] {reasons}"
-        print(message)
+        _print_status(message)
         return message
 
     print(
-        "[patch] passed the audit gate -- running the full test suite in an "
+        "🧪 [patch] passed the audit gate -- running the full test suite in an "
         "isolated copy (this can take a while)..."
     )
     suite_result = run_isolated_test_suite(repo_root or Path.cwd(), subject, proposal.code)
     if not suite_result.passed:
         message = f"[rejected] isolated test suite did not pass: {suite_result.summary}"
-        print(message)
+        _print_status(message)
         activity_log.record_tool_call(
             "self_patch", "TEST_SUITE", f"{subject}: {topic}", suite_result.summary, False
         )
         return message
 
     print(
-        f"[patch] test suite passed ({suite_result.test_count} tests, was "
+        f"✅ [patch] test suite passed ({suite_result.test_count} tests, was "
         f"{suite_result.baseline_test_count}) -- writing to disk..."
     )
     try:
         target = apply_source_patch(proposal, store, suite_result.summary, repo_root=repo_root)
     except ApplyRefused as exc:
         message = f"[rejected] {exc}"
-        print(message)
+        _print_status(message)
         return message
 
     activity_log.record_tool_call(
@@ -809,10 +827,10 @@ def propose_self_patch(
         f"(isolated test suite: {suite_result.test_count} tests passed; review with "
         "git diff/status before committing)"
     )
-    print(message)
+    _print_status(message)
 
     if do_relaunch:
-        print("[patch] relaunching now so the new code takes effect...")
+        print("🔁 [patch] relaunching now so the new code takes effect...")
         relaunch()
 
     return message
@@ -840,15 +858,17 @@ def _print_activity_log(activity_log: ActivityLog, arg: str = "", limit: int = 2
     last prompt and now" view; anything else shows the ordinary
     newest-first recent trail across every kind.
     """
-    if arg.lower() in ("last", "recent"):
-        entries = activity_log.since_last_turn(limit=limit)
-    else:
-        entries = activity_log.recent(limit=limit)
+    narrowed = arg.lower() in ("last", "recent")
+    entries = activity_log.since_last_turn(limit=limit) if narrowed else activity_log.recent(limit=limit)
+    title = "since your last prompt" if narrowed else f"last {len(entries)}"
+    print(style(f"📜 Activity log — {title}", "magenta", "bold"))
+    print(style("─" * 60, "dim"))
     if not entries:
-        print("[no activity recorded yet]")
+        print(style("  (nothing recorded yet)", "dim"))
         return
     for entry in entries:
         print(ActivityLog.format_entry(entry))
+    print(style("─" * 60, "dim"))
 
 
 def fetch_url(tool: WebFetchTool, url: str) -> str:
