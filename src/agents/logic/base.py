@@ -134,41 +134,53 @@ class LogicAgent(SubAgent):
 
     def _draft_via_llm(self, text: str, mood: EmotionalState) -> str | None:
         """Returns the LLM's final response text after a bounded tool-use
-        loop (FETCH/RUN/READ, whichever were configured), or None if no
-        real provider was reachable at all, or it never produced a real
-        final answer within the step budget -- callers fall back to
-        `_draft` on None rather than surface a generic offline notice, or
-        a raw unfinished tool call, as if it were Sim actually speaking.
+        loop (FETCH/RUN/READ/RECALL, whichever were configured), or None
+        if no real provider was reachable at all, or -- even on the
+        forced final turn below -- it produced nothing usable.
+
+        On the LAST allowed step, the prompt explicitly tells the model
+        no more tool calls will be honored and to answer now with
+        whatever it has learned so far, and that response is used
+        verbatim as the final answer regardless of whether it still
+        looks like a tool call. Earlier this silently discarded a tool
+        call attempted on the last step and returned None, which meant a
+        multi-step investigation that ran out of budget one step short of
+        a real answer wasted every one of those (paid) LLM calls on a
+        generic rule-based echo instead of using anything it had already
+        found -- caught live: four RUN attempts investigating whether a
+        capability existed, then a completely unrelated canned reply.
         """
         prompt = self._build_prompt(text, mood)
         markers = self._available_markers()
 
         for step in range(self._max_tool_steps):
+            is_last_step = step == self._max_tool_steps - 1
+            step_prompt = prompt + _FINAL_TURN_HINT if is_last_step else prompt
             try:
-                response = self._cognition.complete(prompt)
+                response = self._cognition.complete(step_prompt)
             except ProviderUnavailable:
                 return None
 
             if response.provider_name == "deterministic_fallback" or not response.text.strip():
                 return None  # no real conversational intelligence available
 
+            if is_last_step:
+                return response.text.strip() or None
+
             kind, payload = parse_marker(response.text, markers)
-            is_last_step = step == self._max_tool_steps - 1
-            if kind == "fetch" and not is_last_step:
+            if kind == "fetch":
                 prompt += self._fetch_tool_turn(payload)
                 continue
-            if kind == "run" and not is_last_step:
+            if kind == "run":
                 prompt += self._run_tool_turn(payload)
                 continue
-            if kind == "read" and not is_last_step:
+            if kind == "read":
                 prompt += self._read_tool_turn(payload)
                 continue
-            if kind == "recall" and not is_last_step:
+            if kind == "recall":
                 prompt += self._recall_tool_turn(payload)
                 continue
-            if kind is None:
-                return payload.strip() or None
-            return None  # wanted another tool call but the step budget is spent
+            return payload.strip() or None
 
         return None
 
@@ -242,13 +254,22 @@ class LogicAgent(SubAgent):
         result = self._sandbox.run(code, timeout=10.0)
         if result.succeeded:
             report = f"stdout:\n{result.stdout[:2000]}"
+            # The report's own first line is always the literal "stdout:"
+            # header, not the actual output -- summarizing from that with
+            # splitlines()[0] (as every other tool-turn narration line
+            # does) silently printed "stdout:" for every single run,
+            # succeeded or not, useless output or not. Summarize from the
+            # real stdout instead.
+            stripped_stdout = result.stdout.strip()
+            summary = stripped_stdout.splitlines()[0] if stripped_stdout else "(no output)"
         else:
             report = (
                 f"FAILED (exit_code={result.exit_code}, timed_out={result.timed_out})\n"
                 f"stderr:\n{result.stderr[:2000]}"
             )
-        print(f"[Sim] run result: {report.splitlines()[0]}")
-        self._record_tool_call("RUN", code, report.splitlines()[0], result.succeeded)
+            summary = report.splitlines()[0]
+        print(f"[Sim] run result: {summary}")
+        self._record_tool_call("RUN", code, summary, result.succeeded)
         return f"\n\n[RUN result]\n{report}\n{_CONTINUE_HINT}"
 
     def _read_tool_turn(self, raw_path: str) -> str:
@@ -290,4 +311,11 @@ class LogicAgent(SubAgent):
 _CONTINUE_HINT = (
     "\nContinue: use another tool if it would help, or respond with your "
     "real answer alone to finish."
+)
+
+_FINAL_TURN_HINT = (
+    "\n\nThis is your last turn -- no more tool calls will be honored. "
+    "Answer now, directly, using whatever you've already learned above "
+    "(even if incomplete); do not write a marker like FETCH:/RUN:/READ:/"
+    "RECALL:, it will be used as your literal final answer verbatim."
 )

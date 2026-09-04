@@ -280,6 +280,45 @@ class TestLogicAgentToolLoop(unittest.TestCase):
         self.assertEqual(len(sandbox.calls), 1)
         self.assertIn("4", provider.prompts[1])
 
+    def test_run_tool_narration_summarizes_actual_stdout_not_the_literal_header(self):
+        import contextlib
+        import io
+
+        sandbox = FakeSandbox(
+            SandboxResult(
+                stdout="42 files found\nmore stuff\n",
+                stderr="",
+                exit_code=0,
+                timed_out=False,
+                duration_seconds=0.01,
+            )
+        )
+        provider = ScriptedProvider([("RUN: find_files()", None), ("done", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]), sandbox=sandbox)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            agent.handle(AgentRequest(text="find things"), SharedMemoryBus())
+
+        self.assertIn("run result: 42 files found", buf.getvalue())
+        self.assertNotIn("run result: stdout:", buf.getvalue())
+
+    def test_run_tool_narration_says_no_output_for_empty_stdout(self):
+        import contextlib
+        import io
+
+        sandbox = FakeSandbox(
+            SandboxResult(stdout="", stderr="", exit_code=0, timed_out=False, duration_seconds=0.01)
+        )
+        provider = ScriptedProvider([("RUN: pass", None), ("done", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]), sandbox=sandbox)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            agent.handle(AgentRequest(text="run something quiet"), SharedMemoryBus())
+
+        self.assertIn("run result: (no output)", buf.getvalue())
+
     def test_read_tool_available_even_with_no_fetch_or_sandbox(self):
         provider = FakeProvider(text="a plain reply")
         agent = LogicAgent(cognition=CognitionRouter([provider]))
@@ -288,7 +327,13 @@ class TestLogicAgentToolLoop(unittest.TestCase):
 
         self.assertIn("READ:", provider.prompts[0])
 
-    def test_loop_bounded_by_max_tool_steps_falls_back_to_rule_based(self):
+    def test_loop_exhausting_max_tool_steps_forces_a_final_answer_instead_of_rule_based(self):
+        # Previously the last step silently discarded whatever the model
+        # said and fell back to a generic rule-based echo, wasting every
+        # prior tool call. Now the last step is told no more tools will
+        # be honored, and whatever text comes back is used verbatim --
+        # even here, where a deliberately unhelpful scripted provider
+        # keeps "asking" for a tool right up to the last turn.
         provider = ScriptedProvider([("READ: src/main.py", None)] * 10)
         agent = LogicAgent(cognition=CognitionRouter([provider]), max_tool_steps=3)
         bus = SharedMemoryBus()
@@ -296,7 +341,30 @@ class TestLogicAgentToolLoop(unittest.TestCase):
         response = agent.handle(AgentRequest(text="hello"), bus)
 
         self.assertEqual(len(provider.prompts), 3)
-        self.assertEqual(response.metadata["source"], "rule_based")
+        self.assertEqual(response.metadata["source"], "llm")
+        self.assertEqual(response.output, "READ: src/main.py")
+
+    def test_final_turn_prompt_tells_the_model_no_more_tools_will_be_honored(self):
+        provider = ScriptedProvider([("READ: src/main.py", None), ("final answer", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]), max_tool_steps=2)
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        self.assertIn("last turn", provider.prompts[1].lower())
+
+    def test_final_turn_produces_a_real_answer_using_what_was_learned(self):
+        provider = ScriptedProvider(
+            [
+                ("READ: src/main.py", None),
+                ("Based on what I found, yes, that exists.", None),
+            ]
+        )
+        agent = LogicAgent(cognition=CognitionRouter([provider]), max_tool_steps=2)
+
+        response = agent.handle(AgentRequest(text="does X exist?"), SharedMemoryBus())
+
+        self.assertEqual(response.output, "Based on what I found, yes, that exists.")
+        self.assertEqual(response.metadata["source"], "llm")
 
     def test_no_tools_configured_still_works_via_final_answer(self):
         provider = FakeProvider(text="a real llm reply")
