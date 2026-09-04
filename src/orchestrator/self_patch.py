@@ -199,16 +199,56 @@ def check_main_py_invariants(new_content: str) -> str | None:
     return None
 
 
-def relaunch(exec_func: Callable[[str, list[str]], None] | None = None) -> None:
-    """Replace this process with a fresh one running the current
-    interpreter and argv, so a just-applied self-patch actually takes
-    effect. Never returns on success (os.execv replaces the process
-    image). `exec_func` is injectable for tests -- nothing in the real
-    test suite actually re-execs itself.
+@dataclass(frozen=True)
+class RelaunchResult:
+    succeeded: bool
+    detail: str
+
+
+DEFAULT_SELF_CHECK_TIMEOUT_SECONDS = 20.0
+
+
+def relaunch(
+    exec_func: Callable[[str, list[str]], None] | None = None,
+    check_runner: Callable[..., subprocess.CompletedProcess] | None = None,
+    timeout: float = DEFAULT_SELF_CHECK_TIMEOUT_SECONDS,
+) -> RelaunchResult:
+    """Verify the new code actually starts before replacing this process
+    with it. `os.execv` replaces the running process image outright --
+    if the patched code has a bug that only shows up at import/startup
+    time (something the test suite didn't happen to exercise), there is
+    no "after" for this process to notice and recover from; it's just
+    gone, replaced by something that immediately crashes.
+
+    So this first spawns a short-lived `--self-check` subprocess (see
+    src/main.py) that imports everything and constructs the core objects
+    without entering the interactive loop, and only execs for real if
+    that exits 0. On that success path this never returns (`os.execv`
+    replaces the process); on failure it returns
+    `RelaunchResult(succeeded=False, ...)` so the caller can roll the
+    just-applied commit back (src/orchestrator/git_ops.py,
+    revert_last_commit) instead of leaving a broken, uncommitted-feeling
+    state. `exec_func`/`check_runner` are injectable for tests -- nothing
+    in the real test suite actually re-execs itself or trusts a
+    self-check it didn't script.
     """
+    run_check = check_runner or subprocess.run
+    check_argv = [sys.executable, *sys.argv, "--self-check"]
+    try:
+        result = run_check(check_argv, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return RelaunchResult(False, f"self-check timed out after {timeout}s")
+    except OSError as exc:
+        return RelaunchResult(False, f"self-check failed to run: {exc!r}")
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return RelaunchResult(False, f"self-check failed (exit {result.returncode}): {detail}")
+
     do_exec = exec_func or os.execv
     sys.stdout.flush()
     do_exec(sys.executable, [sys.executable] + sys.argv)
+    return RelaunchResult(True, "")  # unreachable on a real execv; reachable only for a test stub
 
 
 _PATCH_DRAFT_PROMPT = """You are revising your own existing source file at: {subject}

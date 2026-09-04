@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.orchestrator.git_ops import CommitResult, commit_applied_change
+from src.orchestrator.git_ops import CommitResult, commit_applied_change, revert_last_commit
 
 
 def _run_git(repo_root: Path, *args: str) -> None:
@@ -115,6 +115,56 @@ class TestCommitAppliedChangeFailureModes(unittest.TestCase):
             result = commit_applied_change(Path(tmp), "skill.py", "msg")
 
         self.assertIsInstance(result, CommitResult)
+
+
+class TestRevertLastCommit(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        _run_git(self.repo_root, "init", "-q")
+        _run_git(self.repo_root, "config", "user.email", "test@example.com")
+        _run_git(self.repo_root, "config", "user.name", "Test")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_reverts_the_last_commit_restoring_prior_content(self):
+        target = self.repo_root / "skill.py"
+        target.write_text("VALUE = 1\n")
+        commit_applied_change(self.repo_root, "skill.py", "[sim] first version")
+        target.write_text("VALUE = 2\n")
+        commit_applied_change(self.repo_root, "skill.py", "[sim] second version, broken")
+
+        result = revert_last_commit(self.repo_root)
+
+        self.assertTrue(result.committed)
+        self.assertEqual(target.read_text(), "VALUE = 1\n")
+
+    def test_revert_is_attributed_to_simorgh(self):
+        target = self.repo_root / "skill.py"
+        target.write_text("VALUE = 1\n")
+        commit_applied_change(self.repo_root, "skill.py", "[sim] first version")
+
+        revert_last_commit(self.repo_root)
+
+        author = subprocess.run(
+            ["git", "log", "-1", "--format=%an"], cwd=self.repo_root, capture_output=True, text=True
+        )
+        self.assertIn("Simorgh", author.stdout)
+
+    def test_failure_on_a_repo_with_nothing_to_revert_is_reported_not_raised(self):
+        result = revert_last_commit(self.repo_root)
+
+        self.assertFalse(result.committed)
+
+    def test_missing_git_binary_is_reported_not_raised(self):
+        def raising_runner(*args, **kwargs):
+            raise OSError("no such file: git")
+
+        result = revert_last_commit(self.repo_root, runner=raising_runner)
+
+        self.assertFalse(result.committed)
+        self.assertIn("failed to run git", result.output)
 
 
 if __name__ == "__main__":

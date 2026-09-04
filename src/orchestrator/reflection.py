@@ -62,7 +62,10 @@ TAKEAWAY_KIND = "takeaway"
 # agent in the abstract. Kept in sync by hand with src/main.py's
 # build_router -- there's no runtime introspection here, on purpose,
 # since this heuristic must never itself import or execute agent code.
-_AGENT_SOURCE_FILES = {
+# Public (shared with src/orchestrator/discovery.py, which turns a
+# takeaway into a persisted, patchable Task using the same mapping) --
+# one source of truth, not two copies that could drift.
+AGENT_SOURCE_FILES = {
     "logic": "src/agents/logic/base.py",
     "emotion": "src/agents/emotion/base.py",
     "skills": "src/agents/skills/base.py",
@@ -138,7 +141,7 @@ class ReflectionAgent:
         if outcome.succeeded and not outcome.corrected_by_creator:
             return None
 
-        source_file = _AGENT_SOURCE_FILES.get(outcome.agent)
+        source_file = AGENT_SOURCE_FILES.get(outcome.agent)
         suggestion = (
             f"consider `patch {source_file} <fix>` to address this directly"
             if source_file is not None

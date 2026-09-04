@@ -100,3 +100,45 @@ def commit_applied_change(
         return CommitResult(False, f"git operation timed out after {timeout}s")
     except OSError as exc:
         return CommitResult(False, f"failed to run git: {exc!r}")
+
+
+def revert_last_commit(
+    repo_root: Path,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    runner: Callable[..., subprocess.CompletedProcess] | None = None,
+) -> CommitResult:
+    """`git revert --no-edit HEAD`, attributed to Simorgh the same way a
+    commit is. The rollback half of self-patch relaunch verification
+    (src/orchestrator/self_patch.py): if a patch passed the audit gate
+    and the entire test suite yet still fails to even start as a live
+    process (a runtime bug the test suite didn't happen to exercise),
+    this undoes it -- as a new commit that reverses the change, never by
+    rewriting history (no `reset --hard`, no force-push potential), so
+    the failed attempt stays visible in `git log` rather than vanishing.
+    """
+    run = runner or subprocess.run
+    try:
+        result = run(
+            [
+                "git",
+                "-c",
+                f"user.name={_SIM_GIT_AUTHOR_NAME}",
+                "-c",
+                f"user.email={_SIM_GIT_AUTHOR_EMAIL}",
+                "revert",
+                "--no-edit",
+                "HEAD",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            return CommitResult(False, f"git revert failed: {detail}")
+        return CommitResult(True, result.stdout.strip())
+    except subprocess.TimeoutExpired:
+        return CommitResult(False, f"git operation timed out after {timeout}s")
+    except OSError as exc:
+        return CommitResult(False, f"failed to run git: {exc!r}")

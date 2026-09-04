@@ -521,6 +521,50 @@ class TestProposeSelfPatch(unittest.TestCase):
         applied = store.query(kind=APPLIED_PATCH_KIND)
         self.assertEqual(len(applied), 1)
 
+    def test_relaunch_failure_reverts_the_commit(self):
+        import subprocess
+        from unittest.mock import patch
+
+        from src.orchestrator.self_patch import RelaunchResult
+
+        subprocess.run(["git", "init", "-q"], cwd=self.repo_root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"], cwd=self.repo_root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True)
+        self._write_passing_test()
+        subprocess.run(["git", "add", "-A"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=self.repo_root, check=True)
+
+        store = InMemoryStore()
+        proposal = ModificationProposal(
+            subject="src/orchestrator/target.py", code="VALUE = 2\n", rationale="bump it"
+        )
+        agent = FakeSelfPatchAgent([proposal])
+
+        with patch(
+            "src.main.relaunch",
+            return_value=RelaunchResult(succeeded=False, detail="ImportError: boom"),
+        ):
+            message = propose_self_patch(
+                agent,
+                AuditGate(),
+                store,
+                ActivityLog(store),
+                "src/orchestrator/target.py",
+                "bump the value",
+                repo_root=self.repo_root,
+                do_relaunch=True,
+            )
+
+        self.assertIn("REVERTED", message)
+        self.assertIn("ImportError", message)
+        # The commit that applied VALUE = 2 was reverted, so the file is
+        # back to VALUE = 1 in the working tree.
+        self.assertEqual(
+            (self.repo_root / "src" / "orchestrator" / "target.py").read_text(), "VALUE = 1\n"
+        )
+
     def test_isolated_suite_failure_prevents_apply(self):
         self._write_failing_test()
         store = InMemoryStore()

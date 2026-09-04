@@ -245,14 +245,70 @@ class TestRunIsolatedTestSuite(unittest.TestCase):
 
 
 class TestRelaunch(unittest.TestCase):
-    def test_execs_with_current_interpreter_and_argv(self):
+    @staticmethod
+    def _passing_check_runner(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="[self-check] OK", stderr="")
+
+    @staticmethod
+    def _failing_check_runner(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args, returncode=1, stdout="", stderr="[self-check] FAILED: ImportError(...)"
+        )
+
+    def test_execs_with_current_interpreter_and_argv_when_self_check_passes(self):
         calls = []
-        relaunch(exec_func=lambda exe, argv: calls.append((exe, argv)))
+
+        relaunch(
+            exec_func=lambda exe, argv: calls.append((exe, argv)),
+            check_runner=self._passing_check_runner,
+        )
 
         self.assertEqual(len(calls), 1)
         exe, argv = calls[0]
         self.assertTrue(exe)
         self.assertEqual(argv[0], exe)
+
+    def test_self_check_runs_before_exec_and_includes_the_flag(self):
+        seen_argv = []
+
+        def check_runner(argv, **kwargs):
+            seen_argv.append(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        relaunch(exec_func=lambda exe, argv: None, check_runner=check_runner)
+
+        self.assertEqual(len(seen_argv), 1)
+        self.assertIn("--self-check", seen_argv[0])
+
+    def test_does_not_exec_when_self_check_fails(self):
+        calls = []
+
+        result = relaunch(
+            exec_func=lambda exe, argv: calls.append((exe, argv)),
+            check_runner=self._failing_check_runner,
+        )
+
+        self.assertEqual(calls, [])
+        self.assertFalse(result.succeeded)
+        self.assertIn("self-check failed", result.detail)
+
+    def test_check_runner_timeout_is_reported_not_raised(self):
+        def timing_out(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="python", timeout=1.0)
+
+        result = relaunch(exec_func=lambda exe, argv: None, check_runner=timing_out, timeout=1.0)
+
+        self.assertFalse(result.succeeded)
+        self.assertIn("timed out", result.detail)
+
+    def test_check_runner_os_error_is_reported_not_raised(self):
+        def raising(*args, **kwargs):
+            raise OSError("no such file")
+
+        result = relaunch(exec_func=lambda exe, argv: None, check_runner=raising)
+
+        self.assertFalse(result.succeeded)
+        self.assertIn("self-check failed to run", result.detail)
 
 
 if __name__ == "__main__":
