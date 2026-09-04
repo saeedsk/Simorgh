@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import time
 
+from src.cognition.tool_protocol import preview
 from src.memory.long_term import MemoryRecord, MemoryStore
 from src.orchestrator.console_style import style
 
@@ -181,10 +182,17 @@ class ActivityLog:
         if record.kind == TOOL_CALL_KIND:
             tool = str(meta.get("tool"))
             tool_icon = _TOOL_ICONS.get(tool, "🔩")
+            # A second safety net, not just the first: callers now
+            # truncate before recording (src/cognition/tool_protocol.py,
+            # preview()), but an older record written before that fix --
+            # or any future caller that forgets -- still renders safely
+            # here rather than flooding the terminal.
+            request = preview(str(meta.get("request", "")))
+            result_summary = preview(str(meta.get("result_summary", "")))
             return (
                 f"{ts} {icon} {tool_icon} {style(tool, 'blue', 'bold')} "
                 f"({meta.get('agent')}) {status_of(meta.get('succeeded'))} "
-                f"{meta.get('request')} → {meta.get('result_summary')}"
+                f"{request} → {result_summary}"
             )
         if record.kind == "outcome":
             return (

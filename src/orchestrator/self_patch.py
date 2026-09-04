@@ -66,8 +66,15 @@ from pathlib import Path
 from typing import Callable
 
 from src.cognition.provider import CognitionRouter
-from src.cognition.tool_protocol import extract_code, is_valid_python, parse_marker, safe_read_file
+from src.cognition.tool_protocol import (
+    extract_code,
+    is_valid_python,
+    parse_marker,
+    preview,
+    safe_read_file,
+)
 from src.orchestrator.audit import AuditGate, ModificationProposal
+from src.orchestrator.console_style import format_code_block
 
 DEFAULT_MAX_TOOL_STEPS = 4
 DEFAULT_SUITE_TIMEOUT_SECONDS = 180.0
@@ -327,17 +334,17 @@ class SelfPatchAgent:
 
     def _read_tool_turn(self, raw_path: str) -> str:
         path = raw_path.strip()
-        print(f"[patch] reading {path!r} for context...")
+        print(f"[patch] reading {preview(path)!r} for context...")
         content = safe_read_file(self._repo_root, path)
         if self._activity_log is not None:
             self._activity_log.record_tool_call(
-                "self_patch", "READ", path, f"{len(content)} chars", True
+                "self_patch", "READ", preview(path), f"{len(content)} chars", True
             )
         return f"\n\n[READ {path!r} result]\n{content}\n{_CONTINUE_HINT}"
 
     def _test_tool_turn(self, raw_code: str, subject: str, topic: str) -> str:
-        print("[patch] quick-checking a candidate against the real audit gate...")
         code = extract_code(raw_code) or raw_code
+        print(format_code_block(code, label="quick-check candidate"))
         if self._audit_gate is None:
             report = "[no audit gate configured for this session -- cannot test]"
             succeeded = False
@@ -351,9 +358,9 @@ class SelfPatchAgent:
                 if succeeded
                 else "REJECTED: " + "; ".join(verdict.reasons)
             )
-        print(f"[patch] quick-check result: {report.splitlines()[0]}")
+        print(f"[patch] quick-check result: {preview(report.splitlines()[0])}")
         if self._activity_log is not None:
             self._activity_log.record_tool_call(
-                "self_patch", "DRAFT", subject, report.splitlines()[0], succeeded
+                "self_patch", "DRAFT", subject, preview(report.splitlines()[0]), succeeded
             )
         return f"\n\n[DRAFT test result]\n{report}\n{_CONTINUE_HINT}"
