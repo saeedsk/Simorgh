@@ -197,6 +197,9 @@ class LogicAgent(SubAgent):
             if kind == "recall":
                 prompt += self._recall_tool_turn(payload)
                 continue
+            if kind == "remind":
+                prompt += self._remind_tool_turn(payload)
+                continue
             return payload.strip() or None
 
         return None
@@ -210,6 +213,7 @@ class LogicAgent(SubAgent):
         if self._activity_log is not None:
             markers.append("RECALL")
         markers.append("READ")
+        markers.append("REMIND")
         return tuple(markers)
 
     def _build_prompt(self, text: str, mood: EmotionalState) -> str:
@@ -241,6 +245,13 @@ class LogicAgent(SubAgent):
             )
         lines.append(
             "READ: <path>  -- read a file from this codebase (src/docs/tests only) for context."
+        )
+        lines.append(
+            "REMIND: <duration> <message>  -- actually schedule a one-off reminder that "
+            "interrupts the terminal later with <message> (duration like '30s', '5m', '2h'). "
+            "Use this whenever the user asks to be reminded/nudged/pinged later, in the "
+            "future, or after a delay -- it's a real, working timer, not something you have "
+            "to apologize for not having."
         )
         return (
             "\n\nYou have real tools, used one at a time. To use one, make your "
@@ -310,6 +321,31 @@ class LogicAgent(SubAgent):
         print(f"[Sim] recall result: {line_count} line(s)")
         self._record_tool_call("RECALL", raw_arg.strip() or "since last turn", f"{line_count} lines", True)
         return f"\n\n[RECALL result]\n{content}\n{_CONTINUE_HINT}"
+
+    def _remind_tool_turn(self, raw_arg: str) -> str:
+        from src.orchestrator.reminders import parse_duration, schedule_reminder
+
+        arg = raw_arg.strip()
+        parts = arg.split(None, 1)
+        if len(parts) < 2:
+            report = "FAILED: expected 'REMIND: <duration> <message>', e.g. 'REMIND: 1m wake up'"
+            print(f"[Sim] remind result: {report}")
+            self._record_tool_call("REMIND", preview(arg), report, False)
+            return f"\n\n[REMIND result]\n{report}\n{_CONTINUE_HINT}"
+
+        duration_text, message = parts
+        seconds = parse_duration(duration_text)
+        if seconds is None:
+            report = f"FAILED: {duration_text!r} isn't a valid duration (try '30s', '5m', '1h')"
+            print(f"[Sim] remind result: {report}")
+            self._record_tool_call("REMIND", preview(arg), report, False)
+            return f"\n\n[REMIND result]\n{report}\n{_CONTINUE_HINT}"
+
+        schedule_reminder(seconds, message)
+        report = f"scheduled -- will interrupt in {duration_text}: {message!r}"
+        print(f"[Sim] remind result: {report}")
+        self._record_tool_call("REMIND", preview(arg), report, True)
+        return f"\n\n[REMIND result]\n{report}\n{_CONTINUE_HINT}"
 
     def _record_tool_call(self, tool: str, request: str, result_summary: str, succeeded: bool) -> None:
         if self._activity_log is not None:

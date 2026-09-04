@@ -12,12 +12,14 @@ from src.main import (
     extract_patch_args,
     extract_plan_args,
     extract_propose_topic,
+    extract_remind_args,
     handle_turn,
     note_interest,
     plan_goal,
     propose_self_patch,
     propose_skill,
     propose_skill_batch,
+    remind_command,
     run_skill_code,
     run_task,
     strip_command_slash,
@@ -922,6 +924,51 @@ class TestExtractPlanArgs(unittest.TestCase):
     def test_missing_count_returns_usage_pair(self):
         text = "plan a goal with no count"
         self.assertEqual(extract_plan_args(text, text.lower()), (0, ""))
+
+
+class TestExtractRemindArgs(unittest.TestCase):
+    def test_parses_duration_and_message(self):
+        text = "remind 1m wake up"
+        self.assertEqual(extract_remind_args(text, text.lower()), ("1m", "wake up"))
+
+    def test_non_matching_input_returns_none(self):
+        text = "hey there"
+        self.assertIsNone(extract_remind_args(text, text.lower()))
+
+    def test_missing_message_falls_through_to_none(self):
+        text = "remind 1m"
+        self.assertIsNone(extract_remind_args(text, text.lower()))
+
+    def test_plain_chat_starting_with_remind_is_not_intercepted(self):
+        # The live-caught bug: this used to parse as duration="me".
+        text = "remind me to wake up in one minute"
+        self.assertIsNone(extract_remind_args(text, text.lower()))
+
+    def test_natural_phrasing_with_a_real_duration_word_still_falls_through(self):
+        # "in" isn't a valid duration token, so this is still ordinary
+        # chat, not the explicit command -- exactly the ambiguity this
+        # heuristic accepts as a tradeoff for never hijacking real chat.
+        text = "remind in five minutes to check the oven"
+        self.assertIsNone(extract_remind_args(text, text.lower()))
+
+    def test_explicit_command_shaped_input_is_still_recognized(self):
+        text = "remind 1m wake up"
+        self.assertEqual(extract_remind_args(text, text.lower()), ("1m", "wake up"))
+
+
+class TestRemindCommand(unittest.TestCase):
+    def test_usage_message_when_missing_args(self):
+        message = remind_command("", "")
+        self.assertIn("usage", message)
+
+    def test_invalid_duration_reports_it(self):
+        message = remind_command("not-a-duration", "wake up")
+        self.assertIn("isn't a valid duration", message)
+
+    def test_valid_duration_schedules_and_reports_it(self):
+        message = remind_command("1m", "wake up")
+        self.assertIn("scheduled", message)
+        self.assertIn("wake up", message)
 
 
 class TestRunTask(unittest.TestCase):

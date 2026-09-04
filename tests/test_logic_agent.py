@@ -420,6 +420,47 @@ class TestLogicAgentToolLoop(unittest.TestCase):
 
         self.assertIn("nothing recorded yet", provider.prompts[1])
 
+    def test_remind_marker_is_always_offered(self):
+        # No activity_log, web_fetch, or sandbox given -- REMIND still
+        # shows up, unlike FETCH/RUN/RECALL which are conditional.
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        self.assertIn("REMIND:", provider.prompts[0])
+
+    def test_remind_tool_schedules_and_reports_success(self):
+        provider = ScriptedProvider([("REMIND: 1m wake up", None), ("done", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        response = agent.handle(AgentRequest(text="remind me to wake up in a minute"), SharedMemoryBus())
+
+        self.assertIn("scheduled", provider.prompts[1])
+        self.assertEqual(response.output, "done")
+
+    def test_remind_tool_reports_an_invalid_duration(self):
+        provider = ScriptedProvider([("REMIND: whenever wake up", None), ("done", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        self.assertIn("FAILED", provider.prompts[1])
+        self.assertIn("isn't a valid duration", provider.prompts[1])
+
+    def test_remind_tool_records_itself_as_a_tool_call(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("REMIND: 1m wake up", None), ("done", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]), activity_log=activity_log)
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0].metadata["tool"], "REMIND")
+        self.assertTrue(tool_calls[0].metadata["succeeded"])
+
 
 if __name__ == "__main__":
     unittest.main()
