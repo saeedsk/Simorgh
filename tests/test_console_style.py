@@ -1,8 +1,11 @@
+import contextlib
+import io
+import time
 import unittest
 from unittest.mock import patch
 
 from src.orchestrator import console_style
-from src.orchestrator.console_style import format_code_block, style
+from src.orchestrator.console_style import LiveTicker, format_code_block, style
 
 
 class TestStyleDisabled(unittest.TestCase):
@@ -130,6 +133,71 @@ class TestFormatCodeBlockEnabled(unittest.TestCase):
 
         self.assertIn('"a ', block)
         self.assertIn("\033[2m# b\"\033[0m", block)
+
+
+class TestLiveTicker(unittest.TestCase):
+    def test_does_not_block_entering_the_context(self):
+        start = time.monotonic()
+        with LiveTicker("waiting", interval=5.0):
+            pass
+        elapsed = time.monotonic() - start
+
+        self.assertLess(elapsed, 1.0)
+
+    def test_wraps_a_slow_block_without_raising(self):
+        with LiveTicker("waiting", interval=5.0):
+            time.sleep(0.01)  # the "slow" call this wraps
+
+        # No assertion beyond "didn't raise" -- the point is the ticker
+        # never gets in the way of the wrapped code succeeding.
+
+    def test_ticks_at_least_once_for_a_block_longer_than_the_interval(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            with LiveTicker("running something", interval=0.02):
+                time.sleep(0.1)
+
+        output = buf.getvalue()
+        self.assertIn("running something", output)
+        self.assertIn("elapsed", output)
+
+    def test_no_tick_printed_for_a_block_shorter_than_the_interval(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            with LiveTicker("quick", interval=5.0):
+                pass
+
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_thread_is_joined_before_the_context_exits(self):
+        ticker = LiveTicker("waiting", interval=0.01)
+        with ticker:
+            time.sleep(0.03)
+
+        self.assertFalse(ticker._thread.is_alive())
+
+    def test_a_slow_wrapped_call_that_raises_still_stops_the_ticker(self):
+        ticker = LiveTicker("waiting", interval=0.01)
+        with self.assertRaises(ValueError):
+            with ticker:
+                time.sleep(0.03)
+                raise ValueError("boom")
+
+        self.assertFalse(ticker._thread.is_alive())
+
+    def test_elapsed_time_uses_the_injected_clock(self):
+        fake_time = [0.0]
+
+        def fake_clock():
+            return fake_time[0]
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            with LiveTicker("waiting", interval=0.01, clock=fake_clock):
+                fake_time[0] = 42.0
+                time.sleep(0.03)
+
+        self.assertIn("42s elapsed", buf.getvalue())
 
 
 if __name__ == "__main__":

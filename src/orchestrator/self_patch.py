@@ -80,7 +80,7 @@ from src.cognition.tool_protocol import (
     safe_read_file,
 )
 from src.orchestrator.audit import AuditGate, ModificationProposal
-from src.orchestrator.console_style import format_code_block
+from src.orchestrator.console_style import LiveTicker, format_code_block
 
 DEFAULT_MAX_TOOL_STEPS = 4
 DEFAULT_SUITE_TIMEOUT_SECONDS = 180.0
@@ -132,14 +132,16 @@ def run_isolated_test_suite(
         copy_root = Path(tmp) / "repo"
         shutil.copytree(repo_root, copy_root, ignore=_IGNORE_FOR_COPY)
 
-        baseline = run(copy_root, timeout)
+        with LiveTicker("running the baseline test suite"):
+            baseline = run(copy_root, timeout)
         baseline_count = _parse_test_count(baseline)
 
         target = (copy_root / subject).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(new_content)
 
-        patched = run(copy_root, timeout)
+        with LiveTicker("running the patched test suite"):
+            patched = run(copy_root, timeout)
         patched_count = _parse_test_count(patched)
 
         passed = patched.returncode == 0 and patched_count >= baseline_count and patched_count > 0

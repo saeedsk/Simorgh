@@ -871,31 +871,77 @@ Built:
     general sanitizer") now cleans both title and description at parse
     time, so every consumer -- the new proactive-share path and the
     pre-existing `curious` command alike -- gets readable text.
+53. **A cold, corporate-sounding reply to ordinary small talk, fixed at
+    the prompt level -- and the start of matching Claude Code's terminal
+    UI conventions.** Live bug report: "what's up?" got back "Okay. Not
+    much—just here, keeping things running and ready to dig into
+    whatever you're working on today." Root-caused to prompt dilution:
+    `_PERSONA_PREFIX`'s actual tone instructions are two sentences at
+    the top, followed by 80+ lines of tool/pipeline/safety reference
+    material that grew turn by turn this session -- by the time the
+    model reaches the user's message, warmth is buried under audit-gate
+    and self-modification procedure, and the literal "Current mood:
+    neutral valence, low arousal." line likely compounded it (clinical
+    phrasing right before answering tends to produce clinical replies).
+    Fixed in three layers, not a rewrite: a concrete anti-pattern ban on
+    corporate filler added to the tone instruction; `_mood_phrase()`
+    replacing raw enum-speak with natural first-person phrasing ("calm,
+    nothing much going on" instead of "neutral valence, low arousal");
+    and `_TONE_REMINDER`, a short anchor placed right before the final
+    "User: .../Sim:" cue -- instructions closer to the actual generation
+    point carry more weight than ones diluted by everything in between.
+
+    Separately, the creator asked how Claude Code's terminal UI handles
+    ongoing status and asked to start building something similar for
+    Sim. `src/orchestrator/console_style.py`'s new `LiveTicker` is the
+    first piece: a periodic "still working... (Ns elapsed)" status line
+    (a daemon thread, default every 5s) for a long blocking call that
+    was previously completely silent -- `self_patch.run_isolated_test_suite`'s
+    two subprocess runs (copy the repo, run the entire suite, twice) are
+    the motivating case, reached by every `patch`/`evolve` invocation.
+    Deliberately not a true in-place spinner -- a carriage-return redraw
+    is fragile across terminals -- a new line per tick instead, reusing
+    the same "a daemon thread can safely print while the caller stays
+    blocked" property reminders/the autonomous loop already established
+    rather than inventing a new mechanism. The rest of what Claude Code
+    does (collapsed-by-default multi-step tool output, a live task
+    checklist shown proactively during work, diff-style patch review
+    instead of a full-file dump) is still ahead, listed below.
 
 Still ahead, roughly in order:
 
-53. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+54. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-54. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+55. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-55. *Automatic* registration of an applied skill as a live `Router`
+56. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
     invocation rather than done reflexively).
-56. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+57. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and
     `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
     derived from real operating experience -- worth revisiting once
     there's an actual track record.
-57. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
+58. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
     -- extending hot-swap to a multi-file batch is a real design
     question (which slot(s) to trial, in what order, how to roll back a
     partial hot-swap alongside the multi-commit revert `evolve` already
     does), not yet worked through.
-58. `DEFAULT_SHARE_COOLDOWN_SECONDS` (one hour, milestone 52 above) is a
+59. `DEFAULT_SHARE_COOLDOWN_SECONDS` (one hour, milestone 52 above) is a
     starting judgment call like the autonomous loop's own thresholds --
     worth revisiting once there's a real sense of whether proactive
     news-sharing feels well-paced or not. `DEFAULT_NEWS_TOPICS`'
     specific three feeds are a starting set, not vetted for long-term
     stability -- worth checking they're still live occasionally, and
     trivially replaceable via `interest <feed url>` if not.
+60. The rest of "match Claude Code's terminal UI conventions" (milestone
+    53 above landed `LiveTicker`, the first piece): collapsed-by-default
+    multi-step tool output with drill-down (most existing tool turns are
+    already reasonably bounded -- `format_code_block`'s 30-line cap,
+    `preview()`'s single-line truncation -- but there's no single shared
+    convention for it); a task checklist shown proactively while
+    multi-step work happens (`TaskStore`/`tasks` exists but is only ever
+    shown on request, not live during a `batch`/`evolve` run); and
+    diff-style display for `pending <path>` instead of dumping the whole
+    file when there's a previous version to diff against.
