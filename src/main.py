@@ -23,6 +23,7 @@ from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
 from src.orchestrator.audit import REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
+from src.memory.short_term import ShortTermMemory
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
@@ -36,6 +37,7 @@ INTEREST_PREFIX = "interest "
 INTERESTS_COMMAND = "interests"
 CURIOUS_COMMAND = "curious"
 SLEEP_COMMAND = "sleep"
+HISTORY_COMMAND = "history"
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 
 
@@ -130,11 +132,12 @@ def run_cli() -> None:
     skill_research = SkillResearchAgent()
     interests = InterestTracker(store)
     health_monitor = HealthMonitor()
+    short_term = ShortTermMemory()
     print(
         "Simorgh -- 'exit'/'quit' to leave, 'reflect' for outcome review, "
         "'propose <topic>' to draft a skill, 'pending' for unmerged proposals, "
         "'interest <topic>'/'interests'/'curious' for world-awareness, "
-        "'sleep' for maintenance."
+        "'sleep' for maintenance, 'history' for this session's recent turns."
     )
     while True:
         try:
@@ -170,7 +173,12 @@ def run_cli() -> None:
         if lowered == SLEEP_COMMAND:
             _run_sleep(store, reflection_agent)
             continue
-        print(handle_turn(router, user_input, outcome_log, health_monitor))
+        if lowered == HISTORY_COMMAND:
+            _print_history(short_term)
+            continue
+        reply = handle_turn(router, user_input, outcome_log, health_monitor)
+        short_term.add(user_input, reply)
+        print(reply)
 
 
 def _print_reflection(reflection_agent: ReflectionAgent) -> None:
@@ -275,6 +283,13 @@ def _run_sleep(store: MemoryStore, reflection_agent: ReflectionAgent) -> None:
         return
     for proposal in report.proposals:
         print(f"[sleep proposal] {proposal.rationale}")
+
+
+def _print_history(short_term: ShortTermMemory) -> None:
+    if len(short_term) == 0:
+        print("[no turns yet this session]")
+        return
+    print(short_term.as_context())
 
 
 if __name__ == "__main__":
