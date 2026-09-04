@@ -142,3 +142,71 @@ def revert_last_commit(
         return CommitResult(False, f"git operation timed out after {timeout}s")
     except OSError as exc:
         return CommitResult(False, f"failed to run git: {exc!r}")
+
+
+def current_commit_hash(
+    repo_root: Path,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    runner: Callable[..., subprocess.CompletedProcess] | None = None,
+) -> str | None:
+    """`git rev-parse HEAD`, or None on any failure (not a git repo, git
+    missing, etc.) -- never raises. Used to mark a known-good point
+    before a multi-patch batch (main.py's propose_patch_batch) starts,
+    so the whole batch can be undone as a unit if it doesn't collectively
+    pass the post-batch relaunch self-check.
+    """
+    run = runner or subprocess.run
+    try:
+        result = run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def revert_commits_since(
+    repo_root: Path,
+    base_commit: str,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    runner: Callable[..., subprocess.CompletedProcess] | None = None,
+) -> CommitResult:
+    """Reverts every commit after `base_commit` up to HEAD (`git revert
+    --no-edit <base_commit>..HEAD`) as new commits, attributed to
+    Simorgh, never by rewriting history -- the multi-commit rollback
+    `revert_last_commit` (single-commit) can't do, for when several
+    patches from one batch collectively fail the post-batch relaunch
+    self-check and all need to come back out together.
+    """
+    run = runner or subprocess.run
+    try:
+        result = run(
+            [
+                "git",
+                "-c",
+                f"user.name={_SIM_GIT_AUTHOR_NAME}",
+                "-c",
+                f"user.email={_SIM_GIT_AUTHOR_EMAIL}",
+                "revert",
+                "--no-edit",
+                f"{base_commit}..HEAD",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            return CommitResult(False, f"git revert range failed: {detail}")
+        return CommitResult(True, result.stdout.strip())
+    except subprocess.TimeoutExpired:
+        return CommitResult(False, f"git operation timed out after {timeout}s")
+    except OSError as exc:
+        return CommitResult(False, f"failed to run git: {exc!r}")

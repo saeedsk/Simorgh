@@ -3,7 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.orchestrator.git_ops import CommitResult, commit_applied_change, revert_last_commit
+from src.orchestrator.git_ops import (
+    CommitResult,
+    commit_applied_change,
+    current_commit_hash,
+    revert_commits_since,
+    revert_last_commit,
+)
 
 
 def _run_git(repo_root: Path, *args: str) -> None:
@@ -165,6 +171,88 @@ class TestRevertLastCommit(unittest.TestCase):
 
         self.assertFalse(result.committed)
         self.assertIn("failed to run git", result.output)
+
+
+class TestCurrentCommitHash(unittest.TestCase):
+    def test_returns_the_head_hash_in_a_real_repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _run_git(root, "init", "-q")
+            _run_git(root, "config", "user.email", "test@example.com")
+            _run_git(root, "config", "user.name", "Test")
+            (root / "f.py").write_text("X = 1\n")
+            _run_git(root, "add", "-A")
+            _run_git(root, "commit", "-q", "-m", "initial")
+
+            result = current_commit_hash(root)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 40)  # a full git SHA-1
+
+    def test_returns_none_for_a_non_git_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = current_commit_hash(Path(tmp))
+
+        self.assertIsNone(result)
+
+    def test_returns_none_when_git_is_missing(self):
+        def raising_runner(*args, **kwargs):
+            raise OSError("no such file: git")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = current_commit_hash(Path(tmp), runner=raising_runner)
+
+        self.assertIsNone(result)
+
+
+class TestRevertCommitsSince(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        _run_git(self.repo_root, "init", "-q")
+        _run_git(self.repo_root, "config", "user.email", "test@example.com")
+        _run_git(self.repo_root, "config", "user.name", "Test")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_reverts_multiple_commits_back_to_the_base(self):
+        target = self.repo_root / "a.py"
+        target.write_text("A = 1\n")
+        commit_applied_change(self.repo_root, "a.py", "[sim] a v1")
+        base = current_commit_hash(self.repo_root)
+
+        target.write_text("A = 2\n")
+        commit_applied_change(self.repo_root, "a.py", "[sim] a v2")
+        other = self.repo_root / "b.py"
+        other.write_text("B = 1\n")
+        commit_applied_change(self.repo_root, "b.py", "[sim] b v1")
+
+        result = revert_commits_since(self.repo_root, base)
+
+        self.assertTrue(result.committed)
+        self.assertEqual(target.read_text(), "A = 1\n")
+        self.assertFalse(other.exists())
+
+    def test_reverts_are_attributed_to_simorgh(self):
+        target = self.repo_root / "a.py"
+        target.write_text("A = 1\n")
+        commit_applied_change(self.repo_root, "a.py", "[sim] a v1")
+        base = current_commit_hash(self.repo_root)
+        target.write_text("A = 2\n")
+        commit_applied_change(self.repo_root, "a.py", "[sim] a v2")
+
+        revert_commits_since(self.repo_root, base)
+
+        author = subprocess.run(
+            ["git", "log", "-1", "--format=%an"], cwd=self.repo_root, capture_output=True, text=True
+        )
+        self.assertIn("Simorgh", author.stdout)
+
+    def test_failure_is_reported_not_raised(self):
+        result = revert_commits_since(self.repo_root, "not-a-real-commit-hash")
+
+        self.assertFalse(result.committed)
 
 
 if __name__ == "__main__":

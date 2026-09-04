@@ -9,6 +9,7 @@ from src.main import (
     build_router,
     discover_command,
     extract_batch_args,
+    extract_evolve_args,
     extract_patch_args,
     extract_plan_args,
     extract_propose_topic,
@@ -16,6 +17,7 @@ from src.main import (
     handle_turn,
     note_interest,
     plan_goal,
+    propose_patch_batch,
     propose_self_patch,
     propose_skill,
     propose_skill_batch,
@@ -724,6 +726,147 @@ class TestProposeSelfPatch(unittest.TestCase):
         self.assertTrue(any("eval" in (r or "") for r in agent.calls[1][2]))
 
 
+class TestProposePatchBatch(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        (self.repo_root / "src" / "orchestrator").mkdir(parents=True)
+        (self.repo_root / "src" / "orchestrator" / "a.py").write_text("A = 1\n")
+        (self.repo_root / "src" / "orchestrator" / "b.py").write_text("B = 1\n")
+        (self.repo_root / "tests").mkdir()
+        (self.repo_root / "tests" / "__init__.py").write_text("")
+        (self.repo_root / "tests" / "test_toy.py").write_text(
+            "import unittest\n\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_ok(self):\n"
+            "        self.assertTrue(True)\n"
+        )
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _init_git_repo(self):
+        import subprocess
+
+        subprocess.run(["git", "init", "-q"], cwd=self.repo_root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"], cwd=self.repo_root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.repo_root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=self.repo_root, check=True)
+
+    def test_usage_message_for_invalid_count(self):
+        store = InMemoryStore()
+        message = propose_patch_batch(
+            _FakeBrainstormCognition(""), FakeSelfPatchAgent([]), AuditGate(), store,
+            ActivityLog(store), "goal", 0, repo_root=self.repo_root,
+        )
+        self.assertIn("usage", message)
+
+    def test_usage_message_for_count_above_max(self):
+        store = InMemoryStore()
+        message = propose_patch_batch(
+            _FakeBrainstormCognition(""), FakeSelfPatchAgent([]), AuditGate(), store,
+            ActivityLog(store), "goal", 11, repo_root=self.repo_root,
+        )
+        self.assertIn("usage", message)
+
+    def test_deterministic_fallback_from_brainstorm_step_is_reported(self):
+        store = InMemoryStore()
+        cognition = _FakeBrainstormCognition("1. src/a.py :: fix it", provider_name="deterministic_fallback")
+        message = propose_patch_batch(
+            cognition, FakeSelfPatchAgent([]), AuditGate(), store, ActivityLog(store),
+            "goal", 1, repo_root=self.repo_root,
+        )
+        self.assertIn("no real drafting intelligence", message)
+
+    def test_unparseable_brainstorm_response_is_reported(self):
+        store = InMemoryStore()
+        cognition = _FakeBrainstormCognition("I refuse to make a list.")
+        message = propose_patch_batch(
+            cognition, FakeSelfPatchAgent([]), AuditGate(), store, ActivityLog(store),
+            "goal", 1, repo_root=self.repo_root,
+        )
+        self.assertIn("could not produce real file targets", message)
+
+    def test_applies_each_brainstormed_target_without_relaunching(self):
+        store = InMemoryStore()
+        cognition = _FakeBrainstormCognition(
+            "1. src/orchestrator/a.py :: bump a\n2. src/orchestrator/b.py :: bump b\n"
+        )
+        agent = FakeSelfPatchAgent(
+            [
+                ModificationProposal(subject="src/orchestrator/a.py", code="A = 2\n", rationale="bump a"),
+                ModificationProposal(subject="src/orchestrator/b.py", code="B = 2\n", rationale="bump b"),
+            ]
+        )
+
+        message = propose_patch_batch(
+            cognition, agent, AuditGate(), store, ActivityLog(store), "goal", 2,
+            repo_root=self.repo_root, do_relaunch=False,
+        )
+
+        self.assertIn("2/2", message)
+        self.assertEqual((self.repo_root / "src/orchestrator/a.py").read_text(), "A = 2\n")
+        self.assertEqual((self.repo_root / "src/orchestrator/b.py").read_text(), "B = 2\n")
+
+    def test_commits_each_target_separately_against_a_real_git_repo(self):
+        self._init_git_repo()
+        store = InMemoryStore()
+        cognition = _FakeBrainstormCognition(
+            "1. src/orchestrator/a.py :: bump a\n2. src/orchestrator/b.py :: bump b\n"
+        )
+        agent = FakeSelfPatchAgent(
+            [
+                ModificationProposal(subject="src/orchestrator/a.py", code="A = 2\n", rationale="bump a"),
+                ModificationProposal(subject="src/orchestrator/b.py", code="B = 2\n", rationale="bump b"),
+            ]
+        )
+
+        propose_patch_batch(
+            cognition, agent, AuditGate(), store, ActivityLog(store), "goal", 2,
+            repo_root=self.repo_root, do_relaunch=False,
+        )
+
+        import subprocess
+
+        log = subprocess.run(
+            ["git", "log", "--oneline"], cwd=self.repo_root, capture_output=True, text=True
+        )
+        self.assertEqual(len(log.stdout.strip().splitlines()), 3)  # initial + 2 patches
+
+    def test_relaunch_failure_reverts_every_commit_from_the_batch(self):
+        from unittest.mock import patch
+
+        from src.orchestrator.self_patch import RelaunchResult
+
+        self._init_git_repo()
+        store = InMemoryStore()
+        cognition = _FakeBrainstormCognition(
+            "1. src/orchestrator/a.py :: bump a\n2. src/orchestrator/b.py :: bump b\n"
+        )
+        agent = FakeSelfPatchAgent(
+            [
+                ModificationProposal(subject="src/orchestrator/a.py", code="A = 2\n", rationale="bump a"),
+                ModificationProposal(subject="src/orchestrator/b.py", code="B = 2\n", rationale="bump b"),
+            ]
+        )
+
+        with patch(
+            "src.main.relaunch",
+            return_value=RelaunchResult(succeeded=False, detail="ImportError: boom"),
+        ):
+            message = propose_patch_batch(
+                cognition, agent, AuditGate(), store, ActivityLog(store), "goal", 2,
+                repo_root=self.repo_root, do_relaunch=True,
+            )
+
+        self.assertIn("REVERTED", message)
+        self.assertEqual((self.repo_root / "src/orchestrator/a.py").read_text(), "A = 1\n")
+        self.assertEqual((self.repo_root / "src/orchestrator/b.py").read_text(), "B = 1\n")
+
+
 class TestUseSkill(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -956,6 +1099,20 @@ class TestExtractPlanArgs(unittest.TestCase):
     def test_missing_count_returns_usage_pair(self):
         text = "plan a goal with no count"
         self.assertEqual(extract_plan_args(text, text.lower()), (0, ""))
+
+
+class TestExtractEvolveArgs(unittest.TestCase):
+    def test_parses_count_and_goal(self):
+        text = "evolve 5 improve resilience"
+        self.assertEqual(extract_evolve_args(text, text.lower()), (5, "improve resilience"))
+
+    def test_non_matching_input_returns_none(self):
+        text = "hey there"
+        self.assertIsNone(extract_evolve_args(text, text.lower()))
+
+    def test_missing_count_returns_usage_pair(self):
+        text = "evolve a goal with no count"
+        self.assertEqual(extract_evolve_args(text, text.lower()), (0, ""))
 
 
 class TestExtractRemindArgs(unittest.TestCase):

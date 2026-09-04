@@ -609,25 +609,48 @@ Built:
     never been updated when `batch`/`plan` were added, so a request for
     "10 features" got told to build them one at a time instead of being
     pointed at the commands built specifically for that.
+44. `evolve <count> <goal>` (`main.py`'s `propose_patch_batch`) and a
+    fifth `LogicAgent` marker, EVOLVE: a real gap found live, asked
+    directly -- "add 10 autonomous ai agent feature to yourself" only
+    ever ran `batch`/`propose`, which `apply_proposal` hard-scopes to
+    `src/agents/skills/` (new, standalone, sandboxed-smoke-tested add-
+    ons). The creator wanted genuine evolution of core architecture, not
+    a pile of skill files. `evolve` brainstorms up to `MAX_EVOLVE_COUNT`
+    (10, lower than batch's 20 -- each item here is meaningfully more
+    expensive) real (path :: description) targets under `src/` (never
+    `src/agents/skills/`), given the actual list of existing source
+    files as context so it names real paths, then runs
+    `propose_self_patch` -- unchanged, same audit gate, same isolated
+    full test suite, same auto-commit -- once per target, always with
+    `do_relaunch=False` (relaunching after patch #1 would replace the
+    process via `os.execv` before patches #2..N ever ran). Relaunches
+    *once*, after the whole batch; on a self-check failure, rolls back
+    *every* commit from the batch together (`git_ops.revert_commits_since`,
+    a new multi-commit range revert, not just `revert_last_commit`) --
+    a single bad patch among several must not leave the other N-1
+    stranded half-reverted. The persona prompt now draws the line
+    explicitly: "add/build N things" is BATCH; "evolve/improve yourself
+    at a fundamental level" is EVOLVE, and it should not quietly
+    downgrade the latter into the former.
 
 Still ahead, roughly in order:
 
-44. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+45. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-45. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+46. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-46. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+47. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-47. `use <skill name>` (milestone from the earlier skill-registry work)
+48. `use <skill name>` (milestone from the earlier skill-registry work)
     is still a CLI-level command a human types, not a marker
     `LogicAgent`'s own conversational tool loop can reach (unlike
-    PROPOSE/PATCH/BATCH/PLAN, milestone 43, `use` itself never got a
-    conversational marker), and there is still no *automatic*
-    registration of an applied skill as a live `Router` sub-agent -- it
-    remains a manual, on-demand invocation.
-48. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+    PROPOSE/PATCH/BATCH/PLAN/EVOLVE, milestones 43 and 44, `use` itself
+    never got a conversational marker), and there is still no
+    *automatic* registration of an applied skill as a live `Router`
+    sub-agent -- it remains a manual, on-demand invocation.
+49. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, and now `MAX_BLOCKED_RETRY_ATTEMPTS`=9) are
     judgment calls, not values derived from
     real operating experience -- worth revisiting once there's an actual

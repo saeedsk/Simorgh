@@ -529,6 +529,66 @@ class TestLogicAgentToolLoop(unittest.TestCase):
 
         self.assertEqual(calls, [("improve resilience", 3)])
 
+    def test_evolve_marker_not_offered_without_an_evolve_fn(self):
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="evolve yourself"), SharedMemoryBus())
+
+        self.assertNotIn("EVOLVE:", provider.prompts[0])
+
+    def test_evolve_tool_calls_the_injected_function_with_goal_and_count(self):
+        calls = []
+        provider = ScriptedProvider([("EVOLVE: 3 improve resilience", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            propose_evolve_fn=lambda goal, count: calls.append((goal, count))
+            or "[evolve] 3/3 architectural change(s) applied",
+        )
+
+        agent.handle(AgentRequest(text="evolve yourself to be more resilient"), SharedMemoryBus())
+
+        self.assertEqual(calls, [("improve resilience", 3)])
+
+    def test_evolve_tool_reports_malformed_argument(self):
+        provider = ScriptedProvider([("EVOLVE: notanumber goal", None), ("done", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]), propose_evolve_fn=lambda g, c: "unused")
+
+        agent.handle(AgentRequest(text="evolve yourself"), SharedMemoryBus())
+
+        self.assertIn("FAILED", provider.prompts[1])
+
+    def test_evolve_tool_records_success_correctly(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("EVOLVE: 2 resilience", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            activity_log=activity_log,
+            propose_evolve_fn=lambda g, c: "[evolve] 2/2 architectural change(s) applied",
+        )
+
+        agent.handle(AgentRequest(text="evolve yourself"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(tool_calls[0].metadata["tool"], "EVOLVE")
+        self.assertTrue(tool_calls[0].metadata["succeeded"])
+
+    def test_evolve_tool_records_failure_when_nothing_applied(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("EVOLVE: 2 resilience", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            activity_log=activity_log,
+            propose_evolve_fn=lambda g, c: "[evolve] 0/2 architectural change(s) applied",
+        )
+
+        agent.handle(AgentRequest(text="evolve yourself"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertFalse(tool_calls[0].metadata["succeeded"])
+
     def test_propose_tool_records_itself_as_a_tool_call(self):
         store = InMemoryStore()
         activity_log = ActivityLog(store)

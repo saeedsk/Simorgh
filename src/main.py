@@ -69,7 +69,12 @@ from src.orchestrator.audit import REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
 from src.orchestrator.console_style import style
 from src.orchestrator.discovery import discover_improvements
-from src.orchestrator.git_ops import commit_applied_change, revert_last_commit
+from src.orchestrator.git_ops import (
+    commit_applied_change,
+    current_commit_hash,
+    revert_commits_since,
+    revert_last_commit,
+)
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.reminders import parse_duration, schedule_reminder
@@ -117,6 +122,14 @@ WORK_COMMAND = "work"
 AUTONOMOUS_PREFIX = "autonomous "
 REMIND_PREFIX = "remind "
 MAX_TASK_ATTEMPTS = 3
+EVOLVE_PREFIX = "evolve "
+# Lower than MAX_BATCH_COUNT: each item here is a full propose_self_patch
+# (audit gate + this repo's ENTIRE test suite run twice, in an isolated
+# copy), not a sandboxed smoke test of one new file -- meaningfully more
+# expensive per item, so the ceiling on how many run in one command is
+# tighter.
+MAX_EVOLVE_COUNT = 10
+DEFAULT_EVOLVE_MAX_ATTEMPTS = 2
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 DEFAULT_HISTORY_PATH = Path.home() / ".simorgh" / "cli_history"
 HISTORY_LENGTH = 1000
@@ -145,6 +158,7 @@ _KNOWN_COMMAND_WORDS = (
     SKILLS_COMMAND,
     "batch",
     "plan",
+    "evolve",
     DISCOVER_COMMAND,
     TASKS_COMMAND,
     WORK_COMMAND,
@@ -196,6 +210,7 @@ def build_router(
     propose_patch_fn: Callable[[str, str], str] | None = None,
     propose_batch_fn: Callable[[str, int], str] | None = None,
     plan_fn: Callable[[str, int], str] | None = None,
+    propose_evolve_fn: Callable[[str, int], str] | None = None,
 ) -> Router:
     """All params are optional so existing callers (and every prior test)
     get exactly the old rule-based-only behavior when omitted -- see
@@ -203,11 +218,11 @@ def build_router(
     doesn't change anything unless a real provider actually answers, and
     `web_fetch`/`sandbox` for why LogicAgent only offers FETCH/RUN tools
     when they're actually given. `propose_skill_fn`/`propose_patch_fn`/
-    `propose_batch_fn`/`plan_fn`, when given, let ordinary conversation
-    trigger the real propose/patch/batch/plan pipelines directly --
-    explicitly authorized by the creator (see docs/SOUL.md,
-    "Conversational self-modification"); every downstream gate is
-    unchanged, only the trigger source is new.
+    `propose_batch_fn`/`plan_fn`/`propose_evolve_fn`, when given, let
+    ordinary conversation trigger the real propose/patch/batch/plan/evolve
+    pipelines directly -- explicitly authorized by the creator (see
+    docs/SOUL.md, "Conversational self-modification"); every downstream
+    gate is unchanged, only the trigger source is new.
     """
     router = Router(SharedMemoryBus())
     router.register(EmotionAgent())
@@ -223,6 +238,7 @@ def build_router(
             propose_patch_fn=propose_patch_fn,
             propose_batch_fn=propose_batch_fn,
             plan_fn=plan_fn,
+            propose_evolve_fn=propose_evolve_fn,
         )
     )
     router.register(SkillsAgent())
@@ -293,6 +309,7 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("patch <path> <description>", "Revise existing source, test it fully, relaunch if it passes."),
     ("batch <count> <theme>", "Brainstorm and apply up to 20 focused skills for a theme."),
     ("plan <count> <goal>", "Brainstorm steps toward a goal and save them as tasks."),
+    ("evolve <count> <goal>", "Brainstorm and apply up to 10 REAL patches to core source (not skills)."),
     ("discover", "Scan for improvement areas and save them as tasks."),
     ("tasks", "List the persisted task backlog."),
     ("work", "Run one task from the backlog."),
@@ -382,6 +399,18 @@ def extract_plan_args(user_input: str, lowered: str) -> tuple[int, str] | None:
     if not lowered.startswith(PLAN_PREFIX):
         return None
     rest = user_input[len(PLAN_PREFIX):].strip()
+    parts = rest.split(None, 1)
+    if len(parts) < 2 or not parts[0].isdigit():
+        return (0, "")
+    return int(parts[0]), parts[1].strip()
+
+
+def extract_evolve_args(user_input: str, lowered: str) -> tuple[int, str] | None:
+    """Same shape and convention as extract_batch_args, for
+    'evolve <count> <goal>'."""
+    if not lowered.startswith(EVOLVE_PREFIX):
+        return None
+    rest = user_input[len(EVOLVE_PREFIX):].strip()
     parts = rest.split(None, 1)
     if len(parts) < 2 or not parts[0].isdigit():
         return (0, "")
@@ -665,6 +694,9 @@ def run_cli() -> None:
             cognition, skill_research, audit_gate, store, theme, count
         ),
         plan_fn=lambda goal, count: plan_goal(cognition, task_store, goal, count),
+        propose_evolve_fn=lambda goal, count: propose_patch_batch(
+            cognition, self_patch_agent, audit_gate, store, activity_log, goal, count
+        ),
     )
 
     activity_clock = ActivityClock()
@@ -835,6 +867,13 @@ def _run_cli_loop(
         if plan_args is not None:
             count, goal = plan_args
             plan_goal(cognition, task_store, goal, count)
+            continue
+        evolve_args = extract_evolve_args(user_input, lowered)
+        if evolve_args is not None:
+            count, goal = evolve_args
+            propose_patch_batch(
+                cognition, self_patch_agent, audit_gate, store, activity_log, goal, count
+            )
             continue
         if lowered == DISCOVER_COMMAND:
             discover_command(task_store, reflection_agent, store)
@@ -1340,6 +1379,172 @@ def _patch_commit_message(subject: str, rationale: str, test_summary: str) -> st
         "entire test suite run fresh in an isolated copy). Never pushed "
         "automatically -- see docs/SOUL.md, \"Self-patching source code.\""
     )
+
+
+_EVOLVE_BRAINSTORM_PROMPT = """List exactly {count} distinct, focused architectural improvements to this
+Python codebase, toward the goal: {goal}
+
+These are REAL changes to Sim's own core source, not new standalone
+skill files -- each one must name a specific file to create or revise
+under src/ (never under src/agents/skills/, that's a separate, lighter-
+weight pipeline for standalone add-ons) and a one-line description of
+the change. Keep each one small and targeted: a genuine, focused
+improvement to ONE file, not a rewrite, not several files at once.
+
+Files that already exist in this codebase (prefer revising one of these
+when it genuinely fits the goal; naming a new path under src/ is fine
+too, for something genuinely new):
+{files}
+
+Respond with ONLY a numbered list, one per line, in exactly this format:
+1. <repo-relative path under src/> :: <description>
+2. <repo-relative path under src/> :: <description>
+...
+{count}. <repo-relative path under src/> :: <description>
+No other text before or after the list."""
+
+_EVOLVE_TARGET_LINE = re.compile(r"^\s*\d+[.):]\s*(\S+)\s*::\s*(.+)$")
+
+
+def _list_source_files(repo_root: Path, limit: int = 200) -> list[str]:
+    """Every tracked .py file under src/, excluding src/agents/skills/
+    (that's propose/batch/plan's territory, not evolve's) -- context for
+    the brainstorm prompt so it names real files instead of guessing at
+    plausible-looking paths that don't exist.
+    """
+    src = repo_root / "src"
+    if not src.is_dir():
+        return []
+    files = sorted(
+        str(p.relative_to(repo_root))
+        for p in src.rglob("*.py")
+        if "skills" not in p.relative_to(src).parts
+    )
+    return files[:limit]
+
+
+def _parse_evolve_targets(text: str, expected_count: int) -> list[tuple[str, str]]:
+    pairs = []
+    for line in text.splitlines():
+        match = _EVOLVE_TARGET_LINE.match(line)
+        if not match:
+            continue
+        path, description = match.group(1).strip(), match.group(2).strip()
+        if path.startswith("src/") and "src/agents/skills/" not in path and description:
+            pairs.append((path, description))
+    return pairs[:expected_count]
+
+
+def propose_patch_batch(
+    cognition: CognitionRouter,
+    self_patch_agent: SelfPatchAgent,
+    audit_gate: AuditGate,
+    store: MemoryStore,
+    activity_log: ActivityLog,
+    goal: str,
+    count: int,
+    repo_root: Path | None = None,
+    do_relaunch: bool = True,
+) -> str:
+    """The creator's direct ask, "I want Sim to evolve itself, not just
+    add a bunch of new skill files" -- batch/plan only ever call
+    propose_skill, which apply_proposal hard-scopes to
+    src/agents/skills/ (new, standalone files, sandboxed smoke-tested).
+    This is the analogous batch pipeline for REAL patches: one bounded
+    LLM call brainstorms `count` (capped at MAX_EVOLVE_COUNT -- lower
+    than batch's, since each item here is meaningfully more expensive)
+    distinct architectural changes, each naming a real existing-or-new
+    file under src/ (never src/agents/skills/), then propose_self_patch
+    -- unchanged, same audit gate, same isolated full test suite, same
+    auto-commit -- runs once per target.
+
+    Every individual propose_self_patch call here uses do_relaunch=False:
+    relaunching after patch #1 would replace this process via os.execv
+    before patches #2..N ever ran. Instead this relaunches AT MOST ONCE,
+    after the whole batch, and rolls back EVERY commit from this batch
+    together (git_ops.revert_commits_since, not just the last one) if
+    the combined result fails the post-batch self-check -- a single bad
+    patch out of several must not leave the other N-1 stranded in a
+    half-reverted state.
+    """
+    if not 1 <= count <= MAX_EVOLVE_COUNT or not goal:
+        message = f"[usage: evolve <count 1-{MAX_EVOLVE_COUNT}> <goal>]"
+        _print_status(message)
+        return message
+
+    root = repo_root or Path.cwd()
+    print(f"🧬 [evolve] brainstorming {count} architectural change(s) toward {goal!r}...")
+    response = cognition.complete(
+        _EVOLVE_BRAINSTORM_PROMPT.format(
+            goal=goal, count=count, files="\n".join(_list_source_files(root)) or "(none found)"
+        )
+    )
+    if response.provider_name == "deterministic_fallback":
+        message = "[evolve] no real drafting intelligence available -- try 'patch <path> <description>' directly instead"
+        _print_status(message)
+        return message
+
+    targets = _parse_evolve_targets(response.text, count)
+    if not targets:
+        message = "[evolve] could not produce real file targets -- try a narrower goal, or 'patch <path> <description>' directly"
+        _print_status(message)
+        return message
+
+    print(f"🧬 [evolve] got {len(targets)} target(s):")
+    for path, description in targets:
+        print(f"   {path} -- {description}")
+
+    base_commit = current_commit_hash(root)
+    applied = 0
+    for path, description in targets:
+        print(style(f"— {path}: {description}", "cyan", "bold"))
+        result = propose_self_patch(
+            self_patch_agent,
+            audit_gate,
+            store,
+            activity_log,
+            path,
+            description,
+            repo_root=root,
+            max_attempts=DEFAULT_EVOLVE_MAX_ATTEMPTS,
+            do_relaunch=False,
+        )
+        if result.startswith("[APPLIED]"):
+            applied += 1
+
+    message = f"[evolve] {applied}/{len(targets)} architectural change(s) applied for goal {goal!r}"
+    _print_status(message)
+
+    if applied == 0 or not do_relaunch:
+        return message
+
+    print("🔍 [evolve] verifying the new code actually starts before relaunching into it...")
+    relaunch_result = relaunch()
+    if relaunch_result.succeeded:
+        return message  # unreachable in production -- a real relaunch never returns
+
+    print(style(f"🚫 [evolve] self-check failed: {relaunch_result.detail}", "red", "bold"))
+    if base_commit is not None:
+        revert_result = revert_commits_since(root, base_commit)
+        if revert_result.committed:
+            print(style(f"↩️  [evolve] reverted all {applied} change(s) from this batch", "yellow"))
+        else:
+            print(
+                style(
+                    f"⚠️  [evolve] revert also failed ({revert_result.output}) -- "
+                    "the applied commits are still there; review them by hand",
+                    "red",
+                    "bold",
+                )
+            )
+    else:
+        print(style("⚠️  [evolve] couldn't determine a base commit to revert to -- review by hand", "red", "bold"))
+    message = (
+        f"[REVERTED] evolve batch ({applied} change(s)) passed every mechanical check but "
+        f"failed to start as a live process: {relaunch_result.detail}"
+    )
+    _print_status(message)
+    return message
 
 
 def run_task(
