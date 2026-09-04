@@ -41,6 +41,13 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MAX_BYTES = 200_000
 DEFAULT_MAX_CALLS = 30
 DEFAULT_WINDOW_SECONDS = 3600.0
+# Python's default urllib User-Agent ("Python-urllib/x.y") is routinely
+# blocked as bot traffic by major sites (Wikipedia among them) -- this is
+# an honest, descriptive identification, not a spoofed browser string;
+# never change this to impersonate a browser to get past a block.
+DEFAULT_USER_AGENT = (
+    "Simorgh/1.0 (personal AI assistant; +https://github.com/saeedsk/Simorgh)"
+)
 
 
 class FetchRefused(Exception):
@@ -72,6 +79,7 @@ class WebFetchTool:
         max_bytes: int = DEFAULT_MAX_BYTES,
         max_calls: int = DEFAULT_MAX_CALLS,
         window_seconds: float = DEFAULT_WINDOW_SECONDS,
+        user_agent: str = DEFAULT_USER_AGENT,
         opener: Callable[..., Any] | None = None,
         resolver: Callable[..., Any] | None = None,
     ) -> None:
@@ -80,6 +88,7 @@ class WebFetchTool:
         self._max_bytes = max_bytes
         self._max_calls = max_calls
         self._window_seconds = window_seconds
+        self._user_agent = user_agent
         self._opener = opener or urllib.request.urlopen
         self._resolver = resolver or socket.getaddrinfo
 
@@ -87,8 +96,9 @@ class WebFetchTool:
         self._validate_url(url)
         self._enforce_rate_limit()
 
+        request = urllib.request.Request(url, headers={"User-Agent": self._user_agent})
         try:
-            with self._opener(url, timeout=self._timeout) as response:
+            with self._opener(request, timeout=self._timeout) as response:
                 status_code = getattr(response, "status", 200)
                 raw = response.read(self._max_bytes + 1)
         except FetchRefused:

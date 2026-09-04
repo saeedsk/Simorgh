@@ -10,6 +10,8 @@ This is a deliberate, explicit capability grant (see docs/EVOLUTION.md,
 - READ is read-only and confined to this repository's own tracked source
   (src/, docs/, tests/) -- no absolute paths, no `..` traversal, no
   credential-shaped filenames, bounded size. It cannot write anything.
+  Enforced by src/cognition/tool_protocol.py, shared with LogicAgent's
+  own tool loop so both loops enforce the exact same boundary.
 - TEST runs a candidate through the *real* AuditGate (the same denylist,
   adaptive-immunity memory, and sandboxed run that will apply for real),
   not a separate, weaker check -- so feedback during drafting matches
@@ -36,11 +38,11 @@ intelligence behind it in that case.
 
 from __future__ import annotations
 
-import ast
 import re
 from pathlib import Path
 
 from src.cognition.provider import CognitionRouter
+from src.cognition.tool_protocol import extract_code, is_valid_python, parse_marker, safe_read_file
 from src.orchestrator.audit import AuditGate, ModificationProposal
 
 _NOTE_TEMPLATE = '''"""Drafted skill: {topic}."""
@@ -98,10 +100,6 @@ _CONTINUE_HINT = (
     "your final code alone to finish."
 )
 
-_ALLOWED_READ_ROOTS = ("src", "docs", "tests")
-_MAX_READ_CHARS = 20_000
-_CREDENTIAL_LOOKING_NAMES = (".env", "secrets", "credentials")
-
 DEFAULT_MAX_TOOL_STEPS = 5
 
 
@@ -152,7 +150,7 @@ class SkillResearchAgent:
             if provider_name == "deterministic_fallback":
                 break  # no real drafting intelligence -- use the safe floor
 
-            kind, payload = _parse_directive(response.text)
+            kind, payload = parse_marker(response.text, ("READ", "DRAFT"))
             is_last_step = step == self._max_tool_steps - 1
             if kind == "read" and not is_last_step:
                 prompt += self._read_tool_turn(payload)
@@ -166,10 +164,10 @@ class SkillResearchAgent:
         if provider_name == "deterministic_fallback":
             code = _NOTE_TEMPLATE.format(topic=topic, content=final_text)
         else:
-            candidate = _extract_code(final_text)
+            candidate = extract_code(final_text)
             code = (
                 candidate
-                if candidate is not None and _is_valid_python(candidate)
+                if candidate is not None and is_valid_python(candidate)
                 else _NOTE_TEMPLATE.format(topic=topic, content=final_text)
             )
 
@@ -184,43 +182,12 @@ class SkillResearchAgent:
     def _read_tool_turn(self, raw_path: str) -> str:
         path = raw_path.strip()
         print(f"[research] reading {path!r} for context...")
-        content = self._read_file(path)
+        content = safe_read_file(self._repo_root, path)
         return f"\n\n[READ {path!r} result]\n{content}\n{_CONTINUE_HINT}"
-
-    def _read_file(self, raw_path: str) -> str:
-        rel = Path(raw_path)
-        if rel.is_absolute() or ".." in rel.parts:
-            return f"[refused: {raw_path!r} is not a safe relative path]"
-        if not rel.parts or rel.parts[0] not in _ALLOWED_READ_ROOTS:
-            return (
-                f"[refused: {raw_path!r} is outside the readable areas "
-                f"({', '.join(_ALLOWED_READ_ROOTS)})]"
-            )
-        if any(
-            name in part.lower() or part.lower().endswith(".key")
-            for part in rel.parts
-            for name in _CREDENTIAL_LOOKING_NAMES
-        ):
-            return f"[refused: {raw_path!r} looks like a credentials path]"
-
-        target = (self._repo_root / rel).resolve()
-        if self._repo_root != target and self._repo_root not in target.parents:
-            return f"[refused: {raw_path!r} resolves outside the repository]"
-        if not target.is_file():
-            return f"[refused: {raw_path!r} is not a file]"
-
-        try:
-            content = target.read_text(errors="replace")
-        except OSError as exc:
-            return f"[refused: could not read {raw_path!r}: {exc!r}]"
-
-        if len(content) > _MAX_READ_CHARS:
-            return content[:_MAX_READ_CHARS] + f"\n...[truncated, {len(content)} chars total]"
-        return content
 
     def _test_tool_turn(self, raw_code: str, subject: str, topic: str) -> str:
         print("[research] testing a candidate against the real audit gate...")
-        code = _extract_code(raw_code) or raw_code
+        code = extract_code(raw_code) or raw_code
         if self._audit_gate is None:
             report = "[no audit gate configured for this session -- cannot test]"
         else:
@@ -233,36 +200,6 @@ class SkillResearchAgent:
                 report = "REJECTED: " + "; ".join(verdict.reasons)
         print(f"[research] test result: {report.splitlines()[0]}")
         return f"\n\n[DRAFT test result]\n{report}\n{_CONTINUE_HINT}"
-
-
-_CODE_FENCE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL)
-
-
-def _parse_directive(text: str) -> tuple[str, str]:
-    stripped = text.strip()
-    if stripped[:5].upper() == "READ:":
-        return "read", stripped[5:].strip()
-    if stripped[:6].upper() == "DRAFT:":
-        return "draft", stripped[6:].strip()
-    return "final", stripped
-
-
-def _extract_code(text: str) -> str | None:
-    """Strip a markdown code fence if the model wrapped its answer in one,
-    despite being asked not to; otherwise use the text as-is.
-    """
-    match = _CODE_FENCE.search(text)
-    stripped = match.group(1) if match else text
-    stripped = stripped.strip()
-    return stripped or None
-
-
-def _is_valid_python(code: str) -> bool:
-    try:
-        ast.parse(code)
-    except SyntaxError:
-        return False
-    return True
 
 
 def _slugify(topic: str) -> str:

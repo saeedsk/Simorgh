@@ -37,6 +37,7 @@ from src.orchestrator.consolidation import run_consolidation
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
+from src.sandboxing.sandbox import SandboxExecutor, SubprocessSandbox
 from src.tools.web_fetch import FetchRefused, WebFetchTool
 
 EXIT_COMMANDS = {"exit", "quit"}
@@ -78,15 +79,28 @@ DEFAULT_CLAUDE_CODE_MAX_CALLS = int(os.environ.get("SIMORGH_CLAUDE_CODE_MAX_CALL
 def build_router(
     cognition: CognitionRouter | None = None,
     short_term: ShortTermMemory | None = None,
+    web_fetch: WebFetchTool | None = None,
+    sandbox: SandboxExecutor | None = None,
+    repo_root: Path | None = None,
 ) -> Router:
-    """`cognition`/`short_term` are optional so existing callers (and every
-    prior test) get exactly the old rule-based-only behavior when omitted
-    -- see LogicAgent's own fallback logic for why passing a CognitionRouter
-    here doesn't change anything unless a real provider actually answers.
+    """All params are optional so existing callers (and every prior test)
+    get exactly the old rule-based-only behavior when omitted -- see
+    LogicAgent's own fallback logic for why passing a CognitionRouter here
+    doesn't change anything unless a real provider actually answers, and
+    `web_fetch`/`sandbox` for why LogicAgent only offers FETCH/RUN tools
+    when they're actually given.
     """
     router = Router(SharedMemoryBus())
     router.register(EmotionAgent())
-    router.register(LogicAgent(cognition=cognition, short_term=short_term))
+    router.register(
+        LogicAgent(
+            cognition=cognition,
+            short_term=short_term,
+            web_fetch=web_fetch,
+            sandbox=sandbox,
+            repo_root=repo_root,
+        )
+    )
     router.register(SkillsAgent())
     return router
 
@@ -246,14 +260,17 @@ def run_cli() -> None:
     store = build_memory_store()
     short_term = ShortTermMemory()
     cognition, budget_guards = build_cognition_router(store)
-    router = build_router(cognition=cognition, short_term=short_term)
+    web_fetch = WebFetchTool(store)
+    sandbox = SubprocessSandbox()
+    router = build_router(
+        cognition=cognition, short_term=short_term, web_fetch=web_fetch, sandbox=sandbox
+    )
     outcome_log = OutcomeLog(store)
     reflection_agent = ReflectionAgent(outcome_log)
     audit_gate = AuditGate(memory=store)
     skill_research = SkillResearchAgent(cognition, audit_gate=audit_gate)
     interests = InterestTracker(store)
     health_monitor = HealthMonitor()
-    web_fetch = WebFetchTool(store)
     print(
         "Simorgh -- 'exit'/'quit' to leave, 'reflect' for outcome review, "
         "'propose <topic>' (or 'improve <topic>') to draft, audit, and apply a skill, "
