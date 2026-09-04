@@ -56,6 +56,7 @@ from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
 from src.memory.short_term import ShortTermMemory
 from src.orchestrator.activity_log import ActivityLog
+from src.orchestrator.autonomy import ActivityClock, AutonomyController
 from src.orchestrator.apply import (
     APPLIED_KIND,
     APPLIED_PATCH_KIND,
@@ -66,11 +67,24 @@ from src.orchestrator.apply import (
 from src.orchestrator.audit import REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
 from src.orchestrator.console_style import style
+from src.orchestrator.discovery import discover_improvements
+from src.orchestrator.git_ops import commit_applied_change, revert_last_commit
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
-from src.orchestrator.git_ops import commit_applied_change, revert_last_commit
 from src.orchestrator.self_patch import SelfPatchAgent, check_main_py_invariants, relaunch, run_isolated_test_suite
+from src.orchestrator.tasks import (
+    BLOCKED,
+    DONE,
+    FAILED,
+    IN_PROGRESS,
+    PATCH_TASK,
+    PENDING,
+    SKILL_TASK,
+    Task,
+    TaskStore,
+)
+from src.orchestrator.verification import verify_task_completion
 from src.sandboxing.sandbox import SandboxExecutor, SubprocessSandbox
 from src.tools.web_fetch import FetchRefused, WebFetchTool
 
@@ -94,6 +108,12 @@ SKILLS_COMMAND = "skills"
 BATCH_PREFIX = "batch "
 MAX_BATCH_COUNT = 20
 DEFAULT_BATCH_MAX_ATTEMPTS = 2
+PLAN_PREFIX = "plan "
+DISCOVER_COMMAND = "discover"
+TASKS_COMMAND = "tasks"
+WORK_COMMAND = "work"
+AUTONOMOUS_PREFIX = "autonomous "
+MAX_TASK_ATTEMPTS = 3
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 DEFAULT_HISTORY_PATH = Path.home() / ".simorgh" / "cli_history"
 HISTORY_LENGTH = 1000
@@ -121,6 +141,11 @@ _KNOWN_COMMAND_WORDS = (
     "use",
     SKILLS_COMMAND,
     "batch",
+    "plan",
+    DISCOVER_COMMAND,
+    TASKS_COMMAND,
+    WORK_COMMAND,
+    "autonomous",
     BUDGET_COMMAND,
     LOG_COMMAND,
     "exit",
@@ -267,6 +292,20 @@ _COMMANDS_HELP: tuple[tuple[str, str, str], ...] = (
         "apply/commit each one (max 20 -- each is a real, metered call).",
         "batch 8 digital-world interaction skills",
     ),
+    (
+        "plan <count> <goal>",
+        "Brainstorm N steps toward a goal and SAVE them as tasks (doesn't "
+        "run them yet -- see 'work').",
+        "plan 5 make the CLI more resilient to bad LLM output",
+    ),
+    ("discover", "Scan recent outcomes/takeaways for improvement areas and save them as tasks.", "discover"),
+    ("tasks", "List everything in the persisted task backlog.", "tasks"),
+    ("work", "Run exactly one task from the backlog (resumes an interrupted one first).", "work"),
+    (
+        "autonomous [on|off]",
+        "Control the idle-triggered autonomous loop, or show its status with no argument.",
+        "autonomous status",
+    ),
     ("pending", "List every applied skill and self-patch so far.", "pending"),
     ("skills", "List every applied skill you can actually run by name.", "skills"),
     (
@@ -347,6 +386,18 @@ def extract_batch_args(user_input: str, lowered: str) -> tuple[int, str] | None:
     if not lowered.startswith(BATCH_PREFIX):
         return None
     rest = user_input[len(BATCH_PREFIX):].strip()
+    parts = rest.split(None, 1)
+    if len(parts) < 2 or not parts[0].isdigit():
+        return (0, "")
+    return int(parts[0]), parts[1].strip()
+
+
+def extract_plan_args(user_input: str, lowered: str) -> tuple[int, str] | None:
+    """Same shape and convention as extract_batch_args, for
+    'plan <count> <goal>'."""
+    if not lowered.startswith(PLAN_PREFIX):
+        return None
+    rest = user_input[len(PLAN_PREFIX):].strip()
     parts = rest.split(None, 1)
     if len(parts) < 2 or not parts[0].isdigit():
         return (0, "")
@@ -565,16 +616,107 @@ def run_cli() -> None:
     self_patch_agent = SelfPatchAgent(cognition, audit_gate=audit_gate, activity_log=activity_log)
     interests = InterestTracker(store)
     health_monitor = HealthMonitor()
+    task_store = TaskStore(store)
+
+    activity_clock = ActivityClock()
+    autonomy = AutonomyController(
+        store,
+        activity_clock,
+        perform_action=lambda: _autonomous_action(
+            task_store, reflection_agent, store, skill_research, self_patch_agent,
+            audit_gate, activity_log, cognition,
+        ),
+    )
+
     _print_banner()
     _print_cognition_status(budget_guards)
+    _print_resume_notice(task_store)
+    print(
+        style(
+            f"🤖 autonomous self-improvement is ON -- idle "
+            f"{autonomy.idle_threshold_seconds:.0f}s triggers it (see 'autonomous status'/"
+            "'autonomous off')",
+            "dim",
+        )
+    )
+    autonomy.start()
     try:
         _run_cli_loop(
             router, store, short_term, activity_log, outcome_log, reflection_agent,
             audit_gate, skill_research, self_patch_agent, interests, health_monitor,
-            web_fetch, budget_guards, cognition,
+            web_fetch, budget_guards, cognition, task_store, activity_clock, autonomy,
         )
     finally:
+        autonomy.stop()
         _save_readline_history()
+
+
+def _autonomous_action(
+    task_store: TaskStore,
+    reflection_agent: ReflectionAgent,
+    store: MemoryStore,
+    skill_research: SkillResearchAgent,
+    self_patch_agent: SelfPatchAgent,
+    audit_gate: AuditGate,
+    activity_log: ActivityLog,
+    cognition: CognitionRouter,
+    repo_root: Path | None = None,
+) -> bool:
+    """One autonomous unit of work, called by AutonomyController.tick()
+    only once every gate (enabled, idle long enough, past cooldown,
+    under the daily cap) already passed: discover new improvement areas
+    if the backlog is empty ("once detect it became idle start
+    automatically improve itself"), otherwise work the next persisted
+    task -- through the exact same audited propose/patch/verify/commit
+    pipelines a human-typed command uses. Returns True if real work
+    happened, so a no-op tick never starts the cooldown.
+    """
+    if not task_store.unfinished():
+        created = discover_improvements(task_store, reflection_agent, store)
+        if created:
+            print(
+                style(
+                    f"\n🤖 [autonomous] idle -- discovered {len(created)} improvement area(s)",
+                    "magenta",
+                    "bold",
+                )
+            )
+            for task in created:
+                print(f"   + [{task.id}] ({task.discovered_via}) {task.description}")
+            print(style("> ", "cyan", "bold"), end="", flush=True)
+        return bool(created)
+
+    print(style("\n🤖 [autonomous] idle -- picking up the next task...", "magenta", "bold"))
+    work_on_next_task(
+        task_store,
+        skill_research,
+        self_patch_agent,
+        audit_gate,
+        store,
+        activity_log,
+        cognition,
+        repo_root=repo_root,
+        label="autonomous",
+    )
+    print(style("> ", "cyan", "bold"), end="", flush=True)
+    return True
+
+
+def _print_resume_notice(task_store: TaskStore) -> None:
+    unfinished = task_store.unfinished()
+    if not unfinished:
+        return
+    in_progress = [t for t in unfinished if t.status == IN_PROGRESS]
+    resumable_note = (
+        f" ({len(in_progress)} left mid-work by an earlier process)" if in_progress else ""
+    )
+    print(
+        style(
+            f"🗂️  {len(unfinished)} unfinished task(s) in the backlog{resumable_note} -- "
+            "'tasks' to see them, 'work' to continue",
+            "yellow",
+        )
+    )
 
 
 def _run_cli_loop(
@@ -592,6 +734,9 @@ def _run_cli_loop(
     web_fetch: WebFetchTool,
     budget_guards: dict[str, BudgetGuard],
     cognition: CognitionRouter,
+    task_store: TaskStore,
+    activity_clock: ActivityClock,
+    autonomy: AutonomyController,
 ) -> None:
     """The interactive read-eval-print loop, extracted out of run_cli so
     run_cli can guarantee readline history is saved on the way out
@@ -604,6 +749,7 @@ def _run_cli_loop(
         except (EOFError, KeyboardInterrupt):
             print()
             break
+        activity_clock.touch()
         if not user_input:
             continue
         user_input = strip_command_slash(user_input)
@@ -635,6 +781,27 @@ def _run_cli_loop(
         if batch_args is not None:
             count, theme = batch_args
             propose_skill_batch(cognition, skill_research, audit_gate, store, theme, count)
+            continue
+        plan_args = extract_plan_args(user_input, lowered)
+        if plan_args is not None:
+            count, goal = plan_args
+            plan_goal(cognition, task_store, goal, count)
+            continue
+        if lowered == DISCOVER_COMMAND:
+            discover_command(task_store, reflection_agent, store)
+            continue
+        if lowered == TASKS_COMMAND:
+            _print_tasks(task_store)
+            continue
+        if lowered == WORK_COMMAND:
+            work_on_next_task(
+                task_store, skill_research, self_patch_agent, audit_gate, store,
+                activity_log, cognition,
+            )
+            continue
+        if lowered == "autonomous" or lowered.startswith(AUTONOMOUS_PREFIX):
+            arg = user_input[len(AUTONOMOUS_PREFIX):].strip().lower() if lowered != "autonomous" else ""
+            _handle_autonomous_command(arg, autonomy)
             continue
         if lowered == LOG_COMMAND or lowered.startswith(LOG_COMMAND + " "):
             _print_activity_log(activity_log, user_input[len(LOG_COMMAND):].strip())
@@ -1067,34 +1234,46 @@ def propose_self_patch(
         print(style(f"⚠️  [git] {commit_result.output}", "yellow"))
 
     if do_relaunch and commit_result.committed:
-        print("🔍 [patch] verifying the new code actually starts before relaunching into it...")
-        relaunch_result = relaunch()
-        if not relaunch_result.succeeded:
-            # relaunch() only returns on failure (a real success replaces
-            # the process via os.execv and never gets here) -- the patch
-            # passed the audit gate and the whole test suite, yet still
-            # can't start as a live process. Undo it rather than leaving
-            # a broken commit sitting on top of a working history.
-            print(style(f"🚫 [patch] self-check failed: {relaunch_result.detail}", "red", "bold"))
-            revert_result = revert_last_commit(repo_root or Path.cwd())
-            if revert_result.committed:
-                print(style("↩️  [patch] reverted -- the working tree is back to its prior state", "yellow"))
-            else:
-                print(
-                    style(
-                        f"⚠️  [patch] revert also failed ({revert_result.output}) -- "
-                        "the applied commit is still there; review it by hand",
-                        "red",
-                        "bold",
-                    )
-                )
-            message = (
-                f"[REVERTED] {target} passed every mechanical check but failed to start as a "
-                f"live process: {relaunch_result.detail}"
-            )
+        reverted_message = _relaunch_or_rollback(repo_root, target)
+        if reverted_message is not None:
+            message = reverted_message
             _print_status(message)
 
     return message
+
+
+def _relaunch_or_rollback(repo_root: Path | None, target: Path) -> str | None:
+    """Shared by propose_self_patch (a human-typed `patch`) and the
+    autonomous task runner below -- relaunch() verifies the new code
+    actually starts (see src/orchestrator/self_patch.py) before
+    replacing this process with it; on failure, undo the just-made
+    commit (src/orchestrator/git_ops.py, revert_last_commit) rather than
+    leaving a broken commit sitting on top of a working history. Returns
+    a "[REVERTED] ..." message on failure, or None on the (unreachable
+    in production) success path -- a real relaunch replaces the process
+    outright and never returns here at all.
+    """
+    print("🔍 [patch] verifying the new code actually starts before relaunching into it...")
+    relaunch_result = relaunch()
+    if relaunch_result.succeeded:
+        return None
+    print(style(f"🚫 [patch] self-check failed: {relaunch_result.detail}", "red", "bold"))
+    revert_result = revert_last_commit(repo_root or Path.cwd())
+    if revert_result.committed:
+        print(style("↩️  [patch] reverted -- the working tree is back to its prior state", "yellow"))
+    else:
+        print(
+            style(
+                f"⚠️  [patch] revert also failed ({revert_result.output}) -- "
+                "the applied commit is still there; review it by hand",
+                "red",
+                "bold",
+            )
+        )
+    return (
+        f"[REVERTED] {target} passed every mechanical check but failed to start as a "
+        f"live process: {relaunch_result.detail}"
+    )
 
 
 def _patch_commit_message(subject: str, rationale: str, test_summary: str) -> str:
@@ -1107,6 +1286,218 @@ def _patch_commit_message(subject: str, rationale: str, test_summary: str) -> st
         "entire test suite run fresh in an isolated copy). Never pushed "
         "automatically -- see docs/SOUL.md, \"Self-patching source code.\""
     )
+
+
+def run_task(
+    task_store: TaskStore,
+    task: Task,
+    skill_research: SkillResearchAgent,
+    self_patch_agent: SelfPatchAgent,
+    audit_gate: AuditGate,
+    store: MemoryStore,
+    activity_log: ActivityLog,
+    cognition: CognitionRouter,
+    repo_root: Path | None = None,
+) -> tuple[str, bool]:
+    """Drive one persisted Task through the unchanged propose_skill/
+    propose_self_patch pipelines -- the task queue only decides WHAT to
+    work on and tracks WHETHER it succeeded; it is never a second,
+    weaker path around the audit gate, the test suite, or auto-commit
+    that a human-typed command goes through.
+
+    propose_self_patch is always called with do_relaunch=False here:
+    relaunching (and the self-check/rollback it implies) is deliberately
+    deferred to the caller, via the second return value, so the task's
+    DONE status is safely persisted *before* os.execv ever replaces this
+    process -- doing it the other way around would leave a resumed
+    process finding the task stuck IN_PROGRESS forever, having actually
+    already finished it. Returns (message, needs_relaunch).
+    """
+    task_store.update_status(task.id, IN_PROGRESS, attempt=True)
+
+    if task.kind == PATCH_TASK:
+        result = propose_self_patch(
+            self_patch_agent,
+            audit_gate,
+            store,
+            activity_log,
+            task.subject,
+            task.description,
+            repo_root=repo_root,
+            do_relaunch=False,
+        )
+    else:
+        result = propose_skill(
+            skill_research, audit_gate, store, task.description, repo_root=repo_root
+        )
+
+    if not result.startswith("[APPLIED]"):
+        next_status = BLOCKED if task.attempts + 1 >= MAX_TASK_ATTEMPTS else PENDING
+        task_store.update_status(task.id, next_status, note=result, attempt=False)
+        return result, False
+
+    verification = verify_task_completion(cognition, task, result)
+    if not verification.passed:
+        task_store.update_status(
+            task.id, BLOCKED, note=f"applied but failed review: {verification.explanation}"
+        )
+        print(style(f"🔬 [verify] looks off-target: {verification.explanation}", "yellow", "bold"))
+        return result, False
+
+    task_store.update_status(task.id, DONE, note=result)
+    return result, task.kind == PATCH_TASK
+
+
+def _next_task(task_store: TaskStore) -> Task | None:
+    """Prefer resuming a task an earlier process left IN_PROGRESS
+    (interrupted by a crash or relaunch mid-work) over starting a fresh
+    PENDING one -- the direct mechanism behind "on restart, find pending
+    task and resume."
+    """
+    unfinished = task_store.unfinished()
+    in_progress = [t for t in unfinished if t.status == IN_PROGRESS]
+    pending = [t for t in unfinished if t.status == PENDING]
+    ordered = in_progress + pending
+    return ordered[0] if ordered else None
+
+
+def work_on_next_task(
+    task_store: TaskStore,
+    skill_research: SkillResearchAgent,
+    self_patch_agent: SelfPatchAgent,
+    audit_gate: AuditGate,
+    store: MemoryStore,
+    activity_log: ActivityLog,
+    cognition: CognitionRouter,
+    repo_root: Path | None = None,
+    label: str = "work",
+) -> str:
+    """Pick and run exactly one task from the persisted backlog. `label`
+    lets the autonomous loop (src/orchestrator/autonomy.py) reuse this
+    with an "[autonomous]" prefix instead of "[work]", so a
+    self-triggered action is never visually confused with one the
+    creator typed -- Directive 8, concretely.
+    """
+    task = _next_task(task_store)
+    if task is None:
+        message = f"[{label}] nothing pending -- try 'discover' or 'plan <count> <goal>'"
+        _print_status(message)
+        return message
+
+    print(style(f"🏗️  [{label}] {task.description}", "cyan", "bold"))
+    result, needs_relaunch = run_task(
+        task_store,
+        task,
+        skill_research,
+        self_patch_agent,
+        audit_gate,
+        store,
+        activity_log,
+        cognition,
+        repo_root=repo_root,
+    )
+    if needs_relaunch:
+        target = Path(repo_root or Path.cwd()) / task.subject
+        reverted_message = _relaunch_or_rollback(repo_root, target)
+        if reverted_message is not None:
+            task_store.update_status(task.id, BLOCKED, note=reverted_message)
+            result = reverted_message
+            _print_status(result)
+    return result
+
+
+def discover_command(
+    task_store: TaskStore, reflection_agent: ReflectionAgent, store: MemoryStore
+) -> str:
+    created = discover_improvements(task_store, reflection_agent, store)
+    if not created:
+        message = "[discover] no new improvement areas found right now"
+        _print_status(message)
+        return message
+    print(style(f"🔭 [discover] found {len(created)} improvement area(s):", "magenta", "bold"))
+    for task in created:
+        print(f"   + [{task.id}] ({task.discovered_via}) {task.description}")
+    message = f"[discover] {len(created)} new task(s) added -- see 'tasks', or 'work' to start"
+    _print_status(message)
+    return message
+
+
+def plan_goal(cognition: CognitionRouter, task_store: TaskStore, goal: str, count: int) -> str:
+    """Break a broad goal into `count` (max MAX_BATCH_COUNT) concrete,
+    focused steps -- reusing the same brainstorm prompt 'batch' uses --
+    and persist each as a PENDING Task rather than executing it
+    immediately. This is the "plan, break down the required work, save
+    them" step; 'work' (or the autonomous loop) actually executes a
+    saved task later, through the exact same audited pipelines
+    everything else goes through.
+    """
+    if not 1 <= count <= MAX_BATCH_COUNT or not goal:
+        message = f"[usage: plan <count 1-{MAX_BATCH_COUNT}> <goal>]"
+        _print_status(message)
+        return message
+
+    print(f"🧠 [plan] brainstorming {count} step(s) toward {goal!r}...")
+    response = cognition.complete(_BATCH_BRAINSTORM_PROMPT.format(theme=goal, count=count))
+    if response.provider_name == "deterministic_fallback":
+        message = "[plan] no real drafting intelligence available -- try 'propose <topic>' directly instead"
+        _print_status(message)
+        return message
+
+    topics = _parse_numbered_list(response.text, count)
+    if not topics:
+        message = "[plan] could not produce a step list -- try a narrower goal"
+        _print_status(message)
+        return message
+
+    parent = task_store.add(goal, SKILL_TASK, discovered_via="user")
+    for topic in topics:
+        task = task_store.add(topic, SKILL_TASK, discovered_via="planner", parent_id=parent.id)
+        print(f"   + [{task.id}] {topic}")
+
+    message = (
+        f"[plan] saved {len(topics)} step(s) toward {goal!r} -- "
+        "'work' to start on them, or 'tasks' to see them all"
+    )
+    _print_status(message)
+    return message
+
+
+_STATUS_ICONS = {PENDING: "⏳", IN_PROGRESS: "🏗️ ", BLOCKED: "🚫", DONE: "✅", FAILED: "❌"}
+
+
+def _print_tasks(task_store: TaskStore) -> None:
+    tasks = task_store.unfinished()
+    print(style(f"🗂️  Task backlog ({len(tasks)} unfinished)", "magenta", "bold"))
+    if not tasks:
+        print(style("  (nothing pending -- try 'discover' or 'plan <count> <goal>')", "dim"))
+        return
+    for task in tasks:
+        icon = _STATUS_ICONS.get(task.status, "•")
+        sub = f" ({task.subject})" if task.subject else ""
+        note = f" — {task.note}" if task.note else ""
+        print(f"  {icon} [{task.id}] {task.description}{sub}{note}")
+
+
+def _handle_autonomous_command(arg: str, autonomy: AutonomyController) -> None:
+    """`autonomous on`/`off`/`status` -- live control over the idle-
+    triggered loop, so it's never a black box: 'status' reports exactly
+    which gate (disabled, still active, in cooldown, at the daily cap)
+    is currently holding it back, not just a yes/no.
+    """
+    if arg == "off":
+        autonomy.enabled = False
+        _print_status("[autonomous] disabled -- Sim will only act when you type a command")
+        return
+    if arg == "on":
+        autonomy.enabled = True
+        _print_status("[autonomous] enabled")
+        return
+    idle_for = autonomy.idle_seconds()
+    print(style("🤖 Autonomous self-improvement", "magenta", "bold"))
+    print(f"  enabled: {autonomy.enabled}")
+    print(f"  idle for: {idle_for:.0f}s (threshold: {autonomy.idle_threshold_seconds:.0f}s)")
+    print(f"  actions today: {autonomy.actions_today()}/{autonomy.max_actions_per_day}")
+    print(f"  ready to act right now: {autonomy.ready_to_act()}")
 
 
 def _print_pending(store: MemoryStore) -> None:
