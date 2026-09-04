@@ -28,6 +28,12 @@ Bounded on top of (never instead of) every existing guard:
   durably logged) so it is never mistaken for something a human asked
   for -- Directive 8 (Transparency), made concrete for the one capability
   class where confusing the two would matter most.
+- `max_consecutive_failures` (a circuit breaker, see the constant's own
+  docstring below): if the last `max_consecutive_failures` actions in a
+  row all failed, the loop disables itself and prints a loud notice
+  instead of quietly grinding through the rest of the daily cap on a
+  systematically broken pipeline. Requires `autonomous on` (which resets
+  the streak) to resume -- a human checkpoint, not a silent retry.
 """
 
 from __future__ import annotations
@@ -45,6 +51,19 @@ DEFAULT_IDLE_THRESHOLD_SECONDS = 300.0
 DEFAULT_ACTION_COOLDOWN_SECONDS = 600.0
 DEFAULT_POLL_INTERVAL_SECONDS = 30.0
 DEFAULT_MAX_ACTIONS_PER_DAY = 20
+# A circuit breaker, not a metric to tune finely: real-world guidance on
+# self-improving agents converges on the same shape regardless of the
+# exact number -- a behavioral log, a rollback path (already covered by
+# revert_last_commit/revert_commits_since), and a human checkpoint
+# trigger that pauses the loop and routes to review once failures start
+# looking systematic rather than incidental. Every existing gate below
+# already bounds a single bad action (the audit gate, the isolated test
+# suite, the relaunch self-check); this bounds a *pattern* across many
+# actions that individually passed rate/cost limits but kept failing --
+# the daily cap alone would otherwise let a systematically broken
+# pipeline burn its entire budget on failures, then quietly try again
+# tomorrow, for as long as nobody happens to check `autonomous status`.
+DEFAULT_MAX_CONSECUTIVE_FAILURES = 5
 
 
 class ActivityClock:
@@ -87,6 +106,8 @@ class AutonomyController:
         action_cooldown_seconds: float = DEFAULT_ACTION_COOLDOWN_SECONDS,
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         max_actions_per_day: int = DEFAULT_MAX_ACTIONS_PER_DAY,
+        last_action_succeeded: Callable[[], bool | None] | None = None,
+        max_consecutive_failures: int = DEFAULT_MAX_CONSECUTIVE_FAILURES,
     ) -> None:
         self._store = store
         self._clock = clock
@@ -96,9 +117,23 @@ class AutonomyController:
         self.action_cooldown_seconds = action_cooldown_seconds
         self.poll_interval_seconds = poll_interval_seconds
         self.max_actions_per_day = max_actions_per_day
+        self._last_action_succeeded = last_action_succeeded
+        self.max_consecutive_failures = max_consecutive_failures
+        self._consecutive_failures = 0
         self._last_action_at = 0.0
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+
+    @property
+    def consecutive_failures(self) -> int:
+        return self._consecutive_failures
+
+    def reset_failure_streak(self) -> None:
+        """Called when the creator explicitly re-enables the loop after
+        a circuit-breaker pause -- a fresh start, not an immediate
+        re-trip on the very next failure.
+        """
+        self._consecutive_failures = 0
 
     def start(self) -> None:
         if self._thread is not None:
@@ -152,7 +187,31 @@ class AutonomyController:
             return False
         if did_something:
             self._last_action_at = time.time()
-            self._store.remember(ACTION_KIND, "autonomous action taken")
+            succeeded = None
+            if self._last_action_succeeded is not None:
+                try:
+                    succeeded = self._last_action_succeeded()
+                except Exception:  # noqa: BLE001 -- a broken outcome
+                    # signal must never itself take the loop down; treat
+                    # it as "no signal" and keep going.
+                    succeeded = None
+            self._store.remember(ACTION_KIND, "autonomous action taken", succeeded=succeeded)
+            if succeeded is False:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self.max_consecutive_failures:
+                    self.enabled = False
+                    print(
+                        style(
+                            f"🚨 [autonomous] paused itself after {self._consecutive_failures} "
+                            "consecutive failed actions -- this looks systematic, not "
+                            "incidental. Review recent activity ('log'), then 'autonomous on' "
+                            "to resume once the underlying issue is understood.",
+                            "red",
+                            "bold",
+                        )
+                    )
+            elif succeeded is True:
+                self._consecutive_failures = 0
         return did_something
 
     def _loop(self) -> None:

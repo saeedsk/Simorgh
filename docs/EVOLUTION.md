@@ -698,20 +698,46 @@ Built:
     (`InterestTracker(store, feed=RssWorldFeed(web_fetch))`); the stale
     "no real WorldFeed configured yet" message in `curious`'s empty-
     result path is gone.
+48. **A failure-streak circuit breaker on the autonomous idle loop**
+    (`src/orchestrator/autonomy.py`, `AutonomyController`), prompted by
+    reading up on what current guidance says a self-improving agent
+    architecture needs: a behavioral log (already had one --
+    `ActivityLog`/`activity_log`), a rollback path (already had one --
+    `revert_last_commit`/`revert_commits_since`), and a human checkpoint
+    trigger -- a defined threshold that pauses the loop and routes to
+    review once failures look systematic rather than incidental. That
+    third piece was missing: every existing gate (audit gate, isolated
+    test suite, relaunch self-check, daily action cap) bounds a single
+    bad action, but nothing previously noticed a *pattern* across many
+    individually-rate-limited actions that all kept failing -- a
+    systematically broken pipeline would just quietly burn its daily cap
+    on failures and try again tomorrow, for as long as nobody happened
+    to check `autonomous status`. `last_action_succeeded` (an optional
+    injected callback, backward-compatible -- omitting it leaves the
+    breaker permanently untripped, unchanged behavior for any existing
+    caller) reports whether the last autonomous action's own pipeline
+    said `[APPLIED]`; `DEFAULT_MAX_CONSECUTIVE_FAILURES` consecutive
+    `False`s disables the loop (`enabled = False`) and prints a loud,
+    unmissable notice. A `True` anywhere resets the streak -- it's
+    consecutive failures that matter, not a lifetime total. `autonomous
+    on` (typed by the creator) resets the streak on manual re-enable, so
+    it's a real checkpoint, not an automatic retry with extra steps.
+    `autonomous status` now also reports the current streak when nonzero.
 
 Still ahead, roughly in order:
 
-48. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+49. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-49. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+50. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-50. *Automatic* registration of an applied skill as a live `Router`
+51. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
     invocation rather than done reflexively).
-51. The Autonomous Idle Loop's default thresholds (300s idle, 600s
-    cooldown, 20 actions/day, and now `MAX_BLOCKED_RETRY_ATTEMPTS`=9) are
-    judgment calls, not values derived from
+52. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+    cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and now
+    `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
+    derived from
     real operating experience -- worth revisiting once there's an actual
     track record. There is also no digest/summary surface for autonomous
     activity specifically yet -- reviewing it requires actively checking

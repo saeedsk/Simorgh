@@ -1615,6 +1615,69 @@ class TestAutonomousAction(unittest.TestCase):
         self.assertTrue(did_something)
         self.assertEqual(task_store.all()[0].status, DONE)
 
+    def test_outcome_sink_receives_true_on_applied_task(self):
+        from src.main import _autonomous_action
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        task_store.add("rocketry", SKILL_TASK)
+        outcomes = []
+
+        _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+            outcome_sink=outcomes.append,
+        )
+
+        self.assertEqual(outcomes, [True])
+
+    def test_outcome_sink_receives_false_when_task_is_rejected(self):
+        from src.main import _autonomous_action
+
+        class AlwaysDenyAuditGate(AuditGate):
+            def review(self, proposal):
+                from src.orchestrator.audit import AuditVerdict
+
+                return AuditVerdict(
+                    approved_by_automation=False,
+                    requires_human_approval=False,
+                    reasons=["denied for the test"],
+                )
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        task_store.add("rocketry", SKILL_TASK)
+        outcomes = []
+
+        _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AlwaysDenyAuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+            outcome_sink=outcomes.append,
+        )
+
+        self.assertEqual(outcomes, [False])
+
+    def test_outcome_sink_not_called_on_a_pure_discovery_tick(self):
+        from src.main import _autonomous_action
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        outcomes = []
+
+        _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+            outcome_sink=outcomes.append,
+        )
+
+        self.assertEqual(outcomes, [])
+
 
 if __name__ == "__main__":
     unittest.main()

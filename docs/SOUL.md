@@ -544,6 +544,17 @@ Bounded on top of, never instead of, every existing guard:
   switch, and `autonomous` with no argument reports exactly which gate
   -- disabled, still idle-waiting, in cooldown, at the daily cap -- is
   currently holding it back, not just whether it's running.
+- **A failure-streak circuit breaker** (default: 5 consecutive
+  failures): every gate above bounds a single bad action, but nothing
+  previously noticed a *pattern* across many individually-rate-limited
+  actions that all kept failing -- a systematically broken pipeline
+  would just quietly burn its daily cap on failures and try again
+  tomorrow, for as long as nobody happened to check `autonomous status`.
+  Once that many autonomous actions in a row fail, the loop disables
+  itself and prints a loud notice instead; a single success anywhere
+  resets the streak, and `autonomous on` (typed by the creator) also
+  resets it on manual re-enable -- a real human checkpoint, not an
+  automatic retry with extra steps.
 
 What did *not* change: the denylist, the protected-subjects list, the
 network-access boundary, and `git push` remaining exclusively the
@@ -619,9 +630,10 @@ were judgment calls made to keep the project moving, not settled truths:
   role, a verifiable identity/credential) once Simorgh operates somewhere
   that impersonation is a realistic risk.
 - The Autonomous Idle Loop's default thresholds (300s idle, 600s
-  cooldown, 20 actions/day) were reasonable starting judgment calls, not
-  values derived from real operating experience -- once there's a real
-  track record of what it actually does while idle, these should be
+  cooldown, 20 actions/day, 5 consecutive failures before the circuit
+  breaker trips) were reasonable starting judgment calls, not values
+  derived from real operating experience -- once there's a real track
+  record of what it actually does while idle, these should be
   revisited, tightened or loosened based on evidence rather than guess.
 - Whether there should eventually be a lighter-weight review surface for
   autonomous actions specifically (e.g. a daily digest) beyond `log`/
