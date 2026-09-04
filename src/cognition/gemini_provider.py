@@ -58,11 +58,14 @@ class GeminiProvider(LLMProvider):
         if not self._api_key:
             raise ProviderUnavailable("no Gemini API key configured (GEMINI_API_KEY)")
 
-        client = self._get_client()
         try:
+            client = self._get_client()
             response = client.models.generate_content(model=self._model, contents=prompt)
-        except Exception as exc:  # noqa: BLE001 -- any failure here must
-            # degrade to the next provider, never crash the caller
+        except Exception as exc:  # noqa: BLE001 -- any failure here (a
+            # missing google-genai install, a network error, an API error,
+            # etc.) must degrade to the next provider, never crash the
+            # caller -- this used to only wrap the API call, not client
+            # construction/import, which let ImportError escape uncaught
             raise ProviderUnavailable(f"Gemini request failed: {exc!r}") from exc
 
         usage = getattr(response, "usage_metadata", None)

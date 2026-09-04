@@ -129,6 +129,16 @@ class TestComplete(unittest.TestCase):
         with self.assertRaises(ProviderUnavailable):
             provider.complete("hello")
 
+    def test_unexpected_runner_exception_raises_provider_unavailable(self):
+        # Regression coverage: any failure from the runner call, not just
+        # the two documented subprocess exception types, must degrade to
+        # ProviderUnavailable -- see the identical fix in gemini_provider.py
+        runner = FakeRunner(exception=ValueError("unexpected"))
+        provider = self._provider(runner)
+
+        with self.assertRaises(ProviderUnavailable):
+            provider.complete("hello")
+
     def test_missing_cost_field_defaults_to_zero(self):
         runner = FakeRunner(completed=_completed(stdout=json.dumps({"result": "ok"})))
         provider = self._provider(runner)

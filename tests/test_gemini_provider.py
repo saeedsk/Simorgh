@@ -87,6 +87,21 @@ class TestGeminiProviderComplete(unittest.TestCase):
         with self.assertRaises(ProviderUnavailable):
             provider.complete("hi")
 
+    def test_complete_wraps_client_construction_failure_as_provider_unavailable(self):
+        # Regression test: _get_client() (the lazy `from google import
+        # genai` import + client construction) used to run outside the
+        # try/except in complete(), so a missing/broken google-genai
+        # install raised a raw ImportError straight out of complete(),
+        # uncaught by CognitionRouter -- breaking the whole fallback chain
+        # instead of degrading to the next provider.
+        provider = GeminiProvider(api_key="k")
+        provider._get_client = mock.Mock(
+            side_effect=ImportError("cannot import name 'genai' from 'google'")
+        )
+
+        with self.assertRaises(ProviderUnavailable):
+            provider.complete("hi")
+
     def test_missing_usage_metadata_defaults_to_zero_tokens(self):
         response = FakeResponse("ok")
         response.usage_metadata = None
