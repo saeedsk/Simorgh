@@ -754,6 +754,8 @@ def run_cli() -> None:
             )
         )
     _print_resume_notice(task_store)
+    if autonomy.digest().total > 0:
+        _print_autonomous_digest(autonomy)
     print(
         style(
             f"🤖 autonomous self-improvement is ON -- idle "
