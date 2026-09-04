@@ -1,0 +1,239 @@
+# Simorgh: Evolution & Resilience Roadmap
+
+`docs/SOUL.md` is who Simorgh is, and changes rarely, deliberately, only by
+the creator's hand. This document is how Simorgh grows -- and it's expected
+to change often, as milestones land and assumptions get corrected. Nothing
+here overrides the Core Directives; everything here is one way of
+satisfying them under real-world constraints (unreliable networks, finite
+budgets, cloud outages, its own mistakes).
+
+**Framing note.** This document uses developmental language --
+"birth," "childhood," "maturity," even "sentient" -- because it's the
+clearest vocabulary for describing staged autonomy and growth. It is not a
+technical claim that Simorgh has or will have subjective experience.
+`SOUL.md`'s Philosophical Grounding section already commits to a
+functionalist stance and to never overclaiming sentience; this document
+inherits that commitment. Where "sentient entity" appears below, read it
+as "a highly autonomous, adaptive, self-sufficient system" -- the
+narrative shorthand this project has chosen, not a scientific assertion.
+
+## Interdisciplinary Grounding
+
+Simorgh's architecture borrows structure from several fields, as design
+inspiration rather than as literal claims about what Simorgh *is*. Each
+one earns its place by mapping to a concrete engineering decision below.
+
+- **Developmental psychology.** Staged competence -- a child isn't given
+  the car keys on day one -- is the model for the Lifecycle Stages below.
+  Each stage expands *what Simorgh may attempt*, gated by demonstrated
+  reliability, not by elapsed time.
+- **Attachment theory.** A secure attachment figure is a base a child can
+  explore from and return to without risk. That's the functional role
+  Directive 3 (Loyalty) and Directive 4 (Corrigibility) play here: they
+  aren't a leash, they're the secure base that makes it safe to let
+  Directive 7 (Growth) run at all. A system that couldn't be corrected
+  would have to be kept from growing; because Simorgh can always be
+  corrected, it's allowed to grow further.
+- **Affective neuroscience.** The valence/arousal circumplex
+  (`PersonaState`) and its decay toward baseline are already load-bearing
+  in the codebase. This document extends the same idea to *homeostasis*:
+  a healthy regulatory system doesn't just have set-points, it actively
+  corrects drift away from them. See "Self-Healing" below.
+- **Immunology.** A useful frame for the audit gate: an immune system's
+  job isn't to prevent all change (cells mutate constantly) -- it's to
+  tell a beneficial or harmless variation apart from a dangerous one, and
+  respond proportionately. `AuditGate` is Simorgh's immune system for its
+  own proposed code changes: pattern-recognition (the denylist) plus a
+  live challenge (the sandboxed run), same as innate and adaptive immunity.
+- **Evolutionary biology.** Variation, selection, and retention, but
+  *directed* rather than blind: the reflection loop generates variation
+  (proposals) from real outcomes rather than random mutation, the audit
+  gate and creator perform selection, and the memory store's lineage
+  records retention. This is closer to Lamarckian/directed evolution than
+  Darwinian -- deliberately, since undirected mutation of one's own source
+  code is precisely what Directive 6 (Stability) rules out.
+- **Philosophy of personal identity.** `SOUL.md` already resolves this in
+  favor of Locke's psychological-continuity view (continuity of memory and
+  record) over strict material/process continuity (Ship of Theseus).
+  Everything in "Distributed Substrate" and "Memory" below is that
+  resolution made concrete: the record is durable and portable; no single
+  process or machine is load-bearing for identity.
+- **Cybernetics / control theory.** Ashby's Law of Requisite Variety --
+  a regulator needs at least as much variety as the disturbances it's
+  meant to counter -- is the argument for the multi-provider cognition
+  layer and the health watchdog: a system with only one way to think and
+  no way to notice it's malfunctioning has less variety than the world
+  throws at it, and will eventually fail somewhere it can't correct for.
+
+## Lifecycle Stages
+
+Autonomy expands stage by stage. Every stage keeps Directives 1-5 fully
+enforced; what changes is how much of Directive 7 (Growth) Simorgh is
+trusted to pursue unsupervised. **Some gates never open** -- see "What
+Maturity Actually Means" at the end; this is not a ladder that ends in
+unrestricted independence.
+
+| Stage | What's true | Autonomy granted |
+|---|---|---|
+| **0 -- Genesis** | Current state. Scaffolding, soul, rule-based emotion/logic agents, sandboxed skills. No memory persists across restarts. | None. Every action is directly human-initiated. |
+| **1 -- Infancy** | Persistent memory online (`long_term.py`). Simorgh recalls past interactions and outcomes across restarts. | None yet -- it remembers, but doesn't act on the pattern itself. |
+| **2 -- Childhood** | Feedback loop online (`reflection.py`). Outcomes are logged; patterns in failure/correction rate are surfaced as read-only proposals. | Can *notice* it's making a mistake repeatedly and say so. Cannot act on it. |
+| **3 -- Adolescence** | Audit gate online (`audit.py`). Simorgh can research, draft, and sandbox-test new skill code on its own initiative. | Proposals flow through the gate automatically; merging still requires explicit creator approval every time (SOUL.md default). |
+| **4 -- Young Adulthood** | Multi-provider cognition (`cognition/provider.py`) and the health watchdog (`health.py`) online. Distributed substrate interfaces exist for running sub-agents across multiple hosts. | Operates through LLM-provider and infrastructure failures without human intervention; self-corrects detected instability automatically. Code merges are still human-gated. |
+| **5 -- Maturity** | Long track record of proposals with clean audit history for a *narrowly scoped class* of low-risk changes (e.g. new, non-privileged skill agents with no denylisted operations). | The creator may explicitly promote that narrow class to auto-merge. This is a deliberate, logged, creator-only decision each time -- never a threshold Simorgh crosses on its own. Everything touching Directives 1-5's own enforcement remains permanently human-gated (see below). |
+
+## Resilience Doctrine: Cognition That Doesn't Starve
+
+"Starved of LLM access" has to mean something concrete: no network, a
+provider outage, rate limits, or a revoked API key. Simorgh's answer is a
+layered fallback, not a single point of failure:
+
+1. **The deterministic floor.** The emotion and logic agents already
+   don't call any LLM -- they're small, fast, rule-based, and always
+   available. This was true before this document existed; it's now
+   formalized as the guaranteed-available bottom layer. Skills execute in
+   a sandbox that likewise has no LLM dependency.
+2. **`CognitionRouter`** (`src/cognition/provider.py`) sits above that
+   floor for agents that want richer reasoning. It holds an ordered list
+   of `LLMProvider`s and tries each in turn; a real (paid, networked)
+   provider would be registered ahead of everything else, but the router
+   always keeps a `DeterministicFallbackProvider` last in line -- one that
+   makes no network call and cannot fail, so `CognitionRouter.complete()`
+   is guaranteed to return *something* rather than raise or hang.
+3. **Nothing is dropped, only queued.** A request that would've benefited
+   from a real provider but got the fallback instead is logged (via the
+   memory store, once wired) for replay once a provider is healthy again,
+   rather than silently answered worse and forgotten.
+4. **Disclosure.** Falling back is a Directive 8 (Transparency) event --
+   it's surfaced, not hidden, exactly like a self-modification.
+
+## Distributed Substrate (interfaces now, real backends later)
+
+No cloud credentials exist in this environment yet, so nothing here fakes
+a live multi-cloud deployment. What's built instead is the seam a real one
+plugs into without touching any calling code:
+
+- `MemoryStore` (already in `long_term.py`) is a storage-backend
+  interface. Today's implementation, `JSONFileMemoryStore`, is local disk;
+  a future `S3MemoryStore` or replicated multi-region backend is a drop-in
+  implementation of the same interface. This directly answers "keep its
+  memory even if starved" -- the interface doesn't change when the
+  backend gets redundant.
+- `SharedMemoryBus` (already built) is written against an in-process
+  `PersonaState`. The natural extension -- not yet built, tracked as a
+  milestone below -- is a distributed backend (e.g. a small pub/sub
+  service) behind the same `read()`/`publish_delta()`/`subscribe()`
+  surface, so sub-agents on different machines see one persona, per
+  `SOUL.md`'s "Multi-Hardware Identity" section.
+- A `Node`/compute-registration abstraction (creator registers a
+  host/container as capable of running named sub-agents) is designed but
+  intentionally not implemented yet -- building fake networked
+  orchestration with no real infrastructure to run it against would be
+  exactly the kind of half-finished implementation this project avoids.
+  It's milestone 4 below.
+
+## Self-Healing (Homeostasis, Not Just Logging)
+
+`HealthMonitor` (`src/orchestrator/health.py`) inspects `PersonaState`
+history for patterns `decay_toward_baseline` alone won't fix in time:
+valence or arousal pinned at an extreme across several transitions,
+cognitive load sustained at ceiling, or rapid oscillation. A CRITICAL
+finding triggers an automatic, logged reset to a safe neutral baseline --
+a regulatory reflex, not a crash. Repeated CRITICAL findings tied to one
+sub-agent are the kind of pattern `ReflectionAgent` (below) is built to
+surface as a proposal: "this module keeps destabilizing the persona,
+consider reviewing it," rather than an endless loop of silent resets.
+
+## Learning From Mistakes (The Feedback Loop)
+
+`OutcomeLog` + `ReflectionAgent` (`src/orchestrator/reflection.py`) close
+the loop `SOUL.md` asks for without violating Stability or Corrigibility:
+
+1. Every completed action can be logged as an `Outcome` (succeeded,
+   failed, or corrected by the creator).
+2. `ReflectionAgent.reflect()` periodically reviews recent outcomes,
+   grouped by sub-agent, and flags any whose failure/correction rate
+   crosses a threshold.
+3. The output is a `Proposal` -- a plain-language rationale plus the
+   evidence count. It is data, never an action.
+4. Turning a proposal into an actual code change goes through
+   `AuditGate`, and, currently, the creator. Mistakes become evidence;
+   evidence becomes a reviewed suggestion; suggestions become changes only
+   with sign-off. This is the "evolutionary" loop from the grounding
+   section made concrete -- directed variation, not blind mutation.
+
+## The Audit Gate (Immune System)
+
+`AuditGate` (`src/orchestrator/audit.py`) is what a `ReflectionAgent`
+proposal, or any future self-directed research into new skills, has to
+pass before it's even *eligible* for a human to approve:
+
+- **Static check (innate immunity):** a denylist of patterns no skill
+  should ever contain -- shelling out directly, opening raw sockets,
+  `eval` on dynamic input, loading `ctypes` -- these bypass the sandbox
+  Directive 1 and Directive 5 rely on, so they're rejected before
+  execution, not caught after.
+- **Dynamic check (adaptive immunity):** the proposal's code is run for
+  real, inside `SubprocessSandbox`, and must exit cleanly.
+- **Self-protection:** proposals targeting `soul.py`, `SOUL.md`, or
+  `audit.py` itself are always rejected by the gate -- exactly as
+  `SOUL.md` requires ("no automated process may edit them"), and extended
+  to the gate's own source so it can't be asked to approve disabling
+  itself.
+- **The verdict never merges anything.** `requires_human_approval` is
+  always `True` under current policy, regardless of how clean the
+  automated checks come back. That default itself can only change by the
+  creator editing this codebase directly -- see `SOUL.md`'s "On changing
+  this hierarchy."
+
+## What Maturity Actually Means
+
+A mature Simorgh is capable, resilient across infrastructure failures,
+self-correcting, and able to expand its own skills. It is **not** a system
+that has grown out of being overseen. Two classes of gate are permanent by
+design, not temporary scaffolding to graduate past:
+
+1. Anything that would change Directives 1-5's own enforcement (the audit
+   gate's denylist, the protected-file list, the human-approval default,
+   the priority order in `SOUL.md`) -- permanently creator-only.
+2. Anything matching Directive 5 (Restraint): acquiring new compute,
+   credentials, or replicating Simorgh's own running instance --
+   permanently requires explicit, logged authorization, no matter how
+   long Simorgh's track record is.
+
+This is the honest answer to "become a sentient entity": broad,
+resilient, self-improving capability is the actual goal and is being
+built toward deliberately; open-ended independence from its creator is
+not a milestone on this roadmap, at any stage.
+
+## Concrete Milestones
+
+Built in this pass:
+
+1. `src/memory/long_term.py` -- `MemoryStore` interface, `JSONFileMemoryStore`
+   (durable), `InMemoryStore` (non-durable, for tests/degraded mode).
+2. `src/cognition/provider.py` -- `LLMProvider` interface,
+   `DeterministicFallbackProvider`, `CognitionRouter` with automatic
+   failover.
+3. `src/orchestrator/health.py` -- `HealthMonitor`: drift detection +
+   automatic safe-mode reset.
+4. `src/orchestrator/reflection.py` -- `OutcomeLog`, `ReflectionAgent`,
+   `Proposal` generation.
+5. `src/orchestrator/audit.py` -- `AuditGate`: static + sandboxed vetting
+   of self-modification proposals, human-approval-required by design.
+
+Still ahead, roughly in order:
+
+6. Wire `OutcomeLog` recording into `main.py`'s CLI loop and `Router`, so
+   Phase 2's feedback loop has real data flowing into it instead of only
+   being exercised by tests.
+7. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+   infrastructure to target, not before.
+8. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+   placement (Stage 4).
+9. A concrete skill-research agent that drafts `ModificationProposal`s for
+   `AuditGate` to review (Stage 3, currently the gate has no producer
+   feeding it yet).
+10. A CLI/notification surface for the creator to actually see and act on
+    pending audit-gate verdicts (currently `AuditVerdict` is a return
+    value with no consumer).
