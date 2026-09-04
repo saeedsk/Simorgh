@@ -18,12 +18,13 @@ from pathlib import Path
 from src.agents.emotion.base import EmotionAgent
 from src.agents.interests import InterestTracker
 from src.agents.logic.base import LogicAgent
+from src.agents.skills.base import SkillsAgent
 from src.agents.skills.research import SkillResearchAgent
 from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
+from src.memory.short_term import ShortTermMemory
 from src.orchestrator.audit import REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
-from src.memory.short_term import ShortTermMemory
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
@@ -38,6 +39,7 @@ INTERESTS_COMMAND = "interests"
 CURIOUS_COMMAND = "curious"
 SLEEP_COMMAND = "sleep"
 HISTORY_COMMAND = "history"
+RUN_PREFIX = "run "
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 
 
@@ -45,6 +47,7 @@ def build_router() -> Router:
     router = Router(SharedMemoryBus())
     router.register(EmotionAgent())
     router.register(LogicAgent())
+    router.register(SkillsAgent())
     return router
 
 
@@ -137,7 +140,8 @@ def run_cli() -> None:
         "Simorgh -- 'exit'/'quit' to leave, 'reflect' for outcome review, "
         "'propose <topic>' to draft a skill, 'pending' for unmerged proposals, "
         "'interest <topic>'/'interests'/'curious' for world-awareness, "
-        "'sleep' for maintenance, 'history' for this session's recent turns."
+        "'sleep' for maintenance, 'history' for this session's recent turns, "
+        "'run <code>' to execute sandboxed Python."
     )
     while True:
         try:
@@ -176,9 +180,26 @@ def run_cli() -> None:
         if lowered == HISTORY_COMMAND:
             _print_history(short_term)
             continue
+        if lowered.startswith(RUN_PREFIX):
+            run_skill_code(router, outcome_log, user_input[len(RUN_PREFIX):])
+            continue
         reply = handle_turn(router, user_input, outcome_log, health_monitor)
         short_term.add(user_input, reply)
         print(reply)
+
+
+def run_skill_code(router: Router, outcome_log: OutcomeLog, code: str) -> str:
+    """Execute `code` via the sandboxed skills agent (src/agents/skills/
+    base.py -> src/sandboxing/sandbox.py) and return its output. Returns
+    the message printed, for testability.
+    """
+    if not code:
+        message = "[usage: run <code>]"
+        print(message)
+        return message
+    output = _dispatch_and_record(router, "skills", AgentRequest(text=code), outcome_log)
+    print(output)
+    return output
 
 
 def _print_reflection(reflection_agent: ReflectionAgent) -> None:

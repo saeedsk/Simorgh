@@ -8,6 +8,7 @@ from src.main import (
     handle_turn,
     note_interest,
     propose_skill,
+    run_skill_code,
 )
 from src.memory.long_term import InMemoryStore
 from src.orchestrator.audit import AuditGate
@@ -124,6 +125,47 @@ class TestNoteInterest(unittest.TestCase):
 
         self.assertIn("usage", message)
         self.assertEqual(tracker.list_interests(), [])
+
+
+class TestRunSkillCode(unittest.TestCase):
+    def test_build_router_registers_skills_agent(self):
+        router = build_router()
+        self.assertIn("skills", router.agent_names())
+
+    def test_runs_code_and_returns_stdout(self):
+        router = build_router()
+        log = OutcomeLog(InMemoryStore())
+
+        output = run_skill_code(router, log, "print('hello from sandbox')")
+
+        self.assertIn("hello from sandbox", output)
+
+    def test_failing_code_is_reported_not_raised(self):
+        router = build_router()
+        log = OutcomeLog(InMemoryStore())
+
+        output = run_skill_code(router, log, "raise ValueError('boom')")
+
+        self.assertIn("ValueError", output)
+
+    def test_empty_code_shows_usage(self):
+        router = build_router()
+        log = OutcomeLog(InMemoryStore())
+
+        message = run_skill_code(router, log, "")
+
+        self.assertIn("usage", message)
+
+    def test_run_records_an_outcome(self):
+        router = build_router()
+        log = OutcomeLog(InMemoryStore())
+
+        run_skill_code(router, log, "print('hi')")
+
+        outcomes = log.recent()
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].agent, "skills")
+        self.assertTrue(outcomes[0].succeeded)
 
 
 if __name__ == "__main__":
