@@ -40,10 +40,20 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import dataclass
 from typing import Callable
 
 from src.memory.long_term import MemoryStore
 from src.orchestrator.console_style import style
+
+
+@dataclass(frozen=True)
+class ActionDigest:
+    total: int
+    succeeded: int
+    failed: int
+    unknown: int
+    window_seconds: float
 
 ACTION_KIND = "autonomous_action"
 
@@ -148,6 +158,29 @@ class AutonomyController:
     def actions_today(self) -> int:
         cutoff = time.time() - 86400.0
         return sum(1 for r in self._store.query(kind=ACTION_KIND) if r.created_at >= cutoff)
+
+    def digest(self, window_seconds: float = 86400.0) -> "ActionDigest":
+        """A lightweight rollup of autonomous activity over the last
+        `window_seconds` -- how many actions, how many succeeded/failed
+        (per the same `succeeded` signal the circuit breaker uses), and
+        how many carried no success/failure signal at all (a pure
+        discovery tick, or a caller that never wired
+        `last_action_succeeded`). Exists because reviewing what the
+        autonomous loop actually did previously required actively
+        reading `log`/`tasks` -- there was no lighter-weight summary
+        surface at all.
+        """
+        cutoff = time.time() - window_seconds
+        records = [r for r in self._store.query(kind=ACTION_KIND) if r.created_at >= cutoff]
+        succeeded = sum(1 for r in records if r.metadata.get("succeeded") is True)
+        failed = sum(1 for r in records if r.metadata.get("succeeded") is False)
+        return ActionDigest(
+            total=len(records),
+            succeeded=succeeded,
+            failed=failed,
+            unknown=len(records) - succeeded - failed,
+            window_seconds=window_seconds,
+        )
 
     def idle_seconds(self) -> float:
         return self._clock.idle_seconds()

@@ -121,6 +121,7 @@ DISCOVER_COMMAND = "discover"
 TASKS_COMMAND = "tasks"
 WORK_COMMAND = "work"
 AUTONOMOUS_PREFIX = "autonomous "
+DIGEST_COMMAND = "digest"
 REMIND_PREFIX = "remind "
 MAX_TASK_ATTEMPTS = 3
 EVOLVE_PREFIX = "evolve "
@@ -170,6 +171,7 @@ _KNOWN_COMMAND_WORDS = (
     TASKS_COMMAND,
     WORK_COMMAND,
     "autonomous",
+    DIGEST_COMMAND,
     "remind",
     BUDGET_COMMAND,
     LOG_COMMAND,
@@ -327,6 +329,7 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("tasks", "List the persisted task backlog."),
     ("work", "Run one task from the backlog."),
     ("autonomous [on|off]", "Control the idle-triggered autonomous loop (no arg = status)."),
+    ("digest", "Rollup of autonomous activity over the last 24h."),
     ("pending", "List every applied skill and self-patch."),
     ("skills", "List applied skills you can run by name."),
     ("use <skill name>", "Run an applied skill fresh from disk."),
@@ -945,6 +948,9 @@ def _run_cli_loop(
         if lowered == "autonomous" or lowered.startswith(AUTONOMOUS_PREFIX):
             arg = user_input[len(AUTONOMOUS_PREFIX):].strip().lower() if lowered != "autonomous" else ""
             _handle_autonomous_command(arg, autonomy)
+            continue
+        if lowered == DIGEST_COMMAND:
+            _print_autonomous_digest(autonomy)
             continue
         remind_args = extract_remind_args(user_input, lowered)
         if remind_args is not None:
@@ -1870,6 +1876,30 @@ def _handle_autonomous_command(arg: str, autonomy: AutonomyController) -> None:
             )
         )
     print(f"  ready to act right now: {autonomy.ready_to_act()}")
+
+
+def _print_autonomous_digest(autonomy: AutonomyController) -> None:
+    """A lightweight rollup of what the autonomous loop actually did
+    over the last 24h -- previously the only way to review that was
+    reading raw `log`/`tasks` output line by line; nothing summarized
+    it. Complements 'autonomous status' (which reports the loop's
+    current gating state) rather than duplicating it.
+    """
+    digest = autonomy.digest()
+    print(style("🗞️  Autonomous activity digest (last 24h)", "magenta", "bold"))
+    if digest.total == 0:
+        print(style("  no autonomous actions in this window", "dim"))
+        return
+    print(f"  {digest.total} action(s): {digest.succeeded} succeeded, {digest.failed} failed", end="")
+    print(f", {digest.unknown} other" if digest.unknown else "")
+    if autonomy.consecutive_failures > 0:
+        print(
+            style(
+                f"  current failure streak: {autonomy.consecutive_failures} "
+                f"(pauses itself at {autonomy.max_consecutive_failures})",
+                "yellow",
+            )
+        )
 
 
 def _print_pending(store: MemoryStore) -> None:

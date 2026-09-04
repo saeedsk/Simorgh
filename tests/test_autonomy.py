@@ -229,5 +229,67 @@ class TestActionsToday(unittest.TestCase):
         self.assertEqual(controller.actions_today(), 1)
 
 
+class TestDigest(unittest.TestCase):
+    def _controller(self):
+        store = InMemoryStore()
+        clock = ActivityClock()
+        clock._last_activity -= 10_000
+        controller = AutonomyController(
+            store=store,
+            clock=clock,
+            perform_action=lambda: True,
+            idle_threshold_seconds=60.0,
+            action_cooldown_seconds=0.0,
+        )
+        return controller, store
+
+    def test_empty_digest(self):
+        controller, store = self._controller()
+
+        digest = controller.digest()
+
+        self.assertEqual(digest.total, 0)
+        self.assertEqual(digest.succeeded, 0)
+        self.assertEqual(digest.failed, 0)
+        self.assertEqual(digest.unknown, 0)
+
+    def test_tallies_succeeded_failed_and_unknown(self):
+        store = InMemoryStore()
+        clock = ActivityClock()
+        clock._last_activity -= 10_000
+        outcomes = iter([True, False, None])
+        controller = AutonomyController(
+            store=store,
+            clock=clock,
+            perform_action=lambda: True,
+            idle_threshold_seconds=60.0,
+            action_cooldown_seconds=0.0,
+            last_action_succeeded=lambda: next(outcomes),
+        )
+
+        for _ in range(3):
+            controller.tick()
+        digest = controller.digest()
+
+        self.assertEqual(digest.total, 3)
+        self.assertEqual(digest.succeeded, 1)
+        self.assertEqual(digest.failed, 1)
+        self.assertEqual(digest.unknown, 1)
+
+    def test_ignores_records_outside_the_window(self):
+        from src.memory.long_term import MemoryRecord
+
+        controller, store = self._controller()
+        store.add(
+            MemoryRecord(
+                id="old-id", kind=ACTION_KIND, content="old", created_at=time.time() - 90_000
+            )
+        )
+
+        digest = controller.digest()
+
+        self.assertEqual(digest.total, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
