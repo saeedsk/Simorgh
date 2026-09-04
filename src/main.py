@@ -714,13 +714,30 @@ def run_cli() -> None:
     )
 
     activity_clock = ActivityClock()
+    # A one-slot mailbox between perform_action and last_action_succeeded
+    # below: AutonomyController.tick() calls both, in that order, so
+    # _autonomous_action's outcome_sink writes here and
+    # last_action_succeeded reads the same slot back a moment later --
+    # this is how the circuit breaker (see src/orchestrator/autonomy.py)
+    # learns whether an action actually succeeded, not just that one ran.
+    # Reset before every tick: a discovery-only action never writes to
+    # it, and a stale value from a PRIOR tick must never be attributed
+    # to this one.
+    _last_autonomous_outcome: list[bool | None] = [None]
+
+    def _perform_autonomous_action() -> bool:
+        _last_autonomous_outcome[0] = None
+        return _autonomous_action(
+            task_store, reflection_agent, store, skill_research, self_patch_agent,
+            audit_gate, activity_log, cognition, short_term=short_term,
+            outcome_sink=lambda succeeded: _last_autonomous_outcome.__setitem__(0, succeeded),
+        )
+
     autonomy = AutonomyController(
         store,
         activity_clock,
-        perform_action=lambda: _autonomous_action(
-            task_store, reflection_agent, store, skill_research, self_patch_agent,
-            audit_gate, activity_log, cognition, short_term=short_term,
-        ),
+        perform_action=_perform_autonomous_action,
+        last_action_succeeded=lambda: _last_autonomous_outcome[0],
     )
 
     _print_banner()
@@ -765,6 +782,7 @@ def _autonomous_action(
     cognition: CognitionRouter,
     repo_root: Path | None = None,
     short_term: ShortTermMemory | None = None,
+    outcome_sink: Callable[[bool | None], None] | None = None,
 ) -> bool:
     """One autonomous unit of work, called by AutonomyController.tick()
     only once every gate (enabled, idle long enough, past cooldown,
@@ -773,7 +791,14 @@ def _autonomous_action(
     automatically improve itself"), otherwise work the next persisted
     task -- through the exact same audited propose/patch/verify/commit
     pipelines a human-typed command uses. Returns True if real work
-    happened, so a no-op tick never starts the cooldown.
+    happened, so a no-op tick never starts the cooldown -- this is
+    unrelated to whether that work actually SUCCEEDED, which is what
+    `outcome_sink` (when given) is separately told: True/False for
+    whether the task's own pipeline reported [APPLIED], never called for
+    a pure discovery tick (finding new work isn't itself a success or
+    failure of anything). AutonomyController's circuit breaker reads
+    this signal to notice a systematic failure pattern, not just a
+    single bad action.
     """
     if not task_store.unfinished():
         created = discover_improvements(task_store, reflection_agent, store)
@@ -791,7 +816,7 @@ def _autonomous_action(
         return bool(created)
 
     print(style("\n🤖 [autonomous] idle -- picking up the next task...", "magenta", "bold"))
-    work_on_next_task(
+    result = work_on_next_task(
         task_store,
         skill_research,
         self_patch_agent,
@@ -803,6 +828,8 @@ def _autonomous_action(
         label="autonomous",
         short_term=short_term,
     )
+    if outcome_sink is not None:
+        outcome_sink(result.startswith("[APPLIED]"))
     print(style("> ", "cyan", "bold"), end="", flush=True)
     return True
 
@@ -1826,6 +1853,7 @@ def _handle_autonomous_command(arg: str, autonomy: AutonomyController) -> None:
         return
     if arg == "on":
         autonomy.enabled = True
+        autonomy.reset_failure_streak()
         _print_status("[autonomous] enabled")
         return
     idle_for = autonomy.idle_seconds()
@@ -1833,6 +1861,14 @@ def _handle_autonomous_command(arg: str, autonomy: AutonomyController) -> None:
     print(f"  enabled: {autonomy.enabled}")
     print(f"  idle for: {idle_for:.0f}s (threshold: {autonomy.idle_threshold_seconds:.0f}s)")
     print(f"  actions today: {autonomy.actions_today()}/{autonomy.max_actions_per_day}")
+    if autonomy.consecutive_failures > 0:
+        print(
+            style(
+                f"  consecutive failures: {autonomy.consecutive_failures} "
+                f"(pauses itself at {autonomy.max_consecutive_failures})",
+                "yellow",
+            )
+        )
     print(f"  ready to act right now: {autonomy.ready_to_act()}")
 
 

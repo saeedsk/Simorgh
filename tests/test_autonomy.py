@@ -124,6 +124,98 @@ class TestAutonomyControllerTick(unittest.TestCase):
         self.assertEqual(store.query(kind=ACTION_KIND), [])
 
 
+class TestAutonomyControllerCircuitBreaker(unittest.TestCase):
+    def _controller(self, last_action_succeeded, max_consecutive_failures=3):
+        store = InMemoryStore()
+        clock = ActivityClock()
+        clock._last_activity -= 10_000
+        controller = AutonomyController(
+            store=store,
+            clock=clock,
+            perform_action=lambda: True,
+            idle_threshold_seconds=60.0,
+            action_cooldown_seconds=0.0,
+            last_action_succeeded=last_action_succeeded,
+            max_consecutive_failures=max_consecutive_failures,
+        )
+        return controller, store
+
+    def test_repeated_failures_disable_the_loop(self):
+        controller, store = self._controller(lambda: False, max_consecutive_failures=3)
+
+        controller.tick()
+        self.assertTrue(controller.enabled)
+        controller.tick()
+        self.assertTrue(controller.enabled)
+        controller.tick()
+
+        self.assertFalse(controller.enabled)
+        self.assertEqual(controller.consecutive_failures, 3)
+
+    def test_a_success_resets_the_streak(self):
+        outcomes = iter([False, False, True, False, False])
+        controller, store = self._controller(lambda: next(outcomes), max_consecutive_failures=3)
+
+        for _ in range(5):
+            controller.tick()
+
+        # The two failures, one success, then two more failures never
+        # reach 3 IN A ROW -- the success in the middle reset the count.
+        self.assertTrue(controller.enabled)
+        self.assertEqual(controller.consecutive_failures, 2)
+
+    def test_no_signal_neither_trips_nor_resets_the_streak(self):
+        outcomes = iter([False, False, None, False])
+        controller, store = self._controller(lambda: next(outcomes), max_consecutive_failures=3)
+
+        for _ in range(4):
+            controller.tick()
+
+        self.assertFalse(controller.enabled)
+        self.assertEqual(controller.consecutive_failures, 3)
+
+    def test_reset_failure_streak_clears_the_count(self):
+        controller, store = self._controller(lambda: False, max_consecutive_failures=3)
+        for _ in range(3):
+            controller.tick()
+        self.assertFalse(controller.enabled)
+
+        controller.enabled = True
+        controller.reset_failure_streak()
+
+        self.assertEqual(controller.consecutive_failures, 0)
+
+    def test_without_last_action_succeeded_the_breaker_never_trips(self):
+        store = InMemoryStore()
+        clock = ActivityClock()
+        clock._last_activity -= 10_000
+        controller = AutonomyController(
+            store=store,
+            clock=clock,
+            perform_action=lambda: True,
+            idle_threshold_seconds=60.0,
+            action_cooldown_seconds=0.0,
+            max_consecutive_failures=1,
+        )
+
+        for _ in range(5):
+            controller.tick()
+
+        self.assertTrue(controller.enabled)
+        self.assertEqual(controller.consecutive_failures, 0)
+
+    def test_a_broken_signal_callback_does_not_crash_the_loop(self):
+        def raising():
+            raise ValueError("boom")
+
+        controller, store = self._controller(raising, max_consecutive_failures=1)
+
+        result = controller.tick()  # must not raise
+
+        self.assertTrue(result)
+        self.assertTrue(controller.enabled)
+
+
 class TestActionsToday(unittest.TestCase):
     def test_counts_only_records_within_the_last_24_hours(self):
         from src.memory.long_term import MemoryRecord
