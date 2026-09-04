@@ -129,6 +129,18 @@ class TestTaskAndSkillCommands(E2ECliTestCase):
 
         self.assertIn("nothing pending", result.stdout)
 
+    def test_digest_with_no_autonomous_activity_reports_it(self):
+        result = self.run_cli("digest\nexit\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no autonomous actions", result.stdout)
+
+    def test_pending_with_nothing_applied_reports_it(self):
+        result = self.run_cli("pending\nexit\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("nothing applied yet", result.stdout)
+
 
 class TestProposeAndUseEndToEnd(E2ECliTestCase):
     def test_propose_drafts_applies_and_is_immediately_usable(self):
@@ -140,6 +152,12 @@ class TestProposeAndUseEndToEnd(E2ECliTestCase):
         # relaunch -- its output (the deterministic note template's
         # returned string) should show up somewhere in the transcript.
         self.assertIn("rocketry", result.stdout.lower())
+
+    def test_pending_with_a_path_shows_the_full_applied_code(self):
+        result = self.run_cli("propose rocketry\npending src/agents/skills/rocketry.py\nexit\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("def run()", result.stdout)
 
     def test_plan_saves_tasks_without_a_real_provider(self):
         # No real LLM is reachable here, so the brainstorm step can't
