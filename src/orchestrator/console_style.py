@@ -11,6 +11,9 @@ import keyword
 import os
 import re
 import sys
+import threading
+import time
+from typing import Callable
 
 _ENABLED = sys.stdout.isatty() and "NO_COLOR" not in os.environ
 
@@ -97,3 +100,61 @@ def format_code_block(
     )
     footer = style("└" + "─" * 52, "dim")
     return "\n".join([header, *rendered, *footer_notice, footer])
+
+
+DEFAULT_TICK_INTERVAL_SECONDS = 5.0
+
+
+class LiveTicker:
+    """A periodic "still working... (Ns elapsed)" status line for a
+    long-running blocking call that would otherwise sit completely
+    silent -- run_isolated_test_suite (copies the repo, runs the entire
+    test suite twice) is the direct motivating case: previously just two
+    static print()s around a subprocess call that can genuinely take a
+    while, with zero feedback in between. This is Claude Code's
+    "ongoing status" idea (the creator's own phrase), adapted to a
+    plain-text, no-TUI-library CLI: not a true in-place spinner (a
+    carriage-return redraw is fragile across terminals, and this project
+    already has a working, safer precedent to reuse instead) -- a new
+    line every `interval` seconds, printed by a daemon thread while the
+    caller's own code stays blocked on the slow call. Safe for exactly
+    the same reason reminders/the autonomous loop are: the thread only
+    ever prints between the caller's own output, never concurrently with
+    it, as long as the wrapped block doesn't itself print (true here --
+    the wrapped call is a blocking subprocess.run with nothing printed
+    until it returns).
+
+    Usage:
+        with LiveTicker("running the isolated test suite"):
+            slow_call()
+    """
+
+    def __init__(
+        self,
+        message: str,
+        interval: float = DEFAULT_TICK_INTERVAL_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._message = message
+        self._interval = interval
+        self._clock = clock
+        self._start = 0.0
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "LiveTicker":
+        self._start = self._clock()
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._tick, daemon=True)
+        self._thread.start()
+        return self
+
+    def _tick(self) -> None:
+        while not self._stop_event.wait(self._interval):
+            elapsed = self._clock() - self._start
+            print(style(f"   ⏳ {self._message}... ({elapsed:.0f}s elapsed)", "dim"))
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self._interval + 1.0)
