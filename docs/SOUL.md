@@ -635,11 +635,12 @@ were judgment calls made to keep the project moving, not settled truths:
   derived from real operating experience -- once there's a real track
   record of what it actually does while idle, these should be
   revisited, tightened or loosened based on evidence rather than guess.
-- Whether there should eventually be a lighter-weight review surface for
-  autonomous actions specifically (e.g. a daily digest) beyond `log`/
-  `tasks` and the `[autonomous]`-prefixed live narration -- today,
-  reviewing what it did requires actively looking; nothing pushes a
-  summary to the creator.
+- The `digest` command (`AutonomyController.digest()`) now gives an
+  on-demand 24h rollup of autonomous activity -- action count,
+  succeeded/failed/other tally, current failure streak -- a lighter
+  review surface than reading raw `log`/`tasks` output by hand. Still
+  open: this is *pull*, not *push* -- nothing proactively notifies the
+  creator, `digest` has to be typed.
 
 ## Status
 

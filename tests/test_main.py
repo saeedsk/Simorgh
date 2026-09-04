@@ -1555,6 +1555,54 @@ class TestHandleAutonomousCommand(unittest.TestCase):
         self.assertIn("enabled: True", buf.getvalue())
 
 
+class TestPrintAutonomousDigest(unittest.TestCase):
+    def test_reports_no_actions_when_empty(self):
+        import contextlib
+        import io
+
+        from src.main import _print_autonomous_digest
+        from src.orchestrator.autonomy import ActivityClock, AutonomyController
+
+        controller = AutonomyController(InMemoryStore(), ActivityClock(), perform_action=lambda: False)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_autonomous_digest(controller)
+
+        self.assertIn("no autonomous actions", buf.getvalue())
+
+    def test_reports_the_tally_when_there_are_actions(self):
+        import contextlib
+        import io
+
+        from src.main import _print_autonomous_digest
+        from src.orchestrator.autonomy import ActivityClock, AutonomyController
+
+        store = InMemoryStore()
+        clock = ActivityClock()
+        clock._last_activity -= 10_000
+        outcomes = iter([True, False])
+        controller = AutonomyController(
+            store,
+            clock,
+            perform_action=lambda: True,
+            idle_threshold_seconds=60.0,
+            action_cooldown_seconds=0.0,
+            last_action_succeeded=lambda: next(outcomes),
+        )
+        controller.tick()
+        controller.tick()
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_autonomous_digest(controller)
+
+        output = buf.getvalue()
+        self.assertIn("2 action(s)", output)
+        self.assertIn("1 succeeded", output)
+        self.assertIn("1 failed", output)
+
+
 class TestAutonomousAction(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()

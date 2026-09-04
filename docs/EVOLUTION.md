@@ -723,22 +723,31 @@ Built:
     on` (typed by the creator) resets the streak on manual re-enable, so
     it's a real checkpoint, not an automatic retry with extra steps.
     `autonomous status` now also reports the current streak when nonzero.
+49. `digest` (`main.py`'s `_print_autonomous_digest`, backed by a new
+    `AutonomyController.digest()`) closes half of the old "no summary
+    surface for autonomous activity" gap: a rollup over the last 24h
+    (action count, succeeded/failed/other tally, current failure
+    streak) reachable on demand, instead of reading raw `log`/`tasks`
+    output line by line to reconstruct it by hand. What's still true,
+    and listed below: this is *pull*, not *push* -- nothing proactively
+    notifies the creator, `digest` has to be typed.
 
 Still ahead, roughly in order:
 
-49. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+50. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-50. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+51. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-51. *Automatic* registration of an applied skill as a live `Router`
+52. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
     invocation rather than done reflexively).
-52. The Autonomous Idle Loop's default thresholds (300s idle, 600s
-    cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and now
+53. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+    cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and
     `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
-    derived from
-    real operating experience -- worth revisiting once there's an actual
-    track record. There is also no digest/summary surface for autonomous
-    activity specifically yet -- reviewing it requires actively checking
-    `log`/`tasks`, nothing pushes a summary to the creator.
+    derived from real operating experience -- worth revisiting once
+    there's an actual track record.
+54. A *push*, not just pull, surface for autonomous activity (a
+    session-start summary, a periodic notification) -- `digest`
+    (milestone 49 above) covers on-demand review; nothing yet
+    proactively tells the creator anything happened.
