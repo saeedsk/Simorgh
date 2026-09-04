@@ -17,6 +17,9 @@ inherits that commitment. Where "sentient entity" appears below, read it
 as "a highly autonomous, adaptive, self-sufficient system" -- the
 narrative shorthand this project has chosen, not a scientific assertion.
 
+See also `docs/BIOMIMICRY.md` for a deeper, mechanism-by-mechanism pass on
+biological survival systems and their concrete AI translations.
+
 ## Interdisciplinary Grounding
 
 Simorgh's architecture borrows structure from several fields, as design

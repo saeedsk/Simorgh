@@ -38,6 +38,8 @@ tracks what's actually built.
 | Health monitor | `src/orchestrator/health.py` | `HealthMonitor` inspects `PersonaState` history for pinned extremes, sustained overload, or oscillation, and auto-resets mood to neutral on a CRITICAL finding. |
 | Reflection loop | `src/orchestrator/reflection.py` | `OutcomeLog` records action outcomes to a `MemoryStore`; `ReflectionAgent.reflect()` turns a sub-agent's elevated failure/correction rate into a `Proposal` -- data, never an automatic change. |
 | Audit gate | `src/orchestrator/audit.py` | `AuditGate.review()` vets a `ModificationProposal` via a static denylist plus a real sandboxed run. `soul.py`/`SOUL.md`/`audit.py` itself are always-rejected subjects. `requires_human_approval` is always `True` under current policy. |
+| Live deployment | `src/orchestrator/deployment.py` | `DeploymentManager`: stage a candidate ("B") for a Router slot alongside the active version ("A"), trial both against cloned buses, `promote`/`rollback` hot-swaps the Router's live registration, `purge_retired` drops old versions once confident. Every step logged as `MemoryStore` lineage. |
+| Interests & world-awareness | `src/agents/interests.py` | `InterestTracker` persists tracked topics and decides what's overdue for follow-up; `WorldFeed`/`NullWorldFeed` is the (currently no-network) seam for a future real news/RSS integration. |
 
 ## Data flow (current)
 
