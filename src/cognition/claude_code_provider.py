@@ -121,6 +121,10 @@ class ClaudeCodeProvider(LLMProvider):
                 ) from exc
             except OSError as exc:
                 raise ProviderUnavailable(f"failed to spawn claude CLI: {exc!r}") from exc
+            except Exception as exc:  # noqa: BLE001 -- any other failure
+                # spawning/running the CLI must degrade to the next
+                # provider too, not just the two documented exception types
+                raise ProviderUnavailable(f"claude CLI invocation failed: {exc!r}") from exc
 
         if completed.returncode != 0:
             raise ProviderUnavailable(
