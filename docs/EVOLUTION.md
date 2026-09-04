@@ -485,37 +485,100 @@ Built:
     same audit/apply/commit -- once per topic. No relaxed review for
     being part of a batch; the cap exists because each item is real,
     metered LLM spend, not just a longer list.
+38. A live-caught, real bug fixed in `src/cognition/tool_protocol.py`'s
+    `safe_read_file`: it documented itself as "never raises," but
+    `Path.is_file()`/`.resolve()` can raise a raw `OSError` for a
+    pathological path -- caught live, a confused model's "READ:" payload
+    was a 50,000+ character hallucinated blob, and the resulting
+    `OSError: File name too long` crashed the entire CLI process
+    mid-batch, with no `try/except` anywhere catching it. Fixed with two
+    layers: a length check before ever touching the filesystem, and the
+    filesystem operations wrapped in one `try/except OSError`. Separately,
+    every tool-loop narration line across `LogicAgent`,
+    `SkillResearchAgent`, and `SelfPatchAgent` now goes through
+    `tool_protocol.preview()` (bounded, single-line-safe) before printing
+    or being durably logged, and `console_style.format_code_block()`
+    renders an actual code payload as a bordered, lightly
+    keyword-highlighted block instead of a raw dump -- the creator's ask
+    that reading the log be "a pleasant and easy to do... activity,"
+    extended to the live terminal narration, not just `ActivityLog`.
+39. **The autonomous-agent architecture change** -- the creator's direct
+    ask to "find improvement area, plan for them, break down the
+    required work, save them... design and deploy them, verify the work,
+    quality control... unblock itself... upon restart, find pending task
+    and resume, don't sit idle... once detect it became idle start
+    automatically improve itself," built and explicitly authorized to be
+    enabled immediately, not merely designed inert (see `docs/SOUL.md`,
+    "Autonomous Idle Loop," for the full reasoning and bounds):
+    - `src/orchestrator/tasks.py` -- `TaskStore`: a durable, event-sourced
+      work queue on the same `MemoryStore` everything else uses. Makes
+      "on restart, find pending task and resume" real, not aspirational.
+    - `src/orchestrator/discovery.py` -- `discover_improvements()`: turns
+      `ReflectionAgent`'s existing signals (batched proposals, individual
+      `reflect_on_outcome` takeaways) into persisted tasks, deduplicated
+      against every known task including finished ones.
+    - `src/orchestrator/verification.py` -- `verify_task_completion()`:
+      an independent, separately-prompted "reviewer" LLM pass -- distinct
+      from `AuditGate` (safety) and the test suite (regression), neither
+      of which asks whether a change actually addresses the task. Only
+      ever downgrades a mechanically-successful apply to BLOCKED; never a
+      gate on whether code gets written.
+    - `self_patch.relaunch()` upgraded to spawn a `--self-check`
+      subprocess (`src/main.py`) before ever replacing the live process
+      via `os.execv` -- a patch that clears the audit gate and the entire
+      test suite yet still can't start as a live process (a startup bug
+      the tests didn't happen to exercise) is now caught, and
+      `git_ops.revert_last_commit()` undoes it (a new commit, never
+      rewritten history) rather than leaving a broken state.
+    - `src/orchestrator/autonomy.py` -- `ActivityClock` +
+      `AutonomyController`: a daemon thread that, once the CLI has sat
+      idle past a threshold, works the task queue (discovering new work
+      first if it's empty) through the *unchanged* `propose_skill`/
+      `propose_self_patch` pipelines. Bounded by an idle threshold, an
+      action cooldown, and a durable daily action cap on top of (never
+      instead of) the existing `BudgetGuard` LLM-spend caps; every action
+      is printed with an unmistakable `[autonomous]` prefix and durably
+      logged. `autonomous on`/`off`/`status` gives live control.
+    - CLI: `discover`, `tasks`, `work`, `plan <count> <goal>` (brainstorms
+      steps and *saves* them as tasks, unlike `batch` which executes
+      immediately), `autonomous [on|off]`.
+    - `tests/test_e2e_cli.py`: real subprocess invocations of the actual
+      CLI (not mocked/direct calls) against an isolated repo copy and an
+      overridden `HOME`, exercising the real process boundary this whole
+      change relies on -- imports, `--self-check`, the full startup
+      sequence, a real `propose` -> `use` cycle.
+40. A second live-caught, real bug, found while diagnosing "why isn't Sim
+    falling back to Claude Code CLI when Gemini's budget is capped":
+    `BudgetGuard._recent_records()` queried every `kind="llm_spend"`
+    record in the shared `MemoryStore` with no filter for which provider
+    actually made each one. Since `build_cognition_router` wraps Claude
+    Code CLI and Gemini in separate `BudgetGuard`s sharing one store,
+    each guard's exhaustion check was actually counting the *other*
+    provider's calls too -- heavy Gemini usage silenced the flat-rate
+    subscription provider `main.py` deliberately prefers, entirely
+    because of an unrelated provider's pay-per-token volume. No existing
+    test caught this because every prior test used a single `BudgetGuard`
+    against a fresh store. Fixed by filtering to records matching the
+    guard's own wrapped provider name.
 
 Still ahead, roughly in order:
 
-38. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+41. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-39. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+42. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-40. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+43. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-41. Partially closed: `src/agents/skills/registry.py`
-    (`list_applied_skills`, `load_skill_source`, `build_invocation_code`)
-    plus the CLI's `skills` (list what's applied and runnable) and
-    `use <name>` (actually run one) commands -- directly answering the
-    creator's "develop skill/tool... deploy them... use these changes."
-    Unlike a self-patch, a newly applied skill was never imported into
-    the running process, so nothing here needs a relaunch: `use` re-reads
-    the file fresh from disk every call and runs it through the same
-    sandbox `run <code>` does (`build_invocation_code` deliberately exec's
-    the skill under a namespace where `__name__` isn't `"__main__"`, so a
-    skill's own `if __name__ == "__main__":` guard, if it has one, never
-    double-fires alongside the wrapper's explicit `run()` call). Still
-    open: this is a CLI-level command a human types, not a marker
-    `LogicAgent`'s own tool loop can reach mid-conversation, and there is
+44. `use <skill name>` (milestone from the earlier skill-registry work)
+    is still a CLI-level command a human types, not a marker
+    `LogicAgent`'s own conversational tool loop can reach, and there is
     still no *automatic* registration of an applied skill as a live
-    `Router` sub-agent -- `use <name>` is a manual, on-demand invocation,
-    not a standing capability Sim can reach for on its own initiative.
-42. Sim deciding *on its own*, with no human typing `patch`, that a
-    reflection or a RECALL-informed observation warrants a self-patch --
-    milestone 30 built the pipeline and 29 builds the reflection, but
-    connecting them without a human in the loop is a real, separate
-    autonomy decision this document does not yet consider settled (see
-    docs/SOUL.md, "Self-patching source code," closing bullet).
+    `Router` sub-agent -- it remains a manual, on-demand invocation.
+45. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+    cooldown, 20 actions/day) are judgment calls, not values derived from
+    real operating experience -- worth revisiting once there's an actual
+    track record. There is also no digest/summary surface for autonomous
+    activity specifically yet -- reviewing it requires actively checking
+    `log`/`tasks`, nothing pushes a summary to the creator.

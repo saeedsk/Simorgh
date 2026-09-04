@@ -268,66 +268,30 @@ def _save_readline_history(history_path: Path = DEFAULT_HISTORY_PATH) -> None:
         pass
 
 
-_COMMANDS_HELP: tuple[tuple[str, str, str], ...] = (
-    ("reflect", "Review recent outcomes for patterns worth addressing.", "reflect"),
-    (
-        "propose <topic>",
-        "Draft, audit, and apply a brand-new skill.",
-        "propose a rocket-thrust calculator",
-    ),
-    (
-        "improve <topic>",
-        "Alias for 'propose' -- reads more naturally as a request.",
-        "improve error handling",
-    ),
-    (
-        "patch <path> <description>",
-        "Revise your own existing source, run this repo's entire test "
-        "suite against it in an isolated copy, and relaunch if it passes.",
-        "patch src/agents/logic/base.py handle repeated 403s better",
-    ),
-    (
-        "batch <count> <theme>",
-        "Brainstorm N focused sub-topics for a theme, then propose/audit/"
-        "apply/commit each one (max 20 -- each is a real, metered call).",
-        "batch 8 digital-world interaction skills",
-    ),
-    (
-        "plan <count> <goal>",
-        "Brainstorm N steps toward a goal and SAVE them as tasks (doesn't "
-        "run them yet -- see 'work').",
-        "plan 5 make the CLI more resilient to bad LLM output",
-    ),
-    ("discover", "Scan recent outcomes/takeaways for improvement areas and save them as tasks.", "discover"),
-    ("tasks", "List everything in the persisted task backlog.", "tasks"),
-    ("work", "Run exactly one task from the backlog (resumes an interrupted one first).", "work"),
-    (
-        "autonomous [on|off]",
-        "Control the idle-triggered autonomous loop, or show its status with no argument.",
-        "autonomous status",
-    ),
-    ("pending", "List every applied skill and self-patch so far.", "pending"),
-    ("skills", "List every applied skill you can actually run by name.", "skills"),
-    (
-        "use <skill name>",
-        "Actually run an applied skill (fresh from disk, no relaunch needed).",
-        "use rocketry",
-    ),
-    (
-        "log [last]",
-        "Show the unified activity/audit trail; 'last' narrows it to "
-        "everything since the previous turn.",
-        "log last",
-    ),
-    ("fetch <url>", "Fetch a web page through the reviewed, SSRF-safe tool.", "fetch https://example.com"),
-    ("interest <topic>", "Start tracking a topic of curiosity.", "interest rocketry"),
-    ("interests", "List everything currently being tracked.", "interests"),
-    ("curious", "Follow up on the least-recently-checked interest.", "curious"),
-    ("sleep", "Run maintenance: prune old records, surface patterns.", "sleep"),
-    ("history", "Show this session's recent conversation turns.", "history"),
-    ("run <code>", "Execute Python in the sandbox.", "run print(2 + 2)"),
-    ("budget", "Show LLM spend/call status against the configured caps.", "budget"),
-    ("exit / quit", "Leave.", "exit"),
+_COMMANDS_HELP: tuple[tuple[str, str], ...] = (
+    ("reflect", "Review recent outcomes for patterns worth addressing."),
+    ("propose <topic>", "Draft, audit, and apply a brand-new skill."),
+    ("improve <topic>", "Alias for 'propose'."),
+    ("patch <path> <description>", "Revise existing source, test it fully, relaunch if it passes."),
+    ("batch <count> <theme>", "Brainstorm and apply up to 20 focused skills for a theme."),
+    ("plan <count> <goal>", "Brainstorm steps toward a goal and save them as tasks."),
+    ("discover", "Scan for improvement areas and save them as tasks."),
+    ("tasks", "List the persisted task backlog."),
+    ("work", "Run one task from the backlog."),
+    ("autonomous [on|off]", "Control the idle-triggered autonomous loop (no arg = status)."),
+    ("pending", "List every applied skill and self-patch."),
+    ("skills", "List applied skills you can run by name."),
+    ("use <skill name>", "Run an applied skill fresh from disk."),
+    ("log [last]", "Show the unified activity/audit trail."),
+    ("fetch <url>", "Fetch a web page through the reviewed, SSRF-safe tool."),
+    ("interest <topic>", "Start tracking a topic of curiosity."),
+    ("interests", "List tracked interests."),
+    ("curious", "Follow up on the least-recently-checked interest."),
+    ("sleep", "Run maintenance: prune old records, surface patterns."),
+    ("history", "Show this session's recent turns."),
+    ("run <code>", "Execute Python in the sandbox."),
+    ("budget", "Show LLM spend/call status."),
+    ("exit / quit", "Leave."),
 )
 
 
@@ -339,12 +303,13 @@ def _print_banner() -> None:
     )
     # Pad the plain label BEFORE styling it -- ANSI escape codes count
     # toward len() but occupy no visual width, so padding a styled string
-    # directly would misalign the columns.
-    width = max(len(name) for name, _, _ in _COMMANDS_HELP)
-    for name, description, example in _COMMANDS_HELP:
+    # directly would misalign the columns. One line per command --
+    # explicit creator preference over the earlier two-line (label +
+    # separate "e.g." line) layout.
+    width = max(len(name) for name, _ in _COMMANDS_HELP)
+    for name, description in _COMMANDS_HELP:
         label = f"/{name}".ljust(width + 1)
         print(f"  {style(label, 'cyan', 'bold')} {description}")
-        print(f"  {' ' * (width + 1)} {style('e.g. ' + example, 'dim')}")
     print()
 
 
