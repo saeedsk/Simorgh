@@ -635,12 +635,15 @@ were judgment calls made to keep the project moving, not settled truths:
   derived from real operating experience -- once there's a real track
   record of what it actually does while idle, these should be
   revisited, tightened or loosened based on evidence rather than guess.
-- The `digest` command (`AutonomyController.digest()`) now gives an
+- The `digest` command (`AutonomyController.digest()`) gives an
   on-demand 24h rollup of autonomous activity -- action count,
   succeeded/failed/other tally, current failure streak -- a lighter
-  review surface than reading raw `log`/`tasks` output by hand. Still
-  open: this is *pull*, not *push* -- nothing proactively notifies the
-  creator, `digest` has to be typed.
+  review surface than reading raw `log`/`tasks` output by hand.
+  `run_cli()` also prints that same rollup automatically at startup
+  whenever it's nonempty, so activity from an idle stretch surfaces the
+  next time the CLI opens at all, without the creator having to
+  remember to ask. Real external notification (email/SMS) is still out
+  of scope -- nothing in this environment can deliver one.
 
 ## Status
 

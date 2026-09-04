@@ -724,13 +724,19 @@ Built:
     it's a real checkpoint, not an automatic retry with extra steps.
     `autonomous status` now also reports the current streak when nonzero.
 49. `digest` (`main.py`'s `_print_autonomous_digest`, backed by a new
-    `AutonomyController.digest()`) closes half of the old "no summary
-    surface for autonomous activity" gap: a rollup over the last 24h
-    (action count, succeeded/failed/other tally, current failure
-    streak) reachable on demand, instead of reading raw `log`/`tasks`
-    output line by line to reconstruct it by hand. What's still true,
-    and listed below: this is *pull*, not *push* -- nothing proactively
-    notifies the creator, `digest` has to be typed.
+    `AutonomyController.digest()`) closes the old "no summary surface
+    for autonomous activity" gap, both halves: a rollup over the last
+    24h (action count, succeeded/failed/other tally, current failure
+    streak) reachable on demand as its own command (*pull*), AND
+    `run_cli()` prints that same rollup automatically at startup
+    whenever it's nonempty (right after `_print_resume_notice`, before
+    the "autonomous self-improvement is ON" banner line) -- so activity
+    from an idle stretch is surfaced the next time the creator opens
+    the CLI at all, without having to think to ask (*push*). Real
+    external notification (email/SMS/etc.) is still out of scope --
+    nothing in this environment can deliver one -- but "the creator has
+    to remember to type `digest`" is no longer the only way this
+    surfaces.
 
 Still ahead, roughly in order:
 
@@ -747,7 +753,3 @@ Still ahead, roughly in order:
     `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
     derived from real operating experience -- worth revisiting once
     there's an actual track record.
-54. A *push*, not just pull, surface for autonomous activity (a
-    session-start summary, a periodic notification) -- `digest`
-    (milestone 49 above) covers on-demand review; nothing yet
-    proactively tells the creator anything happened.
