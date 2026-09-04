@@ -33,6 +33,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Callable
 
 try:
     import readline  # noqa: F401 -- imported for its side effect: input() gains
@@ -191,13 +192,22 @@ def build_router(
     sandbox: SandboxExecutor | None = None,
     repo_root: Path | None = None,
     activity_log: ActivityLog | None = None,
+    propose_skill_fn: Callable[[str], str] | None = None,
+    propose_patch_fn: Callable[[str, str], str] | None = None,
+    propose_batch_fn: Callable[[str, int], str] | None = None,
+    plan_fn: Callable[[str, int], str] | None = None,
 ) -> Router:
     """All params are optional so existing callers (and every prior test)
     get exactly the old rule-based-only behavior when omitted -- see
     LogicAgent's own fallback logic for why passing a CognitionRouter here
     doesn't change anything unless a real provider actually answers, and
     `web_fetch`/`sandbox` for why LogicAgent only offers FETCH/RUN tools
-    when they're actually given.
+    when they're actually given. `propose_skill_fn`/`propose_patch_fn`/
+    `propose_batch_fn`/`plan_fn`, when given, let ordinary conversation
+    trigger the real propose/patch/batch/plan pipelines directly --
+    explicitly authorized by the creator (see docs/SOUL.md,
+    "Conversational self-modification"); every downstream gate is
+    unchanged, only the trigger source is new.
     """
     router = Router(SharedMemoryBus())
     router.register(EmotionAgent())
@@ -209,6 +219,10 @@ def build_router(
             sandbox=sandbox,
             repo_root=repo_root,
             activity_log=activity_log,
+            propose_skill_fn=propose_skill_fn,
+            propose_patch_fn=propose_patch_fn,
+            propose_batch_fn=propose_batch_fn,
+            plan_fn=plan_fn,
         )
     )
     router.register(SkillsAgent())
@@ -618,13 +632,7 @@ def run_cli() -> None:
     cognition, budget_guards = build_cognition_router(store)
     web_fetch = WebFetchTool(store)
     sandbox = SubprocessSandbox()
-    router = build_router(
-        cognition=cognition,
-        short_term=short_term,
-        web_fetch=web_fetch,
-        sandbox=sandbox,
-        activity_log=activity_log,
-    )
+
     outcome_log = OutcomeLog(store)
     reflection_agent = ReflectionAgent(outcome_log, store=store)
     audit_gate = AuditGate(memory=store)
@@ -633,6 +641,31 @@ def run_cli() -> None:
     interests = InterestTracker(store)
     health_monitor = HealthMonitor()
     task_store = TaskStore(store)
+
+    # Explicitly authorized by the creator: ordinary conversation can now
+    # trigger these pipelines directly (previously only a literally-typed
+    # command or the autonomous loop could) -- see docs/SOUL.md,
+    # "Conversational self-modification." Every downstream gate (audit
+    # gate, isolated test suite, auto-commit-never-push, protected files,
+    # network denylist) is completely unchanged; only who is allowed to
+    # start the pipeline changed. Closures, not a LogicAgent -> main.py
+    # import, to avoid a circular import (main.py already imports
+    # LogicAgent).
+    router = build_router(
+        cognition=cognition,
+        short_term=short_term,
+        web_fetch=web_fetch,
+        sandbox=sandbox,
+        activity_log=activity_log,
+        propose_skill_fn=lambda topic: propose_skill(skill_research, audit_gate, store, topic),
+        propose_patch_fn=lambda path, desc: propose_self_patch(
+            self_patch_agent, audit_gate, store, activity_log, path, desc
+        ),
+        propose_batch_fn=lambda theme, count: propose_skill_batch(
+            cognition, skill_research, audit_gate, store, theme, count
+        ),
+        plan_fn=lambda goal, count: plan_goal(cognition, task_store, goal, count),
+    )
 
     activity_clock = ActivityClock()
     autonomy = AutonomyController(

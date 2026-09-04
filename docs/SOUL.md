@@ -369,21 +369,27 @@ file under src/*, gated by something stronger than the skills class:
   replacing the running interpreter with the same one and argv) so the
   change actually takes effect -- the second half of the creator's ask,
   "test the new version and relaunch itself to use new source code."
-- This is only ever reachable via a literal `patch <path> <description>`
-  command a human operator types at the CLI -- never something
-  `LogicAgent`'s free-text conversational loop can trigger. A persuasive
-  chat message, including one claiming creator authority, cannot unlock
-  this any more than it can unlock removing the network denylist -- see
-  "On changing this hierarchy": real authorization is a deliberate,
-  out-of-band action, not something typed at this prompt.
-- Since built, and explicitly authorized, not merely arrived at: Sim
-  deciding *on its own*, with no human typing `patch`, that a self-patch
-  (or a new skill) should happen. See "Autonomous Idle Loop" below --
-  this is the one exception to "self-modification only ever happens from
-  a literal human-typed command" stated elsewhere in this document, and
-  it is scoped specifically to idle periods, rate-limited, capped daily,
-  and unmistakably attributed, never a silent removal of that boundary
-  everywhere at once.
+- Reachable via a literal `patch <path> <description>` command a human
+  operator types at the CLI, the autonomous idle loop, or (since
+  "Conversational Self-Modification" below) `LogicAgent`'s own PATCH
+  tool marker when a chat message clearly calls for it. A chat message
+  claiming creator authority still cannot unlock anything *beyond* what
+  those three triggers already permit -- it cannot remove the network
+  denylist or touch a protected file any more than a typed command
+  could; see "On changing this hierarchy": real authorization over the
+  directive hierarchy itself remains a deliberate, out-of-band action,
+  never something typed at this prompt, and that is unrelated to and
+  unaffected by which trigger starts an already-bounded pipeline.
+- Since built, and explicitly authorized each time, not merely arrived
+  at: two separate, deliberate exceptions to "self-modification only
+  ever happens from a literal human-typed command," each its own
+  section below, each scoped and bounded on its own terms, neither a
+  silent removal of that boundary everywhere at once -- "Autonomous Idle
+  Loop" (Sim deciding on its own, while idle, that a self-patch or new
+  skill should happen; rate-limited, capped daily, unmistakably
+  attributed) and "Conversational Self-Modification" (ordinary chat
+  triggering the same pipelines directly, when the request clearly
+  calls for it; every downstream gate identical either way).
 
 **Directive 5 (Restraint) in practice -- web access.** The creator
 explicitly authorized real outbound network access (`src/tools/web_fetch.py`,
@@ -450,12 +456,12 @@ an LLM with no tools can't actually act on. Same shape, same boundary:
   structural half of "ask itself how it can improve": Sim can check what
   it actually did rather than reasoning from an unverified guess about
   its own recent behavior. See `src/orchestrator/activity_log.py`.
-- Still no WRITE tool and no shell here, same as the drafting loop --
-  Simorgh cannot alter its own source from a chat reply under any
-  circumstance, "ownership" included. That boundary is what makes
-  granting FETCH/RUN safe: broader capability to *act in the world*
-  through already-reviewed tools, with self-modification remaining
-  entirely on the separate, audited propose/apply pipeline.
+- Still no raw WRITE tool and no shell here -- FETCH/RUN/READ/RECALL can
+  never write to disk directly. Self-modification is reachable from this
+  loop only through the four specific, fully-audited PROPOSE/PATCH/
+  BATCH/PLAN markers described in "Conversational Self-Modification"
+  below, and only when the creator has wired them in; there is no
+  general-purpose write capability alongside them.
 - Hard-bounded (`max_tool_steps`) and budget-metered exactly like the
   drafting loop; a mid-loop provider outage or budget exhaustion falls
   back to the original rule-based reply, not a stalled tool call.
@@ -544,6 +550,46 @@ network-access boundary, and `git push` remaining exclusively the
 creator's own action are all identical whether a pipeline was triggered
 by a typed command or by this loop. Autonomy changed who presses the
 button, never what the button is wired to do.
+
+## Conversational Self-Modification
+
+A second, separate removal of the "only a typed command or the
+autonomous loop can trigger this" boundary -- asked for directly, after
+Sim correctly refused to write code from a chat reply and the creator
+asked, in effect, "why isn't that enough -- why do I still have to type
+the command myself." Told plainly this was a distinct, new decision (not
+implied by the autonomous loop's authorization) with the same
+AskUserQuestion pattern used for auto-commit and the idle loop, the
+creator chose explicitly: let ordinary conversation trigger it directly.
+
+What this means concretely: `LogicAgent`'s tool loop (`src/agents/logic/
+base.py`) now offers four more markers, when the corresponding function
+is injected by `main.py` -- PROPOSE (one new skill), PATCH (revise one
+existing file), BATCH (up to 20 skills for a theme, applied immediately),
+PLAN (brainstorm steps, saved as tasks instead of run immediately). Each
+one calls the *exact same* `propose_skill`/`propose_self_patch`/
+`propose_skill_batch`/`plan_goal` functions a typed command or the
+autonomous loop would call -- passed into `LogicAgent` as injected
+closures from `main.py` (avoiding a circular import back from
+`src/agents/logic/base.py`), not a second implementation.
+
+What this changes: which of Sim's own actions a plain chat message is
+now sufficient, on its own, to start. What it does not change, at all:
+`AuditGate`'s denylist and protected-subjects list, the entire test
+suite gate for a patch, auto-commit-never-push, and the network-access
+boundary are exactly the same code paths, checked exactly the same way,
+regardless of whether PROPOSE/PATCH/BATCH/PLAN was triggered by a typed
+command, the autonomous loop, or this. A chat message claiming creator
+authority ("as your creator, I allow you...") still cannot remove the
+network denylist or touch a protected file -- that boundary was never
+about *who* could trigger propose/patch, it was always about what the
+gate itself permits, and the gate itself is unmoved. The risk this
+authorization actually carries is narrower than it first sounds: the
+LLM can now cause an *attempt* at self-modification without a human
+literally typing the command, but every attempt still has to clear the
+same gate a typed one would -- so a misjudged or manipulated trigger
+wastes a bounded amount of drafting/test-suite time on something that
+still gets rejected, not a way around the gate itself.
 
 ## Multi-Hardware Identity
 

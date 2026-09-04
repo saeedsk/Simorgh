@@ -29,17 +29,19 @@ restarting it. Both halves matter, and neither moved the other:
   has to still pass -- with at least as many tests as before, so a patch
   can't dodge a failure by deleting or skipping the test that would have
   caught it.
-- This pipeline is invoked either from a literal CLI command
+- This pipeline is invoked from a literal CLI command
   ('patch <path> <description>', see src/main.py) that a human operator
-  types, or from the idle-triggered autonomous loop
-  (src/orchestrator/autonomy.py, explicitly authorized and enabled by
-  the creator -- see docs/SOUL.md, "Autonomous Idle Loop") -- never from
-  something LogicAgent's free-text conversational loop can trigger on
-  its own. A persuasive chat message still cannot unlock this any more
-  than it could unlock the propose/apply pipeline; it takes either a
-  real, deliberate, out-of-band human action or the separately-bounded
-  autonomous scheduler, the same property
-  SOUL.md already establishes for changing the directive hierarchy.
+  types, from the idle-triggered autonomous loop
+  (src/orchestrator/autonomy.py), or -- since the creator separately and
+  explicitly authorized it, see docs/SOUL.md, "Conversational
+  Self-Modification" -- from LogicAgent's own PATCH tool marker, when a
+  chat message clearly calls for it. All three call this exact same
+  function; there is no separate, looser path for the conversational
+  trigger. What none of the three can do is unlock anything *beyond*
+  what this pipeline already permits -- a chat message claiming creator
+  authority still cannot remove the network denylist or touch a
+  protected file, the same property SOUL.md already establishes for
+  changing the directive hierarchy.
 
 Same auto-apply posture as skills (docs/SOUL.md, "Self-Improvement
 Philosophy"): a patch that clears every one of these checks applies and

@@ -461,6 +461,91 @@ class TestLogicAgentToolLoop(unittest.TestCase):
         self.assertEqual(tool_calls[0].metadata["tool"], "REMIND")
         self.assertTrue(tool_calls[0].metadata["succeeded"])
 
+    def test_propose_marker_not_offered_without_a_propose_fn(self):
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="add a rocketry skill"), SharedMemoryBus())
+
+        self.assertNotIn("PROPOSE:", provider.prompts[0])
+
+    def test_propose_tool_calls_the_injected_function_and_reports_result(self):
+        calls = []
+        provider = ScriptedProvider([("PROPOSE: rocketry", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            propose_skill_fn=lambda topic: calls.append(topic) or "[APPLIED] src/agents/skills/rocketry.py",
+        )
+
+        response = agent.handle(AgentRequest(text="add a rocketry skill"), SharedMemoryBus())
+
+        self.assertEqual(calls, ["rocketry"])
+        self.assertIn("APPLIED", provider.prompts[1])
+        self.assertEqual(response.output, "done")
+
+    def test_patch_tool_calls_the_injected_function_with_path_and_description(self):
+        calls = []
+        provider = ScriptedProvider(
+            [("PATCH: src/agents/logic/base.py handle 403s better", None), ("done", None)]
+        )
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            propose_patch_fn=lambda path, desc: calls.append((path, desc)) or "[APPLIED] ok",
+        )
+
+        agent.handle(AgentRequest(text="fix the 403 handling"), SharedMemoryBus())
+
+        self.assertEqual(calls, [("src/agents/logic/base.py", "handle 403s better")])
+
+    def test_patch_tool_reports_malformed_argument(self):
+        provider = ScriptedProvider([("PATCH: onlyonetoken", None), ("done", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]), propose_patch_fn=lambda p, d: "unused")
+
+        agent.handle(AgentRequest(text="fix something"), SharedMemoryBus())
+
+        self.assertIn("FAILED", provider.prompts[1])
+
+    def test_batch_tool_calls_the_injected_function_with_count_and_theme(self):
+        calls = []
+        provider = ScriptedProvider([("BATCH: 5 digital world skills", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            propose_batch_fn=lambda theme, count: calls.append((theme, count)) or "[batch] 5/5 applied",
+        )
+
+        agent.handle(AgentRequest(text="add 5 digital world skills"), SharedMemoryBus())
+
+        self.assertEqual(calls, [("digital world skills", 5)])
+
+    def test_plan_tool_calls_the_injected_function_with_count_and_goal(self):
+        calls = []
+        provider = ScriptedProvider([("PLAN: 3 improve resilience", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            plan_fn=lambda goal, count: calls.append((goal, count)) or "[plan] saved 3 steps",
+        )
+
+        agent.handle(AgentRequest(text="plan out resilience improvements"), SharedMemoryBus())
+
+        self.assertEqual(calls, [("improve resilience", 3)])
+
+    def test_propose_tool_records_itself_as_a_tool_call(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("PROPOSE: rocketry", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            activity_log=activity_log,
+            propose_skill_fn=lambda topic: "[APPLIED] ok",
+        )
+
+        agent.handle(AgentRequest(text="add a skill"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0].metadata["tool"], "PROPOSE")
+        self.assertTrue(tool_calls[0].metadata["succeeded"])
+
 
 if __name__ == "__main__":
     unittest.main()
