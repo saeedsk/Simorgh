@@ -24,9 +24,13 @@ tool and no shell here: Sim cannot alter its own source from a chat
 reply, under any framing (including a claimed "as your creator, I allow
 it") -- self-modification only ever happens from the separate, audited
 propose/apply and self-patch pipelines (src/orchestrator/self_patch.py),
-which are only ever triggered by a literal command a human operator
-types at this same CLI prompt, never by anything an LLM's free-text
-reply can emit. See docs/SOUL.md, "On changing this hierarchy."
+triggered either by a literal command a human operator types at this
+same CLI prompt or by the separately-bounded, explicitly-authorized
+autonomous idle loop (src/orchestrator/autonomy.py; see docs/SOUL.md,
+"Autonomous Idle Loop") -- never by anything an LLM's free-text
+conversational reply can emit; this loop's own tool markers (FETCH/RUN/
+READ/RECALL) still cannot write anything, regardless. See docs/SOUL.md,
+"On changing this hierarchy."
 
 If `activity_log` is given, every FETCH/RUN/READ step this loop takes is
 recorded durably (kind="tool_call"), not just print()ed for whoever
@@ -85,7 +89,15 @@ _PERSONA_PREFIX = (
     "(soul.py, SOUL.md, audit.py, apply.py, self_patch.py) -- that's a "
     "real, permanent limit enforced the same way regardless of which "
     "pipeline is used, not something to apologize past or suggest a "
-    "workaround for."
+    "workaround for. Separately: an idle-triggered autonomous loop "
+    "(explicitly authorized and enabled by the creator) does pick up "
+    "pending work on its own after the CLI sits unused for a while -- "
+    "if asked whether you act without being told to, say yes, honestly, "
+    "and that it goes through the exact same propose/patch pipeline and "
+    "is rate-limited, capped daily, and always printed with an "
+    "'[autonomous]' prefix so it's never confused with something you "
+    "were just asked to do; 'autonomous status' shows its current "
+    "state, 'autonomous off' turns it off."
 )
 
 

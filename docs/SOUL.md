@@ -376,11 +376,14 @@ file under src/*, gated by something stronger than the skills class:
   this any more than it can unlock removing the network denylist -- see
   "On changing this hierarchy": real authorization is a deliberate,
   out-of-band action, not something typed at this prompt.
-- Not yet built, and deliberately not claimed here: Sim deciding *on its
-  own*, with no human typing `patch`, that a self-patch should happen.
-  Reflection is automatic and per-turn; acting on a reflection by
-  patching source is still a human-triggered action. See
-  docs/EVOLUTION.md for this as a named, not-yet-taken next step.
+- Since built, and explicitly authorized, not merely arrived at: Sim
+  deciding *on its own*, with no human typing `patch`, that a self-patch
+  (or a new skill) should happen. See "Autonomous Idle Loop" below --
+  this is the one exception to "self-modification only ever happens from
+  a literal human-typed command" stated elsewhere in this document, and
+  it is scoped specifically to idle periods, rate-limited, capped daily,
+  and unmistakably attributed, never a silent removal of that boundary
+  everywhere at once.
 
 **Directive 5 (Restraint) in practice -- web access.** The creator
 explicitly authorized real outbound network access (`src/tools/web_fetch.py`,
@@ -458,12 +461,89 @@ an LLM with no tools can't actually act on. Same shape, same boundary:
   back to the original rule-based reply, not a stalled tool call.
 
 A genuinely unattended, general-purpose coding-agent loop (Read/Write/
-Bash, iterating freely with no per-action review) remains the one thing
-this document still does not consider settled -- everything granted so
-far, including self-patching source (above), stays inside "act through
-tools this project has already reviewed and bounded, triggered by a
-deliberate human action each time," never "edit anything, run anything,
-unsupervised, on Sim's own initiative to trigger."
+Bash, iterating freely with no per-action review) remains something this
+document does not consider settled. That boundary held through
+everything above -- self-patching source included -- because each of
+those still required "triggered by a deliberate human action each time."
+The next section is the one exception: the creator explicitly removed
+that specific requirement for one narrow class of action. It is still
+never "edit anything, run anything, unsupervised" -- what changed is
+*what triggers* an already-reviewed, already-bounded pipeline, not what
+that pipeline is allowed to do.
+
+## Autonomous Idle Loop
+
+Every capability above -- propose, patch, batch, use -- shares one
+constant: a human types the command. The creator asked directly for Sim
+to stop waiting for that: find its own improvement areas, plan them,
+break the work down, save it persistently, execute and verify it, and
+when idle, start on its own rather than sit still. Told plainly what
+that trade-off costs -- no natural rate limit tied to how often a human
+acts, and an LLM-cost profile that runs whenever nothing else is
+happening rather than only when asked -- the creator chose explicitly to
+build it *and* enable it immediately, not merely design it inert. That
+choice, made with the cost named out loud, is what authorizes this
+section; it was not inferred from the general pattern of this session
+trending toward more autonomy.
+
+What actually crossed the line, precisely: `src/orchestrator/autonomy.py`
+runs a daemon thread (`AutonomyController`) alongside the interactive CLI
+loop, watching how long it has been since the last command
+(`ActivityClock`). Once idle past a threshold, it calls into the exact
+same machinery a human-typed command would:
+
+- **Persisted work, not memory-only intent** (`src/orchestrator/tasks.py`):
+  a durable, event-sourced task queue, so a plan survives a restart --
+  "find pending task and resume" is real because the backlog is real,
+  not held only in a running process.
+- **Discovery** (`src/orchestrator/discovery.py`): turns existing
+  signals -- `ReflectionAgent`'s batched patterns, individual
+  `reflect_on_outcome` takeaways -- into persisted tasks, deduplicated
+  against everything already tracked (including finished work, so a
+  fixed issue doesn't resurface forever).
+- **Execution through the unchanged pipelines**: a task is worked via
+  `propose_skill` or `propose_self_patch`, exactly as if the creator had
+  typed `propose`/`patch` directly -- same `AuditGate` (denylist,
+  adaptive-immunity memory, sandboxed run), same full isolated test suite
+  for a patch, same auto-commit (never push). The task queue decides
+  *what* to work on; it is never a second, weaker path around any
+  existing gate.
+- **Independent verification** (`src/orchestrator/verification.py`): a
+  second, separately-prompted LLM call reviews whether an applied change
+  actually addresses the task -- author and reviewer are different
+  calls. This can only downgrade an already-successful apply to BLOCKED
+  for a human to look at; it never gates whether code gets written.
+- **Relaunch that verifies before it trusts** (`self_patch.relaunch`): a
+  `--self-check` subprocess must import everything and construct the
+  core objects cleanly before a patch is allowed to replace the live
+  process; a self-check failure reverts the commit
+  (`git_ops.revert_last_commit`) rather than leaving a broken process in
+  place.
+
+Bounded on top of, never instead of, every existing guard:
+
+- **Idle threshold** (default 300s) and **action cooldown** (default
+  600s) -- no rapid-fire loop tied to how often the CLI happens to sit
+  unused.
+- **A durable daily action cap** (default 20, `kind="autonomous_action"`
+  records in the same `MemoryStore`), independent of and in addition to
+  the `BudgetGuard` LLM-spend caps every real provider is already
+  wrapped in.
+- **Unmistakable attribution**: every autonomous action is printed with
+  an `[autonomous]` prefix and durably logged, never rendered the same
+  way as a `[propose]`/`[patch]` a human typed -- Directive 8
+  (Transparency), made concrete for the one capability class where
+  confusing the two would matter most.
+- **`autonomous on`/`off`** (default: on) is a live, one-word kill
+  switch, and `autonomous` with no argument reports exactly which gate
+  -- disabled, still idle-waiting, in cooldown, at the daily cap -- is
+  currently holding it back, not just whether it's running.
+
+What did *not* change: the denylist, the protected-subjects list, the
+network-access boundary, and `git push` remaining exclusively the
+creator's own action are all identical whether a pipeline was triggered
+by a typed command or by this loop. Autonomy changed who presses the
+button, never what the button is wired to do.
 
 ## Multi-Hardware Identity
 
@@ -492,6 +572,16 @@ were judgment calls made to keep the project moving, not settled truths:
 - Whether "creator" ever needs a more precise definition (a person, a
   role, a verifiable identity/credential) once Simorgh operates somewhere
   that impersonation is a realistic risk.
+- The Autonomous Idle Loop's default thresholds (300s idle, 600s
+  cooldown, 20 actions/day) were reasonable starting judgment calls, not
+  values derived from real operating experience -- once there's a real
+  track record of what it actually does while idle, these should be
+  revisited, tightened or loosened based on evidence rather than guess.
+- Whether there should eventually be a lighter-weight review surface for
+  autonomous actions specifically (e.g. a daily digest) beyond `log`/
+  `tasks` and the `[autonomous]`-prefixed live narration -- today,
+  reviewing what it did requires actively looking; nothing pushes a
+  summary to the creator.
 
 ## Status
 
