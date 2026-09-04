@@ -7,6 +7,7 @@ from src.cognition.tool_protocol import (
     is_valid_python,
     parse_marker,
     preview,
+    safe_list_dir,
     safe_read_file,
 )
 
@@ -120,6 +121,70 @@ class TestSafeReadFile(unittest.TestCase):
         result = safe_read_file(self.repo_root, "src/big.py")
 
         self.assertIn("truncated", result)
+
+
+class TestSafeListDir(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        (self.repo_root / "src" / "agents").mkdir(parents=True)
+        (self.repo_root / "src" / "example.py").write_text("EXAMPLE = 1\n")
+        (self.repo_root / "src" / "agents" / "logic.py").write_text("X = 1\n")
+        (self.repo_root / "src" / "__pycache__").mkdir()
+        (self.repo_root / "src" / "__pycache__" / "junk.pyc").write_text("junk")
+        (self.repo_root / "docs").mkdir()
+        (self.repo_root / "tests").mkdir()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_empty_path_lists_the_allowed_top_level_roots(self):
+        result = safe_list_dir(self.repo_root, "")
+        self.assertEqual(set(result.splitlines()), {"src/", "docs/", "tests/"})
+
+    def test_dot_path_lists_the_allowed_top_level_roots(self):
+        result = safe_list_dir(self.repo_root, ".")
+        self.assertEqual(set(result.splitlines()), {"src/", "docs/", "tests/"})
+
+    def test_lists_entries_under_an_allowed_directory(self):
+        result = safe_list_dir(self.repo_root, "src")
+        entries = set(result.splitlines())
+        self.assertIn("example.py", entries)
+        self.assertIn("agents/", entries)
+
+    def test_pycache_is_hidden_from_listings(self):
+        result = safe_list_dir(self.repo_root, "src")
+        self.assertNotIn("__pycache__", result)
+        self.assertNotIn("__pycache__/", result)
+
+    def test_lists_nested_directory(self):
+        result = safe_list_dir(self.repo_root, "src/agents")
+        self.assertEqual(result, "logic.py")
+
+    def test_refuses_absolute_path(self):
+        self.assertIn("refused", safe_list_dir(self.repo_root, "/etc"))
+
+    def test_refuses_path_traversal(self):
+        self.assertIn("refused", safe_list_dir(self.repo_root, "../.."))
+
+    def test_refuses_path_outside_allowed_roots(self):
+        self.assertIn("refused", safe_list_dir(self.repo_root, "scripts"))
+
+    def test_refuses_a_file_path_not_a_directory(self):
+        self.assertIn("refused", safe_list_dir(self.repo_root, "src/example.py"))
+
+    def test_refuses_nonexistent_directory(self):
+        self.assertIn("refused", safe_list_dir(self.repo_root, "src/nope"))
+
+    def test_never_raises_and_refuses_a_pathologically_long_payload(self):
+        result = safe_list_dir(self.repo_root, "src/" + ("a" * 10_000))
+        self.assertIsInstance(result, str)
+        self.assertIn("refused", result)
+
+    def test_empty_directory_reports_clearly(self):
+        (self.repo_root / "src" / "empty").mkdir()
+        result = safe_list_dir(self.repo_root, "src/empty")
+        self.assertIn("empty", result.lower())
 
 
 if __name__ == "__main__":

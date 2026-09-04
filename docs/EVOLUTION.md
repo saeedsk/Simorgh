@@ -632,25 +632,58 @@ Built:
     explicitly: "add/build N things" is BATCH; "evolve/improve yourself
     at a fundamental level" is EVOLVE, and it should not quietly
     downgrade the latter into the former.
+45. **Two fixes drawn from Sim's own self-critique.** Asked to "read your
+    code base and point to gaps in your design," Sim (live, in chat)
+    named ten. Two were genuine, safe gaps worth fixing immediately;
+    several others (protected files being immutable, the network
+    denylist being static) are deliberate safety properties, not bugs --
+    "context-adaptive" denylisting or a self-tunable protected-files list
+    would be a regression, not an improvement, and weren't built. The two
+    real ones:
+    - *Relaunch silently dropped conversation context.* `relaunch()`'s
+      `os.execv` replaces the process image outright, wiping
+      `ShortTermMemory` with it -- a patch/evolve mid-conversation used
+      to just vanish with no trace. `ShortTermMemory.save`/
+      `load_and_clear` (`src/memory/short_term.py`) now hand the window
+      across the gap: `_relaunch_or_rollback` and `propose_patch_batch`
+      save it to `~/.simorgh/relaunch_context.json` right before the
+      self-check subprocess runs, and `run_cli()` loads-and-deletes it
+      on the next startup (one-shot -- a stale file from a crash must
+      never silently resurface in an unrelated later session). Threaded
+      through every relaunch path: the `patch`/`evolve` CLI commands,
+      the conversational PATCH/EVOLVE markers (same closures), and the
+      autonomous task runner's `work`/`_autonomous_action` path.
+    - *The RUN sandbox can't see the real repository, and there was no
+      other way to discover a path.* `SubprocessSandbox` runs in an
+      isolated temp directory by design (see its own docstring) -- that
+      isolation is correct and stays. But `READ` requires already
+      knowing a path, so a request to survey the codebase left Sim
+      fumbling through several failed `RUN: os.listdir(...)` attempts
+      before answering from memory alone, visibly live. `safe_list_dir`
+      (`src/cognition/tool_protocol.py`, same boundary as
+      `safe_read_file`: confined to src/docs/tests, no traversal, never
+      raises) plus a new `LIST` marker on `LogicAgent` fill exactly that
+      gap -- discovery, not broader access; still read-only, still the
+      same three roots.
 
 Still ahead, roughly in order:
 
-45. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+46. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-46. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+47. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-47. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+48. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-48. `use <skill name>` (milestone from the earlier skill-registry work)
+49. `use <skill name>` (milestone from the earlier skill-registry work)
     is still a CLI-level command a human types, not a marker
     `LogicAgent`'s own conversational tool loop can reach (unlike
     PROPOSE/PATCH/BATCH/PLAN/EVOLVE, milestones 43 and 44, `use` itself
     never got a conversational marker), and there is still no
     *automatic* registration of an applied skill as a live `Router`
     sub-agent -- it remains a manual, on-demand invocation.
-49. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+50. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, and now `MAX_BLOCKED_RETRY_ATTEMPTS`=9) are
     judgment calls, not values derived from
     real operating experience -- worth revisiting once there's an actual

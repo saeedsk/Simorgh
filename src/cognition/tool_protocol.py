@@ -135,3 +135,64 @@ def safe_read_file(repo_root: Path, raw_path: str) -> str:
     if len(content) > _MAX_READ_CHARS:
         return content[:_MAX_READ_CHARS] + f"\n...[truncated, {len(content)} chars total]"
     return content
+
+
+_MAX_LIST_ENTRIES = 300
+
+
+def safe_list_dir(repo_root: Path, raw_path: str) -> str:
+    """List the immediate entries under `raw_path`, subject to the exact
+    same boundary as safe_read_file (confined to src/docs/tests, no
+    traversal, never raises). An empty path or "." lists the allowed
+    top-level roots themselves.
+
+    Caught live: asked to "read your code base and point to gaps in
+    your design," Sim's only way to see what files even exist was RUN
+    (a sandboxed `os.listdir`) -- but SubprocessSandbox executes in an
+    isolated temp directory, not the real repository, so every attempt
+    saw nothing and Sim fumbled through several failed workarounds
+    before answering from memory alone. READ already lets it look inside
+    a file it already knows the path to; this is the missing step
+    before that -- discovering the path in the first place -- without
+    granting anything READ doesn't already: still read-only, still
+    confined to the same three roots, still no traversal.
+    """
+    raw = raw_path.strip()
+    if not raw or raw == ".":
+        return "\n".join(f"{name}/" for name in _ALLOWED_READ_ROOTS)
+
+    if len(raw) > _MAX_PATH_CHARS:
+        return f"[refused: path is {len(raw)} chars -- too long to be a real path]"
+    try:
+        rel = Path(raw)
+    except ValueError as exc:
+        return f"[refused: {raw!r} is not a valid path: {exc!r}]"
+
+    if rel.is_absolute() or ".." in rel.parts:
+        return f"[refused: {raw!r} is not a safe relative path]"
+    if not rel.parts or rel.parts[0] not in _ALLOWED_READ_ROOTS:
+        return (
+            f"[refused: {raw!r} is outside the readable areas "
+            f"({', '.join(_ALLOWED_READ_ROOTS)})]"
+        )
+
+    try:
+        resolved_root = repo_root.resolve()
+        target = (resolved_root / rel).resolve()
+        if resolved_root != target and resolved_root not in target.parents:
+            return f"[refused: {raw!r} resolves outside the repository]"
+        if not target.is_dir():
+            return f"[refused: {raw!r} is not a directory]"
+        entries = sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name))
+    except OSError as exc:
+        return f"[refused: could not list {raw!r}: {exc!r}]"
+
+    names: list[str] = []
+    for entry in entries:
+        if entry.name.startswith(".") or entry.name == "__pycache__":
+            continue
+        names.append(f"{entry.name}/" if entry.is_dir() else entry.name)
+        if len(names) >= _MAX_LIST_ENTRIES:
+            names.append(f"... (truncated at {_MAX_LIST_ENTRIES} entries)")
+            break
+    return "\n".join(names) if names else "[empty directory]"

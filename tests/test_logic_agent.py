@@ -327,6 +327,44 @@ class TestLogicAgentToolLoop(unittest.TestCase):
 
         self.assertIn("READ:", provider.prompts[0])
 
+    def test_list_tool_available_even_with_no_fetch_or_sandbox(self):
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        self.assertIn("LIST:", provider.prompts[0])
+
+    def test_list_tool_reports_directory_entries_and_continues(self):
+        provider = ScriptedProvider(
+            [
+                ("LIST: src/agents/logic", None),
+                ("Found base.py in there.", None),
+            ]
+        )
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+        bus = SharedMemoryBus()
+
+        response = agent.handle(AgentRequest(text="what's in src/agents/logic?"), bus)
+
+        self.assertEqual(response.output, "Found base.py in there.")
+        self.assertIn("base.py", provider.prompts[1])
+
+    def test_list_tool_empty_or_dot_shows_top_level_allowed_roots(self):
+        provider = ScriptedProvider(
+            [
+                ("LIST: .", None),
+                ("There's src, docs, and tests.", None),
+            ]
+        )
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="what's in this repo?"), SharedMemoryBus())
+
+        self.assertIn("src/", provider.prompts[1])
+        self.assertIn("docs/", provider.prompts[1])
+        self.assertIn("tests/", provider.prompts[1])
+
     def test_loop_exhausting_max_tool_steps_forces_a_final_answer_instead_of_rule_based(self):
         # Previously the last step silently discarded whatever the model
         # said and fell back to a generic rule-based echo, wasting every

@@ -9,9 +9,11 @@ memories do. See docs/BIOMIMICRY.md, "Sleep."
 
 from __future__ import annotations
 
+import json
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,75 @@ class ShortTermMemory:
 
     def clear(self) -> None:
         self._turns.clear()
+
+    def save(self, path: Path) -> None:
+        """Persist the current window to `path` as JSON. This exists for
+        exactly one purpose: self_patch.relaunch's os.execv wipes this
+        in-memory object outright, so a patch/evolve relaunch used to
+        silently drop the whole conversation the creator was mid-way
+        through -- a real gap Sim identified about its own architecture.
+        Called right before a relaunch, paired with load_and_clear()
+        called once on the next process's startup. Best-effort: a write
+        failure here must never block a relaunch that already passed
+        every safety gate.
+        """
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = [
+                {
+                    "request_text": t.request_text,
+                    "response_text": t.response_text,
+                    "timestamp": t.timestamp,
+                }
+                for t in self._turns
+            ]
+            path.write_text(json.dumps(payload))
+        except OSError:
+            pass
+
+    @classmethod
+    def load_and_clear(
+        cls, path: Path, max_turns: int = 20, max_chars: int = 8000
+    ) -> "ShortTermMemory | None":
+        """Load a window saved by save(path), then delete the file --
+        a one-shot handoff across exactly one relaunch, not a durable
+        log (that's long_term.py's job). Deleting it is deliberate: a
+        stale file left behind by a crash must never silently reappear
+        in some later, unrelated session. Returns None (no restore) if
+        the file is missing or unreadable -- corruption here must never
+        crash startup.
+        """
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return None
+        finally:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        memory = cls(max_turns=max_turns, max_chars=max_chars)
+        if not isinstance(payload, list):
+            return None
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            request_text = entry.get("request_text")
+            response_text = entry.get("response_text")
+            if not isinstance(request_text, str) or not isinstance(response_text, str):
+                continue
+            timestamp = entry.get("timestamp")
+            memory._turns.append(
+                Turn(
+                    request_text=request_text,
+                    response_text=response_text,
+                    timestamp=timestamp if isinstance(timestamp, (int, float)) else time.time(),
+                )
+            )
+        memory._trim()
+        return memory
 
     def __len__(self) -> int:
         return len(self._turns)
