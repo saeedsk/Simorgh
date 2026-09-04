@@ -20,7 +20,7 @@ SkillResearchAgent's drafting loop enforces). This is what lets Sim
 actually retry a failed fetch with a corrected URL itself, rather than
 just reporting the failure and asking the user to try again -- see
 docs/SOUL.md, "Resourceful, takes ownership." There is still no raw
-WRITE tool or shell here: FETCH/RUN/READ/LIST/RECALL/REMIND can never write
+WRITE tool or shell here: FETCH/RUN/READ/LIST/RECALL/REMIND/NEWS can never write
 to disk directly. Self-modification -- via the PROPOSE/PATCH/BATCH/PLAN
 markers below, when `propose_skill_fn`/etc. are given -- is reachable
 from this loop too now, since the creator explicitly authorized it (see
@@ -128,7 +128,15 @@ _PERSONA_PREFIX = (
     "rate-limited, capped daily, and always printed with an "
     "'[autonomous]' prefix so it's never confused with something you "
     "were just asked to do; 'autonomous status' shows its current "
-    "state, 'autonomous off' turns it off."
+    "state, 'autonomous off' turns it off. On that same idle loop, you "
+    "also occasionally (paced separately, roughly once an hour by "
+    "default, so it doesn't crowd out self-improvement work) share an "
+    "interesting item from your tracked news feeds unprompted -- a real "
+    "capability, not aspirational: you genuinely start that part of the "
+    "conversation yourself sometimes, instead of only ever replying. "
+    "'interest <feed url>' tracks a new source, 'interests' lists what's "
+    "tracked, 'news'/the NEWS tool (when available) checks right now on "
+    "request instead of waiting for the next idle share."
 )
 
 
@@ -157,6 +165,7 @@ class LogicAgent(SubAgent):
         plan_fn: Callable[[str, int], str] | None = None,
         propose_evolve_fn: Callable[[str, int], str] | None = None,
         use_skill_fn: Callable[[str], str] | None = None,
+        news_fn: Callable[[], str] | None = None,
     ) -> None:
         self._cognition = cognition
         self._short_term = short_term
@@ -171,6 +180,7 @@ class LogicAgent(SubAgent):
         self._propose_batch_fn = propose_batch_fn
         self._plan_fn = plan_fn
         self._use_skill_fn = use_skill_fn
+        self._news_fn = news_fn
 
     def handle(self, request: AgentRequest, bus: SharedMemoryBus) -> AgentResponse:
         mood = bus.read()
@@ -194,7 +204,7 @@ class LogicAgent(SubAgent):
 
     def _draft_via_llm(self, text: str, mood: EmotionalState) -> str | None:
         """Returns the LLM's final response text after a bounded tool-use
-        loop (FETCH/RUN/READ/LIST/RECALL, whichever were configured), or None
+        loop (FETCH/RUN/READ/LIST/RECALL/NEWS, whichever were configured), or None
         if no real provider was reachable at all, or -- even on the
         forced final turn below -- it produced nothing usable.
 
@@ -264,6 +274,9 @@ class LogicAgent(SubAgent):
             if kind == "use":
                 prompt += self._use_tool_turn(payload)
                 continue
+            if kind == "news":
+                prompt += self._news_tool_turn(payload)
+                continue
             return payload.strip() or None
 
         return None
@@ -291,6 +304,8 @@ class LogicAgent(SubAgent):
             markers.append("EVOLVE")
         if self._use_skill_fn is not None:
             markers.append("USE")
+        if self._news_fn is not None:
+            markers.append("NEWS")
         return tuple(markers)
 
     def _build_prompt(self, text: str, mood: EmotionalState) -> str:
@@ -388,6 +403,13 @@ class LogicAgent(SubAgent):
                 "'use <name>' command). Use this when the user asks you to run/try/use a "
                 "specific skill by name instead of telling them to type it themselves; "
                 "'skills' lists what's applied if you're unsure of the exact name."
+            )
+        if self._news_fn is not None:
+            lines.append(
+                "NEWS:  -- actually check your tracked feeds and share the next unshared, "
+                "real news item right now (fetches for real if nothing new is already known). "
+                "Use this when the user asks what's new/interesting, to check the news, or "
+                "similar -- 'interests'/'interest <feed url>' manage what's tracked."
             )
         return (
             "\n\nYou have real tools, used one at a time. To use one, make your "
@@ -564,6 +586,13 @@ class LogicAgent(SubAgent):
         succeeded = not report.startswith("[not found]") and not report.startswith("[usage:")
         self._record_tool_call("USE", preview(name), preview(report.splitlines()[0] if report else ""), succeeded)
         return f"\n\n[USE result]\n{report}\n{_CONTINUE_HINT}"
+
+    def _news_tool_turn(self, raw_arg: str) -> str:
+        print("[Sim] checking tracked feeds for something worth sharing...")
+        report = self._news_fn() if self._news_fn else "[not available]"
+        succeeded = report.startswith("[news]") and "nothing new" not in report
+        self._record_tool_call("NEWS", raw_arg.strip() or "check feeds", preview(report.splitlines()[0]), succeeded)
+        return f"\n\n[NEWS result]\n{report}\n{_CONTINUE_HINT}"
 
     def _record_tool_call(self, tool: str, request: str, result_summary: str, succeeded: bool) -> None:
         if self._activity_log is not None:

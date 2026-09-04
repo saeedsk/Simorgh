@@ -805,24 +805,97 @@ Built:
     same principle as every prior boundary crossing in this project:
     autonomy/hot-swap changes who presses the button and how its effect
     reaches the process, never what the button is wired to do.
+52. **Proactive socializing: a real news knowledge base, and Sim
+    starting the conversation on its own.** The creator's direct ask --
+    "sim should be able to goto internet get the news from different
+    fields and domains, summarize and create knowledge base for itself
+    to socialize and share the highlight and interesting topics with
+    user, on its own, instead of being reactive."
+
+    `InterestTracker.follow_up()` (`src/agents/interests.py`) used to
+    fetch items and hand them straight back to the caller, forgetting
+    them immediately after -- not a knowledge base, just a pass-through.
+    It now persists every fetched item (`kind="news_item"`, deduped
+    per-topic by title) durably in the same `MemoryStore` everything
+    else uses, and tracks what's been shared via an additive marker
+    record (`kind="news_item_shared"` -- `MemoryStore` has no in-place
+    update, same reasoning as `TaskStore` folding status from a
+    sequence of events, not mutating one). `DEFAULT_NEWS_TOPICS`: three
+    well-known public feeds spanning distinct fields (Hacker News for
+    tech, BBC World for world news, NASA for space/science), seeded
+    exactly once -- only on a genuinely first run, when nothing is
+    tracked at all -- so "different fields and domains" produces
+    something real without the creator configuring anything, while
+    never silently re-adding a default the creator later removed.
+    Best-effort, not a guarantee: a stale/dead feed just yields no items
+    (the existing, already-tested `RssWorldFeed` failure-is-empty-list
+    behavior), never an error.
+
+    New: `src/orchestrator/socializing.py`'s `NewsSocializer`.
+    `share_next` picks the next unshared item (refreshing the
+    most-overdue tracked interest first if none is known yet), drafts a
+    short, warm, conversational blurb via `CognitionRouter` when a real
+    provider answers -- an honest `title — summary` rendering otherwise,
+    never a claimed "summary" that didn't happen, the same
+    guaranteed-floor principle as every other cognition-backed drafting
+    step in this codebase. `maybe_share` wraps that with its own pacing
+    cooldown (`DEFAULT_SHARE_COOLDOWN_SECONDS`, one hour by default) --
+    deliberately separate from, and usually much longer than,
+    `AutonomyController`'s own action cooldown, so proactive sharing
+    doesn't crowd out ordinary self-improvement work on every idle tick;
+    the two compete for the same idle ticks, this only decides which one
+    "wins" a given one.
+
+    The actual "start the conversation" mechanism: `main.py`'s
+    `_autonomous_action` now checks `maybe_share` FIRST on every
+    autonomous tick (a no-op on most ticks, since the module's own
+    cooldown gates it) and, when it fires, prints the highlight
+    unprompted, between prompts -- reusing the exact "a daemon thread
+    can safely print while the main loop blocks on `input()`" pattern
+    `src/orchestrator/reminders.py` already proved works, rather than
+    inventing a new mechanism. This is genuinely Sim initiating,
+    occasionally, not just replying faster. A typed `news` command and
+    a new, seventh `LogicAgent` marker, `NEWS:`, both call
+    `share_next` directly (bypassing the pacing cooldown -- an explicit
+    request, the same way typing `work` bypasses `AutonomyController`'s
+    own idle-trigger check) for on-demand checking instead of waiting
+    for the next idle share.
+
+    A real bug caught live while manually verifying this against an
+    actual feed (`https://hnrss.org/frontpage`, over real network):
+    HN's RSS descriptions embed literal HTML (`<p>`, `<a href=...>`,
+    entities), and `RssWorldFeed` had only ever extracted raw XML text
+    content -- so a shared highlight printed raw markup straight to the
+    terminal. `_strip_html` (`src/agents/interests.py`, stdlib
+    `html.parser.HTMLParser`, bounded and honestly documented as "not a
+    general sanitizer") now cleans both title and description at parse
+    time, so every consumer -- the new proactive-share path and the
+    pre-existing `curious` command alike -- gets readable text.
 
 Still ahead, roughly in order:
 
-52. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+53. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-53. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+54. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-54. *Automatic* registration of an applied skill as a live `Router`
+55. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
     invocation rather than done reflexively).
-55. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+56. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and
     `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
     derived from real operating experience -- worth revisiting once
     there's an actual track record.
-56. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
+57. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
     -- extending hot-swap to a multi-file batch is a real design
     question (which slot(s) to trial, in what order, how to roll back a
     partial hot-swap alongside the multi-commit revert `evolve` already
     does), not yet worked through.
+58. `DEFAULT_SHARE_COOLDOWN_SECONDS` (one hour, milestone 52 above) is a
+    starting judgment call like the autonomous loop's own thresholds --
+    worth revisiting once there's a real sense of whether proactive
+    news-sharing feels well-paced or not. `DEFAULT_NEWS_TOPICS`'
+    specific three feeds are a starting set, not vetted for long-term
+    stability -- worth checking they're still live occasionally, and
+    trivially replaceable via `interest <feed url>` if not.

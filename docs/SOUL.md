@@ -562,6 +562,56 @@ creator's own action are all identical whether a pipeline was triggered
 by a typed command or by this loop. Autonomy changed who presses the
 button, never what the button is wired to do.
 
+## Proactive Socializing
+
+The creator's direct ask: "sim should be able to goto internet get the
+news from different fields and domains, summarize and create knowledge
+base for itself to socialize and share the highlight and interesting
+topics with user, on its own, instead of being reactive." Unlike the
+escalations above, this doesn't touch the self-modification boundary at
+all -- it can only ever read a feed and print a message, never write
+code or execute anything -- so it didn't need the same
+explicitly-name-the-tradeoff authorization pattern; it's closer in kind
+to reminders (an unprompted print, already an accepted, working
+mechanism) than to self-patching.
+
+`InterestTracker` (`src/agents/interests.py`) now keeps a real,
+persistent knowledge base of fetched news -- every item `follow_up()`
+retrieves is durably stored (deduped per-topic by title), not just
+handed back to the caller and forgotten the way it worked before. Three
+well-known public feeds across distinct fields -- Hacker News for tech,
+BBC World for world news, NASA for space/science -- are seeded once, only
+on a genuinely first run (nothing tracked yet), so this produces
+something real without the creator having to configure anything first;
+never re-seeded on a later run, so removing or replacing one sticks.
+Best-effort, not a guarantee any of the three stay live forever -- a
+dead feed just silently yields nothing, the same graceful-failure
+behavior `RssWorldFeed` already had.
+
+`src/orchestrator/socializing.py`'s `NewsSocializer` is what actually
+makes this proactive rather than just a bigger `curious`. On top of
+(never instead of) `AutonomyController`'s own idle/cooldown/daily-cap
+gates, it adds its own separate, usually much longer pacing cooldown
+(an hour, by default) so sharing something interesting doesn't crowd
+out ordinary self-improvement work -- the two compete for the same idle
+ticks, and most ticks this is simply not ready and falls straight
+through. When it IS ready, `main.py`'s autonomous-tick handler prints
+the highlight unprompted, between prompts -- the exact "a daemon thread
+can safely print while the main loop blocks on `input()`" mechanism
+`src/orchestrator/reminders.py` already proved works for the exact same
+kind of unprompted interruption, reused rather than reinvented. A real
+LLM condenses the raw feed item into something short and conversational
+when one is configured; without one, an honest, unembellished rendering
+of the title and description -- never a claimed "summary" that didn't
+actually happen.
+
+This is genuinely Sim starting something, not merely replying faster: a
+highlight can appear with no request having been made at all, the same
+way a reminder can. `interest <feed url>` tracks a new source, `news`
+(or the `NEWS:` conversational marker) checks and shares on demand,
+bypassing the pacing cooldown -- an explicit request, same as typing
+`work` bypasses the autonomous loop's own idle check.
+
 ## Conversational Self-Modification
 
 A second, separate removal of the "only a typed command or the

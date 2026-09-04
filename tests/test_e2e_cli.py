@@ -119,6 +119,18 @@ class TestTaskAndSkillCommands(E2ECliTestCase):
 
         self.assertIn("enabled: False", result.stdout)
 
+    def test_default_news_topics_are_seeded_on_a_first_run(self):
+        # note_interest is a pure local store write -- no network call --
+        # so this is safe to exercise here unlike 'curious'/'news', which
+        # would genuinely try to reach a real feed URL and don't belong
+        # in this offline-guaranteed suite.
+        result = self.run_cli("interests\nexit\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("hnrss.org", result.stdout)
+        self.assertIn("bbci.co.uk", result.stdout)
+        self.assertIn("nasa.gov", result.stdout)
+
     def test_discover_with_no_signals_reports_nothing_found(self):
         result = self.run_cli("discover\nexit\n")
 

@@ -686,6 +686,58 @@ class TestLogicAgentToolLoop(unittest.TestCase):
         tool_calls = store.query(kind="tool_call")
         self.assertFalse(tool_calls[0].metadata["succeeded"])
 
+    def test_news_marker_not_offered_without_a_news_fn(self):
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="what's new today?"), SharedMemoryBus())
+
+        self.assertNotIn("NEWS:", provider.prompts[0])
+
+    def test_news_tool_calls_the_injected_function(self):
+        calls = []
+        provider = ScriptedProvider([("NEWS:", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            news_fn=lambda: calls.append(1) or "[news] something interesting",
+        )
+
+        agent.handle(AgentRequest(text="check the news"), SharedMemoryBus())
+
+        self.assertEqual(calls, [1])
+        self.assertIn("something interesting", provider.prompts[1])
+
+    def test_news_tool_records_success_correctly(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("NEWS:", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            activity_log=activity_log,
+            news_fn=lambda: "[news] something interesting",
+        )
+
+        agent.handle(AgentRequest(text="check the news"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(tool_calls[0].metadata["tool"], "NEWS")
+        self.assertTrue(tool_calls[0].metadata["succeeded"])
+
+    def test_news_tool_records_failure_when_nothing_new(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("NEWS:", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            activity_log=activity_log,
+            news_fn=lambda: "[news] nothing new to share right now",
+        )
+
+        agent.handle(AgentRequest(text="check the news"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertFalse(tool_calls[0].metadata["succeeded"])
+
     def test_propose_tool_records_itself_as_a_tool_call(self):
         store = InMemoryStore()
         activity_log = ActivityLog(store)
