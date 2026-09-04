@@ -13,6 +13,7 @@ creator's actual review. See docs/EVOLUTION.md milestone 10.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from src.agents.emotion.base import EmotionAgent
@@ -20,6 +21,9 @@ from src.agents.interests import InterestTracker
 from src.agents.logic.base import LogicAgent
 from src.agents.skills.base import SkillsAgent
 from src.agents.skills.research import SkillResearchAgent
+from src.cognition.budget import Budget, BudgetGuard
+from src.cognition.gemini_provider import GeminiProvider
+from src.cognition.provider import CognitionRouter, DeterministicFallbackProvider
 from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
 from src.memory.short_term import ShortTermMemory
@@ -40,7 +44,16 @@ CURIOUS_COMMAND = "curious"
 SLEEP_COMMAND = "sleep"
 HISTORY_COMMAND = "history"
 RUN_PREFIX = "run "
+BUDGET_COMMAND = "budget"
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
+
+# Gemini 3.8 Flash pricing as of this writing ($/1M tokens) -- verify at
+# ai.google.dev/pricing before relying on this for real budgeting; prices
+# and model names in this space change often.
+GEMINI_PRICE_PER_1M_INPUT = 0.75
+GEMINI_PRICE_PER_1M_OUTPUT = 3.75
+DEFAULT_DAILY_BUDGET_USD = float(os.environ.get("SIMORGH_LLM_DAILY_BUDGET_USD", "1.0"))
+DEFAULT_DAILY_MAX_CALLS = int(os.environ.get("SIMORGH_LLM_DAILY_MAX_CALLS", "50"))
 
 
 def build_router() -> Router:
@@ -53,6 +66,36 @@ def build_router() -> Router:
 
 def build_memory_store(path: Path = DEFAULT_MEMORY_PATH) -> MemoryStore:
     return JSONFileMemoryStore(path)
+
+
+def build_cognition_router(
+    store: MemoryStore,
+) -> tuple[CognitionRouter, BudgetGuard | None]:
+    """A real Gemini provider, wrapped in a durable BudgetGuard, ahead of
+    the free deterministic fallback -- only if GEMINI_API_KEY (or
+    GOOGLE_API_KEY) is actually set. With no key configured, this is
+    exactly the zero-dependency CognitionRouter it always was; no key is
+    required to run Simorgh. Per docs/EVOLUTION.md's Resilience Doctrine,
+    a real provider is never registered unguarded. Returns the router and
+    the guard (or None, if no key is configured) so a caller can surface
+    `guard.status()`.
+    """
+    gemini = GeminiProvider()
+    if not gemini.available():
+        return CognitionRouter([DeterministicFallbackProvider()]), None
+
+    guard = BudgetGuard(
+        gemini,
+        store,
+        Budget(
+            max_calls=DEFAULT_DAILY_MAX_CALLS,
+            max_estimated_cost_usd=DEFAULT_DAILY_BUDGET_USD,
+            window_seconds=86400.0,
+        ),
+        price_per_1m_input=GEMINI_PRICE_PER_1M_INPUT,
+        price_per_1m_output=GEMINI_PRICE_PER_1M_OUTPUT,
+    )
+    return CognitionRouter([guard, DeterministicFallbackProvider()]), guard
 
 
 def build_outcome_log(store: MemoryStore | None = None) -> OutcomeLog:
@@ -132,7 +175,8 @@ def run_cli() -> None:
     outcome_log = OutcomeLog(store)
     reflection_agent = ReflectionAgent(outcome_log)
     audit_gate = AuditGate(memory=store)
-    skill_research = SkillResearchAgent()
+    cognition, budget_guard = build_cognition_router(store)
+    skill_research = SkillResearchAgent(cognition)
     interests = InterestTracker(store)
     health_monitor = HealthMonitor()
     short_term = ShortTermMemory()
@@ -141,8 +185,15 @@ def run_cli() -> None:
         "'propose <topic>' to draft a skill, 'pending' for unmerged proposals, "
         "'interest <topic>'/'interests'/'curious' for world-awareness, "
         "'sleep' for maintenance, 'history' for this session's recent turns, "
-        "'run <code>' to execute sandboxed Python."
+        "'run <code>' to execute sandboxed Python, 'budget' for LLM spend status."
     )
+    if GeminiProvider().available():
+        print(
+            f"[cognition: Gemini active, budgeted at ${DEFAULT_DAILY_BUDGET_USD:.2f}/"
+            f"{DEFAULT_DAILY_MAX_CALLS} calls per 24h]"
+        )
+    else:
+        print("[cognition: no GEMINI_API_KEY set -- using the free deterministic fallback only]")
     while True:
         try:
             user_input = input("> ").strip()
@@ -182,6 +233,9 @@ def run_cli() -> None:
             continue
         if lowered.startswith(RUN_PREFIX):
             run_skill_code(router, outcome_log, user_input[len(RUN_PREFIX):])
+            continue
+        if lowered == BUDGET_COMMAND:
+            _print_budget(budget_guard)
             continue
         reply = handle_turn(router, user_input, outcome_log, health_monitor)
         short_term.add(user_input, reply)
@@ -311,6 +365,18 @@ def _print_history(short_term: ShortTermMemory) -> None:
         print("[no turns yet this session]")
         return
     print(short_term.as_context())
+
+
+def _print_budget(budget_guard: BudgetGuard | None) -> None:
+    if budget_guard is None:
+        print("[no LLM provider configured -- nothing to budget]")
+        return
+    status = budget_guard.status()
+    print(
+        f"[budget] {status['calls_in_window']}/{status['max_calls']} calls, "
+        f"${status['spend_in_window_usd']:.4f}/${status['max_estimated_cost_usd']:.2f} "
+        "spent in the current 24h window"
+    )
 
 
 if __name__ == "__main__":
