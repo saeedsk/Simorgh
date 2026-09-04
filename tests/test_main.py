@@ -1,9 +1,10 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from src.agents.interests import InterestTracker
 from src.agents.skills.research import SkillResearchAgent
 from src.main import (
-    PENDING_KIND,
     build_router,
     extract_propose_topic,
     handle_turn,
@@ -13,6 +14,7 @@ from src.main import (
     strip_command_slash,
 )
 from src.memory.long_term import InMemoryStore
+from src.orchestrator.apply import APPLIED_KIND
 from src.orchestrator.audit import AuditGate
 from src.orchestrator.health import HealthMonitor
 from src.orchestrator.reflection import OutcomeLog
@@ -93,21 +95,35 @@ class TestMainCli(unittest.TestCase):
 
 
 class TestProposeSkill(unittest.TestCase):
-    def test_clean_proposal_is_logged_as_pending_not_merged(self):
-        store = InMemoryStore()
-        message = propose_skill(SkillResearchAgent(), AuditGate(), store, "rocketry")
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
 
-        self.assertIn("PENDING YOUR APPROVAL", message)
-        pending = store.query(kind=PENDING_KIND)
-        self.assertEqual(len(pending), 1)
-        self.assertIn("rocketry", pending[0].content)
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_clean_proposal_is_applied_immediately(self):
+        store = InMemoryStore()
+        message = propose_skill(
+            SkillResearchAgent(), AuditGate(), store, "rocketry", repo_root=self.repo_root
+        )
+
+        self.assertIn("APPLIED", message)
+        applied = store.query(kind=APPLIED_KIND)
+        self.assertEqual(len(applied), 1)
+        self.assertIn("rocketry", applied[0].content)
+        written = self.repo_root / "src/agents/skills/rocketry.py"
+        self.assertTrue(written.exists())
+        self.assertIn("rocketry", written.read_text())
 
     def test_empty_topic_is_rejected_with_usage_message(self):
         store = InMemoryStore()
-        message = propose_skill(SkillResearchAgent(), AuditGate(), store, "")
+        message = propose_skill(
+            SkillResearchAgent(), AuditGate(), store, "", repo_root=self.repo_root
+        )
 
         self.assertIn("usage", message)
-        self.assertEqual(store.query(kind=PENDING_KIND), [])
+        self.assertEqual(store.query(kind=APPLIED_KIND), [])
 
 
 class TestNoteInterest(unittest.TestCase):

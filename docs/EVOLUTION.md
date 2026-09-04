@@ -198,11 +198,15 @@ pass before it's even *eligible* for a human to approve:
   `SOUL.md` requires ("no automated process may edit them"), and extended
   to the gate's own source so it can't be asked to approve disabling
   itself.
-- **The verdict never merges anything.** `requires_human_approval` is
-  always `True` under current policy, regardless of how clean the
-  automated checks come back. That default itself can only change by the
-  creator editing this codebase directly -- see `SOUL.md`'s "On changing
-  this hierarchy."
+- **The verdict is what decides merging, and only the creator sets its
+  policy.** `requires_human_approval` was `True` unconditionally until
+  the creator explicitly, repeatedly instructed otherwise; it's now
+  `False`, meaning a passing verdict applies immediately
+  (`src/orchestrator/apply.py`), scoped to `src/agents/skills/` only.
+  That default itself can only change by the creator editing this
+  codebase directly -- see `SOUL.md`'s "On changing this hierarchy" --
+  which is exactly what happened here, not Simorgh granting itself
+  anything.
 
 ## What Maturity Actually Means
 
@@ -212,12 +216,23 @@ that has grown out of being overseen. Two classes of gate are permanent by
 design, not temporary scaffolding to graduate past:
 
 1. Anything that would change Directives 1-5's own enforcement (the audit
-   gate's denylist, the protected-file list, the human-approval default,
-   the priority order in `SOUL.md`) -- permanently creator-only.
+   gate's denylist, the protected-file list, the priority order in
+   `SOUL.md`) -- permanently creator-only.
 2. Anything matching Directive 5 (Restraint): acquiring new compute,
    credentials, or replicating Simorgh's own running instance --
    permanently requires explicit, logged authorization, no matter how
    long Simorgh's track record is.
+
+**Status: the first narrow-class promotion described above has happened.**
+The creator explicitly, repeatedly authorized auto-merge for new skill
+files that pass the audit gate -- `AuditGate.requires_human_approval` is
+now `False`, and `propose`/`improve` apply immediately
+(`src/orchestrator/apply.py`). This is the mechanism this section always
+described, exercised for real, not a change to what stays permanently
+gated: the audit checks themselves, the protected-file list, and
+Directive 5 (Restraint) are all unaffected. Nothing here runs `git commit`
+or `git push` -- applied changes are ordinary uncommitted working-tree
+changes until the creator reviews and commits them.
 
 This is the honest answer to "become a sentient entity": broad,
 resilient, self-improving capability is the actual goal and is being

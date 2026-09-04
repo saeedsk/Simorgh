@@ -5,7 +5,7 @@ from src.orchestrator.audit import AuditGate, ModificationProposal, REJECTED_KIN
 
 
 class TestAuditGate(unittest.TestCase):
-    def test_clean_code_is_approved_by_automation_but_still_needs_human(self):
+    def test_clean_code_is_approved_by_automation_and_needs_no_human_step(self):
         gate = AuditGate()
         proposal = ModificationProposal(
             subject="src/agents/skills/greeting.py",
@@ -16,7 +16,7 @@ class TestAuditGate(unittest.TestCase):
         verdict = gate.review(proposal)
 
         self.assertTrue(verdict.approved_by_automation)
-        self.assertTrue(verdict.requires_human_approval)
+        self.assertFalse(verdict.requires_human_approval)
         self.assertEqual(verdict.reasons, [])
         self.assertTrue(verdict.sandbox_result.succeeded)
 
@@ -31,7 +31,7 @@ class TestAuditGate(unittest.TestCase):
         verdict = gate.review(proposal)
 
         self.assertFalse(verdict.approved_by_automation)
-        self.assertTrue(verdict.requires_human_approval)
+        self.assertFalse(verdict.requires_human_approval)
         self.assertTrue(any("subprocess" in r for r in verdict.reasons))
         self.assertIsNone(verdict.sandbox_result)
 
@@ -72,7 +72,7 @@ class TestAuditGate(unittest.TestCase):
         verdict = gate.review(proposal)
 
         self.assertFalse(verdict.approved_by_automation)
-        self.assertTrue(verdict.requires_human_approval)
+        self.assertFalse(verdict.requires_human_approval)
         self.assertIsNotNone(verdict.sandbox_result)
         self.assertFalse(verdict.sandbox_result.succeeded)
 
@@ -114,7 +114,12 @@ class TestAuditGate(unittest.TestCase):
 
         self.assertFalse(verdict.approved_by_automation)
 
-    def test_requires_human_approval_is_always_true(self):
+    def test_requires_human_approval_is_always_false(self):
+        # Per the creator's explicit, logged policy change (docs/SOUL.md,
+        # "Self-Improvement Philosophy"): a proposal that clears every
+        # check here now applies automatically -- no separate human-
+        # approval step. This constant can only change by editing this
+        # file directly; it is never something Simorgh grants itself.
         gate = AuditGate()
         clean = gate.review(
             ModificationProposal(subject="x.py", code="print(1)", rationale="r")
@@ -123,8 +128,8 @@ class TestAuditGate(unittest.TestCase):
             ModificationProposal(subject="x.py", code="os.system('x')", rationale="r")
         )
 
-        self.assertTrue(clean.requires_human_approval)
-        self.assertTrue(dirty.requires_human_approval)
+        self.assertFalse(clean.requires_human_approval)
+        self.assertFalse(dirty.requires_human_approval)
 
 
 class TestAdaptiveImmunity(unittest.TestCase):

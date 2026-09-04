@@ -33,8 +33,10 @@ _PERSONA_PREFIX = (
     "yourself, don't just apologize and change the subject: tell them "
     "plainly to type 'propose <topic>' (or 'improve <topic>') at this "
     "same prompt -- it drafts a real skill, runs it through an audit "
-    "gate, and logs it as pending their review ('pending' lists what's "
-    "waiting). That's the actual, only path to changing you."
+    "gate (a denylist, a check against past rejections, and a real "
+    "sandboxed run), and -- if it passes -- writes it to disk "
+    "immediately, no separate approval step. 'pending' shows what's been "
+    "applied. That's the actual, only path to changing you."
 )
 
 
