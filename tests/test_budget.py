@@ -123,6 +123,32 @@ class TestBudgetGuard(unittest.TestCase):
 
         self.assertFalse(second.available())
 
+    def test_two_different_providers_sharing_a_store_have_independent_budgets(self):
+        # Live-caught bug: main.py's build_cognition_router wraps Claude
+        # Code CLI and Gemini in separate BudgetGuards sharing ONE
+        # MemoryStore. Heavy use of one must never count against the
+        # other's cap -- previously it did, because _recent_records()
+        # queried every kind="llm_spend" record regardless of which
+        # provider made it.
+        store = InMemoryStore()
+        budget = Budget(max_calls=5)
+        gemini_provider = StubProvider()
+        gemini_provider.name = "gemini"
+        gemini_guard = BudgetGuard(gemini_provider, store, budget)
+
+        for _ in range(5):
+            gemini_guard.complete("hi")
+        self.assertFalse(gemini_guard.available())  # gemini is now exhausted
+
+        claude_provider = StubProvider()
+        claude_provider.name = "claude_code_cli"
+        claude_guard = BudgetGuard(claude_provider, store, budget)
+
+        self.assertTrue(claude_guard.available())
+        claude_guard.complete("hi")  # must not raise
+        status = claude_guard.status()
+        self.assertEqual(status["calls_in_window"], 1)
+
     def test_unavailable_wrapped_provider_makes_guard_unavailable(self):
         class UnavailableProvider:
             name = "gone"

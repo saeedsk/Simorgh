@@ -95,8 +95,24 @@ class BudgetGuard(LLMProvider):
         }
 
     def _recent_records(self) -> list:
+        """Records for THIS wrapped provider only. A real, live bug lived
+        here: this used to return every kind=SPEND_KIND record
+        regardless of which provider made it, so when Claude Code CLI
+        and Gemini were both registered (main.py's build_cognition_router
+        always wraps each in its own BudgetGuard, sharing one
+        MemoryStore), each guard's exhaustion check was actually counting
+        the OTHER provider's calls too -- caught live: Claude Code CLI's
+        guard reported itself exhausted at "110/30 calls" purely from
+        Gemini's own heavy usage, silencing the flat-rate-subscription
+        provider main.py deliberately prefers, entirely because of an
+        unrelated provider's pay-per-token volume.
+        """
         cutoff = time.time() - self._budget.window_seconds
-        return [r for r in self._store.query(kind=SPEND_KIND) if r.created_at >= cutoff]
+        return [
+            r
+            for r in self._store.query(kind=SPEND_KIND)
+            if r.created_at >= cutoff and r.content == self._provider.name
+        ]
 
     def _is_exhausted(self) -> bool:
         records = self._recent_records()
