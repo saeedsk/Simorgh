@@ -445,24 +445,47 @@ Built:
     Flash-tier call costs a small fraction of a cent, so 50 calls was
     hitting the call-count ceiling long before the dollar one).
 
+34. `ActivityLog.format_entry` made deliberately pleasant to read, not
+    just correct: an icon per record kind (💬/🔧/🎯/💡/✨/🛠️/🚫/🌐/💰/🔭),
+    a per-tool icon within `tool_call` entries, ✅/❌ status, and matching
+    color -- the creator's explicit ask that reading the log be
+    "a pleasant and easy to do... activity." The live `propose`/`patch`
+    terminal narration echoes the same icon language (`_print_status`)
+    so the two don't feel like different tools.
+35. Two related, live-caught fixes to `LogicAgent`'s tool loop: (a) the
+    RUN tool's console narration printed the literal word "stdout:" on
+    every single run, succeeded or not, useless output or not --
+    `report.splitlines()[0]` was always that fixed header line, never
+    the actual output; now summarized from the real stdout instead
+    (`"(no output)"` when genuinely empty). (b) On the loop's last
+    allowed step, the prompt now explicitly tells the model no more tool
+    calls will be honored and to answer now with whatever it already
+    learned -- previously the last step was prompted identically to
+    every other step, so a model that (reasonably) tried one more tool
+    call there had that attempt silently discarded, and the whole turn
+    fell back to a generic rule-based echo of the question, wasting
+    every prior (paid) LLM call in the process. Caught live: four RUN
+    attempts investigating whether a capability existed, then a reply
+    that ignored all of it.
+
 Still ahead, roughly in order:
 
-34. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+36. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-35. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+37. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-36. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+38. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-37. There is still no mechanism that loads and invokes an applied skill
+39. There is still no mechanism that loads and invokes an applied skill
     file as a *registered sub-agent* mid-conversation -- `LogicAgent` can
     now RUN arbitrary code on request (milestone 27), which covers most of
     the practical need, but a specific applied skill file still isn't
     something Sim can call by name. Applied skills remain real, executable
     files sitting in `src/agents/skills/`, reachable via `run <code>`
     (copy the file's logic in) but not auto-discovered.
-38. Sim deciding *on its own*, with no human typing `patch`, that a
+40. Sim deciding *on its own*, with no human typing `patch`, that a
     reflection or a RECALL-informed observation warrants a self-patch --
     milestone 30 built the pipeline and 29 builds the reflection, but
     connecting them without a human in the loop is a real, separate
