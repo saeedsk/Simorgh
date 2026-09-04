@@ -69,10 +69,18 @@ CLAUDE_CODE_WINDOW_SECONDS = float(
 DEFAULT_CLAUDE_CODE_MAX_CALLS = int(os.environ.get("SIMORGH_CLAUDE_CODE_MAX_CALLS", "30"))
 
 
-def build_router() -> Router:
+def build_router(
+    cognition: CognitionRouter | None = None,
+    short_term: ShortTermMemory | None = None,
+) -> Router:
+    """`cognition`/`short_term` are optional so existing callers (and every
+    prior test) get exactly the old rule-based-only behavior when omitted
+    -- see LogicAgent's own fallback logic for why passing a CognitionRouter
+    here doesn't change anything unless a real provider actually answers.
+    """
     router = Router(SharedMemoryBus())
     router.register(EmotionAgent())
-    router.register(LogicAgent())
+    router.register(LogicAgent(cognition=cognition, short_term=short_term))
     router.register(SkillsAgent())
     return router
 
@@ -207,15 +215,15 @@ def _dispatch_and_record(
 
 def run_cli() -> None:
     store = build_memory_store()
-    router = build_router()
+    short_term = ShortTermMemory()
+    cognition, budget_guards = build_cognition_router(store)
+    router = build_router(cognition=cognition, short_term=short_term)
     outcome_log = OutcomeLog(store)
     reflection_agent = ReflectionAgent(outcome_log)
     audit_gate = AuditGate(memory=store)
-    cognition, budget_guards = build_cognition_router(store)
     skill_research = SkillResearchAgent(cognition)
     interests = InterestTracker(store)
     health_monitor = HealthMonitor()
-    short_term = ShortTermMemory()
     print(
         "Simorgh -- 'exit'/'quit' to leave, 'reflect' for outcome review, "
         "'propose <topic>' to draft a skill, 'pending' for unmerged proposals, "

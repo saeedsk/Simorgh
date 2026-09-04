@@ -294,6 +294,14 @@ Built:
     present). This is now genuinely `CognitionRouter`'s intended shape:
     multiple real providers with automatic failover between them, not
     just one.
+18. `LogicAgent` (`src/agents/logic/base.py`) now actually talks to a real
+    LLM for ordinary conversation, not just `SkillResearchAgent`'s drafts.
+    Given a `CognitionRouter`, it builds a prompt from Sim's personality
+    (`docs/SOUL.md`), current mood, and recent `ShortTermMemory` context,
+    and uses the LLM's answer -- falling back to the original rule-based
+    drafting, unchanged, whenever no `CognitionRouter` is given, a real
+    provider raises, or only the deterministic floor answered. `EmotionAgent`
+    stays rule-based by design (fast, cheap, no reason to change).
 
 Still ahead, roughly in order:
 
