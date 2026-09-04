@@ -1,16 +1,26 @@
 """CLI entry point: reads user input, routes it through the orchestrator to
 the emotion and logic sub-agents, and synthesizes their output -- using the
 persona's mood on the shared bus -- into one human-like reply.
+
+Every dispatch is also recorded through OutcomeLog (src/orchestrator/
+reflection.py), so the feedback loop has real data instead of only being
+exercised by tests -- see docs/EVOLUTION.md, "Learning From Mistakes."
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from src.agents.emotion.base import EmotionAgent
 from src.agents.logic.base import LogicAgent
+from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
+from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
 
 EXIT_COMMANDS = {"exit", "quit"}
+REFLECT_COMMAND = "reflect"
+DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 
 
 def build_router() -> Router:
@@ -18,6 +28,10 @@ def build_router() -> Router:
     router.register(EmotionAgent())
     router.register(LogicAgent())
     return router
+
+
+def build_outcome_log(store: MemoryStore | None = None) -> OutcomeLog:
+    return OutcomeLog(store or JSONFileMemoryStore(DEFAULT_MEMORY_PATH))
 
 
 def synthesize(reaction: str, response: str, bus: SharedMemoryBus) -> str:
@@ -32,16 +46,51 @@ def synthesize(reaction: str, response: str, bus: SharedMemoryBus) -> str:
     return " ".join(parts)
 
 
-def handle_turn(router: Router, text: str) -> str:
+def handle_turn(
+    router: Router, text: str, outcome_log: OutcomeLog | None = None
+) -> str:
     request = AgentRequest(text=text)
-    reaction = router.dispatch("emotion", request).output
-    response = router.dispatch("logic", request).output
+    reaction = _dispatch_and_record(router, "emotion", request, outcome_log)
+    response = _dispatch_and_record(router, "logic", request, outcome_log)
     return synthesize(reaction, response, router.bus)
+
+
+def _dispatch_and_record(
+    router: Router, name: str, request: AgentRequest, outcome_log: OutcomeLog | None
+) -> str:
+    try:
+        response = router.dispatch(name, request)
+    except Exception as exc:  # noqa: BLE001 -- a failing sub-agent must not
+        # crash the CLI turn; it becomes a recorded, visible failure instead
+        if outcome_log is not None:
+            outcome_log.record(
+                Outcome(
+                    agent=name,
+                    request_text=request.text,
+                    output="",
+                    succeeded=False,
+                    note=repr(exc),
+                )
+            )
+        return f"[{name} agent failed: {exc}]"
+
+    if outcome_log is not None:
+        outcome_log.record(
+            Outcome(
+                agent=name,
+                request_text=request.text,
+                output=response.output,
+                succeeded=True,
+            )
+        )
+    return response.output
 
 
 def run_cli() -> None:
     router = build_router()
-    print("Simorgh -- type 'exit' or 'quit' to leave.")
+    outcome_log = build_outcome_log()
+    reflection_agent = ReflectionAgent(outcome_log)
+    print("Simorgh -- type 'exit'/'quit' to leave, 'reflect' to review recent outcomes.")
     while True:
         try:
             user_input = input("> ").strip()
@@ -52,7 +101,19 @@ def run_cli() -> None:
             continue
         if user_input.lower() in EXIT_COMMANDS:
             break
-        print(handle_turn(router, user_input))
+        if user_input.lower() == REFLECT_COMMAND:
+            _print_reflection(reflection_agent)
+            continue
+        print(handle_turn(router, user_input, outcome_log))
+
+
+def _print_reflection(reflection_agent: ReflectionAgent) -> None:
+    proposals = reflection_agent.reflect()
+    if not proposals:
+        print("[no concerning patterns in recent outcomes]")
+        return
+    for proposal in proposals:
+        print(f"[proposal] {proposal.rationale}")
 
 
 if __name__ == "__main__":
