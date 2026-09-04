@@ -43,12 +43,13 @@ behind several pieces below. This document tracks what's actually built.
 | Claude Code CLI provider | `src/cognition/claude_code_provider.py` | `ClaudeCodeProvider`: spawns `claude -p <prompt> --output-format json --disallowedTools "*" --bare` (no pip dependency -- shells out to a separately-installed `claude` binary), billed against the caller's Claude subscription rather than the API. `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`/`CLAUDE_CODE_OAUTH_TOKEN` are stripped from the subprocess environment (Claude Code's own credential precedence ranks all three above the subscription OAuth session). `--disallowedTools "*"` removes every tool from Claude's context -- used purely as a text-drafting backend, never given file/bash access, and `--dangerously-skip-permissions` is never passed. Each call also runs from a fresh empty temp dir as defense-in-depth. Wrapped in `BudgetGuard` using the CLI's own reported `total_cost_usd` (via `BudgetGuard`'s `cost_usd` metadata override) and a call-count cap (default 30/5h) -- registered ahead of Gemini in `build_cognition_router()` per the creator's preference to use the flat-rate subscription first. |
 | Health monitor | `src/orchestrator/health.py` | `HealthMonitor` inspects `PersonaState` history for pinned extremes, sustained overload, or oscillation, and auto-resets mood to neutral on a CRITICAL finding. Wired live into `main.py`: a CRITICAL reset now surfaces as part of the reply itself. |
 | Reflection loop | `src/orchestrator/reflection.py` | `OutcomeLog` records action outcomes to a `MemoryStore`; `ReflectionAgent.reflect()` turns a sub-agent's elevated failure/correction rate into a `Proposal` -- data, never an automatic change. Wired live into `main.py`. |
-| Audit gate | `src/orchestrator/audit.py` | `AuditGate.review()` vets a `ModificationProposal` through three layers: a static denylist (innate immunity), a learned check against previously rejected proposals (adaptive immunity, via `MemoryStore`), and a real sandboxed run. `soul.py`/`SOUL.md`/`audit.py` itself are always-rejected subjects. `requires_human_approval` is always `True` under current policy. |
+| Audit gate | `src/orchestrator/audit.py` | `AuditGate.review()` vets a `ModificationProposal` through three layers: a static denylist (innate immunity), a learned check against previously rejected proposals (adaptive immunity, via `MemoryStore`), and a real sandboxed run. `soul.py`/`SOUL.md`/`audit.py` itself are always-rejected subjects. `requires_human_approval` is `False` under current policy (creator-authorized, see `SOUL.md`) -- a passing verdict applies immediately via `apply_proposal`. |
+| Apply | `src/orchestrator/apply.py` | `apply_proposal()`: the one place allowed to write a proposal's code to disk. Independently re-enforces the `src/agents/skills/`-only scope (a second boundary beyond AuditGate's own protected-subject check), refuses path traversal, and logs every write (`kind="applied_skill"`). Never runs `git commit`/`git push` -- applied changes are ordinary uncommitted working-tree changes. |
 | Skill research agent | `src/agents/skills/research.py` | `SkillResearchAgent.draft_skill(topic)` produces a real `ModificationProposal` via `CognitionRouter` -- honestly minimal without a real LLM provider registered, but the pipeline works end to end. |
 | Live deployment | `src/orchestrator/deployment.py` | `DeploymentManager`: stage a candidate ("B") for a Router slot alongside the active version ("A"), trial both against cloned buses, `promote`/`rollback` hot-swaps the Router's live registration, `purge_retired` drops old versions once confident. Every step logged as `MemoryStore` lineage. |
 | Consolidation ("sleep") | `src/orchestrator/consolidation.py` | `run_consolidation()`: one explicit maintenance pass -- runs `ReflectionAgent`, then prunes stale records per `MemoryStore` kind via `delete()`. Not a background daemon; always triggered explicitly. |
 | Interests & world-awareness | `src/agents/interests.py` | `InterestTracker` persists tracked topics and decides what's overdue for follow-up; `WorldFeed`/`NullWorldFeed` is the (currently no-network) seam for a future real news/RSS integration. |
-| CLI loop | `src/main.py` | Dispatches to emotion then logic and synthesizes their output using live mood; records every dispatch via `OutcomeLog`; checks `HealthMonitor` after each turn; records each turn in `ShortTermMemory`. Commands: `reflect` (outcome review), `propose <topic>`/`pending` (draft + audit a skill, list what's awaiting the creator's review), `interest <topic>`/`interests`/`curious` (world-awareness), `sleep` (maintenance), `history` (this session's recent turns), `run <code>` (execute sandboxed Python via the skills agent), `budget` (spend status per active provider). Prints which cognition provider(s) are active (Claude Code CLI, Gemini, both, or neither) at startup. |
+| CLI loop | `src/main.py` | Dispatches to emotion then logic and synthesizes their output using live mood; records every dispatch via `OutcomeLog`; checks `HealthMonitor` after each turn; records each turn in `ShortTermMemory`. Commands: `reflect` (outcome review), `propose <topic>`/`improve <topic>`/`pending` (draft, audit, and immediately apply a skill; `pending` shows what's been applied), `interest <topic>`/`interests`/`curious` (world-awareness), `sleep` (maintenance), `history` (this session's recent turns), `run <code>` (execute sandboxed Python via the skills agent), `budget` (spend status per active provider). A leading `/` is optional on any command. Prints which cognition provider(s) are active (Claude Code CLI, Gemini, both, or neither) at startup. |
 
 ## Data flow (current)
 
@@ -79,11 +80,22 @@ SkillResearchAgent.draft_skill(topic) ──▶ ModificationProposal
                  │              │
                 no              yes
                  │               │
-          printed + dropped   MemoryStore(kind="pending_approval")
+          printed + dropped   apply_proposal()  [independent src/agents/skills/-only
+                                 │                scope check + path-traversal guard]
+                                 ▼
+                    written to disk + MemoryStore(kind="applied_skill")
                                  │
                                  ▼
-                        creator reviews via 'pending' -- nothing auto-merges
+              ordinary uncommitted git change -- creator reviews via
+              git diff/status and decides whether to commit; 'pending'
+              lists what's been applied this way
 ```
+
+`requires_human_approval` is `False` under current, creator-authorized
+policy -- there is no separate approval step. This is unchanged from
+`AuditGate`'s own checks (denylist, adaptive immunity, sandbox), and the
+protected-subject list (`soul.py`/`SOUL.md`/`audit.py`) is unaffected --
+see `docs/SOUL.md`, "Self-Improvement Philosophy."
 
 ## Not yet implemented
 
@@ -92,9 +104,10 @@ SkillResearchAgent.draft_skill(topic) ──▶ ModificationProposal
   (deliberately not built until there's real infrastructure to target).
 - A real `WorldFeed` implementation (RSS/API-backed) -- `curious` always
   reports no updates today, honestly, since only `NullWorldFeed` exists.
-- A real `LLMProvider` registered ahead of the fallback in
-  `CognitionRouter` -- until then, `SkillResearchAgent`'s drafts stay
-  minimal by construction.
-- Anything that actually merges an approved `pending_approval` proposal
-  into the real source tree -- deliberately not built; per `SOUL.md`,
-  that step is the creator's, by hand, not this codebase's.
+- `SkillResearchAgent` only ever asks the LLM for a short descriptive
+  note about the topic, wrapped in a template -- not for actual working
+  code. A real provider now produces real prose, but drafted skills still
+  aren't functional beyond returning that text.
+- Any command to view a previously applied proposal's full code (`pending`
+  shows the file path and rationale, not the code itself) -- `git diff`/
+  reading the file directly are the current way to review one.

@@ -1,12 +1,18 @@
 """Self-modification audit gate.
 
-Per docs/SOUL.md: Simorgh may research, draft, and sandbox-test new code
-on its own initiative, but nothing merges into its own running source
-without passing this gate *and*, under current policy, explicit creator
-approval. AuditGate.review() never merges anything -- it only produces a
-verdict for the creator to act on. See docs/EVOLUTION.md, "The Audit Gate
-(Immune System)," and docs/BIOMIMICRY.md, "Proposed: adaptive immunity for
-the audit gate."
+Per docs/SOUL.md ("Self-Improvement Philosophy"): Simorgh may research,
+draft, and sandbox-test new code on its own initiative. As of the
+creator's explicit, logged policy change (docs/SOUL.md, dated), a
+proposal that passes this gate -- the static denylist, adaptive-immunity
+memory, and a real sandboxed run -- now applies automatically for the
+narrow class this gate covers (new skill files; see
+src/orchestrator/apply.py), with no separate human-approval step. This
+gate's own checks are unchanged; only the human-approval gate *on top of*
+those checks was removed, and only for this narrow class. Protected
+subjects (soul.py, SOUL.md, audit.py) remain permanently blocked
+regardless -- that boundary did not move. See docs/EVOLUTION.md, "The
+Audit Gate (Immune System)," and docs/BIOMIMICRY.md, "Proposed: adaptive
+immunity for the audit gate."
 
 Two layers of defense, as in biological immunity: a fixed, fast, innate
 layer (the denylist and protected-subject list below, which never change
@@ -72,11 +78,12 @@ class AuditGate:
     """Runs a ModificationProposal through static, adaptive, and dynamic
     checks.
 
-    `requires_human_approval` is always True under the current SOUL.md
-    policy default -- automation alone never merges a self-modification,
-    no matter how clean the verdict. That default can only change by the
-    creator editing this file directly (see SOUL.md, "On changing this
-    hierarchy").
+    `requires_human_approval` is False under the current SOUL.md policy:
+    the creator has explicitly authorized auto-merge for proposals that
+    pass every check here, for the narrow class this gate covers. This
+    constant can only change by the creator editing this file directly
+    (see SOUL.md, "On changing this hierarchy") -- it is never something
+    Simorgh grants itself.
     """
 
     def __init__(
@@ -123,7 +130,7 @@ class AuditGate:
 
         return AuditVerdict(
             approved_by_automation=not reasons,
-            requires_human_approval=True,
+            requires_human_approval=False,
             reasons=reasons,
             sandbox_result=sandbox_result,
         )
@@ -148,7 +155,7 @@ class AuditGate:
     def _deny(self, proposal: ModificationProposal, reasons: list[str]) -> AuditVerdict:
         self._remember_rejection(proposal, reasons)
         return AuditVerdict(
-            approved_by_automation=False, requires_human_approval=True, reasons=reasons
+            approved_by_automation=False, requires_human_approval=False, reasons=reasons
         )
 
     def _remember_rejection(

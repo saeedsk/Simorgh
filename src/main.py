@@ -5,10 +5,13 @@ persona's mood on the shared bus -- into one human-like reply.
 Every dispatch is also recorded through OutcomeLog (src/orchestrator/
 reflection.py), so the feedback loop has real data instead of only being
 exercised by tests -- see docs/EVOLUTION.md, "Learning From Mistakes." A
-'propose <topic>' command drafts a skill via SkillResearchAgent and runs it
-through AuditGate; anything that passes automated checks is logged as
-pending, never merged automatically -- 'pending' lists what's awaiting the
-creator's actual review. See docs/EVOLUTION.md milestone 10.
+'propose <topic>' (or 'improve <topic>') command drafts a skill via
+SkillResearchAgent and runs it through AuditGate; per the creator's
+explicit, logged policy change (docs/SOUL.md, "Self-Improvement
+Philosophy"), anything that passes every check applies immediately --
+apply_proposal (src/orchestrator/apply.py) enforces its own independent
+scope check (src/agents/skills/ only) regardless. Applied changes land as
+normal, uncommitted git changes; nothing here commits or pushes.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from src.cognition.provider import CognitionRouter, DeterministicFallbackProvide
 from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
 from src.memory.short_term import ShortTermMemory
+from src.orchestrator.apply import APPLIED_KIND, ApplyRefused, apply_proposal
 from src.orchestrator.audit import REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
 from src.orchestrator.health import HealthMonitor, Severity
@@ -39,7 +43,6 @@ REFLECT_COMMAND = "reflect"
 PENDING_COMMAND = "pending"
 PROPOSE_PREFIX = "propose "
 IMPROVE_PREFIX = "improve "
-PENDING_KIND = "pending_approval"
 INTEREST_PREFIX = "interest "
 INTERESTS_COMMAND = "interests"
 CURIOUS_COMMAND = "curious"
@@ -250,8 +253,8 @@ def run_cli() -> None:
     health_monitor = HealthMonitor()
     print(
         "Simorgh -- 'exit'/'quit' to leave, 'reflect' for outcome review, "
-        "'propose <topic>' (or 'improve <topic>') to draft a skill for review, "
-        "'pending' for unmerged proposals, "
+        "'propose <topic>' (or 'improve <topic>') to draft, audit, and apply a skill, "
+        "'pending' to see what's been applied, "
         "'interest <topic>'/'interests'/'curious' for world-awareness, "
         "'sleep' for maintenance, 'history' for this session's recent turns, "
         "'run <code>' to execute sandboxed Python, 'budget' for LLM spend status. "
@@ -336,11 +339,19 @@ def propose_skill(
     audit_gate: AuditGate,
     store: MemoryStore,
     topic: str,
+    repo_root: Path | None = None,
 ) -> str:
     """Draft a skill on `topic`, run it through the audit gate, and -- if it
-    passes automated checks -- log it as pending the creator's actual
-    review. Nothing is ever merged here; this only ever produces something
-    for a human to look at. Returns the message printed, for testability.
+    passes every check (static denylist, adaptive-immunity memory, a real
+    sandboxed run) -- apply it immediately, per the creator's explicit
+    decision to auto-merge this narrow class (docs/SOUL.md,
+    "Self-Improvement Philosophy"). apply_proposal enforces its own
+    independent scope check (src/agents/skills/ only), so a rejected or
+    off-scope proposal is never written regardless of what happens here.
+    Applied changes land as normal, uncommitted git changes -- nothing
+    here commits or pushes. `repo_root` defaults to the current working
+    directory; tests pass an isolated temp directory instead. Returns the
+    message printed, for testability.
     """
     if not topic:
         message = "[usage: propose <topic>]"
@@ -355,24 +366,29 @@ def propose_skill(
         print(message)
         return message
 
-    store.remember(
-        PENDING_KIND, proposal.subject, code=proposal.code, rationale=proposal.rationale
-    )
+    try:
+        target = apply_proposal(proposal, store, repo_root=repo_root)
+    except ApplyRefused as exc:
+        message = f"[rejected] {exc}"
+        print(message)
+        return message
+
     message = (
-        f"[PENDING YOUR APPROVAL] {proposal.subject} -- {proposal.rationale} "
-        "(automated checks passed; nothing merges without your review)"
+        f"[APPLIED] {target} -- {proposal.rationale} "
+        "(passed every check and was written to disk; review with git diff/status "
+        "before committing)"
     )
     print(message)
     return message
 
 
 def _print_pending(store: MemoryStore) -> None:
-    records = store.query(kind=PENDING_KIND)
+    records = store.query(kind=APPLIED_KIND)
     if not records:
-        print("[no proposals pending approval]")
+        print("[nothing applied yet -- try 'propose <topic>' or 'improve <topic>']")
         return
     for record in records:
-        print(f"[pending] {record.content} -- {record.metadata.get('rationale', '')}")
+        print(f"[applied] {record.content} -- {record.metadata.get('rationale', '')}")
 
 
 def note_interest(tracker: InterestTracker, topic: str) -> str:
