@@ -1,0 +1,58 @@
+# Project Simorgh: Cognitive Architecture Framework
+
+## Overview
+A multi-agent cognitive architecture that orchestrates specialized emotional, technical, and persona-driven sub-routines into a unified, highly skilled, and adaptive human-like artificial consciousness.
+
+## Core Architecture Principles
+To achieve human-like complexity, personality, and emotion, the system relies on a decentralized, multi-agent design rather than a single monolithic prompt. 
+
+1. **The Orchestrator (The "Self"):** A central routing and synthesis engine that maintains the core persona. It evaluates inputs and delegates processing to specific sub-agents.
+2. **Sub-Agent Sandboxing:** Each cognitive function (logic, emotion, specialized technical skills) operates in isolation. For safety and pure execution, skill-based agents should run within microVM-style sandboxes, preventing cross-contamination of states.
+3. **Shared Memory Bus:** Instead of passing massive context windows back and forth, sub-agents communicate via a high-speed shared memory layer, allowing the emotional state to subtly influence the logic output in real-time.
+4. **Density/State Tracking:** The system must maintain a continuous state of consciousness, tracking emotional shifts, immediate context, and long-term memory formation.
+
+## Recommended Directory Structure
+Ask Claude Code to scaffold the following repository structure:
+
+```text
+project-simorgh/
+├── docs/
+│   └── architecture.md          # Detailed system design
+├── src/
+│   ├── orchestrator/            # The core identity and routing engine
+│   │   ├── persona_state.py     # State machine for mood, energy, and focus
+│   │   └── router.py            # Delegates tasks to sub-agents
+│   ├── agents/                  # The "Sub-functionalities"
+│   │   ├── emotion/             # Emotional processing and empathy
+│   │   ├── logic/               # Technical reasoning and coding
+│   │   └── skills/              # Specialized capabilities (sandboxed execution)
+│   ├── memory/
+│   │   ├── shared_bus.py        # Shared memory layer for agent communication
+│   │   ├── short_term.py        # Context window management
+│   │   └── long_term.py         # Vector DB integration for permanent memory
+│   ├── sandboxing/              # MicroVM / isolated execution environments for skills
+│   └── main.py                  # Entry point
+├── tests/
+├── requirements.txt
+└── README.md
+```
+
+## Instructions for Claude Code
+
+Copy and paste the following prompts directly to Claude Code to begin development systematically.
+
+### Phase 1: Foundation and State
+**Prompt for Claude Code:**
+> "Initialize a Python project with the directory structure outlined in our groundwork document. Begin by implementing `src/orchestrator/persona_state.py`. I need a robust state machine that can track continuous emotional vectors (e.g., valence, arousal) and cognitive load. This state must be accessible by all future sub-agents."
+
+### Phase 2: The Shared Memory Bus
+**Prompt for Claude Code:**
+> "Implement `src/memory/shared_bus.py`. We need a multi-agent shared memory design where the orchestrator and sub-agents can publish and subscribe to state changes. This is critical so that the 'emotion' agent can update the system's mood, and the 'logic' agent can instantly read that mood to adjust its output tone."
+
+### Phase 3: Agent Orchestration and Sandboxing
+**Prompt for Claude Code:**
+> "Draft the `router.py` in the orchestrator and set up the interface for the sub-agents. For the `skills` agents, outline a framework that allows them to execute code or perform actions in isolated, sandboxed environments (similar to microVM containers) to ensure execution safety and isolation from the core cognitive state."
+
+### Phase 4: Integration
+**Prompt for Claude Code:**
+> "Create a basic CLI loop in `main.py` that takes user input, passes it to the orchestrator, queries the emotion agent for a reaction, queries the logic agent for a response, synthesizes them using the shared memory bus, and returns the final human-like output."

@@ -1,0 +1,2 @@
+# No third-party dependencies yet -- persona_state, shared_bus, router, and
+# sandboxing are built entirely on the Python standard library.
