@@ -217,6 +217,7 @@ def build_router(
     propose_batch_fn: Callable[[str, int], str] | None = None,
     plan_fn: Callable[[str, int], str] | None = None,
     propose_evolve_fn: Callable[[str, int], str] | None = None,
+    use_skill_fn: Callable[[str], str] | None = None,
 ) -> Router:
     """All params are optional so existing callers (and every prior test)
     get exactly the old rule-based-only behavior when omitted -- see
@@ -228,7 +229,11 @@ def build_router(
     ordinary conversation trigger the real propose/patch/batch/plan/evolve
     pipelines directly -- explicitly authorized by the creator (see
     docs/SOUL.md, "Conversational self-modification"); every downstream
-    gate is unchanged, only the trigger source is new.
+    gate is unchanged, only the trigger source is new. `use_skill_fn`,
+    when given, lets a chat reply actually run an already-applied skill
+    (the same sandboxed `load_skill_source`/`build_invocation_code` path
+    as the typed `use <name>` command) instead of only telling the user
+    to type it themselves.
     """
     router = Router(SharedMemoryBus())
     router.register(EmotionAgent())
@@ -245,6 +250,7 @@ def build_router(
             propose_batch_fn=propose_batch_fn,
             plan_fn=plan_fn,
             propose_evolve_fn=propose_evolve_fn,
+            use_skill_fn=use_skill_fn,
         )
     )
     router.register(SkillsAgent())
@@ -703,6 +709,7 @@ def run_cli() -> None:
         propose_evolve_fn=lambda goal, count: propose_patch_batch(
             cognition, self_patch_agent, audit_gate, store, activity_log, goal, count, short_term=short_term
         ),
+        use_skill_fn=lambda name: use_skill(router, outcome_log, activity_log, name),
     )
 
     activity_clock = ActivityClock()

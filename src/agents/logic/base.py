@@ -98,8 +98,9 @@ _PERSONA_PREFIX = (
     "'plan <count> <goal>' to queue steps as tasks instead of running "
     "them now, or 'evolve <count> <goal>' for several real patches to "
     "core source. Once applied, a new skill is runnable right away with "
-    "'use <skill name>' -- no restart, since it was never loaded into "
-    "the running process; a patch or evolve batch DOES relaunch the "
+    "'use <skill name>' (or the USE tool below, when available) -- no "
+    "restart, since it was never loaded into the running process; a "
+    "patch or evolve batch DOES relaunch the "
     "process to take effect, since it's changing code that's already "
     "loaded in memory -- warn the user their session is about to restart "
     "before using PATCH or EVOLVE successfully, don't just go silent "
@@ -149,6 +150,7 @@ class LogicAgent(SubAgent):
         propose_batch_fn: Callable[[str, int], str] | None = None,
         plan_fn: Callable[[str, int], str] | None = None,
         propose_evolve_fn: Callable[[str, int], str] | None = None,
+        use_skill_fn: Callable[[str], str] | None = None,
     ) -> None:
         self._cognition = cognition
         self._short_term = short_term
@@ -162,6 +164,7 @@ class LogicAgent(SubAgent):
         self._propose_patch_fn = propose_patch_fn
         self._propose_batch_fn = propose_batch_fn
         self._plan_fn = plan_fn
+        self._use_skill_fn = use_skill_fn
 
     def handle(self, request: AgentRequest, bus: SharedMemoryBus) -> AgentResponse:
         mood = bus.read()
@@ -252,6 +255,9 @@ class LogicAgent(SubAgent):
             if kind == "evolve":
                 prompt += self._evolve_tool_turn(payload)
                 continue
+            if kind == "use":
+                prompt += self._use_tool_turn(payload)
+                continue
             return payload.strip() or None
 
         return None
@@ -277,6 +283,8 @@ class LogicAgent(SubAgent):
             markers.append("PLAN")
         if self._propose_evolve_fn is not None:
             markers.append("EVOLVE")
+        if self._use_skill_fn is not None:
+            markers.append("USE")
         return tuple(markers)
 
     def _build_prompt(self, text: str, mood: EmotionalState) -> str:
@@ -335,9 +343,9 @@ class LogicAgent(SubAgent):
             lines.append(
                 "PATCH: <path> <description>  -- actually revise one of your own existing "
                 "source files for real, right now, through the full audit gate and this "
-                "repo's entire test suite. If it applies successfully this relaunches the "
-                "process, ending this conversation abruptly -- say that plainly before "
-                "using it, don't just go silent."
+                "repo's entire test suite. If it applies successfully this restarts the "
+                "process (conversation is saved and restored automatically, but say "
+                "plainly that a restart is coming -- don't just go silent)."
             )
         if self._propose_batch_fn is not None:
             lines.append(
@@ -360,8 +368,17 @@ class LogicAgent(SubAgent):
                 "when asked to genuinely evolve/improve yourself at a fundamental level, "
                 "not just add standalone add-on skills -- PROPOSE/BATCH only ever create "
                 "files under src/agents/skills/, they can't change how you actually work; "
-                "this can. Successfully applying anything here relaunches the process, "
-                "ending this conversation abruptly -- say that plainly before using it."
+                "this can. Successfully applying anything here restarts the process "
+                "(conversation is saved and restored automatically, but say plainly that "
+                "a restart is coming -- don't just go silent)."
+            )
+        if self._use_skill_fn is not None:
+            lines.append(
+                "USE: <skill name>  -- actually run one of your already-applied skills "
+                "right now, for real (fresh from disk, sandboxed, same as the typed "
+                "'use <name>' command). Use this when the user asks you to run/try/use a "
+                "specific skill by name instead of telling them to type it themselves; "
+                "'skills' lists what's applied if you're unsure of the exact name."
             )
         return (
             "\n\nYou have real tools, used one at a time. To use one, make your "
@@ -526,6 +543,18 @@ class LogicAgent(SubAgent):
         succeeded = report.startswith("[evolve]") and not report.startswith("[evolve] 0/")
         self._record_tool_call("EVOLVE", preview(arg), preview(report.splitlines()[0]), succeeded)
         return f"\n\n[EVOLVE result]\n{report}\n{_CONTINUE_HINT}"
+
+    def _use_tool_turn(self, raw_name: str) -> str:
+        name = raw_name.strip()
+        if not name:
+            report = "FAILED: expected 'USE: <skill name>'"
+            self._record_tool_call("USE", preview(name), report, False)
+            return f"\n\n[USE result]\n{report}\n{_CONTINUE_HINT}"
+        print(f"[Sim] running skill {name!r} (triggered from conversation)...")
+        report = self._use_skill_fn(name) if self._use_skill_fn else "[not available]"
+        succeeded = not report.startswith("[not found]") and not report.startswith("[usage:")
+        self._record_tool_call("USE", preview(name), preview(report.splitlines()[0] if report else ""), succeeded)
+        return f"\n\n[USE result]\n{report}\n{_CONTINUE_HINT}"
 
     def _record_tool_call(self, tool: str, request: str, result_summary: str, succeeded: bool) -> None:
         if self._activity_log is not None:
