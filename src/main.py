@@ -43,11 +43,13 @@ from src.agents.emotion.base import EmotionAgent
 from src.agents.interests import InterestTracker
 from src.agents.logic.base import LogicAgent
 from src.agents.skills.base import SkillsAgent
+from src.agents.skills.registry import build_invocation_code, list_applied_skills, load_skill_source
 from src.agents.skills.research import SkillResearchAgent
 from src.cognition.budget import Budget, BudgetGuard
 from src.cognition.claude_code_provider import ClaudeCodeProvider
 from src.cognition.gemini_provider import GeminiProvider
 from src.cognition.provider import CognitionRouter, DeterministicFallbackProvider
+from src.cognition.tool_protocol import preview
 from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
 from src.memory.short_term import ShortTermMemory
@@ -84,6 +86,8 @@ HISTORY_COMMAND = "history"
 RUN_PREFIX = "run "
 BUDGET_COMMAND = "budget"
 LOG_COMMAND = "log"
+USE_PREFIX = "use "
+SKILLS_COMMAND = "skills"
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 DEFAULT_HISTORY_PATH = Path.home() / ".simorgh" / "cli_history"
 HISTORY_LENGTH = 1000
@@ -108,6 +112,8 @@ _KNOWN_COMMAND_WORDS = (
     SLEEP_COMMAND,
     HISTORY_COMMAND,
     "run",
+    "use",
+    SKILLS_COMMAND,
     BUDGET_COMMAND,
     LOG_COMMAND,
     "exit",
@@ -249,6 +255,12 @@ _COMMANDS_HELP: tuple[tuple[str, str, str], ...] = (
         "patch src/agents/logic/base.py handle repeated 403s better",
     ),
     ("pending", "List every applied skill and self-patch so far.", "pending"),
+    ("skills", "List every applied skill you can actually run by name.", "skills"),
+    (
+        "use <skill name>",
+        "Actually run an applied skill (fresh from disk, no relaunch needed).",
+        "use rocketry",
+    ),
     (
         "log [last]",
         "Show the unified activity/audit trail; 'last' narrows it to "
@@ -610,6 +622,12 @@ def _run_cli_loop(
         if lowered.startswith(RUN_PREFIX):
             run_skill_code(router, outcome_log, user_input[len(RUN_PREFIX):])
             continue
+        if lowered == SKILLS_COMMAND:
+            _print_skills_list()
+            continue
+        if lowered.startswith(USE_PREFIX):
+            use_skill(router, outcome_log, activity_log, user_input[len(USE_PREFIX):].strip())
+            continue
         if lowered == BUDGET_COMMAND:
             _print_budget(budget_guards)
             continue
@@ -641,6 +659,57 @@ def run_skill_code(router: Router, outcome_log: OutcomeLog, code: str) -> str:
     output = _dispatch_and_record(router, "skills", AgentRequest(text=code), outcome_log)
     print(output)
     return output
+
+
+def use_skill(
+    router: Router,
+    outcome_log: OutcomeLog,
+    activity_log: ActivityLog | None,
+    name: str,
+    repo_root: Path | None = None,
+) -> str:
+    """Actually run an applied skill by name -- the closing half of
+    propose/improve (drafts and deploys a skill to disk, but never ran
+    it) and self-patch (revises and relaunches Sim's *own already-loaded*
+    logic, which a new skill file isn't). A skill was never imported into
+    the running process to begin with, so nothing here needs a relaunch:
+    `load_skill_source` re-reads the file fresh from disk on every call,
+    so a skill just applied (or overwritten by a later 'propose' on the
+    same topic) is usable immediately. Runs through the same sandbox as
+    'run <code>' (src/agents/skills/registry.py's build_invocation_code),
+    never a live in-process import. Returns the message printed, for
+    testability.
+    """
+    root = repo_root or Path.cwd()
+    if not name:
+        message = "[usage: use <skill name> -- see 'skills' for the list]"
+        _print_status(message)
+        return message
+
+    source = load_skill_source(root, name)
+    if source is None:
+        message = f"[not found] no applied skill named {name!r} -- see 'skills' for the list"
+        _print_status(message)
+        return message
+
+    output = _dispatch_and_record(
+        router, "skills", AgentRequest(text=build_invocation_code(source)), outcome_log
+    )
+    print(output)
+    if activity_log is not None:
+        first_line = output.splitlines()[0] if output.strip() else "(no output)"
+        activity_log.record_tool_call("cli", "USE", name, preview(first_line), True)
+    return output
+
+
+def _print_skills_list(repo_root: Path | None = None) -> None:
+    names = list_applied_skills(repo_root or Path.cwd())
+    print(style(f"🧰 Applied skills ({len(names)})", "magenta", "bold"))
+    if not names:
+        print(style("  (none yet -- try 'propose <topic>' or 'improve <topic>')", "dim"))
+        return
+    for name in names:
+        print(f"  • {name}  —  {style('use ' + name, 'cyan')}")
 
 
 def _print_reflection(reflection_agent: ReflectionAgent) -> None:
@@ -719,6 +788,7 @@ def propose_skill(
         "before committing)"
     )
     _print_status(message)
+    print(style(f"   → try it now: use {target.stem}", "dim"))
     return message
 
 
