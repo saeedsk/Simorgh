@@ -125,6 +125,58 @@ class TestProposeSkill(unittest.TestCase):
         self.assertIn("usage", message)
         self.assertEqual(store.query(kind=APPLIED_KIND), [])
 
+    def test_retries_with_feedback_after_a_rejected_draft(self):
+        from src.orchestrator.audit import ModificationProposal
+
+        class FlakySkillResearch:
+            def __init__(self):
+                self.calls = []
+
+            def draft_skill(self, topic, subject=None, prior_reasons=None):
+                self.calls.append(prior_reasons)
+                if len(self.calls) == 1:
+                    code = "eval('1')"  # denylisted -- rejected first try
+                else:
+                    code = "def run():\n    return 1\n"
+                return ModificationProposal(
+                    subject=f"src/agents/skills/{topic}.py", code=code, rationale="r"
+                )
+
+        store = InMemoryStore()
+        research = FlakySkillResearch()
+
+        message = propose_skill(
+            research, AuditGate(), store, "flaky", repo_root=self.repo_root
+        )
+
+        self.assertIn("APPLIED", message)
+        self.assertEqual(len(research.calls), 2)
+        self.assertIsNone(research.calls[0])
+        self.assertTrue(any("eval" in r for r in research.calls[1]))
+
+    def test_gives_up_after_max_attempts(self):
+        from src.orchestrator.audit import ModificationProposal
+
+        class AlwaysBadSkillResearch:
+            def __init__(self):
+                self.calls = 0
+
+            def draft_skill(self, topic, subject=None, prior_reasons=None):
+                self.calls += 1
+                return ModificationProposal(
+                    subject="src/agents/skills/bad.py", code="eval('1')", rationale="r"
+                )
+
+        store = InMemoryStore()
+        research = AlwaysBadSkillResearch()
+
+        message = propose_skill(
+            research, AuditGate(), store, "bad", repo_root=self.repo_root, max_attempts=2
+        )
+
+        self.assertIn("rejected after 2 attempt(s)", message)
+        self.assertEqual(research.calls, 2)
+
 
 class TestNoteInterest(unittest.TestCase):
     def test_notes_a_topic(self):
