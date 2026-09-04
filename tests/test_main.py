@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.agents.interests import InterestTracker
+from src.agents.interests import InterestTracker, NewsItem, WorldFeed
 from src.agents.skills.research import SkillResearchAgent
 from src.main import (
     autocorrect_command,
@@ -353,6 +353,44 @@ class TestNoteInterest(unittest.TestCase):
         self.assertEqual(tracker.list_interests(), [])
 
 
+class _StubFeed(WorldFeed):
+    def __init__(self, items):
+        self._items = items
+
+    def fetch(self, topic, limit=5):
+        return self._items[:limit]
+
+
+class TestNewsCommand(unittest.TestCase):
+    def test_reports_nothing_when_no_interests_are_tracked(self):
+        from src.main import news_command
+        from src.orchestrator.socializing import NewsSocializer
+
+        tracker = InterestTracker(InMemoryStore())
+
+        message = news_command(tracker, NewsSocializer(), CognitionRouter())
+
+        self.assertIn("nothing new", message)
+
+    def test_shares_the_next_item_bypassing_the_pacing_cooldown(self):
+        from src.main import news_command
+        from src.orchestrator.socializing import NewsSocializer
+
+        store = InMemoryStore()
+        items = [NewsItem(title="t1", summary="s1", source="src", published_at=0.0)]
+        tracker = InterestTracker(store, feed=_StubFeed(items))
+        tracker.note_interest("https://example.com/feed", "seeded")
+        # A fresh NewsSocializer is always ready anyway, but a long
+        # cooldown here proves 'news' bypasses it (share_next, not
+        # maybe_share) rather than happening to be ready by accident.
+        socializer = NewsSocializer(cooldown_seconds=3600.0)
+
+        message = news_command(tracker, socializer, CognitionRouter())
+
+        self.assertIn("t1", message)
+        self.assertFalse(socializer.ready())
+
+
 class TestBuildRouterConversationalSelfMod(unittest.TestCase):
     def test_propose_fn_is_threaded_through_to_logic_agent(self):
         from src.cognition.provider import LLMResponse
@@ -413,6 +451,36 @@ class TestBuildRouterConversationalSelfMod(unittest.TestCase):
         router.dispatch("logic", AgentRequest(text="run the rocketry skill"))
 
         self.assertEqual(calls, ["rocketry"])
+
+    def test_news_fn_is_threaded_through_to_logic_agent(self):
+        from src.cognition.provider import LLMResponse
+        from src.orchestrator.router import AgentRequest
+
+        class ScriptedProvider:
+            name = "scripted"
+
+            def __init__(self, responses):
+                self._responses = responses
+                self.calls = 0
+
+            def available(self):
+                return True
+
+            def complete(self, prompt, **kwargs):
+                text = self._responses[min(self.calls, len(self._responses) - 1)]
+                self.calls += 1
+                return LLMResponse(text=text, provider_name=self.name)
+
+        calls = []
+        provider = ScriptedProvider(["NEWS:", "done"])
+        router = build_router(
+            cognition=CognitionRouter([provider]),
+            news_fn=lambda: calls.append(1) or "[news] something interesting",
+        )
+
+        router.dispatch("logic", AgentRequest(text="check the news"))
+
+        self.assertEqual(calls, [1])
 
 
 class TestRunSkillCode(unittest.TestCase):
@@ -2223,6 +2291,77 @@ class TestAutonomousAction(unittest.TestCase):
         )
 
         self.assertEqual(outcomes, [])
+
+    def test_shares_a_ready_news_highlight_before_touching_the_task_queue(self):
+        from src.main import _autonomous_action
+        from src.orchestrator.socializing import NewsSocializer
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        task_store.add("rocketry", SKILL_TASK)  # would otherwise be worked
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        interests = InterestTracker(store, feed=_StubFeed(
+            [NewsItem(title="t1", summary="s1", source="src", published_at=0.0)]
+        ))
+        interests.note_interest("https://example.com/feed", "seeded")
+
+        did_something = _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+            interests=interests, news_socializer=NewsSocializer(cooldown_seconds=0.0),
+        )
+
+        self.assertTrue(did_something)
+        # the task queue was never touched -- still PENDING, not worked
+        self.assertEqual(task_store.all()[0].status, PENDING)
+        self.assertEqual(len(interests.unshared_news_items()), 0)
+
+    def test_falls_through_to_task_work_when_news_is_not_ready(self):
+        from src.main import _autonomous_action
+        from src.orchestrator.socializing import NewsSocializer
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        task_store.add("rocketry", SKILL_TASK)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        interests = InterestTracker(store, feed=_StubFeed(
+            [
+                NewsItem(title="t1", summary="s1", source="src", published_at=0.0),
+                NewsItem(title="t2", summary="s2", source="src", published_at=0.0),
+            ]
+        ))
+        interests.note_interest("https://example.com/feed", "seeded")
+        socializer = NewsSocializer(cooldown_seconds=3600.0)
+        socializer.share_next(interests, None)  # consumes t1, starts the real cooldown clock
+
+        did_something = _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+            interests=interests, news_socializer=socializer,
+        )
+
+        self.assertTrue(did_something)
+        self.assertEqual(task_store.all()[0].status, DONE)  # the task WAS worked
+        self.assertEqual(len(interests.unshared_news_items()), 1)  # t2 untouched
+
+    def test_no_interests_or_socializer_given_behaves_exactly_as_before(self):
+        from src.main import _autonomous_action
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        task_store.add("rocketry", SKILL_TASK)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+
+        did_something = _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+        )
+
+        self.assertTrue(did_something)
+        self.assertEqual(task_store.all()[0].status, DONE)
 
 
 if __name__ == "__main__":
