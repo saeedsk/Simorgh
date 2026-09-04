@@ -15,6 +15,7 @@ from src.main import (
     propose_skill,
     run_skill_code,
     strip_command_slash,
+    use_skill,
 )
 from src.memory.long_term import InMemoryStore
 from src.orchestrator.activity_log import ActivityLog
@@ -601,6 +602,67 @@ class TestProposeSelfPatch(unittest.TestCase):
         self.assertIn("APPLIED", message)
         self.assertEqual(len(agent.calls), 2)
         self.assertTrue(any("eval" in (r or "") for r in agent.calls[1][2]))
+
+
+class TestUseSkill(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        self.skills_dir = self.repo_root / "src" / "agents" / "skills"
+        self.skills_dir.mkdir(parents=True)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_usage_message_when_no_name_given(self):
+        router = build_router()
+        log = OutcomeLog(InMemoryStore())
+
+        message = use_skill(router, log, None, "", repo_root=self.repo_root)
+
+        self.assertIn("usage", message)
+
+    def test_not_found_message_for_unknown_skill(self):
+        router = build_router()
+        log = OutcomeLog(InMemoryStore())
+
+        message = use_skill(router, log, None, "nonexistent", repo_root=self.repo_root)
+
+        self.assertIn("not found", message)
+
+    def test_runs_an_applied_skill_and_returns_its_output(self):
+        (self.skills_dir / "greet.py").write_text("def run():\n    return 'hello from skill'\n")
+        router = build_router()
+        log = OutcomeLog(InMemoryStore())
+
+        output = use_skill(router, log, None, "greet", repo_root=self.repo_root)
+
+        self.assertIn("hello from skill", output)
+
+    def test_picks_up_a_freshly_overwritten_skill_with_no_relaunch(self):
+        target = self.skills_dir / "greet.py"
+        target.write_text("def run():\n    return 'v1'\n")
+        router = build_router()
+        log = OutcomeLog(InMemoryStore())
+        use_skill(router, log, None, "greet", repo_root=self.repo_root)
+
+        target.write_text("def run():\n    return 'v2'\n")
+        output = use_skill(router, log, None, "greet", repo_root=self.repo_root)
+
+        self.assertIn("v2", output)
+
+    def test_records_an_activity_log_tool_call(self):
+        (self.skills_dir / "greet.py").write_text("def run():\n    return 'hi'\n")
+        router = build_router()
+        log = OutcomeLog(InMemoryStore())
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+
+        use_skill(router, log, activity_log, "greet", repo_root=self.repo_root)
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0].metadata["tool"], "USE")
 
 
 class TestAutocorrectCommand(unittest.TestCase):

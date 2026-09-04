@@ -478,13 +478,23 @@ Still ahead, roughly in order:
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-39. There is still no mechanism that loads and invokes an applied skill
-    file as a *registered sub-agent* mid-conversation -- `LogicAgent` can
-    now RUN arbitrary code on request (milestone 27), which covers most of
-    the practical need, but a specific applied skill file still isn't
-    something Sim can call by name. Applied skills remain real, executable
-    files sitting in `src/agents/skills/`, reachable via `run <code>`
-    (copy the file's logic in) but not auto-discovered.
+39. Partially closed: `src/agents/skills/registry.py`
+    (`list_applied_skills`, `load_skill_source`, `build_invocation_code`)
+    plus the CLI's `skills` (list what's applied and runnable) and
+    `use <name>` (actually run one) commands -- directly answering the
+    creator's "develop skill/tool... deploy them... use these changes."
+    Unlike a self-patch, a newly applied skill was never imported into
+    the running process, so nothing here needs a relaunch: `use` re-reads
+    the file fresh from disk every call and runs it through the same
+    sandbox `run <code>` does (`build_invocation_code` deliberately exec's
+    the skill under a namespace where `__name__` isn't `"__main__"`, so a
+    skill's own `if __name__ == "__main__":` guard, if it has one, never
+    double-fires alongside the wrapper's explicit `run()` call). Still
+    open: this is a CLI-level command a human types, not a marker
+    `LogicAgent`'s own tool loop can reach mid-conversation, and there is
+    still no *automatic* registration of an applied skill as a live
+    `Router` sub-agent -- `use <name>` is a manual, on-demand invocation,
+    not a standing capability Sim can reach for on its own initiative.
 40. Sim deciding *on its own*, with no human typing `patch`, that a
     reflection or a RECALL-informed observation warrants a self-patch --
     milestone 30 built the pipeline and 29 builds the reflection, but
