@@ -41,6 +41,23 @@ _DENYLIST_PATTERNS: dict[str, str] = {
         "spawns its own subprocess instead of using the sandbox (Directive 1)"
     ),
     r"\bsocket\.\b": "opens raw network sockets (Directive 1, Directive 5)",
+    r"\burllib\.request\b": (
+        "makes network requests directly via urllib.request instead of the "
+        "reviewed web-fetch tool (Directive 1, Directive 5) -- see "
+        "src/tools/web_fetch.py"
+    ),
+    r"\bhttp\.client\b": (
+        "makes raw HTTP requests via http.client instead of the reviewed "
+        "web-fetch tool (Directive 1, Directive 5) -- see "
+        "src/tools/web_fetch.py"
+    ),
+    r"\brequests\.(get|post|put|delete|patch|head)\s*\(": (
+        "makes network requests via the requests library instead of the "
+        "reviewed web-fetch tool (Directive 1, Directive 5) -- see "
+        "src/tools/web_fetch.py"
+    ),
+    r"\bftplib\b": "opens FTP connections (Directive 1, Directive 5)",
+    r"\bsmtplib\b": "sends email (Directive 1, Directive 5)",
     r"\beval\s*\(": "uses eval on dynamic input (Directive 1)",
     r"\b__import__\s*\(\s*['\"]os['\"]": (
         "dynamically imports os to route around static checks (Directive 1)"

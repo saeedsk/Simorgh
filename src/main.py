@@ -37,12 +37,14 @@ from src.orchestrator.consolidation import run_consolidation
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
+from src.tools.web_fetch import FetchRefused, WebFetchTool
 
 EXIT_COMMANDS = {"exit", "quit"}
 REFLECT_COMMAND = "reflect"
 PENDING_COMMAND = "pending"
 PROPOSE_PREFIX = "propose "
 IMPROVE_PREFIX = "improve "
+FETCH_PREFIX = "fetch "
 INTEREST_PREFIX = "interest "
 INTERESTS_COMMAND = "interests"
 CURIOUS_COMMAND = "curious"
@@ -251,10 +253,11 @@ def run_cli() -> None:
     skill_research = SkillResearchAgent(cognition)
     interests = InterestTracker(store)
     health_monitor = HealthMonitor()
+    web_fetch = WebFetchTool(store)
     print(
         "Simorgh -- 'exit'/'quit' to leave, 'reflect' for outcome review, "
         "'propose <topic>' (or 'improve <topic>') to draft, audit, and apply a skill, "
-        "'pending' to see what's been applied, "
+        "'pending' to see what's been applied, 'fetch <url>' for reviewed web access, "
         "'interest <topic>'/'interests'/'curious' for world-awareness, "
         "'sleep' for maintenance, 'history' for this session's recent turns, "
         "'run <code>' to execute sandboxed Python, 'budget' for LLM spend status. "
@@ -305,6 +308,9 @@ def run_cli() -> None:
             continue
         if lowered == BUDGET_COMMAND:
             _print_budget(budget_guards)
+            continue
+        if lowered.startswith(FETCH_PREFIX):
+            fetch_url(web_fetch, user_input[len(FETCH_PREFIX):].strip())
             continue
         reply = handle_turn(router, user_input, outcome_log, health_monitor)
         short_term.add(user_input, reply)
@@ -358,7 +364,12 @@ def propose_skill(
         print(message)
         return message
 
+    print(f"[propose] drafting a skill for {topic!r}...")
     proposal = skill_research.draft_skill(topic)
+    print(
+        f"[propose] drafted {proposal.subject} -- running it through the audit "
+        "gate (denylist, adaptive-immunity memory, then a real sandboxed run)..."
+    )
     verdict = audit_gate.review(proposal)
 
     if not verdict.approved_by_automation:
@@ -366,6 +377,7 @@ def propose_skill(
         print(message)
         return message
 
+    print("[propose] passed every check -- writing to disk...")
     try:
         target = apply_proposal(proposal, store, repo_root=repo_root)
     except ApplyRefused as exc:
@@ -389,6 +401,34 @@ def _print_pending(store: MemoryStore) -> None:
         return
     for record in records:
         print(f"[applied] {record.content} -- {record.metadata.get('rationale', '')}")
+
+
+def fetch_url(tool: WebFetchTool, url: str) -> str:
+    """Fetch `url` via the reviewed WebFetchTool -- see src/tools/web_fetch.py
+    for what's actually enforced (http/https GET only, SSRF protection,
+    size/time bounds, rate limiting, logging). Returns the message printed,
+    for testability; the printed content is truncated for terminal display
+    even though the tool itself may have fetched more.
+    """
+    if not url:
+        message = "[usage: fetch <url>]"
+        print(message)
+        return message
+
+    print(f"[fetch] validating {url!r} (scheme, DNS resolution, private-address check)...")
+    try:
+        result = tool.fetch(url)
+    except FetchRefused as exc:
+        message = f"[refused] {exc}"
+        print(message)
+        return message
+
+    print(f"[fetch] got HTTP {result.status_code}, {len(result.content)} chars read")
+    display = result.content[:1000]
+    more_note = " (truncated for display)" if len(result.content) > 1000 or result.truncated else ""
+    message = f"[fetched] {url}{more_note}\n{display}"
+    print(message)
+    return message
 
 
 def note_interest(tracker: InterestTracker, topic: str) -> str:
