@@ -5,6 +5,7 @@ from src.cognition.provider import CognitionRouter, LLMResponse, ProviderUnavail
 from src.memory.long_term import InMemoryStore
 from src.memory.short_term import ShortTermMemory
 from src.memory.shared_bus import SharedMemoryBus
+from src.orchestrator.activity_log import ActivityLog
 from src.orchestrator.persona_state import PersonaState
 from src.orchestrator.router import AgentRequest
 from src.sandboxing.sandbox import SandboxResult
@@ -305,6 +306,51 @@ class TestLogicAgentToolLoop(unittest.TestCase):
 
         self.assertEqual(response.output, "a real llm reply")
         self.assertEqual(response.metadata["source"], "llm")
+
+    def test_recall_marker_not_offered_without_activity_log_configured(self):
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        self.assertNotIn("RECALL:", provider.prompts[0])
+
+    def test_recall_tool_returns_recent_activity_and_continues(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        activity_log.record_conversation_turn("earlier prompt", "earlier reply")
+        provider = ScriptedProvider(
+            [("RECALL:", None), ("final answer after recalling", None)]
+        )
+        agent = LogicAgent(cognition=CognitionRouter([provider]), activity_log=activity_log)
+
+        response = agent.handle(AgentRequest(text="how did that go?"), SharedMemoryBus())
+
+        self.assertEqual(len(provider.prompts), 2)
+        self.assertIn("earlier prompt", provider.prompts[1])
+        self.assertEqual(response.output, "final answer after recalling")
+
+    def test_recall_tool_records_itself_as_a_tool_call(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("RECALL:", None), ("final answer", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]), activity_log=activity_log)
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0].metadata["tool"], "RECALL")
+
+    def test_recall_tool_with_no_activity_recorded_yet_says_so(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("RECALL:", None), ("final answer", None)])
+        agent = LogicAgent(cognition=CognitionRouter([provider]), activity_log=activity_log)
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        self.assertIn("nothing recorded yet", provider.prompts[1])
 
 
 if __name__ == "__main__":

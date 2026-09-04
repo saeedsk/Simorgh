@@ -138,6 +138,19 @@ class ClaudeCodeProvider(LLMProvider):
                 f"claude CLI returned non-JSON output: {exc!r}"
             ) from exc
 
+        # A real, live gap: the CLI can exit 0 while `is_error` is true in
+        # the payload -- e.g. "Not logged in · Please run /login" when no
+        # subscription session is active. Checking only returncode let
+        # that string through as if it were an actual drafted reply,
+        # which CognitionRouter would then hand straight to the user as
+        # Sim's own words. Caught live: `claude -p ... --bare` returned
+        # exit 0 with exactly this payload once a session's Claude Code
+        # login had lapsed.
+        if payload.get("is_error"):
+            raise ProviderUnavailable(
+                f"claude CLI reported an error: {payload.get('result', '')!r}"
+            )
+
         return LLMResponse(
             text=payload.get("result", "") or "",
             provider_name=self.name,

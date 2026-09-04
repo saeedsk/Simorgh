@@ -2,14 +2,27 @@
 learn from its mistakes without silently rewriting itself.
 
 Every completed interaction can be logged as an Outcome (success, failure,
-or creator-corrected). ReflectionAgent periodically reviews recent outcomes
-looking for patterns -- e.g. one sub-agent failing or getting corrected
-often -- and turns them into Proposals: plain-language, human-readable
-suggestions for a change. Proposals are data, not actions; per
-docs/SOUL.md, turning a proposal into an actual change to Simorgh's own
-behavior always goes through the audit gate (src/orchestrator/audit.py)
-and, currently, the creator. See docs/EVOLUTION.md, "Learning From
-Mistakes."
+or creator-corrected). Two distinct reflection passes read that log:
+
+- `ReflectionAgent.reflect()` -- batched, periodic: reviews a whole
+  window of recent outcomes looking for *patterns* (e.g. one sub-agent
+  failing or getting corrected often).
+- `ReflectionAgent.reflect_on_outcome()` -- immediate, per-turn: the
+  creator's explicit ask that Simorgh evaluate "how it can do that task
+  better next time" for every situation, not only in aggregate. Fires
+  right after a single outcome that failed or was corrected, using free
+  heuristics rather than an LLM call -- reflecting on literally every
+  turn should not multiply LLM spend (see docs/SOUL.md, "ai api call
+  might become expensive," the creator's own words that shaped
+  src/cognition/budget.py).
+
+Both produce Proposals: plain-language, human-readable suggestions for a
+change. Proposals are data, not actions -- turning one into an actual
+change to Simorgh's own code goes through the self-patch pipeline
+(src/orchestrator/self_patch.py), which is always triggered by a literal
+`patch <path> <description>` command a human operator types, never
+automatically from a reflection alone. See docs/EVOLUTION.md, "Learning
+From Mistakes."
 """
 
 from __future__ import annotations
@@ -40,6 +53,20 @@ class Proposal:
     subject: str
     rationale: str
     evidence_count: int
+
+
+TAKEAWAY_KIND = "takeaway"
+
+# Where each sub-agent's own logic actually lives, so a per-outcome
+# takeaway can point at something patch-able rather than just naming the
+# agent in the abstract. Kept in sync by hand with src/main.py's
+# build_router -- there's no runtime introspection here, on purpose,
+# since this heuristic must never itself import or execute agent code.
+_AGENT_SOURCE_FILES = {
+    "logic": "src/agents/logic/base.py",
+    "emotion": "src/agents/emotion/base.py",
+    "skills": "src/agents/skills/base.py",
+}
 
 
 class OutcomeLog:
@@ -91,10 +118,52 @@ class ReflectionAgent:
         log: OutcomeLog,
         concern_threshold: float = 0.3,
         min_samples: int = 5,
+        store: MemoryStore | None = None,
     ) -> None:
         self._log = log
         self._concern_threshold = concern_threshold
         self._min_samples = min_samples
+        self._store = store
+
+    def reflect_on_outcome(self, outcome: Outcome) -> Proposal | None:
+        """Immediate, per-turn takeaway: "what was the shortcoming here,
+        and how might it be overcome" -- for a single Outcome, not a
+        batch. Returns None for an ordinary successful outcome (nothing
+        to learn from a turn that went fine). A free heuristic, not an
+        LLM call, so this can run after literally every turn without
+        adding to LLM spend; if `store` was given, also durably records
+        the takeaway (kind="takeaway") so it survives past this process
+        and shows up in ActivityLog's unified timeline.
+        """
+        if outcome.succeeded and not outcome.corrected_by_creator:
+            return None
+
+        source_file = _AGENT_SOURCE_FILES.get(outcome.agent)
+        suggestion = (
+            f"consider `patch {source_file} <fix>` to address this directly"
+            if source_file is not None
+            else "no known source file to patch for this agent -- needs a human look"
+        )
+        if not outcome.succeeded:
+            rationale = (
+                f"'{outcome.agent}' failed on {outcome.request_text!r}"
+                f"{' (' + outcome.note + ')' if outcome.note else ''} -- {suggestion}."
+            )
+        else:
+            rationale = (
+                f"'{outcome.agent}' answered {outcome.request_text!r} but the creator "
+                f"corrected it -- worth revisiting why that answer was wrong; {suggestion}."
+            )
+
+        proposal = Proposal(subject=outcome.agent, rationale=rationale, evidence_count=1)
+        if self._store is not None:
+            self._store.remember(
+                TAKEAWAY_KIND,
+                proposal.rationale,
+                agent=outcome.agent,
+                request_text=outcome.request_text,
+            )
+        return proposal
 
     def reflect(self, limit: int = 100) -> list[Proposal]:
         outcomes = self._log.recent(limit=limit)

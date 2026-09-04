@@ -1,7 +1,7 @@
 import unittest
 
 from src.memory.long_term import InMemoryStore
-from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
+from src.orchestrator.reflection import TAKEAWAY_KIND, Outcome, OutcomeLog, ReflectionAgent
 
 
 class TestOutcomeLog(unittest.TestCase):
@@ -93,6 +93,76 @@ class TestReflectionAgent(unittest.TestCase):
         proposals = agent.reflect()
 
         self.assertEqual([p.subject for p in proposals], ["skills"])
+
+
+class TestReflectOnOutcome(unittest.TestCase):
+    def test_successful_outcome_produces_no_takeaway(self):
+        agent = ReflectionAgent(OutcomeLog(InMemoryStore()))
+        outcome = Outcome(agent="logic", request_text="hi", output="hello", succeeded=True)
+
+        self.assertIsNone(agent.reflect_on_outcome(outcome))
+
+    def test_failed_outcome_produces_a_concrete_takeaway(self):
+        agent = ReflectionAgent(OutcomeLog(InMemoryStore()))
+        outcome = Outcome(
+            agent="logic",
+            request_text="fetch site",
+            output="",
+            succeeded=False,
+            note="ValueError('boom')",
+        )
+
+        proposal = agent.reflect_on_outcome(outcome)
+
+        self.assertIsNotNone(proposal)
+        self.assertEqual(proposal.subject, "logic")
+        self.assertIn("boom", proposal.rationale)
+        self.assertIn("patch src/agents/logic/base.py", proposal.rationale)
+
+    def test_corrected_outcome_produces_a_takeaway_even_though_it_succeeded(self):
+        agent = ReflectionAgent(OutcomeLog(InMemoryStore()))
+        outcome = Outcome(
+            agent="logic",
+            request_text="hi",
+            output="wrong tone",
+            succeeded=True,
+            corrected_by_creator=True,
+        )
+
+        proposal = agent.reflect_on_outcome(outcome)
+
+        self.assertIsNotNone(proposal)
+        self.assertIn("corrected", proposal.rationale)
+
+    def test_unknown_agent_gets_a_generic_suggestion_not_a_crash(self):
+        agent = ReflectionAgent(OutcomeLog(InMemoryStore()))
+        outcome = Outcome(
+            agent="some_future_agent", request_text="x", output="", succeeded=False
+        )
+
+        proposal = agent.reflect_on_outcome(outcome)
+
+        self.assertIsNotNone(proposal)
+        self.assertIn("needs a human look", proposal.rationale)
+
+    def test_takeaway_is_durably_recorded_when_store_given(self):
+        store = InMemoryStore()
+        agent = ReflectionAgent(OutcomeLog(store), store=store)
+        outcome = Outcome(agent="logic", request_text="x", output="", succeeded=False)
+
+        agent.reflect_on_outcome(outcome)
+
+        records = store.query(kind=TAKEAWAY_KIND)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].metadata["agent"], "logic")
+
+    def test_no_store_means_no_durable_record_but_still_returns_a_proposal(self):
+        agent = ReflectionAgent(OutcomeLog(InMemoryStore()))
+        outcome = Outcome(agent="logic", request_text="x", output="", succeeded=False)
+
+        proposal = agent.reflect_on_outcome(outcome)
+
+        self.assertIsNotNone(proposal)
 
 
 if __name__ == "__main__":

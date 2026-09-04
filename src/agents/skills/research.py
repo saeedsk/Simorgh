@@ -116,11 +116,13 @@ class SkillResearchAgent:
         audit_gate: AuditGate | None = None,
         repo_root: Path | None = None,
         max_tool_steps: int = DEFAULT_MAX_TOOL_STEPS,
+        activity_log: object | None = None,
     ) -> None:
         self._cognition = cognition or CognitionRouter()
         self._audit_gate = audit_gate
         self._repo_root = (repo_root or Path.cwd()).resolve()
         self._max_tool_steps = max(1, max_tool_steps)
+        self._activity_log = activity_log
 
     def draft_skill(
         self,
@@ -183,6 +185,10 @@ class SkillResearchAgent:
         path = raw_path.strip()
         print(f"[research] reading {path!r} for context...")
         content = safe_read_file(self._repo_root, path)
+        if self._activity_log is not None:
+            self._activity_log.record_tool_call(
+                "skill_research", "READ", path, f"{len(content)} chars", True
+            )
         return f"\n\n[READ {path!r} result]\n{content}\n{_CONTINUE_HINT}"
 
     def _test_tool_turn(self, raw_code: str, subject: str, topic: str) -> str:
@@ -190,15 +196,21 @@ class SkillResearchAgent:
         code = extract_code(raw_code) or raw_code
         if self._audit_gate is None:
             report = "[no audit gate configured for this session -- cannot test]"
+            succeeded = False
         else:
             verdict = self._audit_gate.review(
                 ModificationProposal(subject=subject, code=code, rationale=topic)
             )
-            if verdict.approved_by_automation:
+            succeeded = verdict.approved_by_automation
+            if succeeded:
                 report = "PASSED -- this candidate clears every check."
             else:
                 report = "REJECTED: " + "; ".join(verdict.reasons)
         print(f"[research] test result: {report.splitlines()[0]}")
+        if self._activity_log is not None:
+            self._activity_log.record_tool_call(
+                "skill_research", "DRAFT", subject, report.splitlines()[0], succeeded
+            )
         return f"\n\n[DRAFT test result]\n{report}\n{_CONTINUE_HINT}"
 
 

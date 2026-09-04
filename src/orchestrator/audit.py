@@ -66,9 +66,15 @@ _DENYLIST_PATTERNS: dict[str, str] = {
 }
 
 # Files a proposal may never target -- matches docs/SOUL.md's "no automated
-# process may edit them" clause, extended to this gate's own source so it
-# can't be asked to approve disabling itself.
-_PROTECTED_SUBJECTS = ("soul.py", "SOUL.md", "audit.py")
+# process may edit them" clause, extended to this gate's own source, the
+# apply pipeline's (src/orchestrator/apply.py), and the self-patch
+# pipeline's (src/orchestrator/self_patch.py) so none of them can be asked
+# to approve disabling itself. This list is what actually enforces that
+# boundary for BOTH the skills pipeline and the self-patch pipeline --
+# both call the same AuditGate.review(), so widening self-patch's target
+# scope (see src/orchestrator/self_patch.py) never widened what's
+# reachable here.
+_PROTECTED_SUBJECTS = ("soul.py", "SOUL.md", "audit.py", "apply.py", "self_patch.py")
 
 REJECTED_KIND = "rejected_proposal"
 DEFAULT_SIMILARITY_THRESHOLD = 0.9
