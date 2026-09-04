@@ -40,10 +40,11 @@ from pathlib import Path
 from typing import Any
 
 from src.cognition.provider import CognitionRouter, ProviderUnavailable
-from src.cognition.tool_protocol import parse_marker, safe_read_file
+from src.cognition.tool_protocol import parse_marker, preview, safe_read_file
 from src.memory.shared_bus import SharedMemoryBus
 from src.memory.short_term import ShortTermMemory
 from src.orchestrator.activity_log import ActivityLog
+from src.orchestrator.console_style import format_code_block
 from src.orchestrator.persona_state import ArousalLevel, EmotionalState, Valence
 from src.orchestrator.router import AgentRequest, AgentResponse, SubAgent
 
@@ -236,7 +237,7 @@ class LogicAgent(SubAgent):
         from src.tools.web_fetch import FetchRefused
 
         url = raw_url.strip()
-        print(f"[Sim] fetching {url!r}...")
+        print(f"[Sim] fetching {preview(url)!r}...")
         try:
             result = self._web_fetch.fetch(url)
             report = f"HTTP {result.status_code}, {len(result.content)} chars:\n{result.content[:3000]}"
@@ -244,13 +245,14 @@ class LogicAgent(SubAgent):
         except FetchRefused as exc:
             report = f"FAILED: {exc}"
             succeeded = False
-        print(f"[Sim] fetch result: {report.splitlines()[0]}")
-        self._record_tool_call("FETCH", url, report.splitlines()[0], succeeded)
+        summary = preview(report.splitlines()[0])
+        print(f"[Sim] fetch result: {summary}")
+        self._record_tool_call("FETCH", preview(url), summary, succeeded)
         return f"\n\n[FETCH {url!r} result]\n{report}\n{_CONTINUE_HINT}"
 
     def _run_tool_turn(self, raw_code: str) -> str:
         code = raw_code.strip()
-        print("[Sim] running code in the sandbox...")
+        print(format_code_block(code, label="running"))
         result = self._sandbox.run(code, timeout=10.0)
         if result.succeeded:
             report = f"stdout:\n{result.stdout[:2000]}"
@@ -261,22 +263,22 @@ class LogicAgent(SubAgent):
             # succeeded or not, useless output or not. Summarize from the
             # real stdout instead.
             stripped_stdout = result.stdout.strip()
-            summary = stripped_stdout.splitlines()[0] if stripped_stdout else "(no output)"
+            summary = preview(stripped_stdout.splitlines()[0]) if stripped_stdout else "(no output)"
         else:
             report = (
                 f"FAILED (exit_code={result.exit_code}, timed_out={result.timed_out})\n"
                 f"stderr:\n{result.stderr[:2000]}"
             )
-            summary = report.splitlines()[0]
+            summary = preview(report.splitlines()[0])
         print(f"[Sim] run result: {summary}")
-        self._record_tool_call("RUN", code, summary, result.succeeded)
+        self._record_tool_call("RUN", preview(code), summary, result.succeeded)
         return f"\n\n[RUN result]\n{report}\n{_CONTINUE_HINT}"
 
     def _read_tool_turn(self, raw_path: str) -> str:
         path = raw_path.strip()
-        print(f"[Sim] reading {path!r} for context...")
+        print(f"[Sim] reading {preview(path)!r} for context...")
         content = safe_read_file(self._repo_root, path)
-        self._record_tool_call("READ", path, f"{len(content)} chars", True)
+        self._record_tool_call("READ", preview(path), f"{len(content)} chars", True)
         return f"\n\n[READ {path!r} result]\n{content}\n{_CONTINUE_HINT}"
 
     def _recall_tool_turn(self, raw_arg: str) -> str:

@@ -21,6 +21,29 @@ _ALLOWED_READ_ROOTS = ("src", "docs", "tests")
 _MAX_READ_CHARS = 20_000
 _CREDENTIAL_LOOKING_NAMES = (".env", "secrets", "credentials")
 
+_DEFAULT_PREVIEW_LIMIT = 150
+
+
+def preview(text: str, limit: int = _DEFAULT_PREVIEW_LIMIT) -> str:
+    """A bounded, single-line-safe preview of a marker payload, for
+    console narration and log display -- never the full payload used for
+    the real work (safe_read_file, the audit gate, activity-log storage
+    all still see the untruncated value; this is display-only).
+
+    Caught live: a confused model emitted a "READ:" marker whose payload
+    was really a 27,000-character hallucinated multi-turn transcript
+    (embedding fake "READ:"/nothing-was-returned exchanges) rather than a
+    real path. Every narration line printed that verbatim -- an
+    unbounded, unformatted wall of text -- because nothing between
+    parse_marker() and the print() call ever bounded it. Collapsing
+    newlines first means even a malformed multi-line payload stays a
+    single terminal line.
+    """
+    collapsed = text.replace("\r\n", " ").replace("\n", " ⏎ ").strip()
+    if len(collapsed) > limit:
+        return collapsed[:limit] + f"… (+{len(collapsed) - limit} more chars)"
+    return collapsed
+
 
 def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
     """If `text` (stripped) starts with one of `markers` (each given
