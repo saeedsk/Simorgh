@@ -157,14 +157,15 @@ _KNOWN_COMMAND_WORDS = (
 # and model names in this space change often.
 GEMINI_PRICE_PER_1M_INPUT = 0.75
 GEMINI_PRICE_PER_1M_OUTPUT = 3.75
-DEFAULT_DAILY_BUDGET_USD = float(os.environ.get("SIMORGH_LLM_DAILY_BUDGET_USD", "1.0"))
-# Raised from 50 -> 1500 at the creator's explicit request: with the
-# $1.00/day dollar cap unchanged, the dollar cap is the real limit in
-# practice (a Flash-tier call is a fraction of a cent) -- the call-count
-# cap exists as a sanity ceiling, not the primary control, so it's set
-# high enough to not be the thing that silently kills LLM access first
-# (see docs/EVOLUTION.md, "Sim doesn't have LLM access anymore," where
-# the 50-call default was exactly what did that).
+DEFAULT_DAILY_BUDGET_USD = float(os.environ.get("SIMORGH_LLM_DAILY_BUDGET_USD", "2.0"))
+# max_calls raised from 50 -> 1500, and the dollar cap from $1.00 ->
+# $2.00/day, both at the creator's explicit request. The dollar cap is
+# the real limit in practice (a Flash-tier call is a fraction of a
+# cent) -- the call-count cap exists as a sanity ceiling, not the
+# primary control, so it's set high enough to not be the thing that
+# silently kills LLM access first (see docs/EVOLUTION.md, "Sim doesn't
+# have LLM access anymore," where the 50-call default was exactly what
+# did that).
 DEFAULT_DAILY_MAX_CALLS = int(os.environ.get("SIMORGH_LLM_DAILY_MAX_CALLS", "1500"))
 
 # Claude Code CLI is flat-rate (a Pro/Max/Team/Enterprise subscription),
