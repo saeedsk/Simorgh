@@ -942,6 +942,111 @@ class TestProposePatchBatch(unittest.TestCase):
         self.assertEqual((self.repo_root / "src/orchestrator/b.py").read_text(), "B = 1\n")
 
 
+class TestPrintPending(unittest.TestCase):
+    def test_empty_store_reports_nothing_applied(self):
+        import contextlib
+        import io
+
+        from src.main import _print_pending
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_pending(InMemoryStore())
+
+        self.assertIn("nothing applied yet", buf.getvalue())
+
+    def test_bare_pending_lists_paths_and_rationale(self):
+        import contextlib
+        import io
+
+        from src.main import _print_pending
+
+        store = InMemoryStore()
+        store.remember(APPLIED_KIND, "src/agents/skills/rocketry.py", code="X = 1", rationale="fun")
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_pending(store)
+
+        output = buf.getvalue()
+        self.assertIn("src/agents/skills/rocketry.py", output)
+        self.assertIn("fun", output)
+
+    def test_pending_with_subject_shows_the_full_code(self):
+        import contextlib
+        import io
+
+        from src.main import _print_pending
+
+        store = InMemoryStore()
+        store.remember(
+            APPLIED_KIND, "src/agents/skills/rocketry.py", code="def run():\n    return 42\n",
+            rationale="fun",
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_pending(store, "src/agents/skills/rocketry.py")
+
+        output = buf.getvalue()
+        self.assertIn("def run():", output)
+        self.assertIn("return 42", output)
+
+    def test_pending_with_subject_shows_the_most_recent_version(self):
+        import contextlib
+        import io
+
+        from src.main import _print_pending
+
+        store = InMemoryStore()
+        store.remember(APPLIED_KIND, "src/agents/skills/rocketry.py", code="OLD = 1", rationale="v1")
+        store.remember(APPLIED_KIND, "src/agents/skills/rocketry.py", code="NEW = 2", rationale="v2")
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_pending(store, "src/agents/skills/rocketry.py")
+
+        output = buf.getvalue()
+        self.assertIn("NEW = 2", output)
+        self.assertNotIn("OLD = 1", output)
+
+    def test_pending_with_unknown_subject_reports_not_found(self):
+        import contextlib
+        import io
+
+        from src.main import _print_pending
+
+        store = InMemoryStore()
+        store.remember(APPLIED_KIND, "src/agents/skills/rocketry.py", code="X = 1", rationale="fun")
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_pending(store, "src/agents/skills/nope.py")
+
+        self.assertIn("not found", buf.getvalue())
+
+    def test_pending_with_subject_includes_test_summary_for_patches(self):
+        import contextlib
+        import io
+
+        from src.main import _print_pending
+
+        store = InMemoryStore()
+        store.remember(
+            APPLIED_PATCH_KIND,
+            "src/main.py",
+            code="X = 1",
+            rationale="fix",
+            test_summary="patched: 42 tests (OK)",
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_pending(store, "src/main.py")
+
+        self.assertIn("patched: 42 tests", buf.getvalue())
+
+
 class TestUseSkill(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()

@@ -737,18 +737,30 @@ Built:
     nothing in this environment can deliver one -- but "the creator has
     to remember to type `digest`" is no longer the only way this
     surfaces.
+50. `pending <path>` now shows the full applied code for that path (the
+    most recent version, if applied more than once), plus its rationale
+    and, for a patch, its isolated-test-suite summary -- previously
+    `pending` only ever listed paths and rationale, and reviewing the
+    actual code meant `git diff`/reading the file by hand. The code was
+    already sitting right there the whole time: `apply_proposal`/
+    `apply_source_patch` both durably store `code=proposal.code` in the
+    record; this just surfaces it. (This also caught and corrected a
+    stale doc claim in `docs/architecture.md`'s "Not yet implemented"
+    list -- `SkillResearchAgent` had already been drafting genuine
+    working code, not template prose, since milestone 25 far below; the
+    bullet just never got removed when that landed.)
 
 Still ahead, roughly in order:
 
-50. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+51. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-51. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+52. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-52. *Automatic* registration of an applied skill as a live `Router`
+53. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
     invocation rather than done reflexively).
-53. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+54. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and
     `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
     derived from real operating experience -- worth revisiting once

@@ -68,7 +68,7 @@ from src.orchestrator.apply import (
 )
 from src.orchestrator.audit import REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
-from src.orchestrator.console_style import style
+from src.orchestrator.console_style import format_code_block, style
 from src.orchestrator.discovery import discover_improvements
 from src.orchestrator.git_ops import (
     commit_applied_change,
@@ -330,7 +330,7 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("work", "Run one task from the backlog."),
     ("autonomous [on|off]", "Control the idle-triggered autonomous loop (no arg = status)."),
     ("digest", "Rollup of autonomous activity over the last 24h."),
-    ("pending", "List every applied skill and self-patch."),
+    ("pending [path]", "List applied changes, or show one's full code."),
     ("skills", "List applied skills you can run by name."),
     ("use <skill name>", "Run an applied skill fresh from disk."),
     ("log [last]", "Show the unified activity/audit trail."),
@@ -902,8 +902,8 @@ def _run_cli_loop(
         if lowered == REFLECT_COMMAND:
             _print_reflection(reflection_agent)
             continue
-        if lowered == PENDING_COMMAND:
-            _print_pending(store)
+        if lowered == PENDING_COMMAND or lowered.startswith(PENDING_COMMAND + " "):
+            _print_pending(store, user_input[len(PENDING_COMMAND):].strip())
             continue
         propose_topic = extract_propose_topic(user_input, lowered)
         if propose_topic is not None:
@@ -1904,7 +1904,15 @@ def _print_autonomous_digest(autonomy: AutonomyController) -> None:
         )
 
 
-def _print_pending(store: MemoryStore) -> None:
+def _print_pending(store: MemoryStore, subject: str = "") -> None:
+    """Bare 'pending' lists every applied skill/patch (path + rationale).
+    'pending <path>' shows the full code for the most recent applied
+    change at that path -- previously the only way to review one was
+    `git diff`/reading the file by hand; the code was already sitting
+    right there in the record the whole time (apply_proposal/
+    apply_source_patch both store `code=proposal.code`), just never
+    surfaced.
+    """
     skills = store.query(kind=APPLIED_KIND)
     patches = store.query(kind=APPLIED_PATCH_KIND)
     if not skills and not patches:
@@ -1913,10 +1921,29 @@ def _print_pending(store: MemoryStore) -> None:
             "'patch <path> <description>']"
         )
         return
+
+    if subject:
+        combined = sorted(skills + patches, key=lambda r: r.created_at, reverse=True)
+        matches = [r for r in combined if r.content == subject]
+        if not matches:
+            print(f"[not found] nothing applied at {subject!r} -- see 'pending' for what's tracked")
+            return
+        record = matches[0]
+        kind_label = "skill" if record.kind == APPLIED_KIND else "patch"
+        print(style(f"📄 Applied {kind_label}: {subject}", "magenta", "bold"))
+        print(f"  rationale: {record.metadata.get('rationale', '')}")
+        test_summary = record.metadata.get("test_summary")
+        if test_summary:
+            print(f"  test suite: {test_summary.splitlines()[0]}")
+        print(format_code_block(record.metadata.get("code", ""), label=subject))
+        return
+
+    print(style(f"📋 Applied changes ({len(skills) + len(patches)})", "magenta", "bold"))
     for record in skills:
-        print(f"[applied: skill] {record.content} -- {record.metadata.get('rationale', '')}")
+        print(f"  [skill] {record.content} -- {record.metadata.get('rationale', '')}")
     for record in patches:
-        print(f"[applied: patch] {record.content} -- {record.metadata.get('rationale', '')}")
+        print(f"  [patch] {record.content} -- {record.metadata.get('rationale', '')}")
+    print(style("  ('pending <path>' shows the full applied code)", "dim"))
 
 
 def _print_activity_log(activity_log: ActivityLog, arg: str = "", limit: int = 20) -> None:
