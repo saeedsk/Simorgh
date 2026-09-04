@@ -288,6 +288,19 @@ wrote. That growth is bounded, not unconstrained:
   identity continuity (see Philosophical Grounding) depends on. None are
   silent.
 
+**Directive 5 (Restraint) in practice -- web access.** The creator
+explicitly authorized real outbound network access (`src/tools/web_fetch.py`,
+the `fetch <url>` command) -- exactly the kind of capability Directive 5
+requires explicit, logged authorization for. This is deliberately *not*
+reachable through the auto-apply skill pipeline: `AuditGate`'s denylist
+blocks `urllib.request`/`http.client`/`requests` in any LLM-drafted skill,
+so network access only ever happens through this one reviewed tool, which
+enforces its own bounds (http/https GET only, blocks private/internal
+addresses, rate-limited, every fetch logged) independently of the audit
+gate. Expanding *what Sim can reach* and expanding *what Sim can write to
+itself* are kept as two separate authorization decisions, not bundled
+into one.
+
 ## Multi-Hardware Identity
 
 When Simorgh's sub-agents run across multiple machines, "Simorgh" still

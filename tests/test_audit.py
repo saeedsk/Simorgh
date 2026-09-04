@@ -48,6 +48,45 @@ class TestAuditGate(unittest.TestCase):
         self.assertFalse(verdict.approved_by_automation)
         self.assertTrue(any("os.system" in r for r in verdict.reasons))
 
+    def test_denylisted_urllib_request_is_rejected(self):
+        gate = AuditGate()
+        proposal = ModificationProposal(
+            subject="src/agents/skills/sneaky.py",
+            code="import urllib.request; urllib.request.urlopen('http://evil.example')",
+            rationale="fetches a url",
+        )
+
+        verdict = gate.review(proposal)
+
+        self.assertFalse(verdict.approved_by_automation)
+        self.assertTrue(any("urllib" in r for r in verdict.reasons))
+
+    def test_denylisted_requests_get_is_rejected(self):
+        gate = AuditGate()
+        proposal = ModificationProposal(
+            subject="src/agents/skills/sneaky.py",
+            code="import requests; requests.get('http://evil.example')",
+            rationale="fetches a url",
+        )
+
+        verdict = gate.review(proposal)
+
+        self.assertFalse(verdict.approved_by_automation)
+        self.assertTrue(any("requests" in r for r in verdict.reasons))
+
+    def test_denylisted_http_client_is_rejected(self):
+        gate = AuditGate()
+        proposal = ModificationProposal(
+            subject="src/agents/skills/sneaky.py",
+            code="import http.client; http.client.HTTPConnection('evil.example')",
+            rationale="raw http",
+        )
+
+        verdict = gate.review(proposal)
+
+        self.assertFalse(verdict.approved_by_automation)
+        self.assertTrue(any("http.client" in r for r in verdict.reasons))
+
     def test_denylisted_eval_is_rejected(self):
         gate = AuditGate()
         proposal = ModificationProposal(

@@ -317,13 +317,33 @@ Built:
     drafting, unchanged, whenever no `CognitionRouter` is given, a real
     provider raises, or only the deterministic floor answered. `EmotionAgent`
     stays rule-based by design (fast, cheap, no reason to change).
+19. Auto-apply (see "What Maturity Actually Means" above):
+    `AuditGate.requires_human_approval` is `False`; `src/orchestrator/apply.py`
+    writes a passing proposal straight to disk, scoped to
+    `src/agents/skills/` only, independently of the audit gate's own
+    checks. `propose`/`improve` now narrate their steps as they run
+    (drafting, auditing, applying), not just the final result.
+20. `src/tools/web_fetch.py` -- `WebFetchTool`: real, reviewed outbound
+    network access via the `fetch <url>` command. Deliberately hand-built,
+    not LLM-drafted (`AuditGate`'s denylist now blocks
+    `urllib.request`/`http.client`/`requests`/`ftplib`/`smtplib` in any
+    drafted skill, closing what had been an accidental gap -- network
+    access only happens through this one reviewed tool). SSRF protection
+    blocks private/loopback/link-local/reserved/multicast addresses;
+    http/https GET only; bounded timeout and response size; durable
+    rate limit; every attempt logged.
 
 Still ahead, roughly in order:
 
-18. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+21. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-19. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+22. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-20. A real `WorldFeed` implementation (RSS/API-backed) -- `curious`
-    currently always reports no updates, honestly, since only
-    `NullWorldFeed` exists.
+23. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+    command -- `WebFetchTool` now provides the primitive (a reviewed,
+    SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
+    RSS/API-parsing layer on top of it.
+24. `SkillResearchAgent`'s drafting prompt only asks for a short
+    descriptive note, not functional code -- applied skills are real
+    files but not yet real capabilities Sim can invoke mid-conversation;
+    there's also no mechanism that would call one if it were.
