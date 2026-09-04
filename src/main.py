@@ -23,6 +23,7 @@ from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
 from src.orchestrator.audit import REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
+from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
 
@@ -66,12 +67,27 @@ def synthesize(reaction: str, response: str, bus: SharedMemoryBus) -> str:
 
 
 def handle_turn(
-    router: Router, text: str, outcome_log: OutcomeLog | None = None
+    router: Router,
+    text: str,
+    outcome_log: OutcomeLog | None = None,
+    health_monitor: HealthMonitor | None = None,
 ) -> str:
     request = AgentRequest(text=text)
     reaction = _dispatch_and_record(router, "emotion", request, outcome_log)
     response = _dispatch_and_record(router, "logic", request, outcome_log)
-    return synthesize(reaction, response, router.bus)
+    reply = synthesize(reaction, response, router.bus)
+
+    if health_monitor is not None:
+        critical = [
+            issue
+            for issue in health_monitor.enforce(router.bus)
+            if issue.severity is Severity.CRITICAL
+        ]
+        if critical:
+            reasons = "; ".join(issue.description for issue in critical)
+            reply += f" [self-correction: {reasons} -- resetting to a calmer baseline]"
+
+    return reply
 
 
 def _dispatch_and_record(
@@ -113,6 +129,7 @@ def run_cli() -> None:
     audit_gate = AuditGate(memory=store)
     skill_research = SkillResearchAgent()
     interests = InterestTracker(store)
+    health_monitor = HealthMonitor()
     print(
         "Simorgh -- 'exit'/'quit' to leave, 'reflect' for outcome review, "
         "'propose <topic>' to draft a skill, 'pending' for unmerged proposals, "
@@ -153,7 +170,7 @@ def run_cli() -> None:
         if lowered == SLEEP_COMMAND:
             _run_sleep(store, reflection_agent)
             continue
-        print(handle_turn(router, user_input, outcome_log))
+        print(handle_turn(router, user_input, outcome_log, health_monitor))
 
 
 def _print_reflection(reflection_agent: ReflectionAgent) -> None:

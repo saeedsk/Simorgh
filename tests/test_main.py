@@ -11,6 +11,7 @@ from src.main import (
 )
 from src.memory.long_term import InMemoryStore
 from src.orchestrator.audit import AuditGate
+from src.orchestrator.health import HealthMonitor
 from src.orchestrator.reflection import OutcomeLog
 
 
@@ -56,6 +57,36 @@ class TestMainCli(unittest.TestCase):
         # outcome_log defaults to None -- should behave exactly as before
         output = handle_turn(router, "hello there")
         self.assertTrue(output)
+
+    def test_handle_turn_self_corrects_when_mood_is_pinned_at_an_extreme(self):
+        router = build_router()
+        for _ in range(6):
+            router.bus.publish_state("test", valence=1.0, arousal=1.0)
+        monitor = HealthMonitor()
+
+        output = handle_turn(router, "just checking in", health_monitor=monitor)
+
+        self.assertIn("self-correction", output)
+        self.assertEqual(router.bus.read().valence, 0.0)
+        self.assertEqual(router.bus.read().arousal, 0.0)
+
+    def test_handle_turn_without_health_monitor_does_not_self_correct(self):
+        router = build_router()
+        for _ in range(6):
+            router.bus.publish_state("test", valence=1.0, arousal=1.0)
+
+        output = handle_turn(router, "just checking in")
+
+        self.assertNotIn("self-correction", output)
+        self.assertEqual(router.bus.read().valence, 1.0)
+
+    def test_handle_turn_with_health_monitor_and_stable_mood_is_unaffected(self):
+        router = build_router()
+        monitor = HealthMonitor()
+
+        output = handle_turn(router, "hello there", health_monitor=monitor)
+
+        self.assertNotIn("self-correction", output)
 
 
 class TestProposeSkill(unittest.TestCase):
