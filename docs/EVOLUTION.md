@@ -560,24 +560,54 @@ Built:
     test caught this because every prior test used a single `BudgetGuard`
     against a fresh store. Fixed by filtering to records matching the
     guard's own wrapped provider name.
+41. `src/orchestrator/reminders.py` -- a real, working one-off timer
+    (`schedule_reminder`/`parse_duration`), the direct fix for "remind me
+    to wake up in one minute" getting the honest-at-the-time-but-now-
+    outdated answer "I have no way to interrupt you unprompted." Reuses
+    the same "a daemon thread can print between prompts" pattern the
+    autonomous loop already proved. Wired as the explicit `remind
+    <duration> <message>` command *and* a `REMIND:` marker in
+    `LogicAgent`'s own tool loop, always offered, so plain conversational
+    asks are understood too -- caught live, immediately: the explicit
+    command's parser first matched on the bare word "remind", so "remind
+    me to wake up in one minute" (ordinary chat) got misparsed as
+    duration="me" before ever reaching the LLM's own tool marker. Fixed
+    by requiring the token right after "remind " to actually parse as a
+    duration before treating input as the explicit command.
+42. Blocked-task reconsideration (`main.py`'s `_reconsider_blocked_tasks`,
+    wired into `_next_task`): previously a task that reached `BLOCKED`
+    (after `MAX_TASK_ATTEMPTS` failures) sat there forever -- nothing
+    ever gave it another look, and Sim's own persona prompt didn't know
+    the autonomous loop already amounted to a recurring background check,
+    so it told the creator it couldn't do either of the two things asked
+    for ("schedule a recurring check" / "automatically unblock
+    yourself") when the infrastructure for both already existed or was
+    one small gap away. Now: once there's no fresh pending/in-progress
+    work, `work`/the autonomous loop resets one `BLOCKED` task back to
+    `PENDING` for a fresh attempt, up to `MAX_BLOCKED_RETRY_ATTEMPTS`
+    (9) total attempts, past which it's marked `FAILED` -- a genuine
+    terminal state, not indefinite limbo, since not every block is
+    actually resolvable by retrying (a hard directive violation won't
+    pass no matter how many times it's rephrased).
 
 Still ahead, roughly in order:
 
-41. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+43. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-42. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+44. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-43. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+45. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-44. `use <skill name>` (milestone from the earlier skill-registry work)
+46. `use <skill name>` (milestone from the earlier skill-registry work)
     is still a CLI-level command a human types, not a marker
     `LogicAgent`'s own conversational tool loop can reach, and there is
     still no *automatic* registration of an applied skill as a live
     `Router` sub-agent -- it remains a manual, on-demand invocation.
-45. The Autonomous Idle Loop's default thresholds (300s idle, 600s
-    cooldown, 20 actions/day) are judgment calls, not values derived from
+47. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+    cooldown, 20 actions/day, and now `MAX_BLOCKED_RETRY_ATTEMPTS`=9) are
+    judgment calls, not values derived from
     real operating experience -- worth revisiting once there's an actual
     track record. There is also no digest/summary surface for autonomous
     activity specifically yet -- reviewing it requires actively checking
