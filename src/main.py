@@ -22,6 +22,7 @@ from src.agents.logic.base import LogicAgent
 from src.agents.skills.base import SkillsAgent
 from src.agents.skills.research import SkillResearchAgent
 from src.cognition.budget import Budget, BudgetGuard
+from src.cognition.claude_code_provider import ClaudeCodeProvider
 from src.cognition.gemini_provider import GeminiProvider
 from src.cognition.provider import CognitionRouter, DeterministicFallbackProvider
 from src.memory.long_term import JSONFileMemoryStore, MemoryStore
@@ -55,6 +56,18 @@ GEMINI_PRICE_PER_1M_OUTPUT = 3.75
 DEFAULT_DAILY_BUDGET_USD = float(os.environ.get("SIMORGH_LLM_DAILY_BUDGET_USD", "1.0"))
 DEFAULT_DAILY_MAX_CALLS = int(os.environ.get("SIMORGH_LLM_DAILY_MAX_CALLS", "50"))
 
+# Claude Code CLI is flat-rate (a Pro/Max/Team/Enterprise subscription),
+# so the real constraint is call *volume* within Anthropic's own rolling
+# quota window, not a dollar figure -- this call cap is a conservative
+# safety net, not an attempt to reproduce Anthropic's actual (undocumented
+# per-plan) limits. Anthropic's own enforcement still applies underneath
+# this and surfaces as a normal ProviderUnavailable (see
+# ClaudeCodeProvider) if it's ever hit first.
+CLAUDE_CODE_WINDOW_SECONDS = float(
+    os.environ.get("SIMORGH_CLAUDE_CODE_WINDOW_SECONDS", str(5 * 3600))
+)
+DEFAULT_CLAUDE_CODE_MAX_CALLS = int(os.environ.get("SIMORGH_CLAUDE_CODE_MAX_CALLS", "30"))
+
 
 def build_router() -> Router:
     router = Router(SharedMemoryBus())
@@ -70,32 +83,55 @@ def build_memory_store(path: Path = DEFAULT_MEMORY_PATH) -> MemoryStore:
 
 def build_cognition_router(
     store: MemoryStore,
-) -> tuple[CognitionRouter, BudgetGuard | None]:
-    """A real Gemini provider, wrapped in a durable BudgetGuard, ahead of
-    the free deterministic fallback -- only if GEMINI_API_KEY (or
-    GOOGLE_API_KEY) is actually set. With no key configured, this is
-    exactly the zero-dependency CognitionRouter it always was; no key is
-    required to run Simorgh. Per docs/EVOLUTION.md's Resilience Doctrine,
-    a real provider is never registered unguarded. Returns the router and
-    the guard (or None, if no key is configured) so a caller can surface
-    `guard.status()`.
-    """
-    gemini = GeminiProvider()
-    if not gemini.available():
-        return CognitionRouter([DeterministicFallbackProvider()]), None
+) -> tuple[CognitionRouter, dict[str, BudgetGuard]]:
+    """Real providers, each wrapped in a durable BudgetGuard, ahead of the
+    free deterministic fallback -- each only activated if it's actually
+    usable. With nothing configured, this is exactly the zero-dependency
+    CognitionRouter it always was; nothing is required to run Simorgh.
+    Per docs/EVOLUTION.md's Resilience Doctrine, a real provider is never
+    registered unguarded.
 
-    guard = BudgetGuard(
-        gemini,
-        store,
-        Budget(
-            max_calls=DEFAULT_DAILY_MAX_CALLS,
-            max_estimated_cost_usd=DEFAULT_DAILY_BUDGET_USD,
-            window_seconds=86400.0,
-        ),
-        price_per_1m_input=GEMINI_PRICE_PER_1M_INPUT,
-        price_per_1m_output=GEMINI_PRICE_PER_1M_OUTPUT,
-    )
-    return CognitionRouter([guard, DeterministicFallbackProvider()]), guard
+    Priority order: Claude Code CLI first (a flat-rate subscription
+    already being paid for, per the creator's explicit ask to prefer it
+    over metered billing), then Gemini (pay-per-token), then the free
+    fallback. Returns the router and a {provider_name: guard} map of
+    whichever providers actually got activated, so a caller can surface
+    `guard.status()` for each.
+    """
+    guards: dict[str, BudgetGuard] = {}
+    providers: list = []
+
+    claude_code = ClaudeCodeProvider()
+    if claude_code.available():
+        claude_code_guard = BudgetGuard(
+            claude_code,
+            store,
+            Budget(
+                max_calls=DEFAULT_CLAUDE_CODE_MAX_CALLS,
+                window_seconds=CLAUDE_CODE_WINDOW_SECONDS,
+            ),
+        )
+        providers.append(claude_code_guard)
+        guards["claude_code_cli"] = claude_code_guard
+
+    gemini = GeminiProvider()
+    if gemini.available():
+        gemini_guard = BudgetGuard(
+            gemini,
+            store,
+            Budget(
+                max_calls=DEFAULT_DAILY_MAX_CALLS,
+                max_estimated_cost_usd=DEFAULT_DAILY_BUDGET_USD,
+                window_seconds=86400.0,
+            ),
+            price_per_1m_input=GEMINI_PRICE_PER_1M_INPUT,
+            price_per_1m_output=GEMINI_PRICE_PER_1M_OUTPUT,
+        )
+        providers.append(gemini_guard)
+        guards["gemini"] = gemini_guard
+
+    providers.append(DeterministicFallbackProvider())
+    return CognitionRouter(providers), guards
 
 
 def build_outcome_log(store: MemoryStore | None = None) -> OutcomeLog:
@@ -175,7 +211,7 @@ def run_cli() -> None:
     outcome_log = OutcomeLog(store)
     reflection_agent = ReflectionAgent(outcome_log)
     audit_gate = AuditGate(memory=store)
-    cognition, budget_guard = build_cognition_router(store)
+    cognition, budget_guards = build_cognition_router(store)
     skill_research = SkillResearchAgent(cognition)
     interests = InterestTracker(store)
     health_monitor = HealthMonitor()
@@ -187,13 +223,7 @@ def run_cli() -> None:
         "'sleep' for maintenance, 'history' for this session's recent turns, "
         "'run <code>' to execute sandboxed Python, 'budget' for LLM spend status."
     )
-    if GeminiProvider().available():
-        print(
-            f"[cognition: Gemini active, budgeted at ${DEFAULT_DAILY_BUDGET_USD:.2f}/"
-            f"{DEFAULT_DAILY_MAX_CALLS} calls per 24h]"
-        )
-    else:
-        print("[cognition: no GEMINI_API_KEY set -- using the free deterministic fallback only]")
+    _print_cognition_status(budget_guards)
     while True:
         try:
             user_input = input("> ").strip()
@@ -235,7 +265,7 @@ def run_cli() -> None:
             run_skill_code(router, outcome_log, user_input[len(RUN_PREFIX):])
             continue
         if lowered == BUDGET_COMMAND:
-            _print_budget(budget_guard)
+            _print_budget(budget_guards)
             continue
         reply = handle_turn(router, user_input, outcome_log, health_monitor)
         short_term.add(user_input, reply)
@@ -367,16 +397,38 @@ def _print_history(short_term: ShortTermMemory) -> None:
     print(short_term.as_context())
 
 
-def _print_budget(budget_guard: BudgetGuard | None) -> None:
-    if budget_guard is None:
+def _print_budget(budget_guards: dict[str, BudgetGuard]) -> None:
+    if not budget_guards:
         print("[no LLM provider configured -- nothing to budget]")
         return
-    status = budget_guard.status()
-    print(
-        f"[budget] {status['calls_in_window']}/{status['max_calls']} calls, "
-        f"${status['spend_in_window_usd']:.4f}/${status['max_estimated_cost_usd']:.2f} "
-        "spent in the current 24h window"
-    )
+    for name, guard in budget_guards.items():
+        status = guard.status()
+        max_calls = status["max_calls"] if status["max_calls"] is not None else "∞"
+        max_cost = (
+            f"${status['max_estimated_cost_usd']:.2f}"
+            if status["max_estimated_cost_usd"] is not None
+            else "no cap"
+        )
+        print(
+            f"[budget: {name}] {status['calls_in_window']}/{max_calls} calls, "
+            f"${status['spend_in_window_usd']:.4f} spent (cap: {max_cost})"
+        )
+
+
+def _print_cognition_status(budget_guards: dict[str, BudgetGuard]) -> None:
+    if not budget_guards:
+        print("[cognition: no real LLM provider configured -- using the free deterministic fallback only]")
+        return
+    if "claude_code_cli" in budget_guards:
+        print(
+            f"[cognition: Claude Code CLI active (subscription billing), budgeted at "
+            f"{DEFAULT_CLAUDE_CODE_MAX_CALLS} calls / {CLAUDE_CODE_WINDOW_SECONDS / 3600:.0f}h]"
+        )
+    if "gemini" in budget_guards:
+        print(
+            f"[cognition: Gemini active, budgeted at ${DEFAULT_DAILY_BUDGET_USD:.2f}/"
+            f"{DEFAULT_DAILY_MAX_CALLS} calls per 24h]"
+        )
 
 
 if __name__ == "__main__":

@@ -137,6 +137,34 @@ class TestBudgetGuard(unittest.TestCase):
 
         self.assertFalse(guard.available())
 
+    def test_reported_cost_overrides_token_based_estimate(self):
+        class ReportedCostProvider:
+            name = "flat_rate"
+
+            def available(self) -> bool:
+                return True
+
+            def complete(self, prompt: str, **kwargs) -> LLMResponse:
+                return LLMResponse(
+                    text="ok",
+                    provider_name=self.name,
+                    # a provider-reported cost, no token counts at all --
+                    # token-based pricing would compute $0 here
+                    metadata={"cost_usd": 0.037},
+                )
+
+        guard = BudgetGuard(
+            ReportedCostProvider(),
+            InMemoryStore(),
+            Budget(max_calls=10),
+            price_per_1m_input=999.0,  # would dominate if wrongly used
+            price_per_1m_output=999.0,
+        )
+
+        guard.complete("a")
+
+        self.assertAlmostEqual(guard.status()["spend_in_window_usd"], 0.037)
+
 
 if __name__ == "__main__":
     unittest.main()
