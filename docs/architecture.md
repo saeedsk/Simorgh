@@ -36,15 +36,16 @@ behind several pieces below. This document tracks what's actually built.
 | Sandboxing framework | `src/sandboxing/sandbox.py` | `SandboxExecutor` interface plus `SubprocessSandbox`, a process-isolated, CPU/memory/time-bounded executor for running skill code. The sandboxed process never receives the `PersonaState` or `SharedMemoryBus` objects. |
 | Skills agent | `src/agents/skills/base.py` | `SkillsAgent(SubAgent)` that runs request text through a `SandboxExecutor` and reports a small cognitive-load delta back through the bus. |
 | Persistent memory | `src/memory/long_term.py` | `MemoryStore` interface with `add`/`get`/`query`/`delete`; `JSONFileMemoryStore` (durable, local disk, fsync'd, compacts on delete) and `InMemoryStore` (non-durable) implementations. Continuity of record, not process -- see `SOUL.md`. |
+| Short-term memory | `src/memory/short_term.py` | `ShortTermMemory`: a bounded, non-durable rolling window of recent turns (by count and rough char budget), rendered via `as_context()` for a future cognition prompt. Wired into `main.py`'s `history` command. |
 | Cognition router | `src/cognition/provider.py` | `LLMProvider` interface, `CognitionRouter` with automatic failover, and `DeterministicFallbackProvider` -- a zero-dependency floor that guarantees `complete()` never raises even with every real provider unreachable. |
-| Health monitor | `src/orchestrator/health.py` | `HealthMonitor` inspects `PersonaState` history for pinned extremes, sustained overload, or oscillation, and auto-resets mood to neutral on a CRITICAL finding. |
+| Health monitor | `src/orchestrator/health.py` | `HealthMonitor` inspects `PersonaState` history for pinned extremes, sustained overload, or oscillation, and auto-resets mood to neutral on a CRITICAL finding. Wired live into `main.py`: a CRITICAL reset now surfaces as part of the reply itself. |
 | Reflection loop | `src/orchestrator/reflection.py` | `OutcomeLog` records action outcomes to a `MemoryStore`; `ReflectionAgent.reflect()` turns a sub-agent's elevated failure/correction rate into a `Proposal` -- data, never an automatic change. Wired live into `main.py`. |
 | Audit gate | `src/orchestrator/audit.py` | `AuditGate.review()` vets a `ModificationProposal` through three layers: a static denylist (innate immunity), a learned check against previously rejected proposals (adaptive immunity, via `MemoryStore`), and a real sandboxed run. `soul.py`/`SOUL.md`/`audit.py` itself are always-rejected subjects. `requires_human_approval` is always `True` under current policy. |
 | Skill research agent | `src/agents/skills/research.py` | `SkillResearchAgent.draft_skill(topic)` produces a real `ModificationProposal` via `CognitionRouter` -- honestly minimal without a real LLM provider registered, but the pipeline works end to end. |
 | Live deployment | `src/orchestrator/deployment.py` | `DeploymentManager`: stage a candidate ("B") for a Router slot alongside the active version ("A"), trial both against cloned buses, `promote`/`rollback` hot-swaps the Router's live registration, `purge_retired` drops old versions once confident. Every step logged as `MemoryStore` lineage. |
 | Consolidation ("sleep") | `src/orchestrator/consolidation.py` | `run_consolidation()`: one explicit maintenance pass -- runs `ReflectionAgent`, then prunes stale records per `MemoryStore` kind via `delete()`. Not a background daemon; always triggered explicitly. |
 | Interests & world-awareness | `src/agents/interests.py` | `InterestTracker` persists tracked topics and decides what's overdue for follow-up; `WorldFeed`/`NullWorldFeed` is the (currently no-network) seam for a future real news/RSS integration. |
-| CLI loop | `src/main.py` | Dispatches to emotion then logic and synthesizes their output using live mood; records every dispatch via `OutcomeLog`. Commands: `reflect` (outcome review), `propose <topic>`/`pending` (draft + audit a skill, list what's awaiting the creator's review), `interest <topic>`/`interests`/`curious` (world-awareness), `sleep` (maintenance). |
+| CLI loop | `src/main.py` | Dispatches to emotion then logic and synthesizes their output using live mood; records every dispatch via `OutcomeLog`; checks `HealthMonitor` after each turn; records each turn in `ShortTermMemory`. Commands: `reflect` (outcome review), `propose <topic>`/`pending` (draft + audit a skill, list what's awaiting the creator's review), `interest <topic>`/`interests`/`curious` (world-awareness), `sleep` (maintenance), `history` (this session's recent turns). |
 
 ## Data flow (current)
 
@@ -94,5 +95,3 @@ SkillResearchAgent.draft_skill(topic) ──▶ ModificationProposal
 - Anything that actually merges an approved `pending_approval` proposal
   into the real source tree -- deliberately not built; per `SOUL.md`,
   that step is the creator's, by hand, not this codebase's.
-- `src/memory/short_term.py` (context window management) is still a
-  placeholder stub.
