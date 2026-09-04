@@ -346,34 +346,50 @@ def propose_skill(
     store: MemoryStore,
     topic: str,
     repo_root: Path | None = None,
+    max_attempts: int = 3,
 ) -> str:
     """Draft a skill on `topic`, run it through the audit gate, and -- if it
     passes every check (static denylist, adaptive-immunity memory, a real
     sandboxed run) -- apply it immediately, per the creator's explicit
     decision to auto-merge this narrow class (docs/SOUL.md,
-    "Self-Improvement Philosophy"). apply_proposal enforces its own
-    independent scope check (src/agents/skills/ only), so a rejected or
-    off-scope proposal is never written regardless of what happens here.
-    Applied changes land as normal, uncommitted git changes -- nothing
-    here commits or pushes. `repo_root` defaults to the current working
-    directory; tests pass an isolated temp directory instead. Returns the
-    message printed, for testability.
+    "Self-Improvement Philosophy"). If a draft is rejected, its reasons are
+    fed back to the drafting agent for a corrected attempt, up to
+    `max_attempts` total -- bounded self-correction, with every attempt
+    still going through the full audit gate, not a shortcut around it.
+    apply_proposal enforces its own independent scope check
+    (src/agents/skills/ only), so a rejected or off-scope proposal is never
+    written regardless of what happens here. Applied changes land as
+    normal, uncommitted git changes -- nothing here commits or pushes.
+    `repo_root` defaults to the current working directory; tests pass an
+    isolated temp directory instead. Returns the message printed, for
+    testability.
     """
     if not topic:
         message = "[usage: propose <topic>]"
         print(message)
         return message
 
-    print(f"[propose] drafting a skill for {topic!r}...")
-    proposal = skill_research.draft_skill(topic)
-    print(
-        f"[propose] drafted {proposal.subject} -- running it through the audit "
-        "gate (denylist, adaptive-immunity memory, then a real sandboxed run)..."
-    )
-    verdict = audit_gate.review(proposal)
+    proposal = None
+    verdict = None
+    prior_reasons: list[str] | None = None
+    for attempt in range(1, max_attempts + 1):
+        if attempt == 1:
+            print(f"[propose] drafting a skill for {topic!r}...")
+        else:
+            print(f"[propose] attempt {attempt}/{max_attempts}: asking for a corrected draft...")
+        proposal = skill_research.draft_skill(topic, prior_reasons=prior_reasons)
+        print(
+            f"[propose] drafted {proposal.subject} -- running it through the audit "
+            "gate (denylist, adaptive-immunity memory, then a real sandboxed run)..."
+        )
+        verdict = audit_gate.review(proposal)
+        if verdict.approved_by_automation:
+            break
+        print(f"[propose] attempt {attempt} failed: {'; '.join(verdict.reasons)}")
+        prior_reasons = verdict.reasons
 
     if not verdict.approved_by_automation:
-        message = f"[rejected] {'; '.join(verdict.reasons)}"
+        message = f"[rejected after {max_attempts} attempt(s)] {'; '.join(verdict.reasons)}"
         print(message)
         return message
 

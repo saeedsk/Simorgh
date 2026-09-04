@@ -332,6 +332,23 @@ Built:
     blocks private/loopback/link-local/reserved/multicast addresses;
     http/https GET only; bounded timeout and response size; durable
     rate limit; every attempt logged.
+25. `SkillResearchAgent` now asks for genuine working code, not a
+    description -- prompted with the same constraints `AuditGate` actually
+    enforces (described categorically, not by quoting the literal
+    denylisted patterns, after that literal quoting was found to
+    self-trigger the denylist when the deterministic floor echoed the
+    prompt back -- caught by the test suite). A markdown fence is
+    stripped if present; the result is validated as syntactically correct
+    Python before use, falling back to the safe note-template otherwise.
+    `main.py`'s `propose_skill` now retries with the audit verdict's
+    rejection reasons fed back, bounded to `max_attempts` (default 3),
+    narrating each attempt -- bounded self-correction using the existing
+    audit gate every time, not a new capability grant. Explicitly *not*
+    built as part of this: giving the drafting LLM actual file-read/
+    test-execution tool access (an agentic, multi-step loop) -- that is a
+    materially different decision from prompt quality, reversing the same
+    `--disallowedTools "*"` boundary `ClaudeCodeProvider` was deliberately
+    built with, and needs its own explicit authorization if wanted.
 
 Still ahead, roughly in order:
 
@@ -343,7 +360,8 @@ Still ahead, roughly in order:
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-24. `SkillResearchAgent`'s drafting prompt only asks for a short
-    descriptive note, not functional code -- applied skills are real
-    files but not yet real capabilities Sim can invoke mid-conversation;
-    there's also no mechanism that would call one if it were.
+24. There is still no mechanism that loads and invokes an applied skill
+    file mid-conversation -- `SkillResearchAgent` now drafts genuinely
+    working code (see milestone 25), but nothing calls it. Applied skills
+    are real, executable files sitting in `src/agents/skills/`, not yet
+    capabilities Sim can reach for on its own.
