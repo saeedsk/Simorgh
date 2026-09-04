@@ -34,6 +34,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 try:
     import readline  # noqa: F401 -- imported for its side effect: input() gains
@@ -43,7 +44,7 @@ except ImportError:  # pragma: no cover -- platform-dependent
     readline = None
 
 from src.agents.emotion.base import EmotionAgent
-from src.agents.interests import InterestTracker
+from src.agents.interests import InterestTracker, RssWorldFeed
 from src.agents.logic.base import LogicAgent
 from src.agents.skills.base import SkillsAgent
 from src.agents.skills.registry import build_invocation_code, list_applied_skills, load_skill_source
@@ -679,7 +680,7 @@ def run_cli() -> None:
     audit_gate = AuditGate(memory=store)
     skill_research = SkillResearchAgent(cognition, audit_gate=audit_gate, activity_log=activity_log)
     self_patch_agent = SelfPatchAgent(cognition, audit_gate=audit_gate, activity_log=activity_log)
-    interests = InterestTracker(store)
+    interests = InterestTracker(store, feed=RssWorldFeed(web_fetch))
     health_monitor = HealthMonitor()
     task_store = TaskStore(store)
 
@@ -1927,10 +1928,11 @@ def _follow_up(tracker: InterestTracker) -> None:
         return
     items = tracker.follow_up(overdue.topic)
     if not items:
-        print(
-            f"[curious about {overdue.topic!r}] no updates available "
-            "(no real WorldFeed configured yet -- see src/agents/interests.py)"
+        hint = (
+            "" if urlparse(overdue.topic).scheme in ("http", "https")
+            else " -- 'interest <topic>' an actual RSS/Atom feed URL to get real items back"
         )
+        print(f"[curious about {overdue.topic!r}] no updates available{hint}")
         return
     for item in items:
         print(f"[{overdue.topic}] {item.title}: {item.summary}")
