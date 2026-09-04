@@ -278,16 +278,29 @@ Built:
     activated if `GEMINI_API_KEY`/`GOOGLE_API_KEY` is set -- no key means
     no change from before. `SkillResearchAgent`'s drafts are genuinely
     LLM-generated when a key is present, not just the deterministic echo.
+17. `src/cognition/claude_code_provider.py` -- `ClaudeCodeProvider`: real
+    multi-provider cognition, spawning a headless `claude -p` subprocess
+    billed against the creator's Claude subscription rather than metered
+    API usage. Every mechanic (headless flags, credential precedence,
+    tool-permission behavior) was verified against Claude Code's own docs
+    before writing this, not assumed. `--disallowedTools "*"` strips all
+    tool access -- this is a text-drafting backend only, never given
+    file/bash access; `--dangerously-skip-permissions` is never passed.
+    Registered ahead of Gemini in `build_cognition_router()` (use the
+    flat-rate subscription before spending metered API money), wrapped in
+    `BudgetGuard` using the CLI's own reported `total_cost_usd`.
+    `BudgetGuard` gained a `cost_usd` metadata override to support this
+    (prefers a provider-reported cost over the token-based estimate when
+    present). This is now genuinely `CognitionRouter`'s intended shape:
+    multiple real providers with automatic failover between them, not
+    just one.
 
 Still ahead, roughly in order:
 
-17. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+18. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-18. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+19. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-19. A real `WorldFeed` implementation (RSS/API-backed) -- `curious`
+20. A real `WorldFeed` implementation (RSS/API-backed) -- `curious`
     currently always reports no updates, honestly, since only
     `NullWorldFeed` exists.
-20. A second real `LLMProvider` (e.g. Claude), registered alongside Gemini
-    in `CognitionRouter` for genuine multi-provider failover -- the
-    interface already supports this; only credentials are missing.

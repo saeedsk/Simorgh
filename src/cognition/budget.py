@@ -109,6 +109,13 @@ class BudgetGuard(LLMProvider):
         return False
 
     def _estimate_cost(self, response: LLMResponse) -> float:
+        """Prefer a provider-reported cost (e.g. Claude Code CLI's own
+        `total_cost_usd` -- a real, provider-computed figure, not an
+        estimate) when present; otherwise fall back to token counts times
+        the configured per-1M prices.
+        """
+        if "cost_usd" in response.metadata:
+            return float(response.metadata["cost_usd"] or 0.0)
         input_tokens = response.metadata.get("input_tokens", 0)
         output_tokens = response.metadata.get("output_tokens", 0)
         return (

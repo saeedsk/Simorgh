@@ -3,3 +3,10 @@
 # when actually calling the API, so the rest of Simorgh runs with nothing
 # installed. Install this only if you're setting GEMINI_API_KEY.
 google-genai
+
+# ClaudeCodeProvider (src/cognition/claude_code_provider.py) needs no pip
+# package -- it shells out to the `claude` CLI binary, installed
+# separately (npm install -g @anthropic-ai/claude-code, or see
+# claude.com/product/claude-code) and authenticated once via `claude
+# login`. If that binary isn't on PATH, this provider is simply
+# unavailable and Simorgh falls back exactly as if no provider existed.
