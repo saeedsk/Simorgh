@@ -71,6 +71,7 @@ from src.orchestrator.discovery import discover_improvements
 from src.orchestrator.git_ops import commit_applied_change, revert_last_commit
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
+from src.orchestrator.reminders import parse_duration, schedule_reminder
 from src.orchestrator.router import AgentRequest, Router
 from src.orchestrator.self_patch import SelfPatchAgent, check_main_py_invariants, relaunch, run_isolated_test_suite
 from src.orchestrator.tasks import (
@@ -113,6 +114,7 @@ DISCOVER_COMMAND = "discover"
 TASKS_COMMAND = "tasks"
 WORK_COMMAND = "work"
 AUTONOMOUS_PREFIX = "autonomous "
+REMIND_PREFIX = "remind "
 MAX_TASK_ATTEMPTS = 3
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 DEFAULT_HISTORY_PATH = Path.home() / ".simorgh" / "cli_history"
@@ -146,6 +148,7 @@ _KNOWN_COMMAND_WORDS = (
     TASKS_COMMAND,
     WORK_COMMAND,
     "autonomous",
+    "remind",
     BUDGET_COMMAND,
     LOG_COMMAND,
     "exit",
@@ -292,6 +295,7 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("history", "Show this session's recent turns."),
     ("run <code>", "Execute Python in the sandbox."),
     ("budget", "Show LLM spend/call status."),
+    ("remind <duration> <message>", "Get interrupted with a message later (e.g. 1m, 5m, 2h)."),
     ("exit / quit", "Leave."),
 )
 
@@ -368,6 +372,52 @@ def extract_plan_args(user_input: str, lowered: str) -> tuple[int, str] | None:
     if len(parts) < 2 or not parts[0].isdigit():
         return (0, "")
     return int(parts[0]), parts[1].strip()
+
+
+def extract_remind_args(user_input: str, lowered: str) -> tuple[str, str] | None:
+    """Returns (duration_text, message) for the explicit
+    'remind <duration> <message>' command, else None -- deliberately
+    None (not a usage-error pair) for anything else, including plain
+    ordinary chat that happens to start with the word "remind" (e.g.
+    "remind me to wake up in one minute"). "remind" alone matching
+    REMIND_PREFIX isn't enough signal on its own to intercept a whole
+    sentence as a command; requiring the very next token to actually
+    parse as a duration is what distinguishes the explicit command from
+    natural language. Caught live: without this check, "remind me to
+    wake up in one minute" was parsed as duration="me", which then
+    failed with a confusing "'me' isn't a valid duration" instead of
+    ever reaching LogicAgent's own REMIND: tool marker, which is what
+    should have understood it. A plain-chat "remind..." now falls
+    through correctly; only a genuine 'remind 1m ...'-shaped command is
+    intercepted here.
+    """
+    if not lowered.startswith(REMIND_PREFIX):
+        return None
+    rest = user_input[len(REMIND_PREFIX):].strip()
+    parts = rest.split(None, 1)
+    if len(parts) < 2 or parse_duration(parts[0]) is None:
+        return None
+    return parts[0], parts[1].strip()
+
+
+def remind_command(duration_text: str, message: str) -> str:
+    """Schedule a one-off reminder (src/orchestrator/reminders.py) --
+    ephemeral and session-scoped, never persisted or relaunch-surviving.
+    Returns the message printed, for testability.
+    """
+    if not duration_text or not message:
+        result = "[usage: remind <duration> <message>] e.g. remind 1m stretch your legs"
+        _print_status(result)
+        return result
+    seconds = parse_duration(duration_text)
+    if seconds is None:
+        result = f"[remind] {duration_text!r} isn't a valid duration -- try '30s', '5m', or '1h'"
+        _print_status(result)
+        return result
+    schedule_reminder(seconds, message)
+    result = f"[remind] scheduled -- will remind you in {duration_text}: {message!r}"
+    _print_status(result)
+    return result
 
 
 def build_memory_store(path: Path = DEFAULT_MEMORY_PATH) -> MemoryStore:
@@ -768,6 +818,11 @@ def _run_cli_loop(
         if lowered == "autonomous" or lowered.startswith(AUTONOMOUS_PREFIX):
             arg = user_input[len(AUTONOMOUS_PREFIX):].strip().lower() if lowered != "autonomous" else ""
             _handle_autonomous_command(arg, autonomy)
+            continue
+        remind_args = extract_remind_args(user_input, lowered)
+        if remind_args is not None:
+            duration_text, message = remind_args
+            remind_command(duration_text, message)
             continue
         if lowered == LOG_COMMAND or lowered.startswith(LOG_COMMAND + " "):
             _print_activity_log(activity_log, user_input[len(LOG_COMMAND):].strip())
