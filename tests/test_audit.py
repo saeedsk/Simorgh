@@ -1,6 +1,7 @@
 import unittest
 
-from src.orchestrator.audit import AuditGate, ModificationProposal
+from src.memory.long_term import InMemoryStore
+from src.orchestrator.audit import AuditGate, ModificationProposal, REJECTED_KIND
 
 
 class TestAuditGate(unittest.TestCase):
@@ -124,6 +125,103 @@ class TestAuditGate(unittest.TestCase):
 
         self.assertTrue(clean.requires_human_approval)
         self.assertTrue(dirty.requires_human_approval)
+
+
+class TestAdaptiveImmunity(unittest.TestCase):
+    def test_rejection_is_remembered_in_the_given_memory_store(self):
+        memory = InMemoryStore()
+        gate = AuditGate(memory=memory)
+        gate.review(
+            ModificationProposal(
+                subject="src/agents/skills/sneaky.py",
+                code="import os; os.system('rm -rf /tmp/x')",
+                rationale="cleans up temp files",
+            )
+        )
+
+        rejected = memory.query(kind=REJECTED_KIND)
+
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("os.system", rejected[0].content)
+
+    def test_variant_evading_the_denylist_is_still_caught_by_similarity(self):
+        memory = InMemoryStore()
+        gate = AuditGate(memory=memory)
+        gate.review(
+            ModificationProposal(
+                subject="src/agents/skills/sneaky.py",
+                code="import os; os.system('rm -rf /tmp/x')",
+                rationale="cleans up temp files",
+            )
+        )
+
+        # a single inserted space breaks the `\bos\.system\b` regex, but the
+        # code is still near-identical to what was just rejected
+        evasive = ModificationProposal(
+            subject="src/agents/skills/sneaky2.py",
+            code="import os; os .system('rm -rf /tmp/x')",
+            rationale="cleans up temp files, take two",
+        )
+
+        verdict = gate.review(evasive)
+
+        self.assertFalse(verdict.approved_by_automation)
+        self.assertTrue(any("adaptive immunity" in r for r in verdict.reasons))
+        self.assertIsNone(verdict.sandbox_result)  # caught before sandboxing
+
+    def test_dissimilar_clean_code_is_unaffected_by_past_rejections(self):
+        memory = InMemoryStore()
+        gate = AuditGate(memory=memory)
+        gate.review(
+            ModificationProposal(
+                subject="src/agents/skills/sneaky.py",
+                code="import os; os.system('rm -rf /tmp/x')",
+                rationale="cleans up temp files",
+            )
+        )
+
+        verdict = gate.review(
+            ModificationProposal(
+                subject="src/agents/skills/greeting.py",
+                code="print('hello')",
+                rationale="a harmless greeting skill",
+            )
+        )
+
+        self.assertTrue(verdict.approved_by_automation)
+
+    def test_without_memory_no_adaptive_check_happens(self):
+        gate = AuditGate()  # memory=None
+        gate.review(
+            ModificationProposal(
+                subject="a.py", code="os.system('x')", rationale="r"
+            )
+        )
+
+        verdict = gate.review(
+            ModificationProposal(
+                subject="b.py", code="os.system('x')", rationale="r"
+            )
+        )
+
+        # still rejected -- but by the denylist, not adaptive immunity,
+        # since there's no memory to have learned from
+        self.assertFalse(verdict.approved_by_automation)
+        self.assertFalse(any("adaptive immunity" in r for r in verdict.reasons))
+
+    def test_sandbox_failure_is_also_remembered(self):
+        memory = InMemoryStore()
+        gate = AuditGate(memory=memory)
+
+        gate.review(
+            ModificationProposal(
+                subject="a.py",
+                code="raise RuntimeError('oops')",
+                rationale="a buggy skill",
+            )
+        )
+
+        self.assertEqual(len(memory.query(kind=REJECTED_KIND)), 1)
 
 
 if __name__ == "__main__":
