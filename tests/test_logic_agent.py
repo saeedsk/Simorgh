@@ -2,10 +2,13 @@ import unittest
 
 from src.agents.logic.base import LogicAgent
 from src.cognition.provider import CognitionRouter, LLMResponse, ProviderUnavailable
+from src.memory.long_term import InMemoryStore
 from src.memory.short_term import ShortTermMemory
 from src.memory.shared_bus import SharedMemoryBus
 from src.orchestrator.persona_state import PersonaState
 from src.orchestrator.router import AgentRequest
+from src.sandboxing.sandbox import SandboxResult
+from src.tools.web_fetch import WebFetchTool
 
 
 class FakeProvider:
@@ -23,6 +26,41 @@ class FakeProvider:
         if self._raises is not None:
             raise self._raises
         return LLMResponse(text=self._text, provider_name=self.name)
+
+
+class ScriptedProvider:
+    """Returns each of `responses` (a list of (text, provider_name) pairs)
+    in order across successive complete() calls, repeating the last one if
+    called more times than scripted.
+    """
+
+    def __init__(self, responses, name="scripted"):
+        self.name = name
+        self._responses = responses
+        self.prompts = []
+
+    def available(self):
+        return True
+
+    def complete(self, prompt, **kwargs):
+        self.prompts.append(prompt)
+        index = min(len(self.prompts) - 1, len(self._responses) - 1)
+        text, provider_name = self._responses[index]
+        return LLMResponse(text=text, provider_name=provider_name or self.name)
+
+
+class FakeSandbox:
+    def __init__(self, result: SandboxResult):
+        self._result = result
+        self.calls: list[str] = []
+
+    def run(self, code, timeout=None):
+        self.calls.append(code)
+        return self._result
+
+
+def _fake_web_fetch(opener, resolver):
+    return WebFetchTool(InMemoryStore(), opener=opener, resolver=resolver)
 
 
 class TestLogicAgent(unittest.TestCase):
@@ -137,6 +175,136 @@ class TestLogicAgentWithCognition(unittest.TestCase):
 
         self.assertEqual(response.output, "Here's my take: hello")
         self.assertEqual(response.metadata["source"], "rule_based")
+
+
+class FakeHTTPResponse:
+    def __init__(self, status, data):
+        self.status = status
+        self._data = data
+
+    def read(self, n):
+        return self._data[:n]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def _fake_opener(response=None, exception=None):
+    def opener(request, timeout=None):
+        if exception is not None:
+            raise exception
+        return response
+
+    return opener
+
+
+def _fake_resolver(ip="93.184.216.34"):
+    import socket
+
+    def resolver(host, port):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+    return resolver
+
+
+class TestLogicAgentToolLoop(unittest.TestCase):
+    def test_fetch_tool_retries_after_failure_and_uses_final_answer(self):
+        web_fetch = WebFetchTool(
+            InMemoryStore(),
+            resolver=_fake_resolver(),
+            opener=_fake_opener(exception=TimeoutError("first url failed")),
+        )
+        provider = ScriptedProvider(
+            [
+                ("FETCH: https://bad.example", None),
+                ("Couldn't get that one, but here's the answer anyway.", None),
+            ]
+        )
+        agent = LogicAgent(cognition=CognitionRouter([provider]), web_fetch=web_fetch)
+        bus = SharedMemoryBus()
+
+        response = agent.handle(AgentRequest(text="get me that page"), bus)
+
+        self.assertEqual(response.output, "Couldn't get that one, but here's the answer anyway.")
+        self.assertEqual(len(provider.prompts), 2)
+        self.assertIn("FAILED", provider.prompts[1])
+
+    def test_fetch_tool_success_is_reported_back(self):
+        web_fetch = WebFetchTool(
+            InMemoryStore(),
+            resolver=_fake_resolver(),
+            opener=_fake_opener(response=FakeHTTPResponse(200, b"hello page")),
+        )
+        provider = ScriptedProvider(
+            [
+                ("FETCH: https://good.example", None),
+                ("Got it -- here's a summary.", None),
+            ]
+        )
+        agent = LogicAgent(cognition=CognitionRouter([provider]), web_fetch=web_fetch)
+        bus = SharedMemoryBus()
+
+        response = agent.handle(AgentRequest(text="get me that page"), bus)
+
+        self.assertEqual(response.output, "Got it -- here's a summary.")
+        self.assertIn("hello page", provider.prompts[1])
+
+    def test_fetch_marker_not_offered_without_web_fetch_configured(self):
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))  # no web_fetch
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        self.assertNotIn("FETCH:", provider.prompts[0])
+
+    def test_run_tool_reports_result_and_continues(self):
+        sandbox = FakeSandbox(
+            SandboxResult(stdout="4\n", stderr="", exit_code=0, timed_out=False, duration_seconds=0.01)
+        )
+        provider = ScriptedProvider(
+            [
+                ("RUN: print(2 + 2)", None),
+                ("The answer is 4.", None),
+            ]
+        )
+        agent = LogicAgent(cognition=CognitionRouter([provider]), sandbox=sandbox)
+        bus = SharedMemoryBus()
+
+        response = agent.handle(AgentRequest(text="what's 2+2"), bus)
+
+        self.assertEqual(response.output, "The answer is 4.")
+        self.assertEqual(len(sandbox.calls), 1)
+        self.assertIn("4", provider.prompts[1])
+
+    def test_read_tool_available_even_with_no_fetch_or_sandbox(self):
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        self.assertIn("READ:", provider.prompts[0])
+
+    def test_loop_bounded_by_max_tool_steps_falls_back_to_rule_based(self):
+        provider = ScriptedProvider([("READ: src/main.py", None)] * 10)
+        agent = LogicAgent(cognition=CognitionRouter([provider]), max_tool_steps=3)
+        bus = SharedMemoryBus()
+
+        response = agent.handle(AgentRequest(text="hello"), bus)
+
+        self.assertEqual(len(provider.prompts), 3)
+        self.assertEqual(response.metadata["source"], "rule_based")
+
+    def test_no_tools_configured_still_works_via_final_answer(self):
+        provider = FakeProvider(text="a real llm reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        response = agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        self.assertEqual(response.output, "a real llm reply")
+        self.assertEqual(response.metadata["source"], "llm")
 
 
 if __name__ == "__main__":

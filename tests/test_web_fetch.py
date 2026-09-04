@@ -20,8 +20,10 @@ class FakeResponse:
         return False
 
 
-def fake_opener(response=None, exception=None):
-    def opener(url, timeout=None):
+def fake_opener(response=None, exception=None, captured_requests=None):
+    def opener(request, timeout=None):
+        if captured_requests is not None:
+            captured_requests.append(request)
         if exception is not None:
             raise exception
         return response
@@ -167,6 +169,35 @@ class TestWebFetchTool(unittest.TestCase):
             tool.fetch("ftp://example.com")
 
         self.assertEqual(store.query(kind=FETCH_KIND), [])
+
+    def test_sets_a_descriptive_user_agent_header(self):
+        # Regression coverage: Python's default urllib User-Agent gets
+        # blocked as bot traffic by major sites (Wikipedia among them) --
+        # this was the actual root cause of a real 403 the creator hit.
+        captured = []
+        tool = self._tool(
+            opener=fake_opener(response=FakeResponse(200, b"ok"), captured_requests=captured)
+        )
+
+        tool.fetch("https://example.com")
+
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].get_header("User-agent"), tool._user_agent)
+        self.assertIn("Simorgh", tool._user_agent)
+        self.assertNotIn("Mozilla", tool._user_agent)  # honest ID, not a spoofed browser
+
+    def test_custom_user_agent_can_be_configured(self):
+        captured = []
+        tool = WebFetchTool(
+            InMemoryStore(),
+            resolver=fake_resolver(PUBLIC_IP),
+            opener=fake_opener(response=FakeResponse(200, b"ok"), captured_requests=captured),
+            user_agent="CustomBot/1.0",
+        )
+
+        tool.fetch("https://example.com")
+
+        self.assertEqual(captured[0].get_header("User-agent"), "CustomBot/1.0")
 
 
 if __name__ == "__main__":

@@ -360,19 +360,38 @@ Built:
     outage. This is still deliberately narrower than a general autonomous
     coding-agent loop (unattended Read/Write/Bash) -- that remains a
     separate, larger decision.
+27. Agentic conversation, and the real bug that prompted it: the creator
+    hit a live 403 fetching Wikipedia, traced to Python's default urllib
+    User-Agent being blocked as bot traffic -- fixed with an honest,
+    descriptive User-Agent (`WebFetchTool`, never a spoofed browser
+    string). Separately, the creator explicitly extended agentic tool
+    access to `LogicAgent` itself (ordinary conversation, not just
+    drafting): FETCH (the real `WebFetchTool`), RUN (the real sandbox),
+    and READ (same shared boundary as milestone 26, now factored into
+    `src/cognition/tool_protocol.py` so both loops enforce it identically
+    instead of maintaining two copies). This is the structural fix behind
+    the new "Resourceful, takes ownership" personality trait
+    (`docs/SOUL.md`) -- a prompt asking an LLM to "try alternatives
+    itself" can't do anything real if it has no tools to try them with.
+    Still no WRITE tool, no shell, anywhere in this loop; self-
+    modification remains exclusively on the separate, audited
+    propose/apply pipeline. Hard-bounded and budget-metered exactly like
+    the drafting loop.
 
 Still ahead, roughly in order:
 
-21. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+28. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-22. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+29. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-23. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+30. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-24. There is still no mechanism that loads and invokes an applied skill
-    file mid-conversation -- `SkillResearchAgent` now drafts genuinely
-    working code (see milestone 25), but nothing calls it. Applied skills
-    are real, executable files sitting in `src/agents/skills/`, not yet
-    capabilities Sim can reach for on its own.
+31. There is still no mechanism that loads and invokes an applied skill
+    file as a *registered sub-agent* mid-conversation -- `LogicAgent` can
+    now RUN arbitrary code on request (milestone 27), which covers most of
+    the practical need, but a specific applied skill file still isn't
+    something Sim can call by name. Applied skills remain real, executable
+    files sitting in `src/agents/skills/`, reachable via `run <code>`
+    (copy the file's logic in) but not auto-discovered.
