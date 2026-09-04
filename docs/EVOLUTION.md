@@ -176,8 +176,13 @@ pass before it's even *eligible* for a human to approve:
   `eval` on dynamic input, loading `ctypes` -- these bypass the sandbox
   Directive 1 and Directive 5 rely on, so they're rejected before
   execution, not caught after.
-- **Dynamic check (adaptive immunity):** the proposal's code is run for
-  real, inside `SubprocessSandbox`, and must exit cleanly.
+- **Learned check (adaptive immunity, built this pass):** every rejection
+  is remembered (`kind="rejected_proposal"` in whatever `MemoryStore` the
+  gate is constructed with); a new proposal that closely resembles one
+  already rejected is denied on that resemblance alone, even if it evades
+  the static denylist outright. See docs/BIOMIMICRY.md.
+- **Live challenge:** the proposal's code is run for real, inside
+  `SubprocessSandbox`, and must exit cleanly.
 - **Self-protection:** proposals targeting `soul.py`, `SOUL.md`, or
   `audit.py` itself are always rejected by the gate -- exactly as
   `SOUL.md` requires ("no automated process may edit them"), and extended
@@ -211,10 +216,11 @@ not a milestone on this roadmap, at any stage.
 
 ## Concrete Milestones
 
-Built in this pass:
+Built:
 
 1. `src/memory/long_term.py` -- `MemoryStore` interface, `JSONFileMemoryStore`
-   (durable), `InMemoryStore` (non-durable, for tests/degraded mode).
+   (durable), `InMemoryStore` (non-durable, for tests/degraded mode), plus
+   `delete()` for consolidation/pruning.
 2. `src/cognition/provider.py` -- `LLMProvider` interface,
    `DeterministicFallbackProvider`, `CognitionRouter` with automatic
    failover.
@@ -222,21 +228,37 @@ Built in this pass:
    automatic safe-mode reset.
 4. `src/orchestrator/reflection.py` -- `OutcomeLog`, `ReflectionAgent`,
    `Proposal` generation.
-5. `src/orchestrator/audit.py` -- `AuditGate`: static + sandboxed vetting
-   of self-modification proposals, human-approval-required by design.
+5. `src/orchestrator/audit.py` -- `AuditGate`: static denylist, sandboxed
+   vetting, and (new) adaptive-immunity memory of past rejections;
+   human-approval-required by design.
+6. `main.py` records every dispatch through `OutcomeLog`, so the
+   reflection loop has real data instead of only synthetic test data; a
+   `reflect` CLI command surfaces `ReflectionAgent` proposals directly.
+7. `src/orchestrator/deployment.py` -- `DeploymentManager`: per-slot A/B
+   trial (against cloned state), hot-swap promotion, rollback, and
+   deliberate purge of retired versions.
+8. `src/agents/skills/research.py` -- `SkillResearchAgent`: drafts real
+   `ModificationProposal`s via `CognitionRouter` (honestly minimal without
+   a real provider registered, but the full pipeline works end to end).
+9. `main.py`'s `propose`/`pending` commands: a CLI surface for the
+   creator to actually see audit-gate verdicts and what's awaiting review
+   -- nothing auto-merges; this only ever produces something to look at.
+10. `src/orchestrator/consolidation.py` -- `run_consolidation`: a
+    "sleep" maintenance pass (reflect, then prune stale records per kind),
+    exposed as the CLI's `sleep` command.
+11. `src/agents/interests.py` wired into `main.py` (`interest`,
+    `interests`, `curious` commands) -- the companion/world-awareness
+    piece is now actually reachable, not just a standalone module.
 
 Still ahead, roughly in order:
 
-6. Wire `OutcomeLog` recording into `main.py`'s CLI loop and `Router`, so
-   Phase 2's feedback loop has real data flowing into it instead of only
-   being exercised by tests.
-7. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
-   infrastructure to target, not before.
-8. A `Node` registration/heartbeat abstraction for multi-host sub-agent
-   placement (Stage 4).
-9. A concrete skill-research agent that drafts `ModificationProposal`s for
-   `AuditGate` to review (Stage 3, currently the gate has no producer
-   feeding it yet).
-10. A CLI/notification surface for the creator to actually see and act on
-    pending audit-gate verdicts (currently `AuditVerdict` is a return
-    value with no consumer).
+12. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+    infrastructure to target, not before.
+13. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+    placement (Stage 4).
+14. A real `WorldFeed` implementation (RSS/API-backed) -- `curious`
+    currently always reports no updates, honestly, since only
+    `NullWorldFeed` exists.
+15. A real `LLMProvider` registered ahead of the fallback in
+    `CognitionRouter` -- until then, `SkillResearchAgent`'s drafts stay
+    minimal by construction, not by choice.

@@ -70,6 +70,14 @@ class MemoryStore(abc.ABC):
         """Return records, most recent first, optionally filtered by kind."""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def delete(self, record_id: str) -> bool:
+        """Permanently remove a record. Returns True if it existed. Used
+        for consolidation/pruning (src/orchestrator/consolidation.py), not
+        by normal request-handling code paths.
+        """
+        raise NotImplementedError
+
     def remember(self, kind: str, content: str, **metadata: Any) -> MemoryRecord:
         """Convenience: build and store a MemoryRecord in one call."""
         record = MemoryRecord.create(kind, content, **metadata)
@@ -102,6 +110,14 @@ class InMemoryStore(MemoryStore):
     ) -> list[MemoryRecord]:
         with self._lock:
             return _filter_ordered(self._records, reversed(self._order), kind, limit)
+
+    def delete(self, record_id: str) -> bool:
+        with self._lock:
+            if record_id not in self._records:
+                return False
+            del self._records[record_id]
+            self._order.remove(record_id)
+            return True
 
 
 class JSONFileMemoryStore(MemoryStore):
@@ -150,6 +166,25 @@ class JSONFileMemoryStore(MemoryStore):
     ) -> list[MemoryRecord]:
         with self._lock:
             return _filter_ordered(self._records, reversed(self._order), kind, limit)
+
+    def delete(self, record_id: str) -> bool:
+        with self._lock:
+            if record_id not in self._records:
+                return False
+            del self._records[record_id]
+            self._order.remove(record_id)
+            self._rewrite()
+            return True
+
+    def _rewrite(self) -> None:
+        """Compact the on-disk log to match in-memory state after a delete.
+        O(n), but deletion is a maintenance-time operation, not a hot path.
+        """
+        with self._path.open("w", encoding="utf-8") as fh:
+            for record_id in self._order:
+                fh.write(json.dumps(asdict(self._records[record_id])) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
 
 
 def _filter_ordered(

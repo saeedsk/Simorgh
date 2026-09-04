@@ -52,6 +52,29 @@ class MemoryStoreContractTests:
 
         self.assertEqual(len(results), 2)
 
+    def test_delete_removes_record(self):
+        store = self.make_store()
+        record = store.remember("episodic", "gone soon")
+
+        deleted = store.delete(record.id)
+
+        self.assertTrue(deleted)
+        self.assertIsNone(store.get(record.id))
+        self.assertEqual(store.query(), [])
+
+    def test_delete_missing_id_returns_false(self):
+        store = self.make_store()
+        self.assertFalse(store.delete("does-not-exist"))
+
+    def test_delete_leaves_other_records_intact(self):
+        store = self.make_store()
+        keep = store.remember("episodic", "keep me")
+        gone = store.remember("episodic", "delete me")
+
+        store.delete(gone.id)
+
+        self.assertEqual([r.id for r in store.query()], [keep.id])
+
 
 class TestInMemoryStore(MemoryStoreContractTests, unittest.TestCase):
     def make_store(self):
@@ -68,6 +91,16 @@ class TestJSONFileMemoryStore(MemoryStoreContractTests, unittest.TestCase):
 
     def make_store(self):
         return JSONFileMemoryStore(self._path)
+
+    def test_delete_persists_across_store_instances(self):
+        store = self.make_store()
+        keep = store.remember("episodic", "keep me")
+        gone = store.remember("episodic", "delete me")
+        store.delete(gone.id)
+
+        reloaded = JSONFileMemoryStore(self._path)
+
+        self.assertEqual([r.id for r in reloaded.query()], [keep.id])
 
     def test_records_survive_across_store_instances(self):
         store = self.make_store()
