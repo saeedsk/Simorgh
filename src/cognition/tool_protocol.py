@@ -20,6 +20,10 @@ _CODE_FENCE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL)
 _ALLOWED_READ_ROOTS = ("src", "docs", "tests")
 _MAX_READ_CHARS = 20_000
 _CREDENTIAL_LOOKING_NAMES = (".env", "secrets", "credentials")
+# Generously above any real path in this repository -- exists purely to
+# refuse an obviously-malformed "path" (a hallucinated multi-KB blob)
+# before ever touching the filesystem with it.
+_MAX_PATH_CHARS = 500
 
 _DEFAULT_PREVIEW_LIMIT = 150
 
@@ -84,8 +88,25 @@ def safe_read_file(repo_root: Path, raw_path: str) -> str:
     raises -- returns a "[refused: ...]" string on any problem, so a
     caller can always feed the result straight back into a prompt without
     a try/except of its own.
+
+    That "never raises" guarantee is enforced explicitly, not assumed:
+    caught live, a confused model's "READ:" payload was really a huge
+    (50,000+ character) hallucinated blob, and `Path.is_file()` raised a
+    raw `OSError: [Errno 63] File name too long` -- nothing here used to
+    catch that, and it crashed the entire CLI process mid-batch. A
+    length check up front refuses the obvious case before ever touching
+    the filesystem; the try/except below is the second, unconditional
+    layer, since a filename can be "too long" (or otherwise invalid) in
+    OS- and filesystem-specific ways this function shouldn't have to
+    enumerate.
     """
-    rel = Path(raw_path)
+    if len(raw_path) > _MAX_PATH_CHARS:
+        return f"[refused: path is {len(raw_path)} chars -- too long to be a real path]"
+    try:
+        rel = Path(raw_path)
+    except ValueError as exc:
+        return f"[refused: {raw_path!r} is not a valid path: {exc!r}]"
+
     if rel.is_absolute() or ".." in rel.parts:
         return f"[refused: {raw_path!r} is not a safe relative path]"
     if not rel.parts or rel.parts[0] not in _ALLOWED_READ_ROOTS:
@@ -100,14 +121,13 @@ def safe_read_file(repo_root: Path, raw_path: str) -> str:
     ):
         return f"[refused: {raw_path!r} looks like a credentials path]"
 
-    resolved_root = repo_root.resolve()
-    target = (resolved_root / rel).resolve()
-    if resolved_root != target and resolved_root not in target.parents:
-        return f"[refused: {raw_path!r} resolves outside the repository]"
-    if not target.is_file():
-        return f"[refused: {raw_path!r} is not a file]"
-
     try:
+        resolved_root = repo_root.resolve()
+        target = (resolved_root / rel).resolve()
+        if resolved_root != target and resolved_root not in target.parents:
+            return f"[refused: {raw_path!r} resolves outside the repository]"
+        if not target.is_file():
+            return f"[refused: {raw_path!r} is not a file]"
         content = target.read_text(errors="replace")
     except OSError as exc:
         return f"[refused: could not read {raw_path!r}: {exc!r}]"

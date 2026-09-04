@@ -1,0 +1,126 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from src.cognition.tool_protocol import (
+    extract_code,
+    is_valid_python,
+    parse_marker,
+    preview,
+    safe_read_file,
+)
+
+
+class TestParseMarker(unittest.TestCase):
+    def test_matches_a_known_marker_case_insensitively(self):
+        kind, payload = parse_marker("read: src/x.py", ("READ", "RUN"))
+        self.assertEqual(kind, "read")
+        self.assertEqual(payload, "src/x.py")
+
+    def test_no_marker_returns_none_and_full_text(self):
+        kind, payload = parse_marker("just a final answer", ("READ",))
+        self.assertIsNone(kind)
+        self.assertEqual(payload, "just a final answer")
+
+
+class TestExtractCode(unittest.TestCase):
+    def test_strips_markdown_fence(self):
+        self.assertEqual(extract_code("```python\nx = 1\n```"), "x = 1")
+
+    def test_empty_input_returns_none(self):
+        self.assertIsNone(extract_code("   "))
+
+
+class TestIsValidPython(unittest.TestCase):
+    def test_valid_code_is_true(self):
+        self.assertTrue(is_valid_python("def f():\n    return 1\n"))
+
+    def test_invalid_code_is_false(self):
+        self.assertFalse(is_valid_python("this is not python {{{"))
+
+
+class TestPreview(unittest.TestCase):
+    def test_short_text_is_unchanged(self):
+        self.assertEqual(preview("hello"), "hello")
+
+    def test_newlines_are_collapsed_to_a_single_line(self):
+        result = preview("line1\nline2\nline3")
+        self.assertNotIn("\n", result)
+        self.assertIn("line1", result)
+        self.assertIn("line2", result)
+
+    def test_long_text_is_truncated_with_a_count(self):
+        text = "x" * 1000
+        result = preview(text, limit=100)
+        self.assertLessEqual(len(result), 130)
+        self.assertIn("more chars", result)
+
+
+class TestSafeReadFile(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        (self.repo_root / "src").mkdir()
+        (self.repo_root / "src" / "example.py").write_text("EXAMPLE = 1\n")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_reads_an_allowed_file(self):
+        content = safe_read_file(self.repo_root, "src/example.py")
+        self.assertIn("EXAMPLE", content)
+
+    def test_refuses_absolute_path(self):
+        self.assertIn("refused", safe_read_file(self.repo_root, "/etc/passwd"))
+
+    def test_refuses_path_traversal(self):
+        self.assertIn("refused", safe_read_file(self.repo_root, "../../etc/passwd"))
+
+    def test_refuses_path_outside_allowed_roots(self):
+        self.assertIn("refused", safe_read_file(self.repo_root, "requirements.txt"))
+
+    def test_refuses_credential_looking_path(self):
+        result = safe_read_file(self.repo_root, "src/.env")
+        self.assertIn("refused", result)
+        self.assertIn("credentials", result)
+
+    def test_refuses_nonexistent_file(self):
+        self.assertIn("refused", safe_read_file(self.repo_root, "src/nope.py"))
+
+    def test_never_raises_and_refuses_a_pathologically_long_payload(self):
+        # Live-caught crash: a confused model's "READ:" payload was a
+        # 50,000+ character hallucinated blob (embedding fake "READ:"/
+        # "DRAFT:" exchanges), and Path.is_file() raised a raw OSError
+        # ("File name too long") that nothing caught, killing the whole
+        # CLI process. This must come back as a refusal string, never an
+        # exception, regardless of how large or malformed the input is.
+        huge_payload = "src/" + ("a" * 50_000)
+
+        result = safe_read_file(self.repo_root, huge_payload)
+
+        self.assertIsInstance(result, str)
+        self.assertIn("refused", result)
+
+    def test_never_raises_for_a_single_path_component_over_the_os_limit(self):
+        # A single path segment longer than the filesystem's max name
+        # length (255 bytes on most systems) is exactly what triggered
+        # the live OSError -- exercised directly, not just via the
+        # generic huge-payload case above.
+        too_long_segment = "src/" + ("a" * 300)
+
+        result = safe_read_file(self.repo_root, too_long_segment)
+
+        self.assertIsInstance(result, str)
+        self.assertIn("refused", result)
+
+    def test_truncates_content_over_the_max_read_size(self):
+        big_file = self.repo_root / "src" / "big.py"
+        big_file.write_text("x = 1\n" * 10_000)
+
+        result = safe_read_file(self.repo_root, "src/big.py")
+
+        self.assertIn("truncated", result)
+
+
+if __name__ == "__main__":
+    unittest.main()
