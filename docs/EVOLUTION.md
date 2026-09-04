@@ -589,23 +589,45 @@ Built:
     terminal state, not indefinite limbo, since not every block is
     actually resolvable by retrying (a hard directive violation won't
     pass no matter how many times it's rephrased).
+43. **Conversational self-modification** (see `docs/SOUL.md`, its own
+    named section): a second, separate removal of "only a typed command
+    or the autonomous loop can trigger this," asked for directly and
+    authorized explicitly after Sim correctly refused to write code from
+    chat and the creator asked why that was still required.
+    `LogicAgent` (`src/agents/logic/base.py`) gained four more tool
+    markers -- PROPOSE, PATCH, BATCH, PLAN -- each calling the *exact
+    same* `propose_skill`/`propose_self_patch`/`propose_skill_batch`/
+    `plan_goal` functions a typed command would, injected as closures
+    from `main.py`'s `run_cli()` (avoiding a circular import back from
+    `logic/base.py`). Every downstream gate -- `AuditGate`, the isolated
+    test suite, auto-commit-never-push, the network denylist, the
+    protected-subjects list -- is the identical code path regardless of
+    which of the three triggers (typed command, autonomous loop,
+    conversational marker) started it; a chat message claiming creator
+    authority still can't unlock anything beyond what those gates
+    already permit. Also fixed along the way: the persona prompt had
+    never been updated when `batch`/`plan` were added, so a request for
+    "10 features" got told to build them one at a time instead of being
+    pointed at the commands built specifically for that.
 
 Still ahead, roughly in order:
 
-43. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+44. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-44. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+45. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-45. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+46. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-46. `use <skill name>` (milestone from the earlier skill-registry work)
+47. `use <skill name>` (milestone from the earlier skill-registry work)
     is still a CLI-level command a human types, not a marker
-    `LogicAgent`'s own conversational tool loop can reach, and there is
-    still no *automatic* registration of an applied skill as a live
-    `Router` sub-agent -- it remains a manual, on-demand invocation.
-47. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+    `LogicAgent`'s own conversational tool loop can reach (unlike
+    PROPOSE/PATCH/BATCH/PLAN, milestone 43, `use` itself never got a
+    conversational marker), and there is still no *automatic*
+    registration of an applied skill as a live `Router` sub-agent -- it
+    remains a manual, on-demand invocation.
+48. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, and now `MAX_BLOCKED_RETRY_ATTEMPTS`=9) are
     judgment calls, not values derived from
     real operating experience -- worth revisiting once there's an actual
