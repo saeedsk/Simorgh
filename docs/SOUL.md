@@ -301,10 +301,22 @@ wrote. That growth is bounded, not unconstrained:
     permanently blocked, exactly as before -- that boundary did not
     move, and per "On changing this hierarchy," never will by Simorgh's
     own initiative.
-  - Applied changes land as normal, uncommitted changes in the git
-    working tree. Nothing in this codebase runs `git commit` or
-    `git push` on Simorgh's behalf -- the creator's own review of the
-    diff, and the decision to commit it, remain entirely theirs.
+  - **Second policy update, by the creator's explicit answer to a direct
+    question ("why is Sim asking for git review"):** an applied change
+    is now also committed automatically (`src/orchestrator/git_ops.py`,
+    `commit_applied_change`) -- one commit per change, attributed to
+    "Simorgh" specifically (per-command `-c user.name=`/`-c user.email=`
+    flags, never a change to the repository's persistent git config), no
+    `--no-verify`, so a real pre-commit hook rejection is reported
+    honestly rather than bypassed. `git push` is a separate, unmoved
+    boundary: nothing in this codebase runs it, automatically or
+    otherwise, on Simorgh's behalf -- that stays the creator's own
+    action, on their own timing, always. This is deliberately staged
+    exactly like auto-apply was: a narrower thing (write to disk) was
+    authorized first and exercised for a while, then a specific,
+    separate follow-on question (commit, still never push) was asked and
+    answered explicitly -- not inferred from the first authorization
+    alone.
   - This is exactly the kind of "deliberate, logged, creator-only
     decision" the Open Questions and "What Maturity Actually Means"
     sections (`docs/EVOLUTION.md`) already anticipated for a narrow

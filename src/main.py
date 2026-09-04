@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import re
 from pathlib import Path
 
 try:
@@ -67,6 +68,7 @@ from src.orchestrator.console_style import style
 from src.orchestrator.health import HealthMonitor, Severity
 from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.router import AgentRequest, Router
+from src.orchestrator.git_ops import commit_applied_change
 from src.orchestrator.self_patch import SelfPatchAgent, check_main_py_invariants, relaunch, run_isolated_test_suite
 from src.sandboxing.sandbox import SandboxExecutor, SubprocessSandbox
 from src.tools.web_fetch import FetchRefused, WebFetchTool
@@ -88,6 +90,9 @@ BUDGET_COMMAND = "budget"
 LOG_COMMAND = "log"
 USE_PREFIX = "use "
 SKILLS_COMMAND = "skills"
+BATCH_PREFIX = "batch "
+MAX_BATCH_COUNT = 20
+DEFAULT_BATCH_MAX_ATTEMPTS = 2
 DEFAULT_MEMORY_PATH = Path.home() / ".simorgh" / "memory.jsonl"
 DEFAULT_HISTORY_PATH = Path.home() / ".simorgh" / "cli_history"
 HISTORY_LENGTH = 1000
@@ -114,6 +119,7 @@ _KNOWN_COMMAND_WORDS = (
     "run",
     "use",
     SKILLS_COMMAND,
+    "batch",
     BUDGET_COMMAND,
     LOG_COMMAND,
     "exit",
@@ -254,6 +260,12 @@ _COMMANDS_HELP: tuple[tuple[str, str, str], ...] = (
         "suite against it in an isolated copy, and relaunch if it passes.",
         "patch src/agents/logic/base.py handle repeated 403s better",
     ),
+    (
+        "batch <count> <theme>",
+        "Brainstorm N focused sub-topics for a theme, then propose/audit/"
+        "apply/commit each one (max 20 -- each is a real, metered call).",
+        "batch 8 digital-world interaction skills",
+    ),
     ("pending", "List every applied skill and self-patch so far.", "pending"),
     ("skills", "List every applied skill you can actually run by name.", "skills"),
     (
@@ -322,6 +334,22 @@ def extract_patch_args(user_input: str, lowered: str) -> tuple[str, str] | None:
         return ("", "")
     path, description = rest.split(" ", 1)
     return path.strip(), description.strip()
+
+
+def extract_batch_args(user_input: str, lowered: str) -> tuple[int, str] | None:
+    """Returns (count, theme) if `user_input` is 'batch <count> <theme>'
+    with a valid positive integer count, else None. A missing/malformed
+    count or theme returns (0, "") -- same convention as
+    extract_patch_args -- so run_cli can show usage rather than silently
+    falling through to plain chat.
+    """
+    if not lowered.startswith(BATCH_PREFIX):
+        return None
+    rest = user_input[len(BATCH_PREFIX):].strip()
+    parts = rest.split(None, 1)
+    if len(parts) < 2 or not parts[0].isdigit():
+        return (0, "")
+    return int(parts[0]), parts[1].strip()
 
 
 def build_memory_store(path: Path = DEFAULT_MEMORY_PATH) -> MemoryStore:
@@ -542,7 +570,7 @@ def run_cli() -> None:
         _run_cli_loop(
             router, store, short_term, activity_log, outcome_log, reflection_agent,
             audit_gate, skill_research, self_patch_agent, interests, health_monitor,
-            web_fetch, budget_guards,
+            web_fetch, budget_guards, cognition,
         )
     finally:
         _save_readline_history()
@@ -562,6 +590,7 @@ def _run_cli_loop(
     health_monitor: HealthMonitor,
     web_fetch: WebFetchTool,
     budget_guards: dict[str, BudgetGuard],
+    cognition: CognitionRouter,
 ) -> None:
     """The interactive read-eval-print loop, extracted out of run_cli so
     run_cli can guarantee readline history is saved on the way out
@@ -600,6 +629,11 @@ def _run_cli_loop(
         if patch_args is not None:
             subject, description = patch_args
             propose_self_patch(self_patch_agent, audit_gate, store, activity_log, subject, description)
+            continue
+        batch_args = extract_batch_args(user_input, lowered)
+        if batch_args is not None:
+            count, theme = batch_args
+            propose_skill_batch(cognition, skill_research, audit_gate, store, theme, count)
             continue
         if lowered == LOG_COMMAND or lowered.startswith(LOG_COMMAND + " "):
             _print_activity_log(activity_log, user_input[len(LOG_COMMAND):].strip())
@@ -739,11 +773,14 @@ def propose_skill(
     still going through the full audit gate, not a shortcut around it.
     apply_proposal enforces its own independent scope check
     (src/agents/skills/ only), so a rejected or off-scope proposal is never
-    written regardless of what happens here. Applied changes land as
-    normal, uncommitted git changes -- nothing here commits or pushes.
-    `repo_root` defaults to the current working directory; tests pass an
-    isolated temp directory instead. Returns the message printed, for
-    testability.
+    written regardless of what happens here. Applied changes are then
+    auto-committed (src/orchestrator/git_ops.py, one commit per change,
+    attributed to Simorgh, never `--no-verify`) -- per the creator's
+    explicit, separate decision on top of auto-apply. `git push` is never
+    run automatically by anything in this codebase; that stays entirely
+    the creator's own action. `repo_root` defaults to the current working
+    directory; tests pass an isolated temp directory instead. Returns the
+    message printed, for testability.
     """
     if not topic:
         message = "[usage: propose <topic>]"
@@ -782,13 +819,129 @@ def propose_skill(
         _print_status(message)
         return message
 
-    message = (
-        f"[APPLIED] {target} -- {proposal.rationale} "
-        "(passed every check and was written to disk; review with git diff/status "
-        "before committing)"
+    commit_result = commit_applied_change(
+        repo_root or Path.cwd(),
+        proposal.subject,
+        _skill_commit_message(proposal.subject, proposal.rationale),
     )
+    committed_note = (
+        "committed (not pushed)" if commit_result.committed else f"NOT committed: {commit_result.output}"
+    )
+    message = f"[APPLIED] {target} -- {proposal.rationale} ({committed_note})"
     _print_status(message)
+    if commit_result.committed:
+        print(style("📦 [git] committed -- push whenever you're ready", "green"))
+    else:
+        print(style(f"⚠️  [git] {commit_result.output}", "yellow"))
     print(style(f"   → try it now: use {target.stem}", "dim"))
+    return message
+
+
+def _skill_commit_message(subject: str, rationale: str) -> str:
+    return (
+        f"[sim] Add skill: {subject}\n\n"
+        f"{rationale}\n\n"
+        "Auto-committed by Simorgh's self-modification pipeline (audited: "
+        "denylist, adaptive-immunity memory, sandboxed run). Never pushed "
+        "automatically -- see docs/SOUL.md, \"Self-Improvement Philosophy.\""
+    )
+
+
+_BATCH_BRAINSTORM_PROMPT = """List exactly {count} distinct, narrowly-focused skill ideas for the
+theme: {theme}
+
+Each one must be small enough to implement as ONE self-contained Python
+module with ONE clear capability -- not a framework, not "and also
+handles X, Y, Z." If the theme is broad, break it into that many
+genuinely separate, specific capabilities rather than one vague one
+repeated. Standard library only, no direct network access (skip any idea
+that would require it -- that needs the creator to use the separately
+reviewed web-fetch tool by hand, not a drafted skill).
+
+Respond with ONLY a numbered list, one short topic per line, nothing
+else before or after it:
+1. <topic>
+2. <topic>
+...
+{count}. <topic>"""
+
+_NUMBERED_LINE = re.compile(r"^\s*\d+[.):]\s*(.+)$")
+
+
+def _parse_numbered_list(text: str, expected_count: int) -> list[str]:
+    topics = []
+    for line in text.splitlines():
+        match = _NUMBERED_LINE.match(line)
+        if match:
+            topic = match.group(1).strip()
+            if topic:
+                topics.append(topic)
+    return topics[:expected_count]
+
+
+def propose_skill_batch(
+    cognition: CognitionRouter,
+    skill_research: SkillResearchAgent,
+    audit_gate: AuditGate,
+    store: MemoryStore,
+    theme: str,
+    count: int,
+    repo_root: Path | None = None,
+) -> str:
+    """The creator's ask made real: 'develop N skills for a theme,' not
+    just one. 'propose <topic>' was always a one-shot, one-focused-
+    capability-per-call pipeline (the audit gate's drafting prompt
+    already says "keep it small, not a framework"), so asking it for
+    "100 skills" in one call just produced one overly broad module trying
+    to cover everything -- not a bug, but not what was wanted either.
+
+    This runs one additional, bounded LLM call to brainstorm `count`
+    distinct sub-topics, then calls propose_skill (unchanged) once per
+    topic -- the exact same audited, auto-applied, auto-committed
+    pipeline as a single 'propose', reused N times, never a relaxed or
+    batched review. `count` is capped at MAX_BATCH_COUNT: each item is a
+    handful of real, metered LLM calls, so an unbounded count here would
+    be an unbounded bill, not just an unbounded list. Returns a summary
+    message, for testability.
+    """
+    if not 1 <= count <= MAX_BATCH_COUNT or not theme:
+        message = f"[usage: batch <count 1-{MAX_BATCH_COUNT}> <theme>]"
+        _print_status(message)
+        return message
+
+    print(f"🧠 [batch] brainstorming {count} focused sub-topic(s) for {theme!r}...")
+    response = cognition.complete(_BATCH_BRAINSTORM_PROMPT.format(theme=theme, count=count))
+    if response.provider_name == "deterministic_fallback":
+        message = "[batch] no real drafting intelligence available -- try 'propose <topic>' directly instead"
+        _print_status(message)
+        return message
+
+    topics = _parse_numbered_list(response.text, count)
+    if not topics:
+        message = "[batch] could not produce a topic list -- try a narrower theme, or 'propose <topic>' directly"
+        _print_status(message)
+        return message
+
+    print(f"🧠 [batch] got {len(topics)} sub-topic(s):")
+    for i, topic in enumerate(topics, 1):
+        print(f"   {i}. {topic}")
+
+    applied = 0
+    for i, topic in enumerate(topics, 1):
+        print(style(f"— ({i}/{len(topics)}) {topic}", "cyan", "bold"))
+        result = propose_skill(
+            skill_research,
+            audit_gate,
+            store,
+            topic,
+            repo_root=repo_root,
+            max_attempts=DEFAULT_BATCH_MAX_ATTEMPTS,
+        )
+        if result.startswith("[APPLIED]"):
+            applied += 1
+
+    message = f"[batch] {applied}/{len(topics)} skill(s) applied for theme {theme!r} -- see 'skills'"
+    _print_status(message)
     return message
 
 
@@ -813,9 +966,11 @@ def propose_self_patch(
     smoke run of the changed file alone. apply_source_patch enforces its
     own independent scope check, so a rejected, off-scope, or
     test-failing proposal is never written regardless of what happens
-    here. `do_relaunch=False` lets tests exercise the full pipeline
-    without actually replacing the test process. Returns the message
-    printed, for testability.
+    here. A successful patch is then auto-committed (before the relaunch
+    below, since os.execv never returns) -- same policy as propose_skill,
+    never `git push`. `do_relaunch=False` lets tests exercise the full
+    pipeline without actually replacing the test process. Returns the
+    message printed, for testability.
     """
     if not subject or not topic:
         message = "[usage: patch <repo-relative path> <description of the change>]"
@@ -892,18 +1047,41 @@ def propose_self_patch(
     activity_log.record_tool_call(
         "self_patch", "TEST_SUITE", f"{subject}: {topic}", suite_result.summary, True
     )
+    commit_result = commit_applied_change(
+        repo_root or Path.cwd(),
+        proposal.subject,
+        _patch_commit_message(proposal.subject, proposal.rationale, suite_result.summary),
+    )
+    committed_note = (
+        "committed (not pushed)" if commit_result.committed else f"NOT committed: {commit_result.output}"
+    )
     message = (
         f"[APPLIED] {target} -- {proposal.rationale} "
-        f"(isolated test suite: {suite_result.test_count} tests passed; review with "
-        "git diff/status before committing)"
+        f"(isolated test suite: {suite_result.test_count} tests passed; {committed_note})"
     )
     _print_status(message)
+    if commit_result.committed:
+        print(style("📦 [git] committed -- push whenever you're ready", "green"))
+    else:
+        print(style(f"⚠️  [git] {commit_result.output}", "yellow"))
 
     if do_relaunch:
         print("🔁 [patch] relaunching now so the new code takes effect...")
         relaunch()
 
     return message
+
+
+def _patch_commit_message(subject: str, rationale: str, test_summary: str) -> str:
+    return (
+        f"[sim] Patch {subject}\n\n"
+        f"{rationale}\n\n"
+        f"Isolated test suite: {test_summary}\n\n"
+        "Auto-committed by Simorgh's self-patch pipeline (audited: denylist, "
+        "adaptive-immunity memory, sandboxed run, then this repository's "
+        "entire test suite run fresh in an isolated copy). Never pushed "
+        "automatically -- see docs/SOUL.md, \"Self-patching source code.\""
+    )
 
 
 def _print_pending(store: MemoryStore) -> None:
