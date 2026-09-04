@@ -250,7 +250,7 @@ def run_cli() -> None:
     outcome_log = OutcomeLog(store)
     reflection_agent = ReflectionAgent(outcome_log)
     audit_gate = AuditGate(memory=store)
-    skill_research = SkillResearchAgent(cognition)
+    skill_research = SkillResearchAgent(cognition, audit_gate=audit_gate)
     interests = InterestTracker(store)
     health_monitor = HealthMonitor()
     web_fetch = WebFetchTool(store)

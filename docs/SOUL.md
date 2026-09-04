@@ -301,6 +301,33 @@ gate. Expanding *what Sim can reach* and expanding *what Sim can write to
 itself* are kept as two separate authorization decisions, not bundled
 into one.
 
+**Agentic drafting -- READ and TEST tools.** The creator explicitly
+authorized giving the skill-drafting LLM (`SkillResearchAgent`) real
+file-read and test-execution tool access, mid-draft -- a materially
+different decision from prompt quality, since it's the first time an LLM
+call in this codebase can take more than one bounded action per turn.
+Granted narrowly, not as general tool access:
+- READ is read-only, confined to this repository's own tracked source
+  (`src/`, `docs`, `tests`), refuses absolute paths, `..` traversal, and
+  credential-shaped filenames, and is size-bounded. It cannot write
+  anything, anywhere.
+- TEST runs a candidate through the *real* `AuditGate` -- the same
+  denylist, adaptive-immunity memory, and sandboxed run that applies for
+  real -- not a separate, weaker check invented for drafting.
+- There is still no WRITE tool and no shell/bash tool in this loop.
+  Writing to disk only ever happens through `apply_proposal`, after the
+  *final* candidate passes `AuditGate.review()` for real -- this loop can
+  propose and test, but never itself commits anything.
+- The loop is hard-bounded (`max_tool_steps`); each step is one more
+  metered `CognitionRouter.complete()` call under the same `BudgetGuard`
+  caps as everything else, and a mid-loop budget exhaustion degrades to
+  the safe deterministic floor exactly like any other provider outage.
+
+This is deliberately *not* the same thing as giving Sim a general
+autonomous coding-agent loop (Read/Write/Bash, unattended, iterating
+freely) -- that remains a separate, larger decision this document does
+not consider settled by the above.
+
 ## Multi-Hardware Identity
 
 When Simorgh's sub-agents run across multiple machines, "Simorgh" still

@@ -343,12 +343,23 @@ Built:
     `main.py`'s `propose_skill` now retries with the audit verdict's
     rejection reasons fed back, bounded to `max_attempts` (default 3),
     narrating each attempt -- bounded self-correction using the existing
-    audit gate every time, not a new capability grant. Explicitly *not*
-    built as part of this: giving the drafting LLM actual file-read/
-    test-execution tool access (an agentic, multi-step loop) -- that is a
-    materially different decision from prompt quality, reversing the same
-    `--disallowedTools "*"` boundary `ClaudeCodeProvider` was deliberately
-    built with, and needs its own explicit authorization if wanted.
+    audit gate every time, not a new capability grant.
+26. Agentic drafting: `SkillResearchAgent` now gives the drafting LLM two
+    bounded tools mid-draft, per the creator's explicit authorization of
+    this specific, narrower capability (see `docs/SOUL.md`, "Agentic
+    drafting -- READ and TEST tools"). `READ: <path>` is read-only,
+    confined to `src/`/`docs`/`tests`, refuses traversal/absolute paths/
+    credential-shaped names. `DRAFT: <code>` tests a candidate against the
+    *real* `AuditGate` (denylist, adaptive immunity, sandbox -- not a
+    separate weaker check) and reports back pass/fail with reasons, so the
+    model can iterate before submitting a final answer. No WRITE tool, no
+    shell -- `apply_proposal` is still the only thing that ever writes to
+    disk, only after the final candidate passes the real audit. Hard-
+    bounded (`max_tool_steps`, default 5); a mid-loop budget exhaustion
+    degrades to the safe deterministic floor, same as any other provider
+    outage. This is still deliberately narrower than a general autonomous
+    coding-agent loop (unattended Read/Write/Bash) -- that remains a
+    separate, larger decision.
 
 Still ahead, roughly in order:
 
