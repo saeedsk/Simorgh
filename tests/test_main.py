@@ -1,7 +1,9 @@
 import unittest
 
-from src.main import build_router, handle_turn
+from src.agents.skills.research import SkillResearchAgent
+from src.main import PENDING_KIND, build_router, handle_turn, propose_skill
 from src.memory.long_term import InMemoryStore
+from src.orchestrator.audit import AuditGate
 from src.orchestrator.reflection import OutcomeLog
 
 
@@ -47,6 +49,24 @@ class TestMainCli(unittest.TestCase):
         # outcome_log defaults to None -- should behave exactly as before
         output = handle_turn(router, "hello there")
         self.assertTrue(output)
+
+
+class TestProposeSkill(unittest.TestCase):
+    def test_clean_proposal_is_logged_as_pending_not_merged(self):
+        store = InMemoryStore()
+        message = propose_skill(SkillResearchAgent(), AuditGate(), store, "rocketry")
+
+        self.assertIn("PENDING YOUR APPROVAL", message)
+        pending = store.query(kind=PENDING_KIND)
+        self.assertEqual(len(pending), 1)
+        self.assertIn("rocketry", pending[0].content)
+
+    def test_empty_topic_is_rejected_with_usage_message(self):
+        store = InMemoryStore()
+        message = propose_skill(SkillResearchAgent(), AuditGate(), store, "")
+
+        self.assertIn("usage", message)
+        self.assertEqual(store.query(kind=PENDING_KIND), [])
 
 
 if __name__ == "__main__":
