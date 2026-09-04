@@ -7,12 +7,14 @@ from src.agents.skills.research import SkillResearchAgent
 from src.main import (
     autocorrect_command,
     build_router,
+    extract_batch_args,
     extract_patch_args,
     extract_propose_topic,
     handle_turn,
     note_interest,
     propose_self_patch,
     propose_skill,
+    propose_skill_batch,
     run_skill_code,
     strip_command_slash,
     use_skill,
@@ -225,6 +227,39 @@ class TestProposeSkill(unittest.TestCase):
         written = self.repo_root / "src/agents/skills/rocketry.py"
         self.assertTrue(written.exists())
         self.assertIn("rocketry", written.read_text())
+
+    def test_clean_proposal_is_auto_committed_when_repo_root_is_a_real_git_repo(self):
+        import subprocess
+
+        subprocess.run(["git", "init", "-q"], cwd=self.repo_root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"], cwd=self.repo_root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True)
+        store = InMemoryStore()
+
+        message = propose_skill(
+            SkillResearchAgent(), AuditGate(), store, "rocketry", repo_root=self.repo_root
+        )
+
+        self.assertIn("committed (not pushed)", message)
+        log = subprocess.run(
+            ["git", "log", "--oneline"], cwd=self.repo_root, capture_output=True, text=True
+        )
+        self.assertIn("rocketry", log.stdout)
+
+    def test_proposal_still_applies_when_repo_root_is_not_a_git_repo(self):
+        # Auto-commit failing (no .git here) must never roll back or
+        # block the already-successful disk write.
+        store = InMemoryStore()
+
+        message = propose_skill(
+            SkillResearchAgent(), AuditGate(), store, "rocketry", repo_root=self.repo_root
+        )
+
+        self.assertIn("APPLIED", message)
+        self.assertIn("NOT committed", message)
+        self.assertTrue((self.repo_root / "src/agents/skills/rocketry.py").exists())
 
     def test_empty_topic_is_rejected_with_usage_message(self):
         store = InMemoryStore()
@@ -663,6 +698,128 @@ class TestUseSkill(unittest.TestCase):
         tool_calls = store.query(kind="tool_call")
         self.assertEqual(len(tool_calls), 1)
         self.assertEqual(tool_calls[0].metadata["tool"], "USE")
+
+
+class _FakeBrainstormCognition:
+    def __init__(self, text, provider_name="fake"):
+        self._text = text
+        self._provider_name = provider_name
+        self.prompts = []
+
+    def complete(self, prompt, **kwargs):
+        from src.cognition.provider import LLMResponse
+
+        self.prompts.append(prompt)
+        return LLMResponse(text=self._text, provider_name=self._provider_name)
+
+
+class TestExtractBatchArgs(unittest.TestCase):
+    def test_parses_count_and_theme(self):
+        text = "batch 5 digital world skills"
+        self.assertEqual(extract_batch_args(text, text.lower()), (5, "digital world skills"))
+
+    def test_non_matching_input_returns_none(self):
+        text = "hey there"
+        self.assertIsNone(extract_batch_args(text, text.lower()))
+
+    def test_missing_count_returns_usage_pair(self):
+        text = "batch some theme"
+        self.assertEqual(extract_batch_args(text, text.lower()), (0, ""))
+
+    def test_missing_theme_returns_usage_pair(self):
+        text = "batch 5"
+        self.assertEqual(extract_batch_args(text, text.lower()), (0, ""))
+
+
+class TestProposeSkillBatch(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_usage_message_for_invalid_count(self):
+        store = InMemoryStore()
+        message = propose_skill_batch(
+            _FakeBrainstormCognition(""),
+            SkillResearchAgent(),
+            AuditGate(),
+            store,
+            "theme",
+            0,
+            repo_root=self.repo_root,
+        )
+        self.assertIn("usage", message)
+
+    def test_usage_message_for_count_above_max(self):
+        store = InMemoryStore()
+        message = propose_skill_batch(
+            _FakeBrainstormCognition(""),
+            SkillResearchAgent(),
+            AuditGate(),
+            store,
+            "theme",
+            21,
+            repo_root=self.repo_root,
+        )
+        self.assertIn("usage", message)
+
+    def test_usage_message_for_empty_theme(self):
+        store = InMemoryStore()
+        message = propose_skill_batch(
+            _FakeBrainstormCognition(""),
+            SkillResearchAgent(),
+            AuditGate(),
+            store,
+            "",
+            3,
+            repo_root=self.repo_root,
+        )
+        self.assertIn("usage", message)
+
+    def test_deterministic_fallback_from_brainstorm_step_is_reported(self):
+        store = InMemoryStore()
+        cognition = _FakeBrainstormCognition("1. a\n2. b\n", provider_name="deterministic_fallback")
+
+        message = propose_skill_batch(
+            cognition, SkillResearchAgent(), AuditGate(), store, "theme", 2, repo_root=self.repo_root
+        )
+
+        self.assertIn("no real drafting intelligence", message)
+
+    def test_unparseable_brainstorm_response_is_reported(self):
+        store = InMemoryStore()
+        cognition = _FakeBrainstormCognition("I refuse to make a list.")
+
+        message = propose_skill_batch(
+            cognition, SkillResearchAgent(), AuditGate(), store, "theme", 2, repo_root=self.repo_root
+        )
+
+        self.assertIn("could not produce a topic list", message)
+
+    def test_proposes_and_applies_each_brainstormed_topic(self):
+        store = InMemoryStore()
+        cognition = _FakeBrainstormCognition("1. rocketry\n2. stopwatch\n")
+
+        message = propose_skill_batch(
+            cognition, SkillResearchAgent(), AuditGate(), store, "gadgets", 2, repo_root=self.repo_root
+        )
+
+        self.assertIn("2/2", message)
+        self.assertTrue((self.repo_root / "src/agents/skills/rocketry.py").exists())
+        self.assertTrue((self.repo_root / "src/agents/skills/stopwatch.py").exists())
+
+    def test_brainstorm_prompt_asks_for_the_requested_count_and_theme(self):
+        store = InMemoryStore()
+        cognition = _FakeBrainstormCognition("1. rocketry\n")
+
+        propose_skill_batch(
+            cognition, SkillResearchAgent(), AuditGate(), store, "gadgets", 1, repo_root=self.repo_root
+        )
+
+        self.assertIn("gadgets", cognition.prompts[0])
+        self.assertIn("1", cognition.prompts[0])
 
 
 class TestAutocorrectCommand(unittest.TestCase):

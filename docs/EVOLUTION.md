@@ -467,18 +467,36 @@ Built:
     every prior (paid) LLM call in the process. Caught live: four RUN
     attempts investigating whether a capability existed, then a reply
     that ignored all of it.
+36. `src/orchestrator/git_ops.py` -- `commit_applied_change`: a direct
+    answer to the creator's question "why is Sim asking for git
+    review." An applied skill or patch is now auto-committed (one commit
+    per change, attributed to "Simorgh," `--no-verify` never used) right
+    after it's written to disk -- `git push` remains untouched, entirely
+    the creator's own action, still. Wired into both `propose_skill` and
+    `propose_self_patch` (before the relaunch, since `os.execv` never
+    returns). See `docs/SOUL.md`, "Self-Improvement Philosophy," second
+    policy update.
+37. `propose_skill_batch` (`main.py`'s `batch <count> <theme>`): answers
+    a real gap found live -- asked to "develop 100 must-have skills,"
+    `propose` (a one-shot, one-focused-capability pipeline, by design)
+    produced one overly broad module instead of 100 real ones. One
+    bounded LLM call brainstorms `count` (capped at 20) distinct,
+    narrowly-focused sub-topics, then `propose_skill` runs -- unchanged,
+    same audit/apply/commit -- once per topic. No relaxed review for
+    being part of a batch; the cap exists because each item is real,
+    metered LLM spend, not just a longer list.
 
 Still ahead, roughly in order:
 
-36. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+38. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-37. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+39. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-38. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
+40. A real `WorldFeed` implementation for `InterestTracker`'s `curious`
     command -- `WebFetchTool` now provides the primitive (a reviewed,
     SSRF-safe HTTP GET); `NullWorldFeed` could be replaced with a thin
     RSS/API-parsing layer on top of it.
-39. Partially closed: `src/agents/skills/registry.py`
+41. Partially closed: `src/agents/skills/registry.py`
     (`list_applied_skills`, `load_skill_source`, `build_invocation_code`)
     plus the CLI's `skills` (list what's applied and runnable) and
     `use <name>` (actually run one) commands -- directly answering the
@@ -495,7 +513,7 @@ Still ahead, roughly in order:
     still no *automatic* registration of an applied skill as a live
     `Router` sub-agent -- `use <name>` is a manual, on-demand invocation,
     not a standing capability Sim can reach for on its own initiative.
-40. Sim deciding *on its own*, with no human typing `patch`, that a
+42. Sim deciding *on its own*, with no human typing `patch`, that a
     reflection or a RECALL-informed observation warrants a self-patch --
     milestone 30 built the pipeline and 29 builds the reflection, but
     connecting them without a human in the loop is a real, separate
