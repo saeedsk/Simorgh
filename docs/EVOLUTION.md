@@ -1172,3 +1172,23 @@ Still ahead, roughly in order:
       bullet-formatted discovery printout (`   + [id] (via) description`)
       is unchanged and now covers both origins, distinguished by
       `discovered_via` ("scan"/"reflection" vs. "creative_agenda").
+71. **A real cost/rate bug in milestone 70's `discover_creative_improvements`,
+    caught in a self-review pass immediately after shipping it, before
+    the creator hit it live.** `AutonomyController.tick()` only starts
+    `action_cooldown_seconds` (default 150s) when `_autonomous_action`
+    reports `True` ("did something"); a creative-agenda call that made a
+    real, possibly-billed LLM request but parsed zero tasks out of the
+    response still returned `False` (nothing was *created*), which would
+    have let the very next poll (`poll_interval_seconds`, default 20s)
+    immediately retry -- hammering a real provider roughly every 20s
+    instead of the intended ~150s cadence, for as long as an idle,
+    empty-backlog, nothing-to-react-to session kept getting unparseable
+    brainstorm output back. Fixed by having `_autonomous_action` count a
+    genuine attempt (any response that wasn't `deterministic_fallback`)
+    as "did something" regardless of whether it produced tasks --
+    `discover_creative_improvements` gained an optional `provider_sink`
+    dict param (same pattern as `_dispatch_and_record`'s `metadata_sink`)
+    so the caller can tell a real attempt apart from the free,
+    unlimited-retry-safe fallback case without changing the function's
+    `list[Task]` return shape. Regression test added
+    (`test_a_creative_attempt_that_finds_nothing_still_counts_as_action`).
