@@ -1405,3 +1405,20 @@ Still ahead, roughly in order:
     fixed alongside this one. 759 unit tests + 19 E2E tests passing,
     with regression tests in all three files proving a rambling READ
     payload now resolves to the real file instead of a refusal.
+79. **A sandbox rejection's real error was never fed back to the
+    retry loop.** Live-caught watching a real self-patch task
+    (`src/cognition/budget.py`'s cost/latency tracking) fail the exact
+    same generic way -- `"sandboxed run did not succeed (timed_out=False,
+    exit_code=1)"` -- across multiple attempts *and* multiple blocked-
+    task reconsideration rounds, with zero improvement each retry, even
+    though `AuditGate.review()` was already handed `sandbox_result`
+    (with the real `stderr`/`stdout`, a genuine traceback) the whole
+    time. The rejection reason string fed back into `prior_reasons`
+    only ever carried the generic summary -- the actual error never
+    reached the drafting model, so every retry was a blind guess, not
+    an informed correction. Fixed: the reason now includes a bounded
+    excerpt of the real error (`_MAX_SANDBOX_DETAIL_CHARS`, 500 chars),
+    giving the exact same bounded-retry-with-feedback mechanism this
+    codebase already uses for audit-denylist and invalid-Python
+    failures something real to act on for a sandbox failure too. 761
+    unit tests + 19 E2E tests passing.

@@ -115,6 +115,39 @@ class TestAuditGate(unittest.TestCase):
         self.assertIsNotNone(verdict.sandbox_result)
         self.assertFalse(verdict.sandbox_result.succeeded)
 
+    def test_sandbox_failure_reason_includes_the_real_error(self):
+        # Live-caught: the generic "sandboxed run did not succeed
+        # (timed_out=.., exit_code=..)" summary alone gave a retry loop
+        # nothing to actually act on -- a real self-patch task kept
+        # failing the same generic way across multiple attempts with no
+        # improvement, since prior_reasons never carried the real error.
+        gate = AuditGate()
+        proposal = ModificationProposal(
+            subject="src/agents/skills/broken.py",
+            code="raise RuntimeError('a specific, actionable failure')",
+            rationale="a buggy skill",
+        )
+
+        verdict = gate.review(proposal)
+
+        self.assertTrue(any("a specific, actionable failure" in r for r in verdict.reasons))
+
+    def test_sandbox_failure_detail_is_bounded(self):
+        from src.orchestrator.audit import _MAX_SANDBOX_DETAIL_CHARS
+
+        gate = AuditGate()
+        proposal = ModificationProposal(
+            subject="src/agents/skills/broken.py",
+            code=f"raise RuntimeError({'x' * (_MAX_SANDBOX_DETAIL_CHARS * 3)!r})",
+            rationale="a buggy skill with a huge error message",
+        )
+
+        verdict = gate.review(proposal)
+
+        combined = "; ".join(verdict.reasons)
+        self.assertLess(len(combined), _MAX_SANDBOX_DETAIL_CHARS * 2)
+        self.assertIn("truncated", combined)
+
     def test_proposal_targeting_soul_py_is_always_rejected(self):
         gate = AuditGate()
         proposal = ModificationProposal(
