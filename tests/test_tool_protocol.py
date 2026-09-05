@@ -7,6 +7,7 @@ from src.cognition.tool_protocol import (
     is_valid_python,
     parse_marker,
     preview,
+    read_file_for_patch,
     safe_list_dir,
     safe_read_file,
 )
@@ -185,6 +186,62 @@ class TestSafeListDir(unittest.TestCase):
         (self.repo_root / "src" / "empty").mkdir()
         result = safe_list_dir(self.repo_root, "src/empty")
         self.assertIn("empty", result.lower())
+
+
+class TestReadFileForPatch(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        (self.repo_root / "src").mkdir()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_reads_full_content_without_truncation_past_the_read_tool_limit(self):
+        # 20_000 chars is safe_read_file's own truncation point -- this
+        # must come back whole, not cut short the way a chat READ would.
+        big = "x = 1\n" * 5000  # well over 20,000 chars
+        (self.repo_root / "src" / "big.py").write_text(big)
+
+        content, refusal = read_file_for_patch(self.repo_root, "src/big.py")
+
+        self.assertIsNone(refusal)
+        self.assertEqual(content, big)
+
+    def test_refuses_a_file_over_the_patch_seed_ceiling(self):
+        from src.cognition.tool_protocol import _MAX_PATCH_SEED_CHARS
+
+        huge = "x" * (_MAX_PATCH_SEED_CHARS + 1)
+        (self.repo_root / "src" / "huge.py").write_text(huge)
+
+        content, refusal = read_file_for_patch(self.repo_root, "src/huge.py")
+
+        self.assertIsNone(content)
+        self.assertIn("too large", refusal)
+
+    def test_refuses_path_traversal_same_as_safe_read_file(self):
+        content, refusal = read_file_for_patch(self.repo_root, "../../etc/passwd")
+
+        self.assertIsNone(content)
+        self.assertIn("refused", refusal)
+
+    def test_refuses_path_outside_allowed_roots(self):
+        content, refusal = read_file_for_patch(self.repo_root, "requirements.txt")
+
+        self.assertIsNone(content)
+        self.assertIn("refused", refusal)
+
+    def test_refuses_nonexistent_file(self):
+        content, refusal = read_file_for_patch(self.repo_root, "src/nope.py")
+
+        self.assertIsNone(content)
+        self.assertIn("refused", refusal)
+
+    def test_never_raises_for_a_pathologically_long_payload(self):
+        content, refusal = read_file_for_patch(self.repo_root, "src/" + ("a" * 10_000))
+
+        self.assertIsNone(content)
+        self.assertIsInstance(refusal, str)
 
 
 if __name__ == "__main__":

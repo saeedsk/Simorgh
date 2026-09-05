@@ -923,35 +923,70 @@ Built:
     Same non-negotiable as `LiveTicker`: no cursor-redrawn in-place
     UI -- everything still prints new lines, safe across any terminal,
     piped output, or non-TTY logging.
+55. **Two real, live-caught self-patch bugs, found while the creator
+    asked Sim to patch `docs/EVOLUTION.md` with new roadmap milestones
+    (persistent causal world model, continuous learning, intrinsic
+    curiosity, counterfactual simulation).** The attempt failed with a
+    misleading "no real drafting intelligence available," which reads
+    like an infrastructure problem; it wasn't. Two real, distinct bugs:
+
+    First: self-patch has always been scoped to `src/` only
+    (`apply.py`'s `SELF_PATCH_SCOPE_PREFIX`, deliberate -- a self-patch
+    changes Simorgh's own logic, not its docs) -- but nothing checked
+    that *before* drafting. A `docs/`-scoped `patch` request burned a
+    real drafting attempt against a check that was always going to fail
+    it at the apply step regardless. `main.py`'s `propose_self_patch`
+    now rejects an out-of-scope subject instantly, honestly, and for
+    free, before ever calling the drafting LLM.
+
+    Second, and more serious: `SelfPatchAgent.draft_patch` seeded its
+    "write the complete new content of this file" prompt with
+    `safe_read_file` -- the same function backing the bounded,
+    chat-facing READ tool, truncated at 20,000 characters. `docs/EVOLUTION.md`
+    is ~63KB, so the model was silently shown barely a third of it while
+    still being asked to reproduce the whole thing -- it visibly
+    confused itself trying to ask for "more" (hallucinating an
+    offset-based read protocol this system has never had) before the
+    attempt failed outright. Checking further: `src/main.py` (~106KB)
+    and `src/agents/logic/base.py` (~36KB) -- two of the most important
+    files in the entire self-modification system -- were *also* over
+    that cap, meaning this was a latent correctness bug for real `src/`
+    self-patch targets, not just an edge case surfaced by a docs/
+    request. `tool_protocol.read_file_for_patch` (sharing
+    `safe_read_file`'s path-safety validation via a new
+    `_resolve_safe_path`, factored out so the two can't drift apart)
+    returns a file's complete, untruncated content up to a much higher,
+    but still real, ceiling (`_MAX_PATCH_SEED_CHARS`, 300K) -- and an
+    honest refusal, not a silent truncation, for anything larger still.
 
 Still ahead, roughly in order:
 
-55. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+56. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-56. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+57. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-57. *Automatic* registration of an applied skill as a live `Router`
+58. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
     invocation rather than done reflexively).
-58. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+59. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and
     `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
     derived from real operating experience -- worth revisiting once
     there's an actual track record.
-59. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
+60. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
     -- extending hot-swap to a multi-file batch is a real design
     question (which slot(s) to trial, in what order, how to roll back a
     partial hot-swap alongside the multi-commit revert `evolve` already
     does), not yet worked through.
-60. `DEFAULT_SHARE_COOLDOWN_SECONDS` (one hour, milestone 52 above) is a
+61. `DEFAULT_SHARE_COOLDOWN_SECONDS` (one hour, milestone 52 above) is a
     starting judgment call like the autonomous loop's own thresholds --
     worth revisiting once there's a real sense of whether proactive
     news-sharing feels well-paced or not. `DEFAULT_NEWS_TOPICS`'
     specific three feeds are a starting set, not vetted for long-term
     stability -- worth checking they're still live occasionally, and
     trivially replaceable via `interest <feed url>` if not.
-61. The one remaining piece of "match Claude Code's terminal UI
+62. The one remaining piece of "match Claude Code's terminal UI
     conventions" (milestones 53-54 above landed `LiveTicker`,
     `render_checklist`, and diff-by-default `pending`): collapsed-by-
     default multi-step tool output with drill-down. Most existing tool
@@ -960,3 +995,7 @@ Still ahead, roughly in order:
     broken behavior and more about there being no single shared
     convention for "one summary line, detail on request" the way the
     checklist/diff work now has one each.
+63. `_MAX_PATCH_SEED_CHARS` (300K, milestone 55 above) is a generous but
+    still arbitrary ceiling -- worth revisiting if a real `src/` file
+    ever legitimately grows past it (unlikely soon: the largest today,
+    `src/main.py`, is ~106KB).

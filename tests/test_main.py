@@ -636,6 +636,26 @@ class TestProposeSelfPatch(unittest.TestCase):
 
         self.assertIn("usage", message)
 
+    def test_subject_outside_src_is_rejected_without_calling_the_drafting_agent(self):
+        # Live bug report: 'patch docs/EVOLUTION.md ...' burned a real
+        # drafting attempt and failed with a misleading "no real
+        # drafting intelligence available" -- self-patch has always
+        # been scoped to src/ only (apply.py's SELF_PATCH_SCOPE_PREFIX;
+        # docs/ is deliberately out of scope, a self-patch changes
+        # Simorgh's own logic, not its docs). This should be caught
+        # instantly, honestly, and for free -- before ever asking the
+        # agent to draft anything.
+        store = InMemoryStore()
+        agent = FakeSelfPatchAgent([])
+
+        message = propose_self_patch(
+            agent, AuditGate(), store, ActivityLog(store), "docs/EVOLUTION.md", "add milestones"
+        )
+
+        self.assertIn("rejected", message.lower())
+        self.assertIn("scope", message.lower())
+        self.assertEqual(agent.calls, [])
+
     def test_clean_patch_passes_full_suite_and_applies_without_relaunching(self):
         self._write_passing_test()
         store = InMemoryStore()

@@ -77,6 +77,7 @@ from src.cognition.tool_protocol import (
     is_valid_python,
     parse_marker,
     preview,
+    read_file_for_patch,
     safe_read_file,
 )
 from src.orchestrator.audit import AuditGate, ModificationProposal
@@ -334,11 +335,31 @@ class SelfPatchAgent:
     def draft_patch(
         self, subject: str, topic: str, prior_reasons: list[str] | None = None
     ) -> ModificationProposal | None:
-        """Returns None if no real drafting intelligence was available or
-        the model never produced valid Python -- callers must not apply a
-        "patch" that's secretly just the unchanged original file.
+        """Returns None if `subject` isn't safely readable at all (an
+        invalid/out-of-scope path, or too large -- see
+        `read_file_for_patch`; the reason is printed before returning so
+        it isn't silently indistinguishable from "no real drafting
+        intelligence"), if no real drafting intelligence was available,
+        or the model never produced valid Python -- callers must not
+        apply a "patch" that's secretly just the unchanged original
+        file.
+
+        Seeds the prompt with `subject`'s true, complete current
+        content via `read_file_for_patch` -- not the much smaller,
+        chat-bounded `safe_read_file` a plain READ tool call uses. This
+        matters: the prompt explicitly asks for "the COMPLETE new
+        content of this file," and a model that only ever saw a
+        truncated prefix cannot honestly produce that, whatever it
+        thinks it's doing (caught live: it visibly confused itself
+        trying to ask for "more" of a large file this protocol has no
+        way to give it, rather than silently drafting a truncated
+        replacement -- the better of two bad outcomes, but the real fix
+        is not truncating what it's shown in the first place).
         """
-        current_content = safe_read_file(self._repo_root, subject)
+        current_content, refusal = read_file_for_patch(self._repo_root, subject)
+        if refusal is not None:
+            print(f"🚫 [patch] {refusal}")
+            return None
         prompt = _PATCH_DRAFT_PROMPT.format(
             subject=subject, topic=topic, current_content=current_content
         )
