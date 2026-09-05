@@ -32,6 +32,7 @@ import difflib
 import importlib
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Callable
@@ -280,6 +281,39 @@ def build_router(
     return router
 
 
+SHELL_PREFIX = "!"
+DEFAULT_SHELL_TIMEOUT_SECONDS = 120.0
+
+
+def _run_shell_passthrough(command: str, timeout: float = DEFAULT_SHELL_TIMEOUT_SECONDS) -> None:
+    """Run `command` as a raw shell command, mirroring Claude Code's own
+    '!<command>' convention: a line typed straight into this REPL that
+    starts with '!' is the human operator's own direct input, run with
+    their own shell authority -- the same trust boundary as alt-tabbing
+    to a real terminal, not a drafted proposal or an LLM tool call. It
+    deliberately bypasses AuditGate/the sandbox entirely for exactly that
+    reason, and is unreachable from anywhere except a literal '!'-
+    prefixed line here -- LogicAgent's own RUN: tool stays the sandboxed,
+    audited path for anything model-drafted. stdout/stderr/stdin are
+    inherited directly (not captured) so output streams live and an
+    interactive command (e.g. a pager, `$EDITOR`) still works, matching
+    what running it in a real shell would do.
+    """
+    if not command:
+        print(style("[usage: !<shell command>]", "dim"))
+        return
+    try:
+        completed = subprocess.run(command, shell=True, cwd=Path.cwd(), timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(style(f"⚠️  shell command timed out after {timeout:.0f}s", "red"))
+        return
+    except OSError as exc:
+        print(style(f"⚠️  failed to run shell command: {exc!r}", "red"))
+        return
+    if completed.returncode != 0:
+        print(style(f"(exit {completed.returncode})", "dim"))
+
+
 def strip_command_slash(user_input: str) -> str:
     """Accept a leading '/' as optional on any command (the common
     slash-command convention, e.g. Claude Code's own) -- '/reflect' is
@@ -365,6 +399,7 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("run <code>", "Execute Python in the sandbox."),
     ("budget", "Show LLM spend/call status."),
     ("remind <duration> <message>", "Get interrupted with a message later (e.g. 1m, 5m, 2h)."),
+    ("!<command>", "Run a raw shell command directly (e.g. '!ls', '!git status')."),
     ("exit / quit", "Leave."),
 )
 
@@ -373,7 +408,8 @@ def _print_banner() -> None:
     print(
         style("Simorgh", "magenta", "bold")
         + " -- talk to me directly, or use one of these commands "
-        "(a leading '/' is optional on any of them):\n"
+        "(a leading '/' is optional on any of them, except '!<command>' "
+        "which is its own trigger):\n"
     )
     # Pad the plain label BEFORE styling it -- ANSI escape codes count
     # toward len() but occupy no visual width, so padding a styled string
@@ -382,7 +418,11 @@ def _print_banner() -> None:
     # separate "e.g." line) layout.
     width = max(len(name) for name, _ in _COMMANDS_HELP)
     for name, description in _COMMANDS_HELP:
-        label = f"/{name}".ljust(width + 1)
+        # '!<command>' is its own trigger character, not a command word
+        # that also accepts an optional leading '/' -- '/!ls' isn't a
+        # real thing, so this one entry is never slash-prefixed.
+        shown = name if name.startswith(SHELL_PREFIX) else f"/{name}"
+        label = shown.ljust(width + 1)
         print(f"  {style(label, 'cyan', 'bold')} {description}")
     print()
 
@@ -743,13 +783,15 @@ def run_cli() -> None:
         web_fetch=web_fetch,
         sandbox=sandbox,
         activity_log=activity_log,
-        propose_skill_fn=lambda topic: propose_skill(skill_research, audit_gate, store, topic),
+        propose_skill_fn=lambda topic: propose_skill(
+            skill_research, audit_gate, store, activity_log, topic
+        ),
         propose_patch_fn=lambda path, desc: propose_self_patch(
             self_patch_agent, audit_gate, store, activity_log, path, desc, short_term=short_term,
             deployment_manager=deployment_manager, hot_swap_factories=hot_swap_factories,
         ),
         propose_batch_fn=lambda theme, count: propose_skill_batch(
-            cognition, skill_research, audit_gate, store, theme, count
+            cognition, skill_research, audit_gate, store, activity_log, theme, count
         ),
         plan_fn=lambda goal, count: plan_goal(cognition, task_store, goal, count),
         propose_evolve_fn=lambda goal, count: propose_patch_batch(
@@ -999,6 +1041,9 @@ def _run_cli_loop(
         activity_clock.touch()
         if not user_input:
             continue
+        if user_input.startswith(SHELL_PREFIX):
+            _run_shell_passthrough(user_input[len(SHELL_PREFIX):].strip())
+            continue
         user_input = strip_command_slash(user_input)
         if not user_input:
             continue
@@ -1017,7 +1062,7 @@ def _run_cli_loop(
             continue
         propose_topic = extract_propose_topic(user_input, lowered)
         if propose_topic is not None:
-            propose_skill(skill_research, audit_gate, store, propose_topic)
+            propose_skill(skill_research, audit_gate, store, activity_log, propose_topic)
             continue
         patch_args = extract_patch_args(user_input, lowered)
         if patch_args is not None:
@@ -1031,7 +1076,7 @@ def _run_cli_loop(
         batch_args = extract_batch_args(user_input, lowered)
         if batch_args is not None:
             count, theme = batch_args
-            propose_skill_batch(cognition, skill_research, audit_gate, store, theme, count)
+            propose_skill_batch(cognition, skill_research, audit_gate, store, activity_log, theme, count)
             continue
         plan_args = extract_plan_args(user_input, lowered)
         if plan_args is not None:
@@ -1201,6 +1246,7 @@ def propose_skill(
     skill_research: SkillResearchAgent,
     audit_gate: AuditGate,
     store: MemoryStore,
+    activity_log: ActivityLog,
     topic: str,
     repo_root: Path | None = None,
     max_attempts: int = 3,
@@ -1221,8 +1267,13 @@ def propose_skill(
     explicit, separate decision on top of auto-apply. `git push` is never
     run automatically by anything in this codebase; that stays entirely
     the creator's own action. `repo_root` defaults to the current working
-    directory; tests pass an isolated temp directory instead. Returns the
-    message printed, for testability.
+    directory; tests pass an isolated temp directory instead. Each
+    attempt's audit result is also recorded via `activity_log` (not just
+    printed live) -- previously a failed attempt's specific reason was
+    gone the moment it scrolled off-screen if nobody was watching the
+    terminal; now 'activity'/'activity last' can show it after the fact,
+    the same as every other tool-loop step (see activity_log.py). Returns
+    the message printed, for testability.
     """
     if not topic:
         message = "[usage: propose <topic>]"
@@ -1243,6 +1294,11 @@ def propose_skill(
             "gate (denylist, adaptive-immunity memory, then a real sandboxed run)..."
         )
         verdict = audit_gate.review(proposal)
+        activity_log.record_tool_call(
+            "propose_skill", "DRAFT", f"{topic} (attempt {attempt}/{max_attempts})",
+            "passed audit gate" if verdict.approved_by_automation else "; ".join(verdict.reasons),
+            verdict.approved_by_automation,
+        )
         if verdict.approved_by_automation:
             break
         print(f"⚠️  [propose] attempt {attempt} failed: {'; '.join(verdict.reasons)}")
@@ -1326,6 +1382,7 @@ def propose_skill_batch(
     skill_research: SkillResearchAgent,
     audit_gate: AuditGate,
     store: MemoryStore,
+    activity_log: ActivityLog,
     theme: str,
     count: int,
     repo_root: Path | None = None,
@@ -1383,6 +1440,7 @@ def propose_skill_batch(
             skill_research,
             audit_gate,
             store,
+            activity_log,
             topic,
             repo_root=repo_root,
             max_attempts=DEFAULT_BATCH_MAX_ATTEMPTS,
@@ -1474,6 +1532,10 @@ def propose_self_patch(
             invariant_reason = check_main_py_invariants(proposal.code)
             if invariant_reason is not None:
                 print(f"⚠️  [patch] attempt {attempt} failed: {invariant_reason}")
+                activity_log.record_tool_call(
+                    "self_patch", "DRAFT", f"{subject}: {topic} (attempt {attempt}/{max_attempts})",
+                    invariant_reason, False,
+                )
                 prior_reasons = [invariant_reason]
                 verdict = None
                 continue
@@ -1483,6 +1545,11 @@ def propose_self_patch(
             "gate (denylist, adaptive-immunity memory, then a real sandboxed run)..."
         )
         verdict = audit_gate.review(proposal)
+        activity_log.record_tool_call(
+            "self_patch", "DRAFT", f"{subject}: {topic} (attempt {attempt}/{max_attempts})",
+            "passed audit gate" if verdict.approved_by_automation else "; ".join(verdict.reasons),
+            verdict.approved_by_automation,
+        )
         if verdict.approved_by_automation:
             break
         print(f"⚠️  [patch] attempt {attempt} failed: {'; '.join(verdict.reasons)}")
@@ -2007,7 +2074,7 @@ def run_task(
         )
     else:
         result = propose_skill(
-            skill_research, audit_gate, store, task.description, repo_root=repo_root
+            skill_research, audit_gate, store, activity_log, task.description, repo_root=repo_root
         )
 
     if not result.startswith("[APPLIED]"):

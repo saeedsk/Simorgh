@@ -104,6 +104,21 @@ class TestPlainChat(E2ECliTestCase):
         self.assertNotIn("LLM access isn't available", result.stdout)
 
 
+class TestShellPassthrough(E2ECliTestCase):
+    def test_bang_prefixed_line_runs_as_a_real_shell_command(self):
+        result = self.run_cli("!echo simorgh-shell-marker\nexit\n")
+
+        self.assertIn("simorgh-shell-marker", result.stdout)
+
+    def test_bang_command_never_reaches_the_conversational_reply_path(self):
+        # A '!'-prefixed line must be treated as a shell command, not
+        # plain chat -- it should never produce the rule-based reply
+        # every ordinary message gets.
+        result = self.run_cli("!echo simorgh-shell-marker\nexit\n")
+
+        self.assertNotIn("Here's my take", result.stdout)
+
+
 class TestTaskAndSkillCommands(E2ECliTestCase):
     def test_tasks_autonomous_status_budget_skills_all_run_cleanly(self):
         result = self.run_cli("tasks\nautonomous status\nbudget\nskills\nlog\nexit\n")

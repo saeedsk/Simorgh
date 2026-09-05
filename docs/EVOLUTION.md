@@ -1078,3 +1078,54 @@ Still ahead, roughly in order:
     (`test_never_passes_bare_flag`); the module docstring's "every claim
     verified against Claude Code's own documentation" list now covers
     this finding too.
+67. A gap in the same spirit as `activity_log.py`'s own stated design
+    principle ("previously only print()ed for the person watching the
+    terminal live -- if nobody was watching, that trail was gone") --
+    but that principle had only ever been applied to `LogicAgent`'s and
+    `SkillResearchAgent`'s FETCH/RUN/READ tool loops, not to
+    `propose_skill`'s or `propose_self_patch`'s own multi-attempt
+    draft/audit loop. A rejected attempt's specific reason (e.g. "attempt
+    1 failed: uses eval on dynamic input") was printed live and then
+    gone forever the moment it scrolled past, even though the final
+    outcome (applied or rejected) was always durably recorded. Fixed by
+    recording every attempt through the same `activity_log.record_tool_call`
+    path (tool="DRAFT"), so `activity`/`activity last` now shows every
+    attempt, not just the last one -- both `propose_skill` and
+    `propose_self_patch` needed an `activity_log` parameter added (and
+    `propose_skill_batch` needed to thread it through), so every call
+    site across `main.py` (CLI dispatch, `LogicAgent`'s tool-marker
+    wiring, `run_task`, `propose_skill_batch`) was updated together.
+68. `JSONFileMemoryStore` (src/memory/long_term.py) loads its entire
+    history into an in-memory dict on startup and answers every query
+    from that dict, not the file -- genuinely fine at today's real
+    scale (single user, single machine, thousands of records: sub-
+    millisecond query, real fsync-per-write crash safety, no DB engine
+    to run), but a real design debt worth tracking, not treating as
+    settled: unbounded memory growth over a long enough history, no real
+    index (a `kind`-filtered query still walks everything in memory),
+    single-process-only despite the in-process `RLock`, and the
+    underlying `.jsonl` file itself is never compacted (`consolidation.py`
+    prunes *records*, not file bytes already written). The honest
+    trigger to actually act on this is either the in-memory load
+    becoming slow, or Stage 4's distributed `SharedMemoryBus` (item 57)
+    needing multiple hosts to share this store -- at that point SQLite is
+    the natural next step (same event-sourced/append-only shape, a real
+    engine with indexes instead of a hand-rolled dict), not before.
+69. **`!<command>` shell passthrough**, the creator's direct ask ("let
+    runing bash command when prompt start with '!', similar to Claude
+    Code"). A line typed straight into the CLI starting with `!` now
+    runs the rest of the line as a real shell command
+    (`_run_shell_passthrough`, `src/main.py`) with stdout/stderr/stdin
+    inherited directly (not captured), so output streams live and an
+    interactive command still works -- the same experience as alt-
+    tabbing to a real terminal. This is deliberately a completely
+    different trust boundary from every other tool-invoking path in this
+    codebase: it is the human operator's own direct keystrokes, so it
+    bypasses AuditGate and the sandbox entirely, on purpose, and is
+    unreachable from anywhere except this literal REPL prefix --
+    `LogicAgent`'s own `RUN:` marker remains the sandboxed, audited path
+    for anything model-drafted, completely untouched by this change. The
+    banner/help text (`_COMMANDS_HELP`) documents it, with one exception
+    to the usual "a leading '/' is optional on any command" convention:
+    `!` is its own trigger character, not a command word, so `_print_banner`
+    is the one place that does NOT slash-prefix an entry.

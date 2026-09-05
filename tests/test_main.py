@@ -5,6 +5,8 @@ from pathlib import Path
 from src.agents.interests import InterestTracker, NewsItem, WorldFeed
 from src.agents.skills.research import SkillResearchAgent
 from src.main import (
+    SHELL_PREFIX,
+    _run_shell_passthrough,
     autocorrect_command,
     build_router,
     discover_command,
@@ -228,7 +230,8 @@ class TestProposeSkill(unittest.TestCase):
     def test_clean_proposal_is_applied_immediately(self):
         store = InMemoryStore()
         message = propose_skill(
-            SkillResearchAgent(), AuditGate(), store, "rocketry", repo_root=self.repo_root
+            SkillResearchAgent(), AuditGate(), store, ActivityLog(store), "rocketry",
+            repo_root=self.repo_root,
         )
 
         self.assertIn("APPLIED", message)
@@ -250,7 +253,8 @@ class TestProposeSkill(unittest.TestCase):
         store = InMemoryStore()
 
         message = propose_skill(
-            SkillResearchAgent(), AuditGate(), store, "rocketry", repo_root=self.repo_root
+            SkillResearchAgent(), AuditGate(), store, ActivityLog(store), "rocketry",
+            repo_root=self.repo_root,
         )
 
         self.assertIn("committed (not pushed)", message)
@@ -265,7 +269,8 @@ class TestProposeSkill(unittest.TestCase):
         store = InMemoryStore()
 
         message = propose_skill(
-            SkillResearchAgent(), AuditGate(), store, "rocketry", repo_root=self.repo_root
+            SkillResearchAgent(), AuditGate(), store, ActivityLog(store), "rocketry",
+            repo_root=self.repo_root,
         )
 
         self.assertIn("APPLIED", message)
@@ -275,7 +280,8 @@ class TestProposeSkill(unittest.TestCase):
     def test_empty_topic_is_rejected_with_usage_message(self):
         store = InMemoryStore()
         message = propose_skill(
-            SkillResearchAgent(), AuditGate(), store, "", repo_root=self.repo_root
+            SkillResearchAgent(), AuditGate(), store, ActivityLog(store), "",
+            repo_root=self.repo_root,
         )
 
         self.assertIn("usage", message)
@@ -301,14 +307,23 @@ class TestProposeSkill(unittest.TestCase):
         store = InMemoryStore()
         research = FlakySkillResearch()
 
+        activity_log = ActivityLog(store)
         message = propose_skill(
-            research, AuditGate(), store, "flaky", repo_root=self.repo_root
+            research, AuditGate(), store, activity_log, "flaky", repo_root=self.repo_root
         )
 
         self.assertIn("APPLIED", message)
         self.assertEqual(len(research.calls), 2)
         self.assertIsNone(research.calls[0])
         self.assertTrue(any("eval" in r for r in research.calls[1]))
+
+        # Same recording as propose_self_patch: the rejected first
+        # attempt's reason survives past the live terminal.
+        drafts = [r for r in store.query(kind="tool_call") if r.metadata["tool"] == "DRAFT"]
+        self.assertEqual(len(drafts), 2)
+        self.assertTrue(drafts[0].metadata["succeeded"])
+        self.assertFalse(drafts[1].metadata["succeeded"])
+        self.assertIn("eval", drafts[1].metadata["result_summary"])
 
     def test_gives_up_after_max_attempts(self):
         from src.orchestrator.audit import ModificationProposal
@@ -327,7 +342,8 @@ class TestProposeSkill(unittest.TestCase):
         research = AlwaysBadSkillResearch()
 
         message = propose_skill(
-            research, AuditGate(), store, "bad", repo_root=self.repo_root, max_attempts=2
+            research, AuditGate(), store, ActivityLog(store), "bad",
+            repo_root=self.repo_root, max_attempts=2,
         )
 
         self.assertIn("rejected after 2 attempt(s)", message)
@@ -596,6 +612,47 @@ class TestStripCommandSlash(unittest.TestCase):
 
     def test_only_strips_one_leading_slash(self):
         self.assertEqual(strip_command_slash("//reflect"), "/reflect")
+
+
+class TestShellPassthrough(unittest.TestCase):
+    def test_runs_command_and_reports_no_error_on_success(self):
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _run_shell_passthrough("exit 0")
+        self.assertNotIn("exit", buf.getvalue())
+
+    def test_nonzero_exit_is_reported(self):
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _run_shell_passthrough("exit 7")
+        self.assertIn("exit 7", buf.getvalue())
+
+    def test_empty_command_prints_usage_without_spawning_a_shell(self):
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _run_shell_passthrough("")
+        self.assertIn("usage", buf.getvalue())
+
+    def test_timeout_is_reported_not_raised(self):
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _run_shell_passthrough("sleep 5", timeout=0.05)
+        self.assertIn("timed out", buf.getvalue())
+
+    def test_prefix_constant_is_a_single_bang(self):
+        self.assertEqual(SHELL_PREFIX, "!")
 
 
 class TestExtractProposeTopic(unittest.TestCase):
@@ -928,12 +985,13 @@ class TestProposeSelfPatch(unittest.TestCase):
             subject="src/orchestrator/target.py", code="VALUE = 2\n", rationale="good"
         )
         agent = FakeSelfPatchAgent([bad, good])
+        activity_log = ActivityLog(store)
 
         message = propose_self_patch(
             agent,
             AuditGate(),
             store,
-            ActivityLog(store),
+            activity_log,
             "src/orchestrator/target.py",
             "fix it",
             repo_root=self.repo_root,
@@ -943,6 +1001,18 @@ class TestProposeSelfPatch(unittest.TestCase):
         self.assertIn("APPLIED", message)
         self.assertEqual(len(agent.calls), 2)
         self.assertTrue(any("eval" in (r or "") for r in agent.calls[1][2]))
+
+        # The rejected first attempt's specific reason must be recorded,
+        # not just live-printed and lost -- see propose_self_patch's
+        # docstring on why this matters when nobody's watching live.
+        # query() returns most-recent-first, so [0] is the 2nd (winning)
+        # attempt and [1] is the 1st (rejected) one; TEST_SUITE's own
+        # tool_call record (already existed) is excluded by tool="DRAFT".
+        drafts = [r for r in store.query(kind="tool_call") if r.metadata["tool"] == "DRAFT"]
+        self.assertEqual(len(drafts), 2)
+        self.assertTrue(drafts[0].metadata["succeeded"])
+        self.assertFalse(drafts[1].metadata["succeeded"])
+        self.assertIn("eval", drafts[1].metadata["result_summary"])
 
 
 class TestAttemptHotSwap(unittest.TestCase):
@@ -1659,6 +1729,7 @@ class TestProposeSkillBatch(unittest.TestCase):
             SkillResearchAgent(),
             AuditGate(),
             store,
+            ActivityLog(store),
             "theme",
             0,
             repo_root=self.repo_root,
@@ -1672,6 +1743,7 @@ class TestProposeSkillBatch(unittest.TestCase):
             SkillResearchAgent(),
             AuditGate(),
             store,
+            ActivityLog(store),
             "theme",
             21,
             repo_root=self.repo_root,
@@ -1685,6 +1757,7 @@ class TestProposeSkillBatch(unittest.TestCase):
             SkillResearchAgent(),
             AuditGate(),
             store,
+            ActivityLog(store),
             "",
             3,
             repo_root=self.repo_root,
@@ -1696,7 +1769,8 @@ class TestProposeSkillBatch(unittest.TestCase):
         cognition = _FakeBrainstormCognition("1. a\n2. b\n", provider_name="deterministic_fallback")
 
         message = propose_skill_batch(
-            cognition, SkillResearchAgent(), AuditGate(), store, "theme", 2, repo_root=self.repo_root
+            cognition, SkillResearchAgent(), AuditGate(), store, ActivityLog(store), "theme", 2,
+            repo_root=self.repo_root,
         )
 
         self.assertIn("no real drafting intelligence", message)
@@ -1706,7 +1780,8 @@ class TestProposeSkillBatch(unittest.TestCase):
         cognition = _FakeBrainstormCognition("I refuse to make a list.")
 
         message = propose_skill_batch(
-            cognition, SkillResearchAgent(), AuditGate(), store, "theme", 2, repo_root=self.repo_root
+            cognition, SkillResearchAgent(), AuditGate(), store, ActivityLog(store), "theme", 2,
+            repo_root=self.repo_root,
         )
 
         self.assertIn("could not produce a topic list", message)
@@ -1716,7 +1791,8 @@ class TestProposeSkillBatch(unittest.TestCase):
         cognition = _FakeBrainstormCognition("1. rocketry\n2. stopwatch\n")
 
         message = propose_skill_batch(
-            cognition, SkillResearchAgent(), AuditGate(), store, "gadgets", 2, repo_root=self.repo_root
+            cognition, SkillResearchAgent(), AuditGate(), store, ActivityLog(store), "gadgets", 2,
+            repo_root=self.repo_root,
         )
 
         self.assertIn("2/2", message)
@@ -1728,7 +1804,8 @@ class TestProposeSkillBatch(unittest.TestCase):
         cognition = _FakeBrainstormCognition("1. rocketry\n")
 
         propose_skill_batch(
-            cognition, SkillResearchAgent(), AuditGate(), store, "gadgets", 1, repo_root=self.repo_root
+            cognition, SkillResearchAgent(), AuditGate(), store, ActivityLog(store), "gadgets", 1,
+            repo_root=self.repo_root,
         )
 
         self.assertIn("gadgets", cognition.prompts[0])
