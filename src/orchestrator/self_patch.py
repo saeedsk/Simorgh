@@ -114,6 +114,81 @@ _RUN_REGEX = re.compile(r"Ran (\d+) tests?")
 
 _MAIN_PY_REQUIRED_SUBSTRINGS = ("AuditGate(", "audit_gate.review(", "apply_proposal(")
 
+# Live-caught (docs/EVOLUTION.md milestone 82): every single creative-
+# agenda self-patch aimed at a substantial existing file (autonomy.py
+# 291 lines, reflection.py 197, budget.py 140) failed to ever produce
+# valid Python, across every attempt and retry round -- "rewrite the
+# COMPLETE file, every line, every comment, faithfully" is a
+# structurally harder task the longer the file is, and prompt-wording
+# retries can't shrink that. Below this line count, the plain full-
+# rewrite prompt (_PATCH_DRAFT_PROMPT) already works reliably (milestone
+# 85's real, successful patches were all to smaller files); at or above
+# it, draft_patch switches to the SEARCH/REPLACE edit-block prompt
+# below, which only asks the model to faithfully reproduce the handful
+# of lines actually changing, not the whole file around them.
+_EDIT_MODE_LINE_THRESHOLD = 100
+
+_SEARCH_MARKER = "<<<<<<< SEARCH"
+_REPLACE_MARKER = ">>>>>>> REPLACE"
+# This exact three-way marker shape (not a bespoke one) is deliberate:
+# it's the same conflict-marker convention every model has seen
+# thousands of times in real merge conflicts and in tools like aider,
+# so "reproduce this shape exactly" asks nothing novel of the model.
+_EDIT_BLOCK_RE = re.compile(
+    r"<<<<<<< SEARCH\n(?P<old>.*?)\n=======\n(?P<new>.*?)\n>>>>>>> REPLACE",
+    re.DOTALL,
+)
+
+
+def parse_search_replace_blocks(text: str) -> list[tuple[str, str]] | None:
+    """Returns the (old, new) pairs found in `text`, or None if it
+    contains no recognizable SEARCH/REPLACE block at all -- distinct
+    from an empty list, which never happens: a match always has at
+    least one block. None is the signal draft_patch uses to fall back
+    to treating `text` as a plain full-file answer instead (a model
+    asked for edit blocks that answers with the whole file anyway is a
+    working answer, not an error).
+    """
+    matches = [(m.group("old"), m.group("new")) for m in _EDIT_BLOCK_RE.finditer(text)]
+    return matches or None
+
+
+def _apply_search_replace_blocks(
+    original: str, blocks: list[tuple[str, str]]
+) -> tuple[str | None, str | None]:
+    """Applies each (old, new) pair against `original` in order,
+    returning (new_content, None) on success or (None, reason) on the
+    first block that doesn't apply cleanly. Deliberately strict rather
+    than a fuzzy/best-effort match: a SEARCH snippet that doesn't match
+    at all, or matches more than once, means the model's mental model
+    of the file's exact text has already drifted -- applying it anyway
+    (to the wrong place, or silently picking the first match) is worse
+    than failing loudly and letting the same retry-with-feedback path
+    every other draft failure already uses correct it.
+    """
+    content = original
+    for i, (old, new) in enumerate(blocks, start=1):
+        if not old.strip():
+            return None, (
+                f"edit block {i}'s SEARCH text is empty -- every block must match a real, "
+                "existing snippet to replace, not mark an insertion point"
+            )
+        count = content.count(old)
+        if count == 0:
+            return None, (
+                f"edit block {i}'s SEARCH text (starting {old.splitlines()[0]!r}) doesn't "
+                "appear anywhere in the current file -- it must match an EXACT, contiguous "
+                "existing snippet, including whitespace, copied verbatim rather than retyped"
+            )
+        if count > 1:
+            return None, (
+                f"edit block {i}'s SEARCH text (starting {old.splitlines()[0]!r}) matches "
+                f"{count} different places in the file -- include more surrounding context "
+                "so it's unambiguous which one to replace"
+            )
+        content = content.replace(old, new, 1)
+    return content, None
+
 
 @dataclass(frozen=True)
 class SuiteRunResult:
@@ -373,6 +448,62 @@ When you're confident in your answer, respond with the final file
 content alone -- no markdown fences, no explanation before or after, no
 marker. That ends this session and submits what you wrote."""
 
+_PATCH_EDIT_PROMPT = """You are revising your own existing source file at: {subject}
+
+Reason for this patch: {topic}
+
+Current content of {subject}:
+---
+{current_content}
+---
+
+This file is long ({line_count} lines). Instead of rewriting the whole
+file, describe your change as one or more small SEARCH/REPLACE blocks,
+each targeting only the lines that actually need to change:
+
+<<<<<<< SEARCH
+<the EXACT existing lines to find, including original indentation -- copied verbatim, not retyped from memory>
+=======
+<the new lines that replace them>
+>>>>>>> REPLACE
+
+Rules:
+- Each SEARCH block must match a real, EXACT, contiguous snippet from
+  the current file above (whitespace included) -- if it doesn't match
+  character-for-character, the whole patch is rejected.
+- Include just enough surrounding lines in SEARCH to make it match only
+  ONE place in the file -- a snippet that appears more than once is
+  rejected as ambiguous.
+- Use as many separate SEARCH/REPLACE blocks as you need; each is
+  applied independently, in order.
+- Never try to reproduce the whole file as one giant SEARCH block --
+  that defeats the entire point of this format. Keep every block small
+  and focused on just what's changing.
+
+Constraints (violating these gets the patch automatically rejected, so
+do not attempt them):
+- Standard library only, no direct network access of any kind (no raw
+  sockets, no HTTP client calls, no FTP, no mail) -- go through the
+  reviewed web-fetch tool if network access is genuinely needed.
+- No shelling out, no spawning your own subprocess, no dynamic code
+  evaluation, no low-level C-library bindings.
+- Preserve behavior you weren't asked to change -- this is a targeted
+  improvement, not a rewrite. If in doubt, change less.
+- The resulting file must remain valid, importable Python.
+
+You have two tools, used one at a time. To use one, make your ENTIRE
+response exactly one of:
+READ: <repo-relative path>
+  -- read another file from this codebase for context. Read-only.
+DRAFT: <code>
+  -- submit a full-file candidate for a quick check (denylist,
+  adaptive-immunity memory, a sandboxed smoke run) if you want to test
+  an idea before committing to it as your SEARCH/REPLACE blocks.
+
+When you're confident in your answer, respond with your SEARCH/REPLACE
+block(s) alone -- no markdown fences, no explanation before or after,
+no marker. That ends this session and submits what you wrote."""
+
 _RETRY_SUFFIX = """
 
 Your previous attempt was rejected for: {reasons}
@@ -460,6 +591,26 @@ class SelfPatchAgent:
           entire module docstring while otherwise passing every check.
           A real provider answered with valid Python; it just dropped
           documentation nothing else in this pipeline was checking for.
+        - `_apply_search_replace_blocks`'s output -- for a file at or
+          above `_EDIT_MODE_LINE_THRESHOLD` lines, also a genuine
+          drafting attempt, also retryable with feedback: the model
+          answered with SEARCH/REPLACE blocks (the right format for a
+          large file, see milestone 82 in docs/EVOLUTION.md) but at
+          least one SEARCH snippet didn't match the file's real text
+          exactly, or matched more than one place.
+
+        For a file at or above `_EDIT_MODE_LINE_THRESHOLD` lines, the
+        prompt asks for SEARCH/REPLACE edit blocks instead of the whole
+        file (`_PATCH_EDIT_PROMPT`) -- live-caught (milestone 82):
+        every real self-patch attempted against a substantial existing
+        file failed to ever produce valid Python via the full-rewrite
+        prompt, across every retry, because faithfully reproducing an
+        entire long file verbatim while also correctly weaving in a
+        change is a fundamentally harder single-shot task than
+        reproducing just the handful of lines that actually change. A
+        model that ignores the edit-block instruction and answers with
+        the whole file anyway still works -- `parse_search_replace_blocks`
+        returning `None` falls back to the plain full-file path.
 
         Seeds the prompt with `subject`'s true, complete current
         content via `read_file_for_patch` -- not the much smaller,
@@ -477,8 +628,11 @@ class SelfPatchAgent:
         if refusal is not None:
             print(f"🚫 [patch] {refusal}")
             return None, refusal
-        prompt = _PATCH_DRAFT_PROMPT.format(
-            subject=subject, topic=topic, current_content=current_content
+        line_count = current_content.count("\n") + 1
+        use_edit_mode = line_count >= _EDIT_MODE_LINE_THRESHOLD
+        template = _PATCH_EDIT_PROMPT if use_edit_mode else _PATCH_DRAFT_PROMPT
+        prompt = template.format(
+            subject=subject, topic=topic, current_content=current_content, line_count=line_count
         )
         if prior_reasons:
             prompt += _RETRY_SUFFIX.format(reasons="; ".join(prior_reasons))
@@ -509,13 +663,27 @@ class SelfPatchAgent:
         if provider_name == "deterministic_fallback":
             return None, "deterministic_fallback"
 
-        candidate = extract_code(final_text)
+        # A model asked for edit blocks that answers with the whole file
+        # anyway still gets treated as a normal full-file draft below --
+        # parse_search_replace_blocks returning None (no blocks found)
+        # is exactly that case, not an error.
+        blocks = parse_search_replace_blocks(final_text) if use_edit_mode else None
+        if blocks is not None:
+            candidate, apply_reason = _apply_search_replace_blocks(current_content, blocks)
+            if apply_reason is not None:
+                return None, apply_reason
+        else:
+            candidate = extract_code(final_text)
+
         if candidate is None or not is_valid_python(candidate):
-            return None, (
-                f"{provider_name!r} answered but its response didn't contain valid, "
-                "complete Python -- try being more specific about scope, or ask for a "
-                "smaller, more targeted change"
+            detail = (
+                "your SEARCH/REPLACE blocks parsed but the resulting file isn't valid, "
+                "complete Python"
+                if blocks is not None
+                else f"{provider_name!r} answered but its response didn't contain valid, "
+                "complete Python"
             )
+            return None, f"{detail} -- try being more specific about scope, or ask for a smaller, more targeted change"
 
         doc_reason = _docstring_regression_reason(current_content, candidate)
         if doc_reason is not None:

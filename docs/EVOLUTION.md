@@ -1471,7 +1471,7 @@ Still ahead, roughly in order:
     its own new risks (applying a diff correctly, handling a diff that
     doesn't cleanly apply), not attempted here without more design work
     first. Left as a clearly-documented, well-evidenced backlog item
-    rather than a rushed change.
+    rather than a rushed change. (Addressed in milestone 90.)
 83. **A second, more tractable cause found by controlled testing: a real
     self-patch/skill draft can fail even on a genuinely SMALL, well-
     scoped change.** A deliberate contrast test -- a direct, narrow
@@ -1699,3 +1699,43 @@ Still ahead, roughly in order:
     isn't possible. 804 unit tests + 22 E2E tests passing, including a
     new E2E case confirming `vitals pin` degrades honestly (not
     silently) over this project's own piped-subprocess test harness.
+90. **The milestone-82 structural limit finally addressed: SEARCH/REPLACE
+    edit blocks for self-patches to large existing files.** Milestone 82
+    left this as a documented, well-evidenced backlog item rather than a
+    rushed fix: every self-patch attempt against a substantial file
+    (autonomy.py 291 lines, reflection.py 197, budget.py 140) failed to
+    ever produce valid Python via the full-file-rewrite prompt, because
+    faithfully reproducing an entire long file verbatim while also
+    correctly weaving in a change is a fundamentally harder single-shot
+    task than reproducing just what's actually changing -- no amount of
+    prompt-wording retry shrinks that.
+
+    `draft_patch` (`self_patch.py`) now checks the target file's line
+    count against `_EDIT_MODE_LINE_THRESHOLD` (100). At or above it, the
+    model is asked for one or more SEARCH/REPLACE blocks (the exact
+    three-way `<<<<<<< SEARCH` / `=======` / `>>>>>>> REPLACE` marker
+    shape used by real merge conflicts and tools like aider -- asking
+    for a shape the model has already seen thousands of times, not a
+    bespoke format) instead of the whole file. `_apply_search_replace_blocks`
+    applies each block against the file's real current content and is
+    deliberately strict, not fuzzy: a SEARCH snippet that doesn't match
+    character-for-character, or matches more than once, is rejected with
+    a specific reason rather than guessed at -- fed back through the
+    exact same `prior_reasons` retry mechanism the invalid-Python and
+    docstring-regression failures already use (milestones 78, 87). A
+    model that ignores the instruction and answers with the whole file
+    anyway still works: `parse_search_replace_blocks` returning `None`
+    (no blocks found) falls back to the plain full-file path unchanged.
+    Below the threshold, behavior is completely unchanged -- the
+    existing full-rewrite prompt already works reliably there.
+
+    Every downstream check (denylist, adaptive-immunity memory, sandbox,
+    `_docstring_regression_reason`, the full isolated test suite) runs
+    against the same reconstructed full-file content either mode
+    produces, so none of them needed to change. Verified end-to-end
+    against the real `AuditGate` with a 150-line target file: a scripted
+    SEARCH/REPLACE response applied cleanly and passed review. 820 tests
+    passing (11 new: block parsing, block application including the
+    not-found/ambiguous/empty-SEARCH failure cases, and integration
+    tests proving edit mode is selected by size, falls back cleanly, and
+    still catches a docstring regression).
