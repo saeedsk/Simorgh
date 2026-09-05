@@ -1,6 +1,6 @@
 import unittest
 
-from src.agents.logic.base import LogicAgent, _mood_phrase
+from src.agents.logic.base import LogicAgent, mood_phrase
 from src.cognition.provider import CognitionRouter, LLMResponse, ProviderUnavailable
 from src.memory.long_term import InMemoryStore
 from src.memory.short_term import ShortTermMemory
@@ -14,20 +14,20 @@ from src.tools.web_fetch import WebFetchTool
 
 class TestMoodPhrase(unittest.TestCase):
     def test_neutral_low_is_calm(self):
-        self.assertEqual(_mood_phrase(EmotionalState()), "calm, nothing much going on")
+        self.assertEqual(mood_phrase(EmotionalState()), "calm, nothing much going on")
 
     def test_positive_high_is_excited(self):
-        phrase = _mood_phrase(EmotionalState(valence=0.8, arousal=0.8))
+        phrase = mood_phrase(EmotionalState(valence=0.8, arousal=0.8))
         self.assertEqual(phrase, "genuinely excited")
 
     def test_negative_high_is_on_edge(self):
-        phrase = _mood_phrase(EmotionalState(valence=-0.8, arousal=0.8))
+        phrase = mood_phrase(EmotionalState(valence=-0.8, arousal=0.8))
         self.assertEqual(phrase, "on edge, a bit wound up")
 
     def test_never_contains_the_words_valence_or_arousal(self):
         for v in (-0.8, 0.0, 0.8):
             for a in (0.0, 0.3, 0.8):
-                phrase = _mood_phrase(EmotionalState(valence=v, arousal=a))
+                phrase = mood_phrase(EmotionalState(valence=v, arousal=a))
                 self.assertNotIn("valence", phrase)
                 self.assertNotIn("arousal", phrase)
 

@@ -47,7 +47,7 @@ except ImportError:  # pragma: no cover -- platform-dependent
 
 from src.agents.emotion.base import EmotionAgent
 from src.agents.interests import DEFAULT_NEWS_TOPICS, InterestTracker, RssWorldFeed
-from src.agents.logic.base import LogicAgent
+from src.agents.logic.base import LogicAgent, mood_phrase
 from src.agents.skills.base import SkillsAgent
 from src.agents.skills.registry import build_invocation_code, list_applied_skills, load_skill_source
 from src.agents.skills.research import SkillResearchAgent
@@ -71,7 +71,14 @@ from src.orchestrator.apply import (
 )
 from src.orchestrator.audit import PROTECTED_SUBJECTS, REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
-from src.orchestrator.console_style import format_code_block, format_diff_block, render_checklist, style
+from src.orchestrator.console_style import (
+    VitalsMonitor,
+    format_code_block,
+    format_diff_block,
+    render_checklist,
+    render_vitals,
+    style,
+)
 from src.orchestrator.deployment import DeploymentManager
 from src.orchestrator.discovery import discover_improvements
 from src.orchestrator.git_ops import (
@@ -131,6 +138,13 @@ DISCOVER_COMMAND = "discover"
 TASKS_COMMAND = "tasks"
 WORK_COMMAND = "work"
 AUTONOMOUS_PREFIX = "autonomous "
+VITALS_COMMAND = "vitals"
+VITALS_PREFIX = "vitals "
+# Short on purpose -- this only gates a live REPRINT of the vitals panel
+# (see VitalsMonitor), never the panel's own on-request snapshot. Long
+# enough that a moment between keystrokes doesn't trigger it, short
+# enough that "real time" still feels real once the creator pauses.
+DEFAULT_VITALS_IDLE_SECONDS = 3.0
 DIGEST_COMMAND = "digest"
 NEWS_COMMAND = "news"
 GROWTH_COMMAND = "growth"
@@ -189,6 +203,7 @@ _KNOWN_COMMAND_WORDS = (
     "remind",
     BUDGET_COMMAND,
     LOG_COMMAND,
+    VITALS_COMMAND,
     "exit",
     "quit",
 )
@@ -398,6 +413,7 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("history", "Show this session's recent turns."),
     ("run <code>", "Execute Python in the sandbox."),
     ("budget", "Show LLM spend/call status."),
+    ("vitals [on|off]", "Show mood/memory/skills/curiosity as bar meters (on = live, while idle)."),
     ("remind <duration> <message>", "Get interrupted with a message later (e.g. 1m, 5m, 2h)."),
     ("!<command>", "Run a raw shell command directly (e.g. '!ls', '!git status')."),
     ("exit / quit", "Leave."),
@@ -851,6 +867,10 @@ def run_cli() -> None:
         perform_action=_perform_autonomous_action,
         last_action_succeeded=lambda: _last_autonomous_outcome[0],
     )
+    vitals_monitor = VitalsMonitor(
+        render=lambda: _vitals_snapshot(router, store, interests, task_store),
+        is_idle=lambda: activity_clock.idle_seconds() >= DEFAULT_VITALS_IDLE_SECONDS,
+    )
 
     _print_banner()
     _print_cognition_status(budget_guards)
@@ -874,16 +894,19 @@ def run_cli() -> None:
         )
     )
     autonomy.start()
+    vitals_monitor.start()
     try:
         _run_cli_loop(
             router, store, short_term, activity_log, outcome_log, reflection_agent,
             audit_gate, skill_research, self_patch_agent, interests, health_monitor,
             web_fetch, budget_guards, cognition, task_store, activity_clock, autonomy,
+            vitals_monitor,
             deployment_manager=deployment_manager, hot_swap_factories=hot_swap_factories,
             news_socializer=news_socializer, growth_socializer=growth_socializer,
         )
     finally:
         autonomy.stop()
+        vitals_monitor.stop()
         _save_readline_history()
 
 
@@ -1044,6 +1067,7 @@ def _run_cli_loop(
     task_store: TaskStore,
     activity_clock: ActivityClock,
     autonomy: AutonomyController,
+    vitals_monitor: VitalsMonitor,
     deployment_manager: DeploymentManager | None = None,
     hot_swap_factories: dict[str, Callable[[type], SubAgent]] | None = None,
     news_socializer: NewsSocializer | None = None,
@@ -1129,6 +1153,10 @@ def _run_cli_loop(
         if lowered == "autonomous" or lowered.startswith(AUTONOMOUS_PREFIX):
             arg = user_input[len(AUTONOMOUS_PREFIX):].strip().lower() if lowered != "autonomous" else ""
             _handle_autonomous_command(arg, autonomy)
+            continue
+        if lowered == VITALS_COMMAND or lowered.startswith(VITALS_PREFIX):
+            arg = user_input[len(VITALS_PREFIX):].strip().lower() if lowered != VITALS_COMMAND else ""
+            _handle_vitals_command(arg, vitals_monitor, router, store, interests, task_store)
             continue
         if lowered == DIGEST_COMMAND:
             _print_autonomous_digest(autonomy)
@@ -1254,6 +1282,48 @@ def _print_skills_list(repo_root: Path | None = None) -> None:
         return
     for name in names:
         print(f"  • {name}  —  {style('use ' + name, 'cyan')}")
+
+
+def _vitals_snapshot(
+    router: Router,
+    store: MemoryStore,
+    interests: InterestTracker,
+    task_store: TaskStore,
+    repo_root: Path | None = None,
+) -> str:
+    """Builds the 'vitals' panel text: mood/energy/focus-load bar meters
+    plus a few plain measurable stats -- the creator's direct ask, "a
+    window or box... that shows its mood in form of a couple of bar
+    meters... and any other thing I can measure." `valence`/`arousal`
+    are already continuous floats in [-1, 1] (`EmotionalState`) --
+    remapped to [0, 1] here only for the bar renderer, which doesn't
+    know about any one stat's real range. `mood_phrase()` (shared with
+    `LogicAgent`'s own prompt) keeps this panel in the same natural
+    "voice" as everything else instead of a raw-numbers dump.
+    """
+    mood = router.bus.read()
+    bars = [
+        ("Mood", (mood.valence + 1.0) / 2.0),
+        ("Energy", (mood.arousal + 1.0) / 2.0),
+        ("Focus load", mood.cognitive_load),
+    ]
+    stats = [
+        ("Memory records", str(len(store.query()))),
+        ("Skills applied", str(len(list_applied_skills(repo_root or Path.cwd())))),
+        ("Interests tracked", str(len(interests.list_interests()))),
+        ("Task backlog", str(len(task_store.unfinished()))),
+    ]
+    return render_vitals(mood_phrase(mood), bars, stats)
+
+
+def _print_vitals(
+    router: Router,
+    store: MemoryStore,
+    interests: InterestTracker,
+    task_store: TaskStore,
+    repo_root: Path | None = None,
+) -> None:
+    print(_vitals_snapshot(router, store, interests, task_store, repo_root))
 
 
 def _print_reflection(reflection_agent: ReflectionAgent) -> None:
@@ -2505,6 +2575,32 @@ def _handle_autonomous_command(arg: str, autonomy: AutonomyController) -> None:
             )
         )
     print(f"  ready to act right now: {autonomy.ready_to_act()}")
+
+
+def _handle_vitals_command(
+    arg: str,
+    vitals_monitor: VitalsMonitor,
+    router: Router,
+    store: MemoryStore,
+    interests: InterestTracker,
+    task_store: TaskStore,
+) -> None:
+    """`vitals` (bare) prints one snapshot right now, always, regardless
+    of the live toggle below. `vitals on`/`off` controls whether the
+    SAME panel also reprints itself periodically between prompts while
+    idle (`VitalsMonitor`, src/orchestrator/console_style.py) -- the
+    creator's own ask for "real time" updates, done the same safe way
+    this project already reprints things on its own (a fresh block
+    between `input()` calls, never a fragile in-place cursor redraw).
+    """
+    if arg == "off":
+        vitals_monitor.enabled = False
+        _print_status("[vitals] live updates off -- 'vitals' still shows a snapshot on request")
+        return
+    if arg == "on":
+        vitals_monitor.enabled = True
+        _print_status("[vitals] live updates on -- reprints itself while idle")
+    _print_vitals(router, store, interests, task_store)
 
 
 def _print_autonomous_digest(autonomy: AutonomyController) -> None:

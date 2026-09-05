@@ -1576,3 +1576,35 @@ Still ahead, roughly in order:
     directly rather than being taken to the creator first. 770 unit
     tests + 19 E2E tests passing, with a new regression test asserting
     the reconstructed argv exactly.
+86. **`vitals`: a real-time terminal status panel.** The creator's own
+    ask: "a window or box in terminal where it shows its mood in form
+    of a couple of bar meters... and any other thing I can measure...
+    updated in real time." `EmotionalState` already carries continuous
+    `valence`/`arousal`/`cognitive_load` floats (never surfaced as bars
+    before, only as `mood_phrase()` prose or raw enum labels) -- exactly
+    the raw material a bar meter needs. `render_bar()`/`render_vitals()`
+    (`src/orchestrator/console_style.py`) render Mood/Energy/Focus-load
+    bars plus plain stat lines (memory records, skills applied,
+    interests tracked, task backlog), opening with the same natural
+    `mood_phrase()` text `LogicAgent`'s own prompt uses -- a numbers
+    panel that still reads in Sim's own voice, not a diagnostics dump.
+    `mood_phrase` itself is now public (was `_mood_phrase`, private to
+    `logic/base.py`) since this panel needed it too.
+
+    "Real time" specifically: `VitalsMonitor` is a toggleable
+    (`vitals on`/`vitals off`) daemon thread, started once at CLI
+    startup exactly like `AutonomyController` (a boolean `enabled` flag
+    checked every tick, not something that starts/stops the thread, so
+    there's no restart-race to get wrong) -- deliberately reuses the
+    same safe pattern this project has used everywhere it prints on its
+    own (`LiveTicker`, `reminders.py`, the autonomous loop itself): a
+    fresh block between `input()` calls, never a true in-place cursor
+    redraw, which `LiveTicker`'s own docstring already explains this
+    project has deliberately avoided (fragile across terminals, piped
+    output, non-TTY logging). Only actually reprints while idle
+    (`DEFAULT_VITALS_IDLE_SECONDS`, 3s -- short enough to feel live once
+    the creator pauses, long enough not to fight active typing), reusing
+    the same `ActivityClock` the autonomous loop already has rather than
+    a second one. The bare `vitals` command always prints one snapshot
+    immediately regardless of the live toggle. 786 unit tests + 21 E2E
+    tests passing.

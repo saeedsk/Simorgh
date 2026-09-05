@@ -166,7 +166,7 @@ _MOOD_PHRASES = {
 }
 
 
-def _mood_phrase(mood: EmotionalState) -> str:
+def mood_phrase(mood: EmotionalState) -> str:
     """A natural, first-person feeling description instead of raw
     enum-speak ("Current mood: neutral valence, low arousal.") --
     plausibly one more contributor to the same flat-reply problem
@@ -175,7 +175,10 @@ def _mood_phrase(mood: EmotionalState) -> str:
     -sounding replies. Falls back to the raw label pair for any
     valence/arousal combination not in the table (there shouldn't be
     one, given the enums this is built from, but never raise over
-    phrasing).
+    phrasing). Public (not `_`-prefixed) since `main.py`'s `vitals`
+    panel also needs it, for the exact same reason: the panel should
+    read in the same natural "voice" as everything else, not show raw
+    numbers alone.
     """
     return _MOOD_PHRASES.get(
         (mood.valence_label, mood.arousal_label),
@@ -387,7 +390,7 @@ class LogicAgent(SubAgent):
                     f"for these: {', '.join(shown)}{more}"
                 )
         parts.append(
-            f"Right now you're feeling {_mood_phrase(mood)} -- let that color your tone "
+            f"Right now you're feeling {mood_phrase(mood)} -- let that color your tone "
             "naturally, don't announce it or describe it out loud."
         )
         if self._short_term is not None and len(self._short_term) > 0:

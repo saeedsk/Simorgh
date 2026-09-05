@@ -134,6 +134,23 @@ class TestTaskAndSkillCommands(E2ECliTestCase):
 
         self.assertIn("enabled: False", result.stdout)
 
+    def test_vitals_shows_mood_bars_and_measurable_stats(self):
+        result = self.run_cli("vitals\nexit\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("vitals", result.stdout)
+        self.assertIn("Mood", result.stdout)
+        self.assertIn("Energy", result.stdout)
+        self.assertIn("Focus load", result.stdout)
+        self.assertIn("Skills applied", result.stdout)
+
+    def test_vitals_on_then_off_toggles_without_crashing(self):
+        result = self.run_cli("vitals on\nvitals off\nexit\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("live updates on", result.stdout)
+        self.assertIn("live updates off", result.stdout)
+
     def test_default_news_topics_are_seeded_on_a_first_run(self):
         # note_interest is a pure local store write -- no network call --
         # so this is safe to exercise here unlike 'curious'/'news', which

@@ -7,9 +7,12 @@ from unittest.mock import patch
 from src.orchestrator import console_style
 from src.orchestrator.console_style import (
     LiveTicker,
+    VitalsMonitor,
     format_code_block,
     format_diff_block,
+    render_bar,
     render_checklist,
+    render_vitals,
     style,
 )
 
@@ -280,6 +283,105 @@ class TestFormatDiffBlock(unittest.TestCase):
             block = format_diff_block(["@@ -1,2 +1,2 @@\n"])
 
         self.assertIn("\033[36m\033[1m@@ -1,2 +1,2 @@\033[0m", block)
+
+
+class TestRenderBar(unittest.TestCase):
+    def test_zero_is_fully_empty(self):
+        bar = render_bar(0.0, width=10)
+
+        self.assertEqual(bar.count("█"), 0)
+        self.assertEqual(bar.count("░"), 10)
+
+    def test_one_is_fully_filled(self):
+        bar = render_bar(1.0, width=10)
+
+        self.assertEqual(bar.count("█"), 10)
+        self.assertEqual(bar.count("░"), 0)
+
+    def test_half_is_half_filled(self):
+        bar = render_bar(0.5, width=20)
+
+        self.assertEqual(bar.count("█"), 10)
+        self.assertEqual(bar.count("░"), 10)
+
+    def test_out_of_range_values_are_clamped(self):
+        self.assertEqual(render_bar(-5.0, width=10).count("█"), 0)
+        self.assertEqual(render_bar(5.0, width=10).count("█"), 10)
+
+
+class TestRenderVitals(unittest.TestCase):
+    def test_includes_mood_phrase_and_bar_labels(self):
+        panel = render_vitals(
+            "calm, nothing much going on",
+            [("Mood", 0.5), ("Energy", 0.5), ("Focus load", 0.0)],
+            [("Memory records", "6"), ("Skills applied", "22")],
+        )
+
+        self.assertIn("calm, nothing much going on", panel)
+        self.assertIn("Mood", panel)
+        self.assertIn("Energy", panel)
+        self.assertIn("Focus load", panel)
+        self.assertIn("Memory records", panel)
+        self.assertIn("6", panel)
+        self.assertIn("22", panel)
+
+    def test_shows_a_percentage_per_bar(self):
+        panel = render_vitals("calm", [("Mood", 0.5)], [])
+
+        self.assertIn("50%", panel)
+
+    def test_with_no_stats_still_renders_the_bars(self):
+        panel = render_vitals("calm", [("Mood", 1.0)], [])
+
+        self.assertIn("Mood", panel)
+        self.assertIn("100%", panel)
+
+
+class TestVitalsMonitor(unittest.TestCase):
+    def test_disabled_by_default_never_prints(self):
+        monitor = VitalsMonitor(render=lambda: "PANEL", is_idle=lambda: True, interval=0.01)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            monitor.start()
+            time.sleep(0.05)
+            monitor.stop()
+
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_enabled_and_idle_prints_the_panel(self):
+        monitor = VitalsMonitor(render=lambda: "PANEL", is_idle=lambda: True, interval=0.01)
+        monitor.enabled = True
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            monitor.start()
+            time.sleep(0.05)
+            monitor.stop()
+
+        self.assertIn("PANEL", buf.getvalue())
+
+    def test_enabled_but_not_idle_never_prints(self):
+        monitor = VitalsMonitor(render=lambda: "PANEL", is_idle=lambda: False, interval=0.01)
+        monitor.enabled = True
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            monitor.start()
+            time.sleep(0.05)
+            monitor.stop()
+
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_starting_twice_does_not_spawn_a_second_thread(self):
+        monitor = VitalsMonitor(render=lambda: "PANEL", is_idle=lambda: True, interval=5.0)
+
+        monitor.start()
+        first_thread = monitor._thread
+        monitor.start()
+
+        self.assertIs(monitor._thread, first_thread)
+        monitor.stop()
 
 
 if __name__ == "__main__":
