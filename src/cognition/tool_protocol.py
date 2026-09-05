@@ -1,18 +1,8 @@
-"""Shared, reviewed helpers for the marker-based tool protocol used
-wherever an LLM is given bounded, single-action-per-turn tool access in
-this codebase (SkillResearchAgent in src/agents/skills/research.py, and
-LogicAgent in src/agents/logic/base.py).
-
-Kept in one place specifically so every caller enforces the exact same
-READ safety boundary -- confined to this repository's own tracked source,
-no traversal, no credential-shaped names -- rather than each maintaining
-its own copy that could drift out of sync with the others.
-"""
-
 from __future__ import annotations
 
 import ast
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 _CODE_FENCE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL)
@@ -287,3 +277,57 @@ def safe_list_dir(repo_root: Path, raw_path: str) -> str:
             names.append(f"... (truncated at {_MAX_LIST_ENTRIES} entries)")
             break
     return "\n".join(names) if names else "[empty directory]"
+
+
+@dataclass(frozen=True)
+class ToolCapability:
+    """One entry in the runtime capability registry below: a marker's
+    name, a human-readable description of what it does, and a hint
+    describing the shape of its argument (e.g. "repo-relative path",
+    "python code") -- enough for an orchestrator to decide, at runtime,
+    which registered tool fits a given task without either side hardcoding
+    the other's marker set.
+    """
+
+    name: str
+    description: str
+    argument_hint: str
+
+
+_CAPABILITY_REGISTRY: dict[str, ToolCapability] = {}
+
+
+def register_capability(name: str, description: str, argument_hint: str) -> ToolCapability:
+    """Register (or replace) a tool/provider's entry in the runtime
+    capability registry, keyed case-insensitively on `name` so a caller
+    doesn't need to track the exact casing used elsewhere. Returns the
+    stored `ToolCapability` so a caller can register and use it in one
+    expression.
+    """
+    capability = ToolCapability(name=name.lower(), description=description, argument_hint=argument_hint)
+    _CAPABILITY_REGISTRY[capability.name] = capability
+    return capability
+
+
+def unregister_capability(name: str) -> None:
+    """Remove `name` from the capability registry if present; a no-op
+    otherwise, so callers (e.g. test teardown) don't need to guard the
+    call with a membership check of their own.
+    """
+    _CAPABILITY_REGISTRY.pop(name.lower(), None)
+
+
+def get_capability(name: str) -> ToolCapability | None:
+    """Look up a single registered capability by name (case-insensitive),
+    or None if nothing is registered under that name.
+    """
+    return _CAPABILITY_REGISTRY.get(name.lower())
+
+
+def available_capabilities() -> tuple[ToolCapability, ...]:
+    """All currently registered capabilities, sorted by name, for an
+    orchestrator to introspect at runtime -- e.g. to build a tool menu
+    or decide which registered marker best fits the current task --
+    instead of hardcoding which tools/providers exist.
+    """
+    return tuple(sorted(_CAPABILITY_REGISTRY.values(), key=lambda cap: cap.name))
