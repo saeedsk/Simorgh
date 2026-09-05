@@ -1348,3 +1348,29 @@ Still ahead, roughly in order:
     a filesystem path. 749 unit tests + 19 E2E tests passing, two new
     regression tests (one per file) locking in the real outcome now
     getting logged.
+77. **Another real, live-caught waste bug: the creative agenda could
+    propose an impossible target.** Watching the same session further:
+    a self-directed idea ("add a rollback-and-score loop... to
+    `src/orchestrator/self_patch.py`") burned three real Gemini calls,
+    got rejected three times by `AuditGate` for the exact same
+    unfixable reason (`self_patch.py` is one of `PROTECTED_SUBJECTS` --
+    no draft, however good, can ever pass that check), went `BLOCKED`,
+    then got reconsidered and rejected again on the very next pass --
+    guaranteed to keep repeating this up to `MAX_BLOCKED_RETRY_ATTEMPTS`
+    (9) before finally being abandoned for good, spending real budget
+    the whole way for a target that was never reachable. Fixed at the
+    source: `discover_creative_improvements` (`src/main.py`) now filters
+    a proposed target against `audit.py`'s protected-file list *before*
+    ever creating a task for it, so this specific class of guaranteed
+    failure never gets a chance to waste anything.
+    `AuditGate._PROTECTED_SUBJECTS` (private, audit-gate-internal until
+    now) is renamed to the public `PROTECTED_SUBJECTS` for this --
+    `AuditGate.review()` remains the one real enforcement point either
+    way, this is a pre-filter to avoid known-impossible attempts, not a
+    second place deciding what's allowed. 750 unit tests + 19 E2E tests
+    passing. The already-BLOCKED task from before this fix landed will
+    still exhaust its own retry ceiling on the creator's live session
+    (bounded, cheap, and it needs a restart to pick up the fix anyway)
+    -- deliberately not hand-edited out of their live `memory.jsonl`
+    while their process was running, to avoid a concurrent-write risk
+    against a real, in-use file for a bounded, self-resolving problem.

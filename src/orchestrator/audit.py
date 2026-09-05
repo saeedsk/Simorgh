@@ -73,8 +73,12 @@ _DENYLIST_PATTERNS: dict[str, str] = {
 # boundary for BOTH the skills pipeline and the self-patch pipeline --
 # both call the same AuditGate.review(), so widening self-patch's target
 # scope (see src/orchestrator/self_patch.py) never widened what's
-# reachable here.
-_PROTECTED_SUBJECTS = ("soul.py", "SOUL.md", "audit.py", "apply.py", "self_patch.py")
+# reachable here. Public (not `_`-prefixed) since main.py's
+# discover_creative_improvements also needs it -- to filter an
+# impossible target out before ever creating a task for it, not to
+# re-decide what's allowed; AuditGate.review() below remains the one
+# real enforcement point regardless of what a caller pre-filters.
+PROTECTED_SUBJECTS = ("soul.py", "SOUL.md", "audit.py", "apply.py", "self_patch.py")
 
 REJECTED_KIND = "rejected_proposal"
 DEFAULT_SIMILARITY_THRESHOLD = 0.9
@@ -122,7 +126,7 @@ class AuditGate:
         self._similarity_threshold = similarity_threshold
 
     def review(self, proposal: ModificationProposal) -> AuditVerdict:
-        if any(protected in proposal.subject for protected in _PROTECTED_SUBJECTS):
+        if any(protected in proposal.subject for protected in PROTECTED_SUBJECTS):
             return self._deny(
                 proposal,
                 [
