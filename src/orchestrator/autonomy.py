@@ -57,37 +57,49 @@ class ActionDigest:
 
 ACTION_KIND = "autonomous_action"
 
-# Retuned twice now, both times from direct creator feedback, both
-# times downward. First pass (300s/600s -> 60s/150s): "not acting on
-# its own, sitting idle all the time" -- idle time resets on every
-# keystroke, so the original defaults meant an active chat session
-# almost never left a silent gap long enough to fire at all. Second
-# pass, this one ("make the self improvement go at hyperscale, starting
-# after 20 seconds"): 60s/150s was still paced like a cautious
-# background daemon, not the "constantly show progress" pace explicitly
-# asked for. Retuned again, aggressively:
-# - idle_threshold: 60s -> 20s, the literal number given.
-# - action_cooldown: 150s -> 30s (5x tighter), so a real self-
-#   improvement action can fire roughly every half-minute of idle time
-#   instead of every 2.5 minutes.
-# - poll_interval: 20s -> 5s, so the loop actually notices a 20s-idle
-#   or 30s-cooldown boundary promptly instead of polling coarser than
-#   the thresholds it's checking.
-# - max_actions_per_day: 20 -> 500. At the old cooldown this cap was a
-#   soft, rarely-hit backstop; at the new pace 20 actions is only ~10
-#   idle minutes; hitting it and going silent for the rest of the day
-#   would directly contradict "constantly show progress." The real
-#   spend ceiling stays BudgetGuard's own per-provider caps (unchanged
-#   here) -- this cap is a redundant, now-loosened extra layer on top,
-#   not the thing actually protecting real money.
+# Retuned three times now, all from direct creator feedback, all
+# downward. First pass (300s/600s -> 60s/150s): "not acting on its own,
+# sitting idle all the time" -- idle time resets on every keystroke, so
+# the original defaults meant an active chat session almost never left
+# a silent gap long enough to fire at all. Second pass (60s/150s ->
+# 20s/30s, "hyperscale... starting after 20 seconds"). Third pass, this
+# one ("increase the rate of sim thinking frequency... 10X speed up" --
+# with an explicit, reasonable worry attached: "would it run out my
+# claude usage? like to be cautious there"):
+# - action_cooldown: 30s -> 3s, the literal 10x asked for. This is the
+#   right knob for "how often does a new self-improvement action fire
+#   once idle" -- it's what actually paces repeated actions.
+# - poll_interval: 5s -> 1s, so the loop notices the new tighter
+#   boundaries promptly.
+# - idle_threshold: 20s -> 10s, only 2x rather than the full 10x on
+#   purpose. Dropping this to ~2s (a literal 10x) would mean an
+#   ordinary pause between reading a reply and typing the next message
+#   -- completely normal during active back-and-forth -- reads as
+#   "idle" and starts competing for attention constantly; that directly
+#   works against every earlier fix aimed at making this feel like a
+#   pleasant conversational partner, not a nervous interruption engine.
+#   10s still comfortably beats the old 20s.
+# - max_actions_per_day: 500 -> 2000, comfortably above Gemini's own
+#   1500-call/24h BudgetGuard cap so THIS cap never becomes the binding
+#   constraint before the real spend ceilings do (same reasoning as the
+#   500 bump before it -- see below).
+# On the subscription-safety worry specifically: this retune does NOT
+# touch DEFAULT_CLAUDE_CODE_MAX_CALLS/CLAUDE_CODE_WINDOW_SECONDS (still
+# 30 calls / 5h, main.py) -- that cap, not this file's timing, is what
+# actually protects the creator's flat-rate Claude Code subscription.
+# A faster tick rate just means that 30-call ceiling gets reached
+# sooner during a genuinely idle stretch, after which CognitionRouter's
+# existing fallback (Gemini, itself capped, then the free deterministic
+# floor) carries the rest -- never more real Claude Code CLI usage than
+# the unchanged cap already allowed.
 # Every other gate (BudgetGuard, the audit gate, the isolated test
 # suite, the failure-streak circuit breaker below) is completely
 # unchanged -- this only changes how OFTEN those gates get a chance to
 # run, never what they allow through.
-DEFAULT_IDLE_THRESHOLD_SECONDS = 20.0
-DEFAULT_ACTION_COOLDOWN_SECONDS = 30.0
-DEFAULT_POLL_INTERVAL_SECONDS = 5.0
-DEFAULT_MAX_ACTIONS_PER_DAY = 500
+DEFAULT_IDLE_THRESHOLD_SECONDS = 10.0
+DEFAULT_ACTION_COOLDOWN_SECONDS = 3.0
+DEFAULT_POLL_INTERVAL_SECONDS = 1.0
+DEFAULT_MAX_ACTIONS_PER_DAY = 2000
 # A circuit breaker, not a metric to tune finely: real-world guidance on
 # self-improving agents converges on the same shape regardless of the
 # exact number -- a behavioral log, a rollback path (already covered by

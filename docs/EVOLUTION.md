@@ -1286,3 +1286,42 @@ Still ahead, roughly in order:
     746 unit tests + 19 E2E tests passing. No commits had landed from
     the creative-agenda tasks yet when this was caught -- this fix
     shipped before anything needed reverting.
+75. **A third autonomy retune -- "10X speed up," with an explicit,
+    reasonable cost worry attached: "would it run out my claude usage?
+    ...like to be cautious there to now exhasust my claud ecode
+    subscription."** `action_cooldown_seconds` 30s -> 3s, the literal
+    10x (this is the knob that actually paces repeated self-improvement
+    actions once idle). `idle_threshold_seconds` only 20s -> 10s (2x),
+    deliberately not the full 10x -- dropping it to ~2s would mean an
+    ordinary pause mid-conversation reads as "idle" and starts
+    competing for attention constantly, undoing every earlier fix aimed
+    at feeling like a present conversational partner rather than a
+    nervous interruption engine. `poll_interval_seconds` 5s -> 1s.
+    `max_actions_per_day` 500 -> 2000 (stays comfortably above Gemini's
+    own 1500-call/24h cap so it's never the binding constraint).
+    Growth/news sharing cooldowns (`socializing.py`) deliberately left
+    UNCHANGED this round -- they weren't part of the ask, and scaling
+    them down too would add extra LLM call volume for something the
+    creator didn't request, working against the exact cost-conscious
+    framing of the message.
+
+    On the actual subscription-safety question, answered directly with
+    real numbers pulled from the creator's own live `memory.jsonl`
+    rather than guessed: `DEFAULT_CLAUDE_CODE_MAX_CALLS`/
+    `CLAUDE_CODE_WINDOW_SECONDS` (30 calls / 5h, `main.py`) is a
+    completely separate mechanism from this file's timing and was NOT
+    touched by any of the three autonomy retunes -- it's the thing that
+    actually protects the flat-rate Claude Code subscription. A faster
+    tick rate only means that ceiling gets reached sooner during a
+    genuinely idle stretch; real usage past it was already impossible,
+    and past it `CognitionRouter`'s existing fallback (Gemini, itself
+    capped at 1500 calls/$2/24h, then the free deterministic floor)
+    carries the rest -- never more real Claude Code CLI usage than the
+    unchanged cap already allowed, at any tick speed. The creator's own
+    live spend history at the time of asking: 30/30 Claude Code calls
+    used in the trailing 5h window (already at cap), averaging ~$0.055
+    equivalent value per call (Claude Code CLI's own reported
+    `total_cost_usd`, even though nothing is actually metered-billed
+    under the flat subscription) -- worst case, at the unchanged 30-
+    calls/5h ceiling, that's at most 144 calls/day regardless of how
+    fast this loop ticks.
