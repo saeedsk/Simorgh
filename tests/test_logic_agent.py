@@ -787,6 +787,58 @@ class TestLogicAgentToolLoop(unittest.TestCase):
         tool_calls = store.query(kind="tool_call")
         self.assertFalse(tool_calls[0].metadata["succeeded"])
 
+    def test_growth_marker_not_offered_without_a_growth_fn(self):
+        provider = FakeProvider(text="a plain reply")
+        agent = LogicAgent(cognition=CognitionRouter([provider]))
+
+        agent.handle(AgentRequest(text="how have you grown lately?"), SharedMemoryBus())
+
+        self.assertNotIn("GROWTH:", provider.prompts[0])
+
+    def test_growth_tool_calls_the_injected_function(self):
+        calls = []
+        provider = ScriptedProvider([("GROWTH:", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            growth_fn=lambda: calls.append(1) or "[growth] I just fixed my own tone",
+        )
+
+        agent.handle(AgentRequest(text="what have you improved lately?"), SharedMemoryBus())
+
+        self.assertEqual(calls, [1])
+        self.assertIn("fixed my own tone", provider.prompts[1])
+
+    def test_growth_tool_records_success_correctly(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("GROWTH:", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            activity_log=activity_log,
+            growth_fn=lambda: "[growth] I just fixed my own tone",
+        )
+
+        agent.handle(AgentRequest(text="what have you improved lately?"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(tool_calls[0].metadata["tool"], "GROWTH")
+        self.assertTrue(tool_calls[0].metadata["succeeded"])
+
+    def test_growth_tool_records_failure_when_nothing_applied(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider([("GROWTH:", None), ("done", None)])
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]),
+            activity_log=activity_log,
+            growth_fn=lambda: "[growth] nothing applied yet to share",
+        )
+
+        agent.handle(AgentRequest(text="what have you improved lately?"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertFalse(tool_calls[0].metadata["succeeded"])
+
     def test_propose_tool_records_itself_as_a_tool_call(self):
         store = InMemoryStore()
         activity_log = ActivityLog(store)

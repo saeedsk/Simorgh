@@ -528,9 +528,16 @@ same machinery a human-typed command would:
 
 Bounded on top of, never instead of, every existing guard:
 
-- **Idle threshold** (default 300s) and **action cooldown** (default
-  600s) -- no rapid-fire loop tied to how often the CLI happens to sit
-  unused.
+- **Idle threshold** (default 60s) and **action cooldown** (default
+  150s) -- no rapid-fire loop tied to how often the CLI happens to sit
+  unused. Originally 300s/600s; retuned down after direct creator
+  feedback ("not acting on its own, sitting idle all the time"): idle
+  time resets on every keystroke, so at the old pace an active,
+  back-and-forth chat session almost never left a long enough silent
+  gap for this to ever fire -- the only way to actually see it act was
+  to walk away from the terminal for 5+ minutes. Reasonable for an
+  unattended background daemon; wrong for something meant to feel like
+  a present conversational partner.
 - **A durable daily action cap** (default 20, `kind="autonomous_action"`
   records in the same `MemoryStore`), independent of and in addition to
   the `BudgetGuard` LLM-spend caps every real provider is already
@@ -591,19 +598,20 @@ behavior `RssWorldFeed` already had.
 `src/orchestrator/socializing.py`'s `NewsSocializer` is what actually
 makes this proactive rather than just a bigger `curious`. On top of
 (never instead of) `AutonomyController`'s own idle/cooldown/daily-cap
-gates, it adds its own separate, usually much longer pacing cooldown
-(an hour, by default) so sharing something interesting doesn't crowd
-out ordinary self-improvement work -- the two compete for the same idle
-ticks, and most ticks this is simply not ready and falls straight
-through. When it IS ready, `main.py`'s autonomous-tick handler prints
-the highlight unprompted, between prompts -- the exact "a daemon thread
-can safely print while the main loop blocks on `input()`" mechanism
-`src/orchestrator/reminders.py` already proved works for the exact same
-kind of unprompted interruption, reused rather than reinvented. A real
-LLM condenses the raw feed item into something short and conversational
-when one is configured; without one, an honest, unembellished rendering
-of the title and description -- never a claimed "summary" that didn't
-actually happen.
+gates, it adds its own separate pacing cooldown (30 minutes by default,
+down from an original hour -- see below) so sharing something
+interesting doesn't crowd out ordinary self-improvement work -- the two
+compete for the same idle ticks, and most ticks this is simply not
+ready and falls straight through. When it IS ready, `main.py`'s
+autonomous-tick handler prints the highlight unprompted, between
+prompts -- the exact "a daemon thread can safely print while the main
+loop blocks on `input()`" mechanism `src/orchestrator/reminders.py`
+already proved works for the exact same kind of unprompted
+interruption, reused rather than reinvented. A real LLM condenses the
+raw feed item into something short and conversational when one is
+configured; without one, an honest, unembellished rendering of the
+title and description -- never a claimed "summary" that didn't actually
+happen.
 
 This is genuinely Sim starting something, not merely replying faster: a
 highlight can appear with no request having been made at all, the same
@@ -611,6 +619,22 @@ way a reminder can. `interest <feed url>` tracks a new source, `news`
 (or the `NEWS:` conversational marker) checks and shares on demand,
 bypassing the pacing cooldown -- an explicit request, same as typing
 `work` bypasses the autonomous loop's own idle check.
+
+**A second, mirrored source, added after direct feedback that this
+still wasn't enough:** "I don't see any evidence of self-improving."
+`GrowthSocializer` is exactly the same shape as `NewsSocializer` --
+same `share_next`/`maybe_share`, own pacing cooldown (15 minutes by
+default, paced tighter than news since this was the more directly-named
+complaint) -- pointed inward instead of outward: it draws from Sim's
+own applied changes (`kind="applied_skill"`/`"applied_source_patch"`),
+already durably recorded by `apply.py`'s pipeline with the real
+rationale and code, the whole time. Nothing about self-improvement
+itself was missing; only the narration of it was. `growth` (or the
+`GROWTH:` marker) checks on demand the same way `news`/`NEWS:` does.
+`main.py`'s autonomous-tick handler checks growth *before* news on
+every tick -- both are usually no-ops (each gated by its own cooldown),
+but on a tick where one is ready, growth wins, since it's the more
+pointed signal.
 
 ## Conversational Self-Modification
 
@@ -749,12 +773,13 @@ were judgment calls made to keep the project moving, not settled truths:
 - Whether "creator" ever needs a more precise definition (a person, a
   role, a verifiable identity/credential) once Simorgh operates somewhere
   that impersonation is a realistic risk.
-- The Autonomous Idle Loop's default thresholds (300s idle, 600s
+- The Autonomous Idle Loop's default thresholds (60s idle, 150s
   cooldown, 20 actions/day, 5 consecutive failures before the circuit
-  breaker trips) were reasonable starting judgment calls, not values
-  derived from real operating experience -- once there's a real track
-  record of what it actually does while idle, these should be
-  revisited, tightened or loosened based on evidence rather than guess.
+  breaker trips -- idle/cooldown already revisited once, from real
+  creator feedback that the original 300s/600s felt inert) remain
+  judgment calls, not values derived from extensive operating
+  experience -- worth continuing to tighten or loosen as more real
+  feedback comes in.
 - The `digest` command (`AutonomyController.digest()`) gives an
   on-demand 24h rollup of autonomous activity -- action count,
   succeeded/failed/other tally, current failure streak -- a lighter

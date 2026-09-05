@@ -84,7 +84,12 @@ from src.orchestrator.reflection import Outcome, OutcomeLog, ReflectionAgent
 from src.orchestrator.reminders import parse_duration, schedule_reminder
 from src.orchestrator.router import AgentRequest, Router, SubAgent
 from src.orchestrator.self_patch import SelfPatchAgent, check_main_py_invariants, relaunch, run_isolated_test_suite
-from src.orchestrator.socializing import NewsHighlight, NewsSocializer
+from src.orchestrator.socializing import (
+    GrowthHighlight,
+    GrowthSocializer,
+    NewsHighlight,
+    NewsSocializer,
+)
 from src.orchestrator.tasks import (
     BLOCKED,
     DONE,
@@ -127,6 +132,7 @@ WORK_COMMAND = "work"
 AUTONOMOUS_PREFIX = "autonomous "
 DIGEST_COMMAND = "digest"
 NEWS_COMMAND = "news"
+GROWTH_COMMAND = "growth"
 REMIND_PREFIX = "remind "
 MAX_TASK_ATTEMPTS = 3
 EVOLVE_PREFIX = "evolve "
@@ -178,6 +184,7 @@ _KNOWN_COMMAND_WORDS = (
     "autonomous",
     DIGEST_COMMAND,
     NEWS_COMMAND,
+    GROWTH_COMMAND,
     "remind",
     BUDGET_COMMAND,
     LOG_COMMAND,
@@ -228,6 +235,7 @@ def build_router(
     propose_evolve_fn: Callable[[str, int], str] | None = None,
     use_skill_fn: Callable[[str], str] | None = None,
     news_fn: Callable[[], str] | None = None,
+    growth_fn: Callable[[], str] | None = None,
 ) -> Router:
     """All params are optional so existing callers (and every prior test)
     get exactly the old rule-based-only behavior when omitted -- see
@@ -243,9 +251,10 @@ def build_router(
     when given, lets a chat reply actually run an already-applied skill
     (the same sandboxed `load_skill_source`/`build_invocation_code` path
     as the typed `use <name>` command) instead of only telling the user
-    to type it themselves. `news_fn`, when given, lets a chat reply
-    actually check tracked feeds and share the next real item right now
-    (`main.py`'s `news_command`, same as the typed `news` command).
+    to type it themselves. `news_fn`/`growth_fn`, when given, let a chat
+    reply actually check tracked feeds, or Sim's own most recently
+    applied change, and share it right now (`main.py`'s `news_command`/
+    `growth_command`, same as the typed `news`/`growth` commands).
     """
     router = Router(SharedMemoryBus())
     router.register(EmotionAgent())
@@ -264,6 +273,7 @@ def build_router(
             propose_evolve_fn=propose_evolve_fn,
             use_skill_fn=use_skill_fn,
             news_fn=news_fn,
+            growth_fn=growth_fn,
         )
     )
     router.register(SkillsAgent())
@@ -341,6 +351,7 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("autonomous [on|off]", "Control the idle-triggered autonomous loop (no arg = status)."),
     ("digest", "Rollup of autonomous activity over the last 24h."),
     ("news", "Share the next interesting item from your tracked feeds."),
+    ("growth", "Share the most recent thing you improved about yourself."),
     ("pending [path]", "List applied changes, or diff one (--full for the whole file)."),
     ("skills", "List applied skills you can run by name."),
     ("use <skill name>", "Run an applied skill fresh from disk."),
@@ -704,6 +715,7 @@ def run_cli() -> None:
         for feed_url, label in DEFAULT_NEWS_TOPICS:
             interests.note_interest(feed_url, why=f"default {label} feed, seeded on first run")
     news_socializer = NewsSocializer()
+    growth_socializer = GrowthSocializer(store)
     health_monitor = HealthMonitor()
     task_store = TaskStore(store)
 
@@ -745,6 +757,7 @@ def run_cli() -> None:
         ),
         use_skill_fn=lambda name: use_skill(router, outcome_log, activity_log, name),
         news_fn=lambda: news_command(interests, news_socializer, cognition),
+        growth_fn=lambda: growth_command(growth_socializer, cognition),
     )
     router = build_router(**logic_agent_kwargs)
 
@@ -787,7 +800,7 @@ def run_cli() -> None:
             audit_gate, activity_log, cognition, short_term=short_term,
             outcome_sink=lambda succeeded: _last_autonomous_outcome.__setitem__(0, succeeded),
             deployment_manager=deployment_manager, hot_swap_factories=hot_swap_factories,
-            interests=interests, news_socializer=news_socializer,
+            interests=interests, news_socializer=news_socializer, growth_socializer=growth_socializer,
         )
 
     autonomy = AutonomyController(
@@ -825,7 +838,7 @@ def run_cli() -> None:
             audit_gate, skill_research, self_patch_agent, interests, health_monitor,
             web_fetch, budget_guards, cognition, task_store, activity_clock, autonomy,
             deployment_manager=deployment_manager, hot_swap_factories=hot_swap_factories,
-            news_socializer=news_socializer,
+            news_socializer=news_socializer, growth_socializer=growth_socializer,
         )
     finally:
         autonomy.stop()
@@ -848,21 +861,25 @@ def _autonomous_action(
     hot_swap_factories: dict[str, Callable[[type], SubAgent]] | None = None,
     interests: InterestTracker | None = None,
     news_socializer: NewsSocializer | None = None,
+    growth_socializer: GrowthSocializer | None = None,
 ) -> bool:
     """One autonomous unit of work, called by AutonomyController.tick()
     only once every gate (enabled, idle long enough, past cooldown,
     under the daily cap) already passed.
 
-    Checks first (when both `interests` and `news_socializer` are given)
-    whether it's time to proactively share a news highlight -- the
-    direct mechanism behind "Sim should be able to start the
-    conversation on its own, instead of only being reactive."
-    `NewsSocializer` owns its own, usually much longer pacing cooldown
-    (see src/orchestrator/socializing.py), so most ticks this is a
-    no-op and falls straight through to the logic below; it's checked
-    first only so that on a tick where it IS ready, sharing something
-    interesting doesn't have to wait behind an arbitrarily long
-    self-improvement backlog.
+    Checks first (when given) whether it's time to proactively share a
+    growth highlight -- something Sim itself recently improved -- then,
+    if not, whether it's time to share a news highlight -- the direct
+    mechanism behind "Sim should be able to start the conversation on
+    its own, instead of only being reactive," and (per direct feedback)
+    the direct answer to "I don't see any evidence of self-improving":
+    growth is checked first specifically because that complaint was more
+    pointed than "share more news." Each socializer owns its own,
+    usually much longer pacing cooldown (see
+    src/orchestrator/socializing.py), so most ticks both are no-ops and
+    this falls straight through to the logic below; they're checked
+    first only so that on a tick where one IS ready, it doesn't have to
+    wait behind an arbitrarily long self-improvement backlog.
 
     Otherwise: discover new improvement areas if the backlog is empty
     ("once detect it became idle start automatically improve itself"),
@@ -873,10 +890,18 @@ def _autonomous_action(
     actually SUCCEEDED, which is what `outcome_sink` (when given) is
     separately told: True/False for whether the task's own pipeline
     reported [APPLIED], never called for a pure discovery or
-    news-sharing tick (neither is itself a success or failure of
-    anything). AutonomyController's circuit breaker reads this signal to
-    notice a systematic failure pattern, not just a single bad action.
+    growth/news-sharing tick (none of those are themselves a success or
+    failure of anything). AutonomyController's circuit breaker reads
+    this signal to notice a systematic failure pattern, not just a
+    single bad action.
     """
+    if growth_socializer is not None:
+        growth_highlight = growth_socializer.maybe_share(cognition)
+        if growth_highlight is not None:
+            _print_growth_highlight(growth_highlight)
+            print(style("> ", "cyan", "bold"), end="", flush=True)
+            return True
+
     if interests is not None and news_socializer is not None:
         highlight = news_socializer.maybe_share(interests, cognition)
         if highlight is not None:
@@ -958,6 +983,7 @@ def _run_cli_loop(
     deployment_manager: DeploymentManager | None = None,
     hot_swap_factories: dict[str, Callable[[type], SubAgent]] | None = None,
     news_socializer: NewsSocializer | None = None,
+    growth_socializer: GrowthSocializer | None = None,
 ) -> None:
     """The interactive read-eval-print loop, extracted out of run_cli so
     run_cli can guarantee readline history is saved on the way out
@@ -1059,6 +1085,9 @@ def _run_cli_loop(
             continue
         if lowered == NEWS_COMMAND:
             news_command(interests, news_socializer, cognition)
+            continue
+        if lowered == GROWTH_COMMAND:
+            growth_command(growth_socializer, cognition)
             continue
         if lowered == SLEEP_COMMAND:
             _run_sleep(store, reflection_agent)
@@ -2270,6 +2299,35 @@ def news_command(
         return message
     _print_news_highlight(highlight)
     return f"[news] {highlight.blurb}"
+
+
+def _print_growth_highlight(highlight: GrowthHighlight) -> None:
+    """The shared presentation for a proactively-shared self-improvement
+    highlight -- same pattern as _print_news_highlight, a different
+    icon so the two are visually distinguishable at a glance (growth is
+    about Sim itself; news is about the outside world).
+    """
+    print(style(f"\n🌱 [Sim] {highlight.blurb}", "green", "bold"))
+    print(style(f"   ({highlight.kind}: {highlight.subject})", "dim"))
+
+
+def growth_command(growth_socializer: GrowthSocializer, cognition: CognitionRouter) -> str:
+    """The typed 'growth' command: share the most recent unshared
+    self-improvement right now, bypassing GrowthSocializer's own pacing
+    cooldown -- an explicit request, the same way typing 'work' bypasses
+    AutonomyController's idle-trigger check. Returns the message
+    printed, for testability.
+    """
+    highlight = growth_socializer.share_next(cognition)
+    if highlight is None:
+        message = (
+            "[growth] nothing applied yet to share -- try 'propose <topic>' or "
+            "'patch <path> <description>', or see 'pending' for what's already there"
+        )
+        _print_status(message)
+        return message
+    _print_growth_highlight(highlight)
+    return f"[growth] {highlight.blurb}"
 
 
 _PENDING_FULL_SUFFIX = " --full"
