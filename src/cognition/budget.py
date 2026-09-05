@@ -1,3 +1,23 @@
+"""Budget guard for LLM providers: caps spend/call volume before it happens.
+
+Wraps a real LLMProvider and refuses to call it once `budget` is exhausted
+for the current rolling time window -- tracked durably via a MemoryStore,
+so the cap survives process restarts, not just the current session. When
+exhausted, `complete()` raises ProviderUnavailable, which CognitionRouter
+already knows how to handle: fall through to the next provider, ultimately
+DeterministicFallbackProvider. An expensive provider degrades exactly like
+an unreachable one -- gracefully, to the guaranteed-available floor --
+rather than silently spending past a limit nobody approved.
+
+See docs/BIOMIMICRY.md, "Metabolic conservation under starvation": an
+organism under caloric restriction doesn't keep spending at full rate
+until it collapses, it rations. This is that rationing, for API spend.
+
+Any real provider (Claude, Gemini, etc.) should be wrapped in a
+BudgetGuard *before* being registered in a CognitionRouter -- that's the
+required pattern, not an optional extra.
+"""
+
 from __future__ import annotations
 
 import time
@@ -7,7 +27,6 @@ from src.cognition.provider import LLMProvider, LLMResponse, ProviderUnavailable
 from src.memory.long_term import MemoryStore
 
 SPEND_KIND = "llm_spend"
-OUTCOME_KIND = "llm_outcome"
 
 
 @dataclass(frozen=True)
@@ -65,81 +84,14 @@ class BudgetGuard(LLMProvider):
         )
         return response
 
-    def record_outcome(self, success: bool, latency_seconds: float | None = None) -> None:
-        """Record whether a dispatched task using this provider succeeded.
-
-        Callers (e.g. the orchestrator's reflection loop) call this after
-        the fact, once a task's real outcome is known -- `complete()`
-        itself only knows the response was returned, not whether the
-        caller's task actually succeeded.
-        """
-        self._store.remember(
-            OUTCOME_KIND,
-            self._provider.name,
-            success=success,
-            latency_seconds=latency_seconds,
-        )
-
-    def success_rate(self) -> float | None:
-        """Fraction of recorded outcomes (this window) that succeeded, or
-        None if no outcomes have been recorded yet -- distinct from 0.0,
-        which would wrongly signal a proven-bad provider.
-        """
-        outcomes = self._recent_outcomes()
-        if not outcomes:
-            return None
-        successes = sum(1 for o in outcomes if o.metadata.get("success"))
-        return successes / len(outcomes)
-
-    def average_latency_seconds(self) -> float | None:
-        """Mean latency across recorded outcomes (this window) that
-        reported one, or None if no such outcomes exist yet.
-        """
-        latencies = [
-            o.metadata["latency_seconds"]
-            for o in self._recent_outcomes()
-            if o.metadata.get("latency_seconds") is not None
-        ]
-        if not latencies:
-            return None
-        return sum(latencies) / len(latencies)
-
-    def score(self) -> tuple[float, float, float]:
-        """Composite ranking key for `preferred_provider`: success rate
-        first (higher is better, unknown treated as worse than any known
-        rate), then lower average latency, then lower in-window spend.
-        Latency and spend only break ties between providers with equal
-        (or equally unknown) success rates -- success is the thing we
-        actually care about, cost/latency are secondary signals.
-        """
-        rate = self.success_rate()
-        latency = self.average_latency_seconds()
-        spend = self.status()["spend_in_window_usd"]
-        return (
-            rate if rate is not None else -1.0,
-            -(latency if latency is not None else float("inf")),
-            -spend,
-        )
-
     def status(self) -> dict:
         records = self._recent_records()
         spend = sum(r.metadata.get("cost_usd", 0.0) for r in records)
-        outcomes = self._recent_outcomes()
-        successes = sum(1 for o in outcomes if o.metadata.get("success"))
-        latencies = [
-            o.metadata["latency_seconds"]
-            for o in outcomes
-            if o.metadata.get("latency_seconds") is not None
-        ]
         return {
             "calls_in_window": len(records),
             "spend_in_window_usd": round(spend, 6),
             "max_calls": self._budget.max_calls,
             "max_estimated_cost_usd": self._budget.max_estimated_cost_usd,
-            "success_rate": (successes / len(outcomes)) if outcomes else None,
-            "average_latency_seconds": (
-                sum(latencies) / len(latencies) if latencies else None
-            ),
         }
 
     def _recent_records(self) -> list:
@@ -159,19 +111,6 @@ class BudgetGuard(LLMProvider):
         return [
             r
             for r in self._store.query(kind=SPEND_KIND)
-            if r.created_at >= cutoff and r.content == self._provider.name
-        ]
-
-    def _recent_outcomes(self) -> list:
-        """Outcome records for THIS wrapped provider only, same
-        per-provider isolation as `_recent_records` and for the same
-        reason: a shared MemoryStore must not let one provider's history
-        bleed into another's.
-        """
-        cutoff = time.time() - self._budget.window_seconds
-        return [
-            r
-            for r in self._store.query(kind=OUTCOME_KIND)
             if r.created_at >= cutoff and r.content == self._provider.name
         ]
 
@@ -199,24 +138,3 @@ class BudgetGuard(LLMProvider):
             (input_tokens / 1_000_000) * self._price_in
             + (output_tokens / 1_000_000) * self._price_out
         )
-
-
-def preferred_provider(guards: list[BudgetGuard]) -> BudgetGuard | None:
-    """Given several BudgetGuards wrapping different providers, pick the
-    available one with the best track record of task success, breaking
-    ties toward lower average latency and then lower in-window spend --
-    cost/latency shape the choice only among providers that succeed
-    equally often, they never outrank success itself.
-
-    Falls back to the first available guard when none yet has outcome
-    history recorded (via `record_outcome`), since there is no success
-    signal yet to adapt toward -- cost alone shouldn't decide once real
-    success data exists, but it's a reasonable default before it does.
-    """
-    available = [g for g in guards if g.available()]
-    if not available:
-        return None
-    scored = [g for g in available if g.success_rate() is not None]
-    if not scored:
-        return available[0]
-    return max(scored, key=lambda g: g.score())
