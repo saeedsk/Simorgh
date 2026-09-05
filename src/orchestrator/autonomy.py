@@ -57,21 +57,37 @@ class ActionDigest:
 
 ACTION_KIND = "autonomous_action"
 
-# Retuned from the original 300s/600s after direct creator feedback:
-# "not acting on its own, sitting idle all the time." Idle time resets
-# on every keystroke, so at 300s idle / 600s cooldown, an active,
-# back-and-forth chat session almost never leaves a long enough silent
-# gap for this to ever fire -- the only way to actually see it act was
-# to walk away from the terminal for 5+ minutes. That's a reasonable
-# default for an unattended background daemon; it's the wrong one for
-# something meant to feel like a present conversational partner.
-# EVOLUTION.md flagged these as "judgment calls... worth revisiting
-# once there's a real track record" from the start -- this is that
-# revision, from real, direct operating feedback rather than a guess.
-DEFAULT_IDLE_THRESHOLD_SECONDS = 60.0
-DEFAULT_ACTION_COOLDOWN_SECONDS = 150.0
-DEFAULT_POLL_INTERVAL_SECONDS = 20.0
-DEFAULT_MAX_ACTIONS_PER_DAY = 20
+# Retuned twice now, both times from direct creator feedback, both
+# times downward. First pass (300s/600s -> 60s/150s): "not acting on
+# its own, sitting idle all the time" -- idle time resets on every
+# keystroke, so the original defaults meant an active chat session
+# almost never left a silent gap long enough to fire at all. Second
+# pass, this one ("make the self improvement go at hyperscale, starting
+# after 20 seconds"): 60s/150s was still paced like a cautious
+# background daemon, not the "constantly show progress" pace explicitly
+# asked for. Retuned again, aggressively:
+# - idle_threshold: 60s -> 20s, the literal number given.
+# - action_cooldown: 150s -> 30s (5x tighter), so a real self-
+#   improvement action can fire roughly every half-minute of idle time
+#   instead of every 2.5 minutes.
+# - poll_interval: 20s -> 5s, so the loop actually notices a 20s-idle
+#   or 30s-cooldown boundary promptly instead of polling coarser than
+#   the thresholds it's checking.
+# - max_actions_per_day: 20 -> 500. At the old cooldown this cap was a
+#   soft, rarely-hit backstop; at the new pace 20 actions is only ~10
+#   idle minutes; hitting it and going silent for the rest of the day
+#   would directly contradict "constantly show progress." The real
+#   spend ceiling stays BudgetGuard's own per-provider caps (unchanged
+#   here) -- this cap is a redundant, now-loosened extra layer on top,
+#   not the thing actually protecting real money.
+# Every other gate (BudgetGuard, the audit gate, the isolated test
+# suite, the failure-streak circuit breaker below) is completely
+# unchanged -- this only changes how OFTEN those gates get a chance to
+# run, never what they allow through.
+DEFAULT_IDLE_THRESHOLD_SECONDS = 20.0
+DEFAULT_ACTION_COOLDOWN_SECONDS = 30.0
+DEFAULT_POLL_INTERVAL_SECONDS = 5.0
+DEFAULT_MAX_ACTIONS_PER_DAY = 500
 # A circuit breaker, not a metric to tune finely: real-world guidance on
 # self-improving agents converges on the same shape regardless of the
 # exact number -- a behavioral log, a rollback path (already covered by

@@ -1192,3 +1192,34 @@ Still ahead, roughly in order:
     unlimited-retry-safe fallback case without changing the function's
     `list[Task]` return shape. Regression test added
     (`test_a_creative_attempt_that_finds_nothing_still_counts_as_action`).
+72. **"Hyperscale" retune, the creator's direct ask right after milestone
+    70/71 shipped: "make the self improvement go at hyperscale, starting
+    after 20 seconds start time, showing constantly progress with
+    details."** `AutonomyController`'s thresholds (`src/orchestrator/
+    autonomy.py`), already retuned once (milestone 56), retuned again,
+    aggressively: `idle_threshold_seconds` 60s -> 20s (the literal
+    number given); `action_cooldown_seconds` 150s -> 30s (5x tighter);
+    `poll_interval_seconds` 20s -> 5s, so the daemon actually notices a
+    20s/30s boundary promptly instead of polling coarser than the
+    thresholds it's checking; `max_actions_per_day` 20 -> 500, since at
+    the new cooldown the old cap was only ~10 idle minutes from
+    exhausted, and going silent for the rest of the day directly
+    contradicts "constantly show progress" -- the real spend ceiling
+    stays `BudgetGuard`'s own per-provider caps, completely untouched by
+    either retune; this cap was always a redundant extra layer on top,
+    not the thing actually protecting real money.
+    `GrowthSocializer`/`NewsSocializer`'s pacing cooldowns
+    (`src/orchestrator/socializing.py`) were brought down proportionally
+    alongside it, keeping the same 6x/12x ratio to `action_cooldown_seconds`
+    they already had: growth 900s -> 180s, news 1800s -> 360s. No gate
+    itself changed -- the audit gate, the isolated test suite, the
+    relaunch self-check, the failure-streak circuit breaker, and every
+    `BudgetGuard` cap are all completely unchanged; only how often those
+    gates get a chance to run did. The "showing constantly progress with
+    details" half of the ask was checked against what already exists
+    rather than assumed to need new code: `LiveTicker` already wraps
+    both isolated-test-suite runs (`self_patch.py`'s baseline and
+    patched runs) with a periodic "still working... (Ns elapsed)" line,
+    and every pipeline phase (drafting, audit gate, test suite, applied)
+    already prints its own step live -- confirmed still true, nothing
+    new needed there, only the cadence at which all of it fires.
