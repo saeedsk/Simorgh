@@ -1384,7 +1384,7 @@ class TestPrintPending(unittest.TestCase):
         self.assertIn("def run():", output)
         self.assertIn("return 42", output)
 
-    def test_pending_with_subject_shows_the_most_recent_version(self):
+    def test_pending_with_a_prior_version_shows_a_diff(self):
         import contextlib
         import io
 
@@ -1399,8 +1399,45 @@ class TestPrintPending(unittest.TestCase):
             _print_pending(store, "src/agents/skills/rocketry.py")
 
         output = buf.getvalue()
+        self.assertIn("+NEW = 2", output)
+        self.assertIn("-OLD = 1", output)
+        self.assertIn("diff vs previous version", output)
+        self.assertIn("--full", output)
+
+    def test_pending_with_full_flag_shows_the_whole_current_file(self):
+        import contextlib
+        import io
+
+        from src.main import _print_pending
+
+        store = InMemoryStore()
+        store.remember(APPLIED_KIND, "src/agents/skills/rocketry.py", code="OLD = 1", rationale="v1")
+        store.remember(APPLIED_KIND, "src/agents/skills/rocketry.py", code="NEW = 2", rationale="v2")
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_pending(store, "src/agents/skills/rocketry.py --full")
+
+        output = buf.getvalue()
         self.assertIn("NEW = 2", output)
-        self.assertNotIn("OLD = 1", output)
+        self.assertNotIn("diff vs previous version", output)
+
+    def test_pending_with_only_one_version_shows_the_full_file_not_a_diff(self):
+        import contextlib
+        import io
+
+        from src.main import _print_pending
+
+        store = InMemoryStore()
+        store.remember(APPLIED_KIND, "src/agents/skills/rocketry.py", code="X = 1", rationale="v1")
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_pending(store, "src/agents/skills/rocketry.py")
+
+        output = buf.getvalue()
+        self.assertIn("X = 1", output)
+        self.assertNotIn("diff vs previous version", output)
 
     def test_pending_with_unknown_subject_reports_not_found(self):
         import contextlib

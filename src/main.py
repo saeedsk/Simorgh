@@ -69,7 +69,7 @@ from src.orchestrator.apply import (
 )
 from src.orchestrator.audit import REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
-from src.orchestrator.console_style import format_code_block, style
+from src.orchestrator.console_style import format_code_block, format_diff_block, render_checklist, style
 from src.orchestrator.deployment import DeploymentManager
 from src.orchestrator.discovery import discover_improvements
 from src.orchestrator.git_ops import (
@@ -340,7 +340,7 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("autonomous [on|off]", "Control the idle-triggered autonomous loop (no arg = status)."),
     ("digest", "Rollup of autonomous activity over the last 24h."),
     ("news", "Share the next interesting item from your tracked feeds."),
-    ("pending [path]", "List applied changes, or show one's full code."),
+    ("pending [path]", "List applied changes, or diff one (--full for the whole file)."),
     ("skills", "List applied skills you can run by name."),
     ("use <skill name>", "Run an applied skill fresh from disk."),
     ("log [last]", "Show the unified activity/audit trail."),
@@ -1338,9 +1338,17 @@ def propose_skill_batch(
     for i, topic in enumerate(topics, 1):
         print(f"   {i}. {topic}")
 
+    # A persistent, reprinted-after-each-step checklist -- the "what's
+    # left" view Claude Code's own terminal UI keeps visible during
+    # multi-step work, instead of only a scrolling trail of individual
+    # step narration with no summary until the very end.
+    statuses = ["pending"] * len(topics)
+    checklist_title = f"🧵 batch: {theme!r} ({len(topics)} skill(s))"
+
     applied = 0
-    for i, topic in enumerate(topics, 1):
-        print(style(f"— ({i}/{len(topics)}) {topic}", "cyan", "bold"))
+    for i, topic in enumerate(topics):
+        statuses[i] = "in_progress"
+        print(render_checklist(list(zip(topics, statuses)), title=checklist_title))
         result = propose_skill(
             skill_research,
             audit_gate,
@@ -1349,9 +1357,11 @@ def propose_skill_batch(
             repo_root=repo_root,
             max_attempts=DEFAULT_BATCH_MAX_ATTEMPTS,
         )
-        if result.startswith("[APPLIED]"):
-            applied += 1
+        applied_now = result.startswith("[APPLIED]")
+        statuses[i] = "done" if applied_now else "failed"
+        applied += applied_now
 
+    print(render_checklist(list(zip(topics, statuses)), title=checklist_title))
     message = f"[batch] {applied}/{len(topics)} skill(s) applied for theme {theme!r} -- see 'skills'"
     _print_status(message)
     return message
@@ -1848,9 +1858,14 @@ def propose_patch_batch(
         print(f"   {path} -- {description}")
 
     base_commit = current_commit_hash(root)
+    target_labels = [f"{path}: {description}" for path, description in targets]
+    statuses = ["pending"] * len(targets)
+    checklist_title = f"🧬 evolve: {goal!r} ({len(targets)} change(s))"
+
     applied = 0
-    for path, description in targets:
-        print(style(f"— {path}: {description}", "cyan", "bold"))
+    for i, (path, description) in enumerate(targets):
+        statuses[i] = "in_progress"
+        print(render_checklist(list(zip(target_labels, statuses)), title=checklist_title))
         result = propose_self_patch(
             self_patch_agent,
             audit_gate,
@@ -1862,9 +1877,11 @@ def propose_patch_batch(
             max_attempts=DEFAULT_EVOLVE_MAX_ATTEMPTS,
             do_relaunch=False,
         )
-        if result.startswith("[APPLIED]"):
-            applied += 1
+        applied_now = result.startswith("[APPLIED]")
+        statuses[i] = "done" if applied_now else "failed"
+        applied += applied_now
 
+    print(render_checklist(list(zip(target_labels, statuses)), title=checklist_title))
     message = f"[evolve] {applied}/{len(targets)} architectural change(s) applied for goal {goal!r}"
     _print_status(message)
 
@@ -2236,14 +2253,23 @@ def news_command(
     return f"[news] {highlight.blurb}"
 
 
+_PENDING_FULL_SUFFIX = " --full"
+
+
 def _print_pending(store: MemoryStore, subject: str = "") -> None:
     """Bare 'pending' lists every applied skill/patch (path + rationale).
-    'pending <path>' shows the full code for the most recent applied
+    'pending <path>' shows what changed for the most recent applied
     change at that path -- previously the only way to review one was
     `git diff`/reading the file by hand; the code was already sitting
     right there in the record the whole time (apply_proposal/
     apply_source_patch both store `code=proposal.code`), just never
-    surfaced.
+    surfaced. When an earlier applied version of the same path exists,
+    shows a diff against it (shorter, and matches what actually
+    changed -- the point of "minimizing" a big file down to what's
+    relevant, the creator's own framing of what Claude Code's UI does
+    well); 'pending <path> --full' always shows the complete current
+    file instead, and a first-ever version (nothing to diff against)
+    always does too, since there's nothing to collapse.
     """
     skills = store.query(kind=APPLIED_KIND)
     patches = store.query(kind=APPLIED_PATCH_KIND)
@@ -2255,6 +2281,10 @@ def _print_pending(store: MemoryStore, subject: str = "") -> None:
         return
 
     if subject:
+        show_full = subject.endswith(_PENDING_FULL_SUFFIX)
+        if show_full:
+            subject = subject[: -len(_PENDING_FULL_SUFFIX)].strip()
+
         combined = sorted(skills + patches, key=lambda r: r.created_at, reverse=True)
         matches = [r for r in combined if r.content == subject]
         if not matches:
@@ -2267,7 +2297,21 @@ def _print_pending(store: MemoryStore, subject: str = "") -> None:
         test_summary = record.metadata.get("test_summary")
         if test_summary:
             print(f"  test suite: {test_summary.splitlines()[0]}")
-        print(format_code_block(record.metadata.get("code", ""), label=subject))
+
+        previous = matches[1] if len(matches) > 1 else None
+        if previous is not None and not show_full:
+            diff_lines = list(
+                difflib.unified_diff(
+                    (previous.metadata.get("code", "") or "").splitlines(keepends=True),
+                    (record.metadata.get("code", "") or "").splitlines(keepends=True),
+                    fromfile=f"{subject} (previous)",
+                    tofile=f"{subject} (current)",
+                )
+            )
+            print(format_diff_block(diff_lines, label=f"{subject} — diff vs previous version"))
+            print(style(f"  ('pending {subject} --full' shows the complete current file)", "dim"))
+        else:
+            print(format_code_block(record.metadata.get("code", ""), label=subject))
         return
 
     print(style(f"📋 Applied changes ({len(skills) + len(patches)})", "magenta", "bold"))
@@ -2275,7 +2319,7 @@ def _print_pending(store: MemoryStore, subject: str = "") -> None:
         print(f"  [skill] {record.content} -- {record.metadata.get('rationale', '')}")
     for record in patches:
         print(f"  [patch] {record.content} -- {record.metadata.get('rationale', '')}")
-    print(style("  ('pending <path>' shows the full applied code)", "dim"))
+    print(style("  ('pending <path>' shows what changed; add --full for the whole file)", "dim"))
 
 
 def _print_activity_log(activity_log: ActivityLog, arg: str = "", limit: int = 20) -> None:

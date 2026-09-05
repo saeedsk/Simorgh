@@ -102,6 +102,75 @@ def format_code_block(
     return "\n".join([header, *rendered, *footer_notice, footer])
 
 
+def format_diff_block(diff_lines: list[str], *, label: str = "diff", max_lines: int = 60) -> str:
+    """Render a unified diff (e.g. from `difflib.unified_diff`) as a
+    bordered, colored block -- `+`/`-` lines in green/red, `@@` hunk
+    headers cyan, the `---`/`+++` file headers bold, everything else
+    left plain. Bounded like `format_code_block` (a full-file rewrite's
+    diff can still be huge) with the same truncation notice; empty input
+    renders as an explicit "(no changes)" line rather than an empty
+    block that could read as a rendering bug.
+    """
+    lines = list(diff_lines) or ["(no changes)"]
+    shown = lines[:max_lines]
+    cut_line_count = len(lines) - len(shown)
+
+    rendered = []
+    for raw in shown:
+        line = raw.rstrip("\n")
+        if line.startswith("+++") or line.startswith("---"):
+            colored = style(line, "bold")
+        elif line.startswith("@@"):
+            colored = style(line, "cyan", "bold")
+        elif line.startswith("+"):
+            colored = style(line, "green")
+        elif line.startswith("-"):
+            colored = style(line, "red")
+        else:
+            colored = line
+        rendered.append(f"{style('│', 'dim')} {colored}")
+
+    header = style(f"┌─ {label} ", "dim", "bold") + style("─" * max(3, 50 - len(label)), "dim")
+    footer_notice = (
+        [style(f"│ … {cut_line_count} more line(s) truncated", "dim")] if cut_line_count > 0 else []
+    )
+    footer = style("└" + "─" * 52, "dim")
+    return "\n".join([header, *rendered, *footer_notice, footer])
+
+
+_CHECKLIST_ICONS = {
+    "pending": "○",
+    "in_progress": "◐",
+    "done": "✅",
+    "failed": "❌",
+}
+_CHECKLIST_COLORS = {
+    "pending": "dim",
+    "in_progress": "cyan",
+    "done": "green",
+    "failed": "red",
+}
+
+
+def render_checklist(items: list[tuple[str, str]], title: str = "") -> str:
+    """A compact, icon-prefixed checklist for multi-step work (`batch`,
+    `evolve`) -- `items` is a list of `(label, status)` pairs, `status`
+    one of "pending"/"in_progress"/"done"/"failed". Reprinted as a whole
+    block after each step changes (not redrawn in place -- same
+    reasoning as `LiveTicker`: a cursor/carriage-return-based redraw is
+    fragile across terminals, piped output, and non-TTY logging), so a
+    multi-item run has a visible, persistent "what's left" view between
+    the individual step's own drafting/audit/test narration, instead of
+    only a scrolling trail with no summary until the very end.
+    """
+    lines = [style(title, "magenta", "bold")] if title else []
+    for label, status in items:
+        icon = _CHECKLIST_ICONS.get(status, "?")
+        color = _CHECKLIST_COLORS.get(status, "dim")
+        lines.append(f"  {style(icon, color)} {label}")
+    return "\n".join(lines)
+
+
 DEFAULT_TICK_INTERVAL_SECONDS = 5.0
 
 
