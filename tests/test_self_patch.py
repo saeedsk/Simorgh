@@ -74,6 +74,44 @@ class TestSelfPatchAgent(unittest.TestCase):
         self.assertEqual(proposal.code.strip(), "def new():\n    return 2")
         self.assertIn("fake", proposal.rationale)
 
+    def test_seeds_the_prompt_with_the_complete_file_not_a_chat_bounded_prefix(self):
+        # Live-caught bug: a chat-bounded READ (safe_read_file, capped at
+        # 20,000 chars) used to seed this prompt -- for a large file the
+        # model was silently shown only a prefix while still being asked
+        # to write "the COMPLETE new content," which it visibly couldn't
+        # do honestly (it tried to invent an offset-based read protocol
+        # that doesn't exist here, and drafting failed outright).
+        big_content = "x = 1\n" * 5000  # comfortably over the old 20,000-char cap
+        (self.repo_root / "src" / "orchestrator" / "big.py").write_text(big_content)
+        provider = FakeProvider(text="y = 2\n")
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        agent.draft_patch("src/orchestrator/big.py", "improve it")
+
+        self.assertIn(big_content, provider.prompts[0])
+
+    def test_a_file_too_large_to_safely_seed_returns_none_without_calling_the_llm(self):
+        from src.cognition.tool_protocol import _MAX_PATCH_SEED_CHARS
+
+        huge_content = "x" * (_MAX_PATCH_SEED_CHARS + 1)
+        (self.repo_root / "src" / "orchestrator" / "huge.py").write_text(huge_content)
+        provider = FakeProvider(text="y = 2\n")
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        proposal = agent.draft_patch("src/orchestrator/huge.py", "improve it")
+
+        self.assertIsNone(proposal)
+        self.assertEqual(provider.prompts, [])  # never even called -- refused up front
+
+    def test_a_nonexistent_subject_returns_none_without_calling_the_llm(self):
+        provider = FakeProvider(text="y = 2\n")
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        proposal = agent.draft_patch("src/orchestrator/does_not_exist.py", "improve it")
+
+        self.assertIsNone(proposal)
+        self.assertEqual(provider.prompts, [])
+
     def test_invalid_python_returns_none(self):
         provider = FakeProvider(text="not valid python {{{")
         agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)

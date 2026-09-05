@@ -81,13 +81,15 @@ def is_valid_python(code: str) -> bool:
     return True
 
 
-def safe_read_file(repo_root: Path, raw_path: str) -> str:
-    """Read `raw_path` if -- and only if -- it resolves to a plain
-    relative path inside `repo_root`, under src/, docs/, or tests/, and
-    doesn't look like a credentials file. Read-only; never writes; never
-    raises -- returns a "[refused: ...]" string on any problem, so a
-    caller can always feed the result straight back into a prompt without
-    a try/except of its own.
+def _resolve_safe_path(repo_root: Path, raw_path: str) -> tuple[Path | None, str | None]:
+    """The shared validation core for safe_read_file (bounded, for the
+    chat-facing READ tool) and read_file_for_patch (a much higher bound,
+    for seeding a self-patch draft with a file's true current content) --
+    factored out so both enforce the identical path-safety boundary
+    (plain relative path inside repo_root, under src/docs/tests, no
+    traversal, no credential-shaped names) rather than risking two
+    copies drifting apart. Returns `(resolved_path, None)` on success or
+    `(None, "refused: ...")` on any failure -- never raises.
 
     That "never raises" guarantee is enforced explicitly, not assumed:
     caught live, a confused model's "READ:" payload was really a huge
@@ -101,33 +103,54 @@ def safe_read_file(repo_root: Path, raw_path: str) -> str:
     enumerate.
     """
     if len(raw_path) > _MAX_PATH_CHARS:
-        return f"[refused: path is {len(raw_path)} chars -- too long to be a real path]"
+        return None, f"refused: path is {len(raw_path)} chars -- too long to be a real path"
     try:
         rel = Path(raw_path)
     except ValueError as exc:
-        return f"[refused: {raw_path!r} is not a valid path: {exc!r}]"
+        return None, f"refused: {raw_path!r} is not a valid path: {exc!r}"
 
     if rel.is_absolute() or ".." in rel.parts:
-        return f"[refused: {raw_path!r} is not a safe relative path]"
+        return None, f"refused: {raw_path!r} is not a safe relative path"
     if not rel.parts or rel.parts[0] not in _ALLOWED_READ_ROOTS:
-        return (
-            f"[refused: {raw_path!r} is outside the readable areas "
-            f"({', '.join(_ALLOWED_READ_ROOTS)})]"
+        return None, (
+            f"refused: {raw_path!r} is outside the readable areas "
+            f"({', '.join(_ALLOWED_READ_ROOTS)})"
         )
     if any(
         name in part.lower() or part.lower().endswith(".key")
         for part in rel.parts
         for name in _CREDENTIAL_LOOKING_NAMES
     ):
-        return f"[refused: {raw_path!r} looks like a credentials path]"
+        return None, f"refused: {raw_path!r} looks like a credentials path"
 
     try:
         resolved_root = repo_root.resolve()
         target = (resolved_root / rel).resolve()
         if resolved_root != target and resolved_root not in target.parents:
-            return f"[refused: {raw_path!r} resolves outside the repository]"
+            return None, f"refused: {raw_path!r} resolves outside the repository"
         if not target.is_file():
-            return f"[refused: {raw_path!r} is not a file]"
+            return None, f"refused: {raw_path!r} is not a file"
+    except OSError as exc:
+        return None, f"refused: could not resolve {raw_path!r}: {exc!r}"
+    return target, None
+
+
+def safe_read_file(repo_root: Path, raw_path: str) -> str:
+    """Read `raw_path` if -- and only if -- it resolves to a plain
+    relative path inside `repo_root`, under src/, docs/, or tests/, and
+    doesn't look like a credentials file. Read-only; never writes; never
+    raises -- returns a "[refused: ...]" string on any problem, so a
+    caller can always feed the result straight back into a prompt without
+    a try/except of its own. Bounded to `_MAX_READ_CHARS`, appropriate
+    for a chat-facing READ tool call -- see `read_file_for_patch` for
+    self-patch's own, much higher ceiling, needed because it seeds a
+    "write the complete new content of this file" prompt rather than a
+    bounded conversational lookup.
+    """
+    target, refusal = _resolve_safe_path(repo_root, raw_path)
+    if refusal is not None:
+        return f"[{refusal}]"
+    try:
         content = target.read_text(errors="replace")
     except OSError as exc:
         return f"[refused: could not read {raw_path!r}: {exc!r}]"
@@ -135,6 +158,49 @@ def safe_read_file(repo_root: Path, raw_path: str) -> str:
     if len(content) > _MAX_READ_CHARS:
         return content[:_MAX_READ_CHARS] + f"\n...[truncated, {len(content)} chars total]"
     return content
+
+
+# Self-patching is asked to write "the COMPLETE new content" of a file,
+# so silently truncating what it's shown (as safe_read_file's much
+# smaller _MAX_READ_CHARS does, appropriate for a bounded chat READ)
+# produces a genuinely broken draft, not just an incomplete one: caught
+# live, self-patching a 62KB file fed the model only its first 20,000
+# characters, and it visibly confused itself trying to ask for "more"
+# (hallucinating an offset-based read protocol this system doesn't
+# have) before the drafting attempt failed outright. src/main.py
+# (~106KB) and src/agents/logic/base.py (~36KB) -- two of the most
+# important files in the whole self-modification system -- are also
+# over the old cap, meaning this was a latent correctness bug for real
+# self-patch targets, not just an edge case. Generous, not unlimited:
+# a file too large even for this ceiling gets an honest refusal instead
+# of a silent truncation the model has to discover the hard way.
+_MAX_PATCH_SEED_CHARS = 300_000
+
+
+def read_file_for_patch(repo_root: Path, raw_path: str) -> tuple[str | None, str | None]:
+    """Like safe_read_file, but for seeding a self-patch draft: the same
+    path-safety validation, an untruncated read up to a much higher
+    ceiling (`_MAX_PATCH_SEED_CHARS`), and a distinct, honest refusal for
+    a file that's too large to safely draft a complete replacement for
+    in one shot -- rather than silently truncating and letting the
+    drafting LLM discover the gap on its own. Returns `(content, None)`
+    on success or `(None, "refused: ...")` on failure; never raises.
+    """
+    target, refusal = _resolve_safe_path(repo_root, raw_path)
+    if refusal is not None:
+        return None, refusal
+    try:
+        content = target.read_text(errors="replace")
+    except OSError as exc:
+        return None, f"refused: could not read {raw_path!r}: {exc!r}"
+
+    if len(content) > _MAX_PATCH_SEED_CHARS:
+        return None, (
+            f"refused: {raw_path!r} is {len(content)} chars, over the "
+            f"{_MAX_PATCH_SEED_CHARS}-char self-patch limit -- too large to safely "
+            "draft a complete replacement for in one shot"
+        )
+    return content, None
 
 
 _MAX_LIST_ENTRIES = 300

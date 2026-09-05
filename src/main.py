@@ -63,6 +63,7 @@ from src.orchestrator.autonomy import ActivityClock, AutonomyController
 from src.orchestrator.apply import (
     APPLIED_KIND,
     APPLIED_PATCH_KIND,
+    SELF_PATCH_SCOPE_PREFIX,
     ApplyRefused,
     apply_proposal,
     apply_source_patch,
@@ -1405,6 +1406,24 @@ def propose_self_patch(
     """
     if not subject or not topic:
         message = "[usage: patch <repo-relative path> <description of the change>]"
+        _print_status(message)
+        return message
+
+    # Checked here, before ever calling the drafting LLM, not left for
+    # apply_source_patch to discover after a whole drafting attempt: a
+    # live bug report showed a subject outside this scope (docs/EVOLUTION.md)
+    # burning a real drafting attempt -- the model, unable to see enough
+    # of a large file (a separate bug, fixed below in draft_patch), spun
+    # into a confused, misleading failure ("no real drafting intelligence
+    # available", which sounds like an infrastructure problem, not a
+    # scope one) instead of getting an instant, honest answer for free.
+    if not subject.startswith(SELF_PATCH_SCOPE_PREFIX):
+        message = (
+            f"[rejected] {subject!r} is outside self-patch's scope "
+            f"({SELF_PATCH_SCOPE_PREFIX!r} only) -- self-patch changes Simorgh's own "
+            "logic, not its docs, tests, or config. Edit that file directly, or "
+            "describe what should change in plain conversation."
+        )
         _print_status(message)
         return message
 
