@@ -270,27 +270,86 @@ def render_vitals(mood_phrase: str, bars: list[tuple[str, float]], stats: list[t
 
 
 DEFAULT_VITALS_INTERVAL_SECONDS = 15.0
+DEFAULT_PINNED_INTERVAL_SECONDS = 2.0
+
+_SAVE_CURSOR = "\x1b7"
+_RESTORE_CURSOR = "\x1b8"
+_HIDE_CURSOR = "\x1b[?25l"
+_SHOW_CURSOR = "\x1b[?25h"
+_CLEAR_LINE = "\x1b[2K"
+
+
+def _terminal_size() -> tuple[int, int] | None:
+    """(columns, rows) of the real controlling terminal, or `None` if
+    stdout isn't one (piped, non-interactive, CI, the test suite) --
+    callers must treat `None` as "pinning isn't possible here" and never
+    fall back to a guessed size, the same discipline `style()`'s own
+    `_ENABLED` check already applies to color.
+    """
+    if not sys.stdout.isatty():
+        return None
+    try:
+        size = os.get_terminal_size(sys.stdout.fileno())
+    except OSError:
+        return None
+    return size.columns, size.lines
+
+
+def _set_scroll_region(top: int, bottom: int) -> None:
+    """DECSTBM: confines normal scrolling to rows `top..bottom`
+    (1-indexed, inclusive) -- rows above `top` become a reserved area
+    ordinary output never touches or scrolls. `reset_scroll_region()`
+    (no args) restores the whole terminal.
+    """
+    sys.stdout.write(f"\x1b[{top};{bottom}r")
+
+
+def _reset_scroll_region() -> None:
+    sys.stdout.write("\x1b[r")
 
 
 class VitalsMonitor:
-    """Optional, toggleable live vitals panel ('vitals on'/'vitals off').
+    """The vitals panel's toggleable display modes -- one on-demand
+    snapshot (`_print_vitals`/`vitals`, elsewhere), plus two live modes
+    this class owns: 'vitals on' (safe, scrolling) and 'vitals pin'
+    (a real fixed on-screen region, at the creator's explicit request
+    after being told the tradeoff).
 
-    Same safe pattern this project already established for everything
-    else that prints on its own (LiveTicker above, reminders.py, the
-    autonomous loop): a daemon thread prints a fresh block between
-    `input()` calls, never a fragile in-place cursor redraw -- this
-    project has deliberately avoided true in-place TUI redraws
-    throughout (see LiveTicker's own docstring) since they're fragile
-    across terminals, piped output, and non-TTY logging. Only actually
-    prints while `enabled` and `is_idle()` both say so, so a "live"
-    panel never interrupts someone actively typing -- the exact same
-    idle-gating idea `AutonomyController` already uses, reusing
-    whatever `ActivityClock` the caller already has rather than a
-    second one.
+    'vitals on'/'off' -- the SAFE mode, on by default preference: same
+    pattern this project already established for everything else that
+    prints on its own (LiveTicker above, reminders.py, the autonomous
+    loop): a daemon thread prints a fresh block between `input()`
+    calls, never a fragile in-place cursor redraw -- this project has
+    deliberately avoided true in-place TUI redraws throughout (see
+    LiveTicker's own docstring) since they're fragile across terminals,
+    piped output, and non-TTY logging. Only actually prints while
+    `enabled` and `is_idle()` both say so, so a "live" panel never
+    interrupts someone actively typing -- the exact same idle-gating
+    idea `AutonomyController` already uses.
+
+    'vitals pin'/'unpin' -- the genuinely riskier mode, built only
+    after the creator was told the tradeoff and chose it anyway: a real
+    reserved region at the top of the screen (`DECSTBM`, the same
+    scroll-region technique `tmux`'s status bar and similar tools use),
+    redrawn in place via save/restore-cursor -- the panel stays visibly
+    present at all times instead of scrolling away, unlike 'vitals on'.
+    Gated hard behind `_terminal_size()` returning a real size (never
+    engages when stdout isn't a genuine TTY -- piped output, CI, the
+    test suite all silently keep the safe scrolling mode instead, same
+    as `console_style.style()`'s own color gating). Redraws are still
+    idle-gated even while pinned -- the panel's PRESENCE never depends
+    on idle time once pinned, but its CONTENT only refreshes when
+    `readline` is unlikely to be mid-redraw of the input line itself,
+    since both write to the same underlying terminal file descriptor
+    and a genuinely concurrent write from each side could interleave.
+    `unpin()`/`stop()` always restore the terminal's normal scroll
+    region -- this must never be skipped, or the user's terminal stays
+    visibly broken (scrolling confined to a partial screen) after Sim
+    exits, including on Ctrl-C or a crash.
 
     Started once at CLI startup and left running for the process's
-    whole life, exactly like `AutonomyController` -- `enabled` is a
-    plain toggle checked every tick, not something that starts/stops
+    whole life, exactly like `AutonomyController` -- `enabled`/`pinned`
+    are plain toggles checked every tick, not things that start/stop
     the underlying thread, so there's no restart-race to get wrong.
     """
 
@@ -299,13 +358,22 @@ class VitalsMonitor:
         render: Callable[[], str],
         is_idle: Callable[[], bool],
         interval: float = DEFAULT_VITALS_INTERVAL_SECONDS,
+        pinned_interval: float = DEFAULT_PINNED_INTERVAL_SECONDS,
     ) -> None:
         self._render = render
         self._is_idle = is_idle
         self._interval = interval
+        self._pinned_interval = pinned_interval
         self.enabled = False
+        self._pinned = False
+        self._panel_height = 0
+        self._pin_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+
+    @property
+    def pinned(self) -> bool:
+        return self._pinned
 
     def start(self) -> None:
         if self._thread is not None:
@@ -315,9 +383,84 @@ class VitalsMonitor:
 
     def stop(self) -> None:
         self._stop.set()
+        self.unpin()
+
+    def pin(self) -> bool:
+        """Switches to the fixed on-screen panel. Returns False (and
+        changes nothing) if stdout isn't a real terminal -- pinning is
+        simply impossible there, not something to fake.
+
+        Sets the scroll region exactly ONCE here, deliberately not on
+        every later redraw: DECSTBM (`_set_scroll_region`) resets the
+        cursor to the top of the new region as a side effect on most
+        terminals, and reissuing it on every redraw would fight
+        wherever ordinary conversation output had actually left the
+        cursor, on every single tick. A later terminal resize isn't
+        auto-detected because of this -- `vitals unpin` then `vitals
+        pin` again re-measures and re-fits cleanly, deliberately kept
+        manual rather than adding back the every-redraw reset this is
+        avoiding.
+        """
+        size = _terminal_size()
+        if size is None:
+            return False
+        _, rows = size
+        panel_lines = self._render().split("\n")
+        # Never reserve the WHOLE screen -- always leave real room for
+        # the actual conversation, or a giant panel on a tiny terminal
+        # would leave nothing for `input()` to even draw into.
+        height = min(len(panel_lines), max(1, rows - 3))
+        with self._pin_lock:
+            self._panel_height = height
+            self._pinned = True
+            _set_scroll_region(height + 1, max(height + 1, rows))
+            self._draw_pinned_locked(panel_lines[:height])
+        return True
+
+    def unpin(self) -> None:
+        with self._pin_lock:
+            if not self._pinned:
+                return
+            self._pinned = False
+            _reset_scroll_region()
+            sys.stdout.flush()
+
+    def _draw_pinned_locked(self, panel_lines: list[str]) -> None:
+        """Caller must hold `_pin_lock`. Draws `panel_lines` into the
+        already-reserved top rows via save/restore-cursor -- never a
+        bare cursor move with nothing to restore it, which would leave
+        the terminal's cursor stranded in the reserved area. Never
+        touches the scroll region itself -- see `pin()`'s own docstring
+        for why that's set up exactly once, not on every redraw.
+        """
+        out = [_SAVE_CURSOR, _HIDE_CURSOR]
+        for i, line in enumerate(panel_lines):
+            out.append(f"\x1b[{i + 1};1H{_CLEAR_LINE}{line}")
+        out.append(_SHOW_CURSOR)
+        out.append(_RESTORE_CURSOR)
+        sys.stdout.write("".join(out))
+        sys.stdout.flush()
 
     def _loop(self) -> None:
-        while not self._stop.wait(self._interval):
-            if self.enabled and self._is_idle():
+        while True:
+            interval = self._pinned_interval if self._pinned else self._interval
+            if self._stop.wait(interval):
+                return
+            if not self._is_idle():
+                continue
+            with self._pin_lock:
+                pinned = self._pinned
+            if pinned:
+                if _terminal_size() is None:
+                    # The terminal disappeared out from under a pinned
+                    # session (e.g. genuinely detached) -- nothing safe
+                    # left to draw into; stop trying rather than error.
+                    self.unpin()
+                    continue
+                panel_lines = self._render().split("\n")[: self._panel_height]
+                with self._pin_lock:
+                    if self._pinned:  # re-check: unpin() may have raced in
+                        self._draw_pinned_locked(panel_lines)
+            elif self.enabled:
                 print("\n" + self._render())
                 print(style("> ", "cyan", "bold"), end="", flush=True)
