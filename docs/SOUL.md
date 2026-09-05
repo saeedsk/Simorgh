@@ -351,7 +351,7 @@ propose/audit/apply pattern from *new skill files only* to *any existing
 file under src/*, gated by something stronger than the skills class:
 - Same `AuditGate.review()` as skills -- same denylist, same
   adaptive-immunity memory, same sandboxed smoke run. Nothing about this
-  pipeline weakened that gate; `_PROTECTED_SUBJECTS` now additionally
+  pipeline weakened that gate; `PROTECTED_SUBJECTS` now additionally
   covers `apply.py` and `self_patch.py` themselves, so this pipeline can
   never be used to approve disabling itself.
 - On top of that: this repository's *entire test suite*, run fresh

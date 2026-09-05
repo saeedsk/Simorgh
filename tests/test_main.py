@@ -2330,6 +2330,26 @@ class TestDiscoverCreativeImprovements(unittest.TestCase):
         self.assertEqual(created, [])
         self.assertEqual(len(task_store.all()), 1)  # still just the pre-existing one
 
+    def test_filters_out_a_target_that_can_never_pass_the_audit_gate(self):
+        # Live-caught: a creative-agenda idea targeting self_patch.py (a
+        # protected file, audit.py's PROTECTED_SUBJECTS) burned three
+        # real LLM calls, got rejected three times, went BLOCKED, then
+        # got retried and rejected again -- guaranteed to fail forever,
+        # no matter how good the draft is. Filtered before ever
+        # touching the task store.
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition(
+            "1. src/orchestrator/self_patch.py :: add a rollback-and-score loop\n"
+            "2. src/orchestrator/foo.py :: a genuinely reachable idea\n"
+        )
+
+        created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=2)
+
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0].subject, "src/orchestrator/foo.py")
+        self.assertEqual(len(task_store.all()), 1)
+
     def test_prompt_asks_for_the_requested_count(self):
         store = InMemoryStore()
         task_store = TaskStore(store)

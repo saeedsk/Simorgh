@@ -69,7 +69,7 @@ from src.orchestrator.apply import (
     apply_proposal,
     apply_source_patch,
 )
-from src.orchestrator.audit import REJECTED_KIND, AuditGate
+from src.orchestrator.audit import PROTECTED_SUBJECTS, REJECTED_KIND, AuditGate
 from src.orchestrator.consolidation import run_consolidation
 from src.orchestrator.console_style import format_code_block, format_diff_block, render_checklist, style
 from src.orchestrator.deployment import DeploymentManager
@@ -2040,6 +2040,24 @@ def discover_creative_improvements(
     existing_descriptions = [t.description for t in task_store.all()]
     created: list[Task] = []
     for path, description in targets:
+        # A protected-file target (audit.py's PROTECTED_SUBJECTS) can
+        # NEVER pass AuditGate.review() no matter how good the draft
+        # is -- letting it become a task anyway means every attempt
+        # (each one a real, billed LLM call) is guaranteed to fail for
+        # the same unfixable reason, and a BLOCKED task keeps getting
+        # reconsidered later, repeating the waste. Caught live: a
+        # creative-agenda idea targeting self_patch.py (protected) burned
+        # three real Gemini calls, got rejected three times, went
+        # BLOCKED, then got retried and rejected again on the very next
+        # reconsideration pass. Filtered out here, before ever touching
+        # the task store, rather than left for the audit gate to keep
+        # discovering the same impossibility over and over.
+        if any(protected in path for protected in PROTECTED_SUBJECTS):
+            print(
+                f"[discover] skipping a self-directed idea for {path!r} -- "
+                "that file can never be self-patched (protected)"
+            )
+            continue
         if _creative_agenda_already_covered(description, existing_descriptions):
             continue
         task = task_store.add(

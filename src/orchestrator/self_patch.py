@@ -18,7 +18,7 @@ restarting it. Both halves matter, and neither moved the other:
 - The boundary stays exactly where it was. A self-patch still goes
   through AuditGate.review() -- the same denylist, adaptive-immunity
   memory, and sandboxed run a drafted skill goes through -- and
-  audit.py's _PROTECTED_SUBJECTS now additionally covers apply.py and
+  audit.py's PROTECTED_SUBJECTS now additionally covers apply.py and
   this file, so a self-patch can never touch the code that enforces
   self-patches. The network denylist is unconditional in AuditGate, not
   scoped by file location, so this pipeline cannot be used to add
