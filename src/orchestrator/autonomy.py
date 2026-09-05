@@ -57,9 +57,20 @@ class ActionDigest:
 
 ACTION_KIND = "autonomous_action"
 
-DEFAULT_IDLE_THRESHOLD_SECONDS = 300.0
-DEFAULT_ACTION_COOLDOWN_SECONDS = 600.0
-DEFAULT_POLL_INTERVAL_SECONDS = 30.0
+# Retuned from the original 300s/600s after direct creator feedback:
+# "not acting on its own, sitting idle all the time." Idle time resets
+# on every keystroke, so at 300s idle / 600s cooldown, an active,
+# back-and-forth chat session almost never leaves a long enough silent
+# gap for this to ever fire -- the only way to actually see it act was
+# to walk away from the terminal for 5+ minutes. That's a reasonable
+# default for an unattended background daemon; it's the wrong one for
+# something meant to feel like a present conversational partner.
+# EVOLUTION.md flagged these as "judgment calls... worth revisiting
+# once there's a real track record" from the start -- this is that
+# revision, from real, direct operating feedback rather than a guess.
+DEFAULT_IDLE_THRESHOLD_SECONDS = 60.0
+DEFAULT_ACTION_COOLDOWN_SECONDS = 150.0
+DEFAULT_POLL_INTERVAL_SECONDS = 20.0
 DEFAULT_MAX_ACTIONS_PER_DAY = 20
 # A circuit breaker, not a metric to tune finely: real-world guidance on
 # self-improving agents converges on the same shape regardless of the

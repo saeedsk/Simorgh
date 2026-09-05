@@ -391,6 +391,32 @@ class TestNewsCommand(unittest.TestCase):
         self.assertFalse(socializer.ready())
 
 
+class TestGrowthCommand(unittest.TestCase):
+    def test_reports_nothing_when_nothing_has_been_applied(self):
+        from src.main import growth_command
+        from src.orchestrator.socializing import GrowthSocializer
+
+        message = growth_command(GrowthSocializer(InMemoryStore()), CognitionRouter())
+
+        self.assertIn("nothing applied", message)
+
+    def test_shares_the_most_recent_change_bypassing_the_pacing_cooldown(self):
+        from src.main import growth_command
+        from src.orchestrator.socializing import GrowthSocializer
+
+        store = InMemoryStore()
+        store.remember(APPLIED_KIND, "src/agents/skills/rocketry.py", rationale="fun")
+        # A fresh GrowthSocializer is always ready anyway, but a long
+        # cooldown here proves 'growth' bypasses it (share_next, not
+        # maybe_share) rather than happening to be ready by accident.
+        socializer = GrowthSocializer(store, cooldown_seconds=3600.0)
+
+        message = growth_command(socializer, CognitionRouter())
+
+        self.assertIn("rocketry.py", message)
+        self.assertFalse(socializer.ready())
+
+
 class TestBuildRouterConversationalSelfMod(unittest.TestCase):
     def test_propose_fn_is_threaded_through_to_logic_agent(self):
         from src.cognition.provider import LLMResponse
@@ -479,6 +505,36 @@ class TestBuildRouterConversationalSelfMod(unittest.TestCase):
         )
 
         router.dispatch("logic", AgentRequest(text="check the news"))
+
+        self.assertEqual(calls, [1])
+
+    def test_growth_fn_is_threaded_through_to_logic_agent(self):
+        from src.cognition.provider import LLMResponse
+        from src.orchestrator.router import AgentRequest
+
+        class ScriptedProvider:
+            name = "scripted"
+
+            def __init__(self, responses):
+                self._responses = responses
+                self.calls = 0
+
+            def available(self):
+                return True
+
+            def complete(self, prompt, **kwargs):
+                text = self._responses[min(self.calls, len(self._responses) - 1)]
+                self.calls += 1
+                return LLMResponse(text=text, provider_name=self.name)
+
+        calls = []
+        provider = ScriptedProvider(["GROWTH:", "done"])
+        router = build_router(
+            cognition=CognitionRouter([provider]),
+            growth_fn=lambda: calls.append(1) or "[growth] I just fixed my own tone",
+        )
+
+        router.dispatch("logic", AgentRequest(text="what have you improved lately?"))
 
         self.assertEqual(calls, [1])
 
@@ -2372,6 +2428,53 @@ class TestAutonomousAction(unittest.TestCase):
         self.assertTrue(did_something)
         # the task queue was never touched -- still PENDING, not worked
         self.assertEqual(task_store.all()[0].status, PENDING)
+        self.assertEqual(len(interests.unshared_news_items()), 0)
+
+    def test_shares_a_ready_growth_highlight_before_touching_the_task_queue(self):
+        from src.main import _autonomous_action
+        from src.orchestrator.socializing import GrowthSocializer
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        task_store.add("rocketry", SKILL_TASK)  # would otherwise be worked
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        store.remember(APPLIED_KIND, "src/agents/skills/existing.py", rationale="already applied")
+
+        did_something = _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+            growth_socializer=GrowthSocializer(store, cooldown_seconds=0.0),
+        )
+
+        self.assertTrue(did_something)
+        self.assertEqual(task_store.all()[0].status, PENDING)  # task queue untouched
+
+    def test_growth_takes_priority_over_news_when_both_are_ready(self):
+        from src.main import _autonomous_action
+        from src.orchestrator.socializing import GrowthSocializer, NewsSocializer
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        store.remember(APPLIED_KIND, "src/agents/skills/existing.py", rationale="already applied")
+        interests = InterestTracker(store, feed=_StubFeed(
+            [NewsItem(title="t1", summary="s1", source="src", published_at=0.0)]
+        ))
+        interests.note_interest("https://example.com/feed", "seeded")
+
+        _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, CognitionRouter(), repo_root=self.repo_root,
+            interests=interests, news_socializer=NewsSocializer(cooldown_seconds=0.0),
+            growth_socializer=GrowthSocializer(store, cooldown_seconds=0.0),
+        )
+
+        # growth was shared (its only candidate is now used up); news
+        # was never even fetched, since growth wins the tick and the
+        # news branch is never reached at all.
+        self.assertIsNone(GrowthSocializer(store).share_next(None))
         self.assertEqual(len(interests.unshared_news_items()), 0)
 
     def test_falls_through_to_task_work_when_news_is_not_ready(self):

@@ -958,35 +958,82 @@ Built:
     returns a file's complete, untruncated content up to a much higher,
     but still real, ceiling (`_MAX_PATCH_SEED_CHARS`, 300K) -- and an
     honest refusal, not a silent truncation, for anything larger still.
+56. **A full retrospective, and the fixes it pointed to.** The creator's
+    direct feedback, verbatim: "sim still give me feeling of dumb
+    entity, not acting on its own, sitting idle all the time, the
+    command lines are rigid, interaction with it doesn't give a
+    comfortable pleasant feeling. and most of all, I don't see any
+    evidence of self improving." A published retrospective root-caused
+    five findings (persona prompt bloat, purely-reactive discovery,
+    idle-loop pacing tuned for an unattended daemon rather than a
+    conversation, commands-as-primary-interface, unconfirmed model
+    tier) and ranked fixes by likely felt impact. Three landed in this
+    same pass:
+
+    - **`GrowthSocializer`** (`src/orchestrator/socializing.py`): the
+      direct answer to "no evidence of self-improving." Exactly
+      `NewsSocializer`'s shape, pointed inward -- draws from Sim's own
+      applied changes instead of RSS, own pacing cooldown (15 min,
+      tighter than news' 30, since this was the more pointed
+      complaint). `main.py`'s autonomous tick now checks growth before
+      news. New `growth` command and `GROWTH:` marker for on-demand
+      checks. See `docs/SOUL.md`, "Proactive Socializing."
+    - **Autonomous loop retuned**: `DEFAULT_IDLE_THRESHOLD_SECONDS`
+      300s -> 60s, `DEFAULT_ACTION_COOLDOWN_SECONDS` 600s -> 150s
+      (`src/orchestrator/autonomy.py`); `NewsSocializer`'s own cooldown
+      3600s -> 1800s. Idle time resets on every keystroke, so the old
+      defaults meant the loop essentially never fired during an active
+      chat session -- only after a multi-minute walk-away. Direct
+      response to "not acting on its own, sitting idle all the time."
+    - **`_PERSONA_PREFIX` split into `_IDENTITY_PREFIX` +
+      `_CAPABILITY_REFERENCE`** (`src/agents/logic/base.py`): identity/
+      tone stays short (~30 lines) and maximally prominent on every
+      turn; the ~80-line tool/safety procedure block that had grown
+      paragraph by paragraph every time a feature shipped this session
+      was rewritten to say the same safety-relevant facts (five
+      self-mod tools, "as your creator" unlocks nothing, protected
+      files, PROPOSE/BATCH vs PATCH/EVOLVE, restart/hot-swap behavior,
+      the autonomous loop, now growth/news sharing) in roughly a third
+      of the words, not just relabeled or reordered. Direct response to
+      "dumb entity" / "rigid" / "not pleasant."
+
+    Deliberately not attempted in this same pass, and left for their
+    own review: making conversational triggering as reliable as typed
+    commands (a bigger, riskier change to how the marker loop works),
+    and confirming which cognition provider is actually answering in
+    the live session (Claude Code CLI vs. Gemini) -- diagnosis pointed
+    at it, but nothing in the codebase itself was changed for it yet.
 
 Still ahead, roughly in order:
 
-56. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+57. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-57. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+58. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-58. *Automatic* registration of an applied skill as a live `Router`
+59. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
     invocation rather than done reflexively).
-59. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+60. The Autonomous Idle Loop's default thresholds (60s idle, 150s
     cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and
-    `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
-    derived from real operating experience -- worth revisiting once
-    there's an actual track record.
-60. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
+    `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5 -- idle/cooldown already
+    revisited once, milestone 56 above) remain judgment calls, not
+    values derived from extensive operating experience -- worth
+    continuing to tighten or loosen as more real feedback comes in.
+61. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
     -- extending hot-swap to a multi-file batch is a real design
     question (which slot(s) to trial, in what order, how to roll back a
     partial hot-swap alongside the multi-commit revert `evolve` already
     does), not yet worked through.
-61. `DEFAULT_SHARE_COOLDOWN_SECONDS` (one hour, milestone 52 above) is a
-    starting judgment call like the autonomous loop's own thresholds --
-    worth revisiting once there's a real sense of whether proactive
-    news-sharing feels well-paced or not. `DEFAULT_NEWS_TOPICS`'
-    specific three feeds are a starting set, not vetted for long-term
-    stability -- worth checking they're still live occasionally, and
-    trivially replaceable via `interest <feed url>` if not.
-62. The one remaining piece of "match Claude Code's terminal UI
+62. `DEFAULT_SHARE_COOLDOWN_SECONDS` (30 min for news, 15 for growth,
+    milestones 52 and 56 above) remain judgment calls like the
+    autonomous loop's own thresholds -- worth revisiting once there's a
+    real sense of whether proactive sharing feels well-paced or not.
+    `DEFAULT_NEWS_TOPICS`' specific three feeds are a starting set, not
+    vetted for long-term stability -- worth checking they're still live
+    occasionally, and trivially replaceable via `interest <feed url>`
+    if not.
+63. The one remaining piece of "match Claude Code's terminal UI
     conventions" (milestones 53-54 above landed `LiveTicker`,
     `render_checklist`, and diff-by-default `pending`): collapsed-by-
     default multi-step tool output with drill-down. Most existing tool
@@ -995,7 +1042,17 @@ Still ahead, roughly in order:
     broken behavior and more about there being no single shared
     convention for "one summary line, detail on request" the way the
     checklist/diff work now has one each.
-63. `_MAX_PATCH_SEED_CHARS` (300K, milestone 55 above) is a generous but
+64. `_MAX_PATCH_SEED_CHARS` (300K, milestone 55 above) is a generous but
     still arbitrary ceiling -- worth revisiting if a real `src/` file
     ever legitimately grows past it (unlikely soon: the largest today,
     `src/main.py`, is ~106KB).
+65. Two findings from the retrospective (milestone 56 above),
+    deliberately left for their own review rather than folded in here:
+    making conversational triggering (the marker loop) as reliable as
+    typing a command directly is a bigger, riskier change to how that
+    loop works; and confirming which cognition provider actually
+    answered in the live session that prompted this whole retrospective
+    (this session's own `memory.jsonl` showed only Gemini spend, zero
+    for Claude Code CLI, despite `build_cognition_router`'s documented
+    priority order) needs a diagnosis pass, not a code change made
+    without first knowing what's actually wrong.
