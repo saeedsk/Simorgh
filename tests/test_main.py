@@ -704,6 +704,13 @@ class TestExtractPatchArgs(unittest.TestCase):
 
 
 class FakeSelfPatchAgent:
+    """`proposals` is a list of either `ModificationProposal` (success)
+    or `None` (mapped to a "deterministic_fallback" reason, matching the
+    real SelfPatchAgent.draft_patch's own tuple return shape) -- or, for
+    tests that need a specific retryable failure reason, a 2-tuple
+    `(None, reason)` passed through as-is.
+    """
+
     def __init__(self, proposals):
         self._proposals = proposals
         self.calls = []
@@ -711,7 +718,10 @@ class FakeSelfPatchAgent:
     def draft_patch(self, subject, topic, prior_reasons=None):
         self.calls.append((subject, topic, prior_reasons))
         index = min(len(self.calls) - 1, len(self._proposals) - 1)
-        return self._proposals[index]
+        proposal = self._proposals[index]
+        if isinstance(proposal, tuple):
+            return proposal
+        return (proposal, None) if proposal is not None else (None, "deterministic_fallback")
 
 
 class TestProposeSelfPatch(unittest.TestCase):
@@ -949,6 +959,56 @@ class TestProposeSelfPatch(unittest.TestCase):
 
         self.assertIn("no real drafting intelligence", message)
         self.assertEqual(store.query(kind=APPLIED_PATCH_KIND), [])
+
+    def test_a_refused_target_stops_immediately_without_retrying(self):
+        # A "refused: ..." reason (out-of-scope/too-large target) is a
+        # problem with the FILE, not the draft -- retrying can't help,
+        # unlike an invalid-Python draft.
+        store = InMemoryStore()
+        agent = FakeSelfPatchAgent([(None, "refused: 'x' is not a file")])
+
+        message = propose_self_patch(
+            agent,
+            AuditGate(),
+            store,
+            ActivityLog(store),
+            "src/orchestrator/target.py",
+            "bad idea",
+            repo_root=self.repo_root,
+            max_attempts=3,
+            do_relaunch=False,
+        )
+
+        self.assertIn("rejected", message.lower())
+        self.assertIn("not a file", message)
+        self.assertEqual(len(agent.calls), 1)  # never retried
+
+    def test_invalid_python_draft_is_retried_with_feedback_not_abandoned(self):
+        # Direct fix for a live-caught bug: a real provider answering
+        # with invalid Python used to abandon the whole attempt on the
+        # very first try, even though max_attempts existed for exactly
+        # this kind of recoverable failure (same as an audit rejection).
+        self._write_passing_test()
+        store = InMemoryStore()
+        good = ModificationProposal(
+            subject="src/orchestrator/target.py", code="VALUE = 2\n", rationale="good"
+        )
+        agent = FakeSelfPatchAgent([(None, "'fake' answered but its response wasn't Python"), good])
+
+        message = propose_self_patch(
+            agent,
+            AuditGate(),
+            store,
+            ActivityLog(store),
+            "src/orchestrator/target.py",
+            "fix it",
+            repo_root=self.repo_root,
+            do_relaunch=False,
+        )
+
+        self.assertIn("APPLIED", message)
+        self.assertEqual(len(agent.calls), 2)
+        self.assertTrue(any("wasn't Python" in (r or "") for r in agent.calls[1][2]))
 
     def test_main_py_patch_missing_safety_wiring_is_refused_before_the_suite_runs(self):
         (self.repo_root / "src" / "main.py").write_text("print('original')\n")
