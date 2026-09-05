@@ -397,6 +397,30 @@ class TestRelaunch(unittest.TestCase):
         self.assertTrue(exe)
         self.assertEqual(argv[0], exe)
 
+    def test_reconstructs_module_invocation_instead_of_reusing_raw_argv(self):
+        # Live-caught: for a process started with `python3 -m src.main`,
+        # sys.argv is NOT ['-m', 'src.main'] -- Python resolves it to the
+        # absolute script path before the program ever runs. Reusing
+        # sys.argv to re-invoke would run that path as a bare script,
+        # not a module, breaking every `from src.... import ...` in the
+        # patched code (ModuleNotFoundError) regardless of how correct
+        # the patch itself was. This silently reverted every otherwise-
+        # successful self-patch to a non-hot-swappable file.
+        seen_check_argv = []
+        exec_calls = []
+
+        def check_runner(argv, **kwargs):
+            seen_check_argv.append(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        relaunch(
+            exec_func=lambda exe, argv: exec_calls.append((exe, argv)),
+            check_runner=check_runner,
+        )
+
+        self.assertEqual(seen_check_argv[0][1:], ["-m", "src.main", "--self-check"])
+        self.assertEqual(exec_calls[0][1][1:], ["-m", "src.main"])
+
     def test_self_check_runs_before_exec_and_includes_the_flag(self):
         seen_argv = []
 

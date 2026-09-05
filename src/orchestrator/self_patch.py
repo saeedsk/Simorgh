@@ -249,9 +249,24 @@ def relaunch(
     state. `exec_func`/`check_runner` are injectable for tests -- nothing
     in the real test suite actually re-execs itself or trusts a
     self-check it didn't script.
+
+    Deliberately reconstructs `-m src.main` rather than reusing
+    `sys.argv` -- live-caught: for a process started with `python3 -m
+    src.main` (`sim.sh`'s own invocation, and every doc/example in this
+    repo), `sys.argv` is NOT `['-m', 'src.main']`; Python resolves it to
+    the absolute *script path* (e.g. `/repo/src/main.py`) before the
+    program ever runs. Re-invoking that path directly runs it as a bare
+    script, not a module -- `sys.path[0]` becomes `src/`'s own
+    directory, not the repo root, so every `from src.... import ...` in
+    the patched code fails with `ModuleNotFoundError: No module named
+    'src'` regardless of how correct the patch itself is. This silently
+    reverted every otherwise-successful self-patch to a non-hot-swappable
+    file, and stayed hidden because the unit test suite always injects
+    `exec_func`/`check_runner` (see above) rather than exercising the
+    real subprocess/exec path.
     """
     run_check = check_runner or subprocess.run
-    check_argv = [sys.executable, *sys.argv, "--self-check"]
+    check_argv = [sys.executable, "-m", "src.main", "--self-check"]
     try:
         result = run_check(check_argv, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -265,7 +280,7 @@ def relaunch(
 
     do_exec = exec_func or os.execv
     sys.stdout.flush()
-    do_exec(sys.executable, [sys.executable] + sys.argv)
+    do_exec(sys.executable, [sys.executable, "-m", "src.main"])
     return RelaunchResult(True, "")  # unreachable on a real execv; reachable only for a test stub
 
 

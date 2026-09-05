@@ -1542,3 +1542,37 @@ Still ahead, roughly in order:
     correctly rejected (the scoping doesn't widen what a skill can get
     away with), and (c) denylist/protected-file checks still fully apply
     to self-patch subjects.
+85. **A second, independent bug found immediately by verifying milestone
+    84 live: even a patch that passes the audit gate and the entire
+    isolated test suite still got silently reverted at the final step.**
+    Re-ran the exact same tiny `reminders.py` request in a fresh sandbox
+    with milestone 84's fix in place -- for the first time all session,
+    a real self-patch actually passed the audit gate AND the isolated
+    test suite (769/769) and got applied and committed. It then failed
+    `relaunch()`'s own final self-check with the *same*
+    `ModuleNotFoundError: No module named 'src'` symptom, and got
+    correctly reverted. Root cause, confirmed by direct interpreter
+    testing: `relaunch()` reconstructed its self-check/relaunch argv by
+    reusing `sys.argv` -- but for a process started with `python3 -m
+    src.main` (`sim.sh`'s own invocation), Python resolves `sys.argv` to
+    the *absolute script path* before the program ever runs, not
+    `['-m', 'src.main']`. Re-invoking that path directly runs it as a
+    bare script, not a module -- `sys.path[0]` becomes `src/`'s own
+    directory instead of the repo root, so every `from src.... import
+    ...` in the patched code fails, regardless of how correct the patch
+    itself is. This silently reverted every otherwise-successful
+    self-patch to a non-hot-swappable file, and stayed hidden because
+    the unit test suite always injects `exec_func`/`check_runner`
+    (documented in `relaunch()`'s own docstring) rather than exercising
+    the real subprocess/exec path -- so no test ever actually ran
+    `python3 -m src.main` a second time to notice.
+
+    Fixed: both the self-check subprocess and the final `os.execv`
+    reconstruct `[sys.executable, "-m", "src.main"]` explicitly instead
+    of reusing `sys.argv`. Unlike milestone 84, this doesn't touch any
+    safety boundary -- it's a pure correctness fix to how the process
+    re-invokes itself, verifiable directly (Python's own `-m` semantics
+    are well-documented and were confirmed empirically), so it shipped
+    directly rather than being taken to the creator first. 770 unit
+    tests + 19 E2E tests passing, with a new regression test asserting
+    the reconstructed argv exactly.
