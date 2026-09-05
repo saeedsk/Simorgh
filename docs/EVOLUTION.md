@@ -1325,3 +1325,26 @@ Still ahead, roughly in order:
     under the flat subscription) -- worst case, at the unchanged 30-
     calls/5h ceiling, that's at most 144 calls/day regardless of how
     fast this loop ticks.
+76. **A real, systemic transparency bug caught live monitoring the
+    creator's session (a genuinely ambitious self-patch attempt on
+    `src/cognition/budget.py` kept struggling): three separate READ/LIST
+    tool-turn handlers -- `SelfPatchAgent._read_tool_turn`
+    (self_patch.py), and `LogicAgent`'s own `_read_tool_turn` and
+    `_list_tool_turn` (logic/base.py) -- all hardcoded `succeeded=True`
+    in their `record_tool_call` call, regardless of what actually
+    happened. `safe_read_file`/`safe_list_dir` never raise -- they
+    return a `"[refused: ...]"` string on any real problem (bad path,
+    traversal, an OSError) -- so a genuinely failed read was always
+    logged as a success, hiding it from `activity`/`log` entirely.
+    Directly caught live: the model wrote something malformed into a
+    `READ:` marker's argument (visible in the raw activity trail as
+    `"tests/test_budget.pyAn error occurred: [Errno 2] No such file or
+    directory"` -- the model narrating what looks like an imagined
+    error, not a clean path), and the resulting refused read still
+    showed `succeeded: True`. Fixed: all three now check
+    `content.startswith("[refused:")` and log the real outcome. `RECALL:`
+    was checked too and left alone -- it reads only from the already-
+    validated `ActivityLog`, with no real failure mode to hide, unlike
+    a filesystem path. 749 unit tests + 19 E2E tests passing, two new
+    regression tests (one per file) locking in the real outcome now
+    getting logged.

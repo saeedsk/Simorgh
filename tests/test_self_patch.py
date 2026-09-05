@@ -202,6 +202,36 @@ class TestSelfPatchAgent(unittest.TestCase):
         self.assertEqual(log.calls[0][0], "self_patch")
         self.assertEqual(log.calls[0][1], "READ")
 
+    def test_activity_log_records_a_refused_read_as_failed(self):
+        # safe_read_file never raises -- it returns a "[refused: ...]"
+        # string on any problem. Logging every READ as succeeded=True
+        # regardless used to hide a real failure from the activity log
+        # entirely -- caught live watching a real session where a
+        # confused draft attempt (the model writing prose into what
+        # should have been a bare path) always showed as "successful."
+        class RecordingLog:
+            def __init__(self):
+                self.calls = []
+
+            def record_tool_call(self, agent, tool, request, result_summary, succeeded):
+                self.calls.append((agent, tool, request, succeeded))
+
+        provider = ScriptedProvider(
+            [
+                ("READ: ../../etc/passwd", None),
+                ("def new():\n    return 2\n", None),
+            ]
+        )
+        log = RecordingLog()
+        agent = SelfPatchAgent(
+            CognitionRouter([provider]), repo_root=self.repo_root, activity_log=log
+        )
+
+        agent.draft_patch("src/orchestrator/target.py", "improve it")
+
+        self.assertEqual(len(log.calls), 1)
+        self.assertFalse(log.calls[0][3])
+
 
 class TestCheckMainPyInvariants(unittest.TestCase):
     def test_content_missing_audit_wiring_is_refused(self):

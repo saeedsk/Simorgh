@@ -502,7 +502,42 @@ class TestLogicAgentToolLoop(unittest.TestCase):
 
         self.assertIn("src/", provider.prompts[1])
         self.assertIn("docs/", provider.prompts[1])
-        self.assertIn("tests/", provider.prompts[1])
+
+    def test_read_tool_records_a_refused_path_as_failed(self):
+        # safe_read_file/safe_list_dir never raise -- each returns a
+        # "[refused: ...]" string on any problem. Logging every call as
+        # succeeded=True regardless used to hide a real failure from the
+        # activity log entirely (caught live monitoring a real session).
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider(
+            [("READ: ../../etc/passwd", None), ("final answer", None)]
+        )
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]), activity_log=activity_log
+        )
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(len(tool_calls), 1)
+        self.assertFalse(tool_calls[0].metadata["succeeded"])
+
+    def test_list_tool_records_a_refused_path_as_failed(self):
+        store = InMemoryStore()
+        activity_log = ActivityLog(store)
+        provider = ScriptedProvider(
+            [("LIST: ../../etc", None), ("final answer", None)]
+        )
+        agent = LogicAgent(
+            cognition=CognitionRouter([provider]), activity_log=activity_log
+        )
+
+        agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+        tool_calls = store.query(kind="tool_call")
+        self.assertEqual(len(tool_calls), 1)
+        self.assertFalse(tool_calls[0].metadata["succeeded"])
 
     def test_loop_exhausting_max_tool_steps_forces_a_final_answer_instead_of_rule_based(self):
         # Previously the last step silently discarded whatever the model

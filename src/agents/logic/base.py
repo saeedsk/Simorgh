@@ -541,15 +541,22 @@ class LogicAgent(SubAgent):
         path = raw_path.strip()
         print(f"[Sim] reading {preview(path)!r} for context...")
         content = safe_read_file(self._repo_root, path)
-        self._record_tool_call("READ", preview(path), f"{len(content)} chars", True)
+        # safe_read_file/safe_list_dir never raise -- each returns a
+        # "[refused: ...]" string on any failure. Logging every call as
+        # succeeded=True regardless used to hide that from the activity
+        # log entirely (same fix as self_patch.py's own READ tool turn,
+        # caught in the same live-monitoring pass).
+        succeeded = not content.startswith("[refused:")
+        self._record_tool_call("READ", preview(path), f"{len(content)} chars", succeeded)
         return f"\n\n[READ {path!r} result]\n{content}\n{_CONTINUE_HINT}"
 
     def _list_tool_turn(self, raw_path: str) -> str:
         path = raw_path.strip()
         print(f"[Sim] listing {preview(path) or '.'!r}...")
         content = safe_list_dir(self._repo_root, path)
+        succeeded = not content.startswith("[refused:")
         line_count = content.count("\n") + 1
-        self._record_tool_call("LIST", preview(path) or ".", f"{line_count} entries", True)
+        self._record_tool_call("LIST", preview(path) or ".", f"{line_count} entries", succeeded)
         return f"\n\n[LIST {path!r} result]\n{content}\n{_CONTINUE_HINT}"
 
     def _recall_tool_turn(self, raw_arg: str) -> str:

@@ -431,9 +431,18 @@ class SelfPatchAgent:
         path = raw_path.strip()
         print(f"[patch] reading {preview(path)!r} for context...")
         content = safe_read_file(self._repo_root, path)
+        # safe_read_file never raises -- it returns a "[refused: ...]"
+        # string on any failure (bad path, traversal, credentials-shaped
+        # name, an OSError while reading). Logging every call as
+        # succeeded=True regardless used to hide that from the activity
+        # log entirely -- caught live watching a real session where a
+        # confused draft attempt (the model writing prose into what
+        # should have been a bare path, e.g. asking itself "does this
+        # file exist?") always showed as a successful read.
+        succeeded = not content.startswith("[refused:")
         if self._activity_log is not None:
             self._activity_log.record_tool_call(
-                "self_patch", "READ", preview(path), f"{len(content)} chars", True
+                "self_patch", "READ", preview(path), f"{len(content)} chars", succeeded
             )
         return f"\n\n[READ {path!r} result]\n{content}\n{_CONTINUE_HINT}"
 
