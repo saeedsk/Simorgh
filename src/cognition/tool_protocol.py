@@ -282,29 +282,44 @@ def safe_list_dir(repo_root: Path, raw_path: str) -> str:
 @dataclass(frozen=True)
 class ToolCapability:
     """One entry in the runtime capability registry below: a marker's
-    name, a human-readable description of what it does, and a hint
+    name, a human-readable description of what it does, a hint
     describing the shape of its argument (e.g. "repo-relative path",
-    "python code") -- enough for an orchestrator to decide, at runtime,
-    which registered tool fits a given task without either side hardcoding
-    the other's marker set.
+    "python code"), its structured argument schema, and its provider
+    -- enough for an orchestrator to decide, at runtime, which registered
+    tool fits a given task without either side hardcoding the other's
+    marker set.
     """
 
     name: str
     description: str
-    argument_hint: str
+    argument_hint: str = ""
+    argument_schema: dict | None = None
+    provider: str = ""
 
 
 _CAPABILITY_REGISTRY: dict[str, ToolCapability] = {}
 
 
-def register_capability(name: str, description: str, argument_hint: str) -> ToolCapability:
+def register_capability(
+    name: str,
+    description: str,
+    argument_hint: str = "",
+    argument_schema: dict | None = None,
+    provider: str = "",
+) -> ToolCapability:
     """Register (or replace) a tool/provider's entry in the runtime
     capability registry, keyed case-insensitively on `name` so a caller
     doesn't need to track the exact casing used elsewhere. Returns the
     stored `ToolCapability` so a caller can register and use it in one
     expression.
     """
-    capability = ToolCapability(name=name.lower(), description=description, argument_hint=argument_hint)
+    capability = ToolCapability(
+        name=name.lower(),
+        description=description,
+        argument_hint=argument_hint,
+        argument_schema=argument_schema,
+        provider=provider,
+    )
     _CAPABILITY_REGISTRY[capability.name] = capability
     return capability
 
@@ -331,3 +346,40 @@ def available_capabilities() -> tuple[ToolCapability, ...]:
     instead of hardcoding which tools/providers exist.
     """
     return tuple(sorted(_CAPABILITY_REGISTRY.values(), key=lambda cap: cap.name))
+
+
+def find_capabilities_by_provider(provider: str) -> tuple[ToolCapability, ...]:
+    """Return all capabilities registered under `provider` (case-insensitive)."""
+    p = provider.lower()
+    return tuple(
+        sorted(
+            (cap for cap in _CAPABILITY_REGISTRY.values() if cap.provider.lower() == p),
+            key=lambda cap: cap.name,
+        )
+    )
+
+
+def clear_capabilities() -> None:
+    """Clear all registered capabilities (primarily for test isolation)."""
+    _CAPABILITY_REGISTRY.clear()
+
+
+def register_default_capabilities() -> None:
+    """Populate default capabilities for built-in tools (read, list)."""
+    register_capability(
+        name="read",
+        description="Read file contents within allowed repository roots (src, docs, tests)",
+        argument_hint="repo-relative path",
+        argument_schema={"type": "string", "description": "Relative path to file"},
+        provider="builtin",
+    )
+    register_capability(
+        name="list",
+        description="List directory contents within allowed repository roots",
+        argument_hint="repo-relative path or '.'",
+        argument_schema={"type": "string", "description": "Relative path to directory"},
+        provider="builtin",
+    )
+
+
+register_default_capabilities()
