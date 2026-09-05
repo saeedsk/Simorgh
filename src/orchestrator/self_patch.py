@@ -84,7 +84,15 @@ from src.cognition.tool_protocol import (
 from src.orchestrator.audit import AuditGate, ModificationProposal
 from src.orchestrator.console_style import LiveTicker, format_code_block
 
-DEFAULT_MAX_TOOL_STEPS = 4
+# Raised from 4, live-caught: 4 was LOWER than SkillResearchAgent's own
+# 5 (research.py) despite self-patch legitimately needing more
+# exploration room, not less -- it's revising an EXISTING file that
+# interacts with the rest of the codebase, not writing one new
+# standalone file from scratch. A model that spent even 2-3 steps
+# reading related files for context (sometimes a hallucinated path
+# that doesn't exist, wasting a step) had nothing left for the actual
+# draft.
+DEFAULT_MAX_TOOL_STEPS = 6
 DEFAULT_SUITE_TIMEOUT_SECONDS = 180.0
 
 # Must never reach a subprocess running this repo's own test suite --
@@ -311,6 +319,22 @@ _CONTINUE_HINT = (
     "your final file content alone to finish."
 )
 
+# Live-caught: on the last available step, a model that used every prior
+# step exploring (READ, sometimes a hallucinated path that doesn't
+# exist) had no way to know this was its last chance to actually answer
+# -- it would emit one more READ: marker anyway, and that raw marker
+# text became the "final" content verbatim, guaranteed to fail
+# is_valid_python. Same fix LogicAgent's own tool loop already uses
+# (_FINAL_TURN_HINT, src/agents/logic/base.py) -- give the model
+# explicit notice one step early instead of silently cutting it off.
+_FINAL_TURN_HINT = (
+    "\n\nThis is your last step -- no more tool calls will be honored. "
+    "Write the complete corrected file content now, using whatever "
+    "you've already learned above (even if incomplete); do not write a "
+    "READ:/DRAFT: marker, it will be used as your literal final file "
+    "content verbatim."
+)
+
 
 class SelfPatchAgent:
     """Drafts a ModificationProposal that replaces the full content of an
@@ -390,7 +414,9 @@ class SelfPatchAgent:
         final_text = ""
 
         for step in range(self._max_tool_steps):
-            response = self._cognition.complete(prompt)
+            is_last_step = step == self._max_tool_steps - 1
+            step_prompt = prompt + _FINAL_TURN_HINT if is_last_step else prompt
+            response = self._cognition.complete(step_prompt)
             provider_name = response.provider_name
             final_text = response.text
 
@@ -398,7 +424,6 @@ class SelfPatchAgent:
                 break
 
             kind, payload = parse_marker(response.text, ("READ", "DRAFT"))
-            is_last_step = step == self._max_tool_steps - 1
             if kind == "read" and not is_last_step:
                 prompt += self._read_tool_turn(payload)
                 continue

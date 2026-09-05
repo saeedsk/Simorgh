@@ -1472,3 +1472,29 @@ Still ahead, roughly in order:
     doesn't cleanly apply), not attempted here without more design work
     first. Left as a clearly-documented, well-evidenced backlog item
     rather than a rushed change.
+83. **A second, more tractable cause found by controlled testing: a real
+    self-patch/skill draft can fail even on a genuinely SMALL, well-
+    scoped change.** A deliberate contrast test -- a direct, narrow
+    `patch` request against a 59-line file (`reminders.py`), autonomous
+    loop off, no ambition involved -- still failed, with the exact same
+    raw-marker-as-final-answer symptom milestone 78 first spotted:
+    `File "skill.py", line 1\n    READ: src/orchestrator/repl.py\n
+    NameError: name 'src' is not defined`. Root cause, confirmed by
+    reading the actual loop code: `SelfPatchAgent`/`SkillResearchAgent`'s
+    tool loop never warned the model when it was on its LAST available
+    step (`LogicAgent`'s own loop already does this,
+    `_FINAL_TURN_HINT`) -- a model that spent its steps exploring
+    (sometimes reading a hallucinated, nonexistent path) had no way to
+    know the next response was its only remaining chance to answer, so
+    it emitted one more `READ:`/`DRAFT:` marker anyway, and that raw
+    marker text became the "final file content" verbatim, guaranteed to
+    fail. Compounded by `DEFAULT_MAX_TOOL_STEPS` for self-patch being
+    *lower* than `SkillResearchAgent`'s (4 vs. 5) despite self-patch
+    legitimately needing more exploration room, not less -- it's
+    revising a file that interacts with the rest of the codebase, not
+    writing one new standalone file. Fixed: both agents now warn the
+    model one step early (matching `LogicAgent`'s proven pattern
+    exactly), and self-patch's step budget raised 4 -> 6. 766 unit
+    tests + 19 E2E tests passing, with regression tests confirming the
+    warning reaches the prompt and a real patch succeeds using
+    already-gathered context on the final step.
