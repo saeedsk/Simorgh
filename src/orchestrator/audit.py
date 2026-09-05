@@ -83,6 +83,12 @@ PROTECTED_SUBJECTS = ("soul.py", "SOUL.md", "audit.py", "apply.py", "self_patch.
 REJECTED_KIND = "rejected_proposal"
 DEFAULT_SIMILARITY_THRESHOLD = 0.9
 
+# Bounds how much of a failed sandboxed run's real stderr/stdout gets
+# folded into the rejection reason -- enough to actually be useful
+# feedback for a retry, not so much that one bad run floods the next
+# drafting prompt.
+_MAX_SANDBOX_DETAIL_CHARS = 500
+
 
 @dataclass(frozen=True)
 class ModificationProposal:
@@ -149,9 +155,22 @@ class AuditGate:
 
         sandbox_result = self._sandbox.run(proposal.code, timeout=self._timeout)
         if not sandbox_result.succeeded:
+            # The generic (timed_out=.., exit_code=..) summary alone
+            # gives a retry loop nothing to actually act on -- caught
+            # live watching a real self-patch task fail this exact same
+            # generic way across multiple attempts and reconsideration
+            # rounds with zero improvement, because prior_reasons never
+            # carried the real error. sandbox_result.stderr/stdout has
+            # the actual traceback; folding a bounded excerpt of it in
+            # gives the next drafting attempt something concrete to fix
+            # instead of guessing blind.
+            detail = (sandbox_result.stderr or sandbox_result.stdout or "").strip()
+            if len(detail) > _MAX_SANDBOX_DETAIL_CHARS:
+                detail = detail[:_MAX_SANDBOX_DETAIL_CHARS] + "…(truncated)"
             reasons.append(
                 "sandboxed run did not succeed "
                 f"(timed_out={sandbox_result.timed_out}, exit_code={sandbox_result.exit_code})"
+                + (f": {detail}" if detail else "")
             )
             self._remember_rejection(proposal, reasons)
 
