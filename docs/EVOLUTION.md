@@ -1374,3 +1374,34 @@ Still ahead, roughly in order:
     -- deliberately not hand-edited out of their live `memory.jsonl`
     while their process was running, to avoid a concurrent-write risk
     against a real, in-use file for a bounded, self-resolving problem.
+78. **The actual root cause behind milestone 76's symptom, found through
+    real hands-on sandbox testing the creator asked for directly** ("you
+    were supposed to extensively test, hand hold, improve the sim...").
+    Launched a real, Gemini-backed Sim instance in an isolated
+    environment (its own `HOME`, `PATH` narrowed to exclude `claude` so
+    none of this ever touched the creator's Claude Code subscription --
+    23 real Gemini calls, $0.07 total) and drove it through genuine
+    conversational turns, a real `propose`, and watched the autonomous
+    loop fire on its own. Milestone 76 fixed the *symptom* (a refused
+    read logged as succeeded); this hands-on session immediately
+    surfaced the *cause*, reproducibly: a real provider doesn't reliably
+    stop at "READ: <path>" the way the prompt asks -- it keeps reasoning
+    out loud in the same response ("Wait, the tool format is... let's
+    check... No, let's READ..."), and `parse_marker()` has no way to
+    tell that wasn't part of the argument, since a code-bearing marker
+    (`RUN:`/`DRAFT:`) legitimately needs everything after it kept
+    intact. The whole rambling blob was being treated as "the path,"
+    guaranteed to refuse, feeding the confusion straight back into the
+    next prompt instead of resolving it.
+
+    Fixed with a new shared helper, `first_line_argument()`
+    (`src/cognition/tool_protocol.py`): takes just the first non-empty
+    line of a marker's payload, for the class of argument that's always
+    a single bare token. Wired into every `READ:`/`LIST:`/`FETCH:`/`USE:`
+    handler across all three tool loops (`self_patch.py`, `logic/base.py`,
+    `research.py`) -- `research.py`'s own `_read_tool_turn` also still
+    had milestone 76's hardcoded `succeeded=True` bug, missed the first
+    time since that pass only checked `self_patch.py` and `logic/base.py`;
+    fixed alongside this one. 759 unit tests + 19 E2E tests passing,
+    with regression tests in all three files proving a rambling READ
+    payload now resolves to the real file instead of a refusal.

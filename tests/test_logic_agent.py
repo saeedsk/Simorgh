@@ -523,6 +523,30 @@ class TestLogicAgentToolLoop(unittest.TestCase):
         self.assertEqual(len(tool_calls), 1)
         self.assertFalse(tool_calls[0].metadata["succeeded"])
 
+    def test_read_tool_ignores_rambling_text_after_the_path(self):
+        # Live-caught with a real provider (Gemini): the model doesn't
+        # always stop at "READ: <path>" -- it keeps reasoning out loud
+        # in the same response instead of a clean single-line marker.
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = Path(tmpdir) / "src"
+            src_dir.mkdir()
+            (src_dir / "other.py").write_text("OTHER = 1\n")
+            rambling = (
+                "READ: src/other.py\n"
+                "Wait, the tool format is:\n"
+                "`READ: <repo-relative path>` exactly as the ENTIRE response."
+            )
+            provider = ScriptedProvider([(rambling, None), ("final answer", None)])
+            agent = LogicAgent(cognition=CognitionRouter([provider]), repo_root=Path(tmpdir))
+
+            agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+            self.assertIn("OTHER", provider.prompts[1])
+            self.assertNotIn("[refused", provider.prompts[1])
+
     def test_list_tool_records_a_refused_path_as_failed(self):
         store = InMemoryStore()
         activity_log = ActivityLog(store)

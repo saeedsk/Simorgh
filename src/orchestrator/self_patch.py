@@ -74,6 +74,7 @@ from typing import Callable
 from src.cognition.provider import CognitionRouter
 from src.cognition.tool_protocol import (
     extract_code,
+    first_line_argument,
     is_valid_python,
     parse_marker,
     preview,
@@ -428,7 +429,14 @@ class SelfPatchAgent:
         )
 
     def _read_tool_turn(self, raw_path: str) -> str:
-        path = raw_path.strip()
+        # Live-caught with a real provider: the model doesn't always
+        # stop at "READ: <path>" -- it keeps reasoning out loud in the
+        # same response ("Wait, the tool format is... let's check...").
+        # A READ argument is always exactly one line; first_line_argument
+        # discards anything after it instead of treating the whole
+        # rambling blob as "the path" and feeding a guaranteed refusal
+        # back into the next prompt, compounding the confusion.
+        path = first_line_argument(raw_path)
         print(f"[patch] reading {preview(path)!r} for context...")
         content = safe_read_file(self._repo_root, path)
         # safe_read_file never raises -- it returns a "[refused: ...]"

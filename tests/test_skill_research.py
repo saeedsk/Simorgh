@@ -160,6 +160,51 @@ class TestSkillResearchAgentToolLoop(unittest.TestCase):
         self.assertIn("EXAMPLE_CONSTANT", provider.prompts[1])
         self.assertEqual(proposal.code.strip(), final_code.strip())
 
+    def test_read_tool_ignores_rambling_text_after_the_path(self):
+        # Live-caught with a real provider (Gemini): the model doesn't
+        # always stop at "READ: <path>" -- it keeps reasoning out loud
+        # in the same response instead of a clean single-line marker.
+        final_code = "def run():\n    return 1\n"
+        rambling = (
+            "READ: src/example.py\n"
+            "Wait, the tool format is:\n"
+            "`READ: <repo-relative path>` exactly as the ENTIRE response."
+        )
+        provider = ScriptedProvider([(rambling, None), (final_code, None)])
+        agent = SkillResearchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        proposal = agent.draft_skill("uses example")
+
+        self.assertIn("EXAMPLE_CONSTANT", provider.prompts[1])
+        self.assertNotIn("[refused", provider.prompts[1])
+        self.assertEqual(proposal.code.strip(), final_code.strip())
+
+    def test_read_tool_records_a_refused_read_as_failed(self):
+        # safe_read_file never raises -- it returns a "[refused: ...]"
+        # string on any problem. Logging every READ as succeeded=True
+        # regardless used to hide a real failure from the activity log
+        # entirely (same fix as self_patch.py/logic/base.py's own READ
+        # tool turns, caught in the same live-monitoring pass).
+        class RecordingLog:
+            def __init__(self):
+                self.calls = []
+
+            def record_tool_call(self, agent, tool, request, result_summary, succeeded):
+                self.calls.append((agent, tool, request, succeeded))
+
+        provider = ScriptedProvider(
+            [("READ: ../../etc/passwd", None), ("def run():\n    return 1\n", None)]
+        )
+        log = RecordingLog()
+        agent = SkillResearchAgent(
+            CognitionRouter([provider]), repo_root=self.repo_root, activity_log=log
+        )
+
+        agent.draft_skill("uses example")
+
+        self.assertEqual(len(log.calls), 1)
+        self.assertFalse(log.calls[0][3])
+
     def test_read_tool_refuses_path_traversal(self):
         provider = ScriptedProvider(
             [("READ: ../../etc/passwd", None), ("def run():\n    return 1\n", None)]

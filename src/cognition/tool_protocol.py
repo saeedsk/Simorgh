@@ -49,6 +49,31 @@ def preview(text: str, limit: int = _DEFAULT_PREVIEW_LIMIT) -> str:
     return collapsed
 
 
+def first_line_argument(text: str) -> str:
+    """The first non-empty line of a marker's payload, stripped -- for
+    an argument that's meant to be a single bare token (a path, a URL,
+    a skill name), never free-form prose.
+
+    Guards a real, live-caught failure mode distinct from `preview()`'s
+    (display-only) one: the model doesn't always stop at the marker
+    itself and keeps reasoning out loud in the same response --
+    "src/orchestrator/discovery.py\\nWait, the tool format is:\\nREAD:
+    <path> exactly as the ENTIRE response...". `parse_marker()` has no
+    way to know that wasn't part of the argument, since a code-bearing
+    marker (RUN:/DRAFT:) legitimately needs everything after it kept
+    intact -- this is the opposite case, a marker whose argument is
+    always exactly one line. For those, only the first line was ever
+    the real answer; discarding the rest turns a guaranteed-refused,
+    confusing lookup (the whole rambling blob treated as one "path")
+    into the working one the model actually intended, instead of
+    feeding the confusion back into the next prompt and compounding it.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    return stripped.splitlines()[0].strip()
+
+
 def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
     """If `text` (stripped) starts with one of `markers` (each given
     without a trailing colon, matched case-insensitively followed by ':'),
