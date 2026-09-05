@@ -903,45 +903,60 @@ Built:
     is fragile across terminals -- a new line per tick instead, reusing
     the same "a daemon thread can safely print while the caller stays
     blocked" property reminders/the autonomous loop already established
-    rather than inventing a new mechanism. The rest of what Claude Code
-    does (collapsed-by-default multi-step tool output, a live task
-    checklist shown proactively during work, diff-style patch review
-    instead of a full-file dump) is still ahead, listed below.
+    rather than inventing a new mechanism.
+54. **Two more pieces of the same Claude Code UI parity work, landed
+    hands-free right after (the creator: "continue build ui improvement
+    autonomously, I'd like to be hands-free").** `render_checklist`
+    (`src/orchestrator/console_style.py`): a compact, icon-prefixed
+    checklist (○ pending / ◐ in-progress / ✅ done / ❌ failed),
+    reprinted as a whole block after each item changes -- `batch`
+    (`propose_skill_batch`) and `evolve` (`propose_patch_batch`) now
+    show one, kept visible and updated through the whole run, instead
+    of only a scrolling trail of individual step narration with no
+    summary in between. `format_diff_block`, `format_code_block`'s
+    sibling for a `difflib.unified_diff` (+/- colored, bounded/
+    truncated the same way): `pending <path>` now diffs against the
+    previous applied version by default -- "minimize a big file down to
+    what's relevant," the creator's own framing of what Claude Code's
+    UI does well -- falling back to the full file when there's no prior
+    version to diff against, or when `--full` is explicitly asked for.
+    Same non-negotiable as `LiveTicker`: no cursor-redrawn in-place
+    UI -- everything still prints new lines, safe across any terminal,
+    piped output, or non-TTY logging.
 
 Still ahead, roughly in order:
 
-54. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
+55. A distributed `SharedMemoryBus` backend (Stage 4) -- once there's real
     infrastructure to target, not before.
-55. A `Node` registration/heartbeat abstraction for multi-host sub-agent
+56. A `Node` registration/heartbeat abstraction for multi-host sub-agent
     placement (Stage 4).
-56. *Automatic* registration of an applied skill as a live `Router`
+57. *Automatic* registration of an applied skill as a live `Router`
     sub-agent (the other half of the old milestone 49 -- see 46 above
     for why this is deliberately still just a manual, on-demand
     invocation rather than done reflexively).
-57. The Autonomous Idle Loop's default thresholds (300s idle, 600s
+58. The Autonomous Idle Loop's default thresholds (300s idle, 600s
     cooldown, 20 actions/day, `MAX_BLOCKED_RETRY_ATTEMPTS`=9, and
     `DEFAULT_MAX_CONSECUTIVE_FAILURES`=5) are judgment calls, not values
     derived from real operating experience -- worth revisiting once
     there's an actual track record.
-58. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
+59. `evolve`/EVOLVE staying full-relaunch-only (see milestone 51 above)
     -- extending hot-swap to a multi-file batch is a real design
     question (which slot(s) to trial, in what order, how to roll back a
     partial hot-swap alongside the multi-commit revert `evolve` already
     does), not yet worked through.
-59. `DEFAULT_SHARE_COOLDOWN_SECONDS` (one hour, milestone 52 above) is a
+60. `DEFAULT_SHARE_COOLDOWN_SECONDS` (one hour, milestone 52 above) is a
     starting judgment call like the autonomous loop's own thresholds --
     worth revisiting once there's a real sense of whether proactive
     news-sharing feels well-paced or not. `DEFAULT_NEWS_TOPICS`'
     specific three feeds are a starting set, not vetted for long-term
     stability -- worth checking they're still live occasionally, and
     trivially replaceable via `interest <feed url>` if not.
-60. The rest of "match Claude Code's terminal UI conventions" (milestone
-    53 above landed `LiveTicker`, the first piece): collapsed-by-default
-    multi-step tool output with drill-down (most existing tool turns are
-    already reasonably bounded -- `format_code_block`'s 30-line cap,
-    `preview()`'s single-line truncation -- but there's no single shared
-    convention for it); a task checklist shown proactively while
-    multi-step work happens (`TaskStore`/`tasks` exists but is only ever
-    shown on request, not live during a `batch`/`evolve` run); and
-    diff-style display for `pending <path>` instead of dumping the whole
-    file when there's a previous version to diff against.
+61. The one remaining piece of "match Claude Code's terminal UI
+    conventions" (milestones 53-54 above landed `LiveTicker`,
+    `render_checklist`, and diff-by-default `pending`): collapsed-by-
+    default multi-step tool output with drill-down. Most existing tool
+    turns are already reasonably bounded (`format_code_block`'s 30-line
+    cap, `preview()`'s single-line truncation), so this is less about a
+    broken behavior and more about there being no single shared
+    convention for "one summary line, detail on request" the way the
+    checklist/diff work now has one each.

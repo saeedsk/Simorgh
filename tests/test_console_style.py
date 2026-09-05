@@ -5,7 +5,13 @@ import unittest
 from unittest.mock import patch
 
 from src.orchestrator import console_style
-from src.orchestrator.console_style import LiveTicker, format_code_block, style
+from src.orchestrator.console_style import (
+    LiveTicker,
+    format_code_block,
+    format_diff_block,
+    render_checklist,
+    style,
+)
 
 
 class TestStyleDisabled(unittest.TestCase):
@@ -198,6 +204,82 @@ class TestLiveTicker(unittest.TestCase):
                 time.sleep(0.03)
 
         self.assertIn("42s elapsed", buf.getvalue())
+
+
+class TestRenderChecklist(unittest.TestCase):
+    def test_renders_a_label_per_item(self):
+        block = render_checklist([("first", "done"), ("second", "pending")])
+
+        self.assertIn("first", block)
+        self.assertIn("second", block)
+
+    def test_title_is_included_when_given(self):
+        block = render_checklist([("a", "pending")], title="My Batch")
+
+        self.assertIn("My Batch", block)
+
+    def test_no_title_omits_a_title_line(self):
+        block = render_checklist([("a", "pending")])
+
+        self.assertEqual(len(block.splitlines()), 1)
+
+    def test_each_status_gets_a_distinct_icon(self):
+        block = render_checklist(
+            [("a", "pending"), ("b", "in_progress"), ("c", "done"), ("d", "failed")]
+        )
+
+        icons = {"○", "◐", "✅", "❌"}
+        for icon in icons:
+            self.assertIn(icon, block)
+
+    def test_unknown_status_does_not_raise(self):
+        block = render_checklist([("a", "some-made-up-status")])
+
+        self.assertIn("a", block)
+
+    def test_empty_items_with_title_still_renders_the_title(self):
+        block = render_checklist([], title="Nothing yet")
+
+        self.assertEqual(block, "Nothing yet")
+
+
+class TestFormatDiffBlock(unittest.TestCase):
+    def test_empty_diff_reports_no_changes(self):
+        block = format_diff_block([])
+
+        self.assertIn("no changes", block)
+
+    def test_content_lines_are_present(self):
+        block = format_diff_block(["--- a\n", "+++ b\n", "-old line\n", "+new line\n"])
+
+        self.assertIn("old line", block)
+        self.assertIn("new line", block)
+
+    def test_label_is_present_in_the_header(self):
+        block = format_diff_block(["+x\n"], label="src/main.py")
+
+        self.assertIn("src/main.py", block)
+
+    def test_truncates_long_diffs_with_a_notice(self):
+        lines = [f"+line {i}\n" for i in range(100)]
+
+        block = format_diff_block(lines, max_lines=10)
+
+        self.assertIn("90 more line(s) truncated", block)
+        self.assertNotIn("line 99", block)
+
+    def test_colors_additions_and_removals_when_enabled(self):
+        with patch.object(console_style, "_ENABLED", True):
+            block = format_diff_block(["+added\n", "-removed\n"])
+
+        self.assertIn("\033[32m+added\033[0m", block)
+        self.assertIn("\033[31m-removed\033[0m", block)
+
+    def test_hunk_header_is_colored_when_enabled(self):
+        with patch.object(console_style, "_ENABLED", True):
+            block = format_diff_block(["@@ -1,2 +1,2 @@\n"])
+
+        self.assertIn("\033[36m\033[1m@@ -1,2 +1,2 @@\033[0m", block)
 
 
 if __name__ == "__main__":
