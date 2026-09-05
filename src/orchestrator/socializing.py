@@ -41,15 +41,15 @@ from src.memory.long_term import MemoryRecord, MemoryStore
 from src.orchestrator.apply import APPLIED_KIND, APPLIED_PATCH_KIND
 
 # Deliberately longer than AutonomyController's own
-# action_cooldown_seconds (150s default), so a proactive share stays an
-# occasional, welcome interruption rather than something competing to
-# win every idle tick -- but not so long it never lands within one real
-# session. Originally an hour; brought down to 30 minutes alongside
-# AutonomyController's own retuning (see autonomy.py) for the same
-# reason: at the old pace, the only way to ever see this fire was to
-# leave the CLI running unattended, which is a bad match for something
-# meant to feel like an active conversational partner.
-DEFAULT_SHARE_COOLDOWN_SECONDS = 1800.0
+# action_cooldown_seconds (30s default as of the "hyperscale" retune --
+# see autonomy.py), so a proactive share stays an occasional, welcome
+# interruption rather than something competing to win every idle tick --
+# but not so long it never lands within one real session. Originally an
+# hour; brought to 30 minutes, then to 6 minutes (12x action_cooldown,
+# the same ratio as before) alongside AutonomyController's second,
+# aggressive retune -- direct creator ask: "make the self improvement
+# go at hyperscale... showing constantly progress."
+DEFAULT_SHARE_COOLDOWN_SECONDS = 360.0
 
 
 @dataclass(frozen=True)
@@ -162,7 +162,9 @@ GROWTH_SHARED_KIND = "growth_highlight_shared"
 # complaint, more specific than "share more news"), so it's paced to
 # actually land within a single active session rather than only ever
 # showing up for someone who leaves the CLI running for an hour.
-DEFAULT_GROWTH_SHARE_COOLDOWN_SECONDS = 900.0
+# Retuned alongside news' cooldown for the "hyperscale" ask: 6x
+# action_cooldown (was 6x at 900s/150s, kept the same ratio at 30s).
+DEFAULT_GROWTH_SHARE_COOLDOWN_SECONDS = 180.0
 
 
 @dataclass(frozen=True)
