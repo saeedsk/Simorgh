@@ -1448,3 +1448,27 @@ Still ahead, roughly in order:
     automated E2E suite) -- any auto-commit from a genuinely autonomous
     session stays fully contained, never touching this project's actual
     git history again.
+82. **A well-evidenced real limitation, not yet worth a rushed fix:**
+    running the sandbox above unattended for an extended stretch, every
+    single creative-agenda idea targeting a substantial existing core
+    file (`autonomy.py` 291 lines, `reflection.py` 197, `budget.py` 140
+    -- all dense with this codebase's own long rationale comments)
+    failed to ever produce a valid, complete patch, across every
+    attempt and every retry round, milestones 79-80's real feedback
+    notwithstanding. The dominant failure mode: `'gemini' answered but
+    its response didn't contain valid, complete Python` -- the model
+    keeps failing to faithfully reproduce a genuinely long existing
+    file (every line, every comment) while also correctly weaving in a
+    nontrivial new capability, in one single-shot generation. This
+    looks like a structural limit of the "rewrite the COMPLETE file"
+    prompt shape itself (`self_patch.py`'s `_PATCH_DRAFT_PROMPT`) for
+    ambitious changes to large files, not something a prompt wording
+    tweak reliably fixes -- real feedback helps the model correct a
+    *specific* mistake, but doesn't shrink the fundamental amount it
+    has to get right in one pass. A genuine fix would likely need a
+    different patch shape entirely (e.g. a diff/edit-based mechanism
+    instead of full-file rewrite) -- a real architectural change with
+    its own new risks (applying a diff correctly, handling a diff that
+    doesn't cleanly apply), not attempted here without more design work
+    first. Left as a clearly-documented, well-evidenced backlog item
+    rather than a rushed change.
