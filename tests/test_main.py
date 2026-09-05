@@ -10,6 +10,7 @@ from src.main import (
     autocorrect_command,
     build_router,
     discover_command,
+    discover_creative_improvements,
     extract_batch_args,
     extract_evolve_args,
     extract_patch_args,
@@ -2207,6 +2208,78 @@ class TestDiscoverCommand(unittest.TestCase):
         self.assertEqual(len(task_store.all()), 1)
 
 
+class TestDiscoverCreativeImprovements(unittest.TestCase):
+    """discover_creative_improvements is Sim setting its own agenda when
+    nothing has actually gone wrong -- the creative half of "find gaps,
+    find improvement areas... be creative, think big" (direct creator
+    feedback). See its own docstring in src/main.py.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_no_real_provider_returns_nothing(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+
+        created = discover_creative_improvements(
+            CognitionRouter(), task_store, repo_root=self.repo_root
+        )
+
+        self.assertEqual(created, [])
+        self.assertEqual(task_store.all(), [])
+
+    def test_parses_brainstormed_targets_into_tasks(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition(
+            "1. src/orchestrator/foo.py :: teach it to notice X\n"
+            "2. src/orchestrator/bar.py :: teach it to notice Y\n"
+        )
+
+        created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=2)
+
+        self.assertEqual(len(created), 2)
+        self.assertEqual(len(task_store.all()), 2)
+        self.assertTrue(all(t.discovered_via == "creative_agenda" for t in created))
+        self.assertTrue(all(t.kind == PATCH_TASK for t in created))
+        self.assertEqual(created[0].subject, "src/orchestrator/foo.py")
+
+    def test_unparseable_response_creates_nothing(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition("I refuse to make a list.")
+
+        created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root)
+
+        self.assertEqual(created, [])
+
+    def test_dedupes_against_an_existing_task_description(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        description = "teach it to notice a specific real recurring pattern in its own logs"
+        task_store.add(description, PATCH_TASK, subject="src/orchestrator/foo.py")
+        cognition = _FakeBrainstormCognition(f"1. src/orchestrator/foo.py :: {description}\n")
+
+        created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
+
+        self.assertEqual(created, [])
+        self.assertEqual(len(task_store.all()), 1)  # still just the pre-existing one
+
+    def test_prompt_asks_for_the_requested_count(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition("1. src/orchestrator/foo.py :: idea\n")
+
+        discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
+
+        self.assertIn("exactly 1", cognition.prompts[0])
+
+
 class TestPlanGoal(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -2401,6 +2474,26 @@ class TestAutonomousAction(unittest.TestCase):
         )
 
         self.assertFalse(did_something)
+
+    def test_falls_back_to_a_creative_agenda_when_nothing_to_react_to(self):
+        from src.main import _autonomous_action
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        cognition = _FakeBrainstormCognition(
+            "1. src/orchestrator/foo.py :: a genuinely ambitious idea\n"
+        )
+
+        did_something = _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, cognition, repo_root=self.repo_root,
+        )
+
+        self.assertTrue(did_something)
+        self.assertEqual(len(task_store.all()), 1)
+        self.assertEqual(task_store.all()[0].discovered_via, "creative_agenda")
 
     def test_works_a_pending_task_when_queue_is_not_empty(self):
         from src.main import _autonomous_action
@@ -2599,6 +2692,110 @@ class TestAutonomousAction(unittest.TestCase):
 
         self.assertTrue(did_something)
         self.assertEqual(task_store.all()[0].status, DONE)
+
+
+class TestMaybeVolunteerDuringConversation(unittest.TestCase):
+    """`_maybe_volunteer_during_conversation` is the fix for the
+    live-caught complaint that Sim only ever acts on its own between
+    conversations (the idle loop), never during one -- see its own
+    docstring in src/main.py. These exercise it directly, the same way
+    TestAutonomousAction exercises the idle-loop's priority logic.
+    """
+
+    def test_shares_a_ready_growth_highlight(self):
+        import contextlib
+        import io
+
+        from src.main import _maybe_volunteer_during_conversation
+        from src.orchestrator.socializing import GrowthSocializer
+
+        store = InMemoryStore()
+        store.remember(APPLIED_KIND, "src/agents/skills/existing.py", rationale="already applied")
+        growth_socializer = GrowthSocializer(store, cooldown_seconds=0.0)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _maybe_volunteer_during_conversation(growth_socializer, None, None, CognitionRouter())
+
+        self.assertIn("existing.py", buf.getvalue())
+        self.assertIsNone(growth_socializer.share_next(None))  # consumed, not left for next time
+
+    def test_shares_a_ready_news_highlight_when_growth_has_nothing(self):
+        import contextlib
+        import io
+
+        from src.main import _maybe_volunteer_during_conversation
+        from src.orchestrator.socializing import GrowthSocializer, NewsSocializer
+
+        store = InMemoryStore()
+        interests = InterestTracker(store, feed=_StubFeed(
+            [NewsItem(title="t1", summary="s1", source="src", published_at=0.0)]
+        ))
+        interests.note_interest("https://example.com/feed", "seeded")
+        growth_socializer = GrowthSocializer(store, cooldown_seconds=0.0)  # nothing applied yet
+        news_socializer = NewsSocializer(cooldown_seconds=0.0)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _maybe_volunteer_during_conversation(
+                growth_socializer, news_socializer, interests, CognitionRouter()
+            )
+
+        self.assertIn("t1", buf.getvalue())
+
+    def test_growth_takes_priority_over_news_when_both_are_ready(self):
+        import contextlib
+        import io
+
+        from src.main import _maybe_volunteer_during_conversation
+        from src.orchestrator.socializing import GrowthSocializer, NewsSocializer
+
+        store = InMemoryStore()
+        store.remember(APPLIED_KIND, "src/agents/skills/existing.py", rationale="already applied")
+        interests = InterestTracker(store, feed=_StubFeed(
+            [NewsItem(title="t1", summary="s1", source="src", published_at=0.0)]
+        ))
+        interests.note_interest("https://example.com/feed", "seeded")
+        growth_socializer = GrowthSocializer(store, cooldown_seconds=0.0)
+        news_socializer = NewsSocializer(cooldown_seconds=0.0)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _maybe_volunteer_during_conversation(
+                growth_socializer, news_socializer, interests, CognitionRouter()
+            )
+
+        self.assertIn("existing.py", buf.getvalue())
+        self.assertEqual(len(interests.unshared_news_items()), 0)  # news never even checked
+
+    def test_prints_nothing_when_nothing_is_ready(self):
+        import contextlib
+        import io
+
+        from src.main import _maybe_volunteer_during_conversation
+        from src.orchestrator.socializing import GrowthSocializer, NewsSocializer
+
+        store = InMemoryStore()
+        growth_socializer = GrowthSocializer(store, cooldown_seconds=3600.0)
+        news_socializer = NewsSocializer(cooldown_seconds=3600.0)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _maybe_volunteer_during_conversation(growth_socializer, news_socializer, None, CognitionRouter())
+
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_no_socializers_given_is_a_safe_no_op(self):
+        import contextlib
+        import io
+
+        from src.main import _maybe_volunteer_during_conversation
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _maybe_volunteer_during_conversation(None, None, None, CognitionRouter())
+
+        self.assertEqual(buf.getvalue(), "")
 
 
 if __name__ == "__main__":

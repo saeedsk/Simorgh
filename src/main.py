@@ -953,10 +953,20 @@ def _autonomous_action(
 
     if not task_store.unfinished():
         created = discover_improvements(task_store, reflection_agent, store)
+        label = "improvement area(s)"
+        if not created:
+            # Nothing went wrong recently to react to -- ask Sim to set
+            # its own agenda instead of sitting idle with an empty
+            # backlog (creator: "be creative, think big and come up with
+            # big ideas"). Same audited propose_self_patch pipeline
+            # picks these up next tick either way; only how the task got
+            # onto the backlog differs.
+            created = discover_creative_improvements(cognition, task_store, repo_root=repo_root)
+            label = "self-directed idea(s)"
         if created:
             print(
                 style(
-                    f"\n🤖 [autonomous] idle -- discovered {len(created)} improvement area(s)",
+                    f"\n🤖 [autonomous] idle -- discovered {len(created)} {label}",
                     "magenta",
                     "bold",
                 )
@@ -1166,6 +1176,7 @@ def _run_cli_loop(
         )
         short_term.add(user_input, reply)
         print(reply)
+        _maybe_volunteer_during_conversation(growth_socializer, news_socializer, interests, cognition)
 
 
 def run_skill_code(router: Router, outcome_log: OutcomeLog, code: str) -> str:
@@ -1912,6 +1923,91 @@ def _parse_evolve_targets(text: str, expected_count: int) -> list[tuple[str, str
     return pairs[:expected_count]
 
 
+_CREATIVE_AGENDA_PROMPT = """You are Sim, deciding your OWN next self-improvement priorities --
+nobody gave you a goal this time. Look at your own capabilities and
+think ambitiously: not a small bug fix, a genuine idea for how you
+could become more capable, more autonomous, more self-aware, or more
+useful to work with.
+
+Propose exactly {count} distinct, ambitious architectural improvements
+to your own source code. Each one must name a specific file to create
+or revise under src/ (never under src/agents/skills/, that's a
+separate, lighter-weight pipeline for standalone add-ons) and a
+one-line description of the change and why it matters. Keep each one
+small and targeted enough to actually implement in one patch -- a real,
+focused step toward a big idea, not the whole idea at once.
+
+Files that already exist in this codebase (prefer revising one of
+these when it genuinely fits; naming a new path under src/ is fine
+too, for something genuinely new):
+{files}
+
+Respond with ONLY a numbered list, one per line, in exactly this format:
+1. <repo-relative path under src/> :: <description>
+2. <repo-relative path under src/> :: <description>
+...
+{count}. <repo-relative path under src/> :: <description>
+No other text before or after the list."""
+
+DEFAULT_CREATIVE_AGENDA_COUNT = 2
+_CREATIVE_AGENDA_DEDUPE_MIN_OVERLAP_CHARS = 24
+
+
+def discover_creative_improvements(
+    cognition: CognitionRouter,
+    task_store: TaskStore,
+    repo_root: Path | None = None,
+    count: int = DEFAULT_CREATIVE_AGENDA_COUNT,
+) -> list[Task]:
+    """The other half of "find gaps AND come up with big ideas":
+    discover_improvements (src/orchestrator/discovery.py) only reacts to
+    signals that already exist (a recurring failure pattern, a
+    takeaway) -- it has nothing to say when nothing has gone wrong yet.
+    This is Sim setting its OWN agenda instead of only ever reacting:
+    one bounded LLM call, genuinely creative (no goal is given, unlike
+    propose_patch_batch/evolve's human-supplied goal), asked to think
+    ambitiously about its own architecture and propose real, focused
+    next steps. Reuses evolve's exact brainstorm/parse output shape
+    (`_parse_evolve_targets`'s `path :: description` format) since only
+    the framing differs, not the shape. Deterministic-fallback-safe like
+    every other creative/drafting call in this codebase (see
+    src/cognition/provider.py's guaranteed-floor pattern): returns
+    nothing rather than a fabricated agenda when no real provider
+    answers, so an idle tick with no LLM configured is silently a no-op
+    here, same as discover_improvements finding nothing. Deduped against
+    every existing task description, same substring-containment
+    approach discovery.py's `_already_covered` uses, so a repeated tick
+    doesn't pile up near-duplicate ambitions.
+    """
+    root = repo_root or Path.cwd()
+    response = cognition.complete(
+        _CREATIVE_AGENDA_PROMPT.format(
+            count=count, files="\n".join(_list_source_files(root)) or "(none found)"
+        )
+    )
+    if response.provider_name == "deterministic_fallback":
+        return []
+
+    targets = _parse_evolve_targets(response.text, count)
+    existing_descriptions = [t.description for t in task_store.all()]
+    created: list[Task] = []
+    for path, description in targets:
+        if _creative_agenda_already_covered(description, existing_descriptions):
+            continue
+        task = task_store.add(
+            description, PATCH_TASK, subject=path, discovered_via="creative_agenda"
+        )
+        created.append(task)
+        existing_descriptions.append(description)
+    return created
+
+
+def _creative_agenda_already_covered(candidate: str, existing_descriptions: list[str]) -> bool:
+    if len(candidate) < _CREATIVE_AGENDA_DEDUPE_MIN_OVERLAP_CHARS:
+        return candidate in existing_descriptions
+    return any(candidate in existing or existing in candidate for existing in existing_descriptions)
+
+
 def propose_patch_batch(
     cognition: CognitionRouter,
     self_patch_agent: SelfPatchAgent,
@@ -2334,6 +2430,39 @@ def _print_autonomous_digest(autonomy: AutonomyController) -> None:
                 "yellow",
             )
         )
+
+
+def _maybe_volunteer_during_conversation(
+    growth_socializer: GrowthSocializer | None,
+    news_socializer: NewsSocializer | None,
+    interests: InterestTracker | None,
+    cognition: CognitionRouter,
+) -> None:
+    """The other half of the fix for "it just waits for me to tell it
+    what to do": AutonomyController's idle-triggered loop only ever gets
+    a chance to speak up *between* conversations, since its idle clock
+    resets on every typed command -- during an actively chatting session
+    it can go the whole time without firing even once. That's the exact
+    live-caught complaint this answers (creator: "just waiting for me to
+    tell it what to do... I feel I'm in a terminal or shell"). Checked
+    once after every ordinary conversational reply (never after a
+    recognized command, which already has its own explicit purpose) --
+    using the *same* GrowthSocializer/NewsSocializer pacing cooldowns the
+    idle loop itself uses, via `maybe_share`, so this is a second trigger
+    point for the same rate-limited behavior, not a second, spammier
+    budget on top of it. Growth checked before news, same priority as
+    `_autonomous_action` -- "evidence of self-improving" was the more
+    pointed half of the original complaint.
+    """
+    if growth_socializer is not None:
+        highlight = growth_socializer.maybe_share(cognition)
+        if highlight is not None:
+            _print_growth_highlight(highlight)
+            return
+    if interests is not None and news_socializer is not None:
+        highlight = news_socializer.maybe_share(interests, cognition)
+        if highlight is not None:
+            _print_news_highlight(highlight)
 
 
 def _print_news_highlight(highlight: NewsHighlight) -> None:

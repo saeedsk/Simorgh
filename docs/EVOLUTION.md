@@ -1129,3 +1129,46 @@ Still ahead, roughly in order:
     to the usual "a leading '/' is optional on any command" convention:
     `!` is its own trigger character, not a command word, so `_print_banner`
     is the one place that does NOT slash-prefix an entry.
+70. **Proactive sharing during active conversation, not just idle gaps
+    -- and a genuinely creative, self-directed discovery pass.** Two
+    more direct pieces of live feedback, back to back: "just waiting
+    for me to tell it what to do... I feel I'm in a terminal or shell,
+    instead of interacting with a sentient, intelligent being," then,
+    more urgently, "actively... starts learning and improving itself in
+    rapid pace... find gaps, find improvement area, be creative, think
+    big and come up with big idea... put together something that
+    actually evolves."
+    - The idle-triggered autonomous loop's growth/news sharing
+      (milestone 52/56) only ever gets a chance to fire *between*
+      conversations, since its idle clock resets on every typed
+      command -- during an actively chatting session it could go the
+      whole time without firing once, which is exactly what "just
+      waiting for me" meant in practice, not a metaphor. Fixed with
+      `_maybe_volunteer_during_conversation` (`src/main.py`): checked
+      once after every ordinary conversational reply (never after a
+      recognized command), reusing `GrowthSocializer`/`NewsSocializer`'s
+      *same* `maybe_share`/pacing cooldowns the idle loop already uses
+      -- a second trigger point for the same rate-limited behavior, not
+      a second, spammier budget layered on top.
+    - `discover_improvements` (`src/orchestrator/discovery.py`) was
+      always purely reactive -- it only ever turns an existing failure
+      signal (a reflection pattern, a takeaway) into a task, so it has
+      nothing to say when nothing has actually gone wrong yet. This was
+      retrospective item #4, deliberately deferred pending more design
+      work; the creator's second message above is that authorization,
+      explicitly. `discover_creative_improvements` (`src/main.py`) is
+      the creative half: when the reactive pass finds nothing and the
+      task backlog is empty, one bounded LLM call asks Sim to set its
+      OWN agenda -- no goal supplied, unlike `evolve`'s human-given one
+      -- and think ambitiously about its own architecture, reusing
+      `evolve`'s exact brainstorm output shape (`_parse_evolve_targets`'s
+      `path :: description` lines) so the resulting tasks flow through
+      the *identical* audited `propose_self_patch` pipeline as anything
+      else on the backlog -- no new, weaker path was added for this,
+      only a new way for a task to originate. Deterministic-fallback-
+      safe like every other drafting call in this codebase: a tick with
+      no real LLM configured silently finds nothing, same as the
+      reactive pass finding nothing. `_autonomous_action`'s existing
+      bullet-formatted discovery printout (`   + [id] (via) description`)
+      is unchanged and now covers both origins, distinguished by
+      `discovered_via` ("scan"/"reflection" vs. "creative_agenda").
