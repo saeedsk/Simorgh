@@ -1273,6 +1273,7 @@ def propose_skill(
     topic: str,
     repo_root: Path | None = None,
     max_attempts: int = 3,
+    initial_reasons: list[str] | None = None,
 ) -> str:
     """Draft a skill on `topic`, run it through the audit gate, and -- if it
     passes every check (static denylist, adaptive-immunity memory, a real
@@ -1295,8 +1296,14 @@ def propose_skill(
     printed live) -- previously a failed attempt's specific reason was
     gone the moment it scrolled off-screen if nobody was watching the
     terminal; now 'activity'/'activity last' can show it after the fact,
-    the same as every other tool-loop step (see activity_log.py). Returns
-    the message printed, for testability.
+    the same as every other tool-loop step (see activity_log.py).
+    `initial_reasons`, when given, seeds the very first attempt's retry
+    feedback instead of starting blind -- for a task that's already
+    failed in a PRIOR round (see `run_task`, which passes the task's
+    own recorded failure note here), so a reconsidered BLOCKED task
+    doesn't repeat the identical mistake across rounds with zero memory
+    of why the last one failed. Returns the message printed, for
+    testability.
     """
     if not topic:
         message = "[usage: propose <topic>]"
@@ -1305,7 +1312,7 @@ def propose_skill(
 
     proposal = None
     verdict = None
-    prior_reasons: list[str] | None = None
+    prior_reasons: list[str] | None = initial_reasons
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
             print(f"🧪 [propose] drafting a skill for {topic!r}...")
@@ -1491,6 +1498,7 @@ def propose_self_patch(
     short_term: ShortTermMemory | None = None,
     deployment_manager: DeploymentManager | None = None,
     hot_swap_factories: dict[str, Callable[[type], SubAgent]] | None = None,
+    initial_reasons: list[str] | None = None,
 ) -> str:
     """Draft a revision to an EXISTING source file at `subject`, run it
     through the same audit gate a drafted skill goes through, and -- if
@@ -1512,7 +1520,15 @@ def propose_self_patch(
     `_relaunch_or_rollback`/`_attempt_hot_swap`. Every gate above this
     point (audit gate, isolated test suite, apply, commit) is identical
     either way; only how the already-verified change takes effect
-    differs. Returns the message printed, for testability.
+    differs. `initial_reasons`, when given, seeds the very first
+    attempt's retry feedback instead of starting blind -- for a task
+    that's already failed in a PRIOR round (see `run_task`, which
+    passes the task's own recorded failure note here): without this, a
+    reconsidered BLOCKED task started every fresh round with zero
+    memory of why the last one failed, so the identical mistake could
+    repeat indefinitely across rounds even though a single round's own
+    internal attempts already retry with feedback. Returns the message
+    printed, for testability.
     """
     if not subject or not topic:
         message = "[usage: patch <repo-relative path> <description of the change>]"
@@ -1539,7 +1555,7 @@ def propose_self_patch(
 
     proposal = None
     verdict = None
-    prior_reasons: list[str] | None = None
+    prior_reasons: list[str] | None = initial_reasons
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
             print(f"🛠️  [patch] drafting a patch to {subject!r}: {topic!r}...")
@@ -2223,6 +2239,16 @@ def run_task(
     """
     task_store.update_status(task.id, IN_PROGRESS, attempt=True)
 
+    # A task reconsidered after being BLOCKED already carries a real
+    # failure reason in its own note (see _reconsider_blocked_tasks) --
+    # without seeding it here, every fresh round started blind, with no
+    # memory of why the last one failed, so the identical mistake could
+    # repeat indefinitely across rounds even though a single round's own
+    # internal attempts already retry with feedback. Live-caught: a real
+    # self-patch task failed the exact same generic way across multiple
+    # reconsideration rounds with zero improvement.
+    initial_reasons = [task.note] if task.attempts > 0 and task.note else None
+
     if task.kind == PATCH_TASK:
         result = propose_self_patch(
             self_patch_agent,
@@ -2233,10 +2259,17 @@ def run_task(
             task.description,
             repo_root=repo_root,
             do_relaunch=False,
+            initial_reasons=initial_reasons,
         )
     else:
         result = propose_skill(
-            skill_research, audit_gate, store, activity_log, task.description, repo_root=repo_root
+            skill_research,
+            audit_gate,
+            store,
+            activity_log,
+            task.description,
+            repo_root=repo_root,
+            initial_reasons=initial_reasons,
         )
 
     if not result.startswith("[APPLIED]"):
