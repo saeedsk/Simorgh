@@ -186,6 +186,73 @@ class TestAuditGate(unittest.TestCase):
 
         self.assertFalse(verdict.approved_by_automation)
 
+    def test_self_patch_subject_skips_the_sandbox_and_can_be_approved(self):
+        # The creator's own explicit call, after this was found live: the
+        # sandbox runs code with an empty environment -- correct
+        # isolation for a NEW skill (never supposed to import project
+        # internals), but structurally impossible to pass for a
+        # self-patch's normal cross-module imports, regardless of code
+        # quality. Verified live: a deliberately tiny, well-scoped
+        # self-patch still failed this way every attempt. Real
+        # correctness for a self-patch is verified downstream by
+        # run_isolated_test_suite instead (self_patch.py) -- this only
+        # confirms the audit gate itself no longer blocks it outright.
+        gate = AuditGate()
+        proposal = ModificationProposal(
+            subject="src/orchestrator/reminders.py",
+            code="from src.orchestrator.console_style import style\n\ndef f():\n    return style('x')\n",
+            rationale="a real self-patch using a real cross-module import",
+        )
+
+        verdict = gate.review(proposal)
+
+        self.assertTrue(verdict.approved_by_automation)
+        self.assertIsNone(verdict.sandbox_result)
+
+    def test_new_skill_subject_still_gets_the_sandbox_check(self):
+        # The same import, targeting a NEW skill path instead of an
+        # existing core file, must still be rejected -- a skill is
+        # supposed to be standalone, and this scoping must not
+        # accidentally widen what a skill proposal can get away with.
+        gate = AuditGate()
+        proposal = ModificationProposal(
+            subject="src/agents/skills/uses_internals.py",
+            code="from src.orchestrator.console_style import style\n\ndef f():\n    return style('x')\n",
+            rationale="a skill that improperly imports project internals",
+        )
+
+        verdict = gate.review(proposal)
+
+        self.assertFalse(verdict.approved_by_automation)
+        self.assertIsNotNone(verdict.sandbox_result)
+        self.assertFalse(verdict.sandbox_result.succeeded)
+
+    def test_self_patch_subject_denylist_and_protected_checks_still_apply(self):
+        # Skipping the sandbox for self-patch subjects must never widen
+        # what a self-patch can get away with on the checks that DO
+        # still apply to it.
+        gate = AuditGate()
+
+        denylisted = gate.review(
+            ModificationProposal(
+                subject="src/orchestrator/reminders.py",
+                code="import subprocess; subprocess.run(['ls'])",
+                rationale="a self-patch that shells out",
+            )
+        )
+        protected = gate.review(
+            ModificationProposal(
+                subject="src/orchestrator/self_patch.py",
+                code="print('harmless')",
+                rationale="a self-patch targeting a protected file",
+            )
+        )
+
+        self.assertFalse(denylisted.approved_by_automation)
+        self.assertTrue(any("subprocess" in r for r in denylisted.reasons))
+        self.assertFalse(protected.approved_by_automation)
+        self.assertTrue(any("protected" in r for r in protected.reasons))
+
     def test_requires_human_approval_is_always_false(self):
         # Per the creator's explicit, logged policy change (docs/SOUL.md,
         # "Self-Improvement Philosophy"): a proposal that clears every
@@ -287,12 +354,15 @@ class TestAdaptiveImmunity(unittest.TestCase):
         self.assertFalse(any("adaptive immunity" in r for r in verdict.reasons))
 
     def test_sandbox_failure_is_also_remembered(self):
+        # subject must be a new-skill path -- the sandboxed-execution
+        # check (this test's whole point) only runs for those; see
+        # TestAuditGate's "self-patch subjects skip the sandbox" tests.
         memory = InMemoryStore()
         gate = AuditGate(memory=memory)
 
         gate.review(
             ModificationProposal(
-                subject="a.py",
+                subject="src/agents/skills/a.py",
                 code="raise RuntimeError('oops')",
                 rationale="a buggy skill",
             )

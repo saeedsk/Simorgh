@@ -20,6 +20,22 @@ based on experience), and an adaptive layer (when `memory` is given,
 every rejection is remembered, and a new proposal that closely resembles
 one already rejected is denied on that resemblance alone -- even if it
 doesn't match any static pattern).
+
+The sandboxed-execution check specifically is scoped to NEW skill
+proposals (subject under src/agents/skills/), not self-patches to
+existing core files. The creator's own explicit call, after this was
+found live: the sandbox runs code with an empty environment in a bare
+temp dir -- correct for a standalone skill file (never supposed to
+import project internals), but structurally impossible to pass for a
+self-patch's normal cross-module imports, regardless of code quality.
+A self-patch's real correctness is already verified downstream by
+run_isolated_test_suite (src/orchestrator/self_patch.py), which
+actually runs the patched code as part of the whole real test suite
+against a full repo copy with the package intact -- so this scoping
+routes self-patches to the check that can actually pass a legitimate
+import, rather than skipping verification. Every OTHER check here
+(denylist, protected-subjects, adaptive-immunity) applies identically
+to both classes, unchanged.
 """
 
 from __future__ import annotations
@@ -28,6 +44,7 @@ import difflib
 import re
 from dataclasses import dataclass, field
 
+from src.agents.skills.registry import SKILLS_DIR
 from src.memory.long_term import MemoryStore
 from src.sandboxing.sandbox import SandboxExecutor, SandboxResult, SubprocessSandbox
 
@@ -153,26 +170,49 @@ class AuditGate:
         if reasons:
             return self._deny(proposal, reasons)
 
-        sandbox_result = self._sandbox.run(proposal.code, timeout=self._timeout)
-        if not sandbox_result.succeeded:
-            # The generic (timed_out=.., exit_code=..) summary alone
-            # gives a retry loop nothing to actually act on -- caught
-            # live watching a real self-patch task fail this exact same
-            # generic way across multiple attempts and reconsideration
-            # rounds with zero improvement, because prior_reasons never
-            # carried the real error. sandbox_result.stderr/stdout has
-            # the actual traceback; folding a bounded excerpt of it in
-            # gives the next drafting attempt something concrete to fix
-            # instead of guessing blind.
-            detail = (sandbox_result.stderr or sandbox_result.stdout or "").strip()
-            if len(detail) > _MAX_SANDBOX_DETAIL_CHARS:
-                detail = detail[:_MAX_SANDBOX_DETAIL_CHARS] + "…(truncated)"
-            reasons.append(
-                "sandboxed run did not succeed "
-                f"(timed_out={sandbox_result.timed_out}, exit_code={sandbox_result.exit_code})"
-                + (f": {detail}" if detail else "")
-            )
-            self._remember_rejection(proposal, reasons)
+        # The sandbox runs code with an EMPTY environment (`env={}`,
+        # `python -I`) in a bare temp dir -- correct isolation for a new,
+        # standalone skill file (src/agents/skills/, never supposed to
+        # import project internals), but structurally impossible to pass
+        # for a self-patch to an existing core file: any normal
+        # cross-module import ("from src.orchestrator.console_style
+        # import style") fails with `ModuleNotFoundError: No module
+        # named 'src'`, regardless of code quality. Verified live: a
+        # deliberately tiny, well-scoped self-patch still failed this
+        # exact way every attempt. Real correctness/behavior for a
+        # self-patch is already verified downstream by
+        # run_isolated_test_suite (self_patch.py) -- it actually runs
+        # the patched code for real, as part of the whole real test
+        # suite, against a full repo copy with the package intact -- so
+        # skipping this one check for self-patch subjects doesn't skip
+        # verification, it routes to the check that can actually pass a
+        # legitimate cross-module import. Every other check above and
+        # below (denylist, protected-files, adaptive-immunity) applies
+        # identically regardless of subject -- only this one, structurally
+        # skill-specific check is scoped to skill subjects.
+        sandbox_result: SandboxResult | None = None
+        is_new_skill = proposal.subject.startswith(f"{SKILLS_DIR}/")
+        if is_new_skill:
+            sandbox_result = self._sandbox.run(proposal.code, timeout=self._timeout)
+            if not sandbox_result.succeeded:
+                # The generic (timed_out=.., exit_code=..) summary alone
+                # gives a retry loop nothing to actually act on -- caught
+                # live watching a real self-patch task fail this exact same
+                # generic way across multiple attempts and reconsideration
+                # rounds with zero improvement, because prior_reasons never
+                # carried the real error. sandbox_result.stderr/stdout has
+                # the actual traceback; folding a bounded excerpt of it in
+                # gives the next drafting attempt something concrete to fix
+                # instead of guessing blind.
+                detail = (sandbox_result.stderr or sandbox_result.stdout or "").strip()
+                if len(detail) > _MAX_SANDBOX_DETAIL_CHARS:
+                    detail = detail[:_MAX_SANDBOX_DETAIL_CHARS] + "…(truncated)"
+                reasons.append(
+                    "sandboxed run did not succeed "
+                    f"(timed_out={sandbox_result.timed_out}, exit_code={sandbox_result.exit_code})"
+                    + (f": {detail}" if detail else "")
+                )
+                self._remember_rejection(proposal, reasons)
 
         return AuditVerdict(
             approved_by_automation=not reasons,
