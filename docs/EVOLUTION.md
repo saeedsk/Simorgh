@@ -1648,3 +1648,20 @@ Still ahead, roughly in order:
     similar length, is never flagged. 796 unit tests + 21 E2E tests
     passing, with tests proving the drop is caught, a genuine rewrite
     isn't, and `draft_patch()` treats it as retryable end to end.
+88. **`vitals` now also prints once automatically at startup** -- the
+    creator's follow-up ask, after noticing it didn't appear until asked
+    for. Deliberately still only a one-time snapshot in the startup
+    sequence, not the live-reprinting mode (`vitals on` stays an
+    explicit opt-in) -- showing it once on the very first screen is
+    unambiguous; having it start reprinting itself unprompted every few
+    idle seconds from the first launch was not asked for. Separately
+    asked whether the panel could stay pinned to a fixed part of the
+    screen at all times rather than reprinting as a scrolling block --
+    answered honestly rather than built: that needs raw ANSI terminal
+    control (a reserved scroll region) that has to coexist carefully
+    with `readline`'s own cursor management for the input line, and
+    stops working entirely over SSH/piped/non-standard terminals --
+    meaningfully more fragile than every other "prints on its own"
+    mechanism this project has built so far, all of which deliberately
+    avoid exactly that kind of terminal control. Not built without the
+    creator explicitly choosing that tradeoff first.
