@@ -2510,6 +2510,113 @@ class TestHandleAutonomousCommand(unittest.TestCase):
         self.assertIn("enabled: True", buf.getvalue())
 
 
+class TestVitals(unittest.TestCase):
+    """The creator's direct ask: "a window or box in terminal where it
+    shows its mood in form of a couple of bar meters... and any other
+    thing I can measure... updated in real time." See
+    src.orchestrator.console_style.VitalsMonitor for the live-update
+    half; these exercise the snapshot content and the on/off toggle.
+    """
+
+    def _router(self, valence=0.0, arousal=0.0, cognitive_load=0.0):
+        from src.memory.shared_bus import SharedMemoryBus
+        from src.orchestrator.router import Router
+
+        bus = SharedMemoryBus()
+        bus.publish_state("test", valence=valence, arousal=arousal, cognitive_load=cognitive_load)
+        return Router(bus)
+
+    def test_snapshot_includes_mood_bars_and_stats(self):
+        from src.main import _vitals_snapshot
+
+        store = InMemoryStore()
+        store.remember("conversation_turn", "hi", reply="hello")
+        interests = InterestTracker(store)
+        interests.note_interest("https://example.com/feed", "seeded")
+        task_store = TaskStore(store)
+        task_store.add("rocketry", SKILL_TASK)
+        router = self._router(valence=0.5, arousal=-0.5, cognitive_load=0.25)
+
+        panel = _vitals_snapshot(router, store, interests, task_store)
+
+        self.assertIn("Mood", panel)
+        self.assertIn("Energy", panel)
+        self.assertIn("Focus load", panel)
+        self.assertIn("Memory records", panel)
+        self.assertIn("Skills applied", panel)
+        self.assertIn("Interests tracked", panel)
+        self.assertIn("Task backlog", panel)
+        self.assertIn("1", panel)  # one tracked interest, one backlog task
+
+    def test_never_shows_raw_valence_or_arousal_jargon(self):
+        # Same principle as LogicAgent's own prompt (mood_phrase) --
+        # this panel reads in the same natural "voice", not a
+        # clinical-sounding numbers dump.
+        from src.main import _vitals_snapshot
+
+        store = InMemoryStore()
+        interests = InterestTracker(store)
+        task_store = TaskStore(store)
+        router = self._router()
+
+        panel = _vitals_snapshot(router, store, interests, task_store)
+
+        self.assertNotIn("valence", panel.lower())
+        self.assertNotIn("arousal", panel.lower())
+
+    def test_handle_vitals_off_disables_the_monitor(self):
+        from src.main import _handle_vitals_command
+        from src.orchestrator.console_style import VitalsMonitor
+
+        monitor = VitalsMonitor(render=lambda: "PANEL", is_idle=lambda: True)
+        monitor.enabled = True
+        store = InMemoryStore()
+
+        _handle_vitals_command(
+            "off", monitor, self._router(), store, InterestTracker(store), TaskStore(store)
+        )
+
+        self.assertFalse(monitor.enabled)
+
+    def test_handle_vitals_on_enables_the_monitor_and_prints_a_snapshot(self):
+        import contextlib
+        import io
+
+        from src.main import _handle_vitals_command
+        from src.orchestrator.console_style import VitalsMonitor
+
+        monitor = VitalsMonitor(render=lambda: "PANEL", is_idle=lambda: True)
+        store = InMemoryStore()
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _handle_vitals_command(
+                "on", monitor, self._router(), store, InterestTracker(store), TaskStore(store)
+            )
+
+        self.assertTrue(monitor.enabled)
+        self.assertIn("Mood", buf.getvalue())
+
+    def test_handle_vitals_bare_prints_a_snapshot_without_changing_the_toggle(self):
+        import contextlib
+        import io
+
+        from src.main import _handle_vitals_command
+        from src.orchestrator.console_style import VitalsMonitor
+
+        monitor = VitalsMonitor(render=lambda: "PANEL", is_idle=lambda: True)
+        store = InMemoryStore()
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _handle_vitals_command(
+                "", monitor, self._router(), store, InterestTracker(store), TaskStore(store)
+            )
+
+        self.assertFalse(monitor.enabled)
+        self.assertIn("Mood", buf.getvalue())
+
+
 class TestPrintAutonomousDigest(unittest.TestCase):
     def test_reports_no_actions_when_empty(self):
         import contextlib

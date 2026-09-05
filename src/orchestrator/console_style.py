@@ -227,3 +227,97 @@ class LiveTicker:
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=self._interval + 1.0)
+
+
+_BAR_FILLED = "█"
+_BAR_EMPTY = "░"
+
+
+def render_bar(fraction: float, width: int = 20, color: str = "cyan") -> str:
+    """A single `[width]`-wide bar meter for a value already normalized to
+    [0.0, 1.0] -- the caller maps whatever real range a stat lives in
+    (e.g. EmotionalState.valence's [-1, 1]) onto that first, so this
+    stays a dumb, reusable renderer rather than knowing about any one
+    stat's own scale.
+    """
+    clamped = max(0.0, min(1.0, fraction))
+    filled = round(clamped * width)
+    bar = _BAR_FILLED * filled + _BAR_EMPTY * (width - filled)
+    return style(bar, color)
+
+
+def render_vitals(mood_phrase: str, bars: list[tuple[str, float]], stats: list[tuple[str, str]]) -> str:
+    """The 'vitals' panel: a few labeled bar meters (already-normalized
+    [0.0, 1.0] fractions, e.g. mood/energy/focus-load) plus a few plain
+    label/value stat lines (memory size, skills applied, interests
+    tracked, task backlog) -- direct answer to the creator's ask for
+    "a window or box... that shows its mood in form of a couple of bar
+    meters... and any other thing I can measure." `mood_phrase` is the
+    same natural-language rendering `_mood_phrase()` already produces
+    for conversation (never the raw numbers alone) so this panel reads
+    the same "voice" as everything else, not a diagnostics dump.
+    """
+    label_width = max((len(label) for label, _ in bars), default=0)
+    lines = [style("🩺 vitals", "magenta", "bold") + style(f" -- feeling {mood_phrase}", "dim")]
+    for label, fraction in bars:
+        pct = round(max(0.0, min(1.0, fraction)) * 100)
+        lines.append(f"  {label.ljust(label_width)}  {render_bar(fraction)}  {pct:>3}%")
+    if stats:
+        stat_width = max(len(label) for label, _ in stats)
+        for label, value in stats:
+            lines.append(f"  {label.ljust(stat_width)}  {style(value, 'bold')}")
+    return "\n".join(lines)
+
+
+DEFAULT_VITALS_INTERVAL_SECONDS = 15.0
+
+
+class VitalsMonitor:
+    """Optional, toggleable live vitals panel ('vitals on'/'vitals off').
+
+    Same safe pattern this project already established for everything
+    else that prints on its own (LiveTicker above, reminders.py, the
+    autonomous loop): a daemon thread prints a fresh block between
+    `input()` calls, never a fragile in-place cursor redraw -- this
+    project has deliberately avoided true in-place TUI redraws
+    throughout (see LiveTicker's own docstring) since they're fragile
+    across terminals, piped output, and non-TTY logging. Only actually
+    prints while `enabled` and `is_idle()` both say so, so a "live"
+    panel never interrupts someone actively typing -- the exact same
+    idle-gating idea `AutonomyController` already uses, reusing
+    whatever `ActivityClock` the caller already has rather than a
+    second one.
+
+    Started once at CLI startup and left running for the process's
+    whole life, exactly like `AutonomyController` -- `enabled` is a
+    plain toggle checked every tick, not something that starts/stops
+    the underlying thread, so there's no restart-race to get wrong.
+    """
+
+    def __init__(
+        self,
+        render: Callable[[], str],
+        is_idle: Callable[[], bool],
+        interval: float = DEFAULT_VITALS_INTERVAL_SECONDS,
+    ) -> None:
+        self._render = render
+        self._is_idle = is_idle
+        self._interval = interval
+        self.enabled = False
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="simorgh-vitals")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self._interval):
+            if self.enabled and self._is_idle():
+                print("\n" + self._render())
+                print(style("> ", "cyan", "bold"), end="", flush=True)
