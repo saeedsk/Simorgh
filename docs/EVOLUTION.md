@@ -1608,3 +1608,43 @@ Still ahead, roughly in order:
     a second one. The bare `vitals` command always prints one snapshot
     immediately regardless of the live toggle. 786 unit tests + 21 E2E
     tests passing.
+87. **The self-patch pipeline finally worked end-to-end for real -- and
+    immediately revealed a systemic quality regression, caught and
+    fixed the same day.** With milestones 84/85 landed, five real,
+    autonomous self-patches to core files applied for the first time
+    all session: `autonomy.py` (a `CuriosityDrive` feature), `tool_protocol.py`
+    x2 (a capability registry), `budget.py` x2 (adaptive per-provider
+    cost/latency tracking). All passed the audit gate and the full
+    isolated test suite (788/788).
+
+    Reviewing them directly (the creator's own earlier ask, "review
+    changes... approve their commit if they make sense") found a
+    serious problem: **all five deleted the target file's entire module
+    docstring**, with no replacement -- `autonomy.py`'s, `tool_protocol.py`'s,
+    and `budget.py`'s own carefully-written rationale (including
+    `budget.py`'s `docs/BIOMIMICRY.md` tie-in) all silently gone. A
+    full-file-rewrite prompt doesn't reliably preserve documentation
+    that isn't the direct subject of the requested change, and nothing
+    in the pipeline was checking for that loss. `CuriosityDrive`
+    specifically also had two independent functional defects on top of
+    that: its contradiction-detection heuristic, tested live against
+    the real 3200+ record memory store, found nothing but false
+    positives (comparing unrelated internal log lines, e.g. a carpentry
+    chat reply against a self-patch failure message); and its
+    exploratory tasks never reached the real task queue at all --
+    `AutonomyController`'s own construction in `main.py` was never
+    updated to pass `task_store` through, so task creation silently
+    no-opped. A half-finished feature, not a working one.
+
+    All three files reverted to their pre-patch state. Root cause fixed
+    structurally, not just patched over: `_docstring_regression_reason()`
+    (`self_patch.py`) compares the original file's module docstring
+    (via `ast.get_docstring`) against the draft's -- a substantial
+    original docstring that's now missing or shrunk to under 30% of its
+    length is a retryable failure, fed back via the same `prior_reasons`
+    mechanism an invalid-Python draft already uses (milestone 78), not
+    a hard block and not something that silently applies anyway. A file
+    with no/trivial docstring, or a patch that genuinely rewrites one at
+    similar length, is never flagged. 796 unit tests + 21 E2E tests
+    passing, with tests proving the drop is caught, a genuine rewrite
+    isn't, and `draft_patch()` treats it as retryable end to end.

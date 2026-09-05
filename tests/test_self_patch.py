@@ -8,6 +8,7 @@ from src.orchestrator.audit import AuditGate
 from src.orchestrator.self_patch import (
     SelfPatchAgent,
     SuiteRunResult,
+    _docstring_regression_reason,
     check_main_py_invariants,
     relaunch,
     run_isolated_test_suite,
@@ -131,6 +132,24 @@ class TestSelfPatchAgent(unittest.TestCase):
         self.assertNotEqual(reason, "deterministic_fallback")
         self.assertFalse(reason.startswith("refused: "))
         self.assertIn("fake", reason)
+
+    def test_draft_that_drops_the_original_docstring_is_retryable(self):
+        # Live-caught: five separate real self-patches all silently
+        # deleted the target's entire module docstring while otherwise
+        # producing valid Python -- must be a retryable failure (same
+        # class as invalid Python above), not a hard stop.
+        (self.repo_root / "src" / "orchestrator" / "documented.py").write_text(
+            f"{_SUBSTANTIAL_DOCSTRING}\n\nVALUE = 1\n"
+        )
+        provider = FakeProvider(text="VALUE = 2\n")  # drops the docstring entirely
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        proposal, reason = agent.draft_patch("src/orchestrator/documented.py", "improve it")
+
+        self.assertIsNone(proposal)
+        self.assertNotEqual(reason, "deterministic_fallback")
+        self.assertFalse(reason.startswith("refused: "))
+        self.assertIn("docstring", reason)
 
     def test_read_tool_pulls_in_other_files_for_context(self):
         (self.repo_root / "src" / "orchestrator" / "other.py").write_text("OTHER = 1\n")
@@ -279,6 +298,65 @@ class TestSelfPatchAgent(unittest.TestCase):
 
         self.assertEqual(len(log.calls), 1)
         self.assertFalse(log.calls[0][3])
+
+
+_SUBSTANTIAL_DOCSTRING = '"""' + "A real rationale, long enough to matter. " * 3 + '"""'
+
+
+class TestDocstringRegressionReason(unittest.TestCase):
+    """Live-caught: five separate real self-patches to three different
+    files all silently deleted the target's entire module docstring
+    while otherwise passing every check. See _docstring_regression_reason's
+    own docstring in self_patch.py.
+    """
+
+    def test_dropped_docstring_is_flagged(self):
+        original = f"{_SUBSTANTIAL_DOCSTRING}\n\nVALUE = 1\n"
+        new = "VALUE = 2\n"
+
+        reason = _docstring_regression_reason(original, new)
+
+        self.assertIsNotNone(reason)
+        self.assertIn("docstring", reason)
+
+    def test_drastically_shortened_docstring_is_flagged(self):
+        original = f"{_SUBSTANTIAL_DOCSTRING}\n\nVALUE = 1\n"
+        new = '"""short."""\n\nVALUE = 2\n'
+
+        reason = _docstring_regression_reason(original, new)
+
+        self.assertIsNotNone(reason)
+
+    def test_preserved_docstring_is_not_flagged(self):
+        original = f"{_SUBSTANTIAL_DOCSTRING}\n\nVALUE = 1\n"
+        new = f"{_SUBSTANTIAL_DOCSTRING}\n\nVALUE = 2\n"
+
+        self.assertIsNone(_docstring_regression_reason(original, new))
+
+    def test_genuinely_rewritten_docstring_of_similar_length_is_not_flagged(self):
+        original = f"{_SUBSTANTIAL_DOCSTRING}\n\nVALUE = 1\n"
+        rewritten = '"""' + "A genuinely different but equally real rationale. " * 3 + '"""'
+        new = f"{rewritten}\n\nVALUE = 2\n"
+
+        self.assertIsNone(_docstring_regression_reason(original, new))
+
+    def test_a_file_with_no_original_docstring_is_never_flagged(self):
+        original = "VALUE = 1\n"
+        new = "VALUE = 2\n"
+
+        self.assertIsNone(_docstring_regression_reason(original, new))
+
+    def test_a_trivial_original_docstring_is_never_flagged(self):
+        original = '"""short."""\n\nVALUE = 1\n'
+        new = "VALUE = 2\n"
+
+        self.assertIsNone(_docstring_regression_reason(original, new))
+
+    def test_unparseable_content_never_raises(self):
+        original = f"{_SUBSTANTIAL_DOCSTRING}\n\nVALUE = 1\n"
+
+        self.assertIsNone(_docstring_regression_reason(original, "not valid python {{{"))
+        self.assertIsNone(_docstring_regression_reason("not valid python {{{", "VALUE = 2\n"))
 
 
 class TestCheckMainPyInvariants(unittest.TestCase):
