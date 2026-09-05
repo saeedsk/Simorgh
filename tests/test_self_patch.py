@@ -8,8 +8,11 @@ from src.orchestrator.audit import AuditGate
 from src.orchestrator.self_patch import (
     SelfPatchAgent,
     SuiteRunResult,
+    _apply_search_replace_blocks,
     _docstring_regression_reason,
+    _EDIT_MODE_LINE_THRESHOLD,
     check_main_py_invariants,
+    parse_search_replace_blocks,
     relaunch,
     run_isolated_test_suite,
 )
@@ -357,6 +360,178 @@ class TestDocstringRegressionReason(unittest.TestCase):
 
         self.assertIsNone(_docstring_regression_reason(original, "not valid python {{{"))
         self.assertIsNone(_docstring_regression_reason("not valid python {{{", "VALUE = 2\n"))
+
+
+class TestParseSearchReplaceBlocks(unittest.TestCase):
+    """See docs/EVOLUTION.md milestone 82: full-file-rewrite self-patches
+    against a substantial existing file failed reliably. SEARCH/REPLACE
+    edit blocks only ask the model to faithfully reproduce the lines
+    actually changing.
+    """
+
+    def test_no_markers_returns_none(self):
+        self.assertIsNone(parse_search_replace_blocks("just a plain full file\nVALUE = 1\n"))
+
+    def test_single_block_is_parsed(self):
+        text = "<<<<<<< SEARCH\nold line\n=======\nnew line\n>>>>>>> REPLACE"
+
+        blocks = parse_search_replace_blocks(text)
+
+        self.assertEqual(blocks, [("old line", "new line")])
+
+    def test_multiple_blocks_are_parsed_in_order(self):
+        text = (
+            "<<<<<<< SEARCH\nfirst old\n=======\nfirst new\n>>>>>>> REPLACE\n"
+            "some prose in between\n"
+            "<<<<<<< SEARCH\nsecond old\n=======\nsecond new\n>>>>>>> REPLACE"
+        )
+
+        blocks = parse_search_replace_blocks(text)
+
+        self.assertEqual(blocks, [("first old", "first new"), ("second old", "second new")])
+
+    def test_a_block_missing_its_replace_marker_is_not_matched(self):
+        text = "<<<<<<< SEARCH\nold line\n=======\nnew line\n"
+
+        self.assertIsNone(parse_search_replace_blocks(text))
+
+
+class TestApplySearchReplaceBlocks(unittest.TestCase):
+    def test_single_exact_match_is_replaced(self):
+        original = "def old():\n    return 1\n"
+
+        new_content, reason = _apply_search_replace_blocks(
+            original, [("def old():\n    return 1", "def new():\n    return 2")]
+        )
+
+        self.assertIsNone(reason)
+        self.assertEqual(new_content, "def new():\n    return 2\n")
+
+    def test_multiple_blocks_apply_independently_in_order(self):
+        original = "A = 1\nB = 2\nC = 3\n"
+
+        new_content, reason = _apply_search_replace_blocks(
+            original, [("A = 1", "A = 10"), ("C = 3", "C = 30")]
+        )
+
+        self.assertIsNone(reason)
+        self.assertEqual(new_content, "A = 10\nB = 2\nC = 30\n")
+
+    def test_search_text_not_found_is_a_retryable_reason(self):
+        original = "A = 1\n"
+
+        new_content, reason = _apply_search_replace_blocks(original, [("B = 2", "B = 3")])
+
+        self.assertIsNone(new_content)
+        self.assertIn("doesn't appear", reason)
+
+    def test_ambiguous_search_text_is_a_retryable_reason(self):
+        original = "A = 1\nA = 1\n"
+
+        new_content, reason = _apply_search_replace_blocks(original, [("A = 1", "A = 2")])
+
+        self.assertIsNone(new_content)
+        self.assertIn("2 different places", reason)
+
+    def test_empty_search_text_is_a_retryable_reason(self):
+        original = "A = 1\n"
+
+        new_content, reason = _apply_search_replace_blocks(original, [("   \n", "A = 2")])
+
+        self.assertIsNone(new_content)
+        self.assertIn("empty", reason)
+
+
+class TestSelfPatchAgentEditMode(unittest.TestCase):
+    """Integration tests: a file at/above _EDIT_MODE_LINE_THRESHOLD lines
+    switches draft_patch to the SEARCH/REPLACE prompt/parsing path.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        (self.repo_root / "src" / "orchestrator").mkdir(parents=True)
+        big_lines = [f"LINE_{i} = {i}\n" for i in range(_EDIT_MODE_LINE_THRESHOLD + 20)]
+        self.big_content = "".join(big_lines)
+        (self.repo_root / "src" / "orchestrator" / "big.py").write_text(self.big_content)
+        (self.repo_root / "src" / "orchestrator" / "small.py").write_text(
+            "def old():\n    return 1\n"
+        )
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_a_large_file_gets_the_edit_block_prompt(self):
+        provider = FakeProvider(text="ignored")
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        agent.draft_patch("src/orchestrator/big.py", "improve it")
+
+        self.assertIn("SEARCH/REPLACE", provider.prompts[0])
+
+    def test_a_small_file_still_gets_the_plain_rewrite_prompt(self):
+        provider = FakeProvider(text="ignored")
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        agent.draft_patch("src/orchestrator/small.py", "improve it")
+
+        self.assertNotIn("SEARCH/REPLACE", provider.prompts[0])
+
+    def test_valid_edit_blocks_are_applied_against_the_real_file(self):
+        response = (
+            "<<<<<<< SEARCH\nLINE_0 = 0\n=======\nLINE_0 = 999\n>>>>>>> REPLACE"
+        )
+        provider = FakeProvider(text=response)
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        proposal, reason = agent.draft_patch("src/orchestrator/big.py", "improve it")
+
+        self.assertIsNone(reason)
+        self.assertIn("LINE_0 = 999", proposal.code)
+        self.assertIn("LINE_1 = 1", proposal.code)  # untouched lines survive verbatim
+
+    def test_a_model_that_ignores_the_edit_format_and_answers_with_the_whole_file_still_works(self):
+        provider = FakeProvider(text="VALUE = 1\n")
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        proposal, reason = agent.draft_patch("src/orchestrator/big.py", "improve it")
+
+        self.assertIsNone(reason)
+        self.assertEqual(proposal.code.strip(), "VALUE = 1")
+
+    def test_a_search_snippet_that_does_not_match_is_a_retryable_reason(self):
+        response = (
+            "<<<<<<< SEARCH\nTHIS_LINE_DOES_NOT_EXIST\n=======\nnew\n>>>>>>> REPLACE"
+        )
+        provider = FakeProvider(text=response)
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        proposal, reason = agent.draft_patch("src/orchestrator/big.py", "improve it")
+
+        self.assertIsNone(proposal)
+        self.assertNotEqual(reason, "deterministic_fallback")
+        self.assertIn("doesn't appear", reason)
+
+    def test_edit_mode_still_catches_a_docstring_regression(self):
+        documented_lines = [f"{_SUBSTANTIAL_DOCSTRING}\n"] + [
+            f"LINE_{i} = {i}\n" for i in range(_EDIT_MODE_LINE_THRESHOLD + 20)
+        ]
+        (self.repo_root / "src" / "orchestrator" / "documented_big.py").write_text(
+            "".join(documented_lines)
+        )
+        response = "<<<<<<< SEARCH\nLINE_0 = 0\n=======\nLINE_0 = 999\n>>>>>>> REPLACE"
+        provider = FakeProvider(text=response)
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        proposal, reason = agent.draft_patch("src/orchestrator/documented_big.py", "improve it")
+
+        # The docstring is untouched by this edit (SEARCH/REPLACE only
+        # touches what it names), so this should NOT be flagged --
+        # proves the edit-mode path still runs the same downstream
+        # checks as the full-rewrite path, without false-positiving on
+        # documentation an edit block never touched.
+        self.assertIsNone(reason)
+        self.assertIn(_SUBSTANTIAL_DOCSTRING.strip('"'), proposal.code)
 
 
 class TestCheckMainPyInvariants(unittest.TestCase):
