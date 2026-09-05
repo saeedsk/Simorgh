@@ -45,6 +45,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from src.agents.skills.registry import list_applied_skills
 from src.cognition.provider import CognitionRouter, ProviderUnavailable
 from src.cognition.tool_protocol import parse_marker, preview, safe_list_dir, safe_read_file
 from src.memory.shared_bus import SharedMemoryBus
@@ -138,6 +139,13 @@ _TONE_REMINDER = (
     "sound. Answer like yourself, not like a status report. If this is "
     "small talk, just talk."
 )
+
+# Bounds the live applied-skills list injected into every prompt (see
+# _build_prompt) -- a long-running "hyperscale" self-improvement session
+# can genuinely accumulate a large number of applied skills, and an
+# unbounded list would otherwise grow every single turn's prompt
+# forever.
+_MAX_SKILLS_IN_PROMPT = 40
 
 _MOOD_PHRASES = {
     (Valence.NEGATIVE, ArousalLevel.HIGH): "on edge, a bit wound up",
@@ -346,6 +354,32 @@ class LogicAgent(SubAgent):
 
     def _build_prompt(self, text: str, mood: EmotionalState) -> str:
         parts = [_IDENTITY_PREFIX, _CAPABILITY_REFERENCE + self._tools_description()]
+        if self._use_skill_fn is not None:
+            applied = list_applied_skills(self._repo_root)
+            if applied:
+                # A live, freshly-read-from-disk list, not a cached
+                # snapshot from when this agent was constructed -- a
+                # skill applied a moment ago (including by the
+                # autonomous loop, mid-session) must show up on the very
+                # next turn. Answers a real, live-caught gap: applying a
+                # skill wrote it to disk and to memory, but nothing ever
+                # told Sim's own conversational awareness it existed --
+                # it could only ever find out by using LIST:/READ: to go
+                # look, which it had no reason to think to do.
+                # Bounded like every other prompt-seeding read in this
+                # codebase (format_code_block, safe_read_file): at
+                # "hyperscale" self-improvement pace the applied-skills
+                # count can genuinely grow large over a long session, and
+                # an unbounded list would otherwise bloat every single
+                # turn's prompt forever.
+                shown = applied[:_MAX_SKILLS_IN_PROMPT]
+                cut = len(applied) - len(shown)
+                more = f" (+{cut} more -- LIST: src/agents/skills for the rest)" if cut > 0 else ""
+                parts.append(
+                    "Skills you've already built and applied to yourself, ready to run "
+                    "right now via USE: <name> -- no need to guess, ask, or go looking "
+                    f"for these: {', '.join(shown)}{more}"
+                )
         parts.append(
             f"Right now you're feeling {_mood_phrase(mood)} -- let that color your tone "
             "naturally, don't announce it or describe it out loud."
@@ -439,7 +473,7 @@ class LogicAgent(SubAgent):
                 "right now, for real (fresh from disk, sandboxed, same as the typed "
                 "'use <name>' command). Use this when the user asks you to run/try/use a "
                 "specific skill by name instead of telling them to type it themselves; "
-                "'skills' lists what's applied if you're unsure of the exact name."
+                "see the live applied-skills list below for exact names."
             )
         if self._news_fn is not None:
             lines.append(

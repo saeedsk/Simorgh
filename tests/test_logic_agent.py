@@ -226,6 +226,96 @@ class TestLogicAgentWithCognition(unittest.TestCase):
         self.assertEqual(response.output, "Here's my take: hello")
         self.assertEqual(response.metadata["source"], "rule_based")
 
+    def test_prompt_lists_applied_skills_when_use_skill_fn_is_given(self):
+        # Direct fix for a live-caught gap: applying a skill wrote it to
+        # disk and memory, but nothing ever told Sim's own conversational
+        # awareness it existed -- it could only find out by using
+        # LIST:/READ: to go look, with no reason to think to.
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / "src" / "agents" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "rocketry.py").write_text("def run():\n    return 1\n")
+            (skills_dir / "stopwatch.py").write_text("def run():\n    return 1\n")
+
+            fake = FakeProvider()
+            agent = LogicAgent(
+                cognition=CognitionRouter([fake]),
+                repo_root=Path(tmpdir),
+                use_skill_fn=lambda name: "unused",
+            )
+
+            agent.handle(AgentRequest(text="what can you do"), SharedMemoryBus())
+
+            prompt = fake.prompts[0]
+            self.assertIn("rocketry", prompt)
+            self.assertIn("stopwatch", prompt)
+
+    def test_prompt_omits_skills_section_when_none_applied(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake = FakeProvider()
+            agent = LogicAgent(
+                cognition=CognitionRouter([fake]),
+                repo_root=Path(tmpdir),
+                use_skill_fn=lambda name: "unused",
+            )
+
+            agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+            self.assertNotIn("already built and applied", fake.prompts[0])
+
+    def test_prompt_omits_skills_section_when_use_skill_fn_not_given(self):
+        # Even if applied skills exist on disk, don't advertise USE:-ing
+        # them when the capability itself isn't wired in for this agent.
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / "src" / "agents" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "rocketry.py").write_text("def run():\n    return 1\n")
+
+            fake = FakeProvider()
+            agent = LogicAgent(cognition=CognitionRouter([fake]), repo_root=Path(tmpdir))
+
+            agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+            self.assertNotIn("rocketry", fake.prompts[0])
+
+    def test_applied_skills_list_is_bounded_with_a_more_count(self):
+        # A long-running "hyperscale" self-improvement session can
+        # genuinely accumulate many applied skills -- must not grow
+        # every single turn's prompt unbounded.
+        import tempfile
+        from pathlib import Path
+
+        from src.agents.logic.base import _MAX_SKILLS_IN_PROMPT
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / "src" / "agents" / "skills"
+            skills_dir.mkdir(parents=True)
+            total = _MAX_SKILLS_IN_PROMPT + 5
+            for i in range(total):
+                (skills_dir / f"skill_{i:03d}.py").write_text("def run():\n    return 1\n")
+
+            fake = FakeProvider()
+            agent = LogicAgent(
+                cognition=CognitionRouter([fake]),
+                repo_root=Path(tmpdir),
+                use_skill_fn=lambda name: "unused",
+            )
+
+            agent.handle(AgentRequest(text="hello"), SharedMemoryBus())
+
+            prompt = fake.prompts[0]
+            self.assertIn("+5 more", prompt)
+            self.assertEqual(prompt.count("skill_"), _MAX_SKILLS_IN_PROMPT)
+
 
 class FakeHTTPResponse:
     def __init__(self, status, data):
