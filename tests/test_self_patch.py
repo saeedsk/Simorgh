@@ -146,6 +146,24 @@ class TestSelfPatchAgent(unittest.TestCase):
 
         self.assertIn("OTHER", provider.prompts[1])
 
+    def test_read_tool_ignores_rambling_text_after_the_path(self):
+        # Live-caught with a real provider (Gemini): the model doesn't
+        # always stop at "READ: <path>" -- it keeps reasoning out loud
+        # in the same response instead of a clean single-line marker.
+        (self.repo_root / "src" / "orchestrator" / "other.py").write_text("OTHER = 1\n")
+        rambling = (
+            "READ: src/orchestrator/other.py\n"
+            "Wait, the tool format is:\n"
+            "`READ: <repo-relative path>` exactly as the ENTIRE response."
+        )
+        provider = ScriptedProvider([(rambling, None), ("def new():\n    return 2\n", None)])
+        agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
+
+        agent.draft_patch("src/orchestrator/target.py", "improve it")
+
+        self.assertIn("OTHER", provider.prompts[1])
+        self.assertNotIn("[refused", provider.prompts[1])
+
     def test_draft_tool_checks_against_real_audit_gate(self):
         bad_code = "eval('1')"
         good_code = "def new():\n    return 2\n"

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from src.cognition.tool_protocol import (
     extract_code,
+    first_line_argument,
     is_valid_python,
     parse_marker,
     preview,
@@ -31,6 +32,32 @@ class TestExtractCode(unittest.TestCase):
 
     def test_empty_input_returns_none(self):
         self.assertIsNone(extract_code("   "))
+
+
+class TestFirstLineArgument(unittest.TestCase):
+    def test_single_line_is_unchanged(self):
+        self.assertEqual(first_line_argument("src/x.py"), "src/x.py")
+
+    def test_strips_surrounding_whitespace(self):
+        self.assertEqual(first_line_argument("  src/x.py  \n"), "src/x.py")
+
+    def test_empty_input_returns_empty_string(self):
+        self.assertEqual(first_line_argument(""), "")
+        self.assertEqual(first_line_argument("   \n  "), "")
+
+    def test_discards_everything_after_the_first_line(self):
+        # Live-caught with a real provider: the model doesn't always
+        # stop at "READ: <path>" -- it keeps reasoning out loud in the
+        # same response instead of emitting a clean single-line marker.
+        rambling = (
+            "src/orchestrator/discovery.py\n"
+            "Wait, the tool format is:\n"
+            "`READ: <repo-relative path>` exactly as the ENTIRE response."
+        )
+        self.assertEqual(first_line_argument(rambling), "src/orchestrator/discovery.py")
+
+    def test_first_line_itself_is_stripped(self):
+        self.assertEqual(first_line_argument("  src/x.py  \nmore text"), "src/x.py")
 
 
 class TestIsValidPython(unittest.TestCase):

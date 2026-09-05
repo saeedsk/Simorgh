@@ -47,7 +47,13 @@ from typing import Any, Callable
 
 from src.agents.skills.registry import list_applied_skills
 from src.cognition.provider import CognitionRouter, ProviderUnavailable
-from src.cognition.tool_protocol import parse_marker, preview, safe_list_dir, safe_read_file
+from src.cognition.tool_protocol import (
+    first_line_argument,
+    parse_marker,
+    preview,
+    safe_list_dir,
+    safe_read_file,
+)
 from src.memory.shared_bus import SharedMemoryBus
 from src.memory.short_term import ShortTermMemory
 from src.orchestrator.activity_log import ActivityLog
@@ -499,7 +505,7 @@ class LogicAgent(SubAgent):
     def _fetch_tool_turn(self, raw_url: str) -> str:
         from src.tools.web_fetch import FetchRefused
 
-        url = raw_url.strip()
+        url = first_line_argument(raw_url)
         print(f"[Sim] fetching {preview(url)!r}...")
         try:
             result = self._web_fetch.fetch(url)
@@ -538,7 +544,12 @@ class LogicAgent(SubAgent):
         return f"\n\n[RUN result]\n{report}\n{_CONTINUE_HINT}"
 
     def _read_tool_turn(self, raw_path: str) -> str:
-        path = raw_path.strip()
+        # Live-caught with a real provider: the model doesn't always
+        # stop at "READ: <path>" -- it keeps reasoning out loud in the
+        # same response. A READ argument is always exactly one line;
+        # first_line_argument discards anything after it rather than
+        # treating the whole rambling blob as "the path."
+        path = first_line_argument(raw_path)
         print(f"[Sim] reading {preview(path)!r} for context...")
         content = safe_read_file(self._repo_root, path)
         # safe_read_file/safe_list_dir never raise -- each returns a
@@ -551,7 +562,7 @@ class LogicAgent(SubAgent):
         return f"\n\n[READ {path!r} result]\n{content}\n{_CONTINUE_HINT}"
 
     def _list_tool_turn(self, raw_path: str) -> str:
-        path = raw_path.strip()
+        path = first_line_argument(raw_path)
         print(f"[Sim] listing {preview(path) or '.'!r}...")
         content = safe_list_dir(self._repo_root, path)
         succeeded = not content.startswith("[refused:")
@@ -661,7 +672,7 @@ class LogicAgent(SubAgent):
         return f"\n\n[EVOLVE result]\n{report}\n{_CONTINUE_HINT}"
 
     def _use_tool_turn(self, raw_name: str) -> str:
-        name = raw_name.strip()
+        name = first_line_argument(raw_name)
         if not name:
             report = "FAILED: expected 'USE: <skill name>'"
             self._record_tool_call("USE", preview(name), report, False)
