@@ -59,17 +59,19 @@ class TestSelfPatchAgent(unittest.TestCase):
     def test_no_real_provider_returns_none(self):
         agent = SelfPatchAgent(CognitionRouter(), repo_root=self.repo_root)
 
-        proposal = agent.draft_patch("src/orchestrator/target.py", "improve it")
+        proposal, reason = agent.draft_patch("src/orchestrator/target.py", "improve it")
 
         self.assertIsNone(proposal)
+        self.assertEqual(reason, "deterministic_fallback")
 
     def test_real_provider_seeds_prompt_with_current_content(self):
         provider = FakeProvider(text="def new():\n    return 2\n")
         agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
 
-        proposal = agent.draft_patch("src/orchestrator/target.py", "improve it")
+        proposal, reason = agent.draft_patch("src/orchestrator/target.py", "improve it")
 
         self.assertIn("def old():", provider.prompts[0])
+        self.assertIsNone(reason)
         self.assertEqual(proposal.subject, "src/orchestrator/target.py")
         self.assertEqual(proposal.code.strip(), "def new():\n    return 2")
         self.assertIn("fake", proposal.rationale)
@@ -98,27 +100,37 @@ class TestSelfPatchAgent(unittest.TestCase):
         provider = FakeProvider(text="y = 2\n")
         agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
 
-        proposal = agent.draft_patch("src/orchestrator/huge.py", "improve it")
+        proposal, reason = agent.draft_patch("src/orchestrator/huge.py", "improve it")
 
         self.assertIsNone(proposal)
+        self.assertTrue(reason.startswith("refused: "))
         self.assertEqual(provider.prompts, [])  # never even called -- refused up front
 
     def test_a_nonexistent_subject_returns_none_without_calling_the_llm(self):
         provider = FakeProvider(text="y = 2\n")
         agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
 
-        proposal = agent.draft_patch("src/orchestrator/does_not_exist.py", "improve it")
+        proposal, reason = agent.draft_patch("src/orchestrator/does_not_exist.py", "improve it")
 
         self.assertIsNone(proposal)
+        self.assertTrue(reason.startswith("refused: "))
         self.assertEqual(provider.prompts, [])
 
-    def test_invalid_python_returns_none(self):
+    def test_invalid_python_returns_none_with_a_retryable_reason(self):
         provider = FakeProvider(text="not valid python {{{")
         agent = SelfPatchAgent(CognitionRouter([provider]), repo_root=self.repo_root)
 
-        proposal = agent.draft_patch("src/orchestrator/target.py", "improve it")
+        proposal, reason = agent.draft_patch("src/orchestrator/target.py", "improve it")
 
         self.assertIsNone(proposal)
+        # Distinguishable from both "deterministic_fallback" and a
+        # "refused: ..." target problem -- a real provider DID answer
+        # here, it just didn't produce valid Python, which is a
+        # genuinely different, retryable failure class (see
+        # propose_self_patch in main.py).
+        self.assertNotEqual(reason, "deterministic_fallback")
+        self.assertFalse(reason.startswith("refused: "))
+        self.assertIn("fake", reason)
 
     def test_read_tool_pulls_in_other_files_for_context(self):
         (self.repo_root / "src" / "orchestrator" / "other.py").write_text("OTHER = 1\n")
@@ -142,9 +154,10 @@ class TestSelfPatchAgent(unittest.TestCase):
             CognitionRouter([provider]), audit_gate=AuditGate(), repo_root=self.repo_root
         )
 
-        proposal = agent.draft_patch("src/orchestrator/target.py", "improve it")
+        proposal, reason = agent.draft_patch("src/orchestrator/target.py", "improve it")
 
         self.assertIn("REJECTED", provider.prompts[1])
+        self.assertIsNone(reason)
         self.assertEqual(proposal.code.strip(), good_code.strip())
 
     def test_prior_reasons_feed_into_retry_prompt(self):

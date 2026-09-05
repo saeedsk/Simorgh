@@ -1246,3 +1246,43 @@ Still ahead, roughly in order:
     deliberately NOT done -- this only makes Sim *aware* a skill exists
     and can still be run via the existing, already-audited `USE:` path;
     it does not change execution, wiring, or the safety boundary at all.
+74. **A real bug caught live while monitoring the creator's own running
+    session right after the hyperscale retune, per their direct ask
+    ("monitor sims activity... tell me if you see any issue").** Two
+    creative-agenda tasks -- genuinely ambitious ones, exactly what
+    milestone 70 was for ("add a rollback-and-score loop...", "track
+    per-provider cost/latency and adapt budget allocation...") -- kept
+    failing with "[patch] no real drafting intelligence available --
+    nothing applied" on their very first attempt, even though neither
+    LLM budget was anywhere near exhausted (19/30 Claude Code calls,
+    28/1500 + $0.38/$2.00 Gemini, checked directly against the live
+    `memory.jsonl`). Root cause: `SelfPatchAgent.draft_patch` collapsed
+    three genuinely different failure classes into one `None` return --
+    "no real provider at all" (not retryable), a "refused: ..." target
+    problem (not retryable), and "a real provider answered but its
+    response wasn't valid, extractable Python" (retryable -- the exact
+    kind of thing this codebase already does bounded self-correction
+    for on an audit-gate rejection). `propose_self_patch` treated all
+    three identically: stop on attempt 1, even though `max_attempts`
+    (default 3) existed specifically for this. An ambitious, real
+    self-directed idea asking for a complete-file rewrite is genuinely
+    harder to get right in one shot than a narrow bug fix -- exactly the
+    case that needed the retry, and exactly the case milestone 70's own
+    prompt now produces more of.
+
+    Fixed: `draft_patch` now returns `(proposal, reason)` instead of
+    just `proposal | None`, with `reason` one of the literal string
+    `"deterministic_fallback"`, a `"refused: ..."`-prefixed target
+    problem (both still immediate, non-retryable stops), or a
+    human-readable description of why the response wasn't valid Python
+    (now fed back into the SAME `prior_reasons` retry mechanism an
+    audit rejection already uses, up to `max_attempts`). The one
+    production call site (`main.py`) and every test call site
+    (`tests/test_self_patch.py`, `tests/test_main.py`'s
+    `FakeSelfPatchAgent`) were updated together; two new regression
+    tests lock in the retry (`test_invalid_python_draft_is_retried_with_feedback_not_abandoned`)
+    and the still-immediate-stop case
+    (`test_a_refused_target_stops_immediately_without_retrying`).
+    746 unit tests + 19 E2E tests passing. No commits had landed from
+    the creative-agenda tasks yet when this was caught -- this fix
+    shipped before anything needed reverting.

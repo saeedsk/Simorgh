@@ -334,15 +334,34 @@ class SelfPatchAgent:
 
     def draft_patch(
         self, subject: str, topic: str, prior_reasons: list[str] | None = None
-    ) -> ModificationProposal | None:
-        """Returns None if `subject` isn't safely readable at all (an
-        invalid/out-of-scope path, or too large -- see
-        `read_file_for_patch`; the reason is printed before returning so
-        it isn't silently indistinguishable from "no real drafting
-        intelligence"), if no real drafting intelligence was available,
-        or the model never produced valid Python -- callers must not
-        apply a "patch" that's secretly just the unchanged original
-        file.
+    ) -> tuple[ModificationProposal | None, str | None]:
+        """Returns (proposal, None) on success, or (None, reason)
+        otherwise. `reason` distinguishes failure classes a caller
+        should treat differently rather than all collapsing into one
+        generic "nothing happened":
+        - the literal string "deterministic_fallback" -- no real LLM
+          answered at all. Retrying is pointless: the same fixed local
+          template would fail identically every time, so a caller should
+          stop immediately rather than burn more attempts.
+        - `read_file_for_patch`'s own refusal text (an invalid/out-of-
+          scope path, or the file's too large to safely seed) --
+          likewise not retryable; the target itself is the problem, not
+          the draft.
+        - a human-readable description of why a REAL provider's response
+          didn't produce valid, extractable Python -- this one WAS a
+          genuine drafting attempt (a real, possibly-billed call was
+          made) that just didn't land; unlike the two cases above, a
+          caller retrying with this fed back as feedback (the same
+          `prior_reasons` mechanism an audit-gate rejection already
+          uses) is exactly the kind of bounded self-correction this
+          codebase already does elsewhere, not a wasted retry. Live-
+          caught: an ambitious self-directed goal (a creative-agenda
+          task -- see discover_creative_improvements, src/main.py) can
+          be genuinely hard for a single one-shot "rewrite the complete
+          file" prompt to get right; the old behavior (collapsing this
+          into "no real drafting intelligence available") silently gave
+          up on the very first attempt even though `max_attempts`
+          existed and a real provider was working the whole time.
 
         Seeds the prompt with `subject`'s true, complete current
         content via `read_file_for_patch` -- not the much smaller,
@@ -359,7 +378,7 @@ class SelfPatchAgent:
         current_content, refusal = read_file_for_patch(self._repo_root, subject)
         if refusal is not None:
             print(f"🚫 [patch] {refusal}")
-            return None
+            return None, refusal
         prompt = _PATCH_DRAFT_PROMPT.format(
             subject=subject, topic=topic, current_content=current_content
         )
@@ -389,16 +408,23 @@ class SelfPatchAgent:
             break
 
         if provider_name == "deterministic_fallback":
-            return None
+            return None, "deterministic_fallback"
 
         candidate = extract_code(final_text)
         if candidate is None or not is_valid_python(candidate):
-            return None
+            return None, (
+                f"{provider_name!r} answered but its response didn't contain valid, "
+                "complete Python -- try being more specific about scope, or ask for a "
+                "smaller, more targeted change"
+            )
 
-        return ModificationProposal(
-            subject=subject,
-            code=candidate,
-            rationale=f"self-patch via cognition provider {provider_name!r}: {topic!r}",
+        return (
+            ModificationProposal(
+                subject=subject,
+                code=candidate,
+                rationale=f"self-patch via cognition provider {provider_name!r}: {topic!r}",
+            ),
+            None,
         )
 
     def _read_tool_turn(self, raw_path: str) -> str:

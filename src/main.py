@@ -1545,11 +1545,39 @@ def propose_self_patch(
             print(f"🛠️  [patch] drafting a patch to {subject!r}: {topic!r}...")
         else:
             print(f"🛠️  [patch] attempt {attempt}/{max_attempts}: asking for a corrected draft...")
-        proposal = self_patch_agent.draft_patch(subject, topic, prior_reasons=prior_reasons)
+        proposal, draft_failure_reason = self_patch_agent.draft_patch(
+            subject, topic, prior_reasons=prior_reasons
+        )
         if proposal is None:
-            message = "[patch] no real drafting intelligence available -- nothing applied"
-            _print_status(message)
-            return message
+            # Two of draft_patch's three failure reasons are genuinely
+            # not worth retrying: "deterministic_fallback" (no real LLM
+            # answered at all -- the same fixed local template would
+            # fail identically every time) and a "refused: ..." target
+            # problem (the file itself is the issue, not the draft).
+            # The third -- a real provider answered but its response
+            # wasn't valid Python -- is exactly the kind of recoverable
+            # failure this loop already retries-with-feedback for audit
+            # rejections; collapsing it into an immediate stop wasted a
+            # real, billed attempt on the very first try, live-caught
+            # while an ambitious creative-agenda task (a big, self-
+            # directed idea, not a small fix) hit it repeatedly.
+            if draft_failure_reason == "deterministic_fallback":
+                message = "[patch] no real drafting intelligence available -- nothing applied"
+                _print_status(message)
+                return message
+            if draft_failure_reason is not None and draft_failure_reason.startswith("refused: "):
+                message = f"[rejected] {draft_failure_reason}"
+                _print_status(message)
+                return message
+            reason = draft_failure_reason or "the draft was empty"
+            print(f"⚠️  [patch] attempt {attempt} failed: {reason}")
+            activity_log.record_tool_call(
+                "self_patch", "DRAFT", f"{subject}: {topic} (attempt {attempt}/{max_attempts})",
+                reason, False,
+            )
+            prior_reasons = [reason]
+            verdict = None
+            continue
 
         if subject.endswith("main.py"):
             invariant_reason = check_main_py_invariants(proposal.code)
