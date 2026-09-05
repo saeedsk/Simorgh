@@ -893,6 +893,7 @@ def run_cli() -> None:
             "dim",
         )
     )
+    _print_vitals(router, store, interests, task_store)
     autonomy.start()
     vitals_monitor.start()
     try:
