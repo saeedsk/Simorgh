@@ -1056,3 +1056,25 @@ Still ahead, roughly in order:
     for Claude Code CLI, despite `build_cognition_router`'s documented
     priority order) needs a diagnosis pass, not a code change made
     without first knowing what's actually wrong.
+66. **The second finding from milestone 65, diagnosed and fixed:** the
+    creator's own live `budget` output (0/30 calls for `claude_code_cli`
+    against a confirmed, valid `claude auth status` Pro login) proved
+    this wasn't sandbox noise but a real, 100%-reproducible bug. Root
+    cause: `src/cognition/claude_code_provider.py`'s `complete()` was
+    passing `--bare` to the headless `claude -p` call. `--bare`'s own
+    `--help` text documents it as skipping, among other things,
+    "keychain reads" -- and on macOS, a normal `claude login` session
+    lives in the OS keychain, not a plain credentials file. Every call
+    silently failed with `is_error: true, "Not logged in"`, and
+    `CognitionRouter` degraded to the next provider (Gemini) every
+    single time, with nothing surfacing it as an error anywhere.
+    Verified by direct A/B subprocess testing: `--bare` alone reproduces
+    the failure; the same call without it, keeping `--disallowedTools
+    "*"` and the fresh temp `cwd`, succeeds and bills the subscription.
+    Fixed by simply not passing the flag -- everything else it would
+    have bought (no CLAUDE.md/hooks/plugin sync) was already covered by
+    this provider's own isolation (a fresh empty temp `cwd`,
+    `--disallowedTools "*"`). Regression test added
+    (`test_never_passes_bare_flag`); the module docstring's "every claim
+    verified against Claude Code's own documentation" list now covers
+    this finding too.
