@@ -198,6 +198,36 @@ class TestSelfPatchAgent(unittest.TestCase):
 
         self.assertEqual(len(provider.prompts), 3)
 
+    def test_final_step_prompt_tells_the_model_no_more_tools_will_be_honored(self):
+        # Live-caught: without an explicit warning, a model that used
+        # every step exploring had no way to know the next response was
+        # its last chance to answer -- it would emit one more READ:
+        # marker anyway, and that raw marker text became the "final"
+        # file content verbatim, guaranteed to fail is_valid_python.
+        provider = ScriptedProvider(
+            [("READ: src/orchestrator/target.py", None), ("VALUE = 2\n", None)]
+        )
+        agent = SelfPatchAgent(
+            CognitionRouter([provider]), repo_root=self.repo_root, max_tool_steps=2
+        )
+
+        agent.draft_patch("src/orchestrator/target.py", "improve it")
+
+        self.assertIn("last step", provider.prompts[1].lower())
+
+    def test_final_step_produces_a_real_patch_using_what_was_learned(self):
+        provider = ScriptedProvider(
+            [("READ: src/orchestrator/target.py", None), ("VALUE = 2\n", None)]
+        )
+        agent = SelfPatchAgent(
+            CognitionRouter([provider]), repo_root=self.repo_root, max_tool_steps=2
+        )
+
+        proposal, reason = agent.draft_patch("src/orchestrator/target.py", "improve it")
+
+        self.assertIsNone(reason)
+        self.assertEqual(proposal.code.strip(), "VALUE = 2")
+
     def test_activity_log_records_tool_calls(self):
         class RecordingLog:
             def __init__(self):

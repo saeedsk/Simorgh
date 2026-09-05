@@ -108,6 +108,20 @@ _CONTINUE_HINT = (
     "your final code alone to finish."
 )
 
+# Same fix as self_patch.py's own tool loop (found in the same live-
+# caught pass): without an explicit warning, a model that used every
+# step exploring had no way to know the next response was its last
+# chance to answer -- it would emit one more marker anyway, and that
+# raw text became the "final" code verbatim, guaranteed to fail
+# is_valid_python. Same pattern LogicAgent's own loop already uses
+# (_FINAL_TURN_HINT, src/agents/logic/base.py).
+_FINAL_TURN_HINT = (
+    "\n\nThis is your last step -- no more tool calls will be honored. "
+    "Write the complete skill code now, using whatever you've already "
+    "learned above (even if incomplete); do not write a READ:/DRAFT: "
+    "marker, it will be used as your literal final code verbatim."
+)
+
 DEFAULT_MAX_TOOL_STEPS = 5
 
 
@@ -153,7 +167,9 @@ class SkillResearchAgent:
         final_text = ""
 
         for step in range(self._max_tool_steps):
-            response = self._cognition.complete(prompt)
+            is_last_step = step == self._max_tool_steps - 1
+            step_prompt = prompt + _FINAL_TURN_HINT if is_last_step else prompt
+            response = self._cognition.complete(step_prompt)
             provider_name = response.provider_name
             final_text = response.text
 
@@ -161,7 +177,6 @@ class SkillResearchAgent:
                 break  # no real drafting intelligence -- use the safe floor
 
             kind, payload = parse_marker(response.text, ("READ", "DRAFT"))
-            is_last_step = step == self._max_tool_steps - 1
             if kind == "read" and not is_last_step:
                 prompt += self._read_tool_turn(payload)
                 continue

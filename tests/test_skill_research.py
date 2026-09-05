@@ -301,6 +301,22 @@ class TestSkillResearchAgentToolLoop(unittest.TestCase):
 
         self.assertEqual(len(provider.prompts), 3)
 
+    def test_final_step_prompt_tells_the_model_no_more_tools_will_be_honored(self):
+        # Same fix as SelfPatchAgent's own tool loop, found in the same
+        # live-caught pass: without an explicit warning, a model that
+        # used every step exploring had no way to know the next
+        # response was its last chance to answer.
+        provider = ScriptedProvider(
+            [("READ: src/example.py", None), ("def run():\n    return 1\n", None)]
+        )
+        agent = SkillResearchAgent(
+            CognitionRouter([provider]), repo_root=self.repo_root, max_tool_steps=2
+        )
+
+        agent.draft_skill("uses example")
+
+        self.assertIn("last step", provider.prompts[1].lower())
+
     def test_provider_falling_back_mid_loop_stops_and_uses_safe_template(self):
         provider = ScriptedProvider(
             [
