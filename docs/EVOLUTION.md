@@ -1422,3 +1422,29 @@ Still ahead, roughly in order:
     codebase already uses for audit-denylist and invalid-Python
     failures something real to act on for a sandbox failure too. 761
     unit tests + 19 E2E tests passing.
+80. **The same lost-feedback problem, one level up: across BLOCKED-task
+    reconsideration rounds, not just within one round's own attempts.**
+    `run_task` always called `propose_self_patch`/`propose_skill` with
+    the task's original, unchanged description and no memory of any
+    prior round's failure -- even though `_reconsider_blocked_tasks`
+    already records exactly that in the task's own `note` field
+    (`"retrying after being blocked: <prior reason>"`) when it resets a
+    BLOCKED task back to PENDING. A task that failed round 1 for reason
+    X started round 2 completely blind to X, even though *within* round
+    2's own 3 internal attempts, feedback already flows correctly
+    (milestone 79 and earlier). Fixed: `propose_self_patch`/
+    `propose_skill` gained an `initial_reasons` parameter that seeds the
+    first attempt's retry feedback instead of starting `None`; `run_task`
+    passes the task's own `note` here whenever `task.attempts > 0` (a
+    genuine retry, not a first attempt). Combined with milestone 79,
+    real failure detail now survives both within a round and across
+    rounds. 763 unit tests + 19 E2E tests passing.
+81. **Properly isolated hands-on sandbox testing, this time.** Milestone
+    78's testing accidentally ran against the live repository (`HOME`
+    was isolated, the working directory wasn't); this pass copies the
+    entire repo to a real temp directory first with its own throwaway
+    `git init` (the same pattern `tests/test_e2e_cli.py` already uses,
+    now also used for interactive hands-on sessions, not just the
+    automated E2E suite) -- any auto-commit from a genuinely autonomous
+    session stays fully contained, never touching this project's actual
+    git history again.

@@ -2023,6 +2023,52 @@ class TestRunTask(unittest.TestCase):
 
         self.assertGreaterEqual(self.task_store.get(task.id).attempts, 1)
 
+    def test_reconsidered_task_seeds_prior_reasons_from_its_own_note(self):
+        # Live-caught: a task reconsidered after being BLOCKED started
+        # every fresh round completely blind, with zero memory of why
+        # the last round failed -- the identical mistake could repeat
+        # across rounds even though a single round's own internal
+        # attempts already retry with feedback.
+        (self.repo_root / "src" / "orchestrator").mkdir(parents=True)
+        (self.repo_root / "src" / "orchestrator" / "target.py").write_text("VALUE = 1\n")
+        task = self.task_store.add(
+            "fix it", PATCH_TASK, subject="src/orchestrator/target.py"
+        )
+        self.task_store.update_status(
+            task.id, BLOCKED, note="a specific prior failure reason", attempt=True
+        )
+        self.task_store.update_status(
+            task.id, PENDING, note="retrying after being blocked: a specific prior failure reason"
+        )
+        task = self.task_store.get(task.id)
+        agent = FakeSelfPatchAgent([None])
+
+        run_task(
+            self.task_store, task, SkillResearchAgent(), agent, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertEqual(len(agent.calls), 1)
+        prior_reasons = agent.calls[0][2]
+        self.assertIsNotNone(prior_reasons)
+        self.assertIn("a specific prior failure reason", prior_reasons[0])
+
+    def test_first_attempt_task_has_no_prior_reasons_seed(self):
+        (self.repo_root / "src" / "orchestrator").mkdir(parents=True)
+        (self.repo_root / "src" / "orchestrator" / "target.py").write_text("VALUE = 1\n")
+        task = self.task_store.add(
+            "fix it", PATCH_TASK, subject="src/orchestrator/target.py"
+        )
+        agent = FakeSelfPatchAgent([None])
+
+        run_task(
+            self.task_store, task, SkillResearchAgent(), agent, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertEqual(len(agent.calls), 1)
+        self.assertIsNone(agent.calls[0][2])
+
     def test_failing_task_is_retried_then_blocked(self):
         from src.orchestrator.audit import ModificationProposal
 
