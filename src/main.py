@@ -413,7 +413,11 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("history", "Show this session's recent turns."),
     ("run <code>", "Execute Python in the sandbox."),
     ("budget", "Show LLM spend/call status."),
-    ("vitals [on|off]", "Show mood/memory/skills/curiosity as bar meters (on = live, while idle)."),
+    (
+        "vitals [on|off|pin|unpin]",
+        "Show mood/memory/skills/curiosity as bar meters (on = reprints while idle; "
+        "pin = stays fixed on screen).",
+    ),
     ("remind <duration> <message>", "Get interrupted with a message later (e.g. 1m, 5m, 2h)."),
     ("!<command>", "Run a raw shell command directly (e.g. '!ls', '!git status')."),
     ("exit / quit", "Leave."),
@@ -893,7 +897,14 @@ def run_cli() -> None:
             "dim",
         )
     )
-    _print_vitals(router, store, interests, task_store)
+    # Try the creator's explicitly-chosen "always on screen" mode first
+    # (see VitalsMonitor.pin's own docstring for the tradeoff they were
+    # told before asking for this); pin() itself refuses on anything
+    # that isn't a real terminal, so this always degrades to the same
+    # one-shot snapshot every earlier session already got. 'vitals
+    # unpin' un-does this at any time if it turns out not to be wanted.
+    if not vitals_monitor.pin():
+        _print_vitals(router, store, interests, task_store)
     autonomy.start()
     vitals_monitor.start()
     try:
@@ -2587,12 +2598,21 @@ def _handle_vitals_command(
     task_store: TaskStore,
 ) -> None:
     """`vitals` (bare) prints one snapshot right now, always, regardless
-    of the live toggle below. `vitals on`/`off` controls whether the
+    of either live mode below. `vitals on`/`off` controls whether the
     SAME panel also reprints itself periodically between prompts while
     idle (`VitalsMonitor`, src/orchestrator/console_style.py) -- the
-    creator's own ask for "real time" updates, done the same safe way
-    this project already reprints things on its own (a fresh block
+    creator's own first ask for "real time" updates, done the same safe
+    way this project already reprints things on its own (a fresh block
     between `input()` calls, never a fragile in-place cursor redraw).
+
+    `vitals pin`/`unpin` is the creator's explicit follow-up choice
+    after being told the tradeoff: a real, always-visible fixed region
+    at the top of the screen instead of a scrolling block -- genuinely
+    riskier (raw terminal control, has to coexist with `readline`'s own
+    cursor, silently impossible over piped/non-TTY output) but built
+    because they chose it knowingly. `pin()` itself reports whether it
+    actually engaged (`False` on a non-TTY), so this can say so plainly
+    rather than claim success it didn't have.
     """
     if arg == "off":
         vitals_monitor.enabled = False
@@ -2601,6 +2621,19 @@ def _handle_vitals_command(
     if arg == "on":
         vitals_monitor.enabled = True
         _print_status("[vitals] live updates on -- reprints itself while idle")
+    if arg == "unpin":
+        vitals_monitor.unpin()
+        _print_status("[vitals] unpinned -- back to a normal scrolling terminal")
+        return
+    if arg == "pin":
+        if vitals_monitor.pin():
+            _print_status("[vitals] pinned -- stays on screen at the top, updates while idle")
+        else:
+            _print_status(
+                "[vitals] can't pin -- this isn't a real terminal (piped output, "
+                "or a non-interactive session). 'vitals on' still works here."
+            )
+        return
     _print_vitals(router, store, interests, task_store)
 
 

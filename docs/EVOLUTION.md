@@ -1665,3 +1665,37 @@ Still ahead, roughly in order:
     mechanism this project has built so far, all of which deliberately
     avoid exactly that kind of terminal control. Not built without the
     creator explicitly choosing that tradeoff first.
+89. **The true pinned vitals panel, built after the creator knowingly
+    chose the riskier option.** Presented with the honest tradeoff from
+    milestone 88 (fragile raw terminal control vs. the safer scrolling
+    block), the creator picked "build the true pinned panel anyway."
+    `vitals pin` now reserves a fixed strip of rows at the top of the
+    screen via a DECSTBM scroll region (`\x1b[{top};{bottom}r`) and
+    redraws into it with save/restore-cursor (`\x1b7`/`\x1b8`) so the
+    conversation's own cursor position is never disturbed; `vitals
+    unpin` resets the scroll region and returns to normal scrolling.
+    `pin()` reports `False` (and changes nothing) when stdout isn't a
+    real terminal -- `os.get_terminal_size()` fails over piped/SSH/non-
+    interactive output -- so the command says plainly it can't pin
+    rather than silently doing nothing useful; `vitals on` still works
+    everywhere as the fallback.
+
+    A real design bug was caught and fixed before this shipped: the
+    first draft reissued the DECSTBM scroll-region escape on *every*
+    redraw, not just the first. DECSTBM resets the cursor to the top of
+    the new region as a side effect on most terminals, so redoing it on
+    every idle-triggered tick would keep fighting wherever ordinary
+    conversation output had actually left the cursor. Fixed by setting
+    the scroll region exactly once, inside `pin()`, before the first
+    draw -- `_draw_pinned_locked()` itself now only ever does
+    save/restore-cursor, absolute positioning, and the redraw, never
+    touching the scroll region again. The direct consequence is a
+    documented limitation: a live terminal resize while pinned isn't
+    auto-detected (deliberately -- catching it would mean going back to
+    resetting the scroll region on every tick, the exact bug just
+    fixed); `vitals unpin` then `vitals pin` again re-measures and
+    re-fits cleanly. Startup now tries `vitals_monitor.pin()` first and
+    falls back to the milestone-88 one-shot print only when pinning
+    isn't possible. 804 unit tests + 22 E2E tests passing, including a
+    new E2E case confirming `vitals pin` degrades honestly (not
+    silently) over this project's own piped-subprocess test harness.
