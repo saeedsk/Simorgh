@@ -61,6 +61,7 @@ is.
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 import shutil
@@ -197,6 +198,56 @@ def _run_suite_subprocess(repo_copy: Path, timeout: float) -> subprocess.Complet
 def _parse_test_count(result: subprocess.CompletedProcess) -> int:
     match = _RUN_REGEX.search(result.stderr or "") or _RUN_REGEX.search(result.stdout or "")
     return int(match.group(1)) if match else 0
+
+
+# Below this, a file's own docstring is a trivial one-liner (or none at
+# all) -- not worth protecting, and forcing one onto every tiny file
+# would be its own kind of noise.
+_MIN_DOCSTRING_CHARS_TO_PROTECT = 80
+# A patch that legitimately rewrites the docstring to reflect a real
+# change still keeps it in a similar size range; anything shrunk below
+# this fraction of the original is a loss, not a rewrite.
+_DOCSTRING_SHRINK_THRESHOLD = 0.3
+
+
+def _docstring_regression_reason(original_content: str, new_content: str) -> str | None:
+    """Live-caught watching real self-patches succeed for the first time
+    (once milestones 84/85 actually let one through): every one of five
+    real, autonomous self-patches to existing files -- to three
+    different files -- silently deleted the target's ENTIRE module
+    docstring (explanatory rationale, in one case tied to a whole
+    biomimicry design doc) with no replacement, while still passing the
+    audit gate and the complete isolated test suite. A full-file-rewrite
+    prompt doesn't reliably preserve documentation that isn't the direct
+    subject of the requested change -- nothing else in this pipeline
+    was checking for that loss at all.
+
+    Only flags a REAL loss: a substantial original docstring that's now
+    missing or reduced to a small fraction of its original length. A
+    file with no/trivial docstring to begin with, or a patch that
+    genuinely rewrites the docstring at a similar length, triggers
+    nothing -- this isn't "the docstring must never change," only "it
+    must not silently vanish."
+    """
+    try:
+        original_doc = ast.get_docstring(ast.parse(original_content)) or ""
+    except SyntaxError:
+        return None
+    if len(original_doc) < _MIN_DOCSTRING_CHARS_TO_PROTECT:
+        return None
+    try:
+        new_doc = ast.get_docstring(ast.parse(new_content)) or ""
+    except SyntaxError:
+        return None
+    if len(new_doc) < len(original_doc) * _DOCSTRING_SHRINK_THRESHOLD:
+        return (
+            f"the original file's module docstring ({len(original_doc)} chars, "
+            "explaining the file's own rationale) is missing or drastically "
+            f"shortened in your draft ({len(new_doc)} chars) -- preserve the "
+            "existing documentation unless the change specifically requires "
+            "updating it; revise it to reflect a real change, don't just drop it"
+        )
+    return None
 
 
 def check_main_py_invariants(new_content: str) -> str | None:
@@ -402,6 +453,13 @@ class SelfPatchAgent:
           into "no real drafting intelligence available") silently gave
           up on the very first attempt even though `max_attempts`
           existed and a real provider was working the whole time.
+        - `_docstring_regression_reason`'s output -- also a genuine
+          drafting attempt, also retryable with feedback, same reasoning
+          as above: live-caught, five separate real self-patches to
+          three different files all silently deleted the target's
+          entire module docstring while otherwise passing every check.
+          A real provider answered with valid Python; it just dropped
+          documentation nothing else in this pipeline was checking for.
 
         Seeds the prompt with `subject`'s true, complete current
         content via `read_file_for_patch` -- not the much smaller,
@@ -458,6 +516,10 @@ class SelfPatchAgent:
                 "complete Python -- try being more specific about scope, or ask for a "
                 "smaller, more targeted change"
             )
+
+        doc_reason = _docstring_regression_reason(current_content, candidate)
+        if doc_reason is not None:
+            return None, doc_reason
 
         return (
             ModificationProposal(
