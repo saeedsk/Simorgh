@@ -16,6 +16,13 @@ exact same audited propose/patch/verify/commit pipelines a human-typed
 command uses. Nothing about *what* it's allowed to do changes; only *what
 triggers it* does.
 
+Additionally, during idle cycles, an intrinsic `CuriosityDrive` inspects
+episodic memory to identify unresolved knowledge gaps (questions,
+uncertainties, missing knowledge) and contradictory beliefs (opposing
+claims or negated assertions on identical topics). When found, it
+autonomously formulates exploratory research tasks so the agent actively
+investigates what it does not know or where its beliefs conflict.
+
 Bounded on top of (never instead of) every existing guard:
 - `idle_threshold_seconds`: how long the CLI must sit unused before this
   considers acting at all.
@@ -38,10 +45,12 @@ Bounded on top of (never instead of) every existing guard:
 
 from __future__ import annotations
 
+import hashlib
+import re
 import threading
 import time
-from dataclasses import dataclass
-from typing import Callable
+from dataclasses import dataclass, field
+from typing import Any, Callable
 
 from src.memory.long_term import MemoryStore
 from src.orchestrator.console_style import style
@@ -55,64 +64,439 @@ class ActionDigest:
     unknown: int
     window_seconds: float
 
-ACTION_KIND = "autonomous_action"
 
-# Retuned three times now, all from direct creator feedback, all
-# downward. First pass (300s/600s -> 60s/150s): "not acting on its own,
-# sitting idle all the time" -- idle time resets on every keystroke, so
-# the original defaults meant an active chat session almost never left
-# a silent gap long enough to fire at all. Second pass (60s/150s ->
-# 20s/30s, "hyperscale... starting after 20 seconds"). Third pass, this
-# one ("increase the rate of sim thinking frequency... 10X speed up" --
-# with an explicit, reasonable worry attached: "would it run out my
-# claude usage? like to be cautious there"):
-# - action_cooldown: 30s -> 3s, the literal 10x asked for. This is the
-#   right knob for "how often does a new self-improvement action fire
-#   once idle" -- it's what actually paces repeated actions.
-# - poll_interval: 5s -> 1s, so the loop notices the new tighter
-#   boundaries promptly.
-# - idle_threshold: 20s -> 10s, only 2x rather than the full 10x on
-#   purpose. Dropping this to ~2s (a literal 10x) would mean an
-#   ordinary pause between reading a reply and typing the next message
-#   -- completely normal during active back-and-forth -- reads as
-#   "idle" and starts competing for attention constantly; that directly
-#   works against every earlier fix aimed at making this feel like a
-#   pleasant conversational partner, not a nervous interruption engine.
-#   10s still comfortably beats the old 20s.
-# - max_actions_per_day: 500 -> 2000, comfortably above Gemini's own
-#   1500-call/24h BudgetGuard cap so THIS cap never becomes the binding
-#   constraint before the real spend ceilings do (same reasoning as the
-#   500 bump before it -- see below).
-# On the subscription-safety worry specifically: this retune does NOT
-# touch DEFAULT_CLAUDE_CODE_MAX_CALLS/CLAUDE_CODE_WINDOW_SECONDS (still
-# 30 calls / 5h, main.py) -- that cap, not this file's timing, is what
-# actually protects the creator's flat-rate Claude Code subscription.
-# A faster tick rate just means that 30-call ceiling gets reached
-# sooner during a genuinely idle stretch, after which CognitionRouter's
-# existing fallback (Gemini, itself capped, then the free deterministic
-# floor) carries the rest -- never more real Claude Code CLI usage than
-# the unchanged cap already allowed.
-# Every other gate (BudgetGuard, the audit gate, the isolated test
-# suite, the failure-streak circuit breaker below) is completely
-# unchanged -- this only changes how OFTEN those gates get a chance to
-# run, never what they allow through.
+@dataclass(frozen=True)
+class KnowledgeGap:
+    """An identified gap in understanding, open question, or explicit
+    uncertainty discovered in episodic memory.
+    """
+
+    topic: str
+    description: str
+    source_record_ids: tuple[str, ...] = ()
+    urgency: float = 1.0
+
+
+@dataclass(frozen=True)
+class ContradictoryBelief:
+    """A pair of contradictory statements or conflicting assertions
+    discovered across episodic memory on the same topic.
+    """
+
+    topic: str
+    first_statement: str
+    second_statement: str
+    source_record_ids: tuple[str, ...] = ()
+    confidence_conflict: float = 1.0
+
+
+@dataclass
+class ExploratoryTask:
+    """An exploratory research task formulated autonomously by the
+    curiosity drive to address a knowledge gap or reconcile contradictory
+    beliefs.
+    """
+
+    id: str
+    title: str
+    description: str
+    target_topic: str
+    rationale: str
+    source_type: str  # "knowledge_gap" | "contradictory_belief"
+    created_at: float = field(default_factory=time.time)
+    status: str = "pending"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+ACTION_KIND = "autonomous_action"
+CURIOSITY_TASK_KIND = "curiosity_task"
+
+EPISODIC_KINDS = (
+    "episodic",
+    "conversation",
+    "turn",
+    "observation",
+    "belief",
+    "takeaway",
+    "chat",
+    "interaction",
+    "fact",
+)
+
 DEFAULT_IDLE_THRESHOLD_SECONDS = 10.0
 DEFAULT_ACTION_COOLDOWN_SECONDS = 3.0
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_MAX_ACTIONS_PER_DAY = 2000
-# A circuit breaker, not a metric to tune finely: real-world guidance on
-# self-improving agents converges on the same shape regardless of the
-# exact number -- a behavioral log, a rollback path (already covered by
-# revert_last_commit/revert_commits_since), and a human checkpoint
-# trigger that pauses the loop and routes to review once failures start
-# looking systematic rather than incidental. Every existing gate below
-# already bounds a single bad action (the audit gate, the isolated test
-# suite, the relaunch self-check); this bounds a *pattern* across many
-# actions that individually passed rate/cost limits but kept failing --
-# the daily cap alone would otherwise let a systematically broken
-# pipeline burn its entire budget on failures, then quietly try again
-# tomorrow, for as long as nobody happens to check `autonomous status`.
 DEFAULT_MAX_CONSECUTIVE_FAILURES = 5
+
+_GAP_INDICATOR_PATTERNS = (
+    r"\b(?:don't|do not|doesn't|does not)\s+know\b",
+    r"\bnot\s+sure\b",
+    r"\bunclear\s+(?:whether|if|how|what|why)\b",
+    r"\bunknown\s+(?:whether|if|how|what|why)\b",
+    r"\bneed\s+to\s+(?:find\s+out|investigate|determine|learn|research|verify|understand)\b",
+    r"\b(?:open\s+question|knowledge\s+gap|missing\s+information|unresolved\s+question)\b",
+    r"\b(?:wondering\s+whether|wondering\s+if|wondering\s+how)\b",
+    r"\b(?:yet\s+to\s+be\s+determined|have\s+yet\s+to\s+learn)\b",
+    r"\bhypothesis:\b",
+)
+
+_OPPOSITE_PAIRS = {
+    "enabled": "disabled",
+    "disabled": "enabled",
+    "active": "inactive",
+    "inactive": "active",
+    "safe": "unsafe",
+    "unsafe": "safe",
+    "dangerous": "safe",
+    "true": "false",
+    "false": "true",
+    "valid": "invalid",
+    "invalid": "valid",
+    "possible": "impossible",
+    "impossible": "possible",
+    "compatible": "incompatible",
+    "incompatible": "compatible",
+    "succeeds": "fails",
+    "fails": "succeeds",
+    "success": "failure",
+    "failure": "success",
+    "always": "never",
+    "never": "always",
+    "available": "unavailable",
+    "unavailable": "available",
+    "synchronous": "asynchronous",
+    "asynchronous": "synchronous",
+    "supported": "unsupported",
+    "unsupported": "supported",
+}
+
+_STOP_WORDS = {
+    "a",
+    "an",
+    "the",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "of",
+    "with",
+    "by",
+    "about",
+    "that",
+    "this",
+    "it",
+    "from",
+    "as",
+    "and",
+    "or",
+    "but",
+}
+
+
+def _tokenize(text: str) -> list[str]:
+    return [w.lower() for w in re.findall(r"[A-Za-z0-9_\-]+", text)]
+
+
+def _content_tokens(text: str) -> set[str]:
+    return {w for w in _tokenize(text) if len(w) > 2 and w not in _STOP_WORDS}
+
+
+class CuriosityDrive:
+    """Identifies knowledge gaps and contradictory beliefs across episodic
+    memory records, autonomously synthesizing them into structured
+    exploratory research tasks.
+    """
+
+    def __init__(
+        self,
+        store: MemoryStore,
+        task_store: Any | None = None,
+        max_tasks_per_cycle: int = 5,
+    ) -> None:
+        self._store = store
+        self._task_store = task_store
+        self.max_tasks_per_cycle = max_tasks_per_cycle
+        self._formulated_tasks: dict[str, ExploratoryTask] = {}
+        self._seen_signatures: set[str] = set()
+
+    def _fetch_episodic_records(self) -> list[Any]:
+        records: list[Any] = []
+        try:
+            all_records = self._store.query()
+        except Exception:
+            all_records = []
+
+        if not all_records:
+            for k in EPISODIC_KINDS:
+                try:
+                    all_records.extend(self._store.query(kind=k))
+                except Exception:
+                    pass
+
+        for record in all_records:
+            kind = getattr(record, "kind", "")
+            if kind in {ACTION_KIND, CURIOSITY_TASK_KIND}:
+                continue
+            records.append(record)
+        return records
+
+    def _extract_topic(self, sentence: str) -> str:
+        match = re.search(
+            r"(?:about|regarding|whether|if|how|why|what|on)\s+([A-Za-z0-9_\-\s]{3,40})",
+            sentence,
+            re.IGNORECASE,
+        )
+        if match:
+            candidate = match.group(1).strip()
+            # Stop before terminal punctuation
+            candidate = re.split(r"[.?!,;]", candidate)[0].strip()
+            if candidate:
+                return candidate.lower()
+
+        tokens = [w for w in _tokenize(sentence) if w not in _STOP_WORDS]
+        if tokens:
+            return " ".join(tokens[:4])
+        return "unspecified topic"
+
+    def identify_knowledge_gaps(self, limit: int = 15) -> list[KnowledgeGap]:
+        """Scans episodic records for unresolved questions, explicit
+        uncertainties, or missing information.
+        """
+        records = self._fetch_episodic_records()
+        gaps: list[KnowledgeGap] = []
+        seen_topics: set[str] = set()
+
+        for record in records:
+            content = getattr(record, "content", "")
+            rec_id = getattr(record, "id", "")
+            if not isinstance(content, str):
+                continue
+
+            # Split into individual sentences or clauses
+            sentences = re.split(r"(?<=[.?!;\n])\s+", content)
+            for s in sentences:
+                s_clean = s.strip()
+                if len(s_clean) < 10:
+                    continue
+
+                is_gap = False
+                urgency = 1.0
+
+                if s_clean.endswith("?"):
+                    is_gap = True
+                else:
+                    for pat in _GAP_INDICATOR_PATTERNS:
+                        if re.search(pat, s_clean, re.IGNORECASE):
+                            is_gap = True
+                            if "need to" in s_clean.lower() or "critical" in s_clean.lower():
+                                urgency = 1.5
+                            break
+
+                if is_gap:
+                    topic = self._extract_topic(s_clean)
+                    if topic in seen_topics:
+                        continue
+                    seen_topics.add(topic)
+                    gaps.append(
+                        KnowledgeGap(
+                            topic=topic,
+                            description=s_clean,
+                            source_record_ids=(rec_id,) if rec_id else (),
+                            urgency=urgency,
+                        )
+                    )
+                    if len(gaps) >= limit:
+                        return gaps
+
+        return gaps
+
+    def identify_contradictory_beliefs(self, limit: int = 15) -> list[ContradictoryBelief]:
+        """Scans pairs of episodic records to identify conflicting assertions
+        or negated claims regarding the same topic or subject.
+        """
+        records = self._fetch_episodic_records()
+        contradictions: list[ContradictoryBelief] = []
+        seen_pairs: set[tuple[str, str]] = set()
+
+        # Extract sentences from each record
+        sentence_entries: list[tuple[str, str, set[str]]] = []
+        for rec in records:
+            rec_id = getattr(rec, "id", "")
+            content = getattr(rec, "content", "")
+            if not isinstance(content, str):
+                continue
+            for s in re.split(r"(?<=[.?!;\n])\s+", content):
+                s_clean = s.strip()
+                tokens = _content_tokens(s_clean)
+                if len(tokens) >= 2:
+                    sentence_entries.append((rec_id, s_clean, tokens))
+
+        for i in range(len(sentence_entries)):
+            for j in range(i + 1, len(sentence_entries)):
+                rec_id_a, s_a, tokens_a = sentence_entries[i]
+                rec_id_b, s_b, tokens_b = sentence_entries[j]
+                if rec_id_a and rec_id_b and rec_id_a == rec_id_b:
+                    continue
+
+                shared = tokens_a.intersection(tokens_b)
+                if len(shared) < 2:
+                    continue
+
+                is_contradiction = False
+                lower_a = s_a.lower()
+                lower_b = s_b.lower()
+
+                # Case 1: Antonym / opposing term pairs
+                for term_a, term_b in _OPPOSITE_PAIRS.items():
+                    if term_a in tokens_a and term_b in tokens_b:
+                        is_contradiction = True
+                        break
+
+                # Case 2: Asymmetric negation on shared predicate
+                if not is_contradiction:
+                    negation_words = {"not", "cannot", "can't", "never", "no", "fails"}
+                    has_neg_a = bool(negation_words.intersection(_tokenize(lower_a)))
+                    has_neg_b = bool(negation_words.intersection(_tokenize(lower_b)))
+                    if has_neg_a != has_neg_b:
+                        is_contradiction = True
+
+                if is_contradiction:
+                    pair_key = (min(s_a, s_b), max(s_a, s_b))
+                    if pair_key in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_key)
+
+                    topic = " ".join(sorted(shared)[:4])
+                    ids = tuple(sorted(filter(None, [rec_id_a, rec_id_b])))
+                    contradictions.append(
+                        ContradictoryBelief(
+                            topic=topic,
+                            first_statement=s_a,
+                            second_statement=s_b,
+                            source_record_ids=ids,
+                            confidence_conflict=1.0,
+                        )
+                    )
+                    if len(contradictions) >= limit:
+                        return contradictions
+
+        return contradictions
+
+    def identify_contradictions(self, limit: int = 15) -> list[ContradictoryBelief]:
+        """Convenience alias for `identify_contradictory_beliefs`."""
+        return self.identify_contradictory_beliefs(limit=limit)
+
+    def formulate_tasks(self, limit: int | None = None) -> list[ExploratoryTask]:
+        """Identifies knowledge gaps and contradictory beliefs, creating new
+        exploratory research tasks for any unhandled findings.
+        """
+        max_tasks = limit if limit is not None else self.max_tasks_per_cycle
+        new_tasks: list[ExploratoryTask] = []
+
+        gaps = self.identify_knowledge_gaps(limit=max_tasks)
+        for gap in gaps:
+            if len(new_tasks) >= max_tasks:
+                break
+            sig = f"gap:{gap.topic}:{gap.description[:40]}"
+            if sig in self._seen_signatures:
+                continue
+            self._seen_signatures.add(sig)
+
+            task_id = "curiosity-gap-" + hashlib.sha256(sig.encode("utf-8")).hexdigest()[:10]
+            task = ExploratoryTask(
+                id=task_id,
+                title=f"Investigate knowledge gap: {gap.topic}",
+                description=f"Conduct research to resolve knowledge gap: {gap.description}",
+                target_topic=gap.topic,
+                rationale=(
+                    f"Episodic memory gap detected in records {gap.source_record_ids}: "
+                    f"'{gap.description}'"
+                ),
+                source_type="knowledge_gap",
+                metadata={
+                    "urgency": gap.urgency,
+                    "source_record_ids": list(gap.source_record_ids),
+                },
+            )
+            new_tasks.append(task)
+            self._formulated_tasks[task_id] = task
+
+        contradictions = self.identify_contradictory_beliefs(limit=max_tasks)
+        for contra in contradictions:
+            if len(new_tasks) >= max_tasks:
+                break
+            sig = f"contra:{contra.topic}:{contra.first_statement[:20]}:{contra.second_statement[:20]}"
+            if sig in self._seen_signatures:
+                continue
+            self._seen_signatures.add(sig)
+
+            task_id = "curiosity-contra-" + hashlib.sha256(sig.encode("utf-8")).hexdigest()[:10]
+            task = ExploratoryTask(
+                id=task_id,
+                title=f"Resolve contradictory beliefs regarding {contra.topic}",
+                description=(
+                    f"Investigate and reconcile contradictory beliefs on {contra.topic}: "
+                    f"'{contra.first_statement}' vs '{contra.second_statement}'"
+                ),
+                target_topic=contra.topic,
+                rationale=(
+                    f"Conflicting assertions detected across records {contra.source_record_ids}: "
+                    f"'{contra.first_statement}' conflicts with '{contra.second_statement}'"
+                ),
+                source_type="contradictory_belief",
+                metadata={
+                    "confidence_conflict": contra.confidence_conflict,
+                    "source_record_ids": list(contra.source_record_ids),
+                    "first_statement": contra.first_statement,
+                    "second_statement": contra.second_statement,
+                },
+            )
+            new_tasks.append(task)
+            self._formulated_tasks[task_id] = task
+
+        # Persist formulated tasks in TaskStore and MemoryStore if available
+        for t in new_tasks:
+            if self._task_store is not None:
+                try:
+                    self._task_store.add(
+                        description=t.description,
+                        kind="research",
+                        subject=t.target_topic,
+                        discovered_via="curiosity",
+                    )
+                except Exception:
+                    pass
+
+            if self._store is not None:
+                try:
+                    self._store.remember(
+                        kind=CURIOSITY_TASK_KIND,
+                        content=t.description,
+                        title=t.title,
+                        target_topic=t.target_topic,
+                        source_type=t.source_type,
+                        rationale=t.rationale,
+                    )
+                except Exception:
+                    pass
+
+        return new_tasks
+
+    def explore(self, limit: int | None = None) -> list[ExploratoryTask]:
+        """Perform one autonomous exploration cycle."""
+        return self.formulate_tasks(limit=limit)
+
+    def recent_tasks(self) -> list[ExploratoryTask]:
+        return list(self._formulated_tasks.values())
 
 
 class ActivityClock:
@@ -138,11 +522,9 @@ class ActivityClock:
 
 class AutonomyController:
     """Owns the enable/disable flag, the idle/cooldown timing, and the
-    durable daily action cap. Does not itself decide what to work on or
-    execute anything -- `perform_action` (injected) does that and
-    returns True only if it genuinely did something, so a no-op check
-    (queue empty, discovery found nothing) never consumes the daily
-    budget or starts the cooldown.
+    durable daily action cap. Contains an intrinsic CuriosityDrive that
+    identifies knowledge gaps and contradictory beliefs across episodic
+    memory during idle cycles.
     """
 
     def __init__(
@@ -157,6 +539,8 @@ class AutonomyController:
         max_actions_per_day: int = DEFAULT_MAX_ACTIONS_PER_DAY,
         last_action_succeeded: Callable[[], bool | None] | None = None,
         max_consecutive_failures: int = DEFAULT_MAX_CONSECUTIVE_FAILURES,
+        curiosity_drive: CuriosityDrive | None = None,
+        task_store: Any | None = None,
     ) -> None:
         self._store = store
         self._clock = clock
@@ -172,6 +556,10 @@ class AutonomyController:
         self._last_action_at = 0.0
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self.curiosity_drive = curiosity_drive or CuriosityDrive(
+            store=store, task_store=task_store
+        )
+        self.curiosity = self.curiosity_drive
 
     @property
     def consecutive_failures(self) -> int:
@@ -188,7 +576,9 @@ class AutonomyController:
         if self._thread is not None:
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._loop, daemon=True, name="simorgh-autonomy")
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name="simorgh-autonomy"
+        )
         self._thread.start()
 
     def stop(self) -> None:
@@ -196,21 +586,24 @@ class AutonomyController:
 
     def actions_today(self) -> int:
         cutoff = time.time() - 86400.0
-        return sum(1 for r in self._store.query(kind=ACTION_KIND) if r.created_at >= cutoff)
+        return sum(
+            1
+            for r in self._store.query(kind=ACTION_KIND)
+            if r.created_at >= cutoff
+        )
 
-    def digest(self, window_seconds: float = 86400.0) -> "ActionDigest":
+    def digest(self, window_seconds: float = 86400.0) -> ActionDigest:
         """A lightweight rollup of autonomous activity over the last
         `window_seconds` -- how many actions, how many succeeded/failed
         (per the same `succeeded` signal the circuit breaker uses), and
-        how many carried no success/failure signal at all (a pure
-        discovery tick, or a caller that never wired
-        `last_action_succeeded`). Exists because reviewing what the
-        autonomous loop actually did previously required actively
-        reading `log`/`tasks` -- there was no lighter-weight summary
-        surface at all.
+        how many carried no success/failure signal at all.
         """
         cutoff = time.time() - window_seconds
-        records = [r for r in self._store.query(kind=ACTION_KIND) if r.created_at >= cutoff]
+        records = [
+            r
+            for r in self._store.query(kind=ACTION_KIND)
+            if r.created_at >= cutoff
+        ]
         succeeded = sum(1 for r in records if r.metadata.get("succeeded") is True)
         failed = sum(1 for r in records if r.metadata.get("succeeded") is False)
         return ActionDigest(
@@ -226,9 +619,7 @@ class AutonomyController:
 
     def ready_to_act(self) -> bool:
         """Whether every gate (enabled, idle long enough, past cooldown,
-        under the daily cap) currently allows an action -- exposed
-        separately from `tick()` so a status command can report *why*
-        it isn't acting, not just that it isn't.
+        under the daily cap) currently allows an action.
         """
         if not self.enabled:
             return False
@@ -249,25 +640,38 @@ class AutonomyController:
         """
         if not self.ready_to_act():
             return False
+
+        # Autonomous curiosity drive during idle cycles: scan episodic memory
+        # to uncover gaps or contradictions and formulate research tasks
+        if self.curiosity_drive is not None:
+            try:
+                self.curiosity_drive.explore()
+            except Exception as exc:  # noqa: BLE001
+                print(style(f"🔍 [curiosity] exploration error: {exc!r}", "dim"))
+
         try:
             did_something = self._perform_action()
-        except Exception as exc:  # noqa: BLE001 -- the background loop
-            # must never die from one bad action; the next tick tries
-            # again after the usual cooldown, not immediately in a
-            # tight failure loop.
-            print(style(f"🤖 [autonomous] action raised {exc!r} -- will try again later", "red", "bold"))
+        except Exception as exc:  # noqa: BLE001
+            print(
+                style(
+                    f"🤖 [autonomous] action raised {exc!r} -- will try again later",
+                    "red",
+                    "bold",
+                )
+            )
             return False
+
         if did_something:
             self._last_action_at = time.time()
             succeeded = None
             if self._last_action_succeeded is not None:
                 try:
                     succeeded = self._last_action_succeeded()
-                except Exception:  # noqa: BLE001 -- a broken outcome
-                    # signal must never itself take the loop down; treat
-                    # it as "no signal" and keep going.
+                except Exception:  # noqa: BLE001
                     succeeded = None
-            self._store.remember(ACTION_KIND, "autonomous action taken", succeeded=succeeded)
+            self._store.remember(
+                ACTION_KIND, "autonomous action taken", succeeded=succeeded
+            )
             if succeeded is False:
                 self._consecutive_failures += 1
                 if self._consecutive_failures >= self.max_consecutive_failures:
