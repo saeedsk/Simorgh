@@ -30,6 +30,23 @@ before writing this, not assumed from training data:
   plan's rolling quota is exhausted, that surfaces as a non-zero exit,
   which becomes ProviderUnavailable here -- CognitionRouter's existing
   fallback handles the rest; no separate sleep/backoff loop is needed.
+- `--bare` is deliberately NOT passed, even though it sounds like the
+  right minimal-footprint flag for a headless drafting call (it skips
+  hooks/LSP/plugin sync/attribution/auto-memory/background prefetches/
+  CLAUDE.md discovery). Live-caught: on macOS, a normal `claude login`
+  session is stored in the OS keychain, not a plain credentials file --
+  and `--bare`'s help text says it also skips "keychain reads." With it
+  passed, every single call failed with "Not logged in · Please run
+  /login" despite `claude auth status` confirming a genuinely valid
+  Pro-subscription session in the same shell -- this provider silently
+  degraded to the next one (Gemini) every time, for this session's
+  entire history, and nothing surfaced that as an error anywhere. Every
+  one of `--bare`'s other effects is already covered by the isolation
+  this provider builds itself (`cwd` is a fresh, empty temp directory,
+  so there's no CLAUDE.md/project hooks to discover in the first place;
+  `--disallowedTools "*"` already removes every tool a hook could act
+  through) -- keychain reads were the one thing actually needed and the
+  one thing this flag can't be told to keep.
 
 This provider must always be wrapped in src/cognition/budget.BudgetGuard
 before being registered in a CognitionRouter, exactly like every other
@@ -107,7 +124,9 @@ class ClaudeCodeProvider(LLMProvider):
                         "json",
                         "--disallowedTools",
                         "*",
-                        "--bare",
+                        # Do NOT add "--bare" here: it skips keychain reads,
+                        # which is where a normal macOS `claude login`
+                        # session lives -- see the module docstring.
                     ],
                     capture_output=True,
                     text=True,

@@ -77,6 +77,19 @@ class TestComplete(unittest.TestCase):
         self.assertNotIn("--dangerously-skip-permissions", args)
         self.assertNotIn("--permission-mode", args)
 
+    def test_never_passes_bare_flag(self):
+        # Regression test: `--bare` skips keychain reads, which is where a
+        # normal macOS `claude login` session lives. Live-caught passing
+        # this flag made every call fail with "Not logged in" despite a
+        # genuinely valid Pro subscription -- see the module docstring.
+        runner = FakeRunner(completed=_completed(stdout=json.dumps({"result": "ok"})))
+        provider = self._provider(runner)
+
+        provider.complete("hello")
+
+        args = runner.calls[0]["args"]
+        self.assertNotIn("--bare", args)
+
     def test_credential_env_vars_are_stripped(self):
         runner = FakeRunner(completed=_completed(stdout=json.dumps({"result": "ok"})))
         base_env = {
@@ -109,10 +122,11 @@ class TestComplete(unittest.TestCase):
             provider.complete("hello")
 
     def test_is_error_true_with_exit_zero_raises_provider_unavailable(self):
-        # Live-observed: `claude -p ... --bare` exits 0 with
+        # Live-observed: `claude -p ...` can exit 0 with
         # {"is_error": true, "result": "Not logged in · Please run
-        # /login", ...} when no subscription session is active --
-        # returncode alone doesn't catch this.
+        # /login", ...} when no subscription session is active (e.g. it
+        # happened on every call while this provider still passed the now-
+        # removed `--bare` flag) -- returncode alone doesn't catch this.
         payload = json.dumps(
             {"is_error": True, "result": "Not logged in · Please run /login"}
         )
