@@ -1223,3 +1223,26 @@ Still ahead, roughly in order:
     and every pipeline phase (drafting, audit gate, test suite, applied)
     already prints its own step live -- confirmed still true, nothing
     new needed there, only the cadence at which all of it fires.
+73. **Sim didn't know its own applied skills existed.** Direct creator
+    question: "when sim develop a new improvemnt or skill, dos it add
+    necessary instruction to itself so later it kbow that skill is there
+    and how to use it?" Checked the actual code rather than assumed: no.
+    `apply_proposal` writes an applied skill to disk and records it in
+    memory, and `USE: <name>` (`LogicAgent`, `src/agents/logic/base.py`)
+    can already run one by name -- but `_build_prompt` never told Sim's
+    own conversational awareness which skills exist. It could only ever
+    find out by using `LIST:`/`READ:` to go look at `src/agents/skills/`
+    itself, with nothing prompting it to think to. Confirmed live: this
+    repo already has ~20 real applied skills (`100_major_skill_to_...py`
+    and others, from earlier sessions) Sim's own conversation had no
+    live awareness of. Fixed: `_build_prompt` now injects a fresh
+    `list_applied_skills(self._repo_root)` result every single turn
+    (never cached -- a skill applied moments ago, including by the
+    hyperscale autonomous loop mid-session, must show up on the very
+    next turn), bounded at `_MAX_SKILLS_IN_PROMPT` (40, with a "+N more"
+    note past that) so a long-running session's accumulated skill count
+    doesn't grow every turn's prompt unbounded forever. Milestone 59
+    ("automatic registration... as a live Router sub-agent") remains
+    deliberately NOT done -- this only makes Sim *aware* a skill exists
+    and can still be run via the existing, already-audited `USE:` path;
+    it does not change execution, wiring, or the safety boundary at all.
