@@ -1498,3 +1498,47 @@ Still ahead, roughly in order:
     tests + 19 E2E tests passing, with regression tests confirming the
     warning reaches the prompt and a real patch succeeds using
     already-gathered context on the final step.
+84. **The actual, primary reason real self-patches to existing files
+    almost never succeeded -- bigger than milestones 82/83, and this
+    time a genuine change to `AuditGate`, taken to the creator directly
+    rather than shipped unilaterally, given what it touches.** Chasing
+    milestone 83's fix further with a fresh, controlled test (same tiny
+    `reminders.py` request, fresh sandbox): still failed, now with a
+    *different, much more fundamental* symptom: `ModuleNotFoundError: No
+    module named 'src'`. Root cause, found by reading `SubprocessSandbox.run()`
+    directly: it executes code with an EMPTY environment (`env={}`,
+    `python -I`, a bare temp dir) -- correct isolation for a NEW,
+    standalone skill file (never supposed to import project internals),
+    but structurally impossible to pass for a self-patch to an existing
+    core file, which normally and legitimately imports sibling modules
+    (`from src.orchestrator.console_style import style`, etc.). Every
+    real self-patch attempt observed all session -- across every
+    ambitious idea and this session's own deliberately tiny, well-scoped
+    contrast test -- ultimately failed this exact way, regardless of
+    code quality. This wasn't "hard tasks fail sometimes"; it was the
+    audit gate's own sandboxed-execution check being unconditionally
+    unwinnable for this entire pipeline.
+
+    Presented directly to the creator before touching anything, given
+    this is `AuditGate` -- the "immune system," repeatedly called out
+    throughout this project's own docs as something to never casually
+    weaken -- with the reasoning and a recommendation: the check is
+    scoped to subjects under `src/agents/skills/` (new skills) only now;
+    a self-patch subject skips it entirely. This does NOT skip
+    verification for a self-patch -- `run_isolated_test_suite`
+    (self_patch.py) already runs immediately afterward, executing the
+    patched code for real, as part of the whole real test suite, against
+    a full repo copy with the package genuinely intact -- a strictly
+    *stronger* check for this exact case (real imports work, real tests
+    exercise the code) than a bare-environment smoke test that could
+    never pass a legitimate import in the first place. Every other check
+    -- denylist, protected-subjects, adaptive-immunity -- applies
+    identically to both self-patches and new skills, completely
+    unchanged; only this one, structurally skill-specific check is now
+    scoped to skill subjects. The creator reviewed and explicitly chose
+    this fix. 769 unit tests + 19 E2E tests passing, with new tests
+    proving (a) a self-patch with a real cross-module import is now
+    approved, (b) the identical import in a NEW skill subject is still
+    correctly rejected (the scoping doesn't widen what a skill can get
+    away with), and (c) denylist/protected-file checks still fully apply
+    to self-patch subjects.
