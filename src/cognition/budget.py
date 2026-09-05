@@ -91,6 +91,36 @@ class BudgetGuard(LLMProvider):
         successes = sum(1 for o in outcomes if o.metadata.get("success"))
         return successes / len(outcomes)
 
+    def average_latency_seconds(self) -> float | None:
+        """Mean latency across recorded outcomes (this window) that
+        reported one, or None if no such outcomes exist yet.
+        """
+        latencies = [
+            o.metadata["latency_seconds"]
+            for o in self._recent_outcomes()
+            if o.metadata.get("latency_seconds") is not None
+        ]
+        if not latencies:
+            return None
+        return sum(latencies) / len(latencies)
+
+    def score(self) -> tuple[float, float, float]:
+        """Composite ranking key for `preferred_provider`: success rate
+        first (higher is better, unknown treated as worse than any known
+        rate), then lower average latency, then lower in-window spend.
+        Latency and spend only break ties between providers with equal
+        (or equally unknown) success rates -- success is the thing we
+        actually care about, cost/latency are secondary signals.
+        """
+        rate = self.success_rate()
+        latency = self.average_latency_seconds()
+        spend = self.status()["spend_in_window_usd"]
+        return (
+            rate if rate is not None else -1.0,
+            -(latency if latency is not None else float("inf")),
+            -spend,
+        )
+
     def status(self) -> dict:
         records = self._recent_records()
         spend = sum(r.metadata.get("cost_usd", 0.0) for r in records)
@@ -174,7 +204,9 @@ class BudgetGuard(LLMProvider):
 def preferred_provider(guards: list[BudgetGuard]) -> BudgetGuard | None:
     """Given several BudgetGuards wrapping different providers, pick the
     available one with the best track record of task success, breaking
-    ties toward lower in-window spend.
+    ties toward lower average latency and then lower in-window spend --
+    cost/latency shape the choice only among providers that succeed
+    equally often, they never outrank success itself.
 
     Falls back to the first available guard when none yet has outcome
     history recorded (via `record_outcome`), since there is no success
@@ -187,7 +219,4 @@ def preferred_provider(guards: list[BudgetGuard]) -> BudgetGuard | None:
     scored = [g for g in available if g.success_rate() is not None]
     if not scored:
         return available[0]
-    return max(
-        scored,
-        key=lambda g: (g.success_rate(), -g.status()["spend_in_window_usd"]),
-    )
+    return max(scored, key=lambda g: g.score())
