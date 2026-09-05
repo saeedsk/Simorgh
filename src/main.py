@@ -954,6 +954,7 @@ def _autonomous_action(
     if not task_store.unfinished():
         created = discover_improvements(task_store, reflection_agent, store)
         label = "improvement area(s)"
+        attempted_creative = False
         if not created:
             # Nothing went wrong recently to react to -- ask Sim to set
             # its own agenda instead of sitting idle with an empty
@@ -961,7 +962,11 @@ def _autonomous_action(
             # big ideas"). Same audited propose_self_patch pipeline
             # picks these up next tick either way; only how the task got
             # onto the backlog differs.
-            created = discover_creative_improvements(cognition, task_store, repo_root=repo_root)
+            provider_sink: dict = {}
+            created = discover_creative_improvements(
+                cognition, task_store, repo_root=repo_root, provider_sink=provider_sink
+            )
+            attempted_creative = provider_sink.get("provider_name") != "deterministic_fallback"
             label = "self-directed idea(s)"
         if created:
             print(
@@ -974,7 +979,14 @@ def _autonomous_action(
             for task in created:
                 print(f"   + [{task.id}] ({task.discovered_via}) {task.description}")
             print(style("> ", "cyan", "bold"), end="", flush=True)
-        return bool(created)
+        # A creative-agenda attempt that produced nothing still spent a
+        # real (possibly billed) LLM call, unlike discover_improvements'
+        # free, purely local pass -- must still count as "did something"
+        # so AutonomyController starts its action_cooldown (default
+        # 150s). Without this, a stubborn/unparseable brainstorm would
+        # get retried every poll_interval_seconds (default 20s) instead,
+        # hammering the provider far faster than this loop is meant to.
+        return bool(created) or attempted_creative
 
     print(style("\n🤖 [autonomous] idle -- picking up the next task...", "magenta", "bold"))
     result = work_on_next_task(
@@ -1958,6 +1970,7 @@ def discover_creative_improvements(
     task_store: TaskStore,
     repo_root: Path | None = None,
     count: int = DEFAULT_CREATIVE_AGENDA_COUNT,
+    provider_sink: dict | None = None,
 ) -> list[Task]:
     """The other half of "find gaps AND come up with big ideas":
     discover_improvements (src/orchestrator/discovery.py) only reacts to
@@ -1977,7 +1990,12 @@ def discover_creative_improvements(
     here, same as discover_improvements finding nothing. Deduped against
     every existing task description, same substring-containment
     approach discovery.py's `_already_covered` uses, so a repeated tick
-    doesn't pile up near-duplicate ambitions.
+    doesn't pile up near-duplicate ambitions. `provider_sink`, if given,
+    is updated with {"provider_name": ...} from the response -- lets a
+    caller (`_autonomous_action`) tell a genuine, possibly-billed LLM
+    attempt apart from a free deterministic-fallback no-op, without this
+    function's return type carrying anything beyond the created tasks
+    (same sink pattern `_dispatch_and_record`'s `metadata_sink` uses).
     """
     root = repo_root or Path.cwd()
     response = cognition.complete(
@@ -1985,6 +2003,8 @@ def discover_creative_improvements(
             count=count, files="\n".join(_list_source_files(root)) or "(none found)"
         )
     )
+    if provider_sink is not None:
+        provider_sink["provider_name"] = response.provider_name
     if response.provider_name == "deterministic_fallback":
         return []
 

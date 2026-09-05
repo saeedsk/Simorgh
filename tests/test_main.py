@@ -2495,6 +2495,28 @@ class TestAutonomousAction(unittest.TestCase):
         self.assertEqual(len(task_store.all()), 1)
         self.assertEqual(task_store.all()[0].discovered_via, "creative_agenda")
 
+    def test_a_creative_attempt_that_finds_nothing_still_counts_as_action(self):
+        # A real LLM call was still spent even when the brainstorm
+        # doesn't parse into any tasks -- must still report "did
+        # something" so AutonomyController starts its action_cooldown,
+        # not retry every poll_interval_seconds (a real cost/rate risk,
+        # unlike discover_improvements' free local-only pass).
+        from src.main import _autonomous_action
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        cognition = _FakeBrainstormCognition("I refuse to make a list.")
+
+        did_something = _autonomous_action(
+            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+            activity_log, cognition, repo_root=self.repo_root,
+        )
+
+        self.assertTrue(did_something)
+        self.assertEqual(task_store.all(), [])
+
     def test_works_a_pending_task_when_queue_is_not_empty(self):
         from src.main import _autonomous_action
 
