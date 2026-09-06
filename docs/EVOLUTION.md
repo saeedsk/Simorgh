@@ -3807,3 +3807,32 @@ Still ahead, roughly in order:
     pending turn live, and the dashboard gets a live activity feed. That
     is the next build item, ahead of the rest of Phase 6 -- it is a
     stated philosophy of the project, not polish.
+
+132. **The CLI now shows what Sim is doing while it thinks (roadmap
+    item 18, half one).** Interface subscribes to `task.started`,
+    `task.step`, `task.completed` (none are reserved -- only `action.
+    proposed/approved` are) and, while a reply is pending, prints one dim
+    line per event *for that session* -- a chat turn's `task_id` is its
+    `session_id` (`worker.py::run_percept_chat`) -- and stays silent for
+    every other task (autonomous ticks, other sessions):
+
+    ```
+    > what does SOUL.md say?
+      ... thinking...  [0.0s]
+      ... step 1 (act) read_file: read docs/SOUL.md ok  [2.1s]
+      ... still thinking  [10s]
+      ... done  [12.3s]
+    <the reply>
+    ```
+
+    A heartbeat (`narrate_heartbeat_s`, default 10 s) covers the gaps
+    between steps -- a long model call -- so silence never lasts longer
+    than that; `[interface] narrate = false` turns all of it off. Along
+    the way: milestone 122's error-visibility `task.step` wrote
+    `phase: "think"`, which is not in the contract's `gather|act|verify`
+    enum -- it only ever reached the schema-blind Ledger path, so
+    nothing failed; now `gather`, and *published* as well as appended so
+    a live surface sees a failed think as it happens. 1 new REPL test
+    (narration for the pending session; silence for an unrelated task;
+    narration precedes the reply). The dashboard half -- a live activity
+    feed -- is next.

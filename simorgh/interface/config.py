@@ -21,6 +21,12 @@ class Config:
     # UTF-8, never non-Latin script (fonts commonly lack it -- live-caught
     # as "weird characters"); full: also the Persian name; off: pure ASCII.
     unicode: str = "auto"  # auto | full | off
+    # Live narration of the pending turn (07-post-cutover-review.md §3.9):
+    # one dim line per task.started/step/completed of *this* session while
+    # the reply is pending, plus a "still thinking" heartbeat so silence
+    # never lasts longer than `narrate_heartbeat_s`.
+    narrate: bool = True
+    narrate_heartbeat_s: float = 10.0
     prompt_timeout_s: float = 120.0
     vitals_idle_reprint_s: float = 3.0
     vitals_interval_s: float = 15.0
