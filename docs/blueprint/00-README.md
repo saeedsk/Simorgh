@@ -79,7 +79,7 @@ Simorgh v1 recorded in `docs/EVOLUTION.md`.
 | contracts | built (v1 catalog: 123 types, 21 domains) | Phase 0 agent | 0 |
 | bus | **built** (memory/sqlite/aws backends, all delivery semantics) | Phase 0 agent | 0 |
 | ledger | **built** (memory/jsonl/sqlite/dynamodb backends, projections, blobs, compaction, `migrate-v1`) | Phase 0 agent | 0 |
-| kernel | complete draft | unassigned | 0 |
+| kernel | **built** (config, secrets, state machine, scheduler, supervisor, registry, context, metrics/status, `--self-check`, CLI) | Phase 0 agent | 0 |
 | cognition, memory | complete draft | unassigned | 1A |
 | guardian, execution | complete draft | unassigned | 1B |
 | worldmodel, persona, interface | complete draft | unassigned | 1C |
@@ -171,3 +171,51 @@ Claim a package by editing this table and the spec's header (see `05` §7).
   rewrite), so `sqlite`/`jsonl` interleave correctly under concurrent
   writers instead of one process locking the other out entirely.
   1188 tests passing (v1 + contracts + bus + 158 new for the ledger).
+- 2026-09-06 — `simorgh/kernel/` built (Phase 0, the composition root, and
+  the last Phase 0 package): config load/merge/env-override, layered
+  secrets (`env`/`file`/`chained`/`scoped`, a `ScopedSecretStore` so a
+  subsystem can read only what its config section declares plus, for
+  `guardian`/`execution` only, the per-run HMAC secret), the state machine
+  (`booting → running ↔ paused → stopping → stopped`, plus terminal
+  `failed`, scoped `autonomous` pauses distinct from a full pause), the
+  Scheduler (idle/second/sleep tick loops off an injected `Clock`, durable
+  `system.schedule.*` timers re-armed from the Ledger on every boot -- a
+  v1 reminder was a `threading.Timer` a restart simply forgot), the
+  Supervisor (layer-ordered concurrent boot gated on health, restart
+  backoff table, a 10-minute restart-budget window, `SAFETY_CRITICAL`
+  auto-pause when `guardian`/`execution` exhausts its budget), the
+  registry (the one place — besides `contracts`/bus/ledger clients — a
+  Kernel module is allowed to import another subsystem's `Service`), the
+  `ContextFactory` (one `BusClient` and one scoped secret store per
+  subsystem), the status/metrics server, and `--self-check` — the
+  structural safety proof required before any real work runs: a stub
+  Guardian/Execution speak the real token contract (`contracts.security`)
+  over the real Bus/Ledger, proving a legitimate approval executes, a
+  forged token is rejected by Execution's own verification before any
+  tool runs, a paused system denies new proposals, and a non-Guardian
+  source cannot subscribe to `action.proposed` — the reserved-topology
+  policy already built into the bus, exercised for real rather than
+  hoped for. `python -m simorgh --self-check` now passes for the first
+  time (`OVERALL: PASS`, all four steps), completing Phase 0 end to end:
+  `contracts → bus/ledger → kernel`, boot to `running` and back to
+  `stopped` on a real in-memory bus/ledger pair, verified by four
+  integration tests (`tests/simorgh/integration/`): booting two toy
+  Phase-1-stand-in subsystems through the real layer-ordered Supervisor,
+  `pause` suspending the Scheduler's own tick loops and `resume`
+  restoring them, a schedule added before a simulated crash surviving a
+  second, independent `Kernel` pointed at the same on-disk Ledger, and a
+  toy `guardian` exhausting its restart budget auto-pausing the Kernel
+  through the real `Supervisor` restart-budget logic (not just the
+  handler in isolation). Doc fix while building: `03`'s self-check
+  walkthrough (§5.4) frames step 2 as testing Execution's own token
+  verification, not a bus publish-policy violation — the Kernel is an
+  allowed publisher of `action.approved` (`PUBLISH_ONLY_BY`), so a
+  forged one is a token failure caught downstream, not a policy denial
+  caught at publish time; step 4 (a throwaway source subscribing to
+  `action.proposed`) is the actual policy-violation proof. Phase 0 is
+  now complete; Phase 1A/1B/1C tracks (cognition/memory, guardian/
+  execution, worldmodel/persona/interface) can start in parallel, each
+  against the same frozen `contracts` catalog and the same Kernel to
+  boot into.
+  1336 tests passing (v1 + contracts + bus + ledger + 148 new for the
+  kernel: 139 unit, 9 integration).

@@ -7,8 +7,8 @@
 > contradict them.
 
 **Layer:** 0 Substrate
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** built, Phase 0 (2026-09-06)
+**Status:** built
 **Depends on (contracts only):** `contracts.protocols.Subsystem/Bus/Ledger/Clock/Context/Health`, `contracts.messages.system`, `contracts.messages.percept` (`percept.time.scheduled`), `contracts.messages.action` (self-check only), `contracts.topics`
 **v1 code that migrates here:** `src/orchestrator/autonomy.py` (`ActivityClock`, idle threshold/cooldown/daily-cap *timing* — not the action policy), `src/orchestrator/reminders.py` (`parse_duration`, one-shot timers → durable schedules), `src/main.py::self_check` and `__main__` arg handling, `main.py`'s `build_cognition_router`/`run_cli` *composition* role (not their logic), config constants scattered through `main.py` (`DEFAULT_*`, `SIMORGH_*` env vars).
 
