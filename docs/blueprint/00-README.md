@@ -74,18 +74,42 @@ Simorgh v1 recorded in `docs/EVOLUTION.md`.
 
 ## Status and ownership
 
-| Package | Spec status | Build owner | Phase |
+**All sixteen subsystems are built.** `tests/simorgh/integration/test_kernel_boots_all_sixteen_subsystems.py`
+boots the real, unpatched `simorgh.kernel.registry.build_factories()` --
+every real `Service`, in the real six-layer order -- and asserts all
+fifteen non-kernel subsystems report healthy, twice in a row on the same
+data directory. 1976+ tests passing across the whole build (v1's
+original suite intact throughout). See `docs/EVOLUTION.md` milestones
+98-103 for how it was built: Phase 0 (contracts, bus, ledger, kernel)
+sequentially by dependency; the remaining twelve subsystems concurrently,
+by nine parallel agents building against nothing but the frozen Phase 0
+contracts (the blueprint's own graceful-degradation principle made this
+safe); then one integration pass wiring every subsystem into the
+Kernel's registry and proving the whole system boots together.
+
+| Package | Spec status | Notes | Phase |
 |---|---|---|---|
-| contracts | built (v1 catalog: 123 types, 21 domains) | Phase 0 agent | 0 |
-| bus | **built** (memory/sqlite/aws backends, all delivery semantics) | Phase 0 agent | 0 |
-| ledger | **built** (memory/jsonl/sqlite/dynamodb backends, projections, blobs, compaction, `migrate-v1`) | Phase 0 agent | 0 |
-| kernel | **built** (config, secrets, state machine, scheduler, supervisor, registry, context, metrics/status, `--self-check`, CLI) | Phase 0 agent | 0 |
-| cognition, memory | complete draft | unassigned | 1A |
-| guardian, execution | complete draft | unassigned | 1B |
-| worldmodel, persona, interface | complete draft | unassigned | 1C |
-| planning, orchestration | complete draft | unassigned | 2D |
-| verification | complete draft | unassigned | 2E |
-| learning, reflection, curiosity | complete draft | unassigned | 3 |
+| contracts | **built** | v1 catalog: 123 types, 21 domains | 0 |
+| bus | **built** | memory/sqlite/aws backends, all delivery semantics | 0 |
+| ledger | **built** | memory/jsonl/sqlite/dynamodb backends, projections, blobs, compaction, `migrate-v1` | 0 |
+| kernel | **built** | config, secrets, state machine, scheduler, supervisor, registry (all 15 subsystems wired), context, metrics/status, `--self-check`, CLI | 0 |
+| cognition | **built** | provider routing/failover, budget accounting, tool-call parsing, compaction layers 1-2 | 1A |
+| memory | **built** | working/episodic/semantic/procedural, retrieval, confidence/decay, consolidation | 1A |
+| worldmodel | **built** | env facets (capability map, file index, git state, tools); static Self Model shell | 1C |
+| guardian | **built** | 8-rule pipeline, real HMAC tokens, posture that only tightens | 1B |
+| execution | **built** | independent token re-verification, ported tools incl. `git_commit`/`git_revert` | 1B |
+| verification | **built** | mechanical + semantic + trajectory verdict pipeline, idempotent replay | 2E |
+| planning | **built** | Task/Project model, dependency DAG, rollup, fuzzy dedupe, Plan Mode, re-grounding | 2D |
+| learning | **built** | competence tables, outcome recording, self-patch pipeline (policy only) | 3 |
+| reflection | **built** | health monitor, pattern mining, calibration (Brier score), drift detection, self-critique | 3 |
+| curiosity | **built** | diversified sampling (proven by regression test), interests, project proposals | 3 |
+| persona | **built** | continuous mood, emotion floor, voice, user model, share pacing | 1C |
+| interface | **built** | command dispatch, Flow 5 (pause/resume/stop), vitals projection, honest degradation | 1C |
+| orchestration | **built** | Worker (gather-act-verify loop), turn/task sessions, sub-agent delegation, resume | 2D |
+
+Every package's own `Status:` header in `subsystems/NN-*.md` and each
+build's own contract-gap notes (`§12` of each spec) are the authoritative
+detail; this table is the index.
 
 Claim a package by editing this table and the spec's header (see `05` §7).
 
@@ -116,6 +140,26 @@ Claim a package by editing this table and the spec's header (see `05` §7).
   drafting loop (Flow 4), and Interface owning every human-facing status
   surface. Open questions the spec authors recorded (each with a default)
   live in each spec's §12.
+- 2026-09-06 — All sixteen subsystems built and integrated. Phase 0
+  (contracts, bus, ledger, kernel) built sequentially by dependency;
+  the remaining twelve subsystems (cognition, memory, worldmodel,
+  guardian, execution, verification, planning, learning, reflection,
+  curiosity, persona, interface) built concurrently by nine parallel
+  agents against the frozen Phase 0 contracts alone, each proving
+  itself against a real Kernel boot before this session verified and
+  pushed it. A final integration pass wired all fifteen non-kernel
+  subsystems into `kernel/registry.py`'s `build_factories()` (left
+  untouched by every build, per a coordination note the Phase 0 build
+  left there) and added `test_kernel_boots_all_sixteen_subsystems.py`,
+  which boots the real, unpatched registry end to end and confirms
+  every subsystem reports healthy. One real module-boundary violation
+  (an unauthorized push carried Planning out with an internal
+  `ledger.api` import instead of the public `ledger.client` boundary)
+  was found and fixed during verification. See `docs/EVOLUTION.md`
+  milestones 102-103 for the full account, including every real bug
+  found while porting v1 behavior into the new architecture. Full
+  status table above; every package's own spec header and §12 carry
+  its build's own detail and contract-gap notes.
 - 2026-09-06 — `simorgh/contracts/` built (Phase 0, first package). Doc
   fix while building: `turn` and `project` are their own first segment on
   the wire, so they are domains; added to `03` §3's table (the prose had

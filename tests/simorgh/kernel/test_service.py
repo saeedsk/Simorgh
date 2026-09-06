@@ -184,8 +184,16 @@ class TestHealthAndStatus(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(snap["run_id"], kernel.run_id)
                 self.assertEqual(snap["mode"], "single")
                 self.assertEqual(snap["state"], RUNNING)
+                # Was {"bus", "ledger"} when this test was first written
+                # (Phase 0) -- stale the moment the other twelve
+                # subsystems were wired into the registry (docs/EVOLUTION.md
+                # milestone 103). _make_kernel boots the real, unpatched
+                # registry, so the snapshot now genuinely reflects every
+                # subsystem LAYERS names.
+                from simorgh.kernel.registry import LAYERS
+
                 names = {s["name"] for s in snap["subsystems"]}
-                self.assertEqual(names, {"bus", "ledger"})
+                self.assertEqual(names, {name for layer in LAYERS for name in layer})
             finally:
                 await kernel.shutdown()
 

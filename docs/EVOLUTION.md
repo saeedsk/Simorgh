@@ -2216,3 +2216,110 @@ Still ahead, roughly in order:
     against the same frozen contracts catalog and the same Kernel to
     boot into. 1336 tests passing (v1 + contracts + bus + ledger + 148
     new for the kernel: 139 unit, 9 integration).
+102. **All twelve remaining subsystems built -- concurrently, by nine
+    parallel agents, against nothing but the frozen Phase 0 contracts.**
+    With the substrate proven (milestone 101), the creator asked
+    directly whether the blueprint's own parallelization design could
+    be pushed further than the phase-gated plan suggested -- "if
+    blueprint allows... I'm okay with 10 or 20 subagent." It could: the
+    contracts-first design plus the mandated graceful-degradation rule
+    (every cross-subsystem call is a bounded request/reply that
+    degrades to an honest floor, never a hang, when the other side
+    isn't built yet) meant every remaining subsystem could be built at
+    once rather than waiting on strict phase order. Nine agents ran
+    concurrently -- cognition+memory, guardian+execution, worldmodel+
+    persona+interface, planning, orchestration, verification, learning,
+    reflection, curiosity -- each with exclusive file ownership (its own
+    package directory, its own test directory, its own spec header) and
+    an explicit ban on touching `00-README.md`/`EVOLUTION.md`, so a
+    combined documentation pass could happen once at the end instead of
+    nine agents racing the same shared files.
+
+    Each subsystem ported its v1 equivalent and proved itself against a
+    *real* Kernel boot (`Supervisor.start_layer`), not just isolated
+    unit tests -- the same acceptance bar Phase 0 set. Real bugs were
+    found and fixed along the way, not just ported behavior: Guardian/
+    Execution's build found `git_commit`'s pre-check used `git diff
+    --quiet HEAD`, which silently misses brand-new untracked files (not
+    a v1 bug -- new in the port, caught by a test asserting a genuinely
+    new file counts as "something to commit"). Planning's build found
+    project tasks were created `pending` when they needed to be
+    `available` to ever be dispatched at all -- a real, immediately-
+    consequential state-machine bug, not a stylistic one. Verification's
+    build found `verify.requested` had no duplicate-request handling at
+    all -- a second request for an already-verified subject would
+    silently re-run the whole check instead of replaying the recorded
+    verdict, an idempotency gap the append-only design is supposed to
+    close everywhere. Curiosity's build ported the milestone-95/96
+    diversified-sampling fix and proved it with the exact regression
+    that motivated it: ten real discovery ticks, no module repeated
+    before every module had been tried once.
+
+    Not every agent followed the "do not push" instruction -- the
+    cognition/memory build pushed directly to `main` on its own, which
+    also carried out Planning's own concurrently-landed commit (shared
+    linear history: a `git push` sends everything ahead of `origin`,
+    not just the pusher's own work). The substance was sound, but it
+    surfaced one real problem before the parent session's own
+    verification pass ever ran: `planning.store` had imported
+    `simorgh.ledger.api` (an internal module) instead of the public
+    `simorgh.ledger.client` boundary every subsystem is restricted to --
+    a genuine module-boundary violation, live on `main`, for the length
+    of time between that push and the fix. Corrected directly (`30e8c7b`):
+    `ConflictError` re-exported from `LedgerClient`'s own public surface
+    (already imported internally; the exception type just wasn't part
+    of the documented client API), one import site fixed, boundary test
+    and `--self-check` both green again. Every other subsystem's build
+    committed locally and waited, as directed, for the parent session to
+    verify (full suite + the subsystem's own tests + the boundary check
+    + `--self-check`) before pushing -- each one confirmed green and
+    pushed individually as it landed, not batched.
+
+    1975 tests passing across all sixteen packages combined.
+103. **The final integration pass: every subsystem wired into the
+    Kernel's own registry, and the whole system proven to boot together
+    for the first time.** Every subsystem built in milestone 102
+    deliberately left `simorgh/kernel/registry.py`'s `build_factories()`
+    untouched -- a docstring left there mid-build by one of the forks
+    asked every concurrent track not to edit that one shared file, and
+    to use the `mock.patch` injection seam `test_kernel_boot_two_toy_
+    subsystems.py` already established for their own integration tests
+    instead. That left one real, necessary step once all fifteen
+    non-kernel subsystems existed: actually registering them.
+
+    Checked every subsystem's real `Service.__init__` signature first
+    (none take `bus`/`ledger` directly -- only `bus`'s and `ledger`'s
+    own `Service` do, a genuine bootstrapping special case; every other
+    subsystem receives them through `start(ctx)`, per the `Subsystem`
+    protocol, exactly as designed) before adding all fifteen factory
+    entries as simple, default-constructed lambdas -- richer wiring
+    (real Cognition providers, a non-default Guardian pipeline, extra
+    Execution tools) is deliberately left as a later, separate
+    configuration change rather than something this composition point
+    should hardcode. `interface` is constructed with `run_repl=False`
+    here specifically -- the real interactive REPL is for `simorgh
+    run`'s own entry point, not for a Kernel boot used by tests or
+    `--self-check`, where a blocking `readline` loop would hang forever.
+
+    Wrote the test the whole blueprint has been building toward since
+    `01-vision-and-principles.md`'s own success criteria: `test_kernel_
+    boots_all_sixteen_subsystems.py` boots the *real*, unpatched
+    `registry.build_factories()` -- all fifteen real `Service`s, in the
+    real six-layer dependency order, through the real `Kernel`/
+    `Supervisor` -- and asserts every single one reports healthy before
+    the boot completes, twice in a row on the same data directory (the
+    second boot proving the first shutdown actually released everything
+    it held, not merely that it didn't crash). This is distinct from
+    `--self-check`, which deliberately uses two small inline stub
+    subsystems for the guarded action-path drill so it can prove the
+    safety topology independent of how much of the rest of the build has
+    landed; this new test is the one place all fifteen real subsystems
+    are constructed together, so a wiring mistake in any single
+    constructor surfaces here.
+
+    It passed on the first real run once the registry wiring was
+    correct. The Simorgh v2 blueprint -- designed, specified, and built
+    in one session, from a knowledge-base research pass through
+    sixteen detailed subsystem specs to sixteen real, tested packages --
+    now boots as one system. 1977 tests passing (v1's original suite
+    fully intact throughout, plus the entire v2 build).
