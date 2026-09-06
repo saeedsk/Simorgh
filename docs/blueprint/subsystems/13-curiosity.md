@@ -8,8 +8,8 @@
 > document and note it in `00-README.md`'s changelog.
 
 **Layer:** 3 Growth
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** worker fork (Phase 1, parallel track)
+**Status:** built -- `simorgh/curiosity/` implemented, unit + integration tests green (98 package tests + the section 9 repetition-regression integration test), module boundary test passing. See package `README.md` for known simplifications against this spec (section 12).
 **Depends on (contracts only):** `system.tick.idle`, `system.tick.sleep`, `system.state.changed`, `task.created`, `task.completed`, `task.failed`, `task.blocked`, `project.completed`, `project.failed`, `learn.competence.updated`, `learn.self_patch.applied`, `learn.skill.acquired`, `reflect.calibration.updated`, `cognition.provider.status`, `persona.state.changed`, `action.result`, `action.denied`, `percept.text.received` (interest commands, via Interface), `self.gaps` (request), `world.env.query` (request), `cognition.think` (request)
 **v1 code that migrates here:** `src/main.py` (`discover_creative_improvements`, `discover_creative_project`, `_creative_agenda_already_covered`, `_parse_targeted_idea`, `_CREATIVE_AGENDA_PROMPT`, `_PROJECT_AGENDA_PROMPT`, `DEFAULT_CREATIVE_PROJECT_CHANCE`, `note_interest`, `news_command`, `growth_command`, `_maybe_volunteer_during_conversation`), `src/orchestrator/capability_map.py` (`pick_diverse_target` policy; the listings themselves move to World Model), `src/agents/interests.py` (`InterestTracker`, `RssWorldFeed`, `DEFAULT_NEWS_TOPICS`), `src/orchestrator/socializing.py` (`GrowthSocializer`, `NewsSocializer`, cooldowns)
 
@@ -346,3 +346,10 @@ Size **M**; interests/sharing (v1 ports) can proceed in parallel with drives/sam
 1. Should `interest` matching use embeddings (via Memory) rather than lexical overlap between topic and area names? **Default:** lexical in Phase 3; a `memory.retrieve` similarity query in Phase 4 if interests rarely match any area.
 2. Should Curiosity ever propose a candidate while the backlog is non-empty but stale (all tasks blocked)? **Default:** yes if every unfinished task is `blocked` with `retry_after` in the future — treat as empty for exploration.
 3. How should the creator seed *drives* (not just interests), e.g. "focus on memory this week"? **Default:** a `[curiosity.focus]` config table of area multipliers, human-edited, reported in the tick record.
+
+### Contract gaps found during the build (see package `README.md` for the full list)
+
+4. `research_prior_multiplier` (valence -> bias toward `RESEARCH` over `PATCH`) is implemented in `drives.py` but not yet threaded into `idea.py`'s prompt or parsing -- the model alone currently decides `PATCH` vs `RESEARCH`. Not a contract gap so much as an unfinished wire-up; flagged here so it isn't lost.
+5. The explore/exploit budget's free-provider carve-out (section 5.6: research candidates still allowed under `budget_stop` if a provider reports `free: true`) is implemented only as an all-or-nothing tick-level gate (any free provider unlocks a normal `candidates_per_tick` tick, `patch` candidates included), not as a per-candidate `kind` restriction to research-only. Would need `cognition.provider.status`'s `budget` object to report free-ness *per provider actually available for a given purpose*, which the current contract doesn't distinguish.
+6. `self.gaps` currently always replies with empty `gaps`/`unexplored_areas` (World Model's `compute_gaps` is a Phase 3 stub) -- `drives.py`'s per-gap field access (`competence`/`task_type`/`score`/`samples`, matching `contracts/messages/self_.py`'s `SelfGapsReply` shape) is exercised only by this package's own unit tests today, not by any real reply yet.
+7. `world.env.query{what: capability_map}`'s reply shape (`areas: [str,...]`, `modules_by_area: {area: [module,...]}}`) and `file_index`'s (`files: [{path,size,mtime}]` for a scan, `{path,available,content,truncated,total_chars}` for a single-file preview) were cross-checked directly against World Model's real facet implementations (built concurrently, in a separate fork, already on disk) rather than only inferred from `03-contracts-and-messaging.md`'s open `O(args)`/`...open` reply shape -- worth eventually promoting those concrete shapes into the catalog itself so future readers don't have to cross-reference two packages.
