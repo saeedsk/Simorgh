@@ -120,13 +120,24 @@ class SessionRunner:
 
     async def _think(self, session: Session, user_text: str, *, last_step: bool) -> Message | None:
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
+        is_chat = session.profile.name == "chat"
         req = Message.new(
             topics.COGNITION_THINK, source=self._bus.source,
             payload={
-                "purpose": "chat" if session.profile.name == "chat" else "draft",
+                "purpose": "chat" if is_chat else "draft",
                 "messages": messages, "tools": list(session.profile.tools),
                 "budget": {"max_tokens": 2000, "max_cost_usd": 0.5},
                 "require_real_provider": False, "last_step": last_step,
+                # Live-caught (v2 live trial, 2026-09-06): a chat turn
+                # whose assembled memory-retrieval block happens to be
+                # large (large migrated records, a broad query) could
+                # exceed budget even after layers 1-4 -- `allow_summarize`
+                # (04-cognition.md section 5's own layer 5, "last resort")
+                # exists precisely for this and was simply never opted
+                # into here. Scoped to chat only, never draft -- summarizing
+                # a patch/skill draft's own code context could silently
+                # lose the exact content a real code change needs.
+                "allow_summarize": is_chat,
             },
             clock=self._clock,
         )
