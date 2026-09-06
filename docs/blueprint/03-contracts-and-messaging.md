@@ -75,6 +75,8 @@ contracts change reviewed like an API change.
 | `intent` | interface, curiosity | a goal stated by a human or by the system's own drives |
 | `plan` | planning, verification | plan proposed/reviewed/approved/revised, re-grounding |
 | `task` | planning, orchestration | task lifecycle: created, available, claim, started, step, paused, completed, failed, blocked |
+| `turn` | orchestration | `turn.completed` — the chat-turn counterpart of `task.completed` (listed under §4.4; its own first segment on the wire) |
+| `project` | planning | `project.completed` / `project.failed` rollups (listed under §4.5; its own first segment on the wire) |
 | `action` | any → guardian → execution | the guarded action path: proposed, approved, denied, needs_human, result |
 | `guardian` | guardian | `guardian.review` (req/rep, used by Verification on candidate code), trust posture changed/request |
 | `tool` | execution | tool registry: registered, unavailable, invoked (telemetry) |
