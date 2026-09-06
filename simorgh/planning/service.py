@@ -1,0 +1,536 @@
+"""Planning as a `Subsystem` (spec section 5): wiring for every consumed
+message, the background tick loops, Plan Mode, re-grounding, and DAG
+propagation. Layer 2 (registry.py).
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import replace
+
+from simorgh.contracts import topics
+from simorgh.contracts.envelope import Message
+from simorgh.contracts.protocols import Context, Health
+from simorgh.contracts.registry import error_reply_payload
+
+from . import dag, planmode, reground
+from .bridge import BusCognitionCaller
+from .config import Config
+from .decomposer import decompose, parse_steps
+from .intake import Intake
+from .model import (
+    AVAILABLE,
+    BLOCKED,
+    COMPLETED,
+    FAILED,
+    IN_PROGRESS,
+    PAUSED,
+    PENDING,
+    Scope,
+    Task,
+)
+from .rollup import is_stalled, project_status
+from .scheduler import Scheduler
+from .store import TaskStore
+
+NAME = "planning"
+VERSION = "0.1.0"
+
+_SECOND_TICK_COUNTER_KEY = "n"
+
+
+class Service:
+    name = NAME
+    version = VERSION
+    consumes: tuple[str, ...] = (
+        topics.INTENT_GOAL_STATED,
+        topics.CURIOSITY_CANDIDATE,
+        topics.TASK_CREATE,
+        topics.TASK_CLAIM,
+        topics.TASK_LIST_REQUEST,
+        topics.TASK_WORK_NEXT_REQUEST,
+        topics.TASK_STARTED,
+        topics.TASK_STEP,
+        topics.TASK_PAUSED,
+        topics.TASK_COMPLETED,
+        topics.TASK_FAILED,
+        topics.TASK_BLOCKED,
+        topics.PLAN_REVIEWED,
+        topics.UI_PROMPT_ANSWERED,
+        topics.RESEARCH_FINDING_RECORDED,
+        topics.REFLECT_PATTERNS_FOUND,
+        topics.SYSTEM_TICK_SECOND,
+        topics.SYSTEM_TICK_IDLE,
+        topics.SYSTEM_STATE_CHANGED,
+    )
+    produces: tuple[str, ...] = (
+        topics.TASK_CREATE_REPLY,
+        topics.TASK_CREATED,
+        topics.TASK_AVAILABLE,
+        topics.TASK_CLAIM_REPLY,
+        topics.TASK_LIST_REPLY,
+        topics.TASK_WORK_NEXT_REPLY,
+        topics.TASK_DEPENDENCY_SATISFIED,
+        topics.TASK_FAILED,
+        topics.TASK_BLOCKED,
+        topics.PLAN_PROPOSED,
+        topics.PLAN_APPROVED,
+        topics.PLAN_REVISED,
+        topics.PROJECT_COMPLETED,
+        topics.PROJECT_FAILED,
+        topics.UI_PROMPT,
+        topics.UI_NOTICE,
+        topics.SYSTEM_HEALTH,
+    )
+
+    def __init__(self, config: Config | None = None) -> None:
+        self.config = config or Config()
+        self._ctx: Context | None = None
+        self._subs: list = []
+        self._store: TaskStore | None = None
+        self._intake: Intake | None = None
+        self._scheduler: Scheduler | None = None
+        self._cognition: BusCognitionCaller | None = None
+        # Plan-mode state, keyed by plan_id -- see planmode.PlanState. Not
+        # in the Ledger as independent state; rebuilt lazily on demand
+        # from the plan:<id> stream would be step 9's remaining work
+        # (documented in the spec's own open questions / README).
+        self._plans: dict[str, planmode.PlanState] = {}
+        self._plan_by_task: dict[str, str] = {}
+        self._prompt_to_plan: dict[str, str] = {}
+        self._project_completed_emitted: set[str] = set()
+        self._tick_n = 0
+
+    async def start(self, ctx: Context) -> None:
+        self._ctx = ctx
+        self._store = TaskStore(ctx.ledger, ctx.clock)
+        await self._store.rebuild()
+        self._intake = Intake(self._store, dedupe_threshold=self.config.dedupe_similarity_threshold)
+        self._scheduler = Scheduler(
+            self._store, ctx.bus, ctx.clock, source=ctx.source,
+            priority_weights=self.config.priority_weights, lease_seconds=self.config.lease_seconds,
+        )
+        self._cognition = BusCognitionCaller(ctx.bus, ctx.clock, source=ctx.source)
+
+        handlers = {
+            topics.INTENT_GOAL_STATED: self._on_goal_stated,
+            topics.CURIOSITY_CANDIDATE: self._on_candidate,
+            topics.TASK_CREATE: self._on_task_create,
+            topics.TASK_CLAIM: self._on_task_claim,
+            topics.TASK_LIST_REQUEST: self._on_task_list,
+            topics.TASK_WORK_NEXT_REQUEST: self._on_work_next,
+            topics.TASK_STARTED: self._on_task_started,
+            topics.TASK_STEP: self._on_task_step,
+            topics.TASK_PAUSED: self._on_task_paused,
+            topics.TASK_COMPLETED: self._on_task_completed,
+            topics.TASK_FAILED: self._on_task_failed,
+            topics.TASK_BLOCKED: self._on_task_blocked,
+            topics.PLAN_REVIEWED: self._on_plan_reviewed,
+            topics.UI_PROMPT_ANSWERED: self._on_prompt_answered,
+            topics.RESEARCH_FINDING_RECORDED: self._on_research_finding,
+            topics.REFLECT_PATTERNS_FOUND: self._on_patterns_found,
+            topics.SYSTEM_TICK_SECOND: self._on_tick_second,
+            topics.SYSTEM_TICK_IDLE: self._on_tick_idle,
+            topics.SYSTEM_STATE_CHANGED: self._on_state_changed,
+        }
+        self._subs = [await ctx.bus.subscribe(t, h) for t, h in handlers.items()]
+        ctx.logger.info("planning.started", tasks=len(self._store.index.tasks))
+
+    async def stop(self) -> None:
+        for sub in self._subs:
+            await sub.unsubscribe()
+        self._subs = []
+
+    async def health(self) -> Health:
+        if self._ctx is None or self._store is None:
+            return Health.down("not started")
+        return Health.ok()
+
+    # -- intake ---------------------------------------------------------------------
+
+    async def _on_goal_stated(self, message: Message) -> None:
+        p = message.payload
+        result = await self._intake.on_goal_stated(
+            goal=p["goal"], origin=p["origin"], wants_project=p.get("wants_project", False),
+            priority=p.get("priority", 0),
+        )
+        if result.task is not None:
+            await self._announce_created(result.task)
+        else:
+            await self._notice("debug", f"duplicate goal, matches task {result.duplicate_of}")
+
+    async def _on_candidate(self, message: Message) -> None:
+        p = message.payload
+        result = await self._intake.on_candidate(
+            kind=p["kind"], description=p["description"], subject=p.get("subject"), area=p.get("area", ""),
+        )
+        if result.task is not None:
+            await self._announce_created(result.task)
+        else:
+            await self._notice("debug", f"duplicate candidate, matches task {result.duplicate_of}")
+
+    async def _on_task_create(self, message: Message) -> None:
+        p = message.payload
+        result = await self._intake.on_candidate(
+            kind=p["kind"], description=p["description"], subject=p.get("subject"), area="",
+            origin=p.get("origin", "human"),
+        ) if p["kind"] != "project" else await self._intake.on_goal_stated(
+            goal=p["description"], origin=p.get("origin", "human"), wants_project=True,
+        )
+        if result.task is not None:
+            await self._announce_created(result.task)
+            payload = {"task_id": result.task.id}
+        else:
+            payload = {"task_id": result.duplicate_of, "deduplicated_against": result.duplicate_of}
+        await self._ctx.bus.reply(message, type=topics.TASK_CREATE_REPLY, payload=payload)
+
+    async def _on_patterns_found(self, message: Message) -> None:
+        created = await self._intake.on_patterns_found(patterns=message.payload.get("patterns", []))
+        for task in created:
+            await self._announce_created(task)
+
+    async def _on_research_finding(self, message: Message) -> None:
+        follow_up = message.payload.get("follow_up")
+        if not follow_up:
+            return
+        task = await self._intake.on_research_follow_up(
+            research_task_id=message.payload["task_id"], subject=follow_up["subject"],
+            description=follow_up["description"],
+        )
+        if task is not None:
+            await self._announce_created(task)
+
+    async def _announce_created(self, task: Task) -> None:
+        payload = {
+            "task_id": task.id, "kind": task.kind, "description": task.description,
+            "depends_on": list(task.depends_on), "mode": task.mode, "origin": task.origin,
+            "risk": task.risk, "subject": task.subject, "parent_id": task.parent_id,
+            "scope": task.scope.to_payload() if task.scope else None,
+        }
+        await self._ctx.bus.publish(Message.new(
+            topics.TASK_CREATED, source=self._ctx.source,
+            partition_key=f"task:{task.id}", payload=payload,
+        ))
+
+    # -- claiming / lifecycle ---------------------------------------------------------
+
+    async def _on_task_claim(self, message: Message) -> None:
+        p = message.payload
+        result = await self._store.claim(p["task_id"], p["worker_id"], self.config.lease_seconds)
+        payload = {"granted": result.granted}
+        if result.granted:
+            payload["lease_until"] = result.lease_until
+            payload["task"] = _task_payload(result.task)
+        else:
+            payload["reason"] = result.reason
+        await self._ctx.bus.reply(message, type=topics.TASK_CLAIM_REPLY, payload=payload)
+
+    async def _on_task_started(self, message: Message) -> None:
+        task_id = message.payload["task_id"]
+        task = await self._store.get(task_id)
+        if task is not None and task.status == "claimed":
+            await self._store.transition(task_id, IN_PROGRESS)
+
+    async def _on_task_step(self, message: Message) -> None:
+        await self._store.refresh_lease(message.payload["task_id"], self.config.lease_seconds)
+
+    async def _on_task_paused(self, message: Message) -> None:
+        p = message.payload
+        task = await self._store.get(p["task_id"])
+        if task is not None and task.status in ("claimed", IN_PROGRESS):
+            await self._store.transition(p["task_id"], PAUSED, note=p.get("reason", ""))
+
+    async def _on_task_completed(self, message: Message) -> None:
+        p = message.payload
+        task_id = p["task_id"]
+        task = await self._store.get(task_id)
+        if task is None:
+            return
+        if task.kind == "project" and task.mode == "plan":
+            await self._on_plan_worker_result(task, p.get("artifacts") or [])
+            return
+        if task.status != COMPLETED:
+            await self._store.transition(task_id, COMPLETED, note=p.get("result_summary", ""))
+        await self._propagate_completion(task_id)
+        await self._maybe_finish_project(task.parent_id)
+
+    async def _on_task_failed(self, message: Message) -> None:
+        p = message.payload
+        task_id, terminal = p["task_id"], p.get("terminal", False)
+        task = await self._store.get(task_id)
+        if task is None:
+            return
+        if terminal:
+            if task.status != FAILED:
+                await self._store.transition(task_id, FAILED, note=p.get("reason", ""))
+            await self._propagate_failure(task_id)
+            await self._maybe_finish_project(task.parent_id)
+            return
+        await self._retry_or_block(task, p.get("reason", ""))
+
+    async def _on_task_blocked(self, message: Message) -> None:
+        p = message.payload
+        task = await self._store.get(p["task_id"])
+        if task is None:
+            return
+        await self._retry_or_block(task, p.get("reason", ""))
+
+    async def _retry_or_block(self, task: Task, reason: str) -> None:
+        if task.attempts + 1 >= self.config.max_blocked_retries:
+            await self._store.transition(
+                task.id, FAILED, note=f"gave up after {task.attempts + 1} attempts: {reason}", attempt=True,
+            )
+            await self._ctx.bus.publish(Message.new(
+                topics.TASK_FAILED, source=self._ctx.source,
+                partition_key=f"task:{task.id}",
+                payload={"task_id": task.id, "reason": reason, "terminal": True, "attempts": task.attempts + 1},
+            ))
+            await self._propagate_failure(task.id)
+            await self._maybe_finish_project(task.parent_id)
+            return
+        await self._store.transition(task.id, BLOCKED, note=reason, attempt=True)
+        await self._ctx.bus.publish(Message.new(
+            topics.TASK_BLOCKED, source=self._ctx.source,
+            partition_key=f"task:{task.id}",
+            payload={"task_id": task.id, "reason": reason, "retry_after": self.config.blocked_retry_delay_seconds},
+        ))
+
+    async def _propagate_completion(self, task_id: str) -> None:
+        for dep_id in dag.dependents_of(task_id, self._store.index.tasks):
+            dependent = self._store.index.tasks.get(dep_id)
+            if dependent is None:
+                continue
+            await self._store.record_dependency_event(dep_id, satisfied_by=task_id, failed_by=None)
+            await self._ctx.bus.publish(Message.new(
+                topics.TASK_DEPENDENCY_SATISFIED, source=self._ctx.source,
+                partition_key=f"task:{dep_id}", payload={"task_id": dep_id, "satisfied_by": task_id},
+            ))
+            if dependent.status == PENDING and dag.is_ready(dependent, self._store.index.tasks):
+                await self._store.transition(dep_id, AVAILABLE)
+
+    async def _propagate_failure(self, task_id: str) -> None:
+        for dep_id in dag.dependents_of(task_id, self._store.index.tasks):
+            dependent = self._store.index.tasks.get(dep_id)
+            if dependent is None or dependent.status in (COMPLETED, FAILED):
+                continue
+            await self._store.record_dependency_event(dep_id, satisfied_by=None, failed_by=task_id)
+            if dependent.status != BLOCKED:
+                await self._store.transition(dep_id, BLOCKED, note=f"dependency_failed:{task_id}")
+
+    async def _maybe_finish_project(self, project_id: str | None) -> None:
+        if project_id is None or project_id in self._project_completed_emitted:
+            return
+        children = self._store.children(project_id)
+        if not children:
+            return
+        status = project_status(children)
+        if status not in (COMPLETED, FAILED):
+            return
+        self._project_completed_emitted.add(project_id)
+        done = sum(1 for c in children if c.status == COMPLETED)
+        topic = topics.PROJECT_COMPLETED if status == COMPLETED else topics.PROJECT_FAILED
+        await self._ctx.bus.publish(Message.new(
+            topic, source=self._ctx.source, partition_key=f"project:{project_id}",
+            payload={"project_id": project_id, "done": done, "total": len(children),
+                     "summary": f"{done}/{len(children)} steps completed"},
+        ))
+
+    # -- ticks / pause ------------------------------------------------------------
+
+    async def _on_tick_idle(self, message: Message) -> None:
+        if self._scheduler is not None:
+            await self._scheduler.dispatch_ready()
+
+    async def _on_tick_second(self, message: Message) -> None:
+        self._tick_n += 1
+        if self._scheduler is not None:
+            await self._scheduler.scan_leases()
+        await self._reconsider_blocked()
+
+    async def _reconsider_blocked(self) -> None:
+        now = self._ctx.clock.now()
+        for task in list(self._store.index.tasks.values()):
+            if task.status != BLOCKED:
+                continue
+            if (now - task.updated_at) < self.config.blocked_retry_delay_seconds:
+                continue
+            if task.attempts >= self.config.max_blocked_retries:
+                await self._store.transition(
+                    task.id, FAILED, note=f"gave up after {task.attempts} attempts: {task.note}",
+                )
+                continue
+            await self._store.transition(task.id, AVAILABLE, note=f"retrying after being blocked: {task.note}")
+
+    async def _on_state_changed(self, message: Message) -> None:
+        state = message.payload.get("state")
+        if self._scheduler is not None:
+            self._scheduler.paused = state in ("paused", "stopping", "stopped")
+
+    # -- reads ----------------------------------------------------------------------
+
+    async def _on_task_list(self, message: Message) -> None:
+        f = message.payload.get("filter") or {}
+        tasks = self._store.all()
+        if f.get("status"):
+            tasks = [t for t in tasks if t.status == f["status"]]
+        if f.get("kind"):
+            tasks = [t for t in tasks if t.kind == f["kind"]]
+        if f.get("parent_id"):
+            tasks = [t for t in tasks if t.parent_id == f["parent_id"]]
+        projects = []
+        for t in self._store.all():
+            if t.kind != "project":
+                continue
+            children = self._store.children(t.id)
+            projects.append({
+                "project_id": t.id, "rollup": project_status(children),
+                "done": sum(1 for c in children if c.status == COMPLETED), "total": len(children),
+                "stalled": is_stalled(children, now=self._ctx.clock.now(), stalled_after_seconds=self.config.stalled_after_seconds),
+            })
+        await self._ctx.bus.reply(message, type=topics.TASK_LIST_REPLY, payload={
+            "tasks": [_task_payload(t) for t in tasks], "projects": projects,
+        })
+
+    async def _on_work_next(self, message: Message) -> None:
+        ready = self._store.ready(limit=1)
+        if not ready:
+            await self._ctx.bus.reply(message, type=topics.TASK_WORK_NEXT_REPLY,
+                                       payload={"reason": "nothing pending"})
+            return
+        await self._ctx.bus.reply(message, type=topics.TASK_WORK_NEXT_REPLY, payload={"task_id": ready[0].id})
+
+    # -- plan mode --------------------------------------------------------------------
+
+    async def _on_plan_worker_result(self, task: Task, artifacts: list[str]) -> None:
+        text = ""
+        if artifacts:
+            try:
+                raw = await self._ctx.ledger.get_blob(artifacts[0])
+                data = json.loads(raw.decode("utf-8"))
+                text = data.get("steps_text", "") if isinstance(data, dict) else ""
+            except Exception:  # noqa: BLE001 -- a malformed artifact must not crash Planning
+                text = ""
+        steps = parse_steps(text, self.config.project_step_count) if text else []
+        if not steps:
+            await self._store.transition(
+                task.id, PENDING if task.status != PENDING else task.status,
+                note="decomposition produced no real steps -- will retry",
+            ) if task.status != PENDING else None
+            return
+        plan_id = uuid.uuid4().hex[:12]
+        state = planmode.PlanState(plan_id=plan_id, task_id=task.id, goal=task.description, steps=steps, risk=task.risk)
+        self._plans[plan_id] = state
+        self._plan_by_task[task.id] = plan_id
+        await self._ctx.bus.publish(Message.new(
+            topics.PLAN_PROPOSED, source=self._ctx.source,
+            partition_key=f"plan:{plan_id}",
+            payload={
+                "plan_id": plan_id, "task_id": task.id, "goal": task.description, "risk": task.risk,
+                "estimated_cost": 0.0,
+                "steps": [
+                    {"step_id": s.step_id, "kind": s.kind, "description": s.description,
+                     "depends_on": list(s.depends_on), "why": s.why, "subject": s.subject}
+                    for s in steps
+                ],
+            },
+        ))
+
+    async def _on_plan_reviewed(self, message: Message) -> None:
+        p = message.payload
+        state = self._plans.get(p["plan_id"])
+        if state is None:
+            return
+        decision = planmode.approval_decision(p["verdict"], state.risk, self.config.auto_approve_max_risk)
+        if decision == "reject":
+            state.status = planmode.REJECTED
+            await self._store.transition(state.task_id, FAILED, note="plan rejected")
+            await self._notice("info", f"plan {state.plan_id} rejected")
+            return
+        if decision == "auto_approve":
+            await self._approve_plan(state, approved_by="auto")
+            return
+        if decision == "ask_human":
+            prompt_id = uuid.uuid4().hex[:12]
+            state.prompt_id = prompt_id
+            state.status = planmode.AWAITING_HUMAN
+            self._prompt_to_plan[prompt_id] = state.plan_id
+            await self._ctx.bus.publish(Message.new(
+                topics.UI_PROMPT, source=self._ctx.source,
+                payload={"prompt_id": prompt_id, "question": f"Approve plan for {state.goal!r}?",
+                         "options": ["yes", "no"], "timeout_s": self.config.human_approval_timeout_seconds,
+                         "default": "no"},
+            ))
+            return
+        # replan
+        if state.revisions >= self.config.max_plan_revisions:
+            state.status = planmode.REJECTED
+            await self._store.transition(state.task_id, FAILED, note=f"plan rejected after {state.revisions} revisions")
+            return
+        new_steps = await decompose(self._cognition, state.goal + f"\n\nReviewer feedback: {p.get('feedback', '')}",
+                                     [], self.config.project_step_count)
+        if not new_steps:
+            return
+        diff = planmode.compute_diff(state.steps, new_steps)
+        state.steps = new_steps
+        state.revisions += 1
+        await self._ctx.bus.publish(Message.new(
+            topics.PLAN_REVISED, source=self._ctx.source,
+            partition_key=f"plan:{state.plan_id}",
+            payload={"plan_id": state.plan_id, "reason": p.get("feedback", "revision requested"), "diff": diff},
+        ))
+
+    async def _on_prompt_answered(self, message: Message) -> None:
+        plan_id = self._prompt_to_plan.get(message.payload["prompt_id"])
+        if plan_id is None:
+            return
+        state = self._plans.get(plan_id)
+        if state is None:
+            return
+        if message.payload["answer"] == "yes":
+            await self._approve_plan(state, approved_by="human")
+        else:
+            state.status = planmode.REJECTED
+            await self._store.transition(state.task_id, FAILED, note="plan rejected by human")
+
+    async def _approve_plan(self, state: planmode.PlanState, *, approved_by: str) -> None:
+        state.status = planmode.APPROVED
+        children_ids: list[str] = []
+        id_by_step = {}
+        for step in state.steps:
+            deps = tuple(id_by_step.get(d, d) for d in step.depends_on)
+            child = await self._store.create(
+                kind=step.kind, description=step.description, subject=step.subject, origin="project",
+                parent_id=state.task_id, depends_on=deps, mode="execute", risk="low",
+                scope=Scope(paths=(step.subject,), network=step.kind == "research") if step.subject else None,
+                initial_status=PENDING if deps else AVAILABLE,
+            )
+            id_by_step[step.step_id] = child.id
+            children_ids.append(child.id)
+            await self._announce_created(child)
+        await self._store.transition(state.task_id, COMPLETED, note="project decomposed")
+        await self._ctx.bus.publish(Message.new(
+            topics.PLAN_APPROVED, source=self._ctx.source,
+            partition_key=f"plan:{state.plan_id}",
+            payload={"plan_id": state.plan_id, "approved_by": approved_by, "children": children_ids},
+        ))
+
+    # -- helpers ----------------------------------------------------------------------
+
+    async def _notice(self, level: str, text: str) -> None:
+        await self._ctx.bus.publish(Message.new(
+            topics.UI_NOTICE, source=self._ctx.source,
+            payload={"level": level, "text": text, "source": self.name},
+        ))
+
+
+def _task_payload(task: Task) -> dict:
+    return {
+        "task_id": task.id, "kind": task.kind, "description": task.description, "subject": task.subject,
+        "status": task.status, "mode": task.mode, "risk": task.risk, "origin": task.origin,
+        "parent_id": task.parent_id, "depends_on": list(task.depends_on), "attempts": task.attempts,
+        "note": task.note,
+    }
+
+
+__all__ = ["Service", "NAME", "VERSION"]
