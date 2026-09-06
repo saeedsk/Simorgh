@@ -189,6 +189,13 @@ five gaps are each closed by name in a test.
   second, parallel, unaudited way to change the system.
 - Cutover: `sim.sh` → `python -m simorgh run`; `src/` reduced to a
   compatibility shim, then removed; docs updated; EVOLUTION milestone.
+  The concrete, staged plan for this lives in `06-migration-from-v1.md`
+  §4.1/§6 (revised 2026-09-06): what the strangler-pattern procedure in
+  §4 assumed versus what actually happened (v2 was built whole, not
+  incrementally strangled), an honest per-flow live-vs-automated-only
+  verification table, and a three-stage checklist (Verify → Switch the
+  default → Retire v1) with an explicit creator sign-off gate between
+  each stage -- written to be reviewed, not run, until approved.
 
 ## 4. Parallelization plan for multiple agents
 
