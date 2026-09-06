@@ -6,6 +6,7 @@ Orchestration depends on (Cognition, Guardian+Execution, Verification).
 import unittest
 
 from simorgh.contracts import topics
+from simorgh.contracts.registry import error_reply_payload
 from simorgh.orchestration import profiles
 from simorgh.orchestration.api import Session
 from simorgh.orchestration.session import SessionRunner
@@ -81,6 +82,43 @@ class TestChatTurnWithOneToolCall(unittest.TestCase):
 
             self.assertEqual(outcome.kind, "completed")
             self.assertTrue(outcome.floor)
+
+    @run
+    async def test_cognition_error_reply_is_recorded_not_silently_swallowed(self):
+        """Live-caught (v2 live trial, 2026-09-06): a real Cognition error
+        (e.g. context_too_large) used to collapse straight to an empty,
+        untraceable floor Outcome -- nothing on the Ledger said why.
+        `_think()` now appends a `task.step` (ok=False) naming the actual
+        error code/detail before returning None, so the failure is
+        queryable on the task's own stream instead of vanishing."""
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            cog_bus = h.client("cognition")
+
+            async def _deny(message):
+                await cog_bus.reply(
+                    message, type=topics.COGNITION_THINK_REPLY,
+                    payload=error_reply_payload("context_too_large", "too much context for this budget"),
+                )
+
+            sub = await cog_bus.subscribe(topics.COGNITION_THINK, _deny)
+            try:
+                runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+                session = Session(task_id="t4", kind="chat", mode="execute", profile=profiles.CHAT)
+                outcome = await runner.run(session, user_text="hello")
+
+                self.assertEqual(outcome.kind, "completed")
+                self.assertTrue(outcome.floor)
+                self.assertEqual(outcome.result_summary, "")
+
+                events = await h.ledger.read("task:t4")
+                step_events = [e for e in events if e.type == topics.TASK_STEP]
+                self.assertEqual(len(step_events), 1)
+                self.assertFalse(step_events[0].payload["ok"])
+                self.assertIn("context_too_large", step_events[0].payload["summary"])
+                self.assertIn("too much context", step_events[0].payload["summary"])
+            finally:
+                await sub.unsubscribe()
 
 
 class TestPatchTaskWithOneRevision(unittest.TestCase):

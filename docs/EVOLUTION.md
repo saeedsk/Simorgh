@@ -3361,3 +3361,64 @@ Still ahead, roughly in order:
     same-session decision (`06-migration-from-v1.md` §6: "let `sim.sh`
     run as the creator's actual daily entry point for a real stretch of
     ordinary use").
+
+122. **Live v2 trial (Gate B->C evidence): real interaction against the
+    real, cutover-live `sim.sh`, plus a real bug found and partially
+    diagnosed along the way.** Per the creator's own explicit request
+    ("start running sim v2 by your selfs and test and interact with
+    sim... collect those interaction and test for later so when I
+    switch to fable, fable have context") -- booted the real Kernel
+    against the real `~/.simorgh` and drove it directly over the
+    dashboard `/api/chat` endpoint across two sessions, probing
+    identity, memory continuity, emotion, curiosity, self-critique,
+    self-evolution, tool awareness, and architectural self-knowledge.
+    Full transcript and six findings in `docs/v2-live-trial/` --
+    deliberately observation-only there, not a fix log.
+
+    Two findings stand out. First: asked whether it would keep making
+    real progress on a hard problem unattended for a few hours, it
+    answered confidently and specifically wrong -- "I only run when you
+    send me a message... no daemon, no scheduled wake-up... nothing
+    happens for three hours" -- while the real `curiosity:ticks` stream
+    was firing every ~3 seconds in the same Ledger the whole time,
+    including two autonomous `cognition.think` calls that fired before
+    the trial's very first message even arrived. Not a hedge that turned
+    out wrong -- stated as settled fact, with specific, plausible-
+    sounding detail, while directly contradicted by the system it's
+    describing. Flagged for the creator's direct attention; not fixed
+    in the trial itself (a self-knowledge grounding question, not a
+    one-line patch).
+
+    Second: an intermittent chat failure -- `{"text": "", "floor":
+    true}` in ~0.04s instead of the usual 5-23s, no error surfaced to
+    the client, nothing printed (the live process's own stdout is fully
+    buffered when not a tty), frequency climbing over the trial (~1-in-8
+    early on, ~1-in-2 by the end), independent of session_id or message
+    content. Root-caused the *code path* precisely, via the real
+    Ledger's own `task:<session_id>` stream (a failed turn skips
+    `task.step` entirely, going straight `task.started` ->
+    `task.completed` with an empty result): `SessionRunner._think()`
+    (`orchestration/session.py`) discarded *which* Cognition error code
+    caused `reply.payload.get("ok") is False`, collapsing every failure
+    -- `no_real_provider`, `budget_exceeded`, `context_too_large`,
+    `paused`, `invalid_request` -- into the same silent `None` ->
+    `Outcome(floor=True, result_summary="")`. Five candidate causes were
+    checked directly against the running process and ruled out
+    (BudgetGuard's call cap, per-request cost cap, Cognition's own pause
+    flag, `SELF.md` size, and `Worker.current_task_id`/`current_kind` --
+    real shared unguarded state, but only ever read for status display,
+    not reply correlation). Leading hypothesis -- growing assembled
+    context eventually exceeding the `chat` purpose's token budget,
+    fitting the climbing-frequency pattern -- not confirmed live.
+
+    Fixed the actual visibility gap regardless of which hypothesis is
+    right, since it's what made this take as long as it did:
+    `_think()` now appends a `task.step` (`ok=False`, the real error
+    code+detail as `summary`) before returning `None`, so a Cognition
+    failure is queryable on the task's own Ledger stream
+    (`/api/logs?stream=task:<id>`) instead of vanishing without a
+    trace. 1 new test (`test_cognition_error_reply_is_recorded_not_
+    silently_swallowed`) exercises this against a real scripted
+    `context_too_large` error reply. Full suite green (2191 tests).
+    Deployed to the live trial process; next occurrence should finally
+    show the real code.
