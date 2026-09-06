@@ -30,6 +30,15 @@ above and, when the same agent keeps showing up, promotes that recurring
 pattern once into durable self-knowledge (kind="self_knowledge") -- so
 later cycles can recall "this is a known, stable issue" instead of
 re-deriving the same conclusion from raw outcomes every time.
+
+Both `reflect_on_outcome()` and `critique_intent()` also each write a
+structured self-critique delta (kind="self_critique_delta") -- what
+changed since the last delta on that subject, a confidence score, and an
+open question -- via `ReflectionAgent.record_self_critique()`. Unlike the
+takeaway/feedback records above, a delta is built by reading the most
+recent prior delta for the same subject first, so consecutive reflection
+cycles compound on each other's reasoning instead of each one starting
+cold from raw outcomes.
 """
 
 from __future__ import annotations
@@ -85,10 +94,28 @@ class ConfidenceRecord:
         return self.actual_outcome - self.predicted_confidence
 
 
+@dataclass(frozen=True)
+class SelfCritique:
+    """A structured self-critique delta for one subject (typically a
+    sub-agent): what changed since the last delta on that subject, how
+    confident this assessment is, and what remains unresolved. Stored
+    durably (kind="self_critique_delta") so the next reflection cycle on
+    the same subject can read the prior delta first instead of
+    re-deriving its reasoning from raw outcomes cold.
+    """
+
+    subject: str
+    what_changed: str
+    confidence: float
+    open_questions: str
+    timestamp: float = field(default_factory=time.time)
+
+
 TAKEAWAY_KIND = "takeaway"
 FEEDBACK_KIND = "feedback"
 SELF_KNOWLEDGE_KIND = "self_knowledge"
 CONFIDENCE_KIND = "confidence_calibration"
+SELF_CRITIQUE_KIND = "self_critique_delta"
 
 
 def _intent_alignment_score(request_text: str, output: str) -> float:
@@ -233,6 +260,77 @@ class ReflectionAgent:
         mean_delta = sum(r.delta for r in records) / len(records)
         return max(0.0, min(1.0, predicted_confidence + mean_delta))
 
+    def _latest_self_critique(self, subject: str) -> SelfCritique | None:
+        """Reads back the most recent self-critique delta for `subject`,
+        if any, so `record_self_critique` can describe a fresh delta
+        against it rather than starting cold. Returns None without a
+        store or when no prior delta exists for this subject.
+        """
+        if self._store is None:
+            return None
+        records = self._store.query(kind=SELF_CRITIQUE_KIND, limit=50)
+        matches = [r for r in records if r.metadata.get("subject") == subject]
+        if not matches:
+            return None
+        latest = max(matches, key=lambda r: r.metadata.get("timestamp", r.created_at))
+        return SelfCritique(
+            subject=subject,
+            what_changed=latest.metadata["what_changed"],
+            confidence=latest.metadata["confidence"],
+            open_questions=latest.metadata.get("open_questions", ""),
+            timestamp=latest.metadata.get("timestamp", latest.created_at),
+        )
+
+    def record_self_critique(
+        self, subject: str, note: str, source_file: str | None
+    ) -> SelfCritique | None:
+        """Builds and stores one structured self-critique delta for
+        `subject`: reads the most recent prior delta (if any) via
+        `_latest_self_critique` so `what_changed` is phrased as a delta
+        against that prior reasoning rather than a cold restart, assigns
+        a `confidence` that grows the more times the same `note` has
+        recurred (a repeat is a stronger signal than a single
+        observation), and records an `open_questions` prompt for the next
+        cycle to pick up. Requires `store` (returns None without one,
+        same as the other store-backed passes).
+        """
+        if self._store is None:
+            return None
+
+        previous = self._latest_self_critique(subject)
+        if previous is None:
+            what_changed = f"first recorded critique for '{subject}': {note}"
+            confidence = 0.4
+        elif previous.what_changed.endswith(note):
+            what_changed = f"issue persists for '{subject}': {note}"
+            confidence = min(1.0, previous.confidence + 0.15)
+        else:
+            what_changed = f"new observation for '{subject}': {note}"
+            confidence = 0.4
+
+        open_questions = (
+            f"is this a recurring, systemic issue in {source_file}, or a one-off?"
+            if source_file is not None
+            else f"no known source file for '{subject}' -- where does this actually live?"
+        )
+
+        critique = SelfCritique(
+            subject=subject,
+            what_changed=what_changed,
+            confidence=confidence,
+            open_questions=open_questions,
+        )
+        self._store.remember(
+            SELF_CRITIQUE_KIND,
+            f"{what_changed} (confidence {confidence:.2f}) -- {open_questions}",
+            subject=subject,
+            what_changed=what_changed,
+            confidence=confidence,
+            open_questions=open_questions,
+            timestamp=critique.timestamp,
+        )
+        return critique
+
     def reflect_on_outcome(self, outcome: Outcome) -> Proposal | None:
         """Immediate, per-turn takeaway: "what was the shortcoming here,
         and how might it be overcome" -- for a single Outcome, not a
@@ -271,6 +369,8 @@ class ReflectionAgent:
                 agent=outcome.agent,
                 request_text=outcome.request_text,
             )
+            note = outcome.note or ("failed" if not outcome.succeeded else "corrected by creator")
+            self.record_self_critique(outcome.agent, note, source_file)
         return proposal
 
     def critique_intent(
@@ -305,6 +405,10 @@ class ReflectionAgent:
                 agent=outcome.agent,
                 request_text=outcome.request_text,
                 alignment_score=score,
+            )
+            note = f"low intent alignment ({score:.0%})"
+            self.record_self_critique(
+                outcome.agent, note, AGENT_SOURCE_FILES.get(outcome.agent)
             )
         return proposal
 
