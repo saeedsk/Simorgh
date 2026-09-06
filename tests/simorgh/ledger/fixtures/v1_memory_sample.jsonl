@@ -1,0 +1,11 @@
+{"id": "aaa1", "kind": "task_event", "content": "created", "created_at": 1000.0, "metadata": {"task_id": "t1", "event": "created"}}
+{"id": "aaa2", "kind": "applied_source_patch", "content": "patched", "created_at": 1001.0, "metadata": {"subject": "src/x.py"}}
+{"id": "aaa3", "kind": "applied_skill", "content": "applied", "created_at": 1002.0, "metadata": {"subject": "src/agents/skills/y.py"}}
+{"id": "aaa4", "kind": "llm_spend", "content": "gemini", "created_at": 1003.0, "metadata": {"cost_usd": 0.001}}
+{"id": "aaa5", "kind": "interest", "content": "rocketry", "created_at": 1004.0, "metadata": {}}
+{"id": "aaa6", "kind": "research_finding", "content": "finding text", "created_at": 1005.0, "metadata": {"task_id": "r1"}}
+{"id": "aaa7", "kind": "autonomous_action", "content": "autonomous action taken", "created_at": 1006.0, "metadata": {"succeeded": true}}
+{"id": "aaa8", "kind": "rejected_proposal", "content": "denied", "created_at": 1007.0, "metadata": {"reasons": ["bad"]}}
+{"id": "aaa9", "kind": "outcome", "content": "Okay.", "created_at": 1008.0, "metadata": {"agent": "emotion"}}
+this is not json at all, a corrupted line from a crash mid-write
+{"id": "aaa10", "kind": "task_event", "content": "created", "created_at": 1009.0, "metadata": {"task_id": "t2", "event": "created"}}
