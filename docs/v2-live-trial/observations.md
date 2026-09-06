@@ -237,3 +237,35 @@ size cap on what it pulls from Memory before handing it to Cognition at
 all — capping it there directly (rather than relying entirely on
 downstream compaction to save an unbounded input) is probably the more
 robust fix than anything in the compaction pipeline itself.
+
+## 7. The CLI itself was broken the whole time — found only when the
+   creator tried it directly, not by this trial
+
+This entire trial, up to this point, drove Sim exclusively through the
+dashboard's `/api/chat` HTTP endpoint — the channel scriptable without a
+live terminal. The creator tried the actual primary interface, `./sim.sh`'s
+interactive REPL, mid-trial and got nothing back: typed "hello", saw
+only repeated `^M` characters, no reply, ever. When asked point-blank
+whether *anything at all* had appeared, the answer was "it appears that
+running sim.sh doesn't accept any text from cli at all."
+
+Root cause (`interface/service.py`'s `_repl_main`): the REPL thread
+scheduled each line's handling fire-and-forget and immediately
+re-blocked on the *next* `input()` call before the previous line's
+handler had even started — a real reply, printed from a different
+thread while this one already sat inside a fresh `input()`, routinely
+never became visible. Notably, this exact race was already known and
+described in this project's own test suite before today, treated as an
+accepted fact about how the REPL works rather than the bug it was.
+Fixed to make the REPL thread actually wait (commit `fccee74`,
+`docs/EVOLUTION.md` milestone 124) — live-verified against a real
+`sim.sh` subprocess with an isolated `$HOME`, not just a unit test.
+
+**The honest lesson, stated plainly because the creator named it
+directly:** "how does the end product behave" cannot be fully answered
+by driving one convenience channel for an hour, however thoroughly. The
+dashboard API is real and working; the actual front door was silently
+broken the entire time, and nothing in an hour of API-only probing
+would ever have caught that. Any future trial like this one should
+drive the CLI directly (a piped/scripted subprocess, isolated `$HOME`)
+from the start, not as a fallback after a user hits a wall.
