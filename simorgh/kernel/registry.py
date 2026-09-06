@@ -11,6 +11,11 @@ kept complete on purpose so adding Phase 1+ subsystems is a one-line
 whose names are not (yet) in `FACTORIES` is skipped with a clear log
 line, not a crash -- this repository builds subsystems incrementally and
 the Kernel has to boot meaningfully at every intermediate point.
+
+Phase 1 packages land here as their own PRs merge -- see
+`tests/simorgh/kernel/test_kernel_boot_two_toy_subsystems.py` for the
+`mock.patch` injection pattern subsystem-track forks should use in their
+own integration tests instead of editing this file concurrently.
 """
 
 from __future__ import annotations

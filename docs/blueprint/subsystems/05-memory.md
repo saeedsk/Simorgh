@@ -7,7 +7,7 @@
 
 **Layer:** 1 Cognitive core
 **Owner (build):** unassigned
-**Status:** draft
+**Status:** built (reconfirmation-tracking in confidence decay not built this pass; decay-from-creation only)
 **Depends on (contracts only):** consumes `memory.retrieve`, `memory.store`, `turn.completed`, `task.completed`, `task.failed`, `research.finding.recorded`, `learn.skill.acquired`, `learn.competence.updated`, `system.tick.sleep`, `system.state.changed`; requests `cognition.think` (purpose `consolidate`)
 **v1 code that migrates here:** `src/memory/long_term.py` (`MemoryRecord`, `MemoryStore`, `embed_text`, `cosine_similarity`, `semantic_search`, `score_confidence`, `find_contradictions`, `flag_contradiction`, `consolidate_contradictions`, `reconsolidate`, causal links), `src/memory/short_term.py` (`ShortTermMemory`, `save`/`load_and_clear`), `src/orchestrator/consolidation.py` (`run_consolidation`, `_prune_kind`)
 
