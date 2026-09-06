@@ -29,7 +29,7 @@ from typing import Any, Awaitable, Callable
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import Clock
 
-from .api import LedgerBackend, Projection, ValidationError
+from .api import ConflictError, LedgerBackend, Projection, ValidationError
 from .blobs import is_ref
 from .projection import materialize as _materialize
 from .projection import rebuild as _rebuild
@@ -253,4 +253,4 @@ class LedgerClient:
         return removed
 
 
-__all__ = ["LedgerClient", "TailHandler"]
+__all__ = ["LedgerClient", "TailHandler", "ConflictError"]
