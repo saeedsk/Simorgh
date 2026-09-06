@@ -263,3 +263,40 @@ Claim a package by editing this table and the spec's header (see `05` §7).
   boot into.
   1336 tests passing (v1 + contracts + bus + ledger + 148 new for the
   kernel: 139 unit, 9 integration).
+- 2026-09-06 — Phases 1-3 and the full integration pass, condensed (the
+  blow-by-blow, including every live-caught bug and its fix, lives in
+  `docs/EVOLUTION.md` milestones 102-107; this entry is the changelog's
+  own catch-up after several sessions' worth of unbroken build). All
+  twelve remaining subsystems (cognition, memory, worldmodel, guardian,
+  execution, verification, planning, learning, reflection, curiosity,
+  persona, interface) built against the frozen Phase 0 contracts, then
+  wired into `kernel/registry.py` and proven to boot together as one
+  system for the first time (`test_kernel_boots_all_sixteen_subsystems.py`).
+  That proof was necessary but not sufficient: actually *running* Sim
+  live (not just its test suite) surfaced two real gaps invisible to
+  every existing test because none of them exercised the real entry
+  point — `percept.text.received` was never wired to a reply at all
+  (milestone 104), and `turn.completed` never triggered Memory's
+  episodic write, so there was no continuity across turns (milestone
+  105) — both fixed and verified live. A third pass made `python -m
+  simorgh run` genuinely interactive for the first time (`run_repl` had
+  been hardcoded off since Phase 0) and, once live concurrent chat
+  traffic actually existed to expose it, found and fixed a session-id
+  cross-wire bug in Interface (milestones 106-107).
+- 2026-09-06 — Phase 4 Wave 1 complete: all four independent new-
+  capability items (Plan Mode + approval policy, the evaluator-optimizer
+  loop, skill acquisition as procedural memory, context-compaction
+  layers 3-5) built in isolated git worktrees rather than concurrent
+  forks sharing one working tree — zero shared-file collisions this
+  time, a clean merge for all four (contrast Phase 1/3's unauthorized
+  push and module-boundary violation, both real cleanup work). Full
+  detail, including the specific bugs each fork found versus what
+  already existed, in `docs/EVOLUTION.md` milestones 108-111. Three of
+  the four forks found the session-mechanics for their item already
+  substantially built and the real gap narrower than the roadmap's
+  one-line description suggested — reading the actual code against the
+  actual spec before writing anything is what made each fork close a
+  real gap instead of duplicating existing work. Wave 2 (re-grounding +
+  drift detection, trust posture, Self Model completeness — all three
+  touch `reflection`, so handled as one combined thread rather than
+  three colliding parallel forks) is next.
