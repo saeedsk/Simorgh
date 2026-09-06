@@ -29,7 +29,7 @@ from simorgh.ledger.factory import make_ledger
 from .api import RuntimeConfig
 from .config import LoadedConfig
 from .context import ContextFactory, make_logger
-from .metrics import MetricsTable, StatusServer
+from .metrics import MetricsHistoryWriter, MetricsTable, ProcessMetricsPublisher, StatusServer
 from .registry import NEEDS_HMAC_SECRET, build_factories, known_layers
 from .scheduler import Scheduler
 from .secrets import SecretStore, build_secret_store
@@ -74,6 +74,8 @@ class Kernel:
         self._scheduler: Scheduler | None = None
         self._status: StatusServer | None = None
         self._metrics_table = MetricsTable()
+        self._process_metrics: ProcessMetricsPublisher | None = None
+        self._metrics_history: MetricsHistoryWriter | None = None
         self._subs = []
         self._bus_backend = None
         self.ledger = None
@@ -133,6 +135,20 @@ class Kernel:
             supervisor=self._supervisor, metrics=self._metrics_table, boot_time=self._boot_time,
         )
         await self._status.start()
+        # Observe-tier additions (02-system-architecture.md section 6.2):
+        # process resource gauges and a low-frequency metrics-history
+        # snapshot, both on `metrics_every_s` -- a `[runtime]` knob that
+        # already existed (read into `RuntimeConfig`/`load_runtime_config`)
+        # but had no consumer until now.
+        self._process_metrics = ProcessMetricsPublisher(
+            bus=self.bus, clock=self._clock, interval_s=self.runtime.metrics_every_s,
+        )
+        await self._process_metrics.start()
+        self._metrics_history = MetricsHistoryWriter(
+            ledger=self.ledger, clock=self._clock, metrics=self._metrics_table,
+            interval_s=self.runtime.metrics_every_s,
+        )
+        await self._metrics_history.start()
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_PAUSE, self._on_pause))
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_RESUME, self._on_resume))
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_STOP, self._on_stop))
@@ -221,6 +237,10 @@ class Kernel:
     async def shutdown(self) -> None:
         for sub in self._subs:
             await sub.unsubscribe()
+        if self._process_metrics is not None:
+            await self._process_metrics.stop()
+        if self._metrics_history is not None:
+            await self._metrics_history.stop()
         if self._status is not None:
             await self._status.stop()
         if self._scheduler is not None:

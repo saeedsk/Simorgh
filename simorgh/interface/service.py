@@ -88,9 +88,14 @@ class Service:
             self._repl_thread.start()
         if self._http_enabled:
             self._http = HttpApi(
-                ctx.bus, host=self.config.http_host, port=self.config.http_port,
+                ctx.bus, ledger=ctx.ledger, host=self.config.http_host, port=self.config.http_port,
                 clock=ctx.clock.now if hasattr(ctx.clock, "now") else None,
                 status_timeout_s=self.config.http_status_timeout_s,
+                history_stream=self.config.history_stream,
+                history_default_minutes=self.config.history_default_minutes,
+                history_max_points=self.config.history_max_points,
+                logs_default_limit=self.config.logs_default_limit,
+                logs_max_limit=self.config.logs_max_limit,
             )
             try:
                 await self._http.start()
