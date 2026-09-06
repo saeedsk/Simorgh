@@ -1794,3 +1794,27 @@ Still ahead, roughly in order:
     fix is what stops that class of waste from recurring. 822 tests
     passing (2 new: the exact rambling-non-answer case, and a genuine
     verdict stated after narration still being honored).
+93. **An observed, benign, not-yet-root-caused anomaly: `git commit`
+    intermittently reports "nothing to commit, working tree clean"
+    immediately after a self-patch write that plainly did change the
+    file.** Caught by the same live supervision as milestone 92, twice
+    in one evening (`provider.py`'s ensemble mode, `long_term.py`'s
+    embedding-based semantic retrieval). In both cases the content was
+    NOT lost: `apply_source_patch` still wrote it to disk, and it later
+    became part of the repository's real history -- but misattributed,
+    folded silently into a LATER, unrelated task's own commit for the
+    same file (that later task's `git add -- <path>` naturally staged
+    whatever was currently on disk, including the earlier task's still-
+    uncommitted write, so its commit message describes only its own
+    change while the diff actually contains both). Confirmed by reading
+    the current file directly: the semantic-retrieval code is present
+    and passing, just not under a commit that mentions it. Deliberately
+    NOT patched blindly tonight -- the exact race in `commit_applied_change`
+    (`git_ops.py`) that lets `git add` see no diff right after a real
+    write hasn't been pinned down with a controlled reproduction, and a
+    guessed fix around commit/retry logic risks masking the real cause
+    or introducing duplicate commits. Left as a documented, low-severity
+    finding (benign failure mode: worst case is a commit message that
+    undersells its own diff, never data loss or wrong code running) for
+    a future session with room to reproduce it deliberately rather than
+    read tea leaves from one live log.
