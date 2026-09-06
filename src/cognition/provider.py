@@ -19,6 +19,13 @@ before falling back to the router's normal ordering. This lets the
 orchestrator switch providers based on what a task needs rather than a
 single static provider choice.
 
+CapabilityRegistry also tracks an OutcomeStore of empirical
+successes/failures per (provider, TaskType), so ties among providers that
+support the same capability are broken by which one has actually performed
+best for that kind of task rather than static registration order. The
+default OutcomeStore is in-process only; a caller can substitute one backed
+by long_term memory to make that history persist across sessions.
+
 No real networked provider is wired in here (no credentials exist in this
 environment, and this project doesn't fake integrations it can't run or
 test). Adding one is a matter of implementing LLMProvider and registering
@@ -193,6 +200,54 @@ class CognitionRouter:
         return [p for p in self._providers if p.supports(capability)]
 
 
+class OutcomeStore(abc.ABC):
+    """Tracks empirical success/failure outcomes per (provider, TaskType),
+    so routing can be informed by observed performance rather than a
+    static registration order. Implementations may persist this data in
+    long_term memory so it survives across sessions; the default provided
+    here (InMemoryOutcomeStore) does not.
+    """
+
+    @abc.abstractmethod
+    def record(self, provider_name: str, task_type: TaskType, success: bool) -> None:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def confidence(self, provider_name: str, task_type: TaskType) -> float:
+        """Empirical confidence in [0, 1] that `provider_name` succeeds at
+        `task_type`. Pairs with no recorded outcomes should return a
+        neutral prior (0.5) rather than 0, so an untried provider isn't
+        permanently starved of a chance to prove itself.
+        """
+        raise NotImplementedError
+
+
+class InMemoryOutcomeStore(OutcomeStore):
+    """Default OutcomeStore: process-local counts, reset on restart. A
+    persistent implementation (e.g. backed by long_term memory) can be
+    substituted via CapabilityRegistry(outcome_store=...) without changing
+    any routing logic.
+    """
+
+    def __init__(self) -> None:
+        self._stats: dict[tuple[str, TaskType], tuple[int, int]] = {}
+
+    def record(self, provider_name: str, task_type: TaskType, success: bool) -> None:
+        successes, failures = self._stats.get((provider_name, task_type), (0, 0))
+        if success:
+            successes += 1
+        else:
+            failures += 1
+        self._stats[(provider_name, task_type)] = (successes, failures)
+
+    def confidence(self, provider_name: str, task_type: TaskType) -> float:
+        successes, failures = self._stats.get((provider_name, task_type), (0, 0))
+        total = successes + failures
+        if total == 0:
+            return 0.5
+        return successes / total
+
+
 class CapabilityRegistry:
     """Provider-agnostic index over a CognitionRouter's providers, keyed by
     Capability, so an orchestrator can ask "which backends support tool-use,
@@ -200,8 +255,9 @@ class CapabilityRegistry:
     CognitionRouter's internals or provider priority order.
     """
 
-    def __init__(self, router: CognitionRouter) -> None:
+    def __init__(self, router: CognitionRouter, outcome_store: OutcomeStore | None = None) -> None:
         self._router = router
+        self._outcome_store = outcome_store or InMemoryOutcomeStore()
 
     def providers_for(self, capability: Capability) -> list[LLMProvider]:
         """Providers (in priority order) that support `capability`."""
@@ -225,26 +281,48 @@ class CapabilityRegistry:
         return frozenset(caps)
 
     def best_for_task(self, task_type: TaskType) -> LLMProvider | None:
-        """Highest-priority available provider that currently supports
-        `task_type`, without invoking it -- lets the orchestrator inspect
-        which provider would be chosen (e.g. Claude vs. Gemini) before
-        committing to a completion, so it can query and switch mid-session
-        based on the kind of work rather than a single static provider
-        choice.
+        """Available provider that currently supports `task_type`, chosen
+        by empirical confidence for that task type (successes / total
+        recorded outcomes, tracked via `record_outcome` / an OutcomeStore),
+        with registration priority as the tiebreak for untried or equally
+        confident providers. Does not invoke the provider -- lets the
+        orchestrator inspect which one would be chosen (e.g. Claude vs.
+        Gemini) before committing to a completion.
         """
-        return self.best_for(task_type.required_capability)
+        candidates = [p for p in self.providers_for(task_type.required_capability) if p.available()]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda p: self._outcome_store.confidence(p.name, task_type))
+
+    def record_outcome(self, provider_name: str, task_type: TaskType, success: bool) -> None:
+        """Record an empirical outcome for `provider_name` at `task_type`,
+        so future `best_for_task` / `complete_for` calls route to whichever
+        provider has actually performed best -- not just registration
+        order. Callers (e.g. the orchestrator, informed by long_term
+        memory) may also report outcomes judged after the fact, not just
+        the ones `complete_for` records itself.
+        """
+        self._outcome_store.record(provider_name, task_type, success)
+
+    def confidence_for(self, provider_name: str, task_type: TaskType) -> float:
+        """Empirical confidence in [0, 1] for `provider_name` at `task_type`."""
+        return self._outcome_store.confidence(provider_name, task_type)
 
     def complete_for(self, task_type: TaskType, prompt: str, **kwargs: Any) -> LLMResponse:
-        """Negotiate a provider for `task_type` mid-session: try the
-        highest-priority available provider that supports the capability
-        the task requires, and fall back to the router's normal
-        starvation-proof ordering (ending in DeterministicFallbackProvider)
-        if none currently qualifies or the chosen provider fails.
+        """Negotiate a provider for `task_type` mid-session: try whichever
+        available provider is empirically strongest for `task_type` (see
+        `best_for_task`), recording the outcome so future calls can learn
+        from it, and fall back to the router's normal starvation-proof
+        ordering (ending in DeterministicFallbackProvider) if none
+        currently qualifies or the chosen provider fails.
         """
-        provider = self.best_for(task_type.required_capability)
+        provider = self.best_for_task(task_type)
         if provider is not None:
             try:
-                return provider.complete(prompt, **kwargs)
+                response = provider.complete(prompt, **kwargs)
             except ProviderUnavailable:
-                pass
+                self._outcome_store.record(provider.name, task_type, success=False)
+            else:
+                self._outcome_store.record(provider.name, task_type, success=True)
+                return response
         return self._router.complete(prompt, **kwargs)
