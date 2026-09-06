@@ -3836,3 +3836,22 @@ Still ahead, roughly in order:
     (narration for the pending session; silence for an unrelated task;
     narration precedes the reply). The dashboard half -- a live activity
     feed -- is next.
+
+133. **The dashboard answers "is it doing anything?" (roadmap item 18,
+    half two).** The creator's verdict on the gauges was that they
+    "practically didn't give any useful information to understand
+    whether the system is working or not" -- fair: counters can't
+    answer that question, events can. `HttpApi` now subscribes to
+    `percept.text.received`, `task.started/step/completed/failed/
+    blocked`, `action.result/denied`, and `turn.completed`, keeps the
+    last 200 in an in-memory ring (no Ledger scan across hundreds of
+    `task:*` streams), and serves them newest-first from
+    `GET /api/activity` together with the turns currently in flight. The
+    page gets an "Activity -- what Sim is doing" panel directly under
+    the chat: a status line (`idle` / `N turns in flight -- thinking...`)
+    and the feed (`heard ... via api`, `thinking`, `step 1 gather final
+    answer ok`, `replied ...`), polled every 1.5 s, failures in red. The
+    same events the CLI narrates (milestone 132), so both surfaces tell
+    one story. 1 new integration test over a real Kernel: after a real
+    turn, the feed lists that session's percept → started → step →
+    replied, newest first, with nothing in flight. Full suite green.

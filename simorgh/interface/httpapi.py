@@ -97,6 +97,17 @@ class HttpApi:
 
     async def start(self) -> None:
         self._turn_sub = await self._bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
+        # Live activity feed (07-post-cutover-review.md §3.9): the same
+        # events the REPL narrates, kept in a small in-memory ring so
+        # `/api/activity` answers "what is Sim doing right now / just did"
+        # from the bus as it happens -- no Ledger scan across hundreds of
+        # `task:*` streams, no polling of counters that can't answer it.
+        self._activity_subs = [
+            await self._bus.subscribe(t, self._on_activity)
+            for t in (topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_COMPLETED, topics.TASK_FAILED,
+                      topics.TASK_BLOCKED, topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TURN_COMPLETED,
+                      topics.PERCEPT_TEXT_RECEIVED)
+        ]
         self._server = await asyncio.start_server(self._handle, self._host, self._port)
 
     async def stop(self) -> None:
@@ -107,11 +118,49 @@ class HttpApi:
         if self._turn_sub is not None:
             await self._turn_sub.unsubscribe()
             self._turn_sub = None
+        for sub in getattr(self, "_activity_subs", []):
+            await sub.unsubscribe()
+        self._activity_subs = []
 
     async def _on_turn_completed(self, message: Message) -> None:
         fut = self._pending_chats.get(message.payload.get("session_id", ""))
         if fut is not None and not fut.done():
             fut.set_result(message.payload)
+
+    _ACTIVITY_MAX = 200
+
+    async def _on_activity(self, message: Message) -> None:
+        p = message.payload
+        entry = {"ts": self._now(), "type": message.type, "task_id": p.get("task_id") or p.get("session_id", "")}
+        if message.type == topics.TASK_STEP:
+            entry.update(step_no=p.get("step_no"), phase=p.get("phase"), summary=p.get("summary", ""),
+                         tool=p.get("tool"), ok=p.get("ok"))
+        elif message.type == topics.TASK_COMPLETED:
+            entry.update(summary=(p.get("result_summary") or "")[:160])
+        elif message.type in (topics.TASK_FAILED, topics.TASK_BLOCKED):
+            entry.update(summary=p.get("reason", ""))
+        elif message.type == topics.ACTION_RESULT:
+            entry.update(action_id=p.get("action_id"), ok=p.get("ok"), duration_ms=p.get("duration_ms"),
+                         summary=(p.get("error") or p.get("stdout_preview") or "")[:160])
+        elif message.type == topics.ACTION_DENIED:
+            entry.update(action_id=p.get("action_id"), ok=False, summary="denied: " + "; ".join(p.get("reasons", [])))
+        elif message.type == topics.TURN_COMPLETED:
+            entry.update(summary=(p.get("text") or "")[:160], floor=p.get("floor", False))
+        elif message.type == topics.PERCEPT_TEXT_RECEIVED:
+            entry.update(summary=(p.get("text") or "")[:160], channel=p.get("channel"))
+        activity = getattr(self, "_activity", None)
+        if activity is None:
+            self._activity = activity = []
+        activity.append(entry)
+        if len(activity) > self._ACTIVITY_MAX:
+            del activity[: len(activity) - self._ACTIVITY_MAX]
+
+    async def _activity_json(self, query: dict) -> bytes:
+        limit = min(int(self._q1(query, "limit", "50") or 50), self._ACTIVITY_MAX)
+        items = list(getattr(self, "_activity", []))[-limit:]
+        items.reverse()  # newest first
+        pending = sorted(self._pending_chats)
+        return json.dumps({"now": self._now(), "pending_turns": pending, "events": items}).encode("utf-8")
 
     # -- connection handling -----------------------------------------------------------------
 
@@ -169,6 +218,9 @@ class HttpApi:
             await self._try_respond(writer, 200, body, "application/json")
         elif method == "GET" and route == "/api/streams":
             body = await self._streams_json()
+            await self._try_respond(writer, 200, body, "application/json")
+        elif method == "GET" and route == "/api/activity":
+            body = await self._activity_json(query)
             await self._try_respond(writer, 200, body, "application/json")
         elif method == "POST" and route == "/api/chat":
             await self._handle_chat_request(reader, writer, headers)

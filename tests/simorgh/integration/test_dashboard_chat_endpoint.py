@@ -101,6 +101,40 @@ class TestDashboardChatEndpoint(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["text"], "hello from the real pipeline")
         self.assertFalse(body["floor"])
 
+    async def _get_json(self, path: str) -> tuple[int, dict]:
+        import json
+
+        def _do():
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            data = resp.read()
+            conn.close()
+            return resp.status, json.loads(data)
+
+        return await asyncio.to_thread(_do)
+
+    async def test_activity_feed_shows_the_turns_own_events_newest_first(self):
+        """07-post-cutover-review.md §3.9: "is it doing anything?" must be
+        answerable from the turn's events, live -- the creator watched a
+        web-chat "thinking" indicator for minutes with nothing else to go
+        on. After a real turn, `/api/activity` lists what happened for
+        that session, newest first, and reports no turn in flight."""
+        status, body = await self._post_chat("show me what you do", session_id="feed-1")
+        self.assertEqual(status, 200, body)
+        status, feed = await self._get_json("/api/activity?limit=50")
+        self.assertEqual(status, 200)
+        self.assertEqual(feed["pending_turns"], [])
+        mine = [e for e in feed["events"] if e.get("task_id") == "feed-1"]
+        kinds = [e["type"] for e in mine]
+        for expected in ("percept.text.received", "task.started", "task.step", "turn.completed"):
+            self.assertIn(expected, kinds, kinds)
+        # Newest first: the reply comes before the percept that started it.
+        self.assertLess(kinds.index("turn.completed"), kinds.index("percept.text.received"))
+        step = next(e for e in mine if e["type"] == "task.step")
+        self.assertEqual(step["phase"], "gather")
+        self.assertEqual(step["summary"], "final answer")
+
     async def test_the_percept_this_endpoint_publishes_is_contract_valid(self):
         """The actual regression: `channel` must be a real member of the
         wire enum (cli|api|chat|command), or `BusClient.publish()`'s own
