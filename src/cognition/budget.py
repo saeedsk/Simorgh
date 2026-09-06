@@ -31,11 +31,21 @@ SPEND_KIND = "llm_spend"
 
 @dataclass(frozen=True)
 class Budget:
-    """A spend/call cap over a rolling time window (default: 24h)."""
+    """A spend/call cap over a rolling time window (default: 24h).
+
+    `high_priority_reserve_fraction` reserves that fraction of `max_calls`
+    / `max_estimated_cost_usd` for calls made with `priority="high"` --
+    the router sets that when a task is flagged high-risk or
+    high-ambiguity, so those calls keep headroom even once ordinary
+    traffic would otherwise have exhausted the window. The default, 0.0,
+    reserves nothing: every priority sees the same limit, exactly as
+    before this field existed.
+    """
 
     max_calls: int | None = None
     max_estimated_cost_usd: float | None = None
     window_seconds: float = 86400.0
+    high_priority_reserve_fraction: float = 0.0
 
 
 class BudgetGuard(LLMProvider):
@@ -67,12 +77,14 @@ class BudgetGuard(LLMProvider):
         return self._provider.available() and not self._is_exhausted()
 
     def complete(self, prompt: str, **kwargs) -> LLMResponse:
-        if self._is_exhausted():
+        priority = kwargs.pop("priority", "normal")
+        if self._is_exhausted(priority):
             status = self.status()
             raise ProviderUnavailable(
                 f"{self._provider.name} budget exhausted for this window "
                 f"(calls={status['calls_in_window']}, "
-                f"spend=${status['spend_in_window_usd']:.4f})"
+                f"spend=${status['spend_in_window_usd']:.4f}, "
+                f"priority={priority})"
             )
         response = self._provider.complete(prompt, **kwargs)
         self._store.remember(
@@ -81,6 +93,7 @@ class BudgetGuard(LLMProvider):
             cost_usd=self._estimate_cost(response),
             input_tokens=response.metadata.get("input_tokens", 0),
             output_tokens=response.metadata.get("output_tokens", 0),
+            priority=priority,
         )
         return response
 
@@ -114,15 +127,27 @@ class BudgetGuard(LLMProvider):
             if r.created_at >= cutoff and r.content == self._provider.name
         ]
 
-    def _is_exhausted(self) -> bool:
+    def _is_exhausted(self, priority: str = "normal") -> bool:
         records = self._recent_records()
-        if self._budget.max_calls is not None and len(records) >= self._budget.max_calls:
+        max_calls = self._effective_limit(self._budget.max_calls, priority)
+        if max_calls is not None and len(records) >= max_calls:
             return True
-        if self._budget.max_estimated_cost_usd is not None:
+        max_cost = self._effective_limit(self._budget.max_estimated_cost_usd, priority)
+        if max_cost is not None:
             spend = sum(r.metadata.get("cost_usd", 0.0) for r in records)
-            if spend >= self._budget.max_estimated_cost_usd:
+            if spend >= max_cost:
                 return True
         return False
+
+    def _effective_limit(self, limit, priority: str):
+        """Shrink `limit` for non-high-priority calls, reserving the
+        difference for `priority="high"` traffic. With the default
+        `high_priority_reserve_fraction` of 0.0, this returns `limit`
+        completely untouched for every priority.
+        """
+        if limit is None or priority == "high" or self._budget.high_priority_reserve_fraction <= 0:
+            return limit
+        return limit * (1 - self._budget.high_priority_reserve_fraction)
 
     def _estimate_cost(self, response: LLMResponse) -> float:
         """Prefer a provider-reported cost (e.g. Claude Code CLI's own
