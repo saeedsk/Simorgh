@@ -55,7 +55,7 @@ from src.cognition.budget import Budget, BudgetGuard
 from src.cognition.claude_code_provider import ClaudeCodeProvider
 from src.cognition.gemini_provider import GeminiProvider
 from src.cognition.provider import CognitionRouter, DeterministicFallbackProvider
-from src.cognition.tool_protocol import preview
+from src.cognition.tool_protocol import preview, safe_read_file
 from src.memory.long_term import JSONFileMemoryStore, MemoryStore
 from src.memory.shared_bus import SharedMemoryBus
 from src.memory.short_term import ShortTermMemory
@@ -105,10 +105,15 @@ from src.orchestrator.tasks import (
     IN_PROGRESS,
     PATCH_TASK,
     PENDING,
+    PROJECT_TASK,
+    RESEARCH_TASK,
     SKILL_TASK,
     Task,
     TaskStore,
 )
+from src.orchestrator.capability_map import pick_diverse_target
+from src.orchestrator.projects import decompose_project, next_unfinished_child, project_status
+from src.orchestrator.research_task import run_research_task
 from src.orchestrator.verification import verify_task_completion
 from src.sandboxing.sandbox import SandboxExecutor, SubprocessSandbox
 from src.tools.web_fetch import FetchRefused, WebFetchTool
@@ -134,6 +139,8 @@ BATCH_PREFIX = "batch "
 MAX_BATCH_COUNT = 20
 DEFAULT_BATCH_MAX_ATTEMPTS = 2
 PLAN_PREFIX = "plan "
+RESEARCH_PREFIX = "research "
+PROJECT_PREFIX = "project "
 DISCOVER_COMMAND = "discover"
 TASKS_COMMAND = "tasks"
 WORK_COMMAND = "work"
@@ -193,6 +200,8 @@ _KNOWN_COMMAND_WORDS = (
     "batch",
     "plan",
     "evolve",
+    "research",
+    "project",
     DISCOVER_COMMAND,
     TASKS_COMMAND,
     WORK_COMMAND,
@@ -394,6 +403,8 @@ _COMMANDS_HELP: tuple[tuple[str, str], ...] = (
     ("batch <count> <theme>", "Brainstorm and apply up to 20 focused skills for a theme."),
     ("plan <count> <goal>", "Brainstorm steps toward a goal and save them as tasks."),
     ("evolve <count> <goal>", "Brainstorm and apply up to 10 REAL patches to core source (not skills)."),
+    ("research <topic>", "Investigate a question and record a finding, without writing code."),
+    ("project <goal>", "Break a goal into tracked patch/research steps and start working them."),
     ("discover", "Scan for improvement areas and save them as tasks."),
     ("tasks", "List the persisted task backlog."),
     ("work", "Run one task from the backlog."),
@@ -1129,6 +1140,18 @@ def _run_cli_loop(
         if plan_args is not None:
             count, goal = plan_args
             plan_goal(cognition, task_store, goal, count)
+            continue
+        if lowered.startswith(RESEARCH_PREFIX):
+            research_command(
+                task_store, skill_research, self_patch_agent, audit_gate, store,
+                activity_log, cognition, user_input[len(RESEARCH_PREFIX):].strip(),
+            )
+            continue
+        if lowered.startswith(PROJECT_PREFIX):
+            project_command(
+                task_store, skill_research, self_patch_agent, audit_gate, store,
+                activity_log, cognition, user_input[len(PROJECT_PREFIX):].strip(),
+            )
             continue
         evolve_args = extract_evolve_args(user_input, lowered)
         if evolve_args is not None:
@@ -2050,34 +2073,65 @@ def _parse_evolve_targets(text: str, expected_count: int) -> list[tuple[str, str
     return pairs[:expected_count]
 
 
-_CREATIVE_AGENDA_PROMPT = """You are Sim, deciding your OWN next self-improvement priorities --
-nobody gave you a goal this time. Look at your own capabilities and
-think ambitiously: not a small bug fix, a genuine idea for how you
-could become more capable, more autonomous, more self-aware, or more
-useful to work with.
+_CREATIVE_AGENDA_PROMPT = """You are Sim, deciding your next self-improvement
+priority -- nobody gave you a goal this time. This target was chosen
+for you by random sampling across the whole codebase (see
+src/orchestrator/capability_map.py), specifically so ideas spread across
+different parts of the architecture instead of clustering wherever seems
+most interesting in the moment -- a real problem observed live: asked to
+just "think ambitiously," this kept returning to the same neighborhood
+of ideas (many worded differently but about the same underlying thing)
+rather than genuinely exploring. Trust the target; don't second-guess it
+by picking a different file.
 
-Propose exactly {count} distinct, ambitious architectural improvements
-to your own source code. Each one must name a specific file to create
-or revise under src/ (never under src/agents/skills/, that's a
-separate, lighter-weight pipeline for standalone add-ons) and a
-one-line description of the change and why it matters. Keep each one
-small and targeted enough to actually implement in one patch -- a real,
-focused step toward a big idea, not the whole idea at once.
+Target: {path}
+{content_section}
 
-Files that already exist in this codebase (prefer revising one of
-these when it genuinely fits; naming a new path under src/ is fine
-too, for something genuinely new):
-{files}
+Propose ONE improvement for this specific file: either a concrete patch
+you already know how to make, or -- if the right implementation
+genuinely isn't clear yet -- mark it RESEARCH and describe the question
+worth investigating first. Keep a patch small and targeted enough to
+implement in one step.
 
-Respond with ONLY a numbered list, one per line, in exactly this format:
-1. <repo-relative path under src/> :: <description>
-2. <repo-relative path under src/> :: <description>
-...
-{count}. <repo-relative path under src/> :: <description>
-No other text before or after the list."""
+Respond with ONLY one line, in exactly one of these two formats:
+PATCH :: <one-line description of the patch>
+RESEARCH :: <question or topic to investigate about this file>
+No other text before or after that one line -- not even the file path,
+that part is already decided."""
+
+_TARGETED_IDEA_LINE = re.compile(r"^\s*(PATCH|RESEARCH)\s*::\s*(.+)$", re.IGNORECASE)
+
+
+def _parse_targeted_idea(text: str) -> tuple[str, str] | None:
+    """Returns (kind, description) from a creative-agenda response, or
+    None if it doesn't contain a recognizable PATCH/RESEARCH line.
+    Deliberately doesn't parse a file path out of the response at all --
+    the target was already chosen by pick_diverse_target before the
+    model ever saw the prompt, so nothing here lets a model that ignores
+    "don't second-guess the target" quietly redirect to a different file
+    anyway; the caller always uses the originally sampled target as the
+    subject, regardless of what (if anything) the model says about a
+    path.
+    """
+    for line in text.splitlines():
+        match = _TARGETED_IDEA_LINE.match(line.strip())
+        if match:
+            kind = PATCH_TASK if match.group(1).upper() == "PATCH" else RESEARCH_TASK
+            return kind, match.group(2).strip()
+    return None
 
 DEFAULT_CREATIVE_AGENDA_COUNT = 2
-_CREATIVE_AGENDA_DEDUPE_MIN_OVERLAP_CHARS = 24
+# How many recent task subjects (regardless of outcome) count as "the
+# backlog already has something here" for capability_map.pick_diverse_target
+# -- bounded rather than every task ever, so an area explored long ago
+# becomes fair game again instead of being avoided forever.
+_CREATIVE_AGENDA_RECENT_SUBJECTS = 30
+# Below this ratio, two descriptions are almost certainly about
+# different things (measured against several real same-evening
+# near-duplicate pairs, which scored 0.45-0.72, vs. 0.13-0.27 for
+# genuinely unrelated ones -- see docs/EVOLUTION.md for the milestone
+# this fixed).
+_CREATIVE_AGENDA_SIMILARITY_THRESHOLD = 0.45
 
 
 def discover_creative_improvements(
@@ -2091,42 +2145,68 @@ def discover_creative_improvements(
     discover_improvements (src/orchestrator/discovery.py) only reacts to
     signals that already exist (a recurring failure pattern, a
     takeaway) -- it has nothing to say when nothing has gone wrong yet.
-    This is Sim setting its OWN agenda instead of only ever reacting:
-    one bounded LLM call, genuinely creative (no goal is given, unlike
-    propose_patch_batch/evolve's human-supplied goal), asked to think
-    ambitiously about its own architecture and propose real, focused
-    next steps. Reuses evolve's exact brainstorm/parse output shape
-    (`_parse_evolve_targets`'s `path :: description` format) since only
-    the framing differs, not the shape. Deterministic-fallback-safe like
-    every other creative/drafting call in this codebase (see
-    src/cognition/provider.py's guaranteed-floor pattern): returns
-    nothing rather than a fabricated agenda when no real provider
-    answers, so an idle tick with no LLM configured is silently a no-op
-    here, same as discover_improvements finding nothing. Deduped against
-    every existing task description, same substring-containment
-    approach discovery.py's `_already_covered` uses, so a repeated tick
-    doesn't pile up near-duplicate ambitions. `provider_sink`, if given,
-    is updated with {"provider_name": ...} from the response -- lets a
-    caller (`_autonomous_action`) tell a genuine, possibly-billed LLM
-    attempt apart from a free deterministic-fallback no-op, without this
-    function's return type carrying anything beyond the created tasks
-    (same sink pattern `_dispatch_and_record`'s `metadata_sink` uses).
+    This is Sim setting its OWN agenda instead of only ever reacting.
+
+    Live-caught: an evening of real creative-agenda runs (asked to just
+    "think ambitiously" about the whole codebase in one open-ended call)
+    produced well over a dozen "capability negotiation" variants across
+    two files -- worded differently enough each time that a substring
+    dedupe check never caught any of them as duplicates of one another.
+    The creator's own diagnosis and fix: the model was never the thing
+    choosing WHERE to look. Stop asking it to -- `count` times, a target
+    module is picked by structured random sampling across the codebase's
+    own real directory/file structure (src/orchestrator/capability_map.py's
+    `pick_diverse_target`, weighted away from areas the backlog already
+    covers), and only THEN is one narrow, bounded LLM call made: propose
+    one improvement for THIS specific file. The model never gets to
+    gravitate toward its own favorite neighborhood, because it's never
+    asked to pick the neighborhood.
+
+    Each target's current content is read (bounded, via safe_read_file)
+    and included as context -- a grounded, file-specific idea beats a
+    guess from the filename alone. Still deduped against every existing
+    task description by fuzzy similarity
+    (`_CREATIVE_AGENDA_SIMILARITY_THRESHOLD`, not exact substring
+    containment -- free-form LLM prose is exactly the case discovery.py's
+    own `_already_covered` explicitly says needs something smarter than
+    substring matching for) as a second, independent line of defense:
+    diversified sampling makes repeats far less likely, but doesn't make
+    them impossible. Deterministic-fallback-safe like every other
+    creative/drafting call in this codebase: a target whose call falls
+    through to the deterministic floor is simply skipped, not faked.
+    `provider_sink`, if given, is updated with {"provider_name": ...} --
+    the LAST real provider seen across every target this pass, or
+    "deterministic_fallback" if none answered -- so a caller
+    (`_autonomous_action`) can tell a genuine, possibly-billed attempt
+    apart from a free no-op tick.
     """
     root = repo_root or Path.cwd()
-    response = cognition.complete(
-        _CREATIVE_AGENDA_PROMPT.format(
-            count=count, files="\n".join(_list_source_files(root)) or "(none found)"
-        )
-    )
-    if provider_sink is not None:
-        provider_sink["provider_name"] = response.provider_name
-    if response.provider_name == "deterministic_fallback":
-        return []
-
-    targets = _parse_evolve_targets(response.text, count)
     existing_descriptions = [t.description for t in task_store.all()]
+    recent_subjects = [t.subject for t in task_store.all()[-_CREATIVE_AGENDA_RECENT_SUBJECTS:] if t.subject]
     created: list[Task] = []
-    for path, description in targets:
+    last_provider_name = "deterministic_fallback"
+
+    for _ in range(count):
+        target = pick_diverse_target(root, recent_subjects)
+        if target is None:
+            break
+        content = safe_read_file(root, target)
+        content_section = (
+            f"\nCurrent content:\n---\n{content}\n---" if not content.startswith("[refused:") else ""
+        )
+        response = cognition.complete(
+            _CREATIVE_AGENDA_PROMPT.format(path=target, content_section=content_section)
+        )
+        if response.provider_name != "deterministic_fallback":
+            last_provider_name = response.provider_name
+        else:
+            continue
+
+        parsed = _parse_targeted_idea(response.text)
+        if parsed is None:
+            continue
+        kind, description = parsed
+
         # A protected-file target (audit.py's PROTECTED_SUBJECTS) can
         # NEVER pass AuditGate.review() no matter how good the draft
         # is -- letting it become a task anyway means every attempt
@@ -2139,26 +2219,30 @@ def discover_creative_improvements(
         # reconsideration pass. Filtered out here, before ever touching
         # the task store, rather than left for the audit gate to keep
         # discovering the same impossibility over and over.
-        if any(protected in path for protected in PROTECTED_SUBJECTS):
+        if kind == PATCH_TASK and any(protected in target for protected in PROTECTED_SUBJECTS):
             print(
-                f"[discover] skipping a self-directed idea for {path!r} -- "
+                f"[discover] skipping a self-directed idea for {target!r} -- "
                 "that file can never be self-patched (protected)"
             )
             continue
         if _creative_agenda_already_covered(description, existing_descriptions):
             continue
-        task = task_store.add(
-            description, PATCH_TASK, subject=path, discovered_via="creative_agenda"
-        )
+        task = task_store.add(description, kind, subject=target, discovered_via="creative_agenda")
         created.append(task)
         existing_descriptions.append(description)
+        recent_subjects.append(target)
+
+    if provider_sink is not None:
+        provider_sink["provider_name"] = last_provider_name
     return created
 
 
 def _creative_agenda_already_covered(candidate: str, existing_descriptions: list[str]) -> bool:
-    if len(candidate) < _CREATIVE_AGENDA_DEDUPE_MIN_OVERLAP_CHARS:
-        return candidate in existing_descriptions
-    return any(candidate in existing or existing in candidate for existing in existing_descriptions)
+    return any(
+        difflib.SequenceMatcher(None, candidate, existing).ratio()
+        >= _CREATIVE_AGENDA_SIMILARITY_THRESHOLD
+        for existing in existing_descriptions
+    )
 
 
 def propose_patch_batch(
@@ -2307,8 +2391,22 @@ def run_task(
     process -- doing it the other way around would leave a resumed
     process finding the task stuck IN_PROGRESS forever, having actually
     already finished it. Returns (message, needs_relaunch).
+
+    A PROJECT_TASK is handled entirely separately (`_run_project_task`)
+    and returns immediately -- it has no `subject`, is never itself run
+    through propose_self_patch/propose_skill, and its own completion is
+    a rollup of its children's statuses (src/orchestrator/projects.py),
+    not a single pass/fail outcome the generic logic below applies to.
+    A RESEARCH_TASK runs through the same generic APPLIED-check/verify/
+    DONE flow as PATCH_TASK/SKILL_TASK below -- `run_research_task`'s
+    result is prefixed "[RESEARCHED]" rather than "[APPLIED]", but is
+    otherwise a first-class outcome subject to the same quality review.
     """
     task_store.update_status(task.id, IN_PROGRESS, attempt=True)
+
+    if task.kind == PROJECT_TASK:
+        result = _run_project_task(task, task_store, cognition, repo_root)
+        return result, False
 
     # A task reconsidered after being BLOCKED already carries a real
     # failure reason in its own note (see _reconsider_blocked_tasks) --
@@ -2332,6 +2430,10 @@ def run_task(
             do_relaunch=False,
             initial_reasons=initial_reasons,
         )
+    elif task.kind == RESEARCH_TASK:
+        result = run_research_task(
+            cognition, task, store, task_store, repo_root=repo_root, activity_log=activity_log
+        )
     else:
         result = propose_skill(
             skill_research,
@@ -2343,9 +2445,10 @@ def run_task(
             initial_reasons=initial_reasons,
         )
 
-    if not result.startswith("[APPLIED]"):
+    if not (result.startswith("[APPLIED]") or result.startswith("[RESEARCHED]")):
         next_status = BLOCKED if task.attempts + 1 >= MAX_TASK_ATTEMPTS else PENDING
         task_store.update_status(task.id, next_status, note=result, attempt=False)
+        _maybe_roll_up_project(task_store, task)
         return result, False
 
     verification = verify_task_completion(cognition, task, result)
@@ -2354,10 +2457,73 @@ def run_task(
             task.id, BLOCKED, note=f"applied but failed review: {verification.explanation}"
         )
         print(style(f"🔬 [verify] looks off-target: {verification.explanation}", "yellow", "bold"))
+        _maybe_roll_up_project(task_store, task)
         return result, False
 
     task_store.update_status(task.id, DONE, note=result)
+    _maybe_roll_up_project(task_store, task)
     return result, task.kind == PATCH_TASK
+
+
+def _run_project_task(
+    task: Task, task_store: TaskStore, cognition: CognitionRouter, repo_root: Path | None
+) -> str:
+    """Decomposes `task` into real child Tasks if it has none yet
+    (src/orchestrator/projects.py's `decompose_project`), or -- if
+    `_next_task` returned the project itself despite it already having
+    children (every child is currently terminal, nothing left to pick)
+    -- reports its rollup status. IN_PROGRESS was already set by the
+    caller before this runs; a fresh decomposition deliberately leaves
+    it there rather than resetting to PENDING, since the project is
+    genuinely now underway.
+    """
+    root = repo_root or Path.cwd()
+    children = task_store.children(task.id)
+    if not children:
+        new_children = decompose_project(cognition, task_store, task, _list_source_files(root))
+        if not new_children:
+            result = "[project] no real drafting intelligence available -- nothing planned"
+            task_store.update_status(task.id, PENDING, note=result, attempt=False)
+            return result
+        result = f"[PLANNED] {task.description} -- {len(new_children)} step(s)"
+        print(style(f"📋 [project] {result}", "magenta", "bold"))
+        for child in new_children:
+            print(f"   + [{child.id}] ({child.kind}) {child.description}")
+        return result
+
+    status = project_status(children)
+    done = sum(1 for c in children if c.status == DONE)
+    if status in (DONE, FAILED):
+        task_store.update_status(
+            task.id, status, note=f"project rollup: {done}/{len(children)} step(s) done"
+        )
+    return f"[project] {status} -- {task.description} ({done}/{len(children)} done)"
+
+
+def _maybe_roll_up_project(task_store: TaskStore, child: Task) -> None:
+    """After `child` (a real, dispatchable task) reaches a status worth
+    recording, checks whether it's a project's child and, if the
+    project's rollup (src/orchestrator/projects.py's `project_status`)
+    is now terminal, persists that -- the only way a PROJECT_TASK's own
+    status ever changes outside `_run_project_task` itself. Intermediate
+    rollup states (IN_PROGRESS, BLOCKED, still PENDING) are deliberately
+    never persisted here to avoid a status_changed event on every single
+    child tick -- callers that want the live rollup (e.g. `tasks`) call
+    `project_status` directly instead of trusting a possibly-stale
+    intermediate value on the stored Task.
+    """
+    if child.parent_id is None:
+        return
+    parent = task_store.get(child.parent_id)
+    if parent is None or parent.kind != PROJECT_TASK:
+        return
+    children = task_store.children(parent.id)
+    status = project_status(children)
+    if status in (DONE, FAILED) and parent.status != status:
+        done = sum(1 for c in children if c.status == DONE)
+        task_store.update_status(
+            parent.id, status, note=f"project rollup: {done}/{len(children)} step(s) done"
+        )
 
 
 MAX_BLOCKED_RETRY_ATTEMPTS = 9  # 3 more rounds of MAX_TASK_ATTEMPTS each
@@ -2371,14 +2537,33 @@ def _next_task(task_store: TaskStore) -> Task | None:
     BLOCKED tasks (see _reconsider_blocked_tasks) rather than leaving
     them stuck forever -- the direct mechanism behind "check if you're
     blocked and automatically unblock yourself."
+
+    A PROJECT_TASK is never returned to the caller directly -- working a
+    project means either decomposing it (no children yet) or working its
+    next unfinished child (src/orchestrator/projects.py's
+    `next_unfinished_child`), so each ordered candidate that's a project
+    is resolved to the real thing to work before being handed back. A
+    project with nothing currently workable (every child terminal, or a
+    genuinely empty decomposition) is skipped in favor of the next
+    ordered candidate, rather than stalling the whole queue behind it.
     """
     unfinished = task_store.unfinished()
     in_progress = [t for t in unfinished if t.status == IN_PROGRESS]
     pending = [t for t in unfinished if t.status == PENDING]
-    ordered = in_progress + pending
-    if ordered:
-        return ordered[0]
+    for task in in_progress + pending:
+        if task.kind != PROJECT_TASK:
+            return task
+        resolved = _resolve_project_task(task_store, task)
+        if resolved is not None:
+            return resolved
     return _reconsider_blocked_tasks(task_store)
+
+
+def _resolve_project_task(task_store: TaskStore, project: Task) -> Task | None:
+    children = task_store.children(project.id)
+    if not children:
+        return project  # needs decomposing -- run_task's PROJECT_TASK branch handles that
+    return next_unfinished_child(children)
 
 
 def _reconsider_blocked_tasks(task_store: TaskStore) -> Task | None:
@@ -2405,6 +2590,7 @@ def _reconsider_blocked_tasks(task_store: TaskStore) -> Task | None:
             task_store.update_status(
                 task.id, FAILED, note=f"gave up after {task.attempts} attempts: {task.note}"
             )
+            _maybe_roll_up_project(task_store, task)
             continue
         task_store.update_status(
             task.id, PENDING, note=f"retrying after being blocked: {task.note}"
@@ -2531,20 +2717,109 @@ def plan_goal(cognition: CognitionRouter, task_store: TaskStore, goal: str, coun
     return message
 
 
+def research_command(
+    task_store: TaskStore,
+    skill_research: SkillResearchAgent,
+    self_patch_agent: SelfPatchAgent,
+    audit_gate: AuditGate,
+    store: MemoryStore,
+    activity_log: ActivityLog,
+    cognition: CognitionRouter,
+    topic: str,
+    repo_root: Path | None = None,
+) -> str:
+    """`research <topic>`: the immediate-execution counterpart to
+    `propose`/`patch` for a RESEARCH_TASK -- creates a real, durable Task
+    (so the finding, and any follow-up task it spawns, have a stable id
+    to reference) and runs it right away through the exact same
+    run_research_task/verify_task_completion pipeline the task queue and
+    autonomous loop use for a research task picked up from the backlog.
+    Never touches AuditGate or the sandbox -- this produces a written
+    finding, not code.
+    """
+    if not topic:
+        message = "[usage: research <topic>]"
+        _print_status(message)
+        return message
+    task = task_store.add(topic, RESEARCH_TASK, discovered_via="user")
+    print(style(f"🔬 [research] investigating {topic!r}...", "cyan", "bold"))
+    result, _ = run_task(
+        task_store, task, skill_research, self_patch_agent, audit_gate, store,
+        activity_log, cognition, repo_root=repo_root,
+    )
+    _print_status(result)
+    return result
+
+
+def project_command(
+    task_store: TaskStore,
+    skill_research: SkillResearchAgent,
+    self_patch_agent: SelfPatchAgent,
+    audit_gate: AuditGate,
+    store: MemoryStore,
+    activity_log: ActivityLog,
+    cognition: CognitionRouter,
+    goal: str,
+    repo_root: Path | None = None,
+) -> str:
+    """`project <goal>`: creates a PROJECT_TASK and runs it immediately --
+    since a fresh project has no children yet, this decomposes the goal
+    into real, tracked patch/research steps (src/orchestrator/projects.py's
+    `decompose_project`) right away, the same "plan, then let 'work'/the
+    autonomous loop execute later" shape `plan` already established, just
+    for a goal substantial enough to genuinely need a mix of patch and
+    research steps rather than a flat list of same-kind topics.
+    """
+    if not goal:
+        message = "[usage: project <goal>]"
+        _print_status(message)
+        return message
+    task = task_store.add(goal, PROJECT_TASK, discovered_via="user")
+    print(style(f"📋 [project] planning {goal!r}...", "magenta", "bold"))
+    result, _ = run_task(
+        task_store, task, skill_research, self_patch_agent, audit_gate, store,
+        activity_log, cognition, repo_root=repo_root,
+    )
+    _print_status(result)
+    return result
+
+
 _STATUS_ICONS = {PENDING: "⏳", IN_PROGRESS: "🏗️ ", BLOCKED: "🚫", DONE: "✅", FAILED: "❌"}
 
 
 def _print_tasks(task_store: TaskStore) -> None:
+    """A PROJECT_TASK's row shows its live rollup status
+    (src/orchestrator/projects.py's `project_status`, computed fresh
+    here rather than trusted from the stored Task -- see
+    `_maybe_roll_up_project`'s own docstring for why only a terminal
+    rollup is ever persisted) with a done/total count, and its children
+    print indented underneath instead of as separate flat top-level rows.
+    """
     tasks = task_store.unfinished()
     print(style(f"🗂️  Task backlog ({len(tasks)} unfinished)", "magenta", "bold"))
     if not tasks:
         print(style("  (nothing pending -- try 'discover' or 'plan <count> <goal>')", "dim"))
         return
+    project_ids = {t.id for t in tasks if t.kind == PROJECT_TASK}
     for task in tasks:
+        if task.parent_id in project_ids:
+            continue  # printed indented under its project below
         icon = _STATUS_ICONS.get(task.status, "•")
         sub = f" ({task.subject})" if task.subject else ""
         note = f" — {task.note}" if task.note else ""
         print(f"  {icon} [{task.id}] {task.description}{sub}{note}")
+        if task.kind != PROJECT_TASK:
+            continue
+        children = task_store.children(task.id)
+        if not children:
+            continue
+        live_status = project_status(children)
+        done = sum(1 for c in children if c.status == DONE)
+        print(style(f"      rollup: {live_status} ({done}/{len(children)} done)", "dim"))
+        for child in children:
+            child_icon = _STATUS_ICONS.get(child.status, "•")
+            child_sub = f" ({child.subject})" if child.subject else ""
+            print(f"      {child_icon} [{child.id}] {child.description}{child_sub}")
 
 
 def _handle_autonomous_command(arg: str, autonomy: AutonomyController) -> None:

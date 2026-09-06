@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from src.agents.interests import InterestTracker, NewsItem, WorldFeed
 from src.agents.skills.research import SkillResearchAgent
@@ -24,7 +25,9 @@ from src.main import (
     propose_self_patch,
     propose_skill,
     propose_skill_batch,
+    project_command,
     remind_command,
+    research_command,
     run_skill_code,
     run_task,
     strip_command_slash,
@@ -38,7 +41,18 @@ from src.orchestrator.apply import APPLIED_KIND, APPLIED_PATCH_KIND
 from src.orchestrator.audit import AuditGate, ModificationProposal
 from src.orchestrator.health import HealthMonitor
 from src.orchestrator.reflection import OutcomeLog, ReflectionAgent
-from src.orchestrator.tasks import BLOCKED, DONE, FAILED, PATCH_TASK, PENDING, SKILL_TASK, TaskStore
+from src.orchestrator.tasks import (
+    BLOCKED,
+    DONE,
+    FAILED,
+    IN_PROGRESS,
+    PATCH_TASK,
+    PENDING,
+    PROJECT_TASK,
+    RESEARCH_TASK,
+    SKILL_TASK,
+    TaskStore,
+)
 
 
 class TestMainCli(unittest.TestCase):
@@ -1757,6 +1771,28 @@ class _FakeBrainstormCognition:
         return LLMResponse(text=self._text, provider_name=self._provider_name)
 
 
+class _ScriptedBrainstormCognition:
+    """Returns a different response text per call, in order -- for
+    discover_creative_improvements' diversified-sampling design, where
+    each of `count` targets gets its own independent cognition call
+    (unlike the old single-call-produces-a-whole-list shape
+    _FakeBrainstormCognition still models for evolve/batch/plan, which
+    weren't changed).
+    """
+
+    def __init__(self, responses, provider_name="fake"):
+        self._responses = responses
+        self._provider_name = provider_name
+        self.prompts = []
+
+    def complete(self, prompt, **kwargs):
+        from src.cognition.provider import LLMResponse
+
+        self.prompts.append(prompt)
+        index = min(len(self.prompts) - 1, len(self._responses) - 1)
+        return LLMResponse(text=self._responses[index], provider_name=self._provider_name)
+
+
 class TestExtractBatchArgs(unittest.TestCase):
     def test_parses_count_and_theme(self):
         text = "batch 5 digital world skills"
@@ -2089,6 +2125,226 @@ class TestRunTask(unittest.TestCase):
 
         self.assertEqual(task.status, BLOCKED)
 
+    def test_research_task_dispatches_to_run_research_task(self):
+        task = self.task_store.add("is this idea worth pursuing", RESEARCH_TASK)
+        cognition = _FakeBrainstormCognition("Yes, this is worth doing -- clear win.")
+
+        message, needs_relaunch = run_task(
+            self.task_store, task, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, cognition, repo_root=self.repo_root,
+        )
+
+        self.assertTrue(message.startswith("[RESEARCHED]"))
+        self.assertFalse(needs_relaunch)
+        self.assertEqual(self.task_store.get(task.id).status, DONE)
+
+    def test_research_task_with_no_real_provider_is_retried_then_blocked(self):
+        task = self.task_store.add("a question nobody can answer for free", RESEARCH_TASK)
+
+        for _ in range(3):
+            run_task(
+                self.task_store, task, SkillResearchAgent(), None, self.audit_gate, self.store,
+                self.activity_log, self.cognition, repo_root=self.repo_root,
+            )
+            task = self.task_store.get(task.id)
+
+        self.assertEqual(task.status, BLOCKED)
+
+    def test_project_task_with_no_children_gets_decomposed(self):
+        task = self.task_store.add("build a much better memory system", PROJECT_TASK)
+        cognition = _FakeBrainstormCognition(
+            "1. src/memory/long_term.py :: add a first concrete step\n"
+        )
+
+        message, needs_relaunch = run_task(
+            self.task_store, task, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, cognition, repo_root=self.repo_root,
+        )
+
+        self.assertTrue(message.startswith("[PLANNED]"))
+        self.assertFalse(needs_relaunch)
+        self.assertEqual(self.task_store.get(task.id).status, IN_PROGRESS)
+        self.assertEqual(len(self.task_store.children(task.id)), 1)
+
+    def test_project_task_decomposition_failure_returns_to_pending(self):
+        task = self.task_store.add("an idea with no real provider available", PROJECT_TASK)
+
+        message, _ = run_task(
+            self.task_store, task, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertIn("no real drafting intelligence", message)
+        self.assertEqual(self.task_store.get(task.id).status, PENDING)
+
+    def test_project_task_never_touches_propose_self_patch_or_skill(self):
+        # A project has no `subject` -- if it were ever accidentally
+        # dispatched through propose_self_patch/propose_skill instead of
+        # _run_project_task, this would raise or behave nonsensically.
+        # Passing None for both agents here means any such misrouting
+        # would crash with an AttributeError, not silently pass.
+        task = self.task_store.add("a goal", PROJECT_TASK)
+
+        message, _ = run_task(
+            self.task_store, task, None, None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        self.assertIn("no real drafting intelligence", message)
+
+    def test_a_done_child_rolls_up_its_project_to_done(self):
+        from src.main import _maybe_roll_up_project
+
+        project = self.task_store.add("a goal", PROJECT_TASK)
+        child = self.task_store.add("the only step", PATCH_TASK, parent_id=project.id)
+        self.task_store.update_status(child.id, DONE)
+
+        _maybe_roll_up_project(self.task_store, self.task_store.get(child.id))
+
+        self.assertEqual(self.task_store.get(project.id).status, DONE)
+
+    def test_a_done_child_does_not_roll_up_while_siblings_are_unfinished(self):
+        from src.main import _maybe_roll_up_project
+
+        project = self.task_store.add("a goal", PROJECT_TASK)
+        done_child = self.task_store.add("step one", PATCH_TASK, parent_id=project.id)
+        self.task_store.add("step two", PATCH_TASK, parent_id=project.id)
+        self.task_store.update_status(done_child.id, DONE)
+
+        _maybe_roll_up_project(self.task_store, self.task_store.get(done_child.id))
+
+        self.assertNotEqual(self.task_store.get(project.id).status, DONE)
+
+    def test_a_permanently_failed_child_rolls_up_its_project_to_failed(self):
+        from src.main import MAX_BLOCKED_RETRY_ATTEMPTS, _reconsider_blocked_tasks
+
+        project = self.task_store.add("a goal", PROJECT_TASK)
+        child = self.task_store.add("an impossible step", PATCH_TASK, parent_id=project.id)
+        for _ in range(MAX_BLOCKED_RETRY_ATTEMPTS):
+            self.task_store.update_status(child.id, BLOCKED, note="stuck", attempt=True)
+
+        _reconsider_blocked_tasks(self.task_store)
+
+        self.assertEqual(self.task_store.get(child.id).status, FAILED)
+        self.assertEqual(self.task_store.get(project.id).status, FAILED)
+
+    def test_a_child_with_no_parent_never_touches_a_project(self):
+        task = self.task_store.add("standalone", SKILL_TASK)
+
+        run_task(
+            self.task_store, task, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, self.cognition, repo_root=self.repo_root,
+        )
+
+        # No exception, no project lookup crash -- the whole point of
+        # _maybe_roll_up_project's own early return on parent_id is None.
+        self.assertEqual(self.task_store.get(task.id).status, DONE)
+
+
+class TestNextTaskProjectUnwrapping(unittest.TestCase):
+    def setUp(self):
+        self.store = InMemoryStore()
+        self.task_store = TaskStore(self.store)
+
+    def test_a_project_with_no_children_is_returned_for_decomposition(self):
+        from src.main import _next_task
+
+        project = self.task_store.add("a goal", PROJECT_TASK)
+
+        self.assertEqual(_next_task(self.task_store).id, project.id)
+
+    def test_a_project_with_an_unfinished_child_returns_the_child_not_the_project(self):
+        from src.main import _next_task
+
+        project = self.task_store.add("a goal", PROJECT_TASK)
+        self.task_store.update_status(project.id, IN_PROGRESS, attempt=True)
+        child = self.task_store.add("step one", PATCH_TASK, parent_id=project.id)
+
+        self.assertEqual(_next_task(self.task_store).id, child.id)
+
+    def test_a_project_with_every_child_terminal_is_skipped_for_the_next_task(self):
+        from src.main import _next_task
+
+        project = self.task_store.add("a goal", PROJECT_TASK)
+        self.task_store.update_status(project.id, IN_PROGRESS, attempt=True)
+        done_child = self.task_store.add("step one", PATCH_TASK, parent_id=project.id)
+        self.task_store.update_status(done_child.id, DONE)
+        other = self.task_store.add("an unrelated task", SKILL_TASK)
+
+        self.assertEqual(_next_task(self.task_store).id, other.id)
+
+    def test_a_stuck_project_does_not_block_the_whole_queue(self):
+        from src.main import _next_task
+
+        project = self.task_store.add("a stuck goal", PROJECT_TASK)
+        self.task_store.update_status(project.id, IN_PROGRESS, attempt=True)
+        blocked_child = self.task_store.add("stuck step", PATCH_TASK, parent_id=project.id)
+        self.task_store.update_status(blocked_child.id, BLOCKED, note="stuck")
+        other = self.task_store.add("a fresh unrelated task", SKILL_TASK)
+
+        # The blocked child is genuinely "unfinished" (BLOCKED isn't
+        # terminal), so it's what actually comes back -- not skipped in
+        # favor of `other`, and not the project itself.
+        self.assertEqual(_next_task(self.task_store).id, blocked_child.id)
+
+
+class TestResearchAndProjectCommands(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+        self.store = InMemoryStore()
+        self.task_store = TaskStore(self.store)
+        self.activity_log = ActivityLog(self.store)
+        self.audit_gate = AuditGate()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_research_command_creates_and_runs_a_research_task(self):
+        cognition = _FakeBrainstormCognition("Worth doing -- a clear, well-scoped idea.")
+
+        result = research_command(
+            self.task_store, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, cognition, "should Sim add caching here", repo_root=self.repo_root,
+        )
+
+        self.assertTrue(result.startswith("[RESEARCHED]"))
+        tasks = self.task_store.all()
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0].kind, RESEARCH_TASK)
+        self.assertEqual(tasks[0].status, DONE)
+
+    def test_research_command_with_no_topic_shows_usage(self):
+        result = research_command(
+            self.task_store, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, CognitionRouter(), "", repo_root=self.repo_root,
+        )
+
+        self.assertIn("usage", result)
+        self.assertEqual(self.task_store.all(), [])
+
+    def test_project_command_creates_and_decomposes_a_project(self):
+        cognition = _FakeBrainstormCognition("1. src/a.py :: a first concrete step\n")
+
+        result = project_command(
+            self.task_store, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, cognition, "build something ambitious", repo_root=self.repo_root,
+        )
+
+        self.assertTrue(result.startswith("[PLANNED]"))
+        projects = [t for t in self.task_store.all() if t.kind == PROJECT_TASK]
+        self.assertEqual(len(projects), 1)
+        self.assertEqual(len(self.task_store.children(projects[0].id)), 1)
+
+    def test_project_command_with_no_goal_shows_usage(self):
+        result = project_command(
+            self.task_store, SkillResearchAgent(), None, self.audit_gate, self.store,
+            self.activity_log, CognitionRouter(), "", repo_root=self.repo_root,
+        )
+
+        self.assertIn("usage", result)
+        self.assertEqual(self.task_store.all(), [])
+
 
 class TestWorkOnNextTask(unittest.TestCase):
     def setUp(self):
@@ -2319,6 +2575,13 @@ class TestDiscoverCreativeImprovements(unittest.TestCase):
     nothing has actually gone wrong -- the creative half of "find gaps,
     find improvement areas... be creative, think big" (direct creator
     feedback). See its own docstring in src/main.py.
+
+    A target is chosen by src/orchestrator/capability_map.py's
+    `pick_diverse_target` BEFORE the model is ever asked anything --
+    mocked here (patched into src.main's own imported name) so these
+    tests aren't at the mercy of real randomness or a real filesystem
+    scan; capability_map's own real sampling behavior has its own tests
+    in tests/test_capability_map.py.
     """
 
     def setUp(self):
@@ -2331,47 +2594,85 @@ class TestDiscoverCreativeImprovements(unittest.TestCase):
     def test_no_real_provider_returns_nothing(self):
         store = InMemoryStore()
         task_store = TaskStore(store)
-
-        created = discover_creative_improvements(
-            CognitionRouter(), task_store, repo_root=self.repo_root
-        )
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+            created = discover_creative_improvements(
+                CognitionRouter(), task_store, repo_root=self.repo_root
+            )
 
         self.assertEqual(created, [])
         self.assertEqual(task_store.all(), [])
 
-    def test_parses_brainstormed_targets_into_tasks(self):
+    def test_parses_a_patch_response_into_a_task_using_the_sampled_target(self):
         store = InMemoryStore()
         task_store = TaskStore(store)
-        cognition = _FakeBrainstormCognition(
-            "1. src/orchestrator/foo.py :: teach it to notice X\n"
-            "2. src/orchestrator/bar.py :: teach it to notice Y\n"
-        )
+        cognition = _FakeBrainstormCognition("PATCH :: teach it to notice X\n")
 
-        created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=2)
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+            created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
 
-        self.assertEqual(len(created), 2)
-        self.assertEqual(len(task_store.all()), 2)
-        self.assertTrue(all(t.discovered_via == "creative_agenda" for t in created))
-        self.assertTrue(all(t.kind == PATCH_TASK for t in created))
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0].kind, PATCH_TASK)
+        self.assertEqual(created[0].subject, "src/orchestrator/foo.py")
+        self.assertEqual(created[0].discovered_via, "creative_agenda")
+
+    def test_parses_a_research_response_into_a_research_task(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition("RESEARCH :: is this even worth doing?\n")
+
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+            created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
+
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0].kind, RESEARCH_TASK)
+        self.assertEqual(created[0].subject, "src/orchestrator/foo.py")
+
+    def test_never_trusts_a_path_the_model_states_itself(self):
+        # The whole point of diversified sampling is that the model
+        # doesn't get to pick its own target -- even if it ignores the
+        # instruction and states a different file in its own response
+        # text, the task's subject must still be the originally sampled
+        # target, not whatever the model said.
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition("PATCH :: src/somewhere/else.py :: an idea\n")
+
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+            created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
+
+        self.assertEqual(len(created), 1)
         self.assertEqual(created[0].subject, "src/orchestrator/foo.py")
 
     def test_unparseable_response_creates_nothing(self):
         store = InMemoryStore()
         task_store = TaskStore(store)
-        cognition = _FakeBrainstormCognition("I refuse to make a list.")
+        cognition = _FakeBrainstormCognition("I refuse to answer.")
 
-        created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root)
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+            created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root)
 
         self.assertEqual(created, [])
+
+    def test_no_available_target_creates_nothing_without_calling_the_llm(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition("PATCH :: idea\n")
+
+        with patch("src.main.pick_diverse_target", return_value=None):
+            created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root)
+
+        self.assertEqual(created, [])
+        self.assertEqual(cognition.prompts, [])
 
     def test_dedupes_against_an_existing_task_description(self):
         store = InMemoryStore()
         task_store = TaskStore(store)
         description = "teach it to notice a specific real recurring pattern in its own logs"
         task_store.add(description, PATCH_TASK, subject="src/orchestrator/foo.py")
-        cognition = _FakeBrainstormCognition(f"1. src/orchestrator/foo.py :: {description}\n")
+        cognition = _FakeBrainstormCognition(f"PATCH :: {description}\n")
 
-        created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+            created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
 
         self.assertEqual(created, [])
         self.assertEqual(len(task_store.all()), 1)  # still just the pre-existing one
@@ -2385,25 +2686,57 @@ class TestDiscoverCreativeImprovements(unittest.TestCase):
         # touching the task store.
         store = InMemoryStore()
         task_store = TaskStore(store)
-        cognition = _FakeBrainstormCognition(
-            "1. src/orchestrator/self_patch.py :: add a rollback-and-score loop\n"
-            "2. src/orchestrator/foo.py :: a genuinely reachable idea\n"
-        )
+        cognition = _FakeBrainstormCognition("PATCH :: add a rollback-and-score loop\n")
 
-        created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=2)
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/self_patch.py"):
+            created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
 
-        self.assertEqual(len(created), 1)
-        self.assertEqual(created[0].subject, "src/orchestrator/foo.py")
-        self.assertEqual(len(task_store.all()), 1)
+        self.assertEqual(created, [])
+        self.assertEqual(task_store.all(), [])
 
-    def test_prompt_asks_for_the_requested_count(self):
+    def test_makes_one_call_per_requested_target(self):
         store = InMemoryStore()
         task_store = TaskStore(store)
-        cognition = _FakeBrainstormCognition("1. src/orchestrator/foo.py :: idea\n")
+        cognition = _ScriptedBrainstormCognition(
+            [
+                "PATCH :: teach the memory store to notice contradictions",
+                "RESEARCH :: would vector search meaningfully help retrieval quality",
+                "PATCH :: add a retry budget to the shell passthrough command",
+            ]
+        )
+        targets = iter(["src/a.py", "src/b.py", "src/c.py"])
 
-        discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
+        with patch("src.main.pick_diverse_target", side_effect=lambda root, avoid: next(targets)):
+            created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=3)
 
-        self.assertIn("exactly 1", cognition.prompts[0])
+        self.assertEqual(len(cognition.prompts), 3)
+        self.assertEqual(len(created), 3)
+        self.assertEqual([t.subject for t in created], ["src/a.py", "src/b.py", "src/c.py"])
+
+    def test_prompt_names_the_sampled_target(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition("PATCH :: idea\n")
+
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+            discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
+
+        self.assertIn("src/orchestrator/foo.py", cognition.prompts[0])
+
+    def test_real_diverse_sampling_integrates_end_to_end(self):
+        # One unmocked pass, against a real (tiny) fake src/ tree --
+        # proves the wiring to capability_map.pick_diverse_target itself
+        # works, not just the mocked unit behavior above.
+        (self.repo_root / "src" / "orchestrator").mkdir(parents=True)
+        (self.repo_root / "src" / "orchestrator" / "only.py").write_text("VALUE = 1\n")
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition("PATCH :: a real idea\n")
+
+        created = discover_creative_improvements(cognition, task_store, repo_root=self.repo_root, count=1)
+
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0].subject, "src/orchestrator/only.py")
 
 
 class TestPlanGoal(unittest.TestCase):
@@ -2715,14 +3048,13 @@ class TestAutonomousAction(unittest.TestCase):
         task_store = TaskStore(store)
         activity_log = ActivityLog(store)
         reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
-        cognition = _FakeBrainstormCognition(
-            "1. src/orchestrator/foo.py :: a genuinely ambitious idea\n"
-        )
+        cognition = _FakeBrainstormCognition("PATCH :: a genuinely ambitious idea\n")
 
-        did_something = _autonomous_action(
-            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
-            activity_log, cognition, repo_root=self.repo_root,
-        )
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+            did_something = _autonomous_action(
+                task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+                activity_log, cognition, repo_root=self.repo_root,
+            )
 
         self.assertTrue(did_something)
         self.assertEqual(len(task_store.all()), 1)
@@ -2740,12 +3072,13 @@ class TestAutonomousAction(unittest.TestCase):
         task_store = TaskStore(store)
         activity_log = ActivityLog(store)
         reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
-        cognition = _FakeBrainstormCognition("I refuse to make a list.")
+        cognition = _FakeBrainstormCognition("I refuse to answer.")
 
-        did_something = _autonomous_action(
-            task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
-            activity_log, cognition, repo_root=self.repo_root,
-        )
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+            did_something = _autonomous_action(
+                task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+                activity_log, cognition, repo_root=self.repo_root,
+            )
 
         self.assertTrue(did_something)
         self.assertEqual(task_store.all(), [])

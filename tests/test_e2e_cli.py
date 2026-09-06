@@ -144,6 +144,22 @@ class TestTaskAndSkillCommands(E2ECliTestCase):
         self.assertIn("Focus load", result.stdout)
         self.assertIn("Skills applied", result.stdout)
 
+    def test_research_with_no_real_provider_reports_the_honest_floor(self):
+        result = self.run_cli("research is this worth pursuing\ntasks\nexit\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no real reviewer available", result.stdout)
+        # Still a real, durable task even though nothing could be
+        # concluded -- the point of persisting research as a Task, not
+        # just an ad-hoc chat reply.
+        self.assertIn("Task backlog", result.stdout)
+
+    def test_project_with_no_real_provider_reports_the_honest_floor(self):
+        result = self.run_cli("project build something ambitious\nexit\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no real drafting intelligence", result.stdout)
+
     def test_vitals_on_then_off_toggles_without_crashing(self):
         result = self.run_cli("vitals on\nvitals off\nexit\n")
 
