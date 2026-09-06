@@ -44,7 +44,7 @@ class Service:
         self._ctx = ctx
         for i in range(max(1, self.config.workers)):
             worker = Worker(ctx.bus, ctx.ledger, clock=ctx.clock.now if hasattr(ctx.clock, "now") else None,
-                            worker_id=f"{ctx.name}-{i}")
+                            worker_id=f"{ctx.name}-{i}", think_timeout_s=self.config.think_timeout_s)
             await worker.start()
             self._workers.append(worker)
         self._percept_sub = await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept)

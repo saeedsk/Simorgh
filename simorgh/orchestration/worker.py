@@ -24,7 +24,7 @@ from .session import SessionRunner
 class Worker:
     def __init__(
         self, bus, ledger, *, clock=None, worker_id: str | None = None,
-        assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
+        assemble_timeout_s: float = DEFAULT_TIMEOUT_S, think_timeout_s: float | None = None,
     ) -> None:
         self._bus = bus
         self._ledger = ledger
@@ -37,9 +37,20 @@ class Worker:
         # ever needs the current value, not a history of transitions.
         self.current_task_id: str | None = None
         self.current_kind: str | None = None
+        # `SessionRunner`'s own default (5s) was never actually reachable
+        # from here before this fix -- `Config.think_timeout_s` (120s)
+        # existed and was documented but nothing threaded it through, so
+        # every real `cognition.think` call that took longer than 5s (a
+        # cold-start `claude` CLI subprocess routinely does, even though
+        # Cognition's own provider timeout allows up to 180s) silently
+        # floored to an empty reply. Live-caught by the creator's own
+        # first interactive use of `simorgh run`: a plain "hello" printed
+        # nothing at all -- indistinguishable from a hung REPL, but it
+        # was this timeout cutting off a real, still-in-flight answer.
+        runner_kwargs = {} if think_timeout_s is None else {"think_timeout_s": think_timeout_s}
         self._runner = SessionRunner(
             bus, ledger, clock=clock, worker_id=self.worker_id, is_paused=lambda: self._paused,
-            assemble_timeout_s=assemble_timeout_s,
+            assemble_timeout_s=assemble_timeout_s, **runner_kwargs,
         )
         self._subs: list = []
 

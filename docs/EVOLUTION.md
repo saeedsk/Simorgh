@@ -2944,3 +2944,79 @@ Still ahead, roughly in order:
     one exists. 2105 tests passing on the fork's own branch before
     merge; full suite reconfirmed green after the contracts addition at
     integration.
+
+116. **The creator's own first real interactive typing hit a bug that
+    looked exactly like a broken terminal and was actually two real,
+    previously-undiscovered wiring gaps -- reported live as "hello^M^M
+    ^M^M^M" and "nothing happens."** Investigated directly rather than
+    guessed at: no terminal-mode code exists anywhere in Interface (no
+    `termios`/raw-mode manipulation, confirmed by grep, and `render.py`'s
+    own docstring already promises no cursor-movement ANSI codes --
+    exactly the class of bug that corrupted the creator's terminal once
+    before, milestone 94, deliberately not repeated). The repeated `^M`
+    was the creator pressing Enter several times in growing confusion at
+    a REPL that looked hung; it wasn't hung.
+
+    Root cause: `simorgh.orchestration.config.Config.think_timeout_s`
+    (120s) existed, was documented, and was never actually threaded
+    through to `SessionRunner` -- `Worker.__init__` never passed it, so
+    every real `cognition.think` round trip was silently bound by
+    `SessionRunner`'s own class-level default of 5.0 seconds, cutting
+    off any real provider call slower than that (routine for a cold-
+    start `claude` CLI subprocess, even though Cognition's *own*
+    provider timeout allows up to 180s). This is the same mechanism
+    behind the "first call floors" pattern observed and shrugged off
+    earlier this session (milestones 105's live-verification note, the
+    Wave-1 dashboard live check) -- not a curiosity, an actual bug, now
+    fixed: `Worker` gained a `think_timeout_s` parameter, `Service.
+    start()` passes `self.config.think_timeout_s` through.
+
+    Second, independent bug compounding the first into total silence:
+    when a chat turn genuinely floors (no real provider answered in
+    time), `Interface._handle_chat` printed the empty `reply_text` as-
+    is -- a blank line, indistinguishable from nothing happening at
+    all. Fixed to print an explicit notice instead. And a third,
+    related gap the same investigation surfaced: `InterfaceConfig.
+    chat_reply_timeout_s`, the REPL's own *outer* wait on top of the
+    now-fixed inner one, defaulted to 8.0s -- comfortably shorter than
+    the 120s inner timeout it wraps, so fixing the inner timeout alone
+    would have just moved the same "looks broken" symptom to a
+    different branch (the honest "no response" timeout message instead
+    of a blank line). Raised to 130s, with the reasoning for the exact
+    number written into the config field itself so it doesn't drift
+    out of sync with `think_timeout_s` unnoticed a second time.
+
+    Asked directly to add a chat option to the dashboard while this was
+    already open in the same breath. `simorgh/interface/httpapi.py`
+    gained a `POST /api/chat` route (and header parsing generally --
+    the previous version only ever read and discarded headers, having
+    no route that needed a body): publishes `percept.text.received` and
+    awaits the matching `turn.completed` the same way `Interface.
+    _handle_chat` already does, keyed by a fresh id per call (the same
+    milestone-106 cross-wire fix applies here too, verified with the
+    same style of concurrent-request test). Live-caught immediately on
+    first real use: `channel: "dashboard"` is not a member of `percept.
+    text.received`'s closed wire enum (`cli|api|chat|command`) --
+    `bus.publish()`'s own contract validation raised, surfacing as a
+    real HTTP 500 the moment a browser actually exercised the endpoint,
+    invisible to every one of `test_httpapi.py`'s existing unit tests
+    because its `_FakeBus` never validates a published message the way
+    a real `BusClient` does. Fixed (`channel: "api"`, the correct
+    existing value) and given real regression coverage this time: a new
+    `tests/simorgh/integration/test_dashboard_chat_endpoint.py` boots an
+    actual Kernel -- real bus, real validation, real socket -- and was
+    confirmed to fail against the pre-fix code before confirming it
+    passes against the fix, the same discipline as every live-caught fix
+    since milestone 104.
+
+    Verified live end to end in the browser, not just via tests: typed
+    a real message into the dashboard's new chat box, watched the
+    request 500 before the channel fix and succeed after it, and got a
+    real, coherent reply rendered in the transcript. One interesting
+    side-observation surfaced by that same live message, left as-is
+    rather than treated as a bug: the underlying model answered
+    honestly that it doesn't have persistent self-identity matching the
+    "Simorgh" framing it was prompted with, rather than adopting the
+    persona -- a real signal about how strongly the persona/self-model
+    prompt asserts identity, not a plumbing defect, and worth a future
+    look at Persona's own prompt construction rather than a fix here.
