@@ -199,7 +199,10 @@ class HttpApi:
             return
         raw = await reader.readexactly(length) if length else b""
         try:
-            text = str(json.loads(raw or b"{}").get("text", "")).strip()
+            body = json.loads(raw or b"{}")
+            text = str(body.get("text", "")).strip()
+            client_session_id = body.get("session_id")
+            client_session_id = str(client_session_id).strip() if client_session_id else None
         except json.JSONDecodeError:
             await self._try_respond(writer, 400, b'{"error":"invalid json"}', "application/json")
             return
@@ -207,21 +210,47 @@ class HttpApi:
             await self._try_respond(writer, 400, b'{"error":"empty message"}', "application/json")
             return
 
-        payload = await self._chat(text)
-        await self._try_respond(writer, 200, json.dumps(payload).encode("utf-8"), "application/json")
+        payload = await self._chat(text, session_id=client_session_id)
+        status = 409 if payload.get("error") == "turn already in flight" else 200
+        await self._try_respond(writer, status, json.dumps(payload).encode("utf-8"), "application/json")
 
-    async def _chat(self, text: str) -> dict:
+    async def _chat(self, text: str, *, session_id: str | None = None) -> dict:
         """One dashboard chat turn: publish `percept.text.received` and
         await the matching `turn.completed` -- the same request/await-a-
         correlated-event shape `Interface._handle_chat` already uses for
-        the REPL (milestone 106's fresh-id-per-turn fix applies here
-        too: a fresh uuid per call, never a shared key, so two dashboard
-        tabs chatting at once can never cross-wire each other's replies).
+        the REPL.
+
+        `session_id` is optional and, when a caller supplies one, is
+        reused as-is rather than replaced -- 02-system-architecture.md
+        section 6.1's own multi-session direction: Memory's episodic
+        write (milestone 105) groups turns by exactly this field, so a
+        client that wants a real, continuous conversation (not a fresh
+        stranger every message) sends the same id every time. The
+        dashboard page does this automatically (one id generated per
+        page load). When no caller supplies one, a fresh uuid is
+        generated, preserving milestone 106's original fix (never a
+        *shared, hardcoded* key).
+
+        A second, real risk that fix didn't have to consider: an
+        externally-supplied session_id could legitimately collide if a
+        client fires two requests for the same conversation before the
+        first resolves. Milestone 106's bug was a fixed key being
+        silently overwritten mid-flight, corrupting which reply answered
+        which prompt; the fix there was "never share a key." Now that a
+        caller can ask to share one on purpose, silently overwriting is
+        exactly as wrong as it was then -- so this refuses the second
+        request outright (a clear `"turn already in flight"` error,
+        HTTP 409) instead of ever letting two futures alias the same
+        dict entry. The dashboard's own UI already serializes one tab's
+        sends (the input is disabled while a reply is pending), so this
+        only ever fires for a genuinely concurrent caller, not normal use.
         `channel: "api"` -- the wire enum (`percept.text.received`'s
         `channel`) is closed (`cli|api|chat|command`); a live-caught bug
         used `"dashboard"` here originally and every publish 500'd on
         real contract validation (milestone 116)."""
-        session_id = str(uuid.uuid4())
+        session_id = session_id or str(uuid.uuid4())
+        if session_id in self._pending_chats:
+            return {"text": "", "floor": True, "error": "turn already in flight"}
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         self._pending_chats[session_id] = fut

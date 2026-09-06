@@ -307,6 +307,58 @@ class HttpApiTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body1["text"], "reply to first")
         self.assertEqual(body2["text"], "reply to second")
 
+    async def test_a_client_supplied_session_id_is_reused_not_replaced(self):
+        """02-system-architecture.md section 6.1: a client that wants a
+        real conversation (not a fresh stranger every message) sends
+        the same session_id every time -- it must reach Memory's own
+        episodic-grouping field unchanged, the exact thing the dashboard
+        page itself now does (one id per tab, generated client-side)."""
+        bus = _FakeBus({})
+        bus.respond_to_chat = {"text": "ok", "floor": False}
+        api = await self._start(bus)
+        status, _data = await self._post(api, "/api/chat", {"text": "hi", "session_id": "conv-42"})
+        self.assertEqual(status, 200)
+        self.assertEqual(bus.published[0].payload["session_id"], "conv-42")
+
+    async def test_two_sequential_messages_with_the_same_session_id_both_succeed(self):
+        bus = _FakeBus({})
+        bus.respond_to_chat = {"text": "ok", "floor": False}
+        api = await self._start(bus)
+        first = await self._post(api, "/api/chat", {"text": "hi", "session_id": "conv-1"})
+        second = await self._post(api, "/api/chat", {"text": "again", "session_id": "conv-1"})
+        self.assertEqual(first[0], 200)
+        self.assertEqual(second[0], 200)
+        self.assertEqual([p.payload["session_id"] for p in bus.published], ["conv-1", "conv-1"])
+
+    async def test_a_second_request_for_a_session_id_already_in_flight_is_refused_not_cross_wired(self):
+        """The real risk milestone 106's fix didn't have to consider: an
+        externally-supplied session_id can legitimately collide if a
+        caller fires two requests before the first resolves. Silently
+        overwriting the pending future (106's original bug) would be
+        exactly as wrong now as it was then -- this must refuse the
+        second one outright instead."""
+        bus = _FakeBus({})  # no respond_to_chat -- the first call is left in-flight, on purpose
+        api = HttpApi(bus, host="127.0.0.1", port=0, chat_timeout_s=5.0)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+
+        first = asyncio.ensure_future(self._post(api, "/api/chat", {"text": "hi", "session_id": "conv-x"}))
+        while not bus.published:
+            await asyncio.sleep(0)  # let the first request actually register as pending
+
+        status2, raw2 = await self._post(api, "/api/chat", {"text": "again", "session_id": "conv-x"})
+        self.assertEqual(status2, 409)
+        self.assertEqual(json.loads(raw2)["error"], "turn already in flight")
+
+        # Resolve the first so it doesn't dangle into the timeout.
+        turn = _FakeMessage("turn.completed", {"session_id": "conv-x", "text": "ok", "floor": False})
+        for type_, handler in list(bus._subs):  # noqa: SLF001
+            if type_ == "turn.completed":
+                await handler(turn)
+        status1, raw1 = await first
+        self.assertEqual(status1, 200)
+        self.assertEqual(json.loads(raw1)["text"], "ok")
+
 
 class HistoryEndpointTestCase(unittest.IsolatedAsyncioTestCase):
     """`GET /api/history?subsystem=<name>&minutes=<n>` -- metrics over
