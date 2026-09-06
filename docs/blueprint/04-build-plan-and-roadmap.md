@@ -268,6 +268,7 @@ document's §5; the items, in order:
 15. Seam + pty test suites; Bus property tests (M).
 16. `delegate.py` (Flow 6), full `resume.py` snapshot (Flow 7) (L).
 17. Multi-session WebSocket; admin control through Guardian (`02` §6.1/§6.2) (L).
+18. **Visibility while thinking** (S/M; creator's ask, `07` §3.9): CLI narrates each `task.step`/`action.*` of the pending turn live; dashboard gains a live activity feed (`/api/activity`) that answers "is it working" with events, not gauges. Pulled ahead of 9–17 in practice — it is a stated philosophy of the project.
 
 Cutover Stage C (deleting `src/`) stays gated on living with v2 as the
 daily driver (`06-migration-from-v1.md` §6).
