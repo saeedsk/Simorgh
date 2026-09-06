@@ -202,16 +202,21 @@ the `None` return before it ever reaches the Ledger or the HTTP
 response, and the process's own stdout was fully block-buffered (not a
 tty) so nothing was visible live either.
 
-**Not fixed in this trial** — flagged with substantial evidence (exact
-code path, exact Ledger signature showing `task.step` never recorded,
-five specific causes ruled out with the reasoning for each, a concurrency
-hypothesis checked and not confirmed, a context-growth hypothesis that
-fits the observed frequency curve, and the fact that frequency climbed
-over the session rather than staying flat) so a focused follow-up starts
-from a real head start instead of re-discovering all of this. Two fixes
-worth doing regardless of which hypothesis is right: (1) `_think()`
-should propagate Cognition's actual error code instead of collapsing
-every failure to an indistinguishable empty floor reply; (2) the
-dashboard/API chat response shape could include that code too, instead
-of just `{"text", "floor"}| bool` — this whole investigation would have
-taken a fifth of the time with either fix in place.
+**Update: fixed, during this same trial, not left as an observation.**
+Shipped the error-visibility fix first (`_think()` now records the real
+Cognition error on the task's own Ledger stream instead of discarding
+it) -- the very next occurrence named it plainly:
+`context_too_large -- context still exceeds budget after all
+compaction layers`. Root cause: `_think()` never set `allow_summarize`
+on its `cognition.think` request, so it defaulted to `false` and layer
+5 (real model summarization, Cognition's own explicit "last resort" for
+exactly this situation) was never reachable for an ordinary chat turn —
+despite being fully built, wired, and tested. Fixed narrowly:
+`allow_summarize` is now `true` only for `kind="chat"` sessions, still
+`false` for patch/research/plan/skill (summarizing away a draft's own
+precise code context could silently corrupt a real code change).
+**Live-verified in this same trial**: the identical rapid-fire 8-probe
+sequence that had failed 2-of-6 times before the fix ran clean 8-for-8
+afterward, with zero `context_too_large` errors on the task stream.
+Both fixes are commits `38fe8d7` and `1295762`; full write-up in
+`docs/EVOLUTION.md` milestones 122-123.
