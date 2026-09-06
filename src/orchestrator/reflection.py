@@ -23,6 +23,13 @@ change to Simorgh's own code goes through the self-patch pipeline
 `patch <path> <description>` command a human operator types, never
 automatically from a reflection alone. See docs/EVOLUTION.md, "Learning
 From Mistakes."
+
+A third pass, `ReflectionAgent.promote_recurring_patterns()`, looks
+across the takeaways and feedback already accumulated by the two passes
+above and, when the same agent keeps showing up, promotes that recurring
+pattern once into durable self-knowledge (kind="self_knowledge") -- so
+later cycles can recall "this is a known, stable issue" instead of
+re-deriving the same conclusion from raw outcomes every time.
 """
 
 from __future__ import annotations
@@ -57,6 +64,7 @@ class Proposal:
 
 TAKEAWAY_KIND = "takeaway"
 FEEDBACK_KIND = "feedback"
+SELF_KNOWLEDGE_KIND = "self_knowledge"
 
 
 def _intent_alignment_score(request_text: str, output: str) -> float:
@@ -242,4 +250,64 @@ class ReflectionAgent:
                         evidence_count=len(agent_outcomes),
                     )
                 )
+        return proposals
+
+    def promote_recurring_patterns(
+        self, limit: int = 200, min_cluster_size: int = 3
+    ) -> list[Proposal]:
+        """Clusters the takeaways (`reflect_on_outcome`) and feedback
+        (`critique_intent`) already accumulated for each agent and, once a
+        cluster is large enough to look like a stable pattern rather than
+        one-off noise, promotes it into durable self-knowledge
+        (kind="self_knowledge") -- a plain fact Simorgh can recall directly
+        in future cycles instead of re-deriving the same conclusion from
+        raw outcomes each time. Requires `store` (returns [] without one,
+        same as the other store-backed passes). Idempotent per agent: a
+        pattern is only re-promoted when new evidence has grown the
+        cluster past the size it was last promoted at, so this can be run
+        repeatedly (e.g. alongside `reflect()`) without spamming duplicate
+        self-knowledge entries.
+        """
+        if self._store is None:
+            return []
+
+        records = list(self._store.query(kind=TAKEAWAY_KIND, limit=limit))
+        records += list(self._store.query(kind=FEEDBACK_KIND, limit=limit))
+
+        by_agent: dict[str, list] = {}
+        for record in records:
+            agent = record.metadata.get("agent", "unknown")
+            by_agent.setdefault(agent, []).append(record)
+
+        previously_promoted: dict[str, int] = {}
+        for record in self._store.query(kind=SELF_KNOWLEDGE_KIND, limit=limit):
+            agent = record.metadata.get("agent")
+            count = record.metadata.get("evidence_count", 0)
+            if agent is not None and count > previously_promoted.get(agent, 0):
+                previously_promoted[agent] = count
+
+        proposals = []
+        for agent, agent_records in by_agent.items():
+            count = len(agent_records)
+            if count < min_cluster_size:
+                continue
+            if count <= previously_promoted.get(agent, 0):
+                continue
+
+            source_file = AGENT_SOURCE_FILES.get(agent)
+            rationale = (
+                f"'{agent}' has accumulated {count} recurring takeaway/feedback "
+                "entries -- this looks like a stable pattern rather than a "
+                "one-off, promoting to durable self-knowledge"
+                f"{' (see ' + source_file + ')' if source_file else ''}."
+            )
+            proposal = Proposal(subject=agent, rationale=rationale, evidence_count=count)
+            self._store.remember(
+                SELF_KNOWLEDGE_KIND,
+                proposal.rationale,
+                agent=agent,
+                evidence_count=count,
+            )
+            proposals.append(proposal)
+
         return proposals
