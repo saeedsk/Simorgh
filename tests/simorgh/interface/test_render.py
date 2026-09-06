@@ -51,12 +51,65 @@ class RenderTestCase(unittest.TestCase):
         self.assertIn("mood", out)
         self.assertIn("3", out)
 
+    def test_vitals_never_prints_a_raw_dict(self):
+        # Live-caught: the old `budget: {...}` line dumped every subsystem's
+        # raw metrics payload -- nested braces across the whole terminal
+        # width in a panel meant to read at a glance.
+        snap = VitalsSnapshot(
+            stale=False, workers_busy=1, workers_total=1, bus_published=18, bus_delivered=6,
+            budget={"claude_code_cli": {"calls": 8, "max_calls": 500, "exhausted": False}},
+        )
+        out = render.vitals(snap)
+        self.assertNotIn("{", out)
+        self.assertNotIn("}", out)
+
+    def test_vitals_renders_a_provider_budget_line(self):
+        snap = VitalsSnapshot(
+            stale=False,
+            budget={"claude_code_cli": {"calls": 8, "max_calls": 500, "exhausted": False},
+                    "gemini": {"calls": 3, "max_calls": None, "exhausted": True}},
+        )
+        out = render.vitals(snap)
+        self.assertIn("budget: claude_code_cli 8/500 calls this window", out)
+        self.assertIn("budget: gemini 3 calls this window  (exhausted)", out)
+
+    def test_vitals_renders_workers_and_bus_line(self):
+        snap = VitalsSnapshot(stale=False, workers_busy=1, workers_total=2, bus_published=18, bus_delivered=6)
+        out = render.vitals(snap)
+        self.assertIn("workers: 1/2 busy", out)
+        self.assertIn("bus: 18 published, 6 delivered", out)
+
     def test_banner_names_the_system_and_a_real_command(self):
         out = render.banner(enabled=False)
         self.assertIn("SIMORGH", out)
-        self.assertIn("سیمرغ", out)
         self.assertIn("status", out)  # a real, always-working command
         self.assertIn("propose <topic>", out)
+
+    def test_banner_auto_uses_no_non_latin_script(self):
+        # Live-caught: the Persian name rendered as garbage on the
+        # creator's terminal (font without Arabic-script glyphs) and broke
+        # monospace centering (right-to-left text). Box-drawing/geometric
+        # glyphs are fine; non-Latin script is opt-in only.
+        out = render.banner(enabled=False, unicode="auto")
+        self.assertNotIn("سیمرغ", out)
+        self.assertIn("─", out)
+        self.assertIn("◆", out)
+
+    def test_banner_full_opts_into_the_persian_name_off_the_aligned_line(self):
+        out = render.banner(enabled=False, unicode="full")
+        self.assertIn("سیمرغ", out)
+        mark_line = next(line for line in out.splitlines() if "SIMORGH" in line)
+        self.assertNotIn("سیمرغ", mark_line)  # never in the centered mark
+
+    def test_banner_off_is_pure_ascii(self):
+        out = render.banner(enabled=False, unicode="off")
+        self.assertTrue(out.isascii(), [c for c in out if not c.isascii()])
+        self.assertIn("SIMORGH", out)
+
+    def test_unicode_mode_honors_explicit_settings(self):
+        self.assertEqual(render.unicode_mode("off"), "off")
+        self.assertEqual(render.unicode_mode("full"), "full")
+        self.assertIn(render.unicode_mode("auto"), ("auto", "off"))
 
     def test_banner_disabled_color_has_no_escape_sequences(self):
         out = render.banner(enabled=False)

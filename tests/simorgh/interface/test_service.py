@@ -330,6 +330,24 @@ class ReadlineWiringTestCase(unittest.IsolatedAsyncioTestCase):
         if service_module_readline_available():
             self.assertTrue((data_dir / "cli_history").exists())
 
+    def test_explicit_history_path_override_wins_over_the_data_dir_default(self):
+        # `[interface] history_path` existed before the readline wiring did
+        # and was silently ignored by the first version of it; an explicit
+        # setting must be honored (e.g. to share one history across runs),
+        # while the default stays inside the per-run data dir so an
+        # isolated/test run never touches the creator's real ~/.simorgh.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        explicit = Path(tmp.name) / "shared" / "history"
+        service = Service(InterfaceConfig(history_path=explicit), run_repl=False)
+        self.assertEqual(service._history_path(), explicit)  # noqa: SLF001
+
+        class _Ctx:
+            data_dir = Path(tmp.name) / "interface"
+
+        service._ctx = _Ctx()  # noqa: SLF001
+        self.assertEqual(service._history_path(), explicit)  # noqa: SLF001 -- still the override, not data_dir
+
 
 def service_module_readline_available() -> bool:
     from simorgh.interface import service as service_module

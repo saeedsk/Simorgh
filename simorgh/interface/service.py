@@ -49,8 +49,6 @@ from .httpapi import HttpApi
 from .parser import parse
 from .vitals import VitalsCache
 
-_HISTORY_LENGTH = 1000
-
 VERSION = "0.1.0"
 
 
@@ -143,6 +141,9 @@ class Service:
         return Health.ok()
 
     def _history_path(self):
+        explicit = self.config.resolved_history_path()
+        if explicit is not None:
+            return explicit
         if self._ctx is None:
             return None
         return self._ctx.data_dir / "cli_history"
@@ -158,7 +159,7 @@ class Service:
             readline.read_history_file(path)
         except (FileNotFoundError, OSError):
             pass
-        readline.set_history_length(_HISTORY_LENGTH)
+        readline.set_history_length(self.config.history_length)
 
     def _save_readline_history(self) -> None:
         if readline is None:
@@ -175,7 +176,7 @@ class Service:
     # -- REPL thread (readline blocks; bridged to asyncio via run_coroutine_threadsafe) --
     def _repl_main(self) -> None:
         self._load_readline_history()
-        print(render_mod.banner(enabled=self._color))
+        print(render_mod.banner(enabled=self._color, unicode=render_mod.unicode_mode(self.config.unicode)))
         print("Ctrl-D to detach the REPL.")
         while not self._stop_repl.is_set():
             try:

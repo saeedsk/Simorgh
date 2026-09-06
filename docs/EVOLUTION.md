@@ -3646,3 +3646,45 @@ Still ahead, roughly in order:
     non-tty stdin may skip history entirely. The garbling fix does not
     depend on that; persistence across sessions is the part still to
     confirm against a real terminal.
+
+128. **Second real CLI session, two more things the creator saw
+    immediately: "the vital is in weird characters" and "some data
+    structure type output on screen."** Both real, both in
+    `interface/`, both fixed together.
+
+    - **Raw dict in the vitals panel.** `VitalsCache.on_system_metrics`
+      stashed every subsystem's whole `system.metrics` payload under a
+      key called `budget`, and `render.vitals()` printed that dict
+      verbatim -- `budget: {'orchestration': {'counters': {}, 'gauges':
+      {...}}}` across the full terminal width, in a panel meant to read
+      like a person's vitals. Nothing in it was a budget. Now: `budget`
+      is the real per-provider rolling window Cognition already
+      publishes as a `providers` gauge (milestone 112) -- one line per
+      provider, `budget: claude_code_cli 8/500 calls this window` -- and
+      a separate `workers: 1/1 busy   bus: 18 published, 6 delivered`
+      line carries the activity that dict was drowning. A test now
+      asserts no `{`/`}` ever appears in the rendered panel.
+    - **Unicode the creator's terminal couldn't draw.** Milestone 125's
+      banner put `سیمرغ` in the centered mark line by default. On the
+      creator's terminal the Arabic-script glyphs rendered as garbage --
+      a font without them is common -- and right-to-left text also
+      breaks monospace centering arithmetic. New `[interface] unicode`
+      setting: `auto` (default) keeps box-drawing and one geometric
+      glyph, which essentially every monospace font has, but never
+      non-Latin script, and degrades to pure ASCII when stdout isn't
+      UTF-8; `full` opts into the Persian name, placed in the epigraph
+      where alignment is irrelevant; `off` is pure ASCII. The pun the
+      banner is built on ("si morgh") survives in transliteration either
+      way. Tests: `auto` contains no Arabic script; `off` is `isascii()`;
+      `full` never puts the script on the centered line.
+    - **Consistency fix found while doing it.** Milestone 127's readline
+      wiring hardcoded `<data_dir>/interface/cli_history` and a 1000-
+      entry constant, ignoring `Config.history_path`/`history_length`
+      which had existed since Interface was first built. `history_path`
+      now defaults to `None` (meaning the per-run data dir -- so an
+      isolated/test run never writes into the real `~/.simorgh`, this
+      session's leak class) and an explicit setting is honored;
+      `history_length` is read from config. One test pins the override.
+
+    9 new/updated tests across `test_render.py`, `test_vitals.py`,
+    `test_service.py`. Full suite green.
