@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -368,3 +369,46 @@ def get_capabilities(provider: str | None) -> ToolCapabilities:
     if provider is None:
         return _DEFAULT_CAPABILITIES
     return _provider_capabilities.get(provider.lower(), _DEFAULT_CAPABILITIES)
+
+
+def select_provider(
+    required_markers: tuple[str, ...], candidates: Iterable[str] | None = None
+) -> str | None:
+    """The capability-negotiation handshake's entry point for routing:
+    among `candidates` (every registered provider, if omitted), pick the
+    one whose registered ToolCapabilities support every marker in
+    `required_markers` -- so the orchestrator can ask "which available
+    provider can actually do this task?" instead of always routing to a
+    fixed default and finding out too late a marker isn't supported.
+
+    A provider that was never registered (or is registered but missing
+    a required marker) is simply not a candidate; it does not fall back
+    to `_DEFAULT_CAPABILITIES`, since that fallback exists for
+    `get_capabilities` to keep pre-negotiation callers working, not to
+    make negotiation assume capabilities a provider never advertised.
+    Among providers that do qualify, the one advertising the most
+    markers wins (ties broken by the larger `max_read_chars`, then by
+    iteration order), on the theory that a provider advertising more
+    than the bare minimum for this task is likely more capable overall.
+    Returns None if no considered provider supports every required
+    marker.
+    """
+    considered = candidates if candidates is not None else list(_provider_capabilities.keys())
+    best: str | None = None
+    best_caps: ToolCapabilities | None = None
+    for name in considered:
+        caps = _provider_capabilities.get(name.lower())
+        if caps is None:
+            continue
+        if not all(caps.supports(marker) for marker in required_markers):
+            continue
+        if best_caps is None or (
+            len(caps.markers) > len(best_caps.markers)
+            or (
+                len(caps.markers) == len(best_caps.markers)
+                and caps.max_read_chars > best_caps.max_read_chars
+            )
+        ):
+            best = name
+            best_caps = caps
+    return best
