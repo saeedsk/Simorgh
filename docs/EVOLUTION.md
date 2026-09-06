@@ -1739,3 +1739,22 @@ Still ahead, roughly in order:
     not-found/ambiguous/empty-SEARCH failure cases, and integration
     tests proving edit mode is selected by size, falls back cleanly, and
     still catches a docstring regression).
+91. **Claude Code CLI's call cap raised, on the creator's explicit
+    request.** The live session was observed idling with every draft
+    attempt falling through to `deterministic_fallback` -- both real
+    providers were legitimately exhausted for their rolling windows
+    (Gemini at its $2.00/24h cost cap, Claude Code CLI at its own
+    30-calls/5h cap). Since Claude Code CLI is flat-rate rather than
+    metered, its cap (`DEFAULT_CLAUDE_CODE_MAX_CALLS`, `main.py`) is a
+    conservative safety net against Anthropic's own subscription rate
+    limits, not a dollar guard -- so raising it is the subscription
+    owner's call, not a design assumption to make unilaterally. Asked
+    directly rather than guessed a number: the creator chose 500 (up
+    from 30), a real, deliberate increase in how much of the
+    subscription's own quota Sim's autonomous drafting can consume
+    before falling back to Gemini/deterministic -- Anthropic's own
+    enforcement still applies underneath this and surfaces as an
+    ordinary `ProviderUnavailable` if it's ever hit first, unchanged.
+    `SIMORGH_CLAUDE_CODE_MAX_CALLS` remains the env-var override for
+    anyone who wants a different value without editing source. 820
+    tests passing (no test depended on the old default).
