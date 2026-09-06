@@ -283,6 +283,13 @@ class MemoryStore(abc.ABC):
         (choosing one, merging, or discarding both) is left to a human or
         a future agent with more context than a shared-subject match can
         supply.
+
+        Idempotent per pair: the confidence penalty is applied only the
+        first time a given `other_id` is newly added to `contradicts`, so
+        calling this repeatedly for the same still-unresolved pair (e.g.
+        once per consolidation cycle via consolidate_contradictions)
+        doesn't keep compounding the same halving -- ongoing staleness is
+        left to score_confidence's time-based decay instead.
         """
         if record_a_id == record_b_id:
             raise ValueError("a record cannot contradict itself")
@@ -291,9 +298,12 @@ class MemoryStore(abc.ABC):
             if record is None:
                 raise KeyError(this_id)
             contradicts = list(record.metadata.get("contradicts", []))
-            if other_id not in contradicts:
+            already_flagged = other_id in contradicts
+            if not already_flagged:
                 contradicts.append(other_id)
-            confidence = float(record.metadata.get("confidence", 1.0)) * 0.5
+            confidence = float(record.metadata.get("confidence", 1.0))
+            if not already_flagged:
+                confidence *= 0.5
             updated = MemoryRecord(
                 id=record.id,
                 kind=record.kind,
