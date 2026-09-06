@@ -107,15 +107,19 @@ def is_valid_python(code: str) -> bool:
     return True
 
 
-def _resolve_safe_path(repo_root: Path, raw_path: str) -> tuple[Path | None, str | None]:
+def _resolve_safe_path(
+    repo_root: Path, raw_path: str, max_path_chars: int = _MAX_PATH_CHARS
+) -> tuple[Path | None, str | None]:
     """The shared validation core for safe_read_file (bounded, for the
     chat-facing READ tool) and read_file_for_patch (a much higher bound,
     for seeding a self-patch draft with a file's true current content) --
     factored out so both enforce the identical path-safety boundary
     (plain relative path inside repo_root, under src/docs/tests, no
     traversal, no credential-shaped names) rather than risking two
-    copies drifting apart. Returns `(resolved_path, None)` on success or
-    `(None, "refused: ...")` on any failure -- never raises.
+    copies drifting apart. `max_path_chars` lets a caller apply a
+    negotiated provider limit (ToolCapabilities.max_path_chars) instead
+    of this module's own default. Returns `(resolved_path, None)` on
+    success or `(None, "refused: ...")` on any failure -- never raises.
 
     That "never raises" guarantee is enforced explicitly, not assumed:
     caught live, a confused model's "READ:" payload was really a huge
@@ -128,7 +132,7 @@ def _resolve_safe_path(repo_root: Path, raw_path: str) -> tuple[Path | None, str
     OS- and filesystem-specific ways this function shouldn't have to
     enumerate.
     """
-    if len(raw_path) > _MAX_PATH_CHARS:
+    if len(raw_path) > max_path_chars:
         return None, f"refused: path is {len(raw_path)} chars -- too long to be a real path"
     try:
         rel = Path(raw_path)
@@ -161,19 +165,23 @@ def _resolve_safe_path(repo_root: Path, raw_path: str) -> tuple[Path | None, str
     return target, None
 
 
-def safe_read_file(repo_root: Path, raw_path: str) -> str:
+def safe_read_file(
+    repo_root: Path, raw_path: str, capabilities: ToolCapabilities | None = None
+) -> str:
     """Read `raw_path` if -- and only if -- it resolves to a plain
     relative path inside `repo_root`, under src/, docs/, or tests/, and
     doesn't look like a credentials file. Read-only; never writes; never
     raises -- returns a "[refused: ...]" string on any problem, so a
     caller can always feed the result straight back into a prompt without
-    a try/except of its own. Bounded to `_MAX_READ_CHARS`, appropriate
-    for a chat-facing READ tool call -- see `read_file_for_patch` for
-    self-patch's own, much higher ceiling, needed because it seeds a
-    "write the complete new content of this file" prompt rather than a
-    bounded conversational lookup.
+    a try/except of its own. Bounded to `capabilities.max_read_chars`
+    (this module's own `_MAX_READ_CHARS` if `capabilities` is omitted),
+    appropriate for a chat-facing READ tool call -- see
+    `read_file_for_patch` for self-patch's own, much higher ceiling,
+    needed because it seeds a "write the complete new content of this
+    file" prompt rather than a bounded conversational lookup.
     """
-    target, refusal = _resolve_safe_path(repo_root, raw_path)
+    caps = capabilities or _DEFAULT_CAPABILITIES
+    target, refusal = _resolve_safe_path(repo_root, raw_path, caps.max_path_chars)
     if refusal is not None:
         return f"[{refusal}]"
     try:
@@ -181,8 +189,8 @@ def safe_read_file(repo_root: Path, raw_path: str) -> str:
     except OSError as exc:
         return f"[refused: could not read {raw_path!r}: {exc!r}]"
 
-    if len(content) > _MAX_READ_CHARS:
-        return content[:_MAX_READ_CHARS] + f"\n...[truncated, {len(content)} chars total]"
+    if len(content) > caps.max_read_chars:
+        return content[: caps.max_read_chars] + f"\n...[truncated, {len(content)} chars total]"
     return content
 
 
@@ -203,16 +211,21 @@ def safe_read_file(repo_root: Path, raw_path: str) -> str:
 _MAX_PATCH_SEED_CHARS = 300_000
 
 
-def read_file_for_patch(repo_root: Path, raw_path: str) -> tuple[str | None, str | None]:
+def read_file_for_patch(
+    repo_root: Path, raw_path: str, capabilities: ToolCapabilities | None = None
+) -> tuple[str | None, str | None]:
     """Like safe_read_file, but for seeding a self-patch draft: the same
     path-safety validation, an untruncated read up to a much higher
-    ceiling (`_MAX_PATCH_SEED_CHARS`), and a distinct, honest refusal for
-    a file that's too large to safely draft a complete replacement for
-    in one shot -- rather than silently truncating and letting the
-    drafting LLM discover the gap on its own. Returns `(content, None)`
-    on success or `(None, "refused: ...")` on failure; never raises.
+    ceiling (`capabilities.max_patch_seed_chars`, or this module's own
+    `_MAX_PATCH_SEED_CHARS` if `capabilities` is omitted), and a distinct,
+    honest refusal for a file that's too large to safely draft a complete
+    replacement for in one shot -- rather than silently truncating and
+    letting the drafting LLM discover the gap on its own. Returns
+    `(content, None)` on success or `(None, "refused: ...")` on failure;
+    never raises.
     """
-    target, refusal = _resolve_safe_path(repo_root, raw_path)
+    caps = capabilities or _DEFAULT_CAPABILITIES
+    target, refusal = _resolve_safe_path(repo_root, raw_path, caps.max_path_chars)
     if refusal is not None:
         return None, refusal
     try:
@@ -220,10 +233,10 @@ def read_file_for_patch(repo_root: Path, raw_path: str) -> tuple[str | None, str
     except OSError as exc:
         return None, f"refused: could not read {raw_path!r}: {exc!r}"
 
-    if len(content) > _MAX_PATCH_SEED_CHARS:
+    if len(content) > caps.max_patch_seed_chars:
         return None, (
             f"refused: {raw_path!r} is {len(content)} chars, over the "
-            f"{_MAX_PATCH_SEED_CHARS}-char self-patch limit -- too large to safely "
+            f"{caps.max_patch_seed_chars}-char self-patch limit -- too large to safely "
             "draft a complete replacement for in one shot"
         )
     return content, None
@@ -232,11 +245,16 @@ def read_file_for_patch(repo_root: Path, raw_path: str) -> tuple[str | None, str
 _MAX_LIST_ENTRIES = 300
 
 
-def safe_list_dir(repo_root: Path, raw_path: str) -> str:
+def safe_list_dir(
+    repo_root: Path, raw_path: str, capabilities: ToolCapabilities | None = None
+) -> str:
     """List the immediate entries under `raw_path`, subject to the exact
     same boundary as safe_read_file (confined to src/docs/tests, no
     traversal, never raises). An empty path or "." lists the allowed
-    top-level roots themselves.
+    top-level roots themselves. `capabilities.max_path_chars` and
+    `capabilities.max_list_entries` (this module's own `_MAX_PATH_CHARS`
+    and `_MAX_LIST_ENTRIES` if `capabilities` is omitted) gate the path
+    length and listing size respectively.
 
     Caught live: asked to "read your code base and point to gaps in
     your design," Sim's only way to see what files even exist was RUN
@@ -249,11 +267,12 @@ def safe_list_dir(repo_root: Path, raw_path: str) -> str:
     granting anything READ doesn't already: still read-only, still
     confined to the same three roots, still no traversal.
     """
+    caps = capabilities or _DEFAULT_CAPABILITIES
     raw = raw_path.strip()
     if not raw or raw == ".":
         return "\n".join(f"{name}/" for name in _ALLOWED_READ_ROOTS)
 
-    if len(raw) > _MAX_PATH_CHARS:
+    if len(raw) > caps.max_path_chars:
         return f"[refused: path is {len(raw)} chars -- too long to be a real path]"
     try:
         rel = Path(raw)
@@ -284,8 +303,8 @@ def safe_list_dir(repo_root: Path, raw_path: str) -> str:
         if entry.name.startswith(".") or entry.name == "__pycache__":
             continue
         names.append(f"{entry.name}/" if entry.is_dir() else entry.name)
-        if len(names) >= _MAX_LIST_ENTRIES:
-            names.append(f"... (truncated at {_MAX_LIST_ENTRIES} entries)")
+        if len(names) >= caps.max_list_entries:
+            names.append(f"... (truncated at {caps.max_list_entries} entries)")
             break
     return "\n".join(names) if names else "[empty directory]"
 
@@ -297,6 +316,13 @@ class ToolCapabilities:
     orchestrator logic can ask "does this provider have LIST?" or "what's
     its read ceiling?" instead of assuming every provider offers the
     same fixed marker set at this module's own hardcoded limits.
+
+    These limits aren't just descriptive metadata: passing an instance
+    as the `capabilities` argument to `safe_read_file`, `safe_list_dir`,
+    and `read_file_for_patch` makes each of them actually enforce these
+    values in place of this module's own defaults, so a provider that
+    negotiates a different ceiling gets that ceiling applied at the
+    point content is read or listed, not just reported back on request.
 
     The limits default to this module's own constants (`_MAX_READ_CHARS`
     etc.) so a provider that doesn't customize anything behaves exactly
