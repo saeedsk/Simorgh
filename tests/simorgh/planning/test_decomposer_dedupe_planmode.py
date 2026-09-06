@@ -83,6 +83,50 @@ class TestApprovalDecision(unittest.TestCase):
         self.assertEqual(planmode.approval_decision("insufficient_evidence", "low", "medium"), "replan")
 
 
+class TestHumanApprovalTimeout(unittest.TestCase):
+    """`is_human_approval_timed_out` (planmode.py): the pure predicate
+    behind `service.py`'s `_reconsider_awaiting_human` scan -- closes
+    07-planning.md section 5.4's "timeout -> project task paused with
+    reason" (Phase 4 roadmap item 4.1's "human prompt when risk >= high,
+    auto otherwise"; a plan stuck waiting on a human must not hang the
+    project forever)."""
+
+    def _state(self, **overrides):
+        kwargs = dict(
+            plan_id="p1", task_id="t1", goal="g", steps=[], risk="high",
+            status=planmode.AWAITING_HUMAN, prompt_asked_at=100.0,
+        )
+        kwargs.update(overrides)
+        return planmode.PlanState(**kwargs)
+
+    def test_not_timed_out_before_the_deadline(self):
+        state = self._state()
+        self.assertFalse(planmode.is_human_approval_timed_out(state, now=150.0, timeout_seconds=100.0))
+
+    def test_timed_out_at_exactly_the_deadline(self):
+        state = self._state()
+        self.assertTrue(planmode.is_human_approval_timed_out(state, now=200.0, timeout_seconds=100.0))
+
+    def test_timed_out_past_the_deadline(self):
+        state = self._state()
+        self.assertTrue(planmode.is_human_approval_timed_out(state, now=1000.0, timeout_seconds=100.0))
+
+    def test_not_awaiting_human_never_times_out(self):
+        state = self._state(status=planmode.PROPOSED, prompt_asked_at=None)
+        self.assertFalse(planmode.is_human_approval_timed_out(state, now=1000.0, timeout_seconds=100.0))
+
+    def test_awaiting_human_but_no_asked_at_never_times_out(self):
+        # Defensive: a state machine bug that sets AWAITING_HUMAN without
+        # recording when must not be misread as "always overdue".
+        state = self._state(prompt_asked_at=None)
+        self.assertFalse(planmode.is_human_approval_timed_out(state, now=1000.0, timeout_seconds=100.0))
+
+    def test_already_resolved_statuses_never_time_out(self):
+        for status in planmode.RESOLVED_STATUSES:
+            state = self._state(status=status)
+            self.assertFalse(planmode.is_human_approval_timed_out(state, now=1000.0, timeout_seconds=100.0))
+
+
 class TestComputeDiff(unittest.TestCase):
     def test_added_and_removed(self):
         before = [Step("1", "patch", "keep this", ()), Step("2", "patch", "drop this", ())]
