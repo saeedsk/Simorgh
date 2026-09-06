@@ -12,6 +12,7 @@ its own copy that could drift out of sync with the others.
 from __future__ import annotations
 
 import ast
+import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -308,6 +309,68 @@ def safe_list_dir(
             names.append(f"... (truncated at {caps.max_list_entries} entries)")
             break
     return "\n".join(names) if names else "[empty directory]"
+
+
+_LEDGER_FILENAME = ".sim_tool_ledger.json"
+
+
+def _ledger_path(repo_root: Path) -> Path:
+    return repo_root / _LEDGER_FILENAME
+
+
+def _load_ledger(repo_root: Path) -> dict[str, dict[str, int]]:
+    """The raw {marker: {"success": n, "failure": n}} counts persisted on
+    disk, or an empty dict if the ledger file doesn't exist yet or is
+    unreadable/corrupt -- biasing tool selection is a best-effort
+    heuristic, so a missing or corrupt ledger degrades to "no history
+    yet" instead of raising.
+    """
+    try:
+        raw = json.loads(_ledger_path(repo_root).read_text())
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def record_outcome(repo_root: Path, marker: str, success: bool) -> None:
+    """Persist one more outcome for `marker` (case-insensitive) to the
+    on-disk ledger under `repo_root`, incrementing its success or
+    failure count so it survives across sessions. Best-effort: an
+    unwritable ledger location (e.g. a read-only checkout) is silently
+    ignored, since a tool call's own result should still be usable by
+    its caller even if history couldn't be recorded.
+    """
+    key = marker.lower()
+    ledger = _load_ledger(repo_root)
+    counts = ledger.setdefault(key, {"success": 0, "failure": 0})
+    counts["success" if success else "failure"] += 1
+    try:
+        _ledger_path(repo_root).write_text(json.dumps(ledger))
+    except OSError:
+        pass
+
+
+def failure_rate(repo_root: Path, marker: str) -> float:
+    """The fraction of `marker`'s recorded outcomes that were failures,
+    in [0.0, 1.0] -- 0.0 if there's no history yet, so a marker that's
+    simply never been tried isn't penalized as though it always failed.
+    """
+    counts = _load_ledger(repo_root).get(marker.lower())
+    if not counts:
+        return 0.0
+    total = counts.get("success", 0) + counts.get("failure", 0)
+    return counts.get("failure", 0) / total if total else 0.0
+
+
+def rank_by_history(repo_root: Path, markers: Iterable[str]) -> list[str]:
+    """`markers` ordered so the ones with the lowest recorded failure
+    rate under `repo_root`'s ledger come first (ties keep their
+    original relative order, via a stable sort) -- the actual "bias
+    future tool selection" step: a caller choosing among several
+    otherwise-equal markers can use this ordering instead of a fixed or
+    arbitrary one.
+    """
+    return sorted(markers, key=lambda m: failure_rate(repo_root, m))
 
 
 @dataclass(frozen=True)
