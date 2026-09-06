@@ -2660,3 +2660,54 @@ Still ahead, roughly in order:
     individually reconfirmed first (37, 48, and 77 tests respectively,
     all passing, 123 schemas back in sync); full suite green at merge,
     2018 tests.
+
+111. **Wave-1's fourth and final fork lands: context-compaction layers
+    3-5, closing harness-06 gap #2 ("No context-compaction pipeline in
+    any tool loop") by name.** Layers 1-2 (budget reduction, snip)
+    already existed; this fork built the rest of `04-cognition.md`'s own
+    pipeline spec on top: layer 3 (microcompact / reference
+    substitution -- dedupe identical tool results, strip whitespace
+    runs, shrink long previews), layer 4 (read-time collapse -- older
+    transcript segments become one-line headlines while the newest stay
+    full, the *stored* messages never mutated, only what's assembled for
+    a given call), layer 5 (auto-compact via an injected `summarize`
+    callable as the genuine last resort, emitting `cognition.compact.
+    pre`/`.done` and recording the summary), and persistent-instruction
+    protection (`protected: true` or `role: "system"`) honored by every
+    layer above it -- proven with a property test that protected blocks
+    survive compaction byte-identical.
+
+    Two real bugs surfaced and fixed along the way, not just new layers
+    bolted on: compaction was running on the assembler's already-
+    flattened "conversation" block rather than the caller's raw
+    messages, silently defeating layer 1 in production even though its
+    own unit tests passed against raw input directly; and `compact.
+    request`'s `allow_summarize` field was hardcoded to `False`,
+    permanently disabling layer 5 regardless of what a caller asked for.
+
+    Per-call budget accounting (the other half of this roadmap item):
+    `RollingWindowBudget.estimate_cost()` gives a pre-call cost
+    projection, and `Router.complete()` now skips any candidate priced
+    over the request's own `max_cost_usd`, raising a new
+    `BudgetExceeded` when every real candidate is priced out and the
+    caller required a real provider -- rather than silently either
+    overspending or floor-degrading for a reason the caller can't see.
+
+    No `simorgh/contracts/` change needed -- every field used
+    (`allow_summarize`, `summary_ref`, the extra `budget`/`purpose`
+    fields, the `cognition.compact.pre`/`.done` topics) was already
+    present or already permitted via `additionalProperties: true`.
+    129 cognition-package tests, 8 new integration tests naming harness-
+    06 gap #2 in their docstrings, full suite green at merge: 2059 tests.
+
+    **Wave 1 complete.** All four independent Phase-4 items (Plan Mode,
+    evaluator-optimizer, skill acquisition, compaction) built in
+    isolated git worktrees -- zero shared-file collisions, zero
+    unauthorized pushes, a clean merge for every one of the four,
+    unlike Phase 1/3's concurrent-forks-in-one-tree approach that cost
+    real cleanup work twice. Three of the four forks found that the
+    session-mechanics for their assigned item were already substantially
+    built, and the real gap was narrower and more specific than the
+    roadmap's one-line description suggested -- reading the actual code
+    against the actual spec before writing anything, every time, is what
+    made that distinction possible instead of duplicating existing work.
