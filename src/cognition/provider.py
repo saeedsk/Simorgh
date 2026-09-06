@@ -215,6 +215,15 @@ class CapabilityRegistry:
             caps |= provider.capabilities
         return frozenset(caps)
 
+    def best_for_task(self, task_type: TaskType) -> LLMProvider | None:
+        """Highest-priority available provider that currently supports
+        `task_type`, without invoking it -- lets the orchestrator inspect
+        which provider would be chosen (e.g. Claude vs. Gemini) before
+        committing to a completion, so it can query and switch mid-session
+        based on the kind of work rather than a static provider choice.
+        """
+        return self.best_for(task_type.required_capability)
+
     def complete_for(self, task_type: TaskType, prompt: str, **kwargs: Any) -> LLMResponse:
         """Negotiate a provider for `task_type` mid-session: try the
         highest-priority available provider that supports the capability
