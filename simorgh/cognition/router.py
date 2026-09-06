@@ -14,9 +14,10 @@ from __future__ import annotations
 
 from simorgh.contracts.protocols import Clock, Provider, ProviderResponse
 
-from .api import Budget, NoRealProvider, Purpose
+from .api import Budget, BudgetExceeded, NoRealProvider, Purpose
 from .budget import RollingWindowBudget
 from .providers.base import FloorProvider
+from .tokens import estimate_tokens
 
 
 class Router:
@@ -38,8 +39,14 @@ class Router:
         budget: Budget, timeout: float,
     ) -> tuple[ProviderResponse, bool]:
         """Returns (response, floor). Raises `NoRealProvider` if every
-        real candidate failed/was exhausted and `budget.require_real`."""
+        real candidate failed/was exhausted and `budget.require_real`;
+        raises `BudgetExceeded` instead when every candidate was actually
+        *available* but skipped purely because its estimated cost for
+        this one request would exceed `budget.max_cost_usd` -- per-call
+        budget accounting (04 section 7), distinct from availability."""
         last_error: Exception | None = None
+        any_available_but_over_budget = False
+        prompt_tokens = sum(estimate_tokens(m.get("content", "")) for m in messages)
         for name in self._order:
             provider = self._by_name.get(name)
             if provider is None or not provider.available():
@@ -47,6 +54,11 @@ class Router:
             provider_budget = self._budgets.get(name)
             if provider_budget is not None and not await provider_budget.can_spend():
                 continue
+            if provider_budget is not None:
+                est_cost = provider_budget.estimate_cost(prompt_tokens, budget.max_tokens_out)
+                if est_cost > budget.max_cost_usd:
+                    any_available_but_over_budget = True
+                    continue
             try:
                 response = await provider.complete(
                     messages, tools=tools, max_tokens=budget.max_tokens_out, timeout=timeout,
@@ -58,6 +70,8 @@ class Router:
                 await provider_budget.record(response)
             return response, False
         if budget.require_real:
+            if last_error is None and any_available_but_over_budget:
+                raise BudgetExceeded(f"every candidate's estimated cost exceeds max_cost_usd={budget.max_cost_usd}")
             raise NoRealProvider(str(last_error) if last_error else "no real provider available")
         return self._floor.respond_for_purpose(purpose), True
 

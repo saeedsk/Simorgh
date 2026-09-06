@@ -14,7 +14,7 @@ from simorgh.contracts.envelope import Event, Message
 from simorgh.contracts.protocols import Context, Health, ProviderResponse
 from simorgh.contracts.registry import error_reply_payload
 
-from .api import Budget, ContextTooLarge, NoRealProvider, Paused, Purpose
+from .api import Budget, BudgetExceeded, ContextTooLarge, NoRealProvider, Paused, Purpose
 from .assembler import PromptAssembler
 from .budget import RollingWindowBudget
 from .compaction import Compactor
@@ -50,6 +50,7 @@ class Service:
     )
     produces: tuple[str, ...] = (
         topics.COGNITION_THINK_REPLY, topics.COGNITION_COMPACT_REPLY,
+        topics.COGNITION_COMPACT_PRE, topics.COGNITION_COMPACT_DONE,
         topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_HEALTH,
     )
 
@@ -84,7 +85,10 @@ class Service:
         self._assembler = PromptAssembler(
             ctx.bus, ctx.source, request_timeout=self._config.assembly_request_timeout, logger=ctx.logger,
         )
-        self._compactor = Compactor(self._config, ctx.ledger)
+        self._compactor = Compactor(
+            self._config, ctx.ledger, bus=ctx.bus, source=ctx.source, clock=ctx.clock,
+            summarize=self._summarize_for_compaction,
+        )
         self._parser = OutputParser()
 
         self._sub_think = await ctx.bus.subscribe(topics.COGNITION_THINK, self._on_think)
@@ -138,11 +142,24 @@ class Service:
                 await self._error_reply(message, "context_too_large", "protected blocks alone exceed the budget")
                 return
 
+            # The compactor sees the caller's *raw* messages (role, name,
+            # load_bearing intact) -- not the assembler's already-flattened
+            # "conversation" block -- so layer 1 can still find individual
+            # tool results and layers 3-4 have real per-segment structure
+            # to work with, per 04 section 5's compaction pipeline.
+            elastic_limit = budget.max_tokens_in - protected_tokens
             compacted = await self._compactor.compact(
-                [{"role": "user", "content": b.text} for b in assembled.blocks if not b.protected],
-                limit_tokens=budget.max_tokens_in - protected_tokens,
+                payload["messages"], limit_tokens=elastic_limit,
                 allow_summarize=payload.get("allow_summarize", False),
+                session_id=payload.get("session_id"), purpose=purpose.value,
             )
+            if compacted.tokens_after > elastic_limit:
+                # Layers 1-5 ran and it's still over budget -- a single
+                # oversized protected block is the spec's own example, but
+                # the check itself is general: protected means protected
+                # (principle 4.6), so we fail loudly rather than truncate.
+                raise ContextTooLarge("context still exceeds budget after all compaction layers")
+
             protected_text = "\n\n".join(b.text for b in protected)
             full_text = f"{protected_text}\n\n{compacted.text}".strip()
 
@@ -152,6 +169,12 @@ class Service:
             )
         except NoRealProvider as exc:
             await self._error_reply(message, "no_real_provider", str(exc), retryable=True)
+            return
+        except BudgetExceeded as exc:
+            await self._error_reply(message, "budget_exceeded", str(exc), retryable=False)
+            return
+        except ContextTooLarge as exc:
+            await self._error_reply(message, "context_too_large", str(exc))
             return
         except Paused:
             await self._error_reply(message, "paused", "system paused mid-call", retryable=True)
@@ -173,16 +196,43 @@ class Service:
             "compaction": {
                 "layers_applied": [str(n) for n in compacted.layers_applied],
                 "tokens_before": compacted.tokens_before, "tokens_after": compacted.tokens_after,
+                "summary_ref": compacted.summary_ref,
+            },
+            # Per-call budget accounting (04 section 7): what this one
+            # request actually spent against what it stated it could --
+            # reported alongside the rolling per-provider window in
+            # `cognition.provider.status`, not instead of it.
+            "budget": {
+                "max_cost_usd": budget.max_cost_usd, "spent_usd": response.cost_usd or 0.0,
+                "max_tokens_out": budget.max_tokens_out, "tokens_out": response.output_tokens,
+                "within_budget": (response.cost_usd or 0.0) <= budget.max_cost_usd,
             },
         })
 
+    async def _summarize_for_compaction(self, text: str) -> str:
+        """Layer 5's model call (04 section 5's "Auto-compact"): purpose
+        `consolidate`, routed through the same `Router` as any other
+        `think` call so it shares budgets/failover/floor -- if every
+        provider is down, the floor's fixed template still returns
+        *something*, which is safer than raising out of a compaction
+        pass that a caller is relying on to make room."""
+        consolidate_budget = self._config.purposes.get("consolidate") or Budget(16_000, 2_000, 0.1)
+        response, _floor = await self._router.complete(
+            Purpose.CONSOLIDATE, [{"role": "user", "content": text}], tools=None,
+            budget=consolidate_budget, timeout=consolidate_budget.max_seconds,
+        )
+        return response.text
+
     async def _on_compact_request(self, message: Message) -> None:
         compacted = await self._compactor.compact(
-            message.payload.get("messages", []), limit_tokens=message.payload["target_tokens"], allow_summarize=False,
+            message.payload.get("messages", []), limit_tokens=message.payload["target_tokens"],
+            allow_summarize=message.payload.get("allow_summarize", False),
+            session_id=message.payload.get("session_id"),
         )
         await self._ctx.bus.reply(message, type=topics.COGNITION_COMPACT_REPLY, payload={
             "layers_applied": [str(n) for n in compacted.layers_applied],
             "tokens_before": compacted.tokens_before, "tokens_after": compacted.tokens_after,
+            "summary_ref": compacted.summary_ref,
         })
 
     async def _on_state_changed(self, message: Message) -> None:
