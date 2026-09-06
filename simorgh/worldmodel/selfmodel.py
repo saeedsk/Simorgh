@@ -232,7 +232,26 @@ def render_summary(model: SelfModel, budget_tokens: int) -> tuple[str, int]:
 
 def _render_section(model: SelfModel, section: str) -> str | None:
     if section == "identity":
-        return f"I am {model.identity.name}. {model.identity.summary}".strip()
+        # Live-caught: read as plain descriptive text ("I am X"), this
+        # was consistently not strong enough to override a provider's
+        # own default identity -- asked directly, it answered honestly
+        # that it was Claude Code, not Simorgh (the underlying `claude`
+        # CLI *is* Claude Code, with its own default system prompt
+        # asserting exactly that identity). This section is delivered as
+        # a real system prompt now (`cognition/service.py`'s `_on_think`,
+        # `ClaudeCodeProvider`'s `--system-prompt`), which does most of
+        # the work -- but the wording itself needs to be a direct,
+        # first-person instruction to respond in character, not a fact
+        # being reported, since "I am X" alone reads as background
+        # rather than a binding directive even with real system-prompt
+        # delivery.
+        return (
+            f"You are {model.identity.name}. Respond fully in character as "
+            f"{model.identity.name}, in the first person -- never break "
+            f"character to say you are Claude, Claude Code, or any other "
+            f"assistant name; that is not who is answering here. "
+            f"{model.identity.summary}"
+        ).strip()
     if section == "competence":
         if not model.competence:
             return "Competence: not yet tracked (no learn.competence.updated seen this session)."

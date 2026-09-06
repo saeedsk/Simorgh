@@ -3191,3 +3191,80 @@ Still ahead, roughly in order:
     already proved back when orchestration was first built. 15 new
     tests; full suite green (2138 on the fork's own branch before
     merge). No `simorgh/contracts/` change needed.
+
+120. **Two unrelated, real things surfaced by the same planning pass for
+    the Phase 5 cutover checklist -- one a process near-miss, one a
+    genuine identity bug the creator then hit live.**
+
+    First: while checking `simorgh migrate-v1`'s readiness (§6's own new
+    checklist item), a routine look at the real `~/.simorgh` turned up
+    10MB of real Ledger data that had landed there during this session's
+    own live-testing -- `metrics:history`, `reflect:drift`, `curiosity:
+    ticks`, `memory:episodic` streams, a `SELF.md` projection -- none of
+    it deliberate. Every *direct* `simorgh run` this session used a
+    scratch `SIMORGH_RUNTIME_DATA_DIR`, but v2's config defaults `data_
+    dir` to `~/.simorgh` whenever that isn't set, and at least one
+    subagent fork's own "verify live" step (or a direct invocation that
+    slipped through) never set it -- a worktree isolates the repo, never
+    `$HOME`. The creator's real v1 data in the same directory
+    (`memory.jsonl`, `cli_history`) was untouched -- v2 writes to a
+    `ledger/` subdirectory v1 never used -- and everything new was
+    synthetic test content, so cleanup was a clean, low-stakes deletion
+    once confirmed with the creator (who asked for delete, not a
+    move-aside, once the contents were described). Found by chance, not
+    a systematic check -- `docs/EVOLUTION.md` itself is not the durable
+    home for this kind of operational lesson, so it's recorded in this
+    session's own memory (`feedback_sandbox_isolation`) instead, as the
+    mirror image of an earlier incident in the same project where the
+    *repo* was isolated but `$HOME` wasn't -- this time the repo was
+    isolated and `$HOME` wasn't, same underlying lesson from the other
+    direction: isolating one axis is never evidence the other is
+    handled too, check both, every time, including inside subagent
+    forks.
+
+    Second, and the more consequential fix: the creator, testing the
+    dashboard chat box directly, got a reply that broke character and
+    said it was Claude Code, not Simorgh. Root-caused rather than
+    patched over: `ClaudeCodeProvider.complete()` flattened every
+    message -- including the identity/self-summary content Cognition's
+    own `_on_think` had carefully assembled as a "protected" block --
+    into one undifferentiated `-p` prompt string, with no role
+    distinction surviving at all by the time it reached the CLI. The
+    underlying `claude` binary *is* Claude Code, carrying its own strong
+    default system prompt asserting exactly that identity; a few
+    paragraphs of identity text buried in the middle of a user turn was
+    never going to compete with that. Confirmed via `claude --help`
+    rather than assumed: `--system-prompt` (full replacement) exists
+    precisely for this. Fixed in two parts: `cognition/service.py`'s
+    `_on_think` now keeps protected content as a real `role: "system"`
+    message instead of flattening it in; `ClaudeCodeProvider.complete()`
+    routes any `system`-role content to `--system-prompt` (not `--
+    append-system-prompt` -- Claude Code's own default identity is
+    exactly what must not compete here) and only conversational content
+    to `-p`. The wording itself was also weak independent of delivery
+    mechanism -- `worldmodel/selfmodel.py`'s identity section read as
+    "I am Simorgh," descriptive third-person-sounding text, not a
+    binding instruction -- strengthened to a direct "You are Simorgh.
+    Respond fully in character... never break character to say you are
+    Claude, Claude Code, or any other assistant name."
+
+    Verified live in the browser, not just in tests: asked the dashboard
+    chat "Who are you? What is your name?" and got back "I'm Simorgh —
+    Sim, if you'd like the short version," correctly referencing its own
+    real code areas and the honest absence of competence-tracking data
+    this session, with no mention of Claude or Claude Code anywhere.
+    5 new regression tests (provider argv construction, identity
+    wording) across `simorgh/cognition/` and `simorgh/worldmodel/`.
+
+    A full-suite run caught one real regression from the `_on_think`
+    split itself: `test_persistent_instruction_protection_survives_in_
+    what_the_provider_actually_sees` had assumed everything the provider
+    receives lands in a single `received_messages[0]`, true only while
+    `_on_think` flattened to one message. Fixed by checking across every
+    message the fake provider actually received instead of index 0 --
+    the two "protected" concepts in play are genuinely distinct (the
+    assembler's own protected blocks, e.g. self-model identity, now go
+    out as `role: system`; a caller-tagged protected *message* is a
+    separate mechanism, preserved through the compactor's own layers but
+    still folded into the compacted conversation text as `role: user`),
+    and the test only needed to assert presence, not a specific role.

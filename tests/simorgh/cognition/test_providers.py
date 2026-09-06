@@ -92,6 +92,58 @@ class TestClaudeCodeProvider(unittest.IsolatedAsyncioTestCase):
     def test_available_reflects_whether_the_binary_is_on_path(self):
         self.assertFalse(ClaudeCodeProvider(binary="definitely-not-a-real-binary-xyz").available())
 
+    async def test_system_role_content_becomes_a_real_system_prompt_flag(self):
+        """Live-caught: identity/self-model content flattened into the
+        same -p prompt as everything else was too weak to override
+        Claude Code's own default identity -- asked directly, it said it
+        was Claude Code, not Simorgh. A `role: "system"` message must
+        reach the CLI with real system-prompt authority instead."""
+        captured = {}
+
+        def runner(argv, **kwargs):
+            captured["argv"] = argv
+            return _fake_completed(json.dumps({"result": "hi", "is_error": False}))
+
+        provider = ClaudeCodeProvider(binary="claude", runner=runner)
+        await provider.complete(
+            [{"role": "system", "content": "You are Simorgh."}, {"role": "user", "content": "hello"}],
+            tools=None, max_tokens=100,
+        )
+        argv = captured["argv"]
+        self.assertIn("--system-prompt", argv)
+        self.assertEqual(argv[argv.index("--system-prompt") + 1], "You are Simorgh.")
+        self.assertNotIn("--append-system-prompt", argv)
+        # The user turn (-p) must not also carry the system content --
+        # no double-delivery, no role bleed.
+        self.assertEqual(argv[argv.index("-p") + 1], "hello")
+
+    async def test_multiple_system_messages_are_joined_into_one_flag(self):
+        captured = {}
+
+        def runner(argv, **kwargs):
+            captured["argv"] = argv
+            return _fake_completed(json.dumps({"result": "hi", "is_error": False}))
+
+        provider = ClaudeCodeProvider(binary="claude", runner=runner)
+        await provider.complete(
+            [{"role": "system", "content": "part one"}, {"role": "system", "content": "part two"},
+             {"role": "user", "content": "hello"}],
+            tools=None, max_tokens=100,
+        )
+        argv = captured["argv"]
+        self.assertEqual(argv[argv.index("--system-prompt") + 1], "part one\n\npart two")
+
+    async def test_no_system_messages_omits_the_flag_entirely(self):
+        captured = {}
+
+        def runner(argv, **kwargs):
+            captured["argv"] = argv
+            return _fake_completed(json.dumps({"result": "hi", "is_error": False}))
+
+        provider = ClaudeCodeProvider(binary="claude", runner=runner)
+        await provider.complete([{"role": "user", "content": "hello"}], tools=None, max_tokens=100)
+        self.assertNotIn("--system-prompt", captured["argv"])
+
 
 class TestGeminiProvider(unittest.IsolatedAsyncioTestCase):
     def test_unavailable_without_an_api_key(self):
