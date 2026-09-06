@@ -6,8 +6,8 @@
 > contradict them. Contradictions found while writing are listed in §12.
 
 **Layer:** 1 Cognitive core
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** built (Phase 1 Track C)
+**Status:** built -- environment facets and the static Self Model shell; the dynamic Self Model content is Phase 3, not this build (see the spec body)
 **Depends on (contracts only):** consumes `world.env.query`, `self.summary`, `self.gaps`, `self.observation`, `tool.registered`, `tool.unavailable`, `persona.user_model.updated`, `learn.competence.updated`, `learn.self_patch.applied`, `learn.self_patch.reverted`, `learn.skill.acquired`, `reflect.calibration.updated`, `reflect.patterns.found`, `reflect.health.finding`, `task.created`, `task.completed`, `task.failed`, `project.completed`, `project.failed`, `plan.approved`, `percept.file.changed`, `system.started`, `system.tick.second`
 **v1 code that migrates here:** `src/orchestrator/capability_map.py` (`list_capability_areas`, `list_capability_modules`, `pick_diverse_target`'s inventory half), `_list_source_files` from `src/main.py`, `list_applied_skills` inventory use from `src/agents/skills/registry.py`; identity text loading from `src/orchestrator/soul.py`
 

@@ -8,8 +8,8 @@
 > document and note it in `00-README.md`'s changelog.
 
 **Layer:** 4 Self & surfaces
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** built (Phase 1 Track C)
+**Status:** partial -- see §12 for what did not land this session
 **Depends on (contracts only):** `ui.notice`, `ui.prompt`, `ui.rendered`, `system.*`, `task.*`, `plan.*`, `action.needs_human`, `action.denied`, `persona.state.changed`, `memory.stored`, `learn.*`, `cognition.provider.status`, `turn.completed` (see §12 Q1), `research.finding.recorded`, `curiosity.interest.updated`
 **v1 code that migrates here:** `src/main.py` (`run_cli`, `_run_cli_loop`, banner, `_COMMANDS_HELP`, `autocorrect_command`, `strip_command_slash`, `extract_*_args`, `_print_tasks`, `_print_pending`, `_print_vitals`/`_vitals_snapshot`, `VitalsMonitor`, `_print_autonomous_digest`, `_run_shell_passthrough`, readline history), `src/orchestrator/console_style.py`, `src/orchestrator/activity_log.py` (viewing side), `src/orchestrator/autonomy.py` (`ActionDigest` rendering)
 
@@ -243,6 +243,6 @@ Parallelizable: 3, 4, 5 after 2. Size: **M** (+M for Phase 5).
 
 ## 12. Open questions
 
-1. `turn.completed` is used in `02` Flow 1 but absent from the `03` §4 catalog. **Default:** add `turn.completed{session_id, task_id, text, floor: bool, verification_ref?}` under `task.*` (contracts change per `05` §6).
-2. `task.create` request and `*.request` view types (`task.list.request`, `curiosity.discover.request`, `reflect.review.request`, `percept.time.schedule.request`) are not in the catalog. **Default:** add them as request/reply pairs; until then Interface may publish `task.created` directly for `immediate` commands.
-3. Should `!shell` output be captured into the Ledger? **Default:** command line and exit code only (stdout is the human's).
+1. `turn.completed` is used in `02` Flow 1 but absent from the `03` §4 catalog. **Default:** add `turn.completed{session_id, task_id, text, floor: bool, verification_ref?}` under `task.*` (contracts change per `05` §6). **Resolved by build:** `turn.completed` is in the live catalog (`simorgh/contracts/messages/task.py`) as of this session and is wired for real (§6 plain-chat flow, tested end-to-end in `tests/simorgh/integration/test_worldmodel_persona_interface_flow.py`).
+2. `task.create` request and `*.request` view types (`task.list.request`, `curiosity.discover.request`, `reflect.review.request`, `percept.time.schedule.request`) are not in the catalog. **Default:** add them as request/reply pairs; until then Interface may publish `task.created` directly for `immediate` commands. **Resolved by build, except one:** `task.create`, `task.list.request`, `curiosity.discover.request`, and `reflect.review.request` are all in the live catalog and wired in `dispatch.py`. **Genuine remaining gap:** `percept.time.schedule.request` is still absent from the catalog -- `remind` has no message to send and this build says so honestly (`not yet available in this build`) rather than inventing one.
+3. Should `!shell` output be captured into the Ledger? **Default:** command line and exit code only (stdout is the human's). **Not built this session:** `!shell` runs for real (human authority, local `subprocess.run`) but neither the command line nor its exit code is appended to the `activity` Ledger stream yet -- this build's `dispatch.run_shell` returns output to the terminal only.

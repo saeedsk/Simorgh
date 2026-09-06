@@ -8,8 +8,8 @@
 > document and note it in `00-README.md`'s changelog.
 
 **Layer:** 4 Self & surfaces
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** built (Phase 1 Track C)
+**Status:** built
 **Depends on (contracts only):** `percept.text.received`, `task.completed`, `task.failed`, `curiosity.share.proposed`, `reflect.health.finding`, `system.tick.second`, `system.state.changed`, `persona.voice` (request), `ui.prompt.answered`
 **v1 code that migrates here:** `src/orchestrator/persona_state.py`, `src/agents/emotion/base.py`, `src/orchestrator/socializing.py` (`GrowthSocializer`, `NewsSocializer`), `src/memory/shared_bus.py` (retired; its role becomes `persona.state.changed`), `src/agents/logic/base.py` (`mood_phrase`, `_IDENTITY_PREFIX`), `docs/SOUL.md` Identity/Personality sections (read-only source)
 
