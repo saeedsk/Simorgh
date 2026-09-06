@@ -1,14 +1,17 @@
 """Builtin tools (08-execution.md section 5.2), ported from v1. Each
 implements `contracts.protocols.Tool`. Scoped this build to the tools
 that don't depend on a subsystem that doesn't exist yet this phase
-(Cognition for drafting loops, Learning for skills) -- `read_file`,
-`list_dir`, `run_python_sandboxed`, `apply_source_patch`, `git_commit`,
-`git_revert`. `web_fetch`, `shell`, `relaunch`, `hot_swap`,
-`isolated_test_suite`, and skill tools are deferred; see README.md.
+(Cognition for drafting loops) -- `read_file`, `list_dir`,
+`run_python_sandboxed`, `apply_source_patch`, `git_commit`,
+`git_revert`, `apply_skill`, and on-demand `skill:<name>` tools
+(`SkillTool`, Phase 4 roadmap item 4.7 -- skill acquisition as
+procedural memory). `web_fetch`, `shell`, `relaunch`, `hot_swap`, and
+`isolated_test_suite` are still deferred; see README.md.
 """
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -118,6 +121,28 @@ class RunPythonSandboxedTool:
             )
 
 
+def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes: tuple[str, ...]) -> ToolResult:
+    """Shared body of `apply_source_patch`/`apply_skill`: write `code` to
+    `subject`, refusing anything outside `write_scopes` -- a tool-level
+    scope re-check independent of Guardian's own (v1's "two boundaries,
+    not one")."""
+    subject = subject.replace("\\", "/")
+    if ".." in Path(subject).parts or not pathsafety.in_write_scope(subject, write_scopes=write_scopes):
+        return ToolResult(ok=False, error=f"refused: {subject!r} is outside the writable scope")
+    target = (config.repo_root / subject).resolve()
+    scope_ok = any((config.repo_root / s).resolve() in target.parents or (config.repo_root / s).resolve() == target.parent
+                    for s in write_scopes)
+    if not scope_ok:
+        return ToolResult(ok=False, error=f"refused: {subject!r} resolves outside the writable scope")
+    already_existed = target.exists()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(code)
+    return ToolResult(
+        ok=True, output=f"wrote {subject}", side_effects=(f"file_write:{subject}",),
+        metadata={"overwrote_existing": already_existed},
+    )
+
+
 class ApplySourcePatchTool:
     """Port of src/orchestrator/apply.py's apply_source_patch: writes
     `args['code']` to `args['subject']`, tool-level scope re-check
@@ -136,21 +161,31 @@ class ApplySourcePatchTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        subject = args["subject"].replace("\\", "/")
-        if ".." in Path(subject).parts or not pathsafety.in_write_scope(subject, write_scopes=self._config.write_scopes_source):
-            return ToolResult(ok=False, error=f"refused: {subject!r} is outside the writable scope")
-        target = (self._config.repo_root / subject).resolve()
-        scope_ok = any((self._config.repo_root / s).resolve() in target.parents or (self._config.repo_root / s).resolve() == target.parent
-                        for s in self._config.write_scopes_source)
-        if not scope_ok:
-            return ToolResult(ok=False, error=f"refused: {subject!r} resolves outside the writable scope")
-        already_existed = target.exists()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(args["code"])
-        return ToolResult(
-            ok=True, output=f"wrote {subject}", side_effects=(f"file_write:{subject}",),
-            metadata={"overwrote_existing": already_existed},
-        )
+        return _write_scoped_file(self._config, args["subject"], args["code"], write_scopes=self._config.write_scopes_source)
+
+
+class ApplySkillTool:
+    """Port of `use_skill`/`apply_skill` (v1 `src/agents/skills/registry.py`
+    write half; 08-execution.md section 5.2): writes a drafted skill's
+    complete module source to its subject path, confined to
+    `write_scopes_skills` (`simorgh_skills/` by default) rather than the
+    source tree -- the same scope `SkillPipeline`'s `apply_skill` action
+    proposal names (learning/pipeline.py)."""
+
+    name = "apply_skill"
+    description = "Write a drafted skill's complete module source to its subject path within the skill scope."
+    read_only = False
+    reversibility = "reversible"
+    args_schema = {
+        "type": "object", "required": ["subject", "code"],
+        "properties": {"subject": {"type": "string"}, "code": {"type": "string"}},
+    }
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        return _write_scoped_file(self._config, args["subject"], args["code"], write_scopes=self._config.write_scopes_skills)
 
 
 _SIM_GIT_AUTHOR_NAME = "Simorgh"
@@ -241,8 +276,71 @@ class GitRevertTool:
         )
 
 
+_SKILL_DRIVER = """import sys, os, json
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _skill_module as _skill
+_args = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
+if not hasattr(_skill, "run"):
+    raise SystemExit("skill module has no run() entrypoint")
+_result = _skill.run(**_args)
+print(_result if isinstance(_result, str) else json.dumps(_result))
+"""
+
+
+class SkillTool:
+    """A skill loaded on demand (08-execution.md section 5.2's
+    `skill:<name>` convention; Phase 4 roadmap item 4.7): the acquired
+    skill module's own source, executed inside the same throwaway,
+    resource-bounded subprocess sandbox `run_python_sandboxed` uses, with
+    its top-level `run(**args)` invoked. The source is written to its own
+    file and imported under a name other than `__main__` (`_SKILL_DRIVER`)
+    so a skill's own `if __name__ == "__main__":` footer, drafted by the
+    skill pipeline, never fires a second time alongside the real
+    invocation. Never registered at boot -- constructed by
+    `Service._load_skill` only when a `learn.skill.acquired` event names
+    it, or when an approved action first references it by name, which is
+    what makes this "on demand" rather than a directory scan at start()."""
+
+    read_only = False
+    reversibility = "reversible"
+    args_schema = {"type": "object", "properties": {}, "additionalProperties": True}
+
+    def __init__(self, config: Config, *, skill_name: str, source: str, description: str) -> None:
+        self._config = config
+        self.name = f"skill:{skill_name}"
+        self.description = description
+        self._source = source
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        timeout = min(ctx.constraints.get("timeout_s", self._config.sandbox_timeout_s), self._config.sandbox_timeout_s)
+        start = time.monotonic()
+        with tempfile.TemporaryDirectory(prefix="simorgh-skill-") as workdir:
+            (Path(workdir) / "_skill_module.py").write_text(self._source)
+            driver = Path(workdir) / "run_skill.py"
+            driver.write_text(_SKILL_DRIVER)
+            preexec = _apply_rlimits(self._config.sandbox_cpu_seconds, self._config.sandbox_memory_mb * 1024 * 1024) if resource else None
+            try:
+                completed = subprocess.run(
+                    [sys.executable, "-I", str(driver), json.dumps(args)], capture_output=True, text=True,
+                    cwd=workdir, env={}, timeout=timeout, preexec_fn=preexec,
+                )
+            except subprocess.TimeoutExpired as exc:
+                return ToolResult(
+                    ok=False, output=(exc.stdout or ""), error="timeout",
+                    metadata={"stderr": exc.stderr or "", "duration_s": time.monotonic() - start},
+                )
+            ok = completed.returncode == 0
+            return ToolResult(
+                ok=ok, output=completed.stdout,
+                error=None if ok else f"exit_code={completed.returncode}",
+                metadata={"stderr": completed.stderr, "exit_code": completed.returncode,
+                          "duration_s": time.monotonic() - start},
+            )
+
+
 def builtin_tools(config: Config) -> list:
     return [
         ReadFileTool(config), ListDirTool(config), RunPythonSandboxedTool(config),
         ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
+        ApplySkillTool(config),
     ]

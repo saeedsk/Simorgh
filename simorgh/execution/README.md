@@ -29,12 +29,46 @@ pre-check that reports an explicit `nothing_to_commit` instead of a
 buried edge case -- and, unlike a naive `git diff --quiet HEAD`, correctly
 catches brand-new untracked files too), `git_revert`. Never pushes.
 
+## Skill acquisition as procedural memory (Phase 4 roadmap item 4.7)
+
+`apply_skill` (writes a drafted skill's module source, confined to
+`write_scopes_skills`/`simorgh_skills/` -- the write half `apply_source_
+patch` already had, scoped to the skill directory instead of the source
+tree) and `skill:<name>` tools (`SkillTool`) are built this pass.
+`SkillTool` runs the acquired module's own source inside the same
+throwaway subprocess sandbox `run_python_sandboxed` uses, invoking its
+`run(**args)` entrypoint (imported under a name other than `__main__` so
+a drafted skill's own `if __name__ == "__main__":` footer never fires a
+second time).
+
+Never registered at boot -- `Service` subscribes to `learn.skill.
+acquired` and loads exactly the one newly-acquired skill (`_load_skill`),
+which is what makes this "on demand" rather than a directory scan of
+`simorgh_skills/` at `start()`. A second path lives in `_on_approved`:
+an approved action naming an as-yet-unregistered `skill:<name>` tool
+(e.g. a skill acquired in a previous process) triggers the same
+`_load_skill` lazily, reconstructing its path from the `skill_dir/
+<name>.py` convention `apply_skill`/`SkillPipeline` both already use --
+no fresh `learn.skill.acquired` required. Either path best-effort
+enriches the registered tool's `description` via a `memory.retrieve
+{kinds:[procedural]}` request against the procedural record Learning
+writes on acquisition (`learning/pipeline.py`) -- the "discoverable by
+description" half of the roadmap item; a Memory that never answers (not
+booted, or nothing stored yet) degrades to a synthesized description
+rather than blocking the load.
+
 ## Deliberate scope cuts (see 08-execution.md section 12 for the full list)
 
-- `web_fetch`, `shell`, `relaunch`, `hot_swap`, `isolated_test_suite`, and
-  skill-loading tools are NOT built this pass -- `relaunch`/`hot_swap`
-  need a `KernelControl` contract that doesn't exist yet, and skill tools
-  depend on Learning.
+- `web_fetch`, `shell`, `relaunch`, and `hot_swap` are NOT built this
+  pass -- they need a `KernelControl` contract that doesn't exist yet.
+  `isolated_test_suite` and the `skill.draft`/`self_patch.draft`
+  Cognition-backed drafting-loop tools are also not built -- Learning's
+  `PatchPipeline` proposes them, but they depend on Cognition composing
+  a multi-step read/draft/test loop, which is out of this build's scope
+  (see `simorgh/learning/README.md`'s own open questions for the
+  consequence: a skill/patch pipeline run against a real Guardian +
+  Execution currently rejects at the first draft attempt with "unknown
+  tool", since nothing in this build implements `*.draft`).
 - The spec's suggested `registry.py`/`runner.py` split was not done;
   registry and dispatch are merged into `service.py` for this build. A
   natural follow-up once the tool count grows past what fits on one
