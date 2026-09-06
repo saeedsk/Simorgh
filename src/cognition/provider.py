@@ -135,6 +135,10 @@ class LLMProvider(abc.ABC):
 
     name: str
     capabilities: frozenset[Capability] = frozenset()
+    # None means "unknown", not zero -- a caller negotiating on context size
+    # (see CapabilityRegistry.best_with_context_window) must not treat an
+    # unreported window as disqualifying by assuming it's small.
+    context_window: int | None = None
 
     @abc.abstractmethod
     def available(self) -> bool:
@@ -309,6 +313,25 @@ class CapabilityRegistry:
         """
         for provider in self.providers_for(capability):
             if provider.available():
+                return provider
+        return None
+
+    def best_with_context_window(
+        self, capability: Capability, min_tokens: int
+    ) -> LLMProvider | None:
+        """Highest-priority available provider that supports `capability`
+        and declares a context_window of at least `min_tokens`, or None if
+        no registered provider currently qualifies. Providers with an
+        unknown (None) context_window are excluded rather than assumed to
+        qualify, since a caller asking for a minimum size needs a
+        guarantee, not an unverified assumption.
+        """
+        for provider in self.providers_for(capability):
+            if (
+                provider.available()
+                and provider.context_window is not None
+                and provider.context_window >= min_tokens
+            ):
                 return provider
         return None
 
