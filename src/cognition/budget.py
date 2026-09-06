@@ -40,12 +40,22 @@ class Budget:
     traffic would otherwise have exhausted the window. The default, 0.0,
     reserves nothing: every priority sees the same limit, exactly as
     before this field existed.
+
+    `high_priority_depth_multiplier` / `low_priority_depth_multiplier`
+    scale the caller-requested `max_tokens` (the provider's reasoning-depth
+    knob) up or down by priority, so the same pool of budget buys more
+    depth on calls the router flagged high-risk/high-ambiguity, and less
+    on routine ones -- dynamic allocation within the window rather than a
+    flat per-task budget. Both default to 1.0, leaving `max_tokens`
+    untouched exactly as before these fields existed.
     """
 
     max_calls: int | None = None
     max_estimated_cost_usd: float | None = None
     window_seconds: float = 86400.0
     high_priority_reserve_fraction: float = 0.0
+    high_priority_depth_multiplier: float = 1.0
+    low_priority_depth_multiplier: float = 1.0
 
 
 class BudgetGuard(LLMProvider):
@@ -86,6 +96,7 @@ class BudgetGuard(LLMProvider):
                 f"spend=${status['spend_in_window_usd']:.4f}, "
                 f"priority={priority})"
             )
+        kwargs = self._apply_depth_allocation(priority, kwargs)
         response = self._provider.complete(prompt, **kwargs)
         self._store.remember(
             SPEND_KIND,
@@ -148,6 +159,27 @@ class BudgetGuard(LLMProvider):
         if limit is None or priority == "high" or self._budget.high_priority_reserve_fraction <= 0:
             return limit
         return limit * (1 - self._budget.high_priority_reserve_fraction)
+
+    def _apply_depth_allocation(self, priority: str, kwargs: dict) -> dict:
+        """Scale a caller-supplied `max_tokens` by priority, so the same
+        window budget buys more reasoning depth on calls the router
+        flagged high-risk/high-ambiguity (`priority="high"`) and less on
+        routine ones -- dynamic allocation instead of a flat per-task
+        budget. No-op if `max_tokens` wasn't requested, or the relevant
+        multiplier is left at its default of 1.0.
+        """
+        if "max_tokens" not in kwargs:
+            return kwargs
+        multiplier = (
+            self._budget.high_priority_depth_multiplier
+            if priority == "high"
+            else self._budget.low_priority_depth_multiplier
+        )
+        if multiplier == 1.0:
+            return kwargs
+        kwargs = dict(kwargs)
+        kwargs["max_tokens"] = max(1, int(kwargs["max_tokens"] * multiplier))
+        return kwargs
 
     def _estimate_cost(self, response: LLMResponse) -> float:
         """Prefer a provider-reported cost (e.g. Claude Code CLI's own
