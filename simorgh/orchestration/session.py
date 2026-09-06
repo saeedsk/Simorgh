@@ -132,6 +132,23 @@ class SessionRunner:
         )
         reply = await self._bus.request_or_error(req, timeout=self._think_timeout_s)
         if reply.payload.get("ok") is False:
+            # Live-caught (v2 live trial, 2026-09-06): this used to just
+            # return None, and every caller collapsed that into a silent,
+            # empty `Outcome(floor=True, result_summary="")` -- no error
+            # code anywhere, not on the Ledger, not in the HTTP response,
+            # not even printed (the real process's stdout is buffered when
+            # not a tty). Diagnosing a real intermittent failure this way
+            # took far longer than it should have. A `task.step` record
+            # with `ok=False` costs nothing and makes the actual Cognition
+            # error code/detail visible on this task's own Ledger stream
+            # (queryable via `/api/logs?stream=task:<id>`) instead of
+            # vanishing -- callers still get `None` and are unaffected.
+            error = reply.payload.get("error") or {}
+            await self._append(session, topics.TASK_STEP, {
+                "task_id": session.task_id, "step_no": session.next_step_no(),
+                "phase": "think", "ok": False,
+                "summary": f"cognition error: {error.get('code', 'unknown')} -- {error.get('detail', '')}",
+            })
             return None
         return reply
 
