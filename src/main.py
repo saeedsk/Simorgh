@@ -3339,6 +3339,37 @@ def self_check() -> int:
 
 
 if __name__ == "__main__":
+    # Cutover (Phase 5, Stage B, docs/blueprint/06-migration-from-v1.md
+    # section 6): v1 is retired as the *default* entry point -- `sim.sh`
+    # now runs `python -m simorgh run` directly. This module is kept
+    # fully intact (not gutted) since ~890 tests still import its
+    # functions directly, and `tests/test_e2e_cli.py` specifically spawns
+    # this file as a real subprocess to drive v1's own CLI end to end.
+    #
+    # Live-caught immediately: the first version of this notice actually
+    # os.execvp'd into `python -m simorgh run` (a real, interactive v2
+    # Kernel process) after printing. That broke test_e2e_cli.py outright
+    # -- it sends v1-shaped commands into what silently became a v2
+    # process instead -- and, worse, the hung v2 process it spawned
+    # during a real test run wrote synthetic data into the creator's
+    # actual ~/.simorgh/ledger/, contaminating the just-completed real
+    # v1->v2 migration (one extra line appended onto memory:episodic
+    # after migrate-v1 had already finished). Cleaned up by wiping and
+    # re-running migrate-v1 from the pre-migration backup -- but the
+    # actual fix is here: a notice, not a live handoff. `python -m
+    # src.main` keeps running v1 exactly as before; only the message
+    # changes, so anyone (a script, a muscle-memory alias, a stale doc)
+    # gets an honest signal instead of either silent divergence from
+    # `sim.sh` or a confusing crash -- without ever starting a second,
+    # unrequested process. `--self-check` stays v1's own (used internally
+    # by src/orchestrator/self_patch.py's relaunch(), unrelated to this
+    # guard) -- untouched.
     if "--self-check" in sys.argv:
         sys.exit(self_check())
+    print(
+        "[notice] v1 (`python -m src.main`) is retired -- v2 is now the "
+        "default, run via `./sim.sh` or `python -m simorgh run`. "
+        "Continuing to run v1 in this process for now.",
+        file=sys.stderr,
+    )
     run_cli()

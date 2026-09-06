@@ -3268,3 +3268,96 @@ Still ahead, roughly in order:
     separate mechanism, preserved through the compactor's own layers but
     still folded into the compacted conversation text as `role: user`),
     and the test only needed to assert presence, not a specific role.
+
+121. **Phase 5 cutover, Stage B: v2 is now `sim.sh`'s default, and the
+    creator's real v1 memory is migrated in.** The creator reviewed the
+    Stage A/B/C plan (§6 of `06-migration-from-v1.md`, milestone 120's
+    own planning pass) and explicitly chose to skip Stage A's own
+    verification checklist and go straight to Stage B -- their call to
+    make, and made explicitly, twice, after I flagged what skipping it
+    meant (three flows never live-driven by hand, no dry run before the
+    real migration).
+
+    Three things surfaced doing it anyway, all handled before the
+    cutover was considered done:
+
+    - **The `~/.simorgh` leak recurred, a third time in as many
+      incidents this session** ([[feedback_sandbox_isolation]] in this
+      session's own memory, not `EVOLUTION.md` -- operational, not
+      architectural): `ledger/` had synthetic test data from this same
+      session's own "live-verify in the browser" step for the persona
+      fix (milestone 120), despite believing that step was isolated.
+      Confirmed the creator's real `memory.jsonl`/`cli_history` were
+      untouched (v2 writes to a subdirectory v1 never used), disclosed
+      it plainly, and got the creator's explicit go-ahead before
+      deleting -- the delete itself was blocked once by Claude Code's
+      own auto-mode classifier (a recursive delete outside the repo)
+      and required that explicit confirmation to proceed, which is
+      exactly the kind of check that classifier exists for.
+    - **A real bug in `simorgh migrate-v1`, caught the moment it ran
+      against real data for the first time** (`06-migration-from-v1.md`
+      §5's own caveat, written one milestone ago: "only tested against a
+      small hand-written fixture... never against the creator's real
+      `~/.simorgh/memory.jsonl`" -- confirmed true within one command).
+      A real `applied_source_patch` record's `metadata.code` field
+      (actual patch source, routinely >4096 chars) blew straight through
+      the Ledger's inline-size validation; no hand-written fixture record
+      had ever happened to be that large. Fixed in `simorgh/kernel/
+      migrate_v1.py`: a new `_deoversize()` walks each event's payload
+      before `append` and blob-stores any string over the Ledger's own
+      `inline_threshold`, renaming the key to `<key>_ref` -- the same
+      `*_ref`/`blob:<sha256>` convention `verification/service.py` and
+      `execution/service.py` already use for real code and tool output,
+      not a special case invented for this. 5 new tests
+      (`tests/simorgh/kernel/test_migrate_v1.py`, new file -- distinct
+      from `tests/simorgh/ledger/test_migrate_v1.py`, which only covers
+      the pure record-routing logic, not this orchestration function).
+    - **The `src/main.py` retirement notice's first draft made things
+      worse, not better.** It printed the notice and then actually
+      `os.execvp`'d into `python -m simorgh run` -- a real, interactive
+      v2 Kernel process. That silently broke `tests/test_e2e_cli.py`,
+      which spawns `python -m src.main` as a real subprocess specifically
+      to drive v1's own CLI end to end (its own module docstring says
+      so): the full-suite run hung mid-test on a live v2 process waiting
+      at a prompt it was never going to get, and that process wrote
+      synthetic data into the just-migrated real Ledger before I found
+      and killed it -- one extra line appended onto `memory:episodic`
+      after `migrate-v1` had already finished (709 real lines, 710 on
+      disk; every other stream matched the migration report exactly, so
+      this was caught by literally diffing line counts against it, not
+      by a general audit). Rather than hand-repair Ledger internals
+      (JSONL stream files plus their own index/snapshot bookkeeping,
+      whose consistency requirements weren't confidently understood),
+      wiped `~/.simorgh/ledger/` outright and re-ran `migrate-v1` clean
+      from the untouched pre-migration backup -- 6342 read, 6342
+      appended, 0 already present, every stream count identical to the
+      first run. The actual fix: the notice no longer hands off into a
+      second process at all -- it prints, then calls `run_cli()` in the
+      same process, exactly as before. `python -m src.main` still works,
+      still says v1 is retired, and never again risks starting an
+      unrequested v2 Kernel that can reach the creator's real `$HOME`
+      from inside a test run.
+
+    With all three fixed: backed up the real `memory.jsonl`, ran the
+    migration for real -- 6342 v1 records read and appended, routed
+    across `activity`, `cognition:budget`, `curiosity:interests`,
+    `guardian:rejected`, `learn:patches`, `learn:skills`,
+    `memory:episodic`, and 42 individual `task:<id>` streams. `sim.sh`
+    now runs `python -m simorgh run`; `src/main.py`'s `__main__` guard
+    (not the rest of the module -- its ~890 tests still import its
+    functions directly, unchanged) prints a retirement notice and keeps
+    running v1 in-process, so `python -m src.main` still works instead
+    of silently diverging or crashing. `docs/architecture.md` rewritten
+    to describe v2 as the system, with the full v1 write-up archived
+    verbatim to `docs/archive/architecture-v1.md` rather than deleted.
+
+    Stage A's own checks were not run -- an explicit, informed choice,
+    not an oversight, and the honest Flow 1-9 table in
+    `06-migration-from-v1.md` §4.1 (three flows never live-driven by
+    hand: Plan Mode, self-patch, sleep/consolidation) still stands
+    exactly as written. Stage C (deleting `src/` and its ~890 tests) is
+    explicitly the one destructive step in the whole plan and has its
+    own gate -- not taken here, and Gate B->C is deliberately not a
+    same-session decision (`06-migration-from-v1.md` §6: "let `sim.sh`
+    run as the creator's actual daily entry point for a real stretch of
+    ordinary use").
