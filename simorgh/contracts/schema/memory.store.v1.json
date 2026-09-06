@@ -1,0 +1,43 @@
+{
+  "$id": "https://simorgh.local/schema/memory.store.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Command.",
+  "properties": {
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "content": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "working",
+        "episodic",
+        "semantic",
+        "procedural"
+      ],
+      "type": "string"
+    },
+    "source_ref": {
+      "type": "string"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "kind",
+    "content",
+    "tags",
+    "source_ref"
+  ],
+  "title": "memory.store",
+  "type": "object"
+}

@@ -1,0 +1,58 @@
+{
+  "$id": "https://simorgh.local/schema/intent.goal.stated.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `intent.goal.stated` (catalog v1).",
+  "properties": {
+    "constraints": {
+      "additionalProperties": true,
+      "properties": {
+        "deadline": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "scope": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "goal": {
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "human",
+        "curiosity",
+        "reflection"
+      ],
+      "type": "string"
+    },
+    "priority": {
+      "type": "integer"
+    },
+    "wants_project": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "goal",
+    "origin",
+    "priority",
+    "wants_project"
+  ],
+  "title": "intent.goal.stated",
+  "type": "object"
+}

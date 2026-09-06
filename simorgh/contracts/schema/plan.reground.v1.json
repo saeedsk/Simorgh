@@ -1,0 +1,25 @@
+{
+  "$id": "https://simorgh.local/schema/plan.reground.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `plan.reground` (catalog v1).",
+  "properties": {
+    "changes_since": {
+      "items": {},
+      "type": "array"
+    },
+    "plan_id": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_id",
+    "task_id",
+    "changes_since"
+  ],
+  "title": "plan.reground",
+  "type": "object"
+}

@@ -1,0 +1,124 @@
+{
+  "$id": "https://simorgh.local/schema/task.list.reply.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projects": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "done": {
+                "type": "integer"
+              },
+              "project_id": {
+                "type": "string"
+              },
+              "rollup": {
+                "type": "string"
+              },
+              "stalled": {
+                "type": "boolean"
+              },
+              "total": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "project_id",
+              "rollup",
+              "done",
+              "total",
+              "stalled"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "tasks": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {},
+            "required": [],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "tasks",
+        "projects"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        "ok": {
+          "const": false
+        }
+      },
+      "required": [
+        "ok",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "Payload of `task.list.reply` (catalog v1).",
+  "title": "task.list.reply"
+}

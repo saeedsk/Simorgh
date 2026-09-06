@@ -1,0 +1,147 @@
+{
+  "$id": "https://simorgh.local/schema/self.gaps.reply.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "gaps": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "competence": {
+                "type": "string"
+              },
+              "samples": {
+                "type": "integer"
+              },
+              "score": {
+                "type": "number"
+              },
+              "task_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "competence",
+              "task_type",
+              "score",
+              "samples"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unexplored_areas": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "area": {
+                "type": "string"
+              },
+              "last_touched": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "modules": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tasks_ever": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "area",
+              "modules",
+              "tasks_ever"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "gaps",
+        "unexplored_areas"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        "ok": {
+          "const": false
+        }
+      },
+      "required": [
+        "ok",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "Payload of `self.gaps.reply` (catalog v1).",
+  "title": "self.gaps.reply"
+}

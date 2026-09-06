@@ -1,0 +1,24 @@
+{
+  "$id": "https://simorgh.local/schema/learn.skill.acquired.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `learn.skill.acquired` (catalog v1).",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "tests": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "tests"
+  ],
+  "title": "learn.skill.acquired",
+  "type": "object"
+}

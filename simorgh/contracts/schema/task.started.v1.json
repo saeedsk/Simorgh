@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/task.started.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `task.started` (catalog v1).",
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "worker_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "worker_id"
+  ],
+  "title": "task.started",
+  "type": "object"
+}

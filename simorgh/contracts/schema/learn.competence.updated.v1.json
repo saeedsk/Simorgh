@@ -1,0 +1,28 @@
+{
+  "$id": "https://simorgh.local/schema/learn.competence.updated.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `learn.competence.updated` (catalog v1).",
+  "properties": {
+    "calibration": {
+      "type": "number"
+    },
+    "samples": {
+      "type": "integer"
+    },
+    "success_rate": {
+      "type": "number"
+    },
+    "task_type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_type",
+    "success_rate",
+    "calibration",
+    "samples"
+  ],
+  "title": "learn.competence.updated",
+  "type": "object"
+}

@@ -1,0 +1,28 @@
+{
+  "$id": "https://simorgh.local/schema/tool.invoked.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `tool.invoked` (catalog v1).",
+  "properties": {
+    "action_id": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "integer"
+    },
+    "name": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "action_id",
+    "duration_ms",
+    "ok"
+  ],
+  "title": "tool.invoked",
+  "type": "object"
+}

@@ -1,0 +1,44 @@
+{
+  "$id": "https://simorgh.local/schema/learn.pipeline.run.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Command; consumer group `learning`. A Worker hands a patch/skill task to Learning (Flow 4).",
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "patch",
+        "skill",
+        "evolve"
+      ],
+      "type": "string"
+    },
+    "prior_reasons": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "subject": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "kind",
+    "description"
+  ],
+  "title": "learn.pipeline.run",
+  "type": "object"
+}

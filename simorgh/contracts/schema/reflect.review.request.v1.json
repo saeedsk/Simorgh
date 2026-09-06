@@ -1,0 +1,17 @@
+{
+  "$id": "https://simorgh.local/schema/reflect.review.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `reflect.review.request` (catalog v1).",
+  "properties": {
+    "window_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "reflect.review.request",
+  "type": "object"
+}

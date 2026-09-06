@@ -1,0 +1,24 @@
+{
+  "$id": "https://simorgh.local/schema/reflect.calibration.updated.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `reflect.calibration.updated` (catalog v1).",
+  "properties": {
+    "empirical_accuracy": {
+      "type": "number"
+    },
+    "stated_confidence": {
+      "type": "number"
+    },
+    "task_type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_type",
+    "stated_confidence",
+    "empirical_accuracy"
+  ],
+  "title": "reflect.calibration.updated",
+  "type": "object"
+}

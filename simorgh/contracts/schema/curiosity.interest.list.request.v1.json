@@ -1,0 +1,10 @@
+{
+  "$id": "https://simorgh.local/schema/curiosity.interest.list.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `curiosity.interest.list.request` (catalog v1).",
+  "properties": {},
+  "required": [],
+  "title": "curiosity.interest.list.request",
+  "type": "object"
+}

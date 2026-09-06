@@ -1,0 +1,45 @@
+{
+  "$id": "https://simorgh.local/schema/action.result.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `action.result` (catalog v1).",
+  "properties": {
+    "action_id": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "integer"
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "output_ref": {
+      "type": "string"
+    },
+    "side_effects": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "stdout_preview": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action_id",
+    "ok",
+    "output_ref",
+    "stdout_preview",
+    "duration_ms",
+    "side_effects"
+  ],
+  "title": "action.result",
+  "type": "object"
+}

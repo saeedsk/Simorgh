@@ -1,0 +1,37 @@
+{
+  "$id": "https://simorgh.local/schema/ui.prompt.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `ui.prompt` (catalog v1).",
+  "properties": {
+    "default": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "options": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "prompt_id": {
+      "type": "string"
+    },
+    "question": {
+      "type": "string"
+    },
+    "timeout_s": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "prompt_id",
+    "question",
+    "options",
+    "timeout_s"
+  ],
+  "title": "ui.prompt",
+  "type": "object"
+}

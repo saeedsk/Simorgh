@@ -1,0 +1,24 @@
+{
+  "$id": "https://simorgh.local/schema/curiosity.interest.updated.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `curiosity.interest.updated` (catalog v1).",
+  "properties": {
+    "items_found": {
+      "type": "integer"
+    },
+    "last_followed_up": {
+      "type": "number"
+    },
+    "topic": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "topic",
+    "last_followed_up",
+    "items_found"
+  ],
+  "title": "curiosity.interest.updated",
+  "type": "object"
+}

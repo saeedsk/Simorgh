@@ -1,0 +1,16 @@
+{
+  "$id": "https://simorgh.local/schema/system.tick.sleep.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.tick.sleep` (catalog v1).",
+  "properties": {
+    "window_seconds": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "window_seconds"
+  ],
+  "title": "system.tick.sleep",
+  "type": "object"
+}

@@ -1,0 +1,40 @@
+{
+  "$id": "https://simorgh.local/schema/verify.requested.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `verify.requested` (catalog v1).",
+  "properties": {
+    "checklist_hint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "task",
+        "plan",
+        "self_patch",
+        "skill"
+      ],
+      "type": "string"
+    },
+    "subject_ref": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "verification_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "verification_id",
+    "task_id",
+    "kind",
+    "subject_ref"
+  ],
+  "title": "verify.requested",
+  "type": "object"
+}

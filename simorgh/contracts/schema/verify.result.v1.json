@@ -1,0 +1,141 @@
+{
+  "$id": "https://simorgh.local/schema/verify.result.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "A non-answer from the reviewer is insufficient_evidence, never fail.",
+  "properties": {
+    "checklist": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "q",
+          "answer",
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "feedback": {
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "suggested_fix": {
+                "type": "string"
+              },
+              "what": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "what",
+              "why",
+              "suggested_fix"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "mechanical": {
+      "additionalProperties": true,
+      "properties": {
+        "baseline": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "patched": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tests_passed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "trajectory": {
+      "additionalProperties": true,
+      "properties": {
+        "recovered_errors": {
+          "type": "integer"
+        },
+        "steps": {
+          "type": "integer"
+        },
+        "wasted": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "steps",
+        "wasted",
+        "recovered_errors"
+      ],
+      "type": "object"
+    },
+    "verdict": {
+      "enum": [
+        "pass",
+        "fail",
+        "insufficient_evidence"
+      ],
+      "type": "string"
+    },
+    "verification_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "verification_id",
+    "task_id",
+    "verdict",
+    "checklist",
+    "trajectory",
+    "mechanical"
+  ],
+  "title": "verify.result",
+  "type": "object"
+}

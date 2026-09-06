@@ -1,0 +1,189 @@
+{
+  "$id": "https://simorgh.local/schema/cognition.think.reply.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "agreement": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "compaction": {
+          "additionalProperties": true,
+          "properties": {
+            "layers_applied": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "tokens_after": {
+              "type": "integer"
+            },
+            "tokens_before": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "layers_applied",
+            "tokens_before",
+            "tokens_after"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cost_usd": {
+          "type": "number"
+        },
+        "edit_blocks": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "replace": {
+                "type": "string"
+              },
+              "search": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "search",
+              "replace"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "floor": {
+          "type": "boolean"
+        },
+        "non_answer": {
+          "type": "boolean"
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "tokens": {
+          "type": "integer"
+        },
+        "tool_calls": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "args": {
+                "additionalProperties": true,
+                "properties": {},
+                "required": [],
+                "type": "object"
+              },
+              "tool": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tool",
+              "args"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "text",
+        "tool_calls",
+        "provider",
+        "cost_usd",
+        "tokens",
+        "floor",
+        "non_answer"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        "ok": {
+          "const": false
+        }
+      },
+      "required": [
+        "ok",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "Payload of `cognition.think.reply` (catalog v1).",
+  "title": "cognition.think.reply"
+}

@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/task.dependency.satisfied.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `task.dependency.satisfied` (catalog v1).",
+  "properties": {
+    "satisfied_by": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "satisfied_by"
+  ],
+  "title": "task.dependency.satisfied",
+  "type": "object"
+}

@@ -1,0 +1,137 @@
+{
+  "$id": "https://simorgh.local/schema/system.status.reply.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "metrics": {
+          "additionalProperties": true,
+          "properties": {},
+          "required": [],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "mode": {
+          "type": "string"
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "paused",
+            "stopping",
+            "stopped"
+          ],
+          "type": "string"
+        },
+        "subsystems": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "version",
+              "status"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "uptime_seconds": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "state",
+        "mode",
+        "run_id",
+        "subsystems",
+        "uptime_seconds"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        "ok": {
+          "const": false
+        }
+      },
+      "required": [
+        "ok",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "The snapshot; open to extra facets (additionalProperties true).",
+  "title": "system.status.reply"
+}

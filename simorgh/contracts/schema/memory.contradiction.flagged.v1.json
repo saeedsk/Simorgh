@@ -1,0 +1,28 @@
+{
+  "$id": "https://simorgh.local/schema/memory.contradiction.flagged.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `memory.contradiction.flagged` (catalog v1).",
+  "properties": {
+    "confidence_after": {
+      "type": "number"
+    },
+    "evidence": {
+      "type": "string"
+    },
+    "ref_a": {
+      "type": "string"
+    },
+    "ref_b": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ref_a",
+    "ref_b",
+    "evidence",
+    "confidence_after"
+  ],
+  "title": "memory.contradiction.flagged",
+  "type": "object"
+}

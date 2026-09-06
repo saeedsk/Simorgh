@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/tool.unavailable.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `tool.unavailable` (catalog v1).",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "reason"
+  ],
+  "title": "tool.unavailable",
+  "type": "object"
+}

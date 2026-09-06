@@ -1,0 +1,16 @@
+{
+  "$id": "https://simorgh.local/schema/system.tick.idle.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.tick.idle` (catalog v1).",
+  "properties": {
+    "idle_seconds": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "idle_seconds"
+  ],
+  "title": "system.tick.idle",
+  "type": "object"
+}

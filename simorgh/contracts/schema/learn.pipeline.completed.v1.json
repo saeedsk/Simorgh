@@ -1,0 +1,43 @@
+{
+  "$id": "https://simorgh.local/schema/learn.pipeline.completed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `learn.pipeline.completed` (catalog v1).",
+  "properties": {
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "detail": {
+      "type": "string"
+    },
+    "outcome": {
+      "enum": [
+        "applied",
+        "researched",
+        "rejected",
+        "reverted",
+        "floor"
+      ],
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "verification_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "task_id",
+    "outcome",
+    "detail"
+  ],
+  "title": "learn.pipeline.completed",
+  "type": "object"
+}

@@ -1,0 +1,40 @@
+{
+  "$id": "https://simorgh.local/schema/reflect.health.finding.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `reflect.health.finding` (catalog v1).",
+  "properties": {
+    "action_taken": {
+      "anyOf": [
+        {
+          "enum": [
+            "none",
+            "request_reset",
+            "request_pause_hint"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "detail": {
+      "type": "string"
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "warn",
+        "critical"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "severity",
+    "detail"
+  ],
+  "title": "reflect.health.finding",
+  "type": "object"
+}

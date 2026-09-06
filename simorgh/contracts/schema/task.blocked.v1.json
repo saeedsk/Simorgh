@@ -1,0 +1,26 @@
+{
+  "$id": "https://simorgh.local/schema/task.blocked.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `task.blocked` (catalog v1).",
+  "properties": {
+    "reason": {
+      "type": "string"
+    },
+    "retry_after": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "reason"
+  ],
+  "title": "task.blocked",
+  "type": "object"
+}

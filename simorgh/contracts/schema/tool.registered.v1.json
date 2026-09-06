@@ -1,0 +1,50 @@
+{
+  "$id": "https://simorgh.local/schema/tool.registered.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `tool.registered` (catalog v1).",
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "provider": {
+      "enum": [
+        "builtin",
+        "skill",
+        "mcp"
+      ],
+      "type": "string"
+    },
+    "read_only": {
+      "type": "boolean"
+    },
+    "reversibility": {
+      "enum": [
+        "read_only",
+        "reversible",
+        "irreversible"
+      ],
+      "type": "string"
+    },
+    "schema_ref": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "version",
+    "description",
+    "read_only",
+    "reversibility",
+    "schema_ref",
+    "provider"
+  ],
+  "title": "tool.registered",
+  "type": "object"
+}

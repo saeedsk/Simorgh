@@ -1,0 +1,49 @@
+{
+  "$id": "https://simorgh.local/schema/persona.state.changed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `persona.state.changed` (catalog v1).",
+  "properties": {
+    "arousal": {
+      "type": "number"
+    },
+    "cognitive_load": {
+      "type": "number"
+    },
+    "previous": {
+      "additionalProperties": true,
+      "properties": {
+        "arousal": {
+          "type": "number"
+        },
+        "cognitive_load": {
+          "type": "number"
+        },
+        "valence": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "valence",
+        "arousal",
+        "cognitive_load"
+      ],
+      "type": "object"
+    },
+    "source": {
+      "type": "string"
+    },
+    "valence": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "valence",
+    "arousal",
+    "cognitive_load",
+    "source",
+    "previous"
+  ],
+  "title": "persona.state.changed",
+  "type": "object"
+}

@@ -1,0 +1,48 @@
+{
+  "$id": "https://simorgh.local/schema/learn.outcome.recorded.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `learn.outcome.recorded` (catalog v1).",
+  "properties": {
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "cost_usd": {
+      "type": "number"
+    },
+    "duration_s": {
+      "type": "number"
+    },
+    "strategy": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "succeeded": {
+      "type": "boolean"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "task_type": {
+      "type": "string"
+    },
+    "verdict": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "task_type",
+    "succeeded",
+    "verdict",
+    "cost_usd",
+    "duration_s"
+  ],
+  "title": "learn.outcome.recorded",
+  "type": "object"
+}

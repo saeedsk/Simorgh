@@ -1,0 +1,27 @@
+{
+  "$id": "https://simorgh.local/schema/self.model.updated.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `self.model.updated` (catalog v1).",
+  "properties": {
+    "changed_sections": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "changed_sections",
+    "reason"
+  ],
+  "title": "self.model.updated",
+  "type": "object"
+}

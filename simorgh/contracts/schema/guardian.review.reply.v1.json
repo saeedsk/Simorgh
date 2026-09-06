@@ -1,0 +1,100 @@
+{
+  "$id": "https://simorgh.local/schema/guardian.review.reply.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "approved": {
+          "type": "boolean"
+        },
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "layers_run": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "approved",
+        "reasons",
+        "layers_run"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        "ok": {
+          "const": false
+        }
+      },
+      "required": [
+        "ok",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "Payload of `guardian.review.reply` (catalog v1).",
+  "title": "guardian.review.reply"
+}

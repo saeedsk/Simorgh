@@ -1,0 +1,32 @@
+{
+  "$id": "https://simorgh.local/schema/system.metrics.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.metrics` (catalog v1).",
+  "properties": {
+    "counters": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "gauges": {
+      "additionalProperties": {},
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "subsystem": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "subsystem",
+    "counters",
+    "gauges"
+  ],
+  "title": "system.metrics",
+  "type": "object"
+}

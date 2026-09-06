@@ -1,0 +1,10 @@
+{
+  "$id": "https://simorgh.local/schema/system.status.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.status.request` (catalog v1).",
+  "properties": {},
+  "required": [],
+  "title": "system.status.request",
+  "type": "object"
+}

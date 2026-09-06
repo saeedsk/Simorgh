@@ -1,0 +1,28 @@
+{
+  "$id": "https://simorgh.local/schema/task.failed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `task.failed` (catalog v1).",
+  "properties": {
+    "attempts": {
+      "type": "integer"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "terminal": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "task_id",
+    "reason",
+    "terminal",
+    "attempts"
+  ],
+  "title": "task.failed",
+  "type": "object"
+}

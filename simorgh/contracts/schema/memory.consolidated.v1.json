@@ -1,0 +1,24 @@
+{
+  "$id": "https://simorgh.local/schema/memory.consolidated.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `memory.consolidated` (catalog v1).",
+  "properties": {
+    "distilled": {
+      "type": "integer"
+    },
+    "pruned": {
+      "type": "integer"
+    },
+    "window": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "window",
+    "distilled",
+    "pruned"
+  ],
+  "title": "memory.consolidated",
+  "type": "object"
+}

@@ -1,0 +1,37 @@
+{
+  "$id": "https://simorgh.local/schema/action.denied.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "layer=classifier omits detailed reasons; execution may publish only layer=token.",
+  "properties": {
+    "action_id": {
+      "type": "string"
+    },
+    "layer": {
+      "enum": [
+        "policy",
+        "denylist",
+        "immunity",
+        "budget",
+        "paused",
+        "scope",
+        "classifier",
+        "token"
+      ],
+      "type": "string"
+    },
+    "reasons": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "action_id",
+    "reasons",
+    "layer"
+  ],
+  "title": "action.denied",
+  "type": "object"
+}

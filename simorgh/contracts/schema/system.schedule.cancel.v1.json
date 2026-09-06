@@ -1,0 +1,16 @@
+{
+  "$id": "https://simorgh.local/schema/system.schedule.cancel.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.schedule.cancel` (catalog v1).",
+  "properties": {
+    "schedule_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schedule_id"
+  ],
+  "title": "system.schedule.cancel",
+  "type": "object"
+}

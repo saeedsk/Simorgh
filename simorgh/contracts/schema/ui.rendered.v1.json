@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/ui.rendered.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `ui.rendered` (catalog v1).",
+  "properties": {
+    "channel": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "channel",
+    "text"
+  ],
+  "title": "ui.rendered",
+  "type": "object"
+}

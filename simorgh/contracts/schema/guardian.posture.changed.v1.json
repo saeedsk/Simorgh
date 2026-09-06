@@ -1,0 +1,31 @@
+{
+  "$id": "https://simorgh.local/schema/guardian.posture.changed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `guardian.posture.changed` (catalog v1).",
+  "properties": {
+    "mode": {
+      "enum": [
+        "observe",
+        "plan",
+        "guarded",
+        "trusted",
+        "locked"
+      ],
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "trust_score": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "mode",
+    "trust_score",
+    "reason"
+  ],
+  "title": "guardian.posture.changed",
+  "type": "object"
+}

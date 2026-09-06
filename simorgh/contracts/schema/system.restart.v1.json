@@ -1,0 +1,26 @@
+{
+  "$id": "https://simorgh.local/schema/system.restart.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.restart` (catalog v1).",
+  "properties": {
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "self_check_passed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "reason",
+    "self_check_passed"
+  ],
+  "title": "system.restart",
+  "type": "object"
+}

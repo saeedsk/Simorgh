@@ -1,0 +1,27 @@
+{
+  "$id": "https://simorgh.local/schema/cognition.provider.status.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `cognition.provider.status` (catalog v1).",
+  "properties": {
+    "available": {
+      "type": "boolean"
+    },
+    "budget": {
+      "additionalProperties": true,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "provider": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "available",
+    "budget"
+  ],
+  "title": "cognition.provider.status",
+  "type": "object"
+}
