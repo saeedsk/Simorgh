@@ -23,7 +23,15 @@ continues, since a later rule may still deny outright.
   `BudgetRule`, `ReversibilityRule`.
 - `posture.Posture`: trust posture that only ever tightens by message
   (`guardian:trust` stream) or resets to baseline -- there is deliberately
-  no message type that loosens it (harness-06).
+  no message type that loosens it (harness-06). As of Phase 4 Wave 2 all
+  four tightening triggers from section 5.3 are wired in `Service`:
+  failure streak (`task.completed`/`task.failed` among `autonomous_
+  origins`), `reflect.drift.detected` -> guarded, budget pressure at or
+  above `budget_pressure_tighten_at` (`cognition.provider.status`) ->
+  guarded, and `reflect.health.finding{severity:critical}` -> locked.
+  `system.resume` resets to `baseline_posture` (the one human-only
+  loosening path; `SYSTEM_RESUME`'s publisher allow-list restricts it to
+  interface/kernel, never an autonomous subsystem).
 - `charter.load_charter`: reads `docs/SOUL.md` read-only at boot; a missing
   file degrades to a placeholder string rather than blocking start, since
   the real boundaries live in `Config.protected_subjects`/`denylist`, not
@@ -37,7 +45,11 @@ continues, since a later rule may still deny outright.
   the real enforcement in the meantime.
 - `BudgetRule` abstains whenever no `cognition.provider.status` has ever
   arrived (`ctx.budgets` empty) -- "no data" must not be treated as
-  "exhausted."
+  "exhausted." As of Phase 4 Wave 2, `Service` subscribes to
+  `cognition.provider.status` and populates `ctx.budgets` for real (was
+  previously always empty -- `BudgetRule` abstained on every proposal
+  regardless of actual spend); the same handler also feeds the trust
+  posture's budget-pressure tightening trigger (section 5.3).
 - `classifier_enabled=False` by default: Cognition doesn't exist yet, so
   every escalation falls through to `action.needs_human` rather than being
   auto-resolved. `pipeline.Pipeline.decide`'s `ctx.classify` hook is real

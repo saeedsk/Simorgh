@@ -60,6 +60,28 @@ Filed in full in the spec's own §12.4. Summary:
   closing paragraph isn't reachable yet; `_on_plan_revised` is wired
   but is a documented no-op until that correlation exists.
 
+### Phase 4 Wave 2
+
+- `reflect.drift.detected` is now actually consumed: Planning
+  (`simorgh/planning/service.py`) reacts by flagging the drifting
+  task's project for re-grounding on its next PENDING->AVAILABLE
+  sibling and recording a `plan.revised` with the drift as the reason
+  — closes harness-06 gap #3, "no drift/re-grounding check across a
+  multi-tick PROJECT_TASK." Previously this event was published and
+  never consumed by anything.
+- `_on_sleep` now also publishes `self.observation{kind:limitation}`
+  for every mined pattern (in addition to the existing
+  `reflect.patterns.found`) — the wire path World Model's `SELF.md`
+  "What I know I'm bad at" section actually ingests
+  (`06-worldmodel.md` section 5's ingestion table); previously nothing
+  produced a real `kind:limitation` observation even though the
+  contract's `kind` enum already allowed it.
+- Reflection still has no wire event carrying a self-critique's
+  `open_questions` (only `guardian:critique:<id>`/`memory.store` see
+  them) — `simorgh/worldmodel/selfmodel.py`'s docstring names the
+  one-line contract addition (a new `self.observation` kind, or a
+  dedicated `reflect.critique.recorded` event) that would close it.
+
 ## Tests
 
 - `tests/simorgh/reflection/` — pure-logic unit tests for every module
