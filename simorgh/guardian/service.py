@@ -51,6 +51,10 @@ class Service:
         topics.TASK_CREATED,
         topics.TASK_COMPLETED,
         topics.TASK_FAILED,
+        topics.REFLECT_DRIFT_DETECTED,
+        topics.REFLECT_HEALTH_FINDING,
+        topics.COGNITION_PROVIDER_STATUS,
+        topics.SYSTEM_RESUME,
     )
     produces = (
         topics.ACTION_APPROVED,
@@ -88,6 +92,10 @@ class Service:
         self._subs.append(await ctx.bus.subscribe(topics.TASK_CREATED, self._on_task_created))
         self._subs.append(await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_outcome))
         self._subs.append(await ctx.bus.subscribe(topics.TASK_FAILED, self._on_task_outcome))
+        self._subs.append(await ctx.bus.subscribe(topics.REFLECT_DRIFT_DETECTED, self._on_drift_detected))
+        self._subs.append(await ctx.bus.subscribe(topics.REFLECT_HEALTH_FINDING, self._on_health_finding))
+        self._subs.append(await ctx.bus.subscribe(topics.COGNITION_PROVIDER_STATUS, self._on_provider_status))
+        self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_RESUME, self._on_resume))
 
     async def stop(self) -> None:
         for sub in self._subs:
@@ -133,6 +141,45 @@ class Service:
         await self._ctx.bus.publish(Message.new(
             topics.GUARDIAN_POSTURE_CHANGED, source="guardian",
             payload={"mode": to, "trust_score": 0.0, "reason": reason},
+        ))
+
+    # -- 09-guardian.md section 5.3's other tightening triggers --------------
+    # `_on_task_outcome` above already wires the failure-streak trigger;
+    # these three plus `_on_resume` complete the table. Each calls the
+    # same `_tighten`, whose own `Posture.tighten` never raises the level
+    # -- so an event here can only ever hold or lower posture, matching
+    # "there is deliberately no message that loosens posture" even though
+    # none of these handlers checks the current level itself.
+
+    async def _on_drift_detected(self, message: Message) -> None:
+        p = message.payload
+        await self._tighten("guarded", f"drift detected on task {p.get('task_id', '')}: {p.get('evidence', '')}")
+
+    async def _on_health_finding(self, message: Message) -> None:
+        p = message.payload
+        if p.get("severity") == "critical":
+            await self._tighten("locked", f"critical health finding: {p.get('detail', '')}")
+
+    async def _on_provider_status(self, message: Message) -> None:
+        p = message.payload
+        fraction = _fraction_used(p.get("budget") or {}, p.get("available", True))
+        self._budgets[p["provider"]] = BudgetStatus(provider=p["provider"], fraction_used=fraction)
+        if fraction >= self._config.budget_pressure_tighten_at:
+            await self._tighten("guarded", f"{p['provider']} budget at {fraction:.0%} of window cap")
+
+    async def _on_resume(self, message: Message) -> None:
+        """The only loosening path (09-guardian.md section 5.3): a human
+        action (`system.resume`), never a message any autonomous
+        subsystem can emit -- `SYSTEM_RESUME`'s publisher allow-list
+        (`contracts/topics.py`) already restricts it to interface/kernel."""
+        if self._posture.level == self._posture.baseline and not self._posture.reasons:
+            return
+        self._posture.reset_to_baseline()
+        self._failure_streak.clear()
+        await self._ctx.ledger.append(TRUST_STREAM, self._event(TRUST_STREAM, "reset_to_baseline", {"by": "human"}))
+        await self._ctx.bus.publish(Message.new(
+            topics.GUARDIAN_POSTURE_CHANGED, source="guardian",
+            payload={"mode": self._posture.level, "trust_score": 1.0, "reason": "system.resume"},
         ))
 
     # -- the pipeline ----------------------------------------------------
@@ -209,3 +256,22 @@ class Service:
 def _sha256(text: str) -> str:
     import hashlib
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _fraction_used(budget: dict, available: bool) -> float:
+    """`cognition.provider.status`'s `budget` object -> Guardian's own
+    0..1+ `fraction_used` (`api.BudgetStatus`). Prefers spend over the
+    window's `max_spend_usd`, falls back to `calls`/`max_calls`, and
+    reports 0.0 (never fabricated pressure) when neither cap is
+    configured -- "no data" and "not exhausted" are the same signal
+    here, matching `BudgetRule`'s own "no data must not be treated as
+    exhausted" (this package's README)."""
+    if budget.get("exhausted") or not available:
+        return 1.0
+    max_spend, spend = budget.get("max_spend_usd"), budget.get("spend_usd")
+    if isinstance(max_spend, (int, float)) and max_spend and isinstance(spend, (int, float)):
+        return spend / max_spend
+    max_calls, calls = budget.get("max_calls"), budget.get("calls")
+    if isinstance(max_calls, (int, float)) and max_calls and isinstance(calls, (int, float)):
+        return calls / max_calls
+    return 0.0
