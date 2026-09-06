@@ -90,12 +90,26 @@ class MemoryStore(abc.ABC):
         self.add(record)
         return record
 
+    def _replace(self, record: MemoryRecord) -> None:
+        """Durably update an existing record's content in place.
+
+        Must preserve the record's position among other records for
+        recency-ordered `query()` results -- unlike delete+add, this must
+        not make an untouched record appear "most recent". Default falls
+        back to delete+add (weaker: briefly loses the record on crash, and
+        reorders it); subclasses backed by an ordered on-disk log should
+        override this for stronger crash safety and stable ordering.
+        """
+        self.delete(record.id)
+        self.add(record)
+
     def link_causal(self, consequence_id: str, antecedent_id: str) -> None:
         """Tag `consequence_id` as causally following from `antecedent_id`.
 
         Stored as a `metadata["antecedent_ids"]` list on the consequence
-        record, rewritten via delete+add so subclasses don't each need to
-        implement in-place metadata updates.
+        record, updated via `_replace` so subclasses don't each need to
+        implement in-place metadata updates, and so the record's recency
+        ordering isn't disturbed just because it was causally linked.
         """
         record = self.get(consequence_id)
         if record is None:
@@ -110,8 +124,7 @@ class MemoryStore(abc.ABC):
             created_at=record.created_at,
             metadata={**record.metadata, "antecedent_ids": antecedent_ids},
         )
-        self.delete(record.id)
-        self.add(updated)
+        self._replace(updated)
 
     def causes_of(self, record_id: str) -> list[MemoryRecord]:
         """Return the antecedent records tagged as causes of `record_id`."""
@@ -167,6 +180,12 @@ class InMemoryStore(MemoryStore):
             del self._records[record_id]
             self._order.remove(record_id)
             return True
+
+    def _replace(self, record: MemoryRecord) -> None:
+        with self._lock:
+            if record.id not in self._records:
+                raise KeyError(record.id)
+            self._records[record.id] = record
 
 
 class JSONFileMemoryStore(MemoryStore):
@@ -225,15 +244,28 @@ class JSONFileMemoryStore(MemoryStore):
             self._rewrite()
             return True
 
+    def _replace(self, record: MemoryRecord) -> None:
+        with self._lock:
+            if record.id not in self._records:
+                raise KeyError(record.id)
+            self._records[record.id] = record
+            self._rewrite()
+
     def _rewrite(self) -> None:
-        """Compact the on-disk log to match in-memory state after a delete.
-        O(n), but deletion is a maintenance-time operation, not a hot path.
+        """Rewrite the on-disk log to match in-memory state, atomically:
+        write to a sibling temp file and fsync it, then os.replace() over
+        the real path. A crash at any point leaves either the old file or
+        the new one fully intact -- never a partially-written one, and
+        never neither (unlike a delete-then-add sequence, which has a
+        window where the record exists in neither form).
         """
-        with self._path.open("w", encoding="utf-8") as fh:
+        tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as fh:
             for record_id in self._order:
                 fh.write(json.dumps(asdict(self._records[record_id])) + "\n")
             fh.flush()
             os.fsync(fh.fileno())
+        os.replace(tmp_path, self._path)
 
 
 def _filter_ordered(
