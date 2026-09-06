@@ -39,17 +39,6 @@ takeaway/feedback records above, a delta is built by reading the most
 recent prior delta for the same subject first, so consecutive reflection
 cycles compound on each other's reasoning instead of each one starting
 cold from raw outcomes.
-
-A fourth pass, `ReflectionAgent.diff_self_model()`, steps back from any
-single subject and asks what changed about Simorgh's self-model as a
-whole since the last time this pass ran: which subjects now carry
-self-critique confidence that didn't before (added), which no longer do
-(removed), and which had their confidence shift up or down. It reads
-its own prior output (kind="self_model_snapshot") the same way
-`record_self_critique` reads its own prior delta, then writes a fresh
-snapshot for next time -- so "what has changed about myself" is an
-explicit, queryable record rather than something that has to be
-reconstructed by re-reading every self-critique delta from scratch.
 """
 
 from __future__ import annotations
@@ -123,18 +112,20 @@ class SelfCritique:
 
 
 @dataclass(frozen=True)
-class SelfModelDiff:
-    """What changed about Simorgh's self-model as a whole since the last
-    time `ReflectionAgent.diff_self_model` ran: subjects that newly
-    carry self-critique confidence (`added`), subjects that used to but
-    no longer do (`removed`), and subjects whose confidence moved,
-    reported as `(subject, previous_confidence, current_confidence)`
-    triples in `confidence_shifts`.
+class SelfModelSnapshot:
+    """A point-in-time summary of what Simorgh currently knows about its
+    own capabilities and behavior: the durable self-knowledge facts
+    (kind="self_knowledge") and self-critique confidence levels
+    (kind="self_critique_delta") accumulated so far, one entry per
+    subject/agent. Built fresh each time by `ReflectionAgent.build_self_model`
+    from the store's own records rather than tracked incrementally, so it
+    always reflects current state rather than an accumulated diff of
+    diffs -- `ReflectionAgent.diff_self_model` is what compares two of
+    these snapshots against each other.
     """
 
-    added: tuple[str, ...]
-    removed: tuple[str, ...]
-    confidence_shifts: tuple[tuple[str, float, float], ...]
+    knowledge_by_subject: dict[str, str]
+    critique_confidence_by_subject: dict[str, float]
     timestamp: float = field(default_factory=time.time)
 
 
@@ -359,75 +350,111 @@ class ReflectionAgent:
         )
         return critique
 
-    def _latest_self_model_snapshot(self) -> dict[str, float]:
-        """Reads back the most recent self-model snapshot per subject
-        (kind="self_model_snapshot"), the same way `_latest_self_critique`
-        reads back the most recent delta per subject -- so
-        `diff_self_model` has something concrete to diff the current
-        self-model against instead of starting cold.
+    def build_self_model(self) -> SelfModelSnapshot:
+        """Builds a fresh summary of current self-knowledge (kind=
+        "self_knowledge") and self-critique confidence (kind=
+        "self_critique_delta"), one entry per subject/agent, taking the
+        most recent record for each -- `query()` already returns records
+        most-recent-first, so the first occurrence per subject in
+        iteration order is the latest. This is the "current capabilities/
+        behavior" half of `diff_self_model`: read live from the store
+        rather than cached, since self-knowledge can be promoted or a
+        critique delta recorded at any point between diffs.
         """
-        if self._store is None:
-            return {}
-        latest_by_subject: dict[str, tuple[float, float]] = {}
-        for record in self._store.query(kind=SELF_MODEL_SNAPSHOT_KIND, limit=1000):
-            subject = record.metadata.get("subject")
-            confidence = record.metadata.get("confidence")
-            if subject is None or confidence is None:
-                continue
-            timestamp = record.metadata.get("timestamp", record.created_at)
-            if subject not in latest_by_subject or timestamp > latest_by_subject[subject][1]:
-                latest_by_subject[subject] = (confidence, timestamp)
-        return {subject: confidence for subject, (confidence, _) in latest_by_subject.items()}
+        knowledge_by_subject: dict[str, str] = {}
+        critique_confidence_by_subject: dict[str, float] = {}
+        if self._store is not None:
+            for record in self._store.query(kind=SELF_KNOWLEDGE_KIND):
+                subject = record.metadata.get("agent")
+                if subject is not None and subject not in knowledge_by_subject:
+                    knowledge_by_subject[subject] = record.content
+            for record in self._store.query(kind=SELF_CRITIQUE_KIND):
+                subject = record.metadata.get("subject")
+                if subject is not None and subject not in critique_confidence_by_subject:
+                    critique_confidence_by_subject[subject] = record.metadata.get(
+                        "confidence", 0.0
+                    )
 
-    def diff_self_model(self) -> SelfModelDiff:
-        """Builds Simorgh's current self-model -- one confidence value per
-        subject, taken from the latest self-critique delta on that
-        subject via `_latest_self_critique` -- and diffs it against the
-        last snapshot this method itself wrote via
-        `_latest_self_model_snapshot`, so what actually changed about
-        Simorgh's own capabilities/behavior since the last reflection
-        cycle is an explicit, queryable result rather than something
-        that has to be re-derived by re-reading every self-critique
-        delta from scratch. Writes a fresh snapshot for next time before
-        returning. Requires `store` (returns an empty diff without one,
-        same as the other store-backed passes).
-        """
-        if self._store is None:
-            return SelfModelDiff(added=(), removed=(), confidence_shifts=())
-
-        subjects = {
-            record.metadata["subject"]
-            for record in self._store.query(kind=SELF_CRITIQUE_KIND, limit=1000)
-            if record.metadata.get("subject") is not None
-        }
-        current: dict[str, float] = {}
-        for subject in subjects:
-            latest = self._latest_self_critique(subject)
-            if latest is not None:
-                current[subject] = latest.confidence
-
-        previous = self._latest_self_model_snapshot()
-
-        added = tuple(sorted(subject for subject in current if subject not in previous))
-        removed = tuple(sorted(subject for subject in previous if subject not in current))
-        confidence_shifts = tuple(
-            (subject, previous[subject], current[subject])
-            for subject in sorted(current)
-            if subject in previous and current[subject] != previous[subject]
+        return SelfModelSnapshot(
+            knowledge_by_subject=knowledge_by_subject,
+            critique_confidence_by_subject=critique_confidence_by_subject,
         )
 
-        diff = SelfModelDiff(added=added, removed=removed, confidence_shifts=confidence_shifts)
+    def _latest_self_model_snapshot(self) -> SelfModelSnapshot | None:
+        """Reads back the most recently stored self-model snapshot (kind=
+        "self_model_snapshot"), if any, so `diff_self_model` has a
+        baseline to compare the freshly built snapshot against. Returns
+        None without a store or before the first snapshot has ever been
+        recorded.
+        """
+        if self._store is None:
+            return None
+        records = self._store.query(kind=SELF_MODEL_SNAPSHOT_KIND, limit=1)
+        if not records:
+            return None
+        latest = records[0]
+        return SelfModelSnapshot(
+            knowledge_by_subject=latest.metadata.get("knowledge_by_subject", {}),
+            critique_confidence_by_subject=latest.metadata.get(
+                "critique_confidence_by_subject", {}
+            ),
+            timestamp=latest.metadata.get("timestamp", latest.created_at),
+        )
 
-        for subject, confidence in current.items():
-            self._store.remember(
-                SELF_MODEL_SNAPSHOT_KIND,
-                f"self-model snapshot: '{subject}' at confidence {confidence:.2f}",
-                subject=subject,
-                confidence=confidence,
-                timestamp=diff.timestamp,
-            )
+    def diff_self_model(self) -> str | None:
+        """Self-model diffing pass: compares the current self-model
+        (`build_self_model`) against the last stored snapshot to
+        explicitly surface what has changed about Simorgh's own
+        capabilities/behavior since then -- new self-knowledge gained,
+        facts that were revised, and subjects whose self-critique
+        confidence moved meaningfully (>= 0.15). Always stores the freshly
+        built snapshot afterward (kind="self_model_snapshot") so the next
+        call diffs against this one; on the very first call there is
+        nothing yet to compare against, so this seeds the baseline
+        snapshot and returns None rather than a diff. Requires `store`
+        (returns None without one, same as the other store-backed
+        passes).
+        """
+        if self._store is None:
+            return None
 
-        return diff
+        current = self.build_self_model()
+        previous = self._latest_self_model_snapshot()
+
+        self._store.remember(
+            SELF_MODEL_SNAPSHOT_KIND,
+            f"self-model snapshot at {current.timestamp}",
+            knowledge_by_subject=current.knowledge_by_subject,
+            critique_confidence_by_subject=current.critique_confidence_by_subject,
+            timestamp=current.timestamp,
+        )
+
+        if previous is None:
+            return None
+
+        changes = []
+        for subject, fact in current.knowledge_by_subject.items():
+            prior_fact = previous.knowledge_by_subject.get(subject)
+            if prior_fact is None:
+                changes.append(f"gained new self-knowledge about '{subject}': {fact}")
+            elif prior_fact != fact:
+                changes.append(f"revised self-knowledge about '{subject}': {fact}")
+
+        for subject, confidence in current.critique_confidence_by_subject.items():
+            prior_confidence = previous.critique_confidence_by_subject.get(subject)
+            if prior_confidence is None:
+                continue
+            delta = confidence - prior_confidence
+            if abs(delta) >= 0.15:
+                direction = "grew more confident" if delta > 0 else "grew less confident"
+                changes.append(
+                    f"{direction} about '{subject}' (self-critique confidence "
+                    f"{prior_confidence:.2f} -> {confidence:.2f})"
+                )
+
+        if not changes:
+            return None
+        return "self-model diff since last reflection: " + "; ".join(changes)
 
     def reflect_on_outcome(self, outcome: Outcome) -> Proposal | None:
         """Immediate, per-turn takeaway: "what was the shortcoming here,
