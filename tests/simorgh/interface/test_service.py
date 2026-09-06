@@ -7,6 +7,7 @@ depend on a tty or piped stdin."""
 import asyncio
 import contextlib
 import io
+import sys
 import tempfile
 import unittest
 import unittest.mock
@@ -284,6 +285,56 @@ class ReplThreadOrderingTestCase(unittest.IsolatedAsyncioTestCase):
             ["input_requested:first", "printed:reply to first",
              "input_requested:second", "printed:reply to second"],
         )
+
+
+class ReadlineWiringTestCase(unittest.IsolatedAsyncioTestCase):
+    """Live-caught (the creator's own real `sim.sh` use, right after the
+    chat itself finally worked): pressing the Up arrow typed a literal
+    `^[[A` into the line, because nothing ever imported `readline` --
+    without it, `input()` has no line editing or history at all, and raw
+    arrow-key escape bytes land in the buffer as text. Importing it is
+    the whole fix for the garbling; the history file is the persistence
+    on top. These pin the wiring, not libedit/readline's own behavior
+    (which needs a real tty and is platform-dependent)."""
+
+    def test_readline_is_imported_on_this_platform(self):
+        from simorgh.interface import service as service_module
+
+        # macOS/Linux CPython ships readline (or libedit behind the same
+        # module name); only Windows' stock build lacks it.
+        if sys.platform.startswith("win"):
+            self.skipTest("readline is not available on stock Windows CPython")
+        self.assertIsNotNone(service_module.readline)
+
+    def test_history_helpers_are_safe_before_start_and_with_a_real_data_dir(self):
+        service = Service(InterfaceConfig(), run_repl=False)
+        # Before start(): no ctx, so no path -- must be a quiet no-op, never a crash.
+        service._load_readline_history()  # noqa: SLF001
+        service._save_readline_history()  # noqa: SLF001
+        self.assertIsNone(service._history_path())  # noqa: SLF001
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        data_dir = Path(tmp.name) / "interface"
+
+        class _Ctx:
+            pass
+
+        ctx = _Ctx()
+        ctx.data_dir = data_dir
+        service._ctx = ctx  # noqa: SLF001
+        self.assertEqual(service._history_path(), data_dir / "cli_history")  # noqa: SLF001
+        # Missing file on load is fine; save creates the parent dir and the file.
+        service._load_readline_history()  # noqa: SLF001
+        service._save_readline_history()  # noqa: SLF001
+        if service_module_readline_available():
+            self.assertTrue((data_dir / "cli_history").exists())
+
+
+def service_module_readline_available() -> bool:
+    from simorgh.interface import service as service_module
+
+    return service_module.readline is not None
 
 
 class HttpEnabledWiringTestCase(unittest.IsolatedAsyncioTestCase):

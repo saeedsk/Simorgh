@@ -3,16 +3,25 @@ the CLI REPL, command dispatch, vitals, and console rendering. Layer 5
 (registry.py).
 
 **Honest about this session's scope** (see the spec header and its own
-§12): the readline history file, the general Phase 5 HTTP/WebSocket API,
-notice mid-line queueing, and interactive `ui.prompt` answer collection
-via the REPL's own stdin did not land this session -- `ui.prompt` is
-rendered and always resolves to its default on timeout (never silently
-proceeds), which is the safe half of the spec's S2 behavior without the
-full interactive half. One narrow slice of that Phase 5 item *did* land
-here, pulled forward: a read-only live-status dashboard (`httpapi.py`),
-because the creator asked to actually see the running system -- which
-subsystems are loaded, bus/worker activity -- while first working with
-v2, not just infer it from REPL scrollback.
+§12): the general Phase 5 HTTP/WebSocket API, notice mid-line queueing,
+and interactive `ui.prompt` answer collection via the REPL's own stdin
+did not land this session -- `ui.prompt` is rendered and always
+resolves to its default on timeout (never silently proceeds), which is
+the safe half of the spec's S2 behavior without the full interactive
+half. One narrow slice of that Phase 5 item *did* land here, pulled
+forward: a read-only live-status dashboard (`httpapi.py`), because the
+creator asked to actually see the running system -- which subsystems
+are loaded, bus/worker activity -- while first working with v2, not
+just infer it from REPL scrollback.
+
+The readline history file (originally also descoped) landed later,
+live-caught: without importing `readline` at all, `input()` has no
+concept of arrow-key line editing -- pressing Up/Down/Left/Right sends
+the raw escape bytes (`^[[A` etc.) straight into the line as literal
+text instead of moving a cursor or recalling history, corrupting
+whatever the creator was mid-typing. Muscle-memory terminal habits
+(history recall, in-line editing) are not optional polish once a human
+is actually typing into this REPL for real.
 """
 
 from __future__ import annotations
@@ -21,6 +30,13 @@ import asyncio
 import sys
 import threading
 import uuid
+
+try:
+    import readline  # noqa: F401 -- imported for its side effect: input() gains
+    # arrow-key editing, backspace/word-editing, and (once history is loaded
+    # below) up/down recall. Not available on Windows' stock CPython.
+except ImportError:  # pragma: no cover -- platform-dependent
+    readline = None
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
@@ -32,6 +48,8 @@ from .dispatch import dispatch
 from .httpapi import HttpApi
 from .parser import parse
 from .vitals import VitalsCache
+
+_HISTORY_LENGTH = 1000
 
 VERSION = "0.1.0"
 
@@ -114,6 +132,7 @@ class Service:
         if self._repl_thread is not None:
             self._repl_thread.join(timeout=1.0)
             self._repl_thread = None
+            self._save_readline_history()
         if self._http is not None:
             await self._http.stop()
             self._http = None
@@ -123,8 +142,39 @@ class Service:
             return Health.down("not started")
         return Health.ok()
 
+    def _history_path(self):
+        if self._ctx is None:
+            return None
+        return self._ctx.data_dir / "cli_history"
+
+    def _load_readline_history(self) -> None:
+        if readline is None:
+            return
+        path = self._history_path()
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            readline.read_history_file(path)
+        except (FileNotFoundError, OSError):
+            pass
+        readline.set_history_length(_HISTORY_LENGTH)
+
+    def _save_readline_history(self) -> None:
+        if readline is None:
+            return
+        path = self._history_path()
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            readline.write_history_file(path)
+        except OSError:
+            pass
+
     # -- REPL thread (readline blocks; bridged to asyncio via run_coroutine_threadsafe) --
     def _repl_main(self) -> None:
+        self._load_readline_history()
         print(render_mod.banner(enabled=self._color))
         print("Ctrl-D to detach the REPL.")
         while not self._stop_repl.is_set():
