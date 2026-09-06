@@ -2,12 +2,31 @@
 a second Worker after a simulated crash (S5/S7, 16 section 6/9)."""
 
 import unittest
+from pathlib import Path
 
 from simorgh.contracts import topics
+from simorgh.contracts.protocols import Context
+from simorgh.orchestration.config import Config
+from simorgh.orchestration.service import Service as OrchestrationService
 from simorgh.orchestration.worker import Worker
 
 from .fakes import FakeCognition, FakeGuardianExecution, FakePlanning
 from .harness import Harness, run
+
+
+class _Logger:
+    def debug(self, event, **f): pass
+    def info(self, event, **f): pass
+    def warning(self, event, **f): pass
+    def error(self, event, **f): pass
+
+
+def _stub_context(h: "Harness", *, name: str = "orchestration") -> Context:
+    return Context(
+        name=name, instance_id="", run_id="test", mode="single",
+        bus=h.client(name), ledger=h.ledger, config={}, secrets={}, clock=h.clock,
+        logger=_Logger(), data_dir=Path("."),
+    )
 
 
 class TestWorkerClaimLoop(unittest.TestCase):
@@ -74,6 +93,73 @@ class TestWorkerClaimLoop(unittest.TestCase):
 
             await worker.stop()
             await planning.stop()
+
+
+class TestPerceptTextRunsAChatTurnWithNoPlanningTask(unittest.TestCase):
+    @run
+    async def test_percept_text_received_produces_turn_completed_with_no_task_ever_created(self):
+        """Flow 1 (02 section 5): plain conversational text has no
+        `intent.goal.stated`/Planning task behind it -- only the
+        `batch`/`evolve`/`plan` commands do. Before this test existed,
+        nothing in Orchestration consumed `percept.text.received` at
+        all, so a plain chat message from Interface got zero reply
+        (Interface's own `_handle_chat` timed out with "no response --
+        the reasoning subsystem isn't built yet this session")."""
+        async with Harness() as h:
+            planning = FakePlanning(h.client("planning"))  # deliberately: no task registered anywhere
+            await planning.start()
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": "hello back"}])
+            await cognition.start()
+
+            service = OrchestrationService(Config(workers=1))
+            ctx = _stub_context(h)
+            await service.start(ctx)
+
+            completed = {}
+
+            async def _on_turn(message):
+                completed["turn"] = message
+
+            sub = await h.client("interface").subscribe(topics.TURN_COMPLETED, _on_turn)
+
+            from simorgh.contracts.envelope import Message
+            await h.client("interface").publish(Message.new(
+                topics.PERCEPT_TEXT_RECEIVED, source="interface",
+                payload={"channel": "cli", "text": "hi there", "session_id": "sess-1"},
+                clock=h.clock.now,
+            ))
+            # No worldmodel/persona/memory fake is running in this harness,
+            # so Assembler.assemble()'s three sequential requests
+            # (self.summary, persona.voice, memory.retrieve) each degrade
+            # via a real 0.25s asyncio.wait_for -- give it real headroom.
+            await h.pump(150, real_delay=0.02)
+
+            self.assertIn("turn", completed)
+            self.assertEqual(completed["turn"].payload["session_id"], "sess-1")
+            self.assertEqual(completed["turn"].payload["text"], "hello back")
+            self.assertEqual(planning._tasks, {})  # confirms this never touched Planning's task store
+
+            await sub.unsubscribe()
+            await service.stop()
+            await cognition.stop()
+            await planning.stop()
+
+    @run
+    async def test_empty_percept_text_is_ignored_not_a_crash(self):
+        async with Harness() as h:
+            service = OrchestrationService(Config(workers=1))
+            ctx = _stub_context(h)
+            await service.start(ctx)
+
+            from simorgh.contracts.envelope import Message
+            await h.client("interface").publish(Message.new(
+                topics.PERCEPT_TEXT_RECEIVED, source="interface",
+                payload={"channel": "cli", "text": "", "session_id": "sess-2"},
+                clock=h.clock.now,
+            ))
+            await h.pump(10)  # must not raise / hang
+
+            await service.stop()
 
 
 class TestResumeOnASecondWorker(unittest.TestCase):
