@@ -16,7 +16,7 @@ from pathlib import Path
 from .config import ConfigError, load_config
 from .migrate_v1 import DEFAULT_V1_MEMORY_PATH, migrate
 from .selfcheck import run as run_selfcheck
-from .service import Kernel, KernelBootError
+from .service import Kernel, KernelBootError, WorkerKernel
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -26,6 +26,10 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="prove the guarded action path works, then exit")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("run", help="boot the Kernel and run until stopped")
+    worker_p = sub.add_parser(
+        "worker", help="start a local-multi worker process (Orchestration only; see [runtime] mode)"
+    )
+    worker_p.add_argument("--id", dest="worker_id", required=True, help="this worker's instance id, e.g. w1")
     status_p = sub.add_parser("status", help="print the current system.status snapshot")
     status_p.add_argument("--timeout", type=float, default=2.0)
     trace_p = sub.add_parser("trace", help="print the causal message trace for an id")
@@ -71,6 +75,31 @@ async def _cmd_run(config_path: str | None) -> int:
 
     await kernel.wait_for_stop()
     await kernel.shutdown()
+    return 0
+
+
+async def _cmd_worker(config_path: str | None, worker_id: str) -> int:
+    config = load_config(config_path)
+    worker = WorkerKernel(config, worker_id=worker_id)
+    await worker.boot()
+
+    loop = asyncio.get_running_loop()
+
+    def _handle_signal() -> None:
+        # A worker process shuts itself down on SIGINT/SIGTERM; unlike
+        # `simorgh run` it never publishes `system.stop` -- that would
+        # (mis)stop the whole deployment from a process that owns none of
+        # guardian/execution/the state machine.
+        worker.request_stop()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _handle_signal)
+        except (NotImplementedError, RuntimeError):
+            pass  # not every platform/loop supports signal handlers (e.g. some test runners)
+
+    await worker.wait_for_stop()
+    await worker.shutdown()
     return 0
 
 
@@ -129,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "run" or args.command is None:
             return asyncio.run(_cmd_run(args.config))
+        if args.command == "worker":
+            return asyncio.run(_cmd_worker(args.config, args.worker_id))
         if args.command == "status":
             return asyncio.run(_cmd_status(args.config, args.timeout))
         if args.command == "trace":

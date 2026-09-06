@@ -43,8 +43,14 @@ class Assembler:
             blocks.append({"role": "user", "content": user_text})
         return blocks
 
-    async def _request(self, type_: str, payload: dict, *, source: str = "orchestration") -> Message | None:
-        req = Message.new(type_, source=source, payload=payload, clock=self._clock)
+    async def _request(self, type_: str, payload: dict) -> Message | None:
+        # `self._bus.source` (never a hardcoded literal): in `local-multi`
+        # mode this Worker's own `BusClient` is bound to an instance-
+        # qualified source (`orchestration@w1`), and `ReservedTopologyPolicy`
+        # authenticates only the exact source `ContextFactory.build` issued
+        # a token for -- a bare `"orchestration"` request would raise
+        # `PolicyViolation` before ever reaching Memory/Self/World/Persona.
+        req = Message.new(type_, source=self._bus.source, payload=payload, clock=self._clock)
         reply = await self._bus.request_or_error(req, timeout=self._timeout_s)
         if reply.payload.get("ok") is False:
             return None
