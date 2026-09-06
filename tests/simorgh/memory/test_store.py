@@ -114,6 +114,20 @@ class TestMemoryEngineStoreAndRetrieve(unittest.IsolatedAsyncioTestCase):
         items, _ = await self.engine.retrieve(query="widget facts", kinds=["semantic"], k=5, filters=None)
         self.assertEqual(items[0].ts, self.clock.now())  # the fresher, higher-confidence one ranks first
 
+    async def test_counts_reports_live_records_per_kind(self):
+        await self.engine.store(kind="episodic", content="e1", tags=[], source_ref="", confidence=1.0)
+        await self.engine.store(kind="episodic", content="e2", tags=[], source_ref="", confidence=1.0)
+        await self.engine.store(kind="semantic", content="s1", tags=[], source_ref="", confidence=1.0)
+        counts = await self.engine.counts()
+        self.assertEqual(counts, {"episodic": 2, "semantic": 1, "procedural": 0})
+
+    async def test_counts_excludes_forgotten_records(self):
+        ref = await self.engine.store(kind="episodic", content="e1", tags=[], source_ref="", confidence=1.0)
+        await self.engine.store(kind="episodic", content="e2", tags=[], source_ref="", confidence=1.0)
+        await self.engine.forget([ref], reason="test")
+        counts = await self.engine.counts()
+        self.assertEqual(counts["episodic"], 1)
+
 
 class TestMemoryEngineContradictionsAndPruning(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

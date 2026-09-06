@@ -345,6 +345,118 @@ not code. Every subsystem is written once against the Bus/Ledger
 protocols. Integration tests run every scenario on the `memory` bus, and
 a smaller smoke set on `sqlite` to prove durability semantics.
 
+### 6.1 Where this is headed: a persistent, multi-session service
+
+Captured directly from the creator (2026-09-06, ahead of the Phase 5
+work it actually belongs to -- written down now so it survives to
+whichever model reviews the roadmap next): Sim's intended end state is
+not "a CLI you invoke," it's a daemon that stays alive and running
+continuously, with people establishing independent *sessions* against
+one long-running Kernel -- through the CLI, through a web interface,
+through a plain HTTP/WebSocket API -- each session getting its own
+back-and-forth, all of them talking to the same Sim underneath.
+
+`single` mode's Kernel already *is* this daemon in embryonic form --
+`python -m simorgh run` boots once and runs until stopped, exactly the
+long-lived process this end state needs; nothing about the Kernel/Bus/
+Ledger substrate assumes a single client. What's actually missing is
+narrower than a re-architecture:
+
+- **Interface hardcodes one session.** `self.session_id` is set once
+  per process (`Service.__init__`) and every REPL turn reuses it. The
+  message contracts this rides on already don't have this limit --
+  `percept.text.received`, `turn.completed`, and (since milestone 105)
+  Memory's own episodic writes are already correlated by an arbitrary
+  `session_id` string, not by anything process-scoped. Generalizing
+  Interface from one fixed session to a registry of N concurrent ones
+  is additive, not a redesign of the message layer underneath it.
+- **No transport for a second, independent client yet.** The dashboard
+  built this session (`simorgh/interface/httpapi.py`) is deliberately
+  read-only -- status, not conversation. A real two-way surface (a
+  WebSocket per session for streaming turns, or an HTTP endpoint a web
+  UI or external API client can open its own session against) is the
+  next slice of the same Phase 5 "HTTP/WebSocket API in Interface"
+  item, not a new item.
+- **Session continuity already has a foundation.** Memory's episodic
+  writes already tag records by `session_id` (milestone 105); a
+  genuine multi-session daemon would extend that same mechanism to give
+  each session (or each returning user, if sessions are meant to
+  persist across a reconnect) its own continuity rather than one shared
+  stream.
+
+This is not a build instruction for the current wave -- it's context
+for whoever plans Phase 5 next: the destination is a persistently
+running Sim that many sessions, through many surfaces, can each
+independently talk to, and the pieces already built (session-scoped
+contracts, session-scoped memory, a daemon-shaped Kernel) point at that
+destination more than they need to change to reach it.
+
+### 6.2 Where this is headed, part two: an admin observe-then-control plane
+
+Captured directly from the creator in the same conversation as §6.1
+(2026-09-06), immediately after seeing the read-only dashboard
+(`simorgh/interface/httpapi.py`) run live for the first time. Explicit
+framing from the creator: **observe first, control second** -- as the
+system's owner ("someone with extensive computer knowledge"), the
+creator wants to first see everything, then be able to change things,
+behind admin authentication that is deliberately *not* part of the
+first pass ("for beginning, the authentication can be ignored, but
+later we can add it"). This is design scope for whoever picks up Phase
+5 -- likely Fable, per the creator's own plan to switch review models
+after cutover -- not an implementation instruction for right now.
+
+**Observe tier -- extending the dashboard §6.1's transport already
+enables:**
+- **Logs.** Already true today, just not surfaced anywhere: "structured
+  logs are Ledger events; there is no separate log file that can drift
+  from the record" (§7 below). An admin log view is a Ledger query UI,
+  not new capture.
+- **Metrics history, not just the live snapshot the dashboard shows
+  today.** The Bus already writes every message -- including every
+  `system.metrics` event -- to `trace:<trace_id>` (§7). A real
+  history view needs a queryable time series, which likely means
+  either mining the trace stream directly or (more likely, given trace
+  sampling exists for high-volume topics) a dedicated low-frequency
+  metrics-history stream Kernel writes to on its own schedule,
+  independent of the per-request trace sampling rate.
+- **LLM usage.** The creator explicitly flagged this one as postponable
+  if it's a lot of work. Cognition's `RollingWindowBudget` (built this
+  session, milestone 111) already estimates and tracks per-call cost in
+  memory for budget enforcement -- the raw signal already exists; what's
+  missing is persisting it somewhere queryable across restarts and a
+  view over it.
+- **System health/sanity and resource allocation.** Per-subsystem
+  health status and `restarts` are already in the dashboard (this
+  session's `StatusServer.snapshot()` work). Actual OS-level resource
+  usage (process memory/CPU) is not tracked anywhere yet -- a real gap,
+  not just an unsurfaced signal.
+
+**Control tier -- explicitly deferred, and explicitly needs auth before
+any of it ships for real:** live-adjustable timeouts and other config
+knobs, enabling/disabling individual skills, memory-size limits, and
+the maximum number of concurrent Orchestration workers (`Config.
+workers`, static today, read once at Kernel boot). None of `simorgh.
+toml`'s config surface is currently mutable at runtime -- every
+subsystem reads its `Config` once, at construction. Making any of this
+live needs either a runtime config-update mechanism with subsystems
+that re-read config dynamically, or reusing what the Supervisor already
+knows how to do (restart one subsystem in place) to apply a changed
+config by restarting just the affected subsystem, not the whole Kernel.
+
+**One architectural constraint worth handing to whoever designs this,
+not just a feature list**: an admin control action is still an action
+with real consequences -- disabling a skill, raising the worker count,
+changing a timeout that governs how long Guardian waits for a human
+prompt. `01-vision-and-principles.md`'s own structural-safety principle
+(4.3) exists precisely so nothing bypasses the guarded `action.proposed
+-> guardian -> action.approved -> execution` path. An admin channel that
+writes runtime state directly, outside that path, would be a second,
+parallel, unaudited way to act on the system -- worth deciding
+*deliberately* whether admin actions are simply another category of
+guarded action (logged, reversible, subject to the same topology) or a
+genuinely separate privileged path, rather than defaulting into the
+latter by not thinking about it.
+
 ## 7. Observability (built into the substrate)
 
 - Every message is appended to `trace:<trace_id>` by the Bus itself

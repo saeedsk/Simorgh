@@ -177,6 +177,19 @@ class MemoryEngine:
             await self.forget(stale, reason=f"pruned below top {keep} of kind={kind}")
         return len(stale)
 
+    async def counts(self) -> dict[str, int]:
+        """Live (non-tombstoned) record count per durable kind -- a
+        dashboard's "what does Sim remember" view (02-system-architecture.md
+        section 6.2), not anything `retrieve()`'s own scoring/truncation
+        needs, so kept as its own cheap pass over each kind's stream."""
+        tombstoned = await self._tombstoned_refs()
+        counts: dict[str, int] = {}
+        for kind in KINDS:
+            stream = stream_for(kind)
+            events = await self._ledger.read(stream)
+            counts[kind] = sum(1 for e in events if f"{stream}:{e.seq}" not in tombstoned)
+        return counts
+
     async def _tombstoned_refs(self) -> set[str]:
         refs: set[str] = set()
         for event in await self._ledger.read(TOMBSTONE_STREAM):

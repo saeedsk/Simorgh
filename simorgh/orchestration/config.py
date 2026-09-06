@@ -18,6 +18,7 @@ class Config:
     max_children_concurrent: int = 4
     think_timeout_s: float = 120.0
     needs_human_timeout_s: float = 600.0
+    metrics_interval_s: float = 3.0  # 0 disables the periodic `system.metrics` publish
 
     @classmethod
     def from_mapping(cls, data: dict) -> "Config":

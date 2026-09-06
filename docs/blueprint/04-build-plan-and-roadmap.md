@@ -164,7 +164,29 @@ five gaps are each closed by name in a test.
 - `local-multi` mode: Worker processes on the SQLite bus; crash/resume drills.
 - Optional `aws` backends (SNS/SQS/DynamoDB/S3) behind the same tests
   (skipped when `boto3` absent).
-- HTTP/WebSocket API in Interface.
+- HTTP/WebSocket API in Interface -- the creator's own stated direction
+  for where this lands (`02-system-architecture.md` §6.1, captured
+  2026-09-06): not just a status/metrics surface (a read-only slice of
+  it, the live dashboard, already shipped ahead of this phase), but a
+  genuine multi-session API -- a persistently running Kernel that many
+  independent sessions can each open their own conversation against,
+  through the CLI, a web interface, and this API, all at once. Needs
+  Interface generalized from its current single fixed `session_id` to a
+  registry of concurrent sessions (the message contracts underneath
+  already carry an arbitrary `session_id`, so this is additive) and a
+  real two-way transport (WebSocket per session, most likely) rather
+  than the dashboard's read-only polling.
+- An admin observe-then-control plane on top of the same dashboard --
+  the creator's own stated design scope for this same phase
+  (`02-system-architecture.md` §6.2, captured 2026-09-06): logs, metrics
+  history, LLM usage, and resource allocation first (read-only, mostly
+  extending signal that already exists but isn't persisted/surfaced
+  yet), then live-adjustable config (timeouts, skill enable/disable,
+  worker count) behind admin authentication -- deliberately deferred,
+  added later. §6.2 also flags the one constraint this needs to be
+  designed against, not just built around: whether admin control
+  actions go through Guardian's own guarded action path or become a
+  second, parallel, unaudited way to change the system.
 - Cutover: `sim.sh` → `python -m simorgh run`; `src/` reduced to a
   compatibility shim, then removed; docs updated; EVOLUTION milestone.
 

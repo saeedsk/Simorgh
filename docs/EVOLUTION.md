@@ -2711,3 +2711,170 @@ Still ahead, roughly in order:
     roadmap's one-line description suggested -- reading the actual code
     against the actual spec before writing anything, every time, is what
     made that distinction possible instead of duplicating existing work.
+
+112. **A live-status dashboard, built while Wave 2 ran in the
+    background.** The creator's own framing: this was to be their first
+    real experience working with v2, and they wanted to actually *see*
+    it -- which subsystems are loaded, their state, bus queue depth and
+    throughput, what each Orchestration worker is doing -- in real time,
+    not infer it from REPL scrollback. Asked directly (not assumed):
+    terminal panel or a local web dashboard, and whether to start now
+    alongside Wave 2 or wait. Chose the web dashboard deliberately over
+    resurrecting v1's terminal vitals panel, which this same project's
+    memory records as having corrupted the creator's actual terminal via
+    a readline/DECSTBM conflict (milestone 94's revert) -- a local HTTP
+    page never touches the TTY at all, sidestepping that whole class of
+    bug rather than trying to avoid it more carefully a second time.
+
+    Most of the backend signal already existed and just wasn't reaching
+    anywhere a human could see it: `StatusServer.snapshot()` (`simorgh/
+    kernel/metrics.py`) already answered `system.status.request` with
+    run id/mode/state/uptime and a bare `{name, status}` per subsystem,
+    and the Bus already published real `system.metrics` gauges (queue
+    depth, inflight, request latency) every 15s -- but each subsystem's
+    own rich `health()` detail string ("6 tools registered", "posture=
+    guarded", "0/1 worker(s) busy") was computed and then discarded by
+    `_on_health`'s own comment: "the supervisor's own poll is the source
+    of truth ... this just keeps the table warm." Added `detail`,
+    `restarts`, and a `layer` (from `registry.LAYERS`, so a dashboard
+    groups by boot order without duplicating that table) to every
+    subsystem entry in the snapshot -- three fields, all already
+    computed, just never carried through.
+
+    Orchestration had no live worker visibility at all -- "what is each
+    forked agent process doing" was one of the creator's explicit asks,
+    and there wasn't an answer. `Worker` gained `current_task_id`/
+    `current_kind`, set for the duration of `run()` (covering both the
+    real `task.available` claim path and the ephemeral `run_percept_
+    chat` path from milestone 104) and cleared in a `finally`; `Service`
+    gained a periodic (`Config.metrics_interval_s`, default 3s)
+    `system.metrics` publish carrying a `workers.busy`/`workers.total`
+    gauge pair plus a structured `workers` list -- `{worker_id, task_id,
+    kind}` per worker. No contracts change needed: `system.metrics`'s
+    own schema already permits any value in a gauge (`additionalProperties:
+    {}`, no numeric-only constraint), so a list of objects validates as
+    cleanly as a float.
+
+    `simorgh/interface/httpapi.py`: a hand-rolled, stdlib-only HTTP/1.1
+    server over `asyncio.start_server` -- GET-only, `Connection: close`
+    on every response, no third-party dependency (04's own "no new
+    third-party dependency in the core" rule ruled out reaching for
+    `aiohttp`). Two routes: `/` serves a self-contained dashboard page
+    (no external requests of any kind -- system fonts only, everything
+    inlined, so it works fully offline), `/api/status` proxies a real
+    `system.status.request`/`.reply` round-trip over the live bus as
+    JSON -- the exact same call `python -m simorgh status` already made,
+    just reachable from a browser instead of a separate throwaway
+    Kernel boot (worth noting for whoever touches that CLI command
+    next: it boots a *fresh* Kernel just to read its own empty snapshot,
+    so it was never actually querying a `simorgh run` process running
+    elsewhere in `single` mode -- this dashboard, running inside
+    Interface in the *same* process as the live Kernel, is the first
+    place in the codebase that actually can).
+
+    `InterfaceService` gained `http_enabled`, defaulting to follow
+    `run_repl` (the dashboard is for a human watching an interactive
+    session, so it comes up exactly when the REPL does, off for every
+    headless boot -- tests, `--self-check`, `status`, `trace` -- unless
+    a caller explicitly overrides it either way), printing its URL to
+    stdout on boot.
+
+    Verified live in the sandboxed repo copy, not just via unit tests:
+    booted `python -m simorgh run` with the dashboard enabled, loaded it
+    in a real browser, and watched it update in place -- subsystem cards
+    color-coded by status and grouped by layer with each one's own real
+    detail string, live bus counters, an idle worker row -- confirmed
+    the auto-refresh was genuinely live by comparing two screenshots a
+    few seconds apart (`counter.published` 72 -> 100, uptime ticking).
+    2073 tests passing (new suites: `test_httpapi.py` over real sockets
+    and real HTTP/1.1 requests via `http.client`, not mocked reader/
+    writer objects, plus worker-busy-tracking and metrics-publish tests
+    in orchestration, plus the snapshot's three new fields in kernel).
+
+113. **Two pieces of the creator's own long-range direction for Sim,
+    captured in `02-system-architecture.md` §6.1/§6.2 and cross-referenced
+    from `04-build-plan-and-roadmap.md`'s Phase 5, specifically so they
+    survive to whichever session reviews the roadmap next** (the creator
+    named Fable 5.1 for that review, planned for after cutover) rather
+    than living only in this conversation's own history:
+
+    First: Sim's intended end state is not a CLI a person invokes, it's
+    a daemon that stays alive continuously, with many independent
+    *sessions* -- through the CLI, a web interface, a plain HTTP/
+    WebSocket API -- all talking to the one running Kernel underneath.
+    `single` mode's Kernel already runs this way in embryo; the real gap
+    is narrower than a redesign: Interface hardcodes one `session_id`
+    per process today, while the message contracts underneath it
+    (`percept.text.received`, `turn.completed`, Memory's own episodic
+    writes since milestone 105) already correlate by an arbitrary
+    string, not anything process-scoped -- generalizing Interface to a
+    registry of concurrent sessions is additive to what's there, not a
+    rebuild of it.
+
+    Second, offered immediately after seeing milestone 112's dashboard
+    run live: an admin plane on top of it, explicitly observe-first-
+    control-second, explicitly with authentication deferred to a later
+    pass ("for beginning, the authentication can be ignored"). Observe:
+    logs (already Ledger events, per section 7 below -- needs a query UI,
+    not new capture), metrics *history* (not just the live snapshot
+    milestone 112 shipped -- the trace stream already durably records
+    every `system.metrics` event, so this is a query/aggregation layer
+    over data already being written, not new instrumentation), LLM usage
+    (explicitly flagged by the creator as postponable if it's a lot of
+    work -- Cognition's `RollingWindowBudget`, milestone 111, already
+    estimates this in memory; what's missing is persistence across
+    restarts), and real OS-level resource usage (memory/CPU -- genuinely
+    untracked anywhere today, not just unsurfaced). Control, explicitly
+    deferred: live-adjustable timeouts, skill enable/disable, memory
+    limits, max concurrent workers -- none of `simorgh.toml` is runtime-
+    mutable today, every subsystem reads its `Config` once at
+    construction. One constraint written down for whoever designs this,
+    not just a feature list to build: an admin control action is still
+    an action with real consequences, and `01-vision-and-principles.md`'s
+    own structural-safety principle (4.3) exists precisely so nothing
+    bypasses the guarded `action.proposed -> guardian -> action.approved
+    -> execution` path -- worth deciding deliberately whether admin
+    actions are another category of guarded action or a genuinely
+    separate privileged path, rather than defaulting into the latter by
+    never asking the question.
+
+114. **Two of §6.2's observe-tier items answered directly, same
+    session: LLM usage and "what does Sim remember," both reusing
+    signal that already existed rather than adding new instrumentation.**
+    Cognition already published `cognition.provider.status` every ~30s
+    from its own `RollingWindowBudget`; that same status now also folds
+    into a `system.metrics{subsystem: "cognition"}` publish (a
+    `providers` gauge -- name/calls/max_calls/spend/exhausted per
+    provider) on the identical throttle, reaching the dashboard's single
+    aggregated snapshot the way every other subsystem's gauges already
+    do. Memory gained a genuinely new capability, `MemoryEngine.
+    counts()` -- a live (non-tombstoned) record count per durable kind,
+    published the same way every 30s. Both new dashboard panels
+    (`simorgh/interface/static/dashboard.html`) verified live against a
+    real autonomous run, not synthetic data: while the sandboxed repo
+    copy booted, Curiosity/Planning had already started a real research
+    task, and the dashboard showed the actual resulting spend
+    (`claude_code_cli`: 2 calls, $0.0597) and provider availability a
+    few seconds later, exactly as it should.
+
+    `dash.sh` added at the repo root, at the creator's own request: a
+    small script that checks the dashboard is actually reachable (curl,
+    2s timeout) before opening it in Chrome, rather than opening a dead
+    tab and leaving the creator to guess why -- `simorgh run` must
+    already be up, this script only points a browser at it. Notes its
+    own real limitation: the port isn't wired to `simorgh.toml`/env
+    overrides yet (`InterfaceConfig` has no `from_mapping`, unlike every
+    other subsystem's own `Config` class), so it's the `InterfaceConfig`
+    default unless a full URL is passed as an argument.
+
+    Asked directly whether to fork a session to build more of §6.2's
+    observe tier (metrics history, a logs view, real OS-level resource
+    usage) in parallel with Wave 2 (still running at this point, on
+    `reflection`/`planning`/`guardian`/`worldmodel` -- zero file overlap
+    with the interface/kernel work this needs) -- launched as a second
+    isolated-worktree fork, explicitly scoped to the observe tier only
+    and explicitly forbidden from building any part of the control tier
+    (config knobs, skill enable/disable, auth), which stays deferred
+    exactly as section 6.2 already says, pending the deliberate
+    Guardian-integration design decision recorded there. 2077 tests
+    passing at this point in the session.

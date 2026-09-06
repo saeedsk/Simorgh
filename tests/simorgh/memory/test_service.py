@@ -141,6 +141,34 @@ class MemoryServiceTestCase(unittest.IsolatedAsyncioTestCase):
         await sub.unsubscribe()
         self.assertEqual(stored, [])
 
+    async def test_thirtieth_second_tick_publishes_record_counts_as_system_metrics(self):
+        """A dashboard's "what does Sim remember" view (02-system-
+        architecture.md section 6.2) rides `system.metrics` like every
+        other subsystem's own gauges -- 29 ticks must stay silent (the
+        30s throttle, matching Cognition's own), the 30th must publish."""
+        await self._store_and_wait({"kind": "episodic", "content": "e1", "tags": [], "source_ref": ""})
+
+        seen = []
+
+        async def _on_metrics(message: Message) -> None:
+            if message.payload.get("subsystem") == "memory":
+                seen.append(message)
+
+        sub = await self.bus.subscribe(topics.SYSTEM_METRICS, _on_metrics)
+        for i in range(29):
+            await self.bus.publish(Message.new(topics.SYSTEM_TICK_SECOND, source="test", payload={"n": i}))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        self.assertEqual(seen, [])  # not yet -- only 29 ticks
+
+        await self.bus.publish(Message.new(topics.SYSTEM_TICK_SECOND, source="test", payload={"n": 29}))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        await sub.unsubscribe()
+
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].payload["gauges"]["records"]["episodic"], 1)
+
     async def test_sleep_tick_publishes_consolidated_and_contradiction_events(self):
         await self._store_and_wait({"kind": "semantic", "content": "the sky is blue", "tags": ["sky"], "source_ref": ""})
         self.clock.advance(1.0)

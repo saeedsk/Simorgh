@@ -3,12 +3,16 @@ the CLI REPL, command dispatch, vitals, and console rendering. Layer 5
 (registry.py).
 
 **Honest about this session's scope** (see the spec header and its own
-§12): the readline history file, the HTTP/WebSocket API (Phase 5),
+§12): the readline history file, the general Phase 5 HTTP/WebSocket API,
 notice mid-line queueing, and interactive `ui.prompt` answer collection
 via the REPL's own stdin did not land this session -- `ui.prompt` is
 rendered and always resolves to its default on timeout (never silently
 proceeds), which is the safe half of the spec's S2 behavior without the
-full interactive half.
+full interactive half. One narrow slice of that Phase 5 item *did* land
+here, pulled forward: a read-only live-status dashboard (`httpapi.py`),
+because the creator asked to actually see the running system -- which
+subsystems are loaded, bus/worker activity -- while first working with
+v2, not just infer it from REPL scrollback.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from simorgh.contracts.protocols import Context, Health
 from . import render as render_mod
 from .config import Config
 from .dispatch import dispatch
+from .httpapi import HttpApi
 from .parser import parse
 from .vitals import VitalsCache
 
@@ -44,9 +49,15 @@ class Service:
         topics.SYSTEM_RESUME, topics.SYSTEM_STOP, topics.UI_PROMPT_ANSWERED, topics.SYSTEM_HEALTH,
     )
 
-    def __init__(self, config: Config | None = None, *, run_repl: bool = True) -> None:
+    def __init__(self, config: Config | None = None, *, run_repl: bool = True, http_enabled: bool | None = None) -> None:
         self.config = config or Config()
         self._run_repl = run_repl
+        # Follows `run_repl` by default: the dashboard is for a human
+        # actually watching a `simorgh run` session, so it comes up
+        # automatically exactly when the REPL does, and stays off for
+        # every headless boot (tests, `--self-check`, `status`, `trace`)
+        # unless a caller explicitly overrides it either way.
+        self._http_enabled = run_repl if http_enabled is None else http_enabled
         self._ctx: Context | None = None
         self._subs: list = []
         self.vitals = VitalsCache()
@@ -55,6 +66,7 @@ class Service:
         self._stop_repl = threading.Event()
         self._pending_turns: dict[str, asyncio.Future] = {}
         self._color = render_mod.color_enabled(self.config.color)
+        self._http: HttpApi | None = None
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -74,6 +86,18 @@ class Service:
             self._stop_repl.clear()
             self._repl_thread = threading.Thread(target=self._repl_main, name="interface-repl", daemon=True)
             self._repl_thread.start()
+        if self._http_enabled:
+            self._http = HttpApi(
+                ctx.bus, host=self.config.http_host, port=self.config.http_port,
+                clock=ctx.clock.now if hasattr(ctx.clock, "now") else None,
+                status_timeout_s=self.config.http_status_timeout_s,
+            )
+            try:
+                await self._http.start()
+                print(f"dashboard: {self._http.url}")
+            except OSError as exc:
+                print(f"dashboard: could not bind {self.config.http_host}:{self.config.http_port} ({exc})")
+                self._http = None
         ctx.logger.info("interface.started", session_id=self.session_id)
 
     async def stop(self) -> None:
@@ -84,6 +108,9 @@ class Service:
         if self._repl_thread is not None:
             self._repl_thread.join(timeout=1.0)
             self._repl_thread = None
+        if self._http is not None:
+            await self._http.stop()
+            self._http = None
 
     async def health(self) -> Health:
         if self._ctx is None:

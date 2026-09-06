@@ -31,6 +31,12 @@ class Worker:
         self._clock = clock
         self.worker_id = worker_id or f"w-{uuid.uuid4().hex[:8]}"
         self._paused = False
+        # Read by `Service`'s own periodic `system.metrics` publish (a
+        # dashboard's "what is each worker doing right now" view) --
+        # plain attributes, not an event, since a live snapshot only
+        # ever needs the current value, not a history of transitions.
+        self.current_task_id: str | None = None
+        self.current_kind: str | None = None
         self._runner = SessionRunner(
             bus, ledger, clock=clock, worker_id=self.worker_id, is_paused=lambda: self._paused,
             assemble_timeout_s=assemble_timeout_s,
@@ -78,7 +84,11 @@ class Worker:
         await self._report(session, outcome)
 
     async def run(self, session: Session, *, user_text: str = "") -> Outcome:
-        return await self._runner.run(session, user_text=user_text)
+        self.current_task_id, self.current_kind = session.task_id, session.kind
+        try:
+            return await self._runner.run(session, user_text=user_text)
+        finally:
+            self.current_task_id, self.current_kind = None, None
 
     async def run_percept_chat(self, session_id: str, text: str) -> None:
         """Flow 1 (02 section 5): a plain conversational percept has no

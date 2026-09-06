@@ -162,6 +162,77 @@ class TestPerceptTextRunsAChatTurnWithNoPlanningTask(unittest.TestCase):
             await service.stop()
 
 
+class TestWorkerBusyTrackingAndMetrics(unittest.TestCase):
+    """A dashboard's "what is each worker doing right now" view needs
+    `Worker.current_task_id`/`current_kind` set while a session is
+    in-flight and cleared once it ends, and `Service._publish_metrics`
+    to put that onto the bus as `system.metrics{subsystem:
+    "orchestration"}` the way `simorgh.bus.service` already does for its
+    own gauges."""
+
+    @run
+    async def test_current_task_is_set_while_running_and_cleared_after(self):
+        async with Harness() as h:
+            planning = FakePlanning(h.client("planning"))
+            await planning.start()
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": "hello back"}])
+            await cognition.start()
+
+            service = OrchestrationService(Config(workers=1, metrics_interval_s=0))
+            ctx = _stub_context(h)
+            await service.start(ctx)
+            worker = service._workers[0]  # noqa: SLF001
+            self.assertIsNone(worker.current_task_id)
+
+            from simorgh.contracts.envelope import Message
+            await h.client("interface").publish(Message.new(
+                topics.PERCEPT_TEXT_RECEIVED, source="interface",
+                payload={"channel": "cli", "text": "hi there", "session_id": "sess-busy"},
+                clock=h.clock.now,
+            ))
+            await h.pump(5)  # past dispatch into Worker.run(), before the assemble timeouts resolve
+            self.assertEqual(worker.current_task_id, "sess-busy")
+            self.assertEqual(worker.current_kind, "chat")
+
+            await h.pump(150, real_delay=0.02)  # let the session actually finish
+            self.assertIsNone(worker.current_task_id)
+            self.assertIsNone(worker.current_kind)
+
+            await service.stop()
+            await cognition.stop()
+            await planning.stop()
+
+    @run
+    async def test_publish_metrics_puts_worker_snapshot_on_the_bus(self):
+        async with Harness() as h:
+            service = OrchestrationService(Config(workers=2, metrics_interval_s=0))
+            ctx = _stub_context(h)
+            await service.start(ctx)
+            service._workers[0].current_task_id = "t1"  # noqa: SLF001
+            service._workers[0].current_kind = "patch"  # noqa: SLF001
+
+            seen = {}
+
+            async def _on_metrics(message):
+                if message.payload.get("subsystem") == "orchestration":
+                    seen["message"] = message
+
+            sub = await h.client("kernel").subscribe(topics.SYSTEM_METRICS, _on_metrics)
+            await service._publish_metrics()  # noqa: SLF001
+            await h.pump(5)
+            await sub.unsubscribe()
+
+            self.assertIn("message", seen)
+            gauges = seen["message"].payload["gauges"]
+            self.assertEqual(gauges["workers.total"], 2)
+            self.assertEqual(gauges["workers.busy"], 1)
+            busy = [w for w in gauges["workers"] if w["task_id"] == "t1"]
+            self.assertEqual(len(busy), 1)
+            self.assertEqual(busy[0]["kind"], "patch")
+
+            await service.stop()
+
+
 class TestResumeOnASecondWorker(unittest.TestCase):
     @run
     async def test_a_second_worker_does_not_redo_completed_steps(self):

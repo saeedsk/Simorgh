@@ -72,8 +72,19 @@ class StatusServer:
         pass  # the supervisor's own poll is the source of truth for status(); this just keeps the table warm
 
     def snapshot(self) -> dict:
+        # `LAYERS` gives each subsystem's boot-order layer for free -- a
+        # dashboard groups by it without duplicating the ordering itself.
+        # Kernel isn't a member of its own `LAYERS` (it's the composition
+        # root, see `registry.py`'s own docstring), so it has no layer.
+        from .registry import LAYERS
+
+        layer_of = {name: i for i, layer in enumerate(LAYERS) for name in layer}
         subsystems = [
-            {"name": s.name, "version": getattr(s.service, "version", ""), "status": s.status}
+            {
+                "name": s.name, "version": getattr(s.service, "version", ""), "status": s.status,
+                "detail": s.last_health.detail if s.last_health is not None else "",
+                "restarts": s.restarts, "layer": layer_of.get(s.name),
+            }
             for s in self._supervisor.services.values()
         ]
         return {
