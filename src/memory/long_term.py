@@ -229,6 +229,60 @@ class MemoryStore(abc.ABC):
             self.flag_contradiction(record_a.id, record_b.id)
         return pairs
 
+    def reconsolidate(
+        self,
+        activity_kind: str = "outcome",
+        kinds: tuple[str, ...] = ("semantic",),
+        activity_limit: int = 200,
+        prune_below: float = 0.1,
+    ) -> list[str]:
+        """Confidence-weighted consolidation pass: cross-check durable
+        records of `kinds` against recent activity (default: "outcome")
+        records, decaying confidence for any that find no supporting
+        mention there and pruning whatever falls below `prune_below`.
+        Meant to be called periodically by consolidation
+        (src/orchestrator/consolidation.py), not on every query --
+        it costs one full scan of both the activity log and each kind,
+        plus a `_replace`/`delete` per record touched.
+
+        Matching is a coarse, case-insensitive substring check of each
+        record's `metadata["subject"]` (the same field find_contradictions
+        keys on) against recent activity content/request_text -- not
+        semantic matching. That's deliberate: this only prunes what looks
+        stale by a cheap, auditable rule, and leaves ambiguous cases for
+        a human or a better-informed future agent rather than guessing.
+        Records without a `subject` are left untouched.
+        """
+        activity_records = self.query(kind=activity_kind, limit=activity_limit)
+        haystack = " ".join(
+            f"{r.content} {r.metadata.get('request_text', '')}" for r in activity_records
+        ).lower()
+
+        pruned_ids = []
+        for kind in kinds:
+            for record in self.query(kind=kind):
+                subject = record.metadata.get("subject")
+                if subject is None:
+                    continue
+                confidence = self.score_confidence(record)
+                if str(subject).lower() in haystack:
+                    confidence = min(1.0, confidence + 0.1)
+                else:
+                    confidence *= 0.5
+                if confidence < prune_below:
+                    self.delete(record.id)
+                    pruned_ids.append(record.id)
+                else:
+                    updated = MemoryRecord(
+                        id=record.id,
+                        kind=record.kind,
+                        content=record.content,
+                        created_at=record.created_at,
+                        metadata={**record.metadata, "confidence": confidence},
+                    )
+                    self._replace(updated)
+        return pruned_ids
+
 
 class InMemoryStore(MemoryStore):
     """Non-durable, process-local memory store. Useful for tests, and as
