@@ -2054,3 +2054,55 @@ Still ahead, roughly in order:
     own first segment on the wire, so they are domains, not `task.*`/
     `plan.*` entries. 84 new tests; the full suite is 973 and green, v1
     untouched.
+99. **`simorgh/bus/` built -- the second Phase 0 package, and the
+    nervous system every later subsystem is written against.** All
+    three interaction patterns (event, competing-consumer command,
+    request/reply) over one abstraction, ordering per `partition_key`,
+    priority-9 preemption for `system.pause/stop/resume`, at-least-once
+    delivery with exponential-backoff retry and dead-lettering (mirrored
+    to a durable Ledger `dead:<type>` stream, not just the backend's own
+    DLQ), backpressure, and reserved-topology enforcement (only
+    `guardian` may subscribe `action.proposed`, only `execution`
+    `action.approved`, only `guardian`/`kernel` may publish
+    `action.approved` at all) with subsystem-token identity for the
+    multi-process modes. Three backends behind the identical `Bus`
+    protocol, selected purely by config: `memory` (asyncio, the
+    guaranteed floor -- zero configuration, zero dependencies), `sqlite`
+    (one WAL-mode file shared by every process on a host, proven with a
+    real `multiprocessing` test where a child process consumes a
+    durable delivery the parent enqueued, and a dead process's expired
+    lease is reaped so another consumer picks the message up), and
+    `aws` (SNS per domain, SQS FIFO per consumer group plus DLQ, driven
+    end-to-end against a hand-written fake `boto3` session so the whole
+    suite still never touches the network or costs a cent).
+
+    Two real bugs surfaced by the spec's own property tests, both fixed
+    before commit, both the kind that would have been genuinely
+    confusing to debug later: `BusClient.new()` was passing
+    `partition_key=None` explicitly when building a message caused by
+    another one, which silently defeated `Message.caused()`'s own
+    "inherit the parent's partition key" default -- a follow-on message
+    would have lost its ordering guarantee with no error anywhere,
+    exactly the kind of thing `test_new_fills_source_trace_and_causation`
+    exists to catch. And the sqlite reaper's partition-lock release
+    required an exact `delivery_id` match on a table already uniquely
+    keyed by `(grp, partition_key)` -- correct in the ordinary case, but
+    a lock could outlive its own reap if the two ever disagreed, which
+    defeats the entire point of reaping a dead process's lease. Also
+    made `TraceWriter` lazily start its own drain task on the first
+    `write()` rather than requiring every caller to remember an explicit
+    `start()` -- found because a test (correctly) never called it and
+    silently got zero tracing instead of an error, which is exactly the
+    failure shape a real subsystem wiring mistake could produce too.
+
+    Process note: this build was interrupted mid-session by a rate
+    limit and resumed from exactly where it left off, verified against
+    the actual on-disk state rather than re-derived from memory -- the
+    four failures the resuming pass found and fixed (the two bugs above,
+    plus two test-authoring bugs of its own: a TTL test whose message
+    timestamp came from real wall-clock time while the assertion
+    compared against the test's fake clock, and an integration test
+    that published two causally-related messages as independently-traced
+    ones and then asserted they shared one trace) were all caught by the
+    spec's own testing strategy doing its job, not discovered later.
+    1041 tests passing (v1 + contracts + 68 new for the bus).

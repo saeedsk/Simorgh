@@ -77,7 +77,8 @@ Simorgh v1 recorded in `docs/EVOLUTION.md`.
 | Package | Spec status | Build owner | Phase |
 |---|---|---|---|
 | contracts | built (v1 catalog: 123 types, 21 domains) | Phase 0 agent | 0 |
-| bus, ledger, kernel | complete draft | unassigned | 0 |
+| bus | **built** (memory/sqlite/aws backends, all delivery semantics) | Phase 0 agent | 0 |
+| ledger, kernel | complete draft | unassigned | 0 |
 | cognition, memory | complete draft | unassigned | 1A |
 | guardian, execution | complete draft | unassigned | 1B |
 | worldmodel, persona, interface | complete draft | unassigned | 1C |
@@ -124,3 +125,22 @@ Claim a package by editing this table and the spec's header (see `05` §7).
   `run_id`, `subsystems`, `uptime_seconds`, optional `metrics`) pending
   the Kernel build. Every `*.reply` admits the §9 error shape as a second
   `anyOf` branch, and its success branch forbids `ok: false`.
+- 2026-09-06 — `simorgh/bus/` built (Phase 0): event/command/request-reply
+  over `memory` (asyncio, the guaranteed floor), `sqlite` (one WAL file,
+  multi-process, proven with a real `multiprocessing` test), and `aws`
+  (SNS+SQS+DLQ, driven end-to-end against a fake boto3 session, never the
+  network). Reserved-topology enforcement (`enforcement.py`) plus
+  subsystem-token identity for multi-process modes; the trace writer
+  (Ledger `trace:<trace_id>`, per-type sampling, blob refs, buffer-and-
+  replay on a ledger outage). Two real bugs found by the spec's own
+  property tests, fixed before commit: `BusClient.new()` was passing
+  `partition_key=None` explicitly to a caused-by message, which defeated
+  `Message.caused()`'s inherit-from-parent default (a follow-on message
+  silently lost its parent's ordering key); the sqlite reaper's lock
+  release required an exact `delivery_id` match on a table already keyed
+  by `(grp, partition_key)`, so a lock could survive its own reap if the
+  two ever disagreed. Also made `TraceWriter` lazily self-starting on
+  first `write()` rather than requiring an explicit `start()` first --
+  found by a test that (correctly) never called it, which is exactly the
+  kind of silent-no-tracing bug a real subsystem could hit too.
+  1041 tests passing (v1 + contracts + 68 new for the bus).
