@@ -1,5 +1,11 @@
 # Simorgh Architecture
 
+> **Simorgh v2 blueprint:** a complete re-architecture of this system into sixteen
+> message-driven subsystems is designed, documented, and ready to build under
+> [`docs/blueprint/`](blueprint/00-README.md). This file describes the *current* v1
+> implementation (`src/`), which remains the running system until the migration in
+> `docs/blueprint/06-migration-from-v1.md` completes.
+
 See `project_simorgh_groundwork.md` at the repo root for the original design
 brief, `docs/SOUL.md` for identity/values, `docs/EVOLUTION.md` for the
 long-term roadmap, and `docs/BIOMIMICRY.md` for the biological grounding

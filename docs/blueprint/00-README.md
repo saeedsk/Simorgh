@@ -76,19 +76,41 @@ Simorgh v1 recorded in `docs/EVOLUTION.md`.
 
 | Package | Spec status | Build owner | Phase |
 |---|---|---|---|
-| contracts | specified in `03` | unassigned | 0 |
-| bus, ledger, kernel | draft | unassigned | 0 |
-| cognition, memory | draft | unassigned | 1A |
-| guardian, execution | draft | unassigned | 1B |
-| worldmodel, persona, interface | draft | unassigned | 1C |
-| planning, orchestration | draft | unassigned | 2D |
-| verification | draft | unassigned | 2E |
-| learning, reflection, curiosity | draft | unassigned | 3 |
+| contracts | specified in `03` (catalog v1) | unassigned | 0 |
+| bus, ledger, kernel | complete draft | unassigned | 0 |
+| cognition, memory | complete draft | unassigned | 1A |
+| guardian, execution | complete draft | unassigned | 1B |
+| worldmodel, persona, interface | complete draft | unassigned | 1C |
+| planning, orchestration | complete draft | unassigned | 2D |
+| verification | complete draft | unassigned | 2E |
+| learning, reflection, curiosity | complete draft | unassigned | 3 |
 
 Claim a package by editing this table and the spec's header (see `05` §7).
 
 ## Changelog
 
 - 2026-09-06 — Initial blueprint: 01–06 core documents, spec template,
-  sixteen subsystem specs. Authored from the knowledge base research and
-  v1's evolution log.
+  sixteen subsystem specs (~54,000 words) written in parallel by five
+  agents from the core documents.
+- 2026-09-06 — Integration pass after the specs landed. Contract
+  additions folded into `03` §4 (all non-breaking, catalog stays v1):
+  `turn.completed`; `task.create`/`task.list.request`/`task.work_next.request`;
+  `task.created.scope`; `task.step` trajectory fields and optional
+  `confidence` on steps/results/verdicts; `system.pause/resume/stop.scope`;
+  `system.restart`/`system.reload`; `system.schedule.*`; a `guardian`
+  domain (`guardian.review`, posture changed/request); `learn.pipeline.run/
+  .completed` and `learn.strategy.suggest`; `cognition.compact.*` and
+  optional `cognition.think` fields; `memory.contradiction.flagged` and
+  retrieval budget/filters; `self.gaps`/`world.env.query` reply fields
+  incl. a bounded `file_index` preview; `percept.text.received`
+  `channel: command`/`steer`; `reflect.review.request`; Curiosity's
+  command requests; `Ledger.put_blob/get_blob/compact`; `Context`
+  identity fields. Ownership rules made explicit in `02`/`03`: one
+  writer per stream (`self:model` → World Model, `plan:<id>` → Planning),
+  publish restrictions on `action.approved`/`action.denied`, subsystem
+  identity authentication in multi-process modes, no `partition_key` on
+  priority-9 messages, dead letters mirrored to the Ledger, per-type
+  trace sampling, the Learning↔Execution↔Verification split for the
+  drafting loop (Flow 4), and Interface owning every human-facing status
+  surface. Open questions the spec authors recorded (each with a default)
+  live in each spec's §12.

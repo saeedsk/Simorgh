@@ -66,8 +66,14 @@ runtime is a graph: any subsystem may subscribe to any event.
 | 15 | Interface | `simorgh/interface/` | 4 | CLI, HTTP/WebSocket API, vitals/digests/notifications; reconciles subsystem outputs into coherent, honest responses | `subsystems/15-interface.md` |
 | 16 | Orchestration | `simorgh/orchestration/` | X | The harness loop (gather→act→verify) as a Worker; task claiming; sub-agent delegation (fresh/fork) with bounded depth; parallel workers | `subsystems/16-orchestration.md` |
 
-Naming note: v1's `SharedMemoryBus` (persona mood pub/sub) is **not** the
-v2 Bus. In v2 the persona's emotional state is owned by Persona and
+Ownership notes: each Ledger stream has exactly one writer — `self:model`
+is written only by World Model (Reflection contributes `self.observation`
+events); `plan:<id>` only by Planning (a Worker's plan artifact is
+validated and republished by Planning); `guardian:*` only by Guardian.
+World Model observes the repository tree and git state directly
+(read-only) rather than through Execution tools, the same way Memory
+reads its own index. Naming note: v1's `SharedMemoryBus` (persona mood
+pub/sub) is **not** the v2 Bus. In v2 the persona's emotional state is owned by Persona and
 published as `persona.state.changed` events on the system Bus.
 
 ## 3. Structural safety: the action path
@@ -84,7 +90,10 @@ This is the single most important topology rule in the system.
 - **Only Guardian subscribes to `action.proposed`.** The kernel enforces
   this at subscription time (a subscription to `action.proposed` from any
   other subsystem name is rejected and logged).
-- **Only Execution subscribes to `action.approved`.** Same enforcement.
+- **Only Execution subscribes to `action.approved`, and only Guardian
+  may publish it** (the Kernel enforces both directions; the `--self-check`
+  forged-token drill is the one Kernel-published exception). Execution
+  may publish `action.denied` only with `layer: token`.
 - **Every approval carries an `approval_token`**: `HMAC-SHA256(kernel_secret,
   action_id | tool | sha256(canonical_args) | expires_at)`. Execution
   recomputes and compares before running anything. A forged or replayed
@@ -232,7 +241,9 @@ lease that expires, and another Worker resumes it (Flow 7).
 interface|curiosity ─intent.goal.stated─▶ planning
 planning ─task.created(kind=project, mode=plan)─▶ orchestration
 orchestration (Worker, mode=plan): guardian enforces read-only tools; loop explores; output = Plan artifact
-orchestration ─plan.proposed─▶ planning, interface, verification
+orchestration ─task.completed(artifacts=[plan_ref])─▶ planning
+planning: validates the artifact (well-formed steps, acyclic deps, in-scope subjects) and, as the single
+          owner of plan:<id>, ─plan.proposed─▶ interface, verification
 verification ⇄ cognition  (independent plan review: coverage, ordering, risk) ─plan.reviewed─▶ planning
 planning: approval policy — human required if risk ≥ threshold (─▶ interface ⇄ human), else auto
 planning ─plan.approved─▶ (children created with dependency edges) ─task.created×N─▶ orchestration
@@ -246,8 +257,11 @@ planning: rollup is a pure function of children → ─project.completed | proje
 ### Flow 4 — A self-patch (the system changing its own code)
 
 ```
+orchestration (Worker claims a kind=patch task) ─learn.pipeline.run─▶ learning     [handoff: Learning owns policy/sequencing]
 learning   ─action.proposed(tool=self_patch.draft, subject, description)─▶ guardian   [protected subjects denied here]
-guardian   ─action.approved─▶ execution: runs the drafting loop (READ/LIST/DRAFT tools; SEARCH/REPLACE for large files)
+guardian   ─action.approved─▶ execution: runs the composite drafting tool (READ/LIST/DRAFT loop; SEARCH/REPLACE for large
+             files; cognition access via cognition.think purpose=draft) — the loop *shape* lives in Execution's tool,
+             the *checks* live in Verification, the *decisions* live in Learning
 execution  ─action.result(candidate)─▶ learning
 learning   ─verify.requested(kind=self_patch, candidate)─▶ verification:
               1) static denylist + adaptive immunity (guardian.review req/rep)
@@ -257,6 +271,7 @@ learning   ─verify.requested(kind=self_patch, candidate)─▶ verification:
 learning   ─action.proposed(tool=apply_source_patch)─▶ guardian ─▶ execution (write + git commit, never push)
 learning   ─action.proposed(tool=relaunch|hot_swap)─▶ guardian ─▶ execution (self-check subprocess; rollback commit on failure)
 learning   ─learn.self_patch.applied|reverted─▶ reflection (Self Model change history), interface (growth notice), memory
+learning   ─learn.pipeline.completed─▶ orchestration (which then closes the task via the normal verify/complete path)
 ```
 
 Nothing about this is new policy — it is v1's pipeline with each gate
@@ -336,8 +351,9 @@ a smaller smoke set on `sqlite` to prove durability semantics.
   (configurable sampling for high-volume ticks). `simorgh trace <id>`
   prints the causal tree.
 - Kernel exposes counters/gauges per subsystem (messages in/out, handler
-  latency, errors, budget usage) as `system.metrics` events and a local
-  HTTP `/status` (Interface).
+  latency, errors, budget usage) as `system.metrics` events and answers
+  `system.status.request`; every human-facing surface for them — the CLI
+  `status` command, the HTTP `/status` endpoint — is owned by Interface.
 - The vitals panel (mood, energy, load, memory size, skills, interests,
   backlog, trust posture, budget) is a projection over these — not a
   special code path.
