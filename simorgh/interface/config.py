@@ -31,6 +31,13 @@ class Config:
     http_port: int = 8765
     http_status_timeout_s: float = 3.0
     http_chat_timeout_s: float = 130.0
+    # Observe-tier additions (02-system-architecture.md section 6.2):
+    # bounds for the `/api/history` and `/api/logs` read-only queries.
+    history_stream: str = "metrics:history"
+    history_default_minutes: float = 10.0
+    history_max_points: int = 500
+    logs_default_limit: int = 100
+    logs_max_limit: int = 500
 
     def resolved_history_path(self) -> Path:
         return self.history_path.expanduser()
