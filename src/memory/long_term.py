@@ -11,6 +11,7 @@ object store later -- see docs/EVOLUTION.md) without touching callers.
 from __future__ import annotations
 
 import abc
+import functools
 import hashlib
 import json
 import math
@@ -32,6 +33,7 @@ def _tokenize(text: str) -> list[str]:
     return _TOKEN_RE.findall(text.lower())
 
 
+@functools.lru_cache(maxsize=4096)
 def embed_text(text: str, dim: int = _EMBED_DIM) -> tuple[float, ...]:
     """Lightweight, dependency-free semantic embedding via the hashing
     trick: each token is hashed into one of `dim` buckets and accumulated,
@@ -39,6 +41,10 @@ def embed_text(text: str, dim: int = _EMBED_DIM) -> tuple[float, ...]:
     stand-in for a learned embedding model -- it captures shared
     vocabulary between texts (so paraphrases with overlapping words score
     as similar) without any network call or third-party model.
+
+    Cached: the same (text, dim) pair recurs often -- semantic_search
+    re-embeds every candidate record on every call -- so memoizing avoids
+    re-hashing unchanged record content repeatedly.
     """
     vector = [0.0] * dim
     for token in _tokenize(text):
