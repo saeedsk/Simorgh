@@ -39,8 +39,13 @@ class RenderTestCase(unittest.TestCase):
         text += render.diff_block(["+added", "-removed", " same"], enabled=True)
         text += render.banner(enabled=True)
         for match in _ESC.finditer(text):
-            self.assertTrue(match.group(0).lstrip("\x1b[").isdigit() or match.group(0) == "\x1b[",
-                             f"non-SGR escape sequence found: {match.group(0)!r}")
+            params = match.group(0).lstrip("\x1b[")
+            # SGR parameters are digits separated by `;` -- this includes
+            # 24-bit color (`38;2;r;g;b`, the brand logo). Anything else
+            # (`A`-`H` cursor moves, `J`/`K` erase, `r` scroll region)
+            # would not survive `[^m]*` + `m` anyway, but be explicit.
+            self.assertTrue(params == "" or params.replace(";", "").isdigit(),
+                            f"non-SGR escape sequence found: {match.group(0)!r}")
 
     def test_vitals_honestly_reports_no_data_yet(self):
         self.assertIn("no data", render.vitals(VitalsSnapshot()))
@@ -105,6 +110,42 @@ class RenderTestCase(unittest.TestCase):
         out = render.banner(enabled=False, unicode="off")
         self.assertTrue(out.isascii(), [c for c in out if not c.isascii()])
         self.assertIn("SIMORGH", out)
+
+    def test_logo_is_eight_centered_rows_from_the_brand_spec(self):
+        # docs/brand/simorgh-brand.json: 8 rows (27 cells, except row 6 at
+        # 24 -- the spec's own shape), each centered independently within
+        # the rule width, never wider than it.
+        rows = render.logo(enabled=False, width=68)
+        self.assertEqual(len(rows), 8)
+        self.assertEqual(len(render._LOGO_ROWS), 8)  # noqa: SLF001
+        for row, segments in zip(rows, render._LOGO_ROWS):  # noqa: SLF001
+            # The brand rows carry their own leading/trailing spaces, so
+            # measure the pad against the row's full cell count, not its
+            # first visible glyph: `logo()` left-pads by half the free width.
+            cells = sum(len(text) for _, text in segments)
+            self.assertLessEqual(cells, 68)
+            self.assertEqual(len(row), (68 - cells) // 2 + cells, repr(row))
+            self.assertTrue(row.strip(), repr(row))
+        # Symmetry check: the top and bottom rows are the single-glyph apex
+        # and tail, centered on the same column.
+        self.assertEqual(rows[0].index("▲"), rows[-1].index("▼"))
+
+    def test_logo_color_is_true_color_sgr_only(self):
+        rows = render.logo(enabled=True)
+        joined = "\n".join(rows)
+        self.assertIn("\x1b[38;2;197;160;89m", joined)  # brand gold
+        self.assertIn("\x1b[38;2;139;0;0m", joined)     # crimson
+        for match in _ESC.finditer(joined):
+            params = match.group(0).lstrip("\x1b[")
+            self.assertTrue(params == "" or params.replace(";", "").isdigit(), repr(match.group(0)))
+
+    def test_logo_with_color_disabled_has_no_escapes(self):
+        self.assertNotIn("\x1b[", "\n".join(render.logo(enabled=False)))
+
+    def test_banner_shows_the_logo_in_unicode_modes_and_omits_it_in_ascii(self):
+        self.assertIn("◄", render.banner(enabled=False, unicode="auto"))
+        self.assertIn("◄", render.banner(enabled=False, unicode="full"))
+        self.assertNotIn("◄", render.banner(enabled=False, unicode="off"))
 
     def test_unicode_mode_honors_explicit_settings(self):
         self.assertEqual(render.unicode_mode("off"), "off")

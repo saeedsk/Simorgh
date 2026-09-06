@@ -3688,3 +3688,73 @@ Still ahead, roughly in order:
 
     9 new/updated tests across `test_render.py`, `test_vitals.py`,
     `test_service.py`. Full suite green.
+
+129. **The post-cutover architecture review -- and the first decisions
+    taken from it.** The creator switched the session to Fable 5.1 to
+    review the design, the built system, and the live-trial evidence,
+    and offered forks to parallelize it. Four read-only review forks,
+    one per layer (substrate; cognitive core; agency; growth+surfaces),
+    each checked spec against code line by line and reported to a file;
+    merged with the trial findings and the day's CLI sessions into
+    `docs/blueprint/07-post-cutover-review.md` (indexed in `00-README.md`).
+
+    The verdict, in one line: **the architecture stands; where the system
+    misbehaved it was almost always a spec'd piece built on both sides
+    and connected on neither, not a wrong design.** Guardian and the
+    action-proposal path were verified in code as the most trustworthy
+    part (`cognition.think` never gated by design; every effect-producing
+    entry point publishes `action.proposed` first; no bypass). The self-
+    improvement loop is the least trustworthy part -- not unsafe, but
+    from the chat surface it convincingly looks wired while touching
+    nothing: `orchestration/tools.py` routes only `tool_calls`, so
+    "propose X" in conversation is a role-play and only the *typed*
+    `propose <topic>` reaches `task.create`. Other confirmed seams:
+    working memory implemented in Memory and never fed (`_on_turn_
+    completed`) nor fetched (`_memory_retrieve` never asks `working`);
+    Self Model `capabilities.tools/providers` never populated (the
+    facet, not the model, receives `tool.registered`); two assemblers
+    fetching `self.summary`/`persona.voice` twice per turn; no Self
+    Model section for how Sim runs; retention covering three streams;
+    an idle loop with a fuse but no cost target; chat completions
+    counted as competence with no quality signal; `guardian.posture.
+    request` with no handler and a `mode`/`posture` key mismatch that
+    kept vitals at `posture: unknown` all day; sandbox timeouts killing
+    the child but not its process group (the v1 lesson that never
+    landed there either).
+
+    Decisions written into the specs themselves (§12 of `01`, `02`,
+    `03`, `04`, `05`, `06`, `08`, `09`, `11`, `13`, `15`, `16`; a Flow 1
+    note in `02-system-architecture.md`; `04-build-plan-and-roadmap.md`
+    gains two risks and a "Phase 6 -- post-cutover hardening" list of
+    17 items with acceptance tests). The headline decisions: chat
+    `propose`/`patch` become ordinary tools in the chat profile routed
+    through Guardian (no marker protocol, no new trust path); Cognition's
+    `PromptAssembler` is the sole owner of self/voice blocks; working
+    memory wired both ends as `05` already says; a Self Model
+    `operating` ("How I run") section grounded in real Kernel data; an
+    hourly cap on real exploration calls; a pty-driven REPL test and one
+    seam test per Flow -- the testing-strategy change that is the real
+    lesson of the day.
+
+    Two more things landed from the creator mid-review. **A command-
+    surface consolidation**: "too many with almost the same purpose" --
+    decided as 38 → ~11 (`status`, `tasks [work]`, `improve`, `plan`,
+    `research`, `interests`, `auto [on|off|now]`, `pause`, `resume`,
+    `exit`, `help`; `15-interface.md` §12 q5 has the full keep/merge/
+    remove map), to be implemented next. **A brand system** (`docs/brand/
+    simorgh-brand.json`: palette + an 8-row true-color Unicode Simorgh):
+    `render.logo()` renders it in 24-bit SGR above the wordmark, which
+    is now in the brand's gold; omitted in the pure-ASCII mode; the
+    milestone-94 "SGR only" test now accepts `;`-separated parameters
+    (still color-only) and five new tests pin the logo's shape, color
+    codes, and mode behavior.
+
+    Honest assessment, as the creator asked for one (full text in
+    `07` §6): the code is good and faithful to the blueprint; the
+    verification of the code against real use was the weak link --
+    declared working on the one channel that was easy to script while
+    the front door was broken, "fixed" claimed three times before a real
+    terminal was used, four writes into the real home directory, and
+    the most important seam left looking wired without a test that
+    would say otherwise. Nothing should be rewritten; the next wave is
+    the seventeen items, the first eight of them small.

@@ -113,6 +113,49 @@ def vitals(snapshot: VitalsSnapshot) -> str:
 
 
 _RULE_WIDTH = 68
+
+# Brand palette and CLI logo -- from docs/brand/simorgh-brand.json (the
+# creator's brand system, 2026-09-06); that file is the source of truth,
+# these are its values transcribed. 24-bit SGR color only (`38;2;r;g;b`)
+# -- still plain color codes, so milestone 94's "SGR only, never cursor
+# control" rule holds; a terminal without true color shows the glyphs
+# uncolored, and `enabled=False` prints them with no escapes at all.
+_BRAND = {
+    "gold": (197, 160, 89), "crimson": (139, 0, 0), "lapis": (15, 82, 186),
+    "emerald": (80, 200, 120), "amethyst": (153, 102, 204),
+}
+# Each row: (color, text) segments; every row renders to exactly 27 cells.
+_LOGO_ROWS: tuple[tuple[tuple[str, str], ...], ...] = (
+    (("gold", "             ▲             "),),
+    (("gold", "           ▲ █ ▲           "),),
+    (("lapis", "   ◄██▄"), ("gold", "▄▄▄███████▄▄▄"), ("crimson", "▄██►   ")),
+    (("lapis", " ◄█████"), ("gold", "█████████████"), ("crimson", "█████► ")),
+    (("emerald", "     ▼████"), ("gold", "███████"), ("emerald", "████▼     ")),
+    (("amethyst", "       ╰██"), ("gold", "█████"), ("amethyst", "██╯       ")),
+    (("gold", "           ▼ █ ▼           "),),
+    (("gold", "             ▼             "),),
+)
+
+
+def _rgb(text: str, color: str, *, enabled: bool = True) -> str:
+    if not enabled:
+        return text
+    r, g, b = _BRAND[color]
+    return f"\x1b[38;2;{r};{g};{b}m{text}{_RESET}"
+
+
+def logo(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
+    """The brand's Unicode Simorgh, one string per row, centered in `width`.
+    Callers decide whether to show it at all (`banner()` omits it in the
+    pure-ASCII mode)."""
+    rows = []
+    for segments in _LOGO_ROWS:
+        plain_len = sum(len(text) for _, text in segments)
+        pad = " " * max(0, (width - plain_len) // 2)
+        rows.append(pad + "".join(_rgb(text, color, enabled=enabled) for color, text in segments))
+    return rows
+
+
 _QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
     ("status", "subsystem health at a glance"),
     ("propose <topic>", "draft a new skill, audited before it lands"),
@@ -163,15 +206,22 @@ def banner(*, enabled: bool = True, unicode: str = "auto") -> str:
     else:
         rule_ch, mark_plain = "─", "◆  SIMORGH  ◆"
     rule = style(rule_ch * _RULE_WIDTH, "dim", enabled=enabled)
-    mark = style(style(mark_plain.center(_RULE_WIDTH), "bold", enabled=enabled), "yellow", enabled=enabled)
+    # The wordmark in the brand's own gold (docs/brand/simorgh-brand.json),
+    # bold; falls back to plain text when color is off.
+    mark = _rgb(style(mark_plain.center(_RULE_WIDTH), "bold", enabled=enabled), "gold", enabled=enabled)
     name = "Simorgh (سیمرغ)" if unicode == "full" else "Simorgh"
     epigraph = style(
         f'"si morgh": thirty birds, one {name} -- Attar\'s Conference of\n'
         "the Birds. Sixteen subsystems, one self.",
         "dim", enabled=enabled,
     )
-    lines = [
-        rule,
+    lines = [rule]
+    if unicode != "off":
+        # Block/geometric glyphs only -- present in essentially every
+        # monospace font, unlike the Arabic script this replaced in the
+        # centered line; the pure-ASCII mode simply omits the picture.
+        lines.extend(logo(enabled=enabled))
+    lines += [
         mark,
         rule,
         "",

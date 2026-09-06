@@ -24,6 +24,7 @@ Simorgh v1 recorded in `docs/EVOLUTION.md`.
 | 04 | [`04-build-plan-and-roadmap.md`](04-build-plan-and-roadmap.md) | Phases 0–5, dependency graph, parallel tracks for multiple agents, acceptance criteria, definition of done, risks | Whoever coordinates |
 | 05 | [`05-agent-build-instructions.md`](05-agent-build-instructions.md) | Exactly how an AI agent builds one subsystem: conventions, hard rules, step-by-step, testing standards, contracts-change process | Every builder, before coding |
 | 06 | [`06-migration-from-v1.md`](06-migration-from-v1.md) | v1 → v2 module map, lessons that must survive (with tests), strangler procedure, data migration, cutover checklist | Builders porting v1 code |
+| 07 | [`07-post-cutover-review.md`](07-post-cutover-review.md) | Architecture review after the cutover and first real use: what the live evidence showed, layer-by-layer verdict, decisions (wiring completions, governance), the testing-strategy change, the prioritized next wave, and an honest assessment of the build | Everyone, before the next wave |
 | — | [`subsystems/TEMPLATE.md`](subsystems/TEMPLATE.md) | The mandatory structure of every subsystem spec | Spec authors |
 | 01–16 | [`subsystems/`](subsystems/) | One detailed spec per subsystem (see table below) | The builder of that subsystem |
 

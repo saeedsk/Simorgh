@@ -452,3 +452,24 @@ different agents one file each.
    done as part of this build (`tests/simorgh/integration/
    test_guardian_execution_action_path.py` proves the real subsystems
    reproduce the same four properties independently in the meantime).
+
+**Post-cutover review, 2026-09-06 (`07-post-cutover-review.md` §3.7) —
+two subprocess requirements that must be stated, not assumed:**
+
+- **Never inherit the parent's stdin.** Every `subprocess.run` here now
+  passes `stdin=subprocess.DEVNULL` (commit `87d673b`). Without it a
+  sandboxed child inherits the Kernel's stdin — the creator's real
+  terminal under `sim.sh` — and a child killed on `TimeoutExpired` that
+  had put that shared terminal into raw mode never restores it: Enter
+  echoes `^M`, nothing else works, and nothing in Simorgh's own output
+  says why. Add to §8 as a stated failure mode and requirement.
+- **Kill the process group on timeout, not just the direct child.**
+  `RunPythonSandboxedTool`/`SkillTool` use `subprocess.run(..., timeout=)`
+  with no `start_new_session=True`/`os.killpg`; a sandboxed script that
+  forks survives the timeout as an orphan. This is the exact v1 lesson
+  (`src/sandboxing/sandbox.py`) whose fix was repeatedly rejected by v1's
+  own adaptive-immunity gate for unrelated reasons and never landed;
+  v2's port did not carry it either. *Default:* `start_new_session=True`
+  and `os.killpg(pgid, SIGKILL)` on `TimeoutExpired`; acceptance: a
+  script that forks a long-sleeping child leaves no live grandchild
+  after the tool returns `error="timeout"`.

@@ -463,3 +463,28 @@ Size: **M/L**. Parallelizable after step 2: rules are independent files.
    done as part of this build (`tests/simorgh/integration/
    test_guardian_execution_action_path.py` proves the real subsystems
    reproduce the same four properties independently in the meantime).
+
+**Post-cutover review, 2026-09-06 (`07-post-cutover-review.md` §3.6) —
+the posture read path is broken at both ends, and this spec never
+listed it:**
+
+- `guardian.posture.request` / `.reply` exist in `03`'s catalog
+  (`contracts/topics.py`) and Interface's `budget` command sends the
+  request — but Guardian never subscribes to it and no handler exists,
+  so the command times out every time. *Default:* add the pair to §3.1/
+  §3.3 here and implement the handler: reply `{ok, posture: <level>,
+  baseline, since, reason}`.
+- The event path is broken too: Guardian publishes
+  `guardian.posture.changed{mode: <level>, trust_score, reason}` while
+  Interface's vitals reads `payload["posture"]` — a key-name mismatch,
+  so the panel showed `posture: unknown` for an entire day of real use
+  regardless of what Guardian did. *Default:* the contract's field is
+  `mode` (Guardian is authoritative); fix the consumer. No integration
+  test asserted vitals' posture after a real posture event — add one.
+- Housekeeping from the same review: `_tasks` is never evicted on
+  `task.completed`/`task.failed` — a slow, unbounded leak on a long-
+  running Kernel. *Default:* evict on terminal task events.
+- Verified and worth stating plainly: the structural-safety claim holds
+  in code. `cognition.think` is never gated (by design); every effect-
+  producing entry point — chat `tool_calls` *and* every typed CLI
+  command — publishes `action.proposed` first. No bypass was found.
