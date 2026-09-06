@@ -52,6 +52,21 @@ toy Guardian/Verification subsystems answering with real message shapes).
 
 ## Build log
 
+- 2026-09-06 — Phase 4 roadmap item 4.7 (skill acquisition as procedural
+  memory): on a successful skill acquisition, `PatchPipeline` now also
+  publishes `memory.store{kind: procedural, content: <the pipeline's own
+  description>, tags: ["skill", <name>], source_ref: <path>}` alongside
+  the existing `learn.skill.acquired` -- `LearnSkillAcquired`'s wire
+  shape (`{name, path, tests}`) carries no description field (see Open
+  question 1 below), so the description this pipeline was actually given
+  would otherwise never reach anywhere queryable. This is what makes a
+  skill "discoverable by description" (`memory.retrieve{kinds:
+  [procedural]}`) later, and what Execution's on-demand `skill:<name>`
+  tool loading (`simorgh/execution/service.py`'s `_load_skill`,
+  `simorgh/execution/README.md`) reads back to describe the tool it
+  registers. No `simorgh/contracts/` change was needed for this half --
+  `memory.store`/`memory.retrieve` were already fully generic over the
+  `procedural` kind (`simorgh/memory/store.py`'s `KINDS`).
 - 2026-09-06 — Phase 1: built the outcome/competence/strategy core and
   the full patch/skill pipeline (spec Flow 4) end to end, including
   Kernel-boot integration coverage. **Deliberately not built this
@@ -98,3 +113,31 @@ See spec §12, and these gaps found against the real generated contracts
    worth a real fix (or at least a documented caution) wherever a
    future test wants both a long-running booted Kernel *and* a
    manually-advanced clock.
+5. **`LearnSkillAcquired` (`{name, path, tests}`) has no `description`
+   field**, even though 05-memory.md's own dependency table describes
+   `learn.skill.acquired` as producing "Procedural record `{name,
+   description, path, tests}`" for Memory to hold directly. Rather than
+   edit `simorgh/contracts/` unilaterally, this build routes the
+   description around it instead: `PatchPipeline` publishes a second,
+   already-fully-generic `memory.store{kind: procedural}` command
+   alongside `learn.skill.acquired` (see Build log above) carrying the
+   description Memory could not otherwise get. A non-breaking fix would
+   be an optional `description: Str` field on `LearnSkillAcquired`,
+   which would let Memory subscribe to it directly per the spec's
+   original design instead of via this two-message workaround — flagged
+   for whoever owns `simorgh/contracts/` to decide.
+6. **`skill.draft`/`self_patch.draft` (and `isolated_test_suite`) are not
+   built in Execution** (`simorgh/execution/README.md`'s "Deliberate
+   scope cuts") — they need a Cognition-backed multi-step drafting loop
+   that is out of scope for both this and the prior build pass. This
+   means `learn.pipeline.run{kind: skill|patch}` cannot currently reach
+   `applied` against a REAL Guardian + Execution; it rejects at the
+   first draft attempt with "unknown tool". The skill/patch pipeline
+   state machine itself is fully built and unit-tested (this package's
+   own tests, and `tests/simorgh/integration/test_learning_pipeline_
+   kernel_boot.py`'s toy Guardian/Verification), and the on-demand
+   registration this pipeline's `learn.skill.acquired`/`memory.store`
+   now feeds is proven against a REAL Guardian + Execution + Memory in
+   `tests/simorgh/integration/test_skill_acquisition_procedural_memory.
+   py` — driving the two events directly, the same way that test file's
+   own docstring explains.

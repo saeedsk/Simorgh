@@ -9,12 +9,14 @@ from pathlib import Path
 
 from simorgh.execution.config import Config
 from simorgh.execution.tools import (
+    ApplySkillTool,
     ApplySourcePatchTool,
     GitCommitTool,
     GitRevertTool,
     ListDirTool,
     ReadFileTool,
     RunPythonSandboxedTool,
+    SkillTool,
     builtin_tools,
 )
 
@@ -119,6 +121,82 @@ class TestApplySourcePatchTool(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.ok)
 
 
+class TestApplySkillTool(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.config = Config(repo_root=self.root, write_scopes_skills=("simorgh_skills/",))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    async def test_writes_a_file_inside_the_skill_scope(self):
+        result = await ApplySkillTool(self.config).run(
+            {"subject": "simorgh_skills/greet.py", "code": "def run():\n    return 'hi'\n"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual((self.root / "simorgh_skills" / "greet.py").read_text(), "def run():\n    return 'hi'\n")
+
+    async def test_refuses_a_subject_outside_the_skill_scope(self):
+        result = await ApplySkillTool(self.config).run(
+            {"subject": "src/not_a_skill.py", "code": "x = 1"}, ctx=_ctx(self.config),
+        )
+        self.assertFalse(result.ok)
+        self.assertFalse((self.root / "src").exists())
+
+    async def test_refuses_traversal_even_with_a_matching_prefix(self):
+        result = await ApplySkillTool(self.config).run(
+            {"subject": "simorgh_skills/../../etc/passwd", "code": "x"}, ctx=_ctx(self.config),
+        )
+        self.assertFalse(result.ok)
+
+
+class TestSkillTool(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.config = Config(repo_root=Path.cwd(), sandbox_timeout_s=5.0)
+
+    async def test_runs_the_skills_own_entrypoint_with_forwarded_args(self):
+        tool = SkillTool(
+            self.config, skill_name="greet", description="greets someone",
+            source='def run(name="world"):\n    return f"hello {name}"\n',
+        )
+        self.assertEqual(tool.name, "skill:greet")
+        result = await tool.run({"name": "simorgh"}, ctx=_ctx(self.config))
+        self.assertTrue(result.ok, result.metadata)
+        self.assertIn("hello simorgh", result.output)
+
+    async def test_the_skills_own_main_guard_does_not_double_fire(self):
+        tool = SkillTool(
+            self.config, skill_name="once", description="prints once",
+            source="def run():\n    return 'once'\n\nif __name__ == '__main__':\n    print(run())\n",
+        )
+        result = await tool.run({}, ctx=_ctx(self.config))
+        self.assertTrue(result.ok, result.metadata)
+        self.assertEqual(result.output.strip().count("once"), 1)
+
+    async def test_a_raising_skill_returns_ok_false(self):
+        tool = SkillTool(
+            self.config, skill_name="broken", description="always fails",
+            source="def run():\n    raise ValueError('boom')\n",
+        )
+        result = await tool.run({}, ctx=_ctx(self.config))
+        self.assertFalse(result.ok)
+        self.assertIn("exit_code", result.error)
+
+    async def test_a_missing_run_entrypoint_returns_ok_false(self):
+        tool = SkillTool(self.config, skill_name="empty", description="no entrypoint", source="x = 1\n")
+        result = await tool.run({}, ctx=_ctx(self.config))
+        self.assertFalse(result.ok)
+
+    async def test_the_sandbox_has_no_repo_access(self):
+        tool = SkillTool(
+            self.config, skill_name="nosy", description="tries to import the repo",
+            source="def run():\n    import simorgh.execution\n    return 'should not get here'\n",
+        )
+        result = await tool.run({}, ctx=_ctx(self.config))
+        self.assertFalse(result.ok)
+
+
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
 
@@ -196,7 +274,7 @@ class TestBuiltinTools(unittest.TestCase):
         names = {tool.name for tool in builtin_tools(Config(repo_root=Path.cwd()))}
         self.assertEqual(names, {
             "read_file", "list_dir", "run_python_sandboxed",
-            "apply_source_patch", "git_commit", "git_revert",
+            "apply_source_patch", "git_commit", "git_revert", "apply_skill",
         })
 
 

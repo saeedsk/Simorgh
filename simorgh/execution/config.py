@@ -1,7 +1,9 @@
 """Execution configuration (08-execution.md section 3.5) -- a working
 subset: the knobs the tools built this phase actually read. Web fetch,
-shell, relaunch, hot_swap, isolated_test_suite, and skill tools (and
-their config keys) are deferred -- see simorgh/execution/README.md.
+shell, relaunch, hot_swap, and isolated_test_suite (and their config
+keys) are still deferred -- see simorgh/execution/README.md. Skill
+tools (`apply_skill`, `SkillTool`, on-demand `learn.skill.acquired`
+loading -- Phase 4 roadmap item 4.7) are built this pass.
 """
 
 from __future__ import annotations
@@ -19,11 +21,17 @@ class Config:
     blob_inline_threshold_bytes: int = 4096
     approval_max_age_s: float = 120.0
     repo_root: Path = field(default_factory=Path.cwd)
-    readable_roots: tuple[str, ...] = ("src", "docs", "tests", "simorgh")
+    readable_roots: tuple[str, ...] = ("src", "docs", "tests", "simorgh", "simorgh_skills")
     write_scopes_source: tuple[str, ...] = ("src/", "simorgh/")
     sandbox_cpu_seconds: int = 5
     sandbox_memory_mb: int = 256
     sandbox_timeout_s: float = 10.0
+    # -- skills (11-learning.md's `skill_dir`; 08-execution.md's
+    # `write_scopes.skills`) -- where `apply_skill` writes and
+    # `learn.skill.acquired`/on-demand loading reads back from.
+    skill_dir: str = "simorgh_skills"
+    write_scopes_skills: tuple[str, ...] = ("simorgh_skills/",)
+    skill_lookup_timeout_s: float = 2.0
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":
@@ -32,7 +40,7 @@ class Config:
         kwargs = dict(data)
         if "repo_root" in kwargs:
             kwargs["repo_root"] = Path(kwargs["repo_root"])
-        for key in ("readable_roots", "write_scopes_source"):
+        for key in ("readable_roots", "write_scopes_source", "write_scopes_skills"):
             if key in kwargs:
                 kwargs[key] = tuple(kwargs[key])
         kwargs = {k: v for k, v in kwargs.items() if k in cls.__dataclass_fields__}
