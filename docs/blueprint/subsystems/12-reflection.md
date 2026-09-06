@@ -8,8 +8,8 @@
 > document and note it in `00-README.md`'s changelog.
 
 **Layer:** 3 Growth
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** built (2026 build session — see §12.4 for scope simplifications)
+**Status:** built
 **Depends on (contracts only):** `persona.state.changed`, `task.started`, `task.step`, `task.completed`, `task.failed`, `task.blocked`, `verify.result`, `plan.proposed`, `plan.approved`, `plan.revised`, `action.denied`, `learn.outcome.recorded`, `learn.competence.updated`, `learn.self_patch.applied`, `learn.self_patch.reverted`, `learn.skill.acquired`, `system.started`, `system.state.changed`, `system.tick.idle`, `system.tick.sleep`, `self.model.updated`
 **v1 code that migrates here:** `src/orchestrator/health.py` (`HealthMonitor`), `src/orchestrator/reflection.py` (`ReflectionAgent`, `reflect_on_outcome`, `TAKEAWAY_KIND`, `Proposal`, `AGENT_SOURCE_FILES`), the self-critique-delta and self-model-diffing ideas from v1's self-patched `reflection.py` (re-implemented, not copied — v1's versions were unverified autonomous patches)
 
@@ -329,3 +329,10 @@ Size **M**; health/patterns (v1 ports) and drift/critique (new) can proceed in p
 1. Should drift reviews use a *different* provider than the one that produced the steps (an independent reviewer, harness-04)? **Default:** request `cognition.think{purpose: review}` and let Cognition's routing prefer a different provider when available; do not hard-require it.
 2. Where do per-turn chat critiques go — every chat turn is a task, so critiquing each would be costly. **Default:** critique only `kind ∈ {patch, skill, research, project}`; chat turns get `self.observation` only on `verify.result{fail}` or a Guardian denial.
 3. Should a `critical` health finding also pause autonomous work? **Default:** emit `recommendation: pause` as a drift-style hint to Guardian; Guardian decides per its posture rules.
+
+4. Contract gaps and scope simplifications found during the build session (`simorgh/reflection/`, tested — see the package README's build log for detail):
+   - `reflect.patterns.found`'s and `reflect.calibration.updated`'s actual schemas (`simorgh/contracts/messages/reflect.py`) are narrower than this spec's own payload-table prose: no per-pattern `task_type` field (patterns carry `kind`/`rate`/`proposal`/optional `agent` only — `task_type` is folded into `proposal`'s text instead), and no `brier`/`bins`/`samples` on the calibration event (those stay internal to `CalibrationTable`/`Calibration`, recorded to the `reflect:calibration` Ledger stream but not published on the bus). Either widen the schemas or accept the narrower wire contract.
+   - `action.denied` carries no `task_id` in its current schema, so this build never wired `action.denied{layer: scope}` to a task's `DriftTracker` at all (not even the immediate-review path from §5.4's flow diagram) — `Service.consumes` does not include `ACTION_DENIED`. Needs either a `task_id` added to `action.denied` or an explicit decision that scope-crossing drift signal only ever arrives via a later terminal-task review, never live.
+   - `task.started` (`TaskStarted`) carries no goal/scope, so `DriftTracker` registration moved to `task.created` instead (which does carry `description` and optional `scope`) — a strict superset of what was asked for, not a narrowing, but worth confirming as the intended anchor point.
+   - `plan.revised`'s `plan_id` is never guaranteed to equal any task's `task_id` in the current contracts, so the project-level tracker described in §5.4's closing paragraph ("the same tracker runs at plan level") is not actually reachable — `_on_plan_revised` is wired but is a documented no-op unless a caller happens to key them the same.
+   - Drift review is evaluated once, at task-terminal time over the whole accumulated trajectory, rather than live every `drift_check_every_steps` mid-task — a deliberate scope cut for this build session, not a design change; the heuristic, the combined-score formula, and the never-fabricate-on-`unknown` rule are all implemented exactly as specified.
