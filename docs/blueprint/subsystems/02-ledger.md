@@ -7,8 +7,8 @@
 > contradict them.
 
 **Layer:** 0 Substrate
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** built, Phase 0 (2026-09-06)
+**Status:** built
 **Depends on (contracts only):** `contracts.protocols.Ledger/Clock`, `contracts.envelope` (canonical JSON), `contracts.messages.system` (for `system.health`)
 **v1 code that migrates here:** `src/memory/long_term.py` (`JSONFileMemoryStore` file format, fsync/atomic-rewrite discipline, `MemoryRecord` shape — the *storage* half; retrieval/embedding/confidence logic migrates to `memory`), `src/orchestrator/activity_log.py` (durable activity record → `activity` stream), the event-sourcing discipline of `src/orchestrator/tasks.py` (`_fold` → `Projection`).
 

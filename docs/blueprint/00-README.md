@@ -78,7 +78,8 @@ Simorgh v1 recorded in `docs/EVOLUTION.md`.
 |---|---|---|---|
 | contracts | built (v1 catalog: 123 types, 21 domains) | Phase 0 agent | 0 |
 | bus | **built** (memory/sqlite/aws backends, all delivery semantics) | Phase 0 agent | 0 |
-| ledger, kernel | complete draft | unassigned | 0 |
+| ledger | **built** (memory/jsonl/sqlite/dynamodb backends, projections, blobs, compaction, `migrate-v1`) | Phase 0 agent | 0 |
+| kernel | complete draft | unassigned | 0 |
 | cognition, memory | complete draft | unassigned | 1A |
 | guardian, execution | complete draft | unassigned | 1B |
 | worldmodel, persona, interface | complete draft | unassigned | 1C |
@@ -144,3 +145,29 @@ Claim a package by editing this table and the spec's header (see `05` §7).
   found by a test that (correctly) never called it, which is exactly the
   kind of silent-no-tracing bug a real subsystem could hit too.
   1041 tests passing (v1 + contracts + 68 new for the bus).
+- 2026-09-06 — `simorgh/ledger/` built (Phase 0): the `memory` (tests),
+  `jsonl` (default -- v1's own fsync-per-append/atomic-rewrite discipline
+  carried over verbatim, plus partial-trailing-line recovery on restart),
+  `sqlite` (WAL, `BEGIN IMMEDIATE`-serialized writers, PK-based CAS -- the
+  recommended `local-multi` engine, proven with a real concurrent-CAS
+  test), and `dynamodb` (conditional-put CAS, S3 blobs, lazy `boto3`,
+  exercised entirely through in-memory fakes of its two adapter protocols
+  -- no credentials, no network) backends behind `LedgerClient`:
+  validation (stream grammar, canonical/NaN-free payloads, the blob-
+  threshold rule), idempotency-key dedupe, `tail()` with per-stream
+  cursors, `Projection`/`rebuild`/`materialize` (snapshot + replay, a
+  corrupt snapshot falls back to a full replay rather than getting
+  stuck), a content-addressed blob store, and record compaction/
+  retention (distinct from context compaction) with an explicit
+  protected-prefix list. `migrate_v1.py` makes the Kernel's future
+  `migrate-v1` command a plain, idempotent replay of v1's own
+  `~/.simorgh/memory.jsonl` shape, routed per `06-migration-from-v1.md`
+  section 5. Doc fixes (spec section 12's own open question 1, resolved):
+  `contracts.protocols.Ledger` already carries `put_blob`/`get_blob`/
+  `compact` from the integration pass, so no further protocol change was
+  needed. Spec section 5.5 described the jsonl lock as held for the
+  backend's whole lifetime while section 5.4 described it as per-append;
+  built per-append (the file lock is taken only around each write/
+  rewrite), so `sqlite`/`jsonl` interleave correctly under concurrent
+  writers instead of one process locking the other out entirely.
+  1188 tests passing (v1 + contracts + bus + 158 new for the ledger).

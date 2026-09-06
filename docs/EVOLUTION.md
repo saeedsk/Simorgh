@@ -2106,3 +2106,45 @@ Still ahead, roughly in order:
     ones and then asserted they shared one trace) were all caught by the
     spec's own testing strategy doing its job, not discovered later.
     1041 tests passing (v1 + contracts + 68 new for the bus).
+100. **`simorgh/ledger/` built -- the third Phase 0 package, in parallel
+    with the bus.** Everything durable in Simorgh v2 is a projection over
+    this: append-only, typed event streams with compare-and-swap appends
+    for single-writer coordination, idempotency-key dedupe so at-least-
+    once delivery from the Bus can never double-record, snapshots so a
+    `Projection` need not replay from the beginning of time, a content-
+    addressed blob store so a large payload never bloats a stream, and a
+    record-compaction/retention policy distinct from the Bus's own
+    context-adjacent tracing. Four backends behind one `LedgerClient`:
+    `memory` (tests), `jsonl` (default -- v1's own `fsync`-per-append and
+    tmp-write/`fsync`/`os.replace` atomic-rewrite discipline carried over
+    almost verbatim from `src/memory/long_term.py`, plus recovery from a
+    truncated trailing line on restart -- a real crash loses at most the
+    record that was mid-write, never a corrupted stream), `sqlite` (WAL,
+    `BEGIN IMMEDIATE`-serialized writers, a `(stream, seq)` primary key
+    doing double duty as the CAS check -- the recommended engine once
+    more than one process needs to append, proven with eight concurrent
+    `asyncio` tasks racing the same `expected_seq` and exactly one
+    winning), and `dynamodb` (conditional-put CAS, S3 for blobs and
+    oversized payloads, `boto3` imported lazily so the core dependency
+    graph never needs it -- exercised entirely through in-memory fakes of
+    its own two adapter protocols, so the parity suite proves the CAS/
+    idempotency/snapshot logic without any credentials or network call).
+
+    `migrate_v1.py` is what makes the eventual Kernel `migrate-v1`
+    command a plain, idempotent replay rather than a bespoke importer:
+    `read_v1_records` maps every kind in the real
+    `~/.simorgh/memory.jsonl` (task events, applied patches and skills,
+    LLM spend, interests, research findings, rejected proposals, and
+    everything else as a generic episodic memory) to the stream
+    `06-migration-from-v1.md`'s own route table already specified,
+    tagged `idempotency_key="v1:<id>"` -- replaying the same file twice
+    appends nothing the second time, proven directly against a fixture
+    shaped like the real file, malformed line included (skipped, not
+    fatal, the same tolerance v1's own loader already had).
+
+    Interrupted mid-build by the same session rate limit as the bus
+    package, in the same way: resumed from the verified on-disk state
+    (the package code, written first, was already complete and
+    untouched) rather than restarted, with the test suite -- entirely
+    unwritten before the interruption -- as the remaining work. 1188
+    tests passing (v1 + contracts + bus + 158 new for the ledger).
