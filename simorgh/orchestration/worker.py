@@ -76,6 +76,26 @@ class Worker:
     async def run(self, session: Session, *, user_text: str = "") -> Outcome:
         return await self._runner.run(session, user_text=user_text)
 
+    async def run_percept_chat(self, session_id: str, text: str) -> None:
+        """Flow 1 (02 section 5): a plain conversational percept has no
+        Planning task behind it -- only the `batch`/`evolve`/`plan`
+        commands go through `intent.goal.stated` -> Intake -> a real
+        task. Runs an ephemeral chat session directly, keyed by the
+        percept's own `session_id` (the same value Interface is already
+        waiting on in `_pending_turns`), and reuses `run`/`_report`
+        unchanged: every `TASK_*` handler this fires (`_on_task_started`
+        et al. in `simorgh.planning.service`) checks `task is None` first,
+        so an id Planning never created is always a safe no-op there --
+        the one part of `_report` this session actually needs is its
+        `if session.kind == "chat": publish turn.completed` branch.
+        """
+        profile = profiles.for_task("chat", "execute")
+        session = Session(task_id=session_id, kind="chat", mode="execute", profile=profile, worker_id=self.worker_id)
+        session.budget.max_steps = profile.max_steps
+        session.budget.max_revisions = profile.max_revisions
+        outcome = await self.run(session, user_text=text)
+        await self._report(session, outcome)
+
     async def _report(self, session: Session, outcome: Outcome) -> None:
         if outcome.kind == "paused":
             return  # session.py already emitted task.paused

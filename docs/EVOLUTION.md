@@ -2323,3 +2323,78 @@ Still ahead, roughly in order:
     sixteen detailed subsystem specs to sixteen real, tested packages --
     now boots as one system. 1977 tests passing (v1's original suite
     fully intact throughout, plus the entire v2 build).
+
+104. **A live-caught lesson: "boots as one system" is not "works as one
+    system" -- `percept.text.received` was never wired to a reply, so
+    plain chat had zero response until this milestone.** Milestone 103
+    proved every subsystem starts up healthy together; it did not prove
+    a message dropped in at the real entry point actually produces the
+    behavior the architecture promises. Asked directly by the creator to
+    stop building and instead *run* Simorgh v2 and talk to it -- boot the
+    real Kernel, in a throwaway copy of the repo (the standing sandbox-
+    isolation lesson: Execution's real git/file tools must never run
+    against the working project) -- this is exactly what surfaced: a
+    plain chat message went in, and nothing ever came out. Interface's
+    own `_handle_chat` even carried a self-documented placeholder for
+    it -- `"no response -- the reasoning subsystem isn't built yet this
+    session"` -- left there by the fork that built Interface in Phase 1,
+    correctly anticipating the gap but not the one that would eventually
+    close it.
+
+    Root cause, found by reading `02-system-architecture.md`'s own Flow
+    1 against the real code: the spec says "orchestration: opens a TURN
+    session" directly off `percept.text.received`, but `simorgh.
+    orchestration.service.Service.consumes` never named that topic --
+    only `task.available`, fed exclusively by Planning's `Intake`, which
+    itself only reacts to `intent.goal.stated` (the explicit `batch`/
+    `evolve`/`plan` commands), never to plain conversational text. Two
+    real, working subsystems, each individually tested and each exactly
+    matching its own spec section, with a genuine gap in the wiring
+    *between* them -- invisible to every unit and integration test
+    because every one of them either drove a `task.available` directly
+    or patched a partial `build_factories()`, so none of them ever
+    exercised the actual seam a live percept has to cross. This is
+    the concrete version of the graceful-degradation principle's dark
+    twin: a missing subscription degrades exactly like a slow one --
+    silently, correctly, and indistinguishably from "working but taking
+    a while" until someone actually waits for the reply.
+
+    Fixed by giving `Worker` a `run_percept_chat(session_id, text)` path
+    that runs an ephemeral chat `Session` directly -- no Planning task
+    ever created, keyed by the percept's own `session_id` (the exact
+    correlation key Interface's `_pending_turns` was already waiting on)
+    -- and reusing `Worker._report` unchanged for the `turn.completed`
+    publish, since every `TASK_*` handler it also fires
+    (`simorgh.planning.service._on_task_started` et al.) already checks
+    `task is None` first and no-ops safely for an id Planning never
+    created. `Service.start` now subscribes once to `percept.text.
+    received` and round-robins across its workers, so a multi-worker
+    config never double-replies to the same message.
+
+    Verified live, not just in tests: booted the real Kernel in the
+    sandboxed repo copy and sent `"hello Simorgh, what are you?"`
+    through the exact path Interface's REPL uses -- got back a real,
+    coherent answer describing itself and correctly citing `SOUL.md`'s
+    eight directives by name, with `floor: False` (a real provider
+    answered, not the honest-floor fallback). Also drove the explicit-
+    goal path (`intent.goal.stated` -> a real Planning task -> Worker
+    claim -> completion) and Flow 5 pause/resume live in the same
+    session: both already worked correctly end-to-end, unaffected by
+    this bug. 1978 tests passing (four new regression tests: a percept
+    with no Planning task anywhere produces `turn.completed` with the
+    right `session_id` and never touches Planning's store; an empty
+    percept is ignored, not a crash).
+
+    A second, related gap was found by the same live-reading pass and
+    deliberately left open rather than folded into this fix: Flow 1
+    also calls for `turn.completed` -> Memory's episodic write, but
+    `simorgh.memory.service.Service` only ever reacts to an explicit
+    `memory.store` request -- nothing publishes one when a turn ends, so
+    Simorgh currently has no memory of a conversation from one turn to
+    the next. Closing it needs a real design decision this milestone
+    didn't make casually: `turn.completed`'s payload only carries the
+    assistant's reply, not the user's own text, so a two-sided episodic
+    record needs either a contract change or Orchestration itself
+    publishing `memory.store` with both halves -- left for the next
+    session rather than rushed alongside a different contracts-adjacent
+    fix.
