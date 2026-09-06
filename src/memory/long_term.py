@@ -30,6 +30,12 @@ class MemoryRecord:
     (a skill or how-to), "outcome" (the result of a dispatched action, see
     src/orchestrator/reflection.py), and "lineage" (a record of a
     self-modification).
+
+    Episodic records may carry a `metadata["antecedent_ids"]` list naming
+    the ids of records that causally preceded this one (e.g. the failure
+    that led to this outcome), so planning can walk cause -> effect chains
+    instead of relying on keyword recency alone. Use MemoryStore.link_causal
+    to set this and MemoryStore.causes_of / consequences_of to walk it.
     """
 
     id: str
@@ -83,6 +89,49 @@ class MemoryStore(abc.ABC):
         record = MemoryRecord.create(kind, content, **metadata)
         self.add(record)
         return record
+
+    def link_causal(self, consequence_id: str, antecedent_id: str) -> None:
+        """Tag `consequence_id` as causally following from `antecedent_id`.
+
+        Stored as a `metadata["antecedent_ids"]` list on the consequence
+        record, rewritten via delete+add so subclasses don't each need to
+        implement in-place metadata updates.
+        """
+        record = self.get(consequence_id)
+        if record is None:
+            raise KeyError(consequence_id)
+        antecedent_ids = list(record.metadata.get("antecedent_ids", []))
+        if antecedent_id not in antecedent_ids:
+            antecedent_ids.append(antecedent_id)
+        updated = MemoryRecord(
+            id=record.id,
+            kind=record.kind,
+            content=record.content,
+            created_at=record.created_at,
+            metadata={**record.metadata, "antecedent_ids": antecedent_ids},
+        )
+        self.delete(record.id)
+        self.add(updated)
+
+    def causes_of(self, record_id: str) -> list[MemoryRecord]:
+        """Return the antecedent records tagged as causes of `record_id`."""
+        record = self.get(record_id)
+        if record is None:
+            return []
+        causes = []
+        for antecedent_id in record.metadata.get("antecedent_ids", []):
+            antecedent = self.get(antecedent_id)
+            if antecedent is not None:
+                causes.append(antecedent)
+        return causes
+
+    def consequences_of(self, record_id: str) -> list[MemoryRecord]:
+        """Return records that name `record_id` as a causal antecedent."""
+        return [
+            record
+            for record in self.query()
+            if record_id in record.metadata.get("antecedent_ids", [])
+        ]
 
 
 class InMemoryStore(MemoryStore):
