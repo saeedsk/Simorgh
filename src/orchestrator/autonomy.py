@@ -42,8 +42,15 @@ healthy, or reviewing recent action outcomes. It shares the same
 idle/cooldown pacing as real actions, but is logged under its own kind
 (`PROBE_ACTION_KIND`) and deliberately excluded from `max_actions_per_day`
 and the failure-streak breaker, since observing is not acting. Deciding
-*what* to probe stays external (main.py), the same separation of concerns
-already used for `perform_action`.
+*what* to probe stays external (main.py) when a `diagnostic_probe` is
+injected, the same separation of concerns already used for
+`perform_action`. When no `diagnostic_probe` is injected at all, this
+file falls back to a small, fixed, intrinsic set of read-only self-checks
+(`_run_intrinsic_hypothesis_probe`) so idle time is never pure waiting
+even in the minimal wiring case -- every one of those checks is local,
+read-only, and stdlib-only (no network, no subprocess, no file writes
+beyond the usual MemoryStore record), the same boundary every other
+action in this file already respects.
 """
 
 from __future__ import annotations
@@ -156,6 +163,17 @@ class AutonomyController:
     budget or starts the cooldown.
     """
 
+    # A small, fixed set of read-only self-checks used as a fallback
+    # when no `diagnostic_probe` is injected -- see
+    # `_run_intrinsic_hypothesis_probe`. Deliberately short: this is a
+    # "something rather than nothing" floor, not a substitute for the
+    # richer, project-aware checks main.py's own `diagnostic_probe` can
+    # run.
+    _INTRINSIC_HYPOTHESES = (
+        "memory_store_queryable",
+        "recent_failure_rate_bounded",
+    )
+
     def __init__(
         self,
         store: MemoryStore,
@@ -184,6 +202,7 @@ class AutonomyController:
         self._last_action_at = 0.0
         self._diagnostic_probe = diagnostic_probe
         self._last_probe_at = 0.0
+        self._hypothesis_index = 0
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -254,26 +273,70 @@ class AutonomyController:
             return False
         return True
 
+    def _run_intrinsic_hypothesis_probe(self) -> None:
+        """Fallback used by `_maybe_run_diagnostic_probe` when no
+        external `diagnostic_probe` was injected: cycle through a
+        small, fixed set of read-only self-checks ("hypotheses" about
+        this process's own health) one at a time, log the outcome, and
+        move on. Every check here is local and read-only -- no network,
+        no subprocess, no file writes beyond the usual MemoryStore
+        record -- the same boundary every other action in this file
+        already respects. This never touches `max_actions_per_day` or
+        the failure-streak breaker, same as the injected-probe path.
+        """
+        hypothesis = self._INTRINSIC_HYPOTHESES[self._hypothesis_index % len(self._INTRINSIC_HYPOTHESES)]
+        self._hypothesis_index += 1
+        passed = True
+        detail = ""
+        try:
+            if hypothesis == "memory_store_queryable":
+                self._store.query(kind=ACTION_KIND)
+            elif hypothesis == "recent_failure_rate_bounded":
+                recent = self.digest(window_seconds=3600.0)
+                if recent.total > 0 and recent.failed / recent.total > 0.5:
+                    passed = False
+                    detail = f"{recent.failed}/{recent.total} recent actions failed"
+        except Exception as exc:  # noqa: BLE001 -- a broken self-check
+            # must never take the background loop down; record it and
+            # move on, same as every other guard in this file.
+            passed = False
+            detail = repr(exc)
+        self._store.remember(
+            PROBE_ACTION_KIND,
+            f"intrinsic diagnostic probe: {hypothesis}",
+            hypothesis=hypothesis,
+            passed=passed,
+            detail=detail,
+        )
+        status = "ok" if passed else f"flagged ({detail})"
+        print(style(f"🔎 [autonomous] intrinsic probe '{hypothesis}': {status}", "cyan", "bold"))
+
     def _maybe_run_diagnostic_probe(self) -> None:
         """Fallback for a genuinely idle tick where `perform_action`
         found no external work: gives an injected `diagnostic_probe`
         callback a chance to run one hypothesis-driven self-check (e.g.
         verifying memory-store integrity or reviewing recent action
-        health) so idle time isn't pure waiting. Paced by the same
+        health) so idle time isn't pure waiting; when no
+        `diagnostic_probe` was injected at all, falls back to
+        `_run_intrinsic_hypothesis_probe` instead, so this floor exists
+        even in the minimal wiring case. Paced by the same
         `action_cooldown_seconds` as real actions so it can't spam every
         poll tick; logged under its own kind (`PROBE_ACTION_KIND`) so it
         is never confused with -- or double-counted against -- the
         daily action cap or the failure-streak circuit breaker, both of
         which are about real actions only. What a probe actually checks
-        is entirely the injected callback's decision, same as
-        `perform_action` -- this file still never decides *what* to
-        work on, only *whether/when* it's allowed to.
+        is entirely the injected callback's decision when one exists,
+        same as `perform_action` -- this file still never decides *what*
+        external work to do, only *whether/when* it's allowed to, and
+        (in the no-callback case) which of its own small fixed
+        self-checks to run next.
         """
-        if self._diagnostic_probe is None:
-            return
         if time.time() - self._last_probe_at < self.action_cooldown_seconds:
             return
         self._last_probe_at = time.time()
+        if self._diagnostic_probe is None:
+            self._run_intrinsic_hypothesis_probe()
+            return
         try:
             probe_ran = self._diagnostic_probe()
         except Exception as exc:  # noqa: BLE001 -- same reasoning as
@@ -291,7 +354,8 @@ class AutonomyController:
         (and unit-testable) without any real waiting or threading.
         Returns True only if `perform_action` actually ran and reported
         real work done. When it didn't (genuinely nothing pending), an
-        injected `diagnostic_probe` gets one paced chance to run instead
+        injected `diagnostic_probe` (or, absent one, the intrinsic
+        hypothesis-cycle fallback) gets one paced chance to run instead
         -- see `_maybe_run_diagnostic_probe` -- but that never changes
         this method's return value or counts as an "action".
         """
