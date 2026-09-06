@@ -18,7 +18,7 @@ from typing import Iterable
 
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import Clock, Ledger
-from simorgh.ledger.api import ConflictError
+from simorgh.ledger.client import ConflictError
 
 from .model import (
     AVAILABLE,
