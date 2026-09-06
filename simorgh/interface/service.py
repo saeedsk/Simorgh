@@ -124,7 +124,16 @@ class Service:
             print(render_mod.notice("error", f"[render error] {exc!r}", "interface", enabled=self._color))
 
     async def _handle_chat(self, text: str) -> None:
-        session_id = self.session_id
+        # A fresh id per turn, not `self.session_id` (the REPL's own
+        # stable per-instance identity, still used elsewhere e.g.
+        # `dispatch()`'s session_id= for plan/batch commands): reusing one
+        # fixed key here let a second chat message sent before the first
+        # one's reply arrived silently overwrite `_pending_turns[key]`,
+        # cross-wiring which reply resolved which prompt's future and
+        # leaving the other one to time out with a false "no response" --
+        # a real bug live-caught only once `run_repl=True` actually ran
+        # (milestone 106).
+        session_id = str(uuid.uuid4())
         fut: asyncio.Future = self._loop.create_future()
         self._pending_turns[session_id] = fut
         await self._ctx.bus.publish(self._ctx.bus.new(topics.PERCEPT_TEXT_RECEIVED, {

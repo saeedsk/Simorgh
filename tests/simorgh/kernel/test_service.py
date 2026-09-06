@@ -89,6 +89,25 @@ class TestBootAndShutdown(unittest.IsolatedAsyncioTestCase):
                 await kernel.shutdown()
 
 
+class TestInteractiveFlag(unittest.IsolatedAsyncioTestCase):
+    async def test_defaults_to_not_interactive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(_make_kernel(tmp)._interactive)  # noqa: SLF001
+
+    async def test_interactive_true_is_threaded_through_to_the_interface_factory(self):
+        # Only constructs the factory dict (never boots) so this stays a
+        # fast, deterministic check -- booting with run_repl=True would
+        # spawn a real REPL thread reading this test process's own stdin.
+        with tempfile.TemporaryDirectory() as tmp:
+            config = LoadedConfig({"runtime": {"data_dir": tmp}}, None)
+            kernel = Kernel(config, secrets=EnvSecretStore({}), clock=FakeClock(), interactive=True)
+            self.assertTrue(kernel._interactive)  # noqa: SLF001
+            from simorgh.kernel.registry import build_factories
+
+            factories = build_factories(bus_client=object(), ledger_client=object(), run_repl=kernel._interactive)
+            self.assertTrue(factories["interface"]()._run_repl)  # noqa: SLF001
+
+
 class TestPauseResumeStop(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()

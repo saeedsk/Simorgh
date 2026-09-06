@@ -124,6 +124,49 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         await sub.unsubscribe()
         self.assertIn("hi back", out)
 
+    async def test_two_chats_in_flight_at_once_never_cross_wire_their_replies(self):
+        """`_handle_chat` used to key `_pending_turns` by the REPL's own
+        fixed `self.session_id`, not a fresh id per turn -- sending a
+        second message before the first one's reply arrived (exactly
+        what the real REPL thread does: it never waits for one line's
+        reply before reading the next) silently overwrote the first
+        call's dict entry, so whichever turn.completed happened to land
+        first resolved the *second* call's future regardless of content,
+        and the first call's own future was orphaned until it timed out
+        with a false "no response". Reproduced here without any real
+        timing race: both `_handle_line` calls are fired concurrently,
+        just like the REPL thread fires them, before either's percept is
+        answered."""
+        replies = {"first message": "reply to first", "second message": "reply to second"}
+
+        async def _responder(message: Message) -> None:
+            await asyncio.sleep(0)
+            text = message.payload["text"]
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": message.payload["session_id"], "task_id": "t",
+                "text": replies[text], "floor": True, "tool_steps": 0,
+            }))
+
+        sub = await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
+
+        # One shared buffer, not one per task: `contextlib.redirect_stdout`
+        # mutates `sys.stdout` globally, so two overlapping `with` blocks
+        # on separate buffers would fight over it -- both calls run on the
+        # same thread/event loop, so their individual `print()`s are each
+        # atomic even while interleaved.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            await asyncio.gather(
+                self.service._handle_line("first message"),
+                self.service._handle_line("second message"),
+            )
+        await sub.unsubscribe()
+
+        out = buf.getvalue()
+        self.assertIn("reply to first", out)
+        self.assertIn("reply to second", out)
+        self.assertNotIn("no response", out)
+
     async def test_vitals_updates_from_persona_state(self):
         await self.bus.publish(self.bus.new(topics.PERSONA_STATE_CHANGED, {
             "valence": 0.4, "arousal": 0.1, "cognitive_load": 0.2, "source": "test",

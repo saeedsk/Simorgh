@@ -50,6 +50,16 @@ class TestBuildFactories(unittest.TestCase):
         factories = build_factories(bus_client=object(), ledger_client=object())
         self.assertEqual(factories["ledger"]().name, "ledger")
 
+    def test_interface_defaults_to_headless_so_tests_and_self_check_never_spawn_a_repl(self):
+        factories = build_factories(bus_client=object(), ledger_client=object())
+        self.assertFalse(factories["interface"]()._run_repl)  # noqa: SLF001
+
+    def test_run_repl_true_reaches_the_interface_factory(self):
+        # `simorgh run`'s own entry point (`Kernel(..., interactive=True)`)
+        # is the one caller that needs this -- see the module docstring.
+        factories = build_factories(bus_client=object(), ledger_client=object(), run_repl=True)
+        self.assertTrue(factories["interface"]()._run_repl)  # noqa: SLF001
+
 
 class TestKnownLayers(unittest.TestCase):
     def test_filters_out_names_with_no_factory_but_keeps_layer_slots(self):

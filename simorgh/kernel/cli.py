@@ -43,7 +43,7 @@ async def _cmd_self_check() -> int:
 
 async def _cmd_run(config_path: str | None) -> int:
     config = load_config(config_path)
-    kernel = Kernel(config)
+    kernel = Kernel(config, interactive=True)
     await kernel.boot()
 
     loop = asyncio.get_running_loop()

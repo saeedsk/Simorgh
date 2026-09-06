@@ -57,9 +57,12 @@ class Kernel:
         topics.SYSTEM_SCHEDULE_ADDED,
     )
 
-    def __init__(self, config: LoadedConfig, *, secrets: SecretStore | None = None, clock=None) -> None:
+    def __init__(
+        self, config: LoadedConfig, *, secrets: SecretStore | None = None, clock=None, interactive: bool = False,
+    ) -> None:
         self.config = config
         self.runtime: RuntimeConfig = config.runtime
+        self._interactive = interactive
         self.run_id = uuid.uuid4().hex[:12]
         self._clock = clock or _WallClock()
         self.state = SystemStateMachine()
@@ -96,7 +99,7 @@ class Kernel:
         self.bus = make_bus_client(self._bus_backend, source="kernel", ledger=self.ledger, clock=self._clock.now,
                                    policy=policy)
 
-        factories = build_factories(bus_client=self.bus, ledger_client=self.ledger)
+        factories = build_factories(bus_client=self.bus, ledger_client=self.ledger, run_repl=self._interactive)
         ctx_factory = ContextFactory(
             bus_backend=self._bus_backend, ledger=self.ledger, config=self.config, secrets=self._secrets,
             clock=self._clock, runtime=self.runtime, run_id=self.run_id, hmac_secret=self._hmac_secret,

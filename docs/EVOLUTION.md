@@ -2446,3 +2446,66 @@ Still ahead, roughly in order:
     (2 new regression tests: a real two-sided episodic write is stored
     and retrievable; a turn with nothing said on either side is not
     stored).
+
+106. **`python -m simorgh run` finally launches an actual interactive
+    session -- it never had before.** Surfaced by the creator's own next
+    question, not a self-directed check: "how do I run v2?" The honest
+    answer at that moment would have been "you can't talk to it through
+    its own real entry point" -- `simorgh/kernel/registry.py`'s
+    `build_factories()` constructed Interface with `run_repl=False`
+    unconditionally, a deliberate Phase-0-era choice so a blocking
+    `readline` loop could never hang a test or `--self-check` boot (both
+    of those also call `build_factories()`), but nothing had ever added
+    the other half: a way for `simorgh run`'s own entry point to ask for
+    the opposite.
+
+    Added `run_repl: bool = False` as a `build_factories()` parameter and
+    `interactive: bool = False` as a `Kernel.__init__` parameter, threaded
+    straight through; `simorgh/kernel/cli.py`'s `_cmd_run` is the one
+    caller that now passes `interactive=True` -- every other caller
+    (`status`, `trace`, `migrate-v1`, every test, self-check) keeps the
+    old default, unchanged. Small, mechanical, three files.
+
+    Verified live in the sandboxed repo copy by actually running
+    `python -m simorgh run` with piped stdin, not just unit tests: the
+    REPL banner appeared, a plain chat line produced a real answer
+    ("2 + 2 = 4."), and Ctrl-C (`SIGINT`) cleanly published `system.stop`
+    and shut every subsystem down in reverse order, exactly as
+    `_cmd_run`'s signal handler was always written to do -- it had just
+    never had a live REPL in front of it to prove it against before.
+
+107. **A second bug the same live run surfaced, caught only because the
+    REPL was actually running for the first time: two chat messages sent
+    close together could cross-wire their replies.** `Interface._handle_
+    chat` keyed `self._pending_turns` by `self.session_id` -- the REPL's
+    own single, fixed per-instance identity, not a fresh id per turn.
+    The real REPL thread never waits for one line's reply before reading
+    the next (`_repl_main`'s loop just schedules `_handle_line` and goes
+    straight back to `input()`), so a second message sent before the
+    first one's `turn.completed` arrived silently overwrote the dict
+    entry. Whichever reply happened to land on the bus first then
+    resolved the *second* call's future regardless of whose prompt it
+    actually answered, and the first call's own future -- now orphaned,
+    nothing pointed to it anymore -- sat until `chat_reply_timeout_s`
+    expired and printed a false "no response" for a prompt that likely
+    did get a real answer, just not the one shown.
+
+    This is exactly the class of bug milestone 104 already named and
+    fixed once (a wiring gap invisible to any test that never exercises
+    the real seam) showing up a second time in the same subsystem the
+    moment a second real capability -- the REPL actually running -- put
+    live concurrent traffic through it for the first time.
+
+    Fixed by generating a fresh `uuid.uuid4()` per `_handle_chat` call
+    instead of reusing `self.session_id` for the `_pending_turns` key
+    (`self.session_id` itself is untouched and still used elsewhere,
+    e.g. `dispatch()`'s `session_id=` for `plan`/`batch` commands -- a
+    legitimately different, REPL-instance-scoped concern). Regression
+    test fires two `_handle_line` calls concurrently against one fake
+    responder that replies with distinct, content-tagged text per
+    prompt, and asserts both replies land on their own call, with no
+    false "no response" -- confirmed this test actually fails against
+    the pre-fix code (reproduced by hand: the second reply vanishes,
+    replaced by exactly the false timeout message described above)
+    before confirming it passes against the fix. 1988 tests passing (1
+    new regression test).
