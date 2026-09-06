@@ -56,13 +56,13 @@ async def _pump(n: int = 40) -> None:
 def _patched_build_factories(instances: dict):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client):
+    def _build(*, bus_client, ledger_client, run_repl=False):
         # `real()` now wires every subsystem (docs/EVOLUTION.md milestone
         # 103) -- when this test was first written it returned only
         # bus/ledger, so filtering down to that is what actually keeps
         # cognition/memory "absent from this boot" true for test 4, rather
         # than relying on `real()`'s own (now much larger) output.
-        factories = real(bus_client=bus_client, ledger_client=ledger_client)
+        factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
         factories = {name: factories[name] for name in ("bus", "ledger")}
         factories["worldmodel"] = lambda: instances.setdefault(
             "worldmodel", WorldModelService(WorldConfig(repo_root=REPO_ROOT)))

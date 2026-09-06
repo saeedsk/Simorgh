@@ -50,7 +50,9 @@ LAYERS: tuple[tuple[str, ...], ...] = (
 NEEDS_HMAC_SECRET: frozenset[str] = frozenset({"guardian", "execution"})
 
 
-def build_factories(*, bus_client: BusClient, ledger_client: LedgerClient) -> dict[str, Callable[[], Subsystem]]:
+def build_factories(
+    *, bus_client: BusClient, ledger_client: LedgerClient, run_repl: bool = False,
+) -> dict[str, Callable[[], Subsystem]]:
     """Zero-arg constructors per subsystem name, for `Supervisor.start_layer`.
     `bus`/`ledger` wrap the clients the Kernel already built (section 5.1:
     "the Kernel constructs the backend and the clients *before* any
@@ -60,6 +62,13 @@ def build_factories(*, bus_client: BusClient, ledger_client: LedgerClient) -> di
     Cognition providers, extra Execution tools, a non-default Guardian
     pipeline) is deliberately a later, separate configuration change, not
     something this composition point should hardcode.
+
+    `run_repl` defaults False -- a blocking `readline` loop must never
+    start under a test or `--self-check` boot, where nothing will ever
+    type into it. Only `python -m simorgh run`, the one entry point whose
+    entire purpose is an interactive session, passes `run_repl=True`
+    (via `Kernel(..., interactive=True)`); every other caller (`status`,
+    `trace`, `migrate-v1`, every test, self-check) leaves the default.
     """
     from simorgh.bus.service import Service as BusService
     from simorgh.cognition.service import Service as CognitionService
@@ -91,7 +100,7 @@ def build_factories(*, bus_client: BusClient, ledger_client: LedgerClient) -> di
         "reflection": lambda: ReflectionService(),
         "curiosity": lambda: CuriosityService(),
         "persona": lambda: PersonaService(),
-        "interface": lambda: InterfaceService(run_repl=False),
+        "interface": lambda: InterfaceService(run_repl=run_repl),
         "orchestration": lambda: OrchestrationService(),
     }
 

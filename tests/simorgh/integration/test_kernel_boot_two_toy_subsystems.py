@@ -85,8 +85,8 @@ class _ToyMemory:
 def _patched_build_factories(order: list[str], toys: dict):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client):
-        factories = real(bus_client=bus_client, ledger_client=ledger_client)
+    def _build(*, bus_client, ledger_client, run_repl=False):
+        factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
         factories["cognition"] = lambda: toys.setdefault("cognition", _ToyCognition(order))
         factories["memory"] = lambda: toys.setdefault("memory", _ToyMemory(order))
         return factories
@@ -132,8 +132,8 @@ class TestKernelBootsTwoToySubsystems(unittest.IsolatedAsyncioTestCase):
         toys: dict = {}
         order: list[str] = []
 
-        def _build(*, bus_client, ledger_client):
-            factories = kernel_registry.build_factories(bus_client=bus_client, ledger_client=ledger_client)
+        def _build(*, bus_client, ledger_client, run_repl=False):
+            factories = kernel_registry.build_factories(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
             factories["cognition"] = lambda: toys.setdefault("cognition", _NeverHealthy(order))
             return factories
 

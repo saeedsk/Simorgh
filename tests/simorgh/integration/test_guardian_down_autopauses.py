@@ -48,8 +48,8 @@ class _ToyGuardian:
 
 
 def _build_with_guardian(guardian: _ToyGuardian):
-    def _build(*, bus_client, ledger_client):
-        factories = kernel_registry.build_factories(bus_client=bus_client, ledger_client=ledger_client)
+    def _build(*, bus_client, ledger_client, run_repl=False):
+        factories = kernel_registry.build_factories(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
         factories["guardian"] = lambda: guardian
         return factories
 
