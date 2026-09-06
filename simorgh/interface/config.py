@@ -10,9 +10,17 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Config:
-    history_path: Path = Path("~/.simorgh/cli_history")
+    # None means `<data_dir>/interface/cli_history` -- the per-run data
+    # dir, not a hardcoded home path, so an isolated/test run never writes
+    # into the creator's real `~/.simorgh` (this session's leak class).
+    # Set explicitly to share a history file across runs/versions.
+    history_path: Path | None = None
     history_length: int = 1000
     color: str = "auto"  # auto | on | off
+    # Banner glyphs. auto: box-drawing/geometric unicode when stdout is
+    # UTF-8, never non-Latin script (fonts commonly lack it -- live-caught
+    # as "weird characters"); full: also the Persian name; off: pure ASCII.
+    unicode: str = "auto"  # auto | full | off
     prompt_timeout_s: float = 120.0
     vitals_idle_reprint_s: float = 3.0
     vitals_interval_s: float = 15.0
@@ -39,5 +47,5 @@ class Config:
     logs_default_limit: int = 100
     logs_max_limit: int = 500
 
-    def resolved_history_path(self) -> Path:
-        return self.history_path.expanduser()
+    def resolved_history_path(self) -> Path | None:
+        return self.history_path.expanduser() if self.history_path is not None else None

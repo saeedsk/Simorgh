@@ -10,6 +10,7 @@ scroll-region sequences.
 from __future__ import annotations
 
 import os
+import sys
 
 from .vitals import VitalsSnapshot
 
@@ -95,8 +96,19 @@ def vitals(snapshot: VitalsSnapshot) -> str:
         f"memory records: {snapshot.memory_records}   skills: {snapshot.skills}   interests: {snapshot.interests}",
         f"backlog: {snapshot.backlog}   posture: {snapshot.posture}",
     ]
-    if snapshot.budget:
-        lines.append(f"budget: {snapshot.budget}")
+    if snapshot.workers_total or snapshot.bus_published:
+        lines.append(
+            f"workers: {snapshot.workers_busy}/{snapshot.workers_total} busy   "
+            f"bus: {snapshot.bus_published} published, {snapshot.bus_delivered} delivered"
+        )
+    # Live-caught: this used to print the raw per-subsystem metrics dict
+    # verbatim under a "budget:" label -- a screenful of nested braces in
+    # a panel meant to read at a glance. Only a real per-provider budget
+    # is a budget; one short line per provider.
+    for name, b in sorted(snapshot.budget.items()):
+        cap = f"/{b['max_calls']}" if b.get("max_calls") is not None else ""
+        flag = "  (exhausted)" if b.get("exhausted") else ""
+        lines.append(f"budget: {name} {b.get('calls', 0)}{cap} calls this window{flag}")
     return "\n".join(lines)
 
 
@@ -115,7 +127,18 @@ _QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
 )
 
 
-def banner(*, enabled: bool = True) -> str:
+def unicode_mode(setting: str = "auto") -> str:
+    """Resolve the `[interface] unicode` setting to `off | auto | full`.
+    `auto` degrades to `off` when stdout isn't UTF-8 (a redirected file
+    with a legacy locale, some CI shells) -- glyphs that can't be encoded
+    would otherwise raise or print as `?`."""
+    if setting in ("off", "full"):
+        return setting
+    encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
+    return "auto" if "utf" in encoding else "off"
+
+
+def banner(*, enabled: bool = True, unicode: str = "auto") -> str:
     """The startup splash. `سی مرغ` ("si morgh", thirty birds) is a pun
     on `سیمرغ` (Simorgh) that IS the point of Attar's `Conference of the
     Birds`: thirty birds journey to find the Simorgh and discover they
@@ -125,12 +148,25 @@ def banner(*, enabled: bool = True) -> str:
     text only (module docstring's hard rule) -- no cursor control, so
     this is exactly what a redirected/piped session sees too, just
     without the color codes.
+
+    `unicode`: `off` is pure ASCII; `auto` uses box-drawing and one
+    geometric glyph (present in essentially every monospace font) but
+    never non-Latin script; `full` also shows the Persian name. Live-
+    caught: the first version put `سیمرغ` in the centered mark line by
+    default, and on the creator's terminal it rendered as garbage -- a
+    font without Arabic-script glyphs is common, and right-to-left text
+    also breaks monospace centering arithmetic. So the script is opt-in,
+    and even then it lives in the epigraph, where alignment is irrelevant.
     """
-    rule = style("─" * _RULE_WIDTH, "dim", enabled=enabled)
-    mark_plain = "◆  سیمرغ  ·  SIMORGH  ◆"
+    if unicode == "off":
+        rule_ch, mark_plain = "-", "*  SIMORGH  *"
+    else:
+        rule_ch, mark_plain = "─", "◆  SIMORGH  ◆"
+    rule = style(rule_ch * _RULE_WIDTH, "dim", enabled=enabled)
     mark = style(style(mark_plain.center(_RULE_WIDTH), "bold", enabled=enabled), "yellow", enabled=enabled)
+    name = "Simorgh (سیمرغ)" if unicode == "full" else "Simorgh"
     epigraph = style(
-        '"si morgh": thirty birds, one Simorgh -- Attar\'s Conference of\n'
+        f'"si morgh": thirty birds, one {name} -- Attar\'s Conference of\n'
         "the Birds. Sixteen subsystems, one self.",
         "dim", enabled=enabled,
     )

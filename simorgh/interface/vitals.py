@@ -54,7 +54,14 @@ class VitalsSnapshot:
     interests: int = 0
     backlog: int = 0
     posture: str = "unknown"
+    # {provider_name: {"calls": int, "max_calls": int | None, "exhausted": bool}}
+    # -- Cognition's own per-provider rolling-window budget, taken from the
+    # `providers` gauge it publishes on `system.metrics` (milestone 112).
     budget: dict = field(default_factory=dict)
+    workers_busy: int = 0
+    workers_total: int = 0
+    bus_published: int = 0
+    bus_delivered: int = 0
     mood_phrase: str = ""
     stale: bool = True
 
@@ -67,7 +74,6 @@ class VitalsCache:
         self._counters: dict[str, int] = {}
         self._gauges: dict = {}
         self._posture = "unknown"
-        self._budget: dict = {}
         self._have_persona = False
 
     def on_persona_state(self, payload: dict) -> None:
@@ -77,17 +83,36 @@ class VitalsCache:
         self._have_persona = True
 
     def on_system_metrics(self, payload: dict) -> None:
+        # Live-caught: this used to also stash every subsystem's whole raw
+        # payload under a `budget` key, and `render.vitals` printed that
+        # dict verbatim -- a screenful of `{'orchestration': {'counters':
+        # ...}}` in a panel meant to read like a person's vitals. Only the
+        # flattened counters/gauges are kept; `snapshot()` picks the few
+        # that mean something to a human and shapes them.
         subsystem = payload.get("subsystem", "")
         for key, value in (payload.get("counters") or {}).items():
             self._counters[f"{subsystem}.{key}"] = value
         for key, value in (payload.get("gauges") or {}).items():
             self._gauges[f"{subsystem}.{key}"] = value
-        self._budget[subsystem] = {"counters": payload.get("counters", {}), "gauges": payload.get("gauges", {})}
 
     def on_guardian_posture(self, payload: dict) -> None:
         posture = payload.get("posture")
         if posture:
             self._posture = posture
+
+    def _budget(self) -> dict:
+        providers = self._gauges.get("cognition.providers")
+        if not isinstance(providers, list):
+            return {}
+        out: dict = {}
+        for p in providers:
+            if isinstance(p, dict) and p.get("name"):
+                out[str(p["name"])] = {
+                    "calls": int(p.get("calls", 0) or 0),
+                    "max_calls": p.get("max_calls"),
+                    "exhausted": bool(p.get("exhausted", False)),
+                }
+        return out
 
     def snapshot(self) -> VitalsSnapshot:
         phrase = _MOOD_PHRASES.get((_valence_label(self._mood), _arousal_label(self._energy)), "")
@@ -97,6 +122,10 @@ class VitalsCache:
             skills=self._counters.get("learning.skills_acquired", 0),
             interests=self._counters.get("curiosity.interests", 0),
             backlog=self._counters.get("planning.backlog", 0),
-            posture=self._posture, budget=dict(self._budget),
+            posture=self._posture, budget=self._budget(),
+            workers_busy=int(self._gauges.get("orchestration.workers.busy", 0) or 0),
+            workers_total=int(self._gauges.get("orchestration.workers.total", 0) or 0),
+            bus_published=int(self._counters.get("bus.published", 0) or 0),
+            bus_delivered=int(self._counters.get("bus.delivered", 0) or 0),
             mood_phrase=phrase, stale=not self._have_persona,
         )
