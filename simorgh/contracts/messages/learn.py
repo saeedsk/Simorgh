@@ -42,7 +42,14 @@ LearnCompetenceUpdated = define(t.LEARN_COMPETENCE_UPDATED, [
     F("calibration", Float),
     F("samples", Int),
 ])
-LearnSkillAcquired = define(t.LEARN_SKILL_ACQUIRED, [F("name", Str), F("path", Str), F("tests", Int)])
+LearnSkillAcquired = define(t.LEARN_SKILL_ACQUIRED, [
+    F("name", Str), F("path", Str), F("tests", Int), O("description", Str),
+], doc="05-memory.md's own dependency table describes this as producing a "
+       "procedural record {name, description, path, tests} directly -- "
+       "`description` is optional here (a producer built against v1 of "
+       "this catalog entry still validates) so a consumer can read it "
+       "straight off this event once a producer sets it, instead of every "
+       "consumer needing its own paired `memory.store` publish.")
 _SELF_PATCH = [
     F("subject", Str),
     F("commit", Str),
