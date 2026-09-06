@@ -4,10 +4,22 @@ the actual v1 record shape and routing table -- docs/blueprint/
 Ledger, stream `read_v1_records` through `append`, and report counts;
 idempotency is the Ledger's own (`idempotency_key="v1:<id>"`), so running
 this twice against the same file appends nothing the second time.
+
+Live-caught running this against the creator's real ~/.simorgh/memory.jsonl
+for the first time (06-migration section 5's own caveat: only ever proven
+against a small fixture before): a v1 `applied_source_patch` record's
+`metadata.code` field, real full-file patch source, routinely exceeds the
+Ledger's 4096-char inline threshold -- something no hand-written fixture
+happened to include. `_deoversize` walks each event's payload before
+`append` and blob-stores any string over that threshold, renaming the key
+to `<key>_ref` per the Ledger's own `*_ref`/`blob:<sha256>` convention
+(simorgh/ledger/blobs.py), the same pattern verification/service.py and
+execution/service.py already use for real code and tool output.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from simorgh.ledger.client import LedgerClient
@@ -38,12 +50,26 @@ class MigrationReport:
         return "\n".join(lines)
 
 
+async def _deoversize(ledger: LedgerClient, payload: dict) -> dict:
+    threshold = ledger.inline_threshold
+    out = dict(payload)
+    for key, value in payload.items():
+        if isinstance(value, str) and len(value) > threshold:
+            ref = await ledger.put_blob(value.encode("utf-8"), content_type="text/plain")
+            del out[key]
+            out[f"{key}_ref"] = ref
+    return out
+
+
 async def migrate(ledger: LedgerClient, path: Path = DEFAULT_V1_MEMORY_PATH) -> MigrationReport:
     report = MigrationReport()
     if not path.is_file():
         return report
     for event in read_v1_records(path):
         report.read += 1
+        payload = await _deoversize(ledger, event.payload)
+        if payload is not event.payload:
+            event = replace(event, payload=payload)
         dedupes_before = ledger.counters.get("dedupes", 0)
         await ledger.append(event.stream, event)
         appended = ledger.counters.get("dedupes", 0) == dedupes_before
