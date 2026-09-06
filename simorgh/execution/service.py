@@ -5,6 +5,24 @@ dispatches to the tool registry, and reports `action.result`. Registry
 and dispatch are kept in this one module for this build (the spec's
 `registry.py`/`runner.py` split is a natural follow-up once the tool
 count grows past what fits in one screenful).
+
+Skill acquisition as procedural memory (Phase 4 roadmap item 4.7): per
+08-execution.md's own dependency line ("Depends on ... learn.skill.
+acquired") and section 5.2 ("`learn.skill.acquired` -> load the skill
+module in a sandbox-backed SkillTool, register it, emit tool.registered"),
+this Service subscribes to `learn.skill.acquired` and loads exactly the
+one newly-acquired skill -- never a directory scan of every skill ever
+acquired at boot, which is what makes this "on demand." `_load_skill`
+also best-effort enriches the tool's `description` via a
+`memory.retrieve{kinds:[procedural]}` request against the procedural
+record Learning writes on acquisition (learning/pipeline.py) -- the
+"discoverable by description" half of the same roadmap item. A second,
+independent on-demand path lives in `_on_approved`: an approved action
+naming an as-yet-unregistered `skill:<name>` tool (e.g. after a restart,
+when no fresh `learn.skill.acquired` fired this process) triggers the
+same `_load_skill` lazily, reconstructing the skill's path from the
+`skill_dir/<name>.py` convention `ApplySkillTool` and `SkillPipeline`
+both already use.
 """
 
 from __future__ import annotations
@@ -16,8 +34,9 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
 from simorgh.contracts.protocols import Health, ToolContext
 
+from . import pathsafety
 from .config import Config
-from .tools import builtin_tools
+from .tools import SkillTool, builtin_tools
 from .verifier import ApprovalVerifier
 
 INFLIGHT_STREAM = "execution:inflight"
@@ -27,7 +46,7 @@ TOOLS_STREAM = "execution:tools"
 class Service:
     name = "execution"
     version = "0.1.0"
-    consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED)
+    consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED, topics.LEARN_SKILL_ACQUIRED)
     produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED)
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None) -> None:
@@ -62,6 +81,7 @@ class Service:
 
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_APPROVED, self._on_approved, group="execution"))
         self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
+        self._subs.append(await ctx.bus.subscribe(topics.LEARN_SKILL_ACQUIRED, self._on_skill_acquired))
 
     async def stop(self) -> None:
         for sub in self._subs:
@@ -75,6 +95,57 @@ class Service:
 
     async def _on_state_changed(self, message: Message) -> None:
         self._paused = message.payload["state"] in ("paused", "stopping")
+
+    # -- skill acquisition as procedural memory (roadmap 4.7) --------------------
+    async def _on_skill_acquired(self, message: Message) -> None:
+        name, path = message.payload.get("name", ""), message.payload.get("path", "")
+        if name and path:
+            await self._load_skill(name, path=path)
+
+    async def _load_skill(self, name: str, *, path: str) -> object | None:
+        """Register the one named skill as a `skill:<name>` tool, reading
+        its source from `path` (readable-roots bounded) and its
+        description from Memory's procedural record if one answers in
+        time. Never raises; a load that cannot complete just leaves the
+        tool unregistered for the caller to report as `unknown tool`."""
+        existing = self._registry.get(f"skill:{name}")
+        if existing is not None:
+            return existing
+        source = pathsafety.safe_read_file(self._config.repo_root, path, readable_roots=self._config.readable_roots)
+        if source.startswith("[refused"):
+            self._ctx.logger.warning("skill_load_refused", name=name, path=path, detail=source)
+            return None
+        description = await self._skill_description(name) or f"On-demand skill {name!r} acquired at {path}"
+        tool = SkillTool(self._config, skill_name=name, source=source, description=description)
+        self._registry[tool.name] = tool
+        await self._ctx.bus.publish(Message.new(
+            topics.TOOL_REGISTERED, source="execution",
+            payload={"name": tool.name, "version": "1", "description": tool.description,
+                     "read_only": tool.read_only, "reversibility": tool.reversibility,
+                     "schema_ref": "", "provider": "skill"},
+        ))
+        await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name, "provider": "skill"}))
+        return tool
+
+    async def _skill_description(self, name: str) -> str | None:
+        """Best-effort `memory.retrieve{kinds:[procedural]}` for the
+        description Learning stored on acquisition (learning/pipeline.py)
+        -- the "discoverable by description" half of roadmap item 4.7.
+        Absence (timeout, no Memory booted, nothing stored yet) degrades
+        to a synthesized description rather than blocking the load."""
+        try:
+            reply = await self._ctx.bus.request(
+                Message.new(
+                    topics.MEMORY_RETRIEVE, source="execution",
+                    payload={"query": name, "kinds": ["procedural"], "k": 3,
+                             "filters": {"tags": ["skill", name]}},
+                ),
+                timeout=self._config.skill_lookup_timeout_s,
+            )
+        except Exception:  # noqa: BLE001 -- a description lookup failure must never block loading the skill
+            return None
+        items = reply.payload.get("items") or []
+        return items[0]["content"] if items else None
 
     async def _replay_inflight(self) -> None:
         events = await self._ctx.ledger.read(INFLIGHT_STREAM)
@@ -121,6 +192,15 @@ class Service:
             return
 
         tool = self._registry.get(approved["tool"])
+        if tool is None and approved["tool"].startswith("skill:"):
+            # Lazy on-demand load: this process never saw this skill's own
+            # `learn.skill.acquired` (e.g. it was acquired before this
+            # restart), so resolve it from the `skill_dir/<name>.py`
+            # convention `ApplySkillTool`/`SkillPipeline` both use, rather
+            # than reporting a false "unknown tool" for a skill that is
+            # really just not loaded *yet*.
+            skill_name = approved["tool"][len("skill:"):]
+            tool = await self._load_skill(skill_name, path=f"{self._config.skill_dir}/{skill_name}.py")
         if tool is None:
             await self._publish_result(message, action_id, ok=False, error="unknown tool")
             return

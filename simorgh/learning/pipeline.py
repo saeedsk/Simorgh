@@ -151,6 +151,19 @@ class PatchPipeline:
 
         if self.kind == "skill":
             await self._publish(topics.LEARN_SKILL_ACQUIRED, {"name": self._skill_name(), "path": self._subject or "", "tests": tests["patched"]})
+            # Skill acquisition as procedural memory (roadmap 4.7): the
+            # `learn.skill.acquired` event itself carries no description
+            # field (LearnSkillAcquired is `{name, path, tests}` only --
+            # see the package README's open questions), so the
+            # description this pipeline was actually given is stored
+            # straight into Memory's procedural kind instead, over the
+            # already-generic `memory.store` command. This is what makes
+            # the skill discoverable by description later (Execution's
+            # `memory.retrieve{kinds:[procedural]}` lookup on load).
+            await self._publish(topics.MEMORY_STORE, {
+                "kind": "procedural", "content": self._description,
+                "tags": ["skill", self._skill_name()], "source_ref": self._subject or "",
+            })
             return await self._finish("applied", "skill acquired", commit=commit_sha)
 
         activation_tool = "hot_swap" if self._subject in self._config.hot_swap_slots else "relaunch"

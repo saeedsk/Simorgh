@@ -37,7 +37,7 @@ class Service:
     produces = (
         topics.LEARN_OUTCOME_RECORDED, topics.LEARN_COMPETENCE_UPDATED, topics.LEARN_PIPELINE_COMPLETED,
         topics.LEARN_STRATEGY_SUGGEST_REPLY, topics.LEARN_SELF_PATCH_APPLIED, topics.LEARN_SELF_PATCH_REVERTED,
-        topics.LEARN_SKILL_ACQUIRED, topics.ACTION_PROPOSED, topics.VERIFY_REQUESTED,
+        topics.LEARN_SKILL_ACQUIRED, topics.ACTION_PROPOSED, topics.VERIFY_REQUESTED, topics.MEMORY_STORE,
     )
 
     def __init__(self, config: Config | None = None) -> None:

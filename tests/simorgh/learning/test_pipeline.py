@@ -104,6 +104,34 @@ class TestPatchPipelineHappyPath(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tools, ["skill.draft", "apply_skill", "git_commit"])
         self.assertIn("learn.skill.acquired", [t for t, _ in h.published])
 
+    async def test_skill_pipeline_writes_a_procedural_memory_record(self):
+        """Skill acquisition as procedural memory (roadmap 4.7): the
+        `learn.skill.acquired` wire type carries no description
+        (`{name, path, tests}` only), so the description this pipeline
+        was actually given must reach Memory some other way -- a
+        `memory.store{kind: procedural}` command, published alongside
+        `learn.skill.acquired`, which is what makes the skill
+        discoverable by description later."""
+        h = _Harness()
+        ledger = await _memory_ledger()
+        await h.pipeline(ledger=ledger, kind="skill", subject="simorgh_skills/x.py").run()
+
+        stores = [payload for type_, payload in h.published if type_ == "memory.store"]
+        self.assertEqual(len(stores), 1)
+        store = stores[0]
+        self.assertEqual(store["kind"], "procedural")
+        self.assertEqual(store["content"], "add recency weighting")  # the pipeline's own `description`
+        self.assertEqual(store["source_ref"], "simorgh_skills/x.py")
+        self.assertIn("skill", store["tags"])
+        self.assertIn("x", store["tags"])  # `_skill_name()`: the subject's stem
+
+    async def test_patch_pipeline_does_not_write_a_procedural_memory_record(self):
+        h = _Harness()
+        ledger = await _memory_ledger()
+        await h.pipeline(ledger=ledger, kind="patch").run()
+
+        self.assertNotIn("memory.store", [t for t, _ in h.published])
+
 
 class TestPatchPipelineRetry(unittest.IsolatedAsyncioTestCase):
     async def test_a_failed_verify_retries_with_feedback_then_succeeds(self):
