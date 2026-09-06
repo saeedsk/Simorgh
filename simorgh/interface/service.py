@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+import time
 import uuid
 
 try:
@@ -59,6 +60,7 @@ class Service:
         topics.UI_NOTICE, topics.UI_PROMPT, topics.ACTION_NEEDS_HUMAN, topics.ACTION_DENIED,
         topics.PERSONA_STATE_CHANGED, topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_METRICS,
         topics.SYSTEM_HEALTH, topics.GUARDIAN_POSTURE_CHANGED, topics.TURN_COMPLETED,
+        topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_COMPLETED,
     )
     produces: tuple[str, ...] = (
         topics.PERCEPT_TEXT_RECEIVED, topics.INTENT_GOAL_STATED, topics.SYSTEM_PAUSE,
@@ -81,6 +83,7 @@ class Service:
         self._repl_thread: threading.Thread | None = None
         self._stop_repl = threading.Event()
         self._pending_turns: dict[str, asyncio.Future] = {}
+        self._turn_started: dict[str, float] = {}  # session_id -> monotonic start, for narration timing
         self._color = render_mod.color_enabled(self.config.color)
         self._http: HttpApi | None = None
 
@@ -97,6 +100,9 @@ class Service:
             await ctx.bus.subscribe(topics.SYSTEM_METRICS, self._on_metrics),
             await ctx.bus.subscribe(topics.GUARDIAN_POSTURE_CHANGED, self._on_posture),
             await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed),
+            await ctx.bus.subscribe(topics.TASK_STARTED, self._on_task_event),
+            await ctx.bus.subscribe(topics.TASK_STEP, self._on_task_event),
+            await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_event),
         ]
         if self._run_repl:
             self._stop_repl.clear()
@@ -241,9 +247,21 @@ class Service:
         session_id = str(uuid.uuid4())
         fut: asyncio.Future = self._loop.create_future()
         self._pending_turns[session_id] = fut
+        self._turn_started[session_id] = time.monotonic()
         await self._ctx.bus.publish(self._ctx.bus.new(topics.PERCEPT_TEXT_RECEIVED, {
             "channel": "cli", "text": text, "session_id": session_id,
         }))
+
+        async def _heartbeat() -> None:
+            # Silence never lasts longer than narrate_heartbeat_s: the
+            # step narration (_on_task_event) covers *what* is happening;
+            # this covers "still alive" between steps (a long model call).
+            while True:
+                await asyncio.sleep(self.config.narrate_heartbeat_s)
+                elapsed = time.monotonic() - self._turn_started.get(session_id, time.monotonic())
+                print(render_mod.style(f"  ... still thinking  [{elapsed:.0f}s]", "dim", enabled=self._color))
+
+        beat = asyncio.ensure_future(_heartbeat()) if self.config.narrate else None
         try:
             reply_text = await asyncio.wait_for(fut, timeout=self.config.chat_reply_timeout_s)
             if reply_text:
@@ -261,7 +279,10 @@ class Service:
         except asyncio.TimeoutError:
             print("no response -- the reasoning subsystem isn't built yet this session")
         finally:
+            if beat is not None:
+                beat.cancel()
             self._pending_turns.pop(session_id, None)
+            self._turn_started.pop(session_id, None)
 
     # -- bus handlers -----------------------------------------------------------------
     async def _on_notice(self, message: Message) -> None:
@@ -300,6 +321,33 @@ class Service:
 
     async def _on_posture(self, message: Message) -> None:
         self.vitals.on_guardian_posture(message.payload)
+
+    async def _on_task_event(self, message: Message) -> None:
+        """Live narration (07-post-cutover-review.md §3.9): the creator
+        watched "thinking" for a long time with no sign of what Sim was
+        doing. The Ledger already records every step of a turn as it
+        happens; this prints the ones for a turn *this REPL* is waiting
+        on -- a chat turn's task_id IS its session_id (`worker.py::
+        run_percept_chat`) -- as dim one-liners, and stays silent for
+        every other task (autonomous ticks, other sessions)."""
+        if not self.config.narrate:
+            return
+        p = message.payload
+        task_id = p.get("task_id", "")
+        if task_id not in self._pending_turns:
+            return
+        elapsed = time.monotonic() - self._turn_started.get(task_id, time.monotonic())
+        if message.type == topics.TASK_STARTED:
+            text = "thinking..."
+        elif message.type == topics.TASK_STEP:
+            phase, summary, tool = p.get("phase", ""), p.get("summary", ""), p.get("tool")
+            ok = p.get("ok")
+            mark = "" if ok is None else (" ok" if ok else " FAILED")
+            what = f"{tool}: {summary}" if tool else summary
+            text = f"step {p.get('step_no', '?')} ({phase}) {what}{mark}"
+        else:  # task.completed -- the reply itself prints from _handle_chat
+            text = "done"
+        print(render_mod.style(f"  ... {text}  [{elapsed:.1f}s]", "dim", enabled=self._color))
 
     async def _on_turn_completed(self, message: Message) -> None:
         p = message.payload

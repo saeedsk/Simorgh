@@ -114,6 +114,39 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         out = await self._line("hello there")
         self.assertIn("no response", out)
 
+    async def test_pending_turn_is_narrated_live_and_other_tasks_stay_silent(self):
+        """07-post-cutover-review.md §3.9: while a reply is pending, each
+        task.started/step/completed for *this* session prints a dim line
+        (the creator watched "thinking" for a long time with no sign of
+        what Sim was doing); events for any other task stay silent."""
+        seen_session: dict = {}
+
+        async def _responder(message: Message) -> None:
+            sid = message.payload["session_id"]
+            seen_session["id"] = sid
+            await self.other.publish(self.other.new(topics.TASK_STARTED, {"task_id": sid, "worker_id": "w1"}))
+            await self.other.publish(self.other.new(topics.TASK_STEP, {
+                "task_id": sid, "step_no": 1, "phase": "act", "summary": "read docs/SOUL.md",
+                "tool": "read_file", "ok": True,
+            }))
+            # An unrelated autonomous task -- must NOT be narrated.
+            await self.other.publish(self.other.new(topics.TASK_STEP, {
+                "task_id": "autonomous-9", "step_no": 3, "phase": "gather", "summary": "final answer",
+            }))
+            await asyncio.sleep(0)
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": sid, "task_id": sid, "text": "the reply", "floor": False, "tool_steps": 1,
+            }))
+
+        sub = await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
+        out = await self._line("what does SOUL.md say?")
+        await sub.unsubscribe()
+        self.assertIn("thinking...", out)
+        self.assertIn("step 1 (act) read_file: read docs/SOUL.md ok", out)
+        self.assertNotIn("final answer", out)  # the other task's step
+        self.assertIn("the reply", out)
+        self.assertLess(out.index("thinking..."), out.index("the reply"))
+
     async def test_plain_chat_gets_a_real_turn_completed(self):
         async def _responder(message: Message) -> None:
             await asyncio.sleep(0)

@@ -155,11 +155,20 @@ class SessionRunner:
             # (queryable via `/api/logs?stream=task:<id>`) instead of
             # vanishing -- callers still get `None` and are unaffected.
             error = reply.payload.get("error") or {}
-            await self._append(session, topics.TASK_STEP, {
+            # `phase` is `gather|act|verify` in the contract (TaskStep); the
+            # failed think happened while gathering the answer, so "gather"
+            # -- a first version wrote "think", which only the schema-blind
+            # Ledger path accepted (post-cutover review caught it).
+            step_payload = {
                 "task_id": session.task_id, "step_no": session.next_step_no(),
-                "phase": "think", "ok": False,
+                "phase": "gather", "ok": False,
                 "summary": f"cognition error: {error.get('code', 'unknown')} -- {error.get('detail', '')}",
-            })
+            }
+            await self._append(session, topics.TASK_STEP, step_payload)
+            # Published too (not just appended) so a live surface -- the
+            # REPL's narration, the dashboard feed -- sees the failure as
+            # it happens, not only in the Ledger afterwards.
+            await self._publish(session, topics.TASK_STEP, step_payload)
             return None
         return reply
 
