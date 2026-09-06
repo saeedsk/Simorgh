@@ -19,6 +19,7 @@ from simorgh.worldmodel.selfmodel import (
     add_skill,
     bump_restarts,
     mitigate_limitations,
+    render_summary,
     update_competence,
 )
 
@@ -28,6 +29,27 @@ def _model(**overrides) -> SelfModel:
     defaults = dict(version=1, updated_at=0.0, identity=identity)
     defaults.update(overrides)
     return SelfModel(**defaults)
+
+
+class TestIdentityRendering(unittest.TestCase):
+    """Live-caught: rendered as plain descriptive text ("I am X"), the
+    identity section was never strong enough to override a real
+    provider's own default identity -- asked directly, it said it was
+    Claude Code, not Simorgh. This is delivered as a real system prompt
+    now (cognition/service.py, ClaudeCodeProvider's --system-prompt),
+    but the wording itself must also be a direct instruction to respond
+    in character, not a fact being reported."""
+
+    def test_identity_section_is_a_direct_instruction_not_a_bare_fact(self):
+        text, _tokens = render_summary(_model(), budget_tokens=300)
+        self.assertIn("You are Simorgh.", text)
+        self.assertIn("Respond fully in character as Simorgh", text)
+        self.assertIn("never break character", text)
+        self.assertIn("a test persona", text)  # the identity summary itself still comes through
+
+    def test_identity_instruction_explicitly_names_the_underlying_model_it_must_not_default_to(self):
+        text, _tokens = render_summary(_model(), budget_tokens=300)
+        self.assertIn("Claude Code", text)
 
 
 class TestUpdateCompetence(unittest.TestCase):

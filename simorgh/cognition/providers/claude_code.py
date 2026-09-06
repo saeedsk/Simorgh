@@ -16,6 +16,22 @@ one every time. `--disallowedTools "*"` strips all tool/file/bash access
 (this is a text-drafting backend only); credential env vars ranked above
 the subscription in Claude Code's own precedence are stripped so a
 headless call bills the subscription, not a stray key.
+
+**Live-caught: `role: "system"` messages were being flattened into the
+same `-p` prompt string as everything else, with no role distinction at
+all once they reached this binary.** The underlying `claude` binary
+*is* Claude Code -- the same product this file's own module lives in --
+and it carries its own strong default identity/system prompt ("you are
+Claude Code, an agentic coding tool"). A few paragraphs of identity text
+sitting in the middle of a `-p` user turn is not remotely strong enough
+to override that; asked directly, it answered honestly that it was
+Claude Code, not Simorgh, because nothing had ever told it otherwise
+with real system-prompt authority. Fixed by using `--system-prompt`
+(full replacement, not `--append-system-prompt`, since this is a
+headless drafting backend, not an interactive coding session, and the
+Claude Code default identity is exactly what needs to not compete here)
+for any `role: "system"` content, keeping only conversational content in
+`-p`.
 """
 
 from __future__ import annotations
@@ -55,19 +71,30 @@ class ClaudeCodeProvider:
     async def complete(
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,
     ) -> ProviderResponse:
-        prompt = "\n\n".join(m.get("content", "") for m in messages if m.get("content"))
-        return await asyncio.to_thread(self._complete_sync, prompt, timeout or self._timeout)
+        system_prompt = "\n\n".join(
+            m.get("content", "") for m in messages if m.get("role") == "system" and m.get("content")
+        )
+        prompt = "\n\n".join(
+            m.get("content", "") for m in messages if m.get("role") != "system" and m.get("content")
+        )
+        return await asyncio.to_thread(self._complete_sync, prompt, system_prompt, timeout or self._timeout)
 
-    def _complete_sync(self, prompt: str, timeout: float) -> ProviderResponse:
+    def _complete_sync(self, prompt: str, system_prompt: str, timeout: float) -> ProviderResponse:
         binary_path = shutil.which(self._binary)
         if binary_path is None:
             raise ProviderUnavailable(f"{self._binary!r} not found on PATH")
 
         env = self._subprocess_env()
+        argv = [binary_path, "-p", prompt, "--output-format", "json", "--disallowedTools", "*"]
+        if system_prompt:
+            # Full replacement, not --append-system-prompt: see the module
+            # docstring -- Claude Code's own default identity is exactly
+            # what must not compete with Simorgh's here.
+            argv += ["--system-prompt", system_prompt]
         with tempfile.TemporaryDirectory(prefix="simorgh-claude-code-") as workdir:
             try:
                 completed = self._runner(
-                    [binary_path, "-p", prompt, "--output-format", "json", "--disallowedTools", "*"],
+                    argv,
                     # Do NOT add "--bare": it skips keychain reads, which is
                     # where a normal macOS `claude login` session lives.
                     capture_output=True, text=True, timeout=timeout, env=env, cwd=workdir,

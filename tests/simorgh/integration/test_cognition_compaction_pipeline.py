@@ -255,7 +255,15 @@ class TestCognitionCompactionPipelineBoot(unittest.IsolatedAsyncioTestCase):
         reply = await self.kernel.bus.request(request, timeout=5.0)
         self.assertNotIn("error", reply.payload)
         self.assertIsNotNone(fake.received_messages)
-        sent_text = fake.received_messages[0]["content"]
+        # Milestone 120: the provider now sees separate `role: "system"`
+        # (assembler-level protected blocks, e.g. self-model identity) and
+        # `role: "user"` (the compacted conversation) messages instead of
+        # one flattened blob -- but this caller-tagged protected *message*
+        # (distinct from the assembler's own protected blocks) is preserved
+        # by the compactor within the conversation text, so check across
+        # every message the provider actually received rather than
+        # assuming which role it landed on.
+        sent_text = "\n\n".join(m["content"] for m in fake.received_messages)
         self.assertIn(protected_text, sent_text)
         self.assertIn("the newest turn", sent_text)
 

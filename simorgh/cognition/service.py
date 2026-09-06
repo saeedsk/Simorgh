@@ -160,11 +160,26 @@ class Service:
                 # (principle 4.6), so we fail loudly rather than truncate.
                 raise ContextTooLarge("context still exceeds budget after all compaction layers")
 
+            # Protected blocks (self-summary, persona voice) go as a real
+            # `role: "system"` message, not flattened into the same user
+            # turn as everything else -- live-caught: a provider that
+            # only ever sees one undifferentiated blob of text has no way
+            # to tell "binding identity" apart from "conversation," and
+            # `ClaudeCodeProvider` in particular is the literal Claude
+            # Code CLI, which defaults to its own strong identity unless
+            # something with real system-prompt authority overrides it
+            # (see that provider's own module docstring).
             protected_text = "\n\n".join(b.text for b in protected)
-            full_text = f"{protected_text}\n\n{compacted.text}".strip()
+            think_messages: list[dict] = []
+            if protected_text:
+                think_messages.append({"role": "system", "content": protected_text})
+            if compacted.text:
+                think_messages.append({"role": "user", "content": compacted.text})
+            if not think_messages:
+                think_messages.append({"role": "user", "content": ""})  # never call complete() with zero messages
 
             response, floor = await self._router.complete(
-                purpose, [{"role": "user", "content": full_text}], tools=None,
+                purpose, think_messages, tools=None,
                 budget=budget, timeout=budget.max_seconds,
             )
         except NoRealProvider as exc:
