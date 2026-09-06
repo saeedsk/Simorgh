@@ -39,6 +39,17 @@ takeaway/feedback records above, a delta is built by reading the most
 recent prior delta for the same subject first, so consecutive reflection
 cycles compound on each other's reasoning instead of each one starting
 cold from raw outcomes.
+
+A fourth pass, `ReflectionAgent.diff_self_model()`, steps back from any
+single subject and asks what changed about Simorgh's self-model as a
+whole since the last time this pass ran: which subjects now carry
+self-critique confidence that didn't before (added), which no longer do
+(removed), and which had their confidence shift up or down. It reads
+its own prior output (kind="self_model_snapshot") the same way
+`record_self_critique` reads its own prior delta, then writes a fresh
+snapshot for next time -- so "what has changed about myself" is an
+explicit, queryable record rather than something that has to be
+reconstructed by re-reading every self-critique delta from scratch.
 """
 
 from __future__ import annotations
@@ -111,11 +122,28 @@ class SelfCritique:
     timestamp: float = field(default_factory=time.time)
 
 
+@dataclass(frozen=True)
+class SelfModelDiff:
+    """What changed about Simorgh's self-model as a whole since the last
+    time `ReflectionAgent.diff_self_model` ran: subjects that newly
+    carry self-critique confidence (`added`), subjects that used to but
+    no longer do (`removed`), and subjects whose confidence moved,
+    reported as `(subject, previous_confidence, current_confidence)`
+    triples in `confidence_shifts`.
+    """
+
+    added: tuple[str, ...]
+    removed: tuple[str, ...]
+    confidence_shifts: tuple[tuple[str, float, float], ...]
+    timestamp: float = field(default_factory=time.time)
+
+
 TAKEAWAY_KIND = "takeaway"
 FEEDBACK_KIND = "feedback"
 SELF_KNOWLEDGE_KIND = "self_knowledge"
 CONFIDENCE_KIND = "confidence_calibration"
 SELF_CRITIQUE_KIND = "self_critique_delta"
+SELF_MODEL_SNAPSHOT_KIND = "self_model_snapshot"
 
 
 def _intent_alignment_score(request_text: str, output: str) -> float:
@@ -330,6 +358,76 @@ class ReflectionAgent:
             timestamp=critique.timestamp,
         )
         return critique
+
+    def _latest_self_model_snapshot(self) -> dict[str, float]:
+        """Reads back the most recent self-model snapshot per subject
+        (kind="self_model_snapshot"), the same way `_latest_self_critique`
+        reads back the most recent delta per subject -- so
+        `diff_self_model` has something concrete to diff the current
+        self-model against instead of starting cold.
+        """
+        if self._store is None:
+            return {}
+        latest_by_subject: dict[str, tuple[float, float]] = {}
+        for record in self._store.query(kind=SELF_MODEL_SNAPSHOT_KIND, limit=1000):
+            subject = record.metadata.get("subject")
+            confidence = record.metadata.get("confidence")
+            if subject is None or confidence is None:
+                continue
+            timestamp = record.metadata.get("timestamp", record.created_at)
+            if subject not in latest_by_subject or timestamp > latest_by_subject[subject][1]:
+                latest_by_subject[subject] = (confidence, timestamp)
+        return {subject: confidence for subject, (confidence, _) in latest_by_subject.items()}
+
+    def diff_self_model(self) -> SelfModelDiff:
+        """Builds Simorgh's current self-model -- one confidence value per
+        subject, taken from the latest self-critique delta on that
+        subject via `_latest_self_critique` -- and diffs it against the
+        last snapshot this method itself wrote via
+        `_latest_self_model_snapshot`, so what actually changed about
+        Simorgh's own capabilities/behavior since the last reflection
+        cycle is an explicit, queryable result rather than something
+        that has to be re-derived by re-reading every self-critique
+        delta from scratch. Writes a fresh snapshot for next time before
+        returning. Requires `store` (returns an empty diff without one,
+        same as the other store-backed passes).
+        """
+        if self._store is None:
+            return SelfModelDiff(added=(), removed=(), confidence_shifts=())
+
+        subjects = {
+            record.metadata["subject"]
+            for record in self._store.query(kind=SELF_CRITIQUE_KIND, limit=1000)
+            if record.metadata.get("subject") is not None
+        }
+        current: dict[str, float] = {}
+        for subject in subjects:
+            latest = self._latest_self_critique(subject)
+            if latest is not None:
+                current[subject] = latest.confidence
+
+        previous = self._latest_self_model_snapshot()
+
+        added = tuple(sorted(subject for subject in current if subject not in previous))
+        removed = tuple(sorted(subject for subject in previous if subject not in current))
+        confidence_shifts = tuple(
+            (subject, previous[subject], current[subject])
+            for subject in sorted(current)
+            if subject in previous and current[subject] != previous[subject]
+        )
+
+        diff = SelfModelDiff(added=added, removed=removed, confidence_shifts=confidence_shifts)
+
+        for subject, confidence in current.items():
+            self._store.remember(
+                SELF_MODEL_SNAPSHOT_KIND,
+                f"self-model snapshot: '{subject}' at confidence {confidence:.2f}",
+                subject=subject,
+                confidence=confidence,
+                timestamp=diff.timestamp,
+            )
+
+        return diff
 
     def reflect_on_outcome(self, outcome: Outcome) -> Proposal | None:
         """Immediate, per-turn takeaway: "what was the shortcoming here,
