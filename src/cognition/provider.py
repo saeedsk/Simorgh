@@ -11,12 +11,15 @@ degraded to a simpler response.
 
 On top of that failover, CapabilityRegistry gives the orchestrator a
 provider-agnostic negotiation layer: providers declare which Capabilities
-they support (tool use, streaming, long context, ...), TaskType maps a
-kind of work to the Capability it needs, and `complete_for(task_type, ...)`
-picks whichever registered provider (e.g. Claude vs. Gemini) currently
-supports and is available for that capability -- mid-session, per call --
-before falling back to the router's normal ordering. This lets the
-orchestrator switch providers based on what a task needs rather than a
+they support (tool use, streaming, long context, ...), the context_window
+they can handle, and the CostTier they run at, so the orchestrator can
+query token limits, tool-support, and cost tier before routing (see
+`best_with_context_window` and `cheapest_for`/`best_within_cost`). TaskType
+maps a kind of work to the Capability it needs, and `complete_for(task_type,
+...)` picks whichever registered provider (e.g. Claude vs. Gemini)
+currently supports and is available for that capability -- mid-session,
+per call -- before falling back to the router's normal ordering. This lets
+the orchestrator switch providers based on what a task needs rather than a
 single static provider choice.
 
 CapabilityRegistry also tracks an OutcomeStore of empirical
@@ -64,6 +67,18 @@ class Capability(enum.Enum):
     TOOL_USE = "tool_use"
     STREAMING = "streaming"
     LONG_CONTEXT = "long_context"
+
+
+class CostTier(enum.IntEnum):
+    """Relative cost of invoking a provider, cheapest first, so the
+    orchestrator can negotiate on price the same way it negotiates on
+    capability or context window -- without needing to know actual
+    per-token pricing.
+    """
+
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
 
 
 class TaskType(enum.Enum):
@@ -139,6 +154,10 @@ class LLMProvider(abc.ABC):
     # (see CapabilityRegistry.best_with_context_window) must not treat an
     # unreported window as disqualifying by assuming it's small.
     context_window: int | None = None
+    # None means "unknown", not "free" -- a caller negotiating on cost
+    # (see CapabilityRegistry.cheapest_for / best_within_cost) must not
+    # treat an unreported tier as the cheapest option by assuming it.
+    cost_tier: CostTier | None = None
 
     @abc.abstractmethod
     def available(self) -> bool:
@@ -334,6 +353,35 @@ class CapabilityRegistry:
             ):
                 return provider
         return None
+
+    def best_within_cost(self, capability: Capability, max_tier: CostTier) -> LLMProvider | None:
+        """Highest-priority available provider that supports `capability`
+        and declares a cost_tier at or below `max_tier`, or None if no
+        registered provider currently qualifies. Providers with an unknown
+        (None) cost_tier are excluded rather than assumed cheap, mirroring
+        `best_with_context_window`'s treatment of an unreported window.
+        """
+        for provider in self.providers_for(capability):
+            if (
+                provider.available()
+                and provider.cost_tier is not None
+                and provider.cost_tier <= max_tier
+            ):
+                return provider
+        return None
+
+    def cheapest_for(self, capability: Capability) -> LLMProvider | None:
+        """Available provider supporting `capability` with the lowest
+        declared cost_tier, or None if no registered provider currently
+        supports and is available for it with a known cost_tier. Ties are
+        broken by registration priority (the order `providers_for` returns).
+        """
+        candidates = [
+            p for p in self.providers_for(capability) if p.available() and p.cost_tier is not None
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda p: p.cost_tier)
 
     def supported_capabilities(self) -> frozenset[Capability]:
         """Union of all capabilities declared by any registered provider."""
