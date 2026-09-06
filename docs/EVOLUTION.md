@@ -3758,3 +3758,25 @@ Still ahead, roughly in order:
     the most important seam left looking wired without a test that
     would say otherwise. Nothing should be rewritten; the next wave is
     the seventeen items, the first eight of them small.
+
+130. **Phase 6 item 1 done, and the official logo in the terminal.**
+    - **Guardian posture, both ends.** `guardian.posture.request` finally
+      has a handler (`_on_posture_request`, replying the contract's
+      `{mode, trust_score, tightened_by}`), so the `budget` command
+      answers instead of timing out; `vitals` now reads the contract's
+      `mode` key (with `posture` kept as a legacy fallback), so the
+      panel reflects real tighten/loosen events instead of `unknown` all
+      day. 1 new integration test over a real Kernel + real Guardian
+      (`test_guardian_posture_request.py`), 2 vitals unit tests.
+    - **The official logo.** The creator added `images/logo/` (all
+      committed; `Logo-5.png` is the official mark). A dev-only
+      generator, `tools/render_logo_splash.py` (Pillow), crops the bird,
+      downsamples it to 52 columns of half-block cells (`▀` with the top
+      pixel as foreground and the bottom as background, 24-bit color;
+      cream background → transparent) and writes
+      `simorgh/interface/splash_art.py` as plain data -- the runtime
+      gains no dependency. `render.splash()` draws it above the wordmark
+      in the `auto`/`full` modes; `off` omits it; with color disabled the
+      silhouette still reads in plain block glyphs. The brand SDK's
+      compact 8-row mark (`render.logo()`) stays for narrow surfaces.
+      3 new render tests. Full suite green (2221 tests).

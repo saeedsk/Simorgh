@@ -96,7 +96,13 @@ class VitalsCache:
             self._gauges[f"{subsystem}.{key}"] = value
 
     def on_guardian_posture(self, payload: dict) -> None:
-        posture = payload.get("posture")
+        # The contract's field is `mode` (contracts/messages/guardian.py:
+        # GuardianPostureChanged); Guardian is authoritative. Live-caught
+        # (post-cutover review): this read `posture`, a key Guardian never
+        # sends, so the panel showed `posture: unknown` all day regardless
+        # of real tighten/loosen events. `posture` kept as a fallback for
+        # any older producer.
+        posture = payload.get("mode") or payload.get("posture")
         if posture:
             self._posture = posture
 

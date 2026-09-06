@@ -24,7 +24,16 @@ class VitalsCacheTestCase(unittest.TestCase):
         cache.on_system_metrics({"subsystem": "memory", "counters": {"stored": 5}, "gauges": {}})
         self.assertEqual(cache.snapshot().memory_records, 5)
 
-    def test_guardian_posture_updates(self):
+    def test_guardian_posture_updates_from_the_contracts_mode_field(self):
+        # Live-caught (post-cutover review): Guardian publishes
+        # `guardian.posture.changed{mode: ...}` (the contract's field); the
+        # cache read a `posture` key that never arrives, so the panel said
+        # `posture: unknown` all day regardless of real events.
+        cache = VitalsCache()
+        cache.on_guardian_posture({"mode": "locked", "trust_score": 0.0, "reason": "test"})
+        self.assertEqual(cache.snapshot().posture, "locked")
+
+    def test_guardian_posture_legacy_key_still_accepted(self):
         cache = VitalsCache()
         cache.on_guardian_posture({"posture": "cautious"})
         self.assertEqual(cache.snapshot().posture, "cautious")

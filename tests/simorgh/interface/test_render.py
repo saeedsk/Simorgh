@@ -142,10 +142,30 @@ class RenderTestCase(unittest.TestCase):
     def test_logo_with_color_disabled_has_no_escapes(self):
         self.assertNotIn("\x1b[", "\n".join(render.logo(enabled=False)))
 
-    def test_banner_shows_the_logo_in_unicode_modes_and_omits_it_in_ascii(self):
-        self.assertIn("◄", render.banner(enabled=False, unicode="auto"))
-        self.assertIn("◄", render.banner(enabled=False, unicode="full"))
-        self.assertNotIn("◄", render.banner(enabled=False, unicode="off"))
+    def test_banner_shows_the_splash_in_unicode_modes_and_omits_it_in_ascii(self):
+        self.assertIn("█", render.banner(enabled=False, unicode="auto"))
+        self.assertIn("█", render.banner(enabled=False, unicode="full"))
+        self.assertNotIn("█", render.banner(enabled=False, unicode="off"))
+
+    def test_splash_is_generated_from_the_official_logo_and_fits_the_rule(self):
+        from simorgh.interface import splash_art
+
+        self.assertEqual(splash_art.SOURCE, "images/logo/Logo-5.png")
+        rows = render.splash(enabled=False)
+        self.assertEqual(len(rows), len(splash_art.ROWS))
+        self.assertTrue(10 <= len(rows) <= 40, len(rows))
+        for row in rows:
+            self.assertLessEqual(len(row), 68, repr(row))
+            self.assertTrue(set(row) <= set(" ▀▄█"), repr(row))  # plain block glyphs only
+
+    def test_splash_color_is_true_color_sgr_only(self):
+        joined = "\n".join(render.splash(enabled=True))
+        self.assertIn("\x1b[38;2;", joined)
+        self.assertIn("\x1b[48;2;", joined)  # bottom pixel as background
+        for match in _ESC.finditer(joined):
+            params = match.group(0).lstrip("\x1b[")
+            self.assertTrue(params == "" or params.replace(";", "").isdigit(), repr(match.group(0)))
+        self.assertNotIn("\x1b[", "\n".join(render.splash(enabled=False)))
 
     def test_unicode_mode_honors_explicit_settings(self):
         self.assertEqual(render.unicode_mode("off"), "off")
