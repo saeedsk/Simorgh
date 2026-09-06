@@ -1665,40 +1665,50 @@ Still ahead, roughly in order:
     mechanism this project has built so far, all of which deliberately
     avoid exactly that kind of terminal control. Not built without the
     creator explicitly choosing that tradeoff first.
-89. **The true pinned vitals panel, built after the creator knowingly
-    chose the riskier option.** Presented with the honest tradeoff from
-    milestone 88 (fragile raw terminal control vs. the safer scrolling
-    block), the creator picked "build the true pinned panel anyway."
-    `vitals pin` now reserves a fixed strip of rows at the top of the
-    screen via a DECSTBM scroll region (`\x1b[{top};{bottom}r`) and
-    redraws into it with save/restore-cursor (`\x1b7`/`\x1b8`) so the
-    conversation's own cursor position is never disturbed; `vitals
-    unpin` resets the scroll region and returns to normal scrolling.
-    `pin()` reports `False` (and changes nothing) when stdout isn't a
-    real terminal -- `os.get_terminal_size()` fails over piped/SSH/non-
-    interactive output -- so the command says plainly it can't pin
-    rather than silently doing nothing useful; `vitals on` still works
-    everywhere as the fallback.
+89. **The true pinned vitals panel: built after the creator knowingly
+    chose the riskier option, then reverted the same night after real
+    use confirmed the exact risk that was flagged.** Presented with the
+    honest tradeoff from milestone 88 (fragile raw terminal control vs.
+    the safer scrolling block), the creator picked "build the true
+    pinned panel anyway." `vitals pin` reserved a fixed strip of rows at
+    the top of the screen via a DECSTBM scroll region
+    (`\x1b[{top};{bottom}r`) and redrew into it with save/restore-cursor
+    (`\x1b7`/`\x1b8`); a real design bug (reissuing DECSTBM on every
+    redraw, not just the first, fighting the terminal's own cursor
+    tracking) was caught and fixed before it shipped, and startup was
+    changed to try `pin()` first, falling back to milestone 88's one-shot
+    print.
 
-    A real design bug was caught and fixed before this shipped: the
-    first draft reissued the DECSTBM scroll-region escape on *every*
-    redraw, not just the first. DECSTBM resets the cursor to the top of
-    the new region as a side effect on most terminals, so redoing it on
-    every idle-triggered tick would keep fighting wherever ordinary
-    conversation output had actually left the cursor. Fixed by setting
-    the scroll region exactly once, inside `pin()`, before the first
-    draw -- `_draw_pinned_locked()` itself now only ever does
-    save/restore-cursor, absolute positioning, and the redraw, never
-    touching the scroll region again. The direct consequence is a
-    documented limitation: a live terminal resize while pinned isn't
-    auto-detected (deliberately -- catching it would mean going back to
-    resetting the scroll region on every tick, the exact bug just
-    fixed); `vitals unpin` then `vitals pin` again re-measures and
-    re-fits cleanly. Startup now tries `vitals_monitor.pin()` first and
-    falls back to the milestone-88 one-shot print only when pinning
-    isn't possible. 804 unit tests + 22 E2E tests passing, including a
-    new E2E case confirming `vitals pin` degrades honestly (not
-    silently) over this project's own piped-subprocess test harness.
+    It did not hold up in real use. The creator reported, in their own
+    running terminal: arrow keys and Enter behaving as if unrecognized,
+    and new input appearing near the vitals panel's last line instead of
+    after the prompt, with freshly typed characters visually merging
+    into already-printed text. This is the textbook failure mode of a
+    DECSTBM scroll region running underneath `readline`'s own line
+    editing: `readline` tracks the cursor by counting what it has
+    printed, with no awareness that an active scroll region has changed
+    where the terminal is actually drawing -- exactly the coexistence
+    problem milestone 88 named as the reason not to build this without
+    the creator explicitly accepting the risk first. Confirmed the
+    interpreter itself wasn't at fault (`readline` here is genuine GNU
+    readline, not macOS's libedit shim, so the corruption traced to the
+    scroll-region mechanism, not a platform quirk).
+
+    Reverted outright (`git revert`) rather than patched further:
+    correctly reconciling a raw ANSI scroll region with `readline`'s own
+    cursor bookkeeping is a genuinely hard terminal-programming problem
+    (real curses/prompt_toolkit-style TUI libraries exist specifically
+    because this is hard to get right), not something to keep patching
+    live against a creator's broken interactive session. Back to
+    milestone 88's behavior: a one-shot `vitals` print at startup, `vitals
+    on`/`off` for a periodic scrolling reprint, no in-place cursor
+    control anywhere. The lesson holds for future terminal-UI work in
+    this project: the existing "print a fresh block, never redraw in
+    place" pattern (`LiveTicker`, `render_checklist`, the autonomous
+    loop's own announcements) is safe precisely because it never
+    contests the terminal's cursor with `readline` -- any future feature
+    should keep doing that rather than reach for raw cursor/scroll-region
+    control again.
 90. **The milestone-82 structural limit finally addressed: SEARCH/REPLACE
     edit blocks for self-patches to large existing files.** Milestone 82
     left this as a documented, well-evidenced backlog item rather than a
@@ -1818,3 +1828,18 @@ Still ahead, roughly in order:
     undersells its own diff, never data loss or wrong code running) for
     a future session with room to reproduce it deliberately rather than
     read tea leaves from one live log.
+94. **Milestone 89's pinned vitals panel reverted, on direct creator
+    bug report.** While supervising a live session, the creator reported
+    their own separate interactive terminal breaking: arrow keys and
+    Enter appearing not to work, and new input drawing near the vitals
+    panel instead of after the prompt, merging with already-printed
+    text. Root-caused to exactly the coexistence risk milestone 88
+    named before building this and milestone 89 knowingly accepted:
+    `readline`'s cursor bookkeeping has no way to know a DECSTBM scroll
+    region has changed where the terminal actually draws. Reverted via
+    `git revert` (not a live patch) -- `pin()`/`unpin()`, the `vitals
+    pin`/`unpin` commands, and the auto-pin-at-startup attempt are gone;
+    `vitals` is back to milestone 88's one-shot print plus `vitals
+    on`/`off` for a periodic scrolling reprint. See milestone 89's entry
+    above (rewritten in place to tell the full built-then-reverted arc
+    rather than presenting the reverted version as still current).
