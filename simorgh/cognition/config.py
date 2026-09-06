@@ -50,11 +50,15 @@ class Config:
         ),
     })
     purposes: Mapping[str, Budget] = field(default_factory=lambda: dict(DEFAULT_PURPOSE_BUDGETS))
-    # Compaction (layers 1-2 built this session; 3-5 are Phase 4 -- see README).
+    # Compaction thresholds (04-cognition.md section 3.5's `compaction.thresholds`
+    # table): L1 at 100% of the per-tool-result cap, L2 at 90%, L3 at 95%,
+    # L4 always, L5 at 100% (and only when the caller sets allow_summarize).
     tool_result_max_tokens: int = 2_000
     snip_trigger_fraction: float = 0.90
     snip_target_fraction: float = 0.85
     snip_keep_last_segments: int = 4
+    microcompact_trigger_fraction: float = 0.95
+    collapse_keep_full_segments: int = 4
     availability_poll_seconds: float = 30.0
     assembly_request_timeout: float = 2.0  # persona.voice / self.summary -- omitted on timeout, not fatal
 
@@ -76,7 +80,8 @@ class Config:
             }}
         for key in (
             "tool_result_max_tokens", "snip_trigger_fraction", "snip_target_fraction",
-            "snip_keep_last_segments", "availability_poll_seconds", "assembly_request_timeout",
+            "snip_keep_last_segments", "microcompact_trigger_fraction", "collapse_keep_full_segments",
+            "availability_poll_seconds", "assembly_request_timeout",
         ):
             if key in raw:
                 kwargs[key] = raw[key]

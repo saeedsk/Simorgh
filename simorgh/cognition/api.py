@@ -16,6 +16,7 @@ __all__ = [
     "Provider", "ProviderResponse", "Purpose", "Budget", "BudgetStatus",
     "PromptBlock", "AssembledContext", "CompactedContext", "ParsedOutput",
     "ProviderUnavailable", "NoRealProvider", "Paused", "ContextTooLarge",
+    "BudgetExceeded",
 ]
 
 
@@ -50,6 +51,14 @@ class ContextTooLarge(Exception):
     """A protected block alone exceeds the purpose's budget -- protected
     blocks are never compacted (principle 4.6), so this is a real,
     reportable failure rather than a silent truncation."""
+
+
+class BudgetExceeded(Exception):
+    """Every real candidate's estimated cost for *this single request*
+    exceeds the request's own `max_cost_usd` -- per-call budget
+    accounting (04 section 7, "Budgets account; Guardian enforces"):
+    Cognition refuses to overspend one request's stated budget, distinct
+    from `NoRealProvider` (availability) and `ContextTooLarge` (size)."""
 
 
 @dataclass(frozen=True)
@@ -114,4 +123,7 @@ class ParsedOutput:
 
 @runtime_checkable
 class Compactor(Protocol):
-    async def compact(self, ctx: AssembledContext, *, limit_tokens: int, allow_summarize: bool) -> CompactedContext: ...
+    async def compact(
+        self, messages: list[dict], *, limit_tokens: int, allow_summarize: bool = False,
+        session_id: str | None = None, purpose: str | None = None,
+    ) -> CompactedContext: ...
