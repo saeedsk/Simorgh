@@ -239,3 +239,35 @@ API every other agent is building against.
 | Losing v1's live-caught lessons | `06-migration-from-v1.md` maps each lesson to its new home; tests carry over |
 | Safety regression during migration | Guardian + token check land in Phase 1 before any autonomous work runs on v2; v1's `AuditGate` stays authoritative until Guardian's tests are a superset |
 | Agents editing the same files | Package-per-subsystem ownership; Phase 4 items name their package; contracts are single-owner |
+| Built on both sides, connected on neither (*added 2026-09-06*) | Every seam between two subsystems gets one integration scenario that drives the whole flow through the real subsystems and asserts the user-visible outcome — see `07-post-cutover-review.md` §4; this is the gap that let the post-cutover findings through a 2,200-test suite |
+| Verified through a convenient channel, not the real one (*added 2026-09-06*) | The primary interface is driven as a real subprocess with a real (pty) terminal in tests and in any live trial, from the start; pipes are never terminals |
+
+## 7. Phase 6 — post-cutover hardening (S/M; added 2026-09-06)
+
+The cutover (Phase 5, Stage B) landed and the first day of real use plus
+a four-fork architecture review produced `07-post-cutover-review.md`.
+Its verdict: the architecture stands; the next wave is wiring
+completions, governance, and the testing-strategy change above — not a
+redesign. The full prioritized table with acceptance tests is that
+document's §5; the items, in order:
+
+1. Guardian posture request handler + event key fix (S).
+2. Working memory wired both ends — same-session continuity (S).
+3. Single-owner context assembly (S).
+4. Self Model `capabilities.tools/providers` populated (S).
+5. Process-group kill on sandbox timeout (S).
+6. Ctrl-C → graceful `system.stop` (S).
+7. Ledger retention defaults, `max_events`, periodic compaction (S/M).
+8. Idle-loop hourly cost cap (S).
+9. Command-surface consolidation: 38 → ~11 (S/M; creator's decision, `15-interface.md` §12 q5).
+10. Self Model "How I run" section (M).
+11. Conversational `propose`/`patch` through Guardian (M) — the single most important item for the project's stated purpose.
+12. Chat competence honesty (M).
+13. Reflection verdicts → Self Model (M).
+14. Layer-5 input cap; retrieval window/index (M).
+15. Seam + pty test suites; Bus property tests (M).
+16. `delegate.py` (Flow 6), full `resume.py` snapshot (Flow 7) (L).
+17. Multi-session WebSocket; admin control through Guardian (`02` §6.1/§6.2) (L).
+
+Cutover Stage C (deleting `src/`) stays gated on living with v2 as the
+daily driver (`06-migration-from-v1.md` §6).

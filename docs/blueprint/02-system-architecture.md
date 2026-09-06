@@ -213,6 +213,17 @@ assembly (via `persona.voice` req/rep inside cognition's prompt
 assembler), not by being in the call path — the loop is unchanged
 whether or not Persona is running.
 
+*Post-cutover review, 2026-09-06 (`07-post-cutover-review.md` §3.2/§3.3):*
+the diagram is the intended shape, and two of its arrows were not
+literal in the first build. `memory.retrieve` was requested for
+episodic/semantic only, never for this session's *recent turns* — the
+working-memory half was built in Memory and never fed or fetched — and
+`self.summary`/`persona.voice` were fetched twice per turn (once here by
+Orchestration's assembler, once again inside Cognition's). Both are
+decided: Orchestration fetches memory (including `working`, scoped by
+`session_id`) and passes the conversation; Cognition alone fetches
+self/voice as protected blocks. The diagram stands as drawn.
+
 ### Flow 2 — An autonomous idle tick becomes finished work
 
 ```
