@@ -39,3 +39,29 @@ what changed and when.
 Researched from current, cited sources (WebSearch/WebFetch against
 primary papers, lab publications, and benchmark technical reports) as of
 2026 -- see each file's own Sources section.
+
+- **[harness-00: Overview](./harness-00-overview.md)** -- north star for
+  leveling up Sim's own harness. Start here for this set.
+- **[harness-01: Claude Code Deep Dive](./harness-01-claude-code-deep-dive.md)**
+  -- the agentic loop, five human values / thirteen design principles,
+  the five-layer context-compaction pipeline, seven permission modes and
+  the ML classifier, subagents (fork vs. fresh), checkpoints, Plan Mode,
+  and the TodoWrite-to-Task evolution.
+- **[harness-02: Design Principles](./harness-02-design-principles.md)**
+  -- workflows vs. agents, the five composable workflow patterns
+  (prompt chaining, routing, parallelization, orchestrator-workers,
+  evaluator-optimizer), and tool/agent-computer-interface design.
+- **[harness-03: Project Decomposition and Focus](./harness-03-project-decomposition-and-focus.md)**
+  -- when a task is really a project, hierarchical planning, and
+  concrete anti-divergence mechanisms for long-running agents.
+- **[harness-04: Completion and Verification](./harness-04-completion-and-verification.md)**
+  -- why "it ran" isn't "it's done," checklist-based evaluator patterns,
+  and how to avoid a multi-step effort silently stalling.
+- **[harness-05: Subsystems](./harness-05-subsystems.md)** -- an
+  iterative breakdown of context/memory, planning, tool-use,
+  verification, permissions, multi-agent orchestration, and persistence
+  -- functionality, an effective method, and the real tradeoffs for each.
+- **[harness-06: Gap Analysis for Simorgh](./harness-06-gap-analysis-simorgh.md)**
+  -- the actual point: a concrete, file-by-file comparison of what Sim's
+  harness already gets right against this research, prioritized gaps,
+  and where to spend effort next.
