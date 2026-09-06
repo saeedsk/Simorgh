@@ -51,6 +51,13 @@ class TestArgumentParsing(unittest.TestCase):
         args = self.parser.parse_args(["migrate-v1", "--path", "/tmp/m.jsonl"])
         self.assertEqual(args.path, "/tmp/m.jsonl")
 
+    def test_worker_requires_an_id(self):
+        args = self.parser.parse_args(["worker", "--id", "w1"])
+        self.assertEqual(args.command, "worker")
+        self.assertEqual(args.worker_id, "w1")
+        with self.assertRaises(SystemExit):
+            self.parser.parse_args(["worker"])  # missing --id
+
 
 class TestMainDispatch(unittest.TestCase):
     """`main()`'s routing to the right `_cmd_*` coroutine and its exit-code
@@ -93,6 +100,23 @@ class TestMainDispatch(unittest.TestCase):
             code = main(["migrate-v1", "--path", "/tmp/x.jsonl"])
         self.assertEqual(code, 0)
         m.assert_called_once_with(None, "/tmp/x.jsonl")
+
+    def test_worker_command_dispatches_with_id(self):
+        with mock.patch("simorgh.kernel.cli._cmd_worker", side_effect=self._ok) as m:
+            code = main(["worker", "--id", "w2"])
+        self.assertEqual(code, 0)
+        m.assert_called_once_with(None, "w2")
+
+    def test_worker_command_reports_boot_error_with_exit_code_2(self):
+        async def _raise(*a, **k):
+            raise KernelBootError("a worker process only makes sense under [runtime] mode = \"local-multi\"")
+
+        with mock.patch("simorgh.kernel.cli._cmd_worker", side_effect=_raise):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = main(["worker", "--id", "w1"])
+        self.assertEqual(code, 2)
+        self.assertIn("local-multi", stderr.getvalue())
 
     def test_config_flag_is_passed_to_the_dispatched_command(self):
         with mock.patch("simorgh.kernel.cli._cmd_run", side_effect=self._ok) as m:

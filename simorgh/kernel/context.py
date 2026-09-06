@@ -98,6 +98,17 @@ class ContextFactory:
         token = ""
         if self._identity_registry is not None:
             token = self._identity_registry.issue(name, instance_id)
+            # Self-authenticate immediately: the token was just minted by
+            # this same process's own registry, so there is nothing to
+            # wait for -- but `ReservedTopologyPolicy.check_publish`/
+            # `check_subscribe` refuse *any* source that never called
+            # `authenticate()` once `identities` is set (multi-process
+            # modes), and nothing else in the boot sequence ever did.
+            # Without this line every subsystem's first publish/subscribe
+            # in `local-multi`/`aws` mode raised `PolicyViolation` before
+            # this fix -- multi-process boot never actually worked.
+            if self._bus_policy is not None:
+                self._bus_policy.authenticate(source, token)
         data_dir = self._runtime.data_dir / name
         data_dir.mkdir(parents=True, exist_ok=True)
         return Context(

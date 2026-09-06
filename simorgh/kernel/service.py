@@ -15,6 +15,7 @@ Kernel is what constructs everyone else -- there is no special case in
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 import uuid
 from pathlib import Path
@@ -27,7 +28,7 @@ from simorgh.contracts.protocols import Health
 from simorgh.ledger.factory import make_ledger
 
 from .api import RuntimeConfig
-from .config import LoadedConfig
+from .config import ConfigError, LoadedConfig
 from .context import ContextFactory, make_logger
 from .metrics import MetricsHistoryWriter, MetricsTable, ProcessMetricsPublisher, StatusServer
 from .registry import NEEDS_HMAC_SECRET, build_factories, known_layers
@@ -40,6 +41,49 @@ VERSION = "0.1.0"
 
 class KernelBootError(RuntimeError):
     pass
+
+
+def _bus_config_for(config: LoadedConfig, runtime: RuntimeConfig):
+    """Shared by `Kernel` and `WorkerKernel` so both processes derive the
+    same `${data_dir}` -> sqlite path expansion (`bus.config.Config.
+    from_mapping`'s own docstring) from the *same* `simorgh.toml`/env --
+    the one thing that makes `local-multi` a config change, not a code
+    change (`bus/backends/sqlite.py`'s module docstring)."""
+    from simorgh.bus.config import Config as BusConfig
+
+    return BusConfig.from_mapping(config.section("bus"), data_dir=str(runtime.data_dir))
+
+
+def _ledger_mapping_for(config: LoadedConfig, runtime: RuntimeConfig) -> dict:
+    section = dict(config.section("ledger"))
+    section.setdefault("data_dir", str(runtime.data_dir / "ledger"))
+    section.setdefault("allow_fallback", runtime.allow_backend_fallback)
+    return section
+
+
+def _require_cross_process_backends(config: LoadedConfig, runtime: RuntimeConfig) -> None:
+    """`local-multi`'s entire premise is one shared backend every process
+    on the host opens (02-system-architecture.md section 6's deployment
+    table: "one WAL file"). `memory` is an in-process Python structure a
+    second process cannot see at all -- a worker configured against it
+    would just poll forever and silently never see a single message, the
+    quietest possible failure mode. Fail loud at boot instead."""
+    if runtime.mode != "local-multi":
+        return
+    bus_backend = _bus_config_for(config, runtime).backend
+    if bus_backend == "memory":
+        raise ConfigError(
+            "[runtime] mode = \"local-multi\" requires a cross-process [bus] backend "
+            f"(sqlite recommended -- 02-system-architecture.md section 6), not {bus_backend!r}"
+        )
+    from simorgh.ledger.config import Config as LedgerConfig
+
+    ledger_backend = LedgerConfig.from_mapping(_ledger_mapping_for(config, runtime)).backend
+    if ledger_backend == "memory":
+        raise ConfigError(
+            "[runtime] mode = \"local-multi\" requires a cross-process [ledger] backend "
+            f"(sqlite or jsonl -- 02-ledger.md section 4.3), not {ledger_backend!r}"
+        )
 
 
 class Kernel:
@@ -84,6 +128,7 @@ class Kernel:
     async def boot(self) -> None:
         from .supervisor import BootFailed, BootTimeout, Supervisor
 
+        _require_cross_process_backends(self.config, self.runtime)
         self.runtime.data_dir.mkdir(parents=True, exist_ok=True)
         self.ledger = make_ledger(self._ledger_mapping(), clock=self._clock)
         await self.ledger.start()
@@ -98,6 +143,12 @@ class Kernel:
         policy = ReservedTopologyPolicy(identities)
         self._bus_backend = make_bus_backend(self._bus_config(), clock=self._clock.now)
         await self._bus_backend.start()
+        if identities is not None:
+            # The Kernel's own client is built directly (not through
+            # `ContextFactory.build`, which self-authenticates every other
+            # subsystem) -- it needs the same treatment or its first
+            # publish/subscribe below raises `PolicyViolation`.
+            policy.authenticate("kernel", identities.issue("kernel"))
         self.bus = make_bus_client(self._bus_backend, source="kernel", ledger=self.ledger, clock=self._clock.now,
                                    policy=policy)
 
@@ -114,7 +165,7 @@ class Kernel:
         )
         started: list[tuple[str, ...]] = []
         try:
-            for layer in known_layers(factories):
+            for layer in self._own_layers(factories):
                 if not layer:
                     continue
                 await self._supervisor.start_layer(layer, lambda name: ctx_factory.build(name), factories)
@@ -168,16 +219,24 @@ class Kernel:
     def _subsystem_versions(self) -> list[str]:
         return [f"{s.name}@{getattr(s.service, 'version', '0')}" for s in self._supervisor.services.values()]
 
-    def _bus_config(self):
-        from simorgh.bus.config import Config as BusConfig
+    def _own_layers(self, factories: dict) -> tuple[tuple[str, ...], ...]:
+        """`registry.LAYERS`, filtered to what `factories` can build (as
+        `known_layers` already does) and, in `local-multi` mode, further
+        filtered to exclude `orchestration` (03-kernel.md section 5.6):
+        `simorgh run` boots every subsystem *except* orchestration, whose
+        Workers instead run as separate `simorgh worker --id wN` processes
+        (`WorkerKernel`, below). `aws` mode is untouched here -- its
+        process topology is a different track's concern."""
+        layers = known_layers(factories)
+        if self.runtime.mode == "local-multi":
+            layers = tuple(tuple(name for name in layer if name != "orchestration") for layer in layers)
+        return layers
 
-        return BusConfig.from_mapping(self.config.section("bus"))
+    def _bus_config(self):
+        return _bus_config_for(self.config, self.runtime)
 
     def _ledger_mapping(self) -> dict:
-        section = dict(self.config.section("ledger"))
-        section.setdefault("data_dir", str(self.runtime.data_dir / "ledger"))
-        section.setdefault("allow_fallback", self.runtime.allow_backend_fallback)
-        return section
+        return _ledger_mapping_for(self.config, self.runtime)
 
     async def _append_state(self, change) -> None:
         from simorgh.contracts.envelope import Event
@@ -245,11 +304,21 @@ class Kernel:
             await self._status.stop()
         if self._scheduler is not None:
             await self._scheduler.stop()
+        # Append the final `stopped` state *before* `stop_all` below tears
+        # down the "ledger" layer -- `ledger.service.Service.stop()`
+        # closes the very backend connection `_append_state` needs
+        # (`ledger`/`bus` are ordinary layers here too, stopped last by
+        # `stop_all`'s `reversed()`). With a backend that actually enforces
+        # "not started" once closed (`sqlite`; `memory`/`jsonl` happened
+        # to tolerate the stale order silently), appending afterward raised
+        # `LedgerUnavailable` on every clean shutdown -- reproducible in
+        # plain `single` mode with `[ledger] backend = "sqlite"`, not
+        # something `local-multi` introduced.
+        change = self.state.stopped()
+        await self._append_state(change)
         if self._supervisor is not None:
             await self._supervisor.stop_all(list(reversed(known_layers(
                 build_factories(bus_client=self.bus, ledger_client=self.ledger)))), grace_s=self.runtime.stop_grace_s)
-        change = self.state.stopped()
-        await self._append_state(change)
         if self._bus_backend is not None:
             await self._bus_backend.stop()
         if self.ledger is not None:
@@ -267,6 +336,115 @@ class Kernel:
         return self._status.snapshot() if self._status is not None else {}
 
 
+class WorkerKernel:
+    """`local-multi` mode's `simorgh worker --id wN` process
+    (docs/blueprint/subsystems/03-kernel.md section 5.6): a standalone
+    process holding only Ledger/Bus clients and exactly one `orchestration`
+    `Worker`, sharing the cross-process backend(s) (`sqlite` bus, `sqlite`/
+    `jsonl` ledger) the main `simorgh run` process -- and every sibling
+    worker process -- also opens against the same `simorgh.toml`/`--config`
+    (`_bus_config_for`/`_ledger_mapping_for` derive the same `${data_dir}`
+    path from it that `Kernel` does).
+
+    It never touches the per-run HMAC *approval* secret: guardian/execution
+    keep that (`registry.NEEDS_HMAC_SECRET`), and a Worker only proposes
+    actions, it never approves or runs one (16-orchestration.md section 2)
+    -- "the secret: workers never need it" (03-kernel.md section 5.6). It
+    also never boots any subsystem but `orchestration`; guardian/execution/
+    everything else stays in whichever process runs `simorgh run`, reached
+    only through the shared bus.
+
+    Its own `IdentityRegistry` still self-issues and self-authenticates a
+    subsystem token so `ReservedTopologyPolicy` (built with `identities`
+    set, since this only ever runs in a multi-process mode) does not
+    refuse this process's own publishes/subscribes -- see `ContextFactory.
+    build`. That secret is generated fresh in this process and is *not*,
+    and today cannot be, the same secret the main process's own
+    `IdentityRegistry` holds: policy is enforced client-side, per process
+    (`bus/enforcement.py`'s own docstring already flags this as unfinished
+    hardening, not a regression introduced here), so self-consistency
+    within this one process is all that is required for it to work.
+    """
+
+    name = "kernel-worker"
+    version = VERSION
+
+    def __init__(
+        self, config: LoadedConfig, *, worker_id: str, secrets: SecretStore | None = None, clock=None,
+    ) -> None:
+        if config.runtime.mode != "local-multi":
+            raise KernelBootError(
+                f"a worker process only makes sense under [runtime] mode = \"local-multi\" "
+                f"(got {config.runtime.mode!r}); run `simorgh run` for every other mode"
+            )
+        self.config = config
+        self.runtime: RuntimeConfig = config.runtime
+        self.worker_id = worker_id
+        self._clock = clock or _WallClock()
+        self.run_id = uuid.uuid4().hex[:12]
+        self._secrets = secrets or build_secret_store(config, self.runtime.data_dir)
+        self._stop_event = asyncio.Event()
+        self._bus_backend = None
+        self.ledger = None
+        self.bus = None
+        self._service = None
+        self._ctx = None
+
+    async def boot(self) -> None:
+        from simorgh.orchestration.config import Config as OrchestrationConfig
+        from simorgh.orchestration.service import Service as OrchestrationService
+
+        _require_cross_process_backends(self.config, self.runtime)
+        self.runtime.data_dir.mkdir(parents=True, exist_ok=True)
+        self.ledger = make_ledger(_ledger_mapping_for(self.config, self.runtime), clock=self._clock)
+        await self.ledger.start()
+
+        identities = IdentityRegistry(security.new_run_secret(), self.run_id)
+        policy = ReservedTopologyPolicy(identities)
+        self._bus_backend = make_bus_backend(_bus_config_for(self.config, self.runtime), clock=self._clock.now)
+        await self._bus_backend.start()
+
+        ctx_factory = ContextFactory(
+            bus_backend=self._bus_backend, ledger=self.ledger, config=self.config, secrets=self._secrets,
+            clock=self._clock, runtime=self.runtime, run_id=self.run_id, hmac_secret=b"",
+            needs_hmac_secret=frozenset(), bus_policy=policy, identity_registry=identities,
+        )
+        self._ctx = ctx_factory.build("orchestration", instance_id=self.worker_id)
+        self.bus = self._ctx.bus
+
+        orch_config = OrchestrationConfig.from_mapping(self.config.section("orchestration"))
+        # One process is exactly one Worker, regardless of what
+        # `[orchestration] workers` says -- that key still governs how
+        # many Workers a `single`-mode Kernel starts in-process.
+        self._service = OrchestrationService(dataclasses.replace(orch_config, workers=1))
+        try:
+            await self._service.start(self._ctx)
+        except Exception as exc:  # noqa: BLE001 -- name the failure, mirroring Kernel.boot's BootFailed handling
+            raise KernelBootError(f"worker {self.worker_id!r} failed to start: {exc!r}") from exc
+
+    def request_stop(self) -> None:
+        self._stop_event.set()
+
+    async def wait_for_stop(self) -> None:
+        await self._stop_event.wait()
+
+    async def shutdown(self) -> None:
+        if self._service is not None:
+            await self._service.stop()
+            self._service = None
+        if self._bus_backend is not None:
+            await self._bus_backend.stop()
+            self._bus_backend = None
+        if self.ledger is not None:
+            await self.ledger.stop()
+            self.ledger = None
+
+    async def health(self) -> Health:
+        if self._service is None:
+            return Health.down("not booted")
+        return await self._service.health()
+
+
 class _WallClock:
     def now(self) -> float:
         return time.time()
@@ -275,4 +453,4 @@ class _WallClock:
         await asyncio.sleep(seconds)
 
 
-__all__ = ["Kernel", "KernelBootError", "VERSION"]
+__all__ = ["Kernel", "KernelBootError", "VERSION", "WorkerKernel"]

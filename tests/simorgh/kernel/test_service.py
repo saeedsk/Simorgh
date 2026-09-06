@@ -8,9 +8,9 @@ from simorgh.bus.client import BusClient
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Health
-from simorgh.kernel.config import LoadedConfig
+from simorgh.kernel.config import ConfigError, LoadedConfig
 from simorgh.kernel.secrets import EnvSecretStore
-from simorgh.kernel.service import Kernel
+from simorgh.kernel.service import Kernel, KernelBootError, WorkerKernel
 from simorgh.kernel.state import PAUSED, RUNNING, STOPPED
 from tests.simorgh.helpers import FakeClock
 
@@ -18,6 +18,11 @@ from tests.simorgh.helpers import FakeClock
 def _make_kernel(tmp: str) -> Kernel:
     config = LoadedConfig({"runtime": {"data_dir": tmp}}, None)
     return Kernel(config, secrets=EnvSecretStore({}), clock=FakeClock())
+
+
+def _local_multi_config(tmp: str, **extra_runtime) -> LoadedConfig:
+    runtime = {"mode": "local-multi", "data_dir": tmp, **extra_runtime}
+    return LoadedConfig({"runtime": runtime, "bus": {"backend": "sqlite"}, "ledger": {"backend": "sqlite"}}, None)
 
 
 async def _pump(n: int = 30) -> None:
@@ -236,6 +241,141 @@ class TestHealthAndStatus(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(s["restarts"], 0)
             finally:
                 await kernel.shutdown()
+
+
+class TestLocalMultiMode(unittest.IsolatedAsyncioTestCase):
+    """`local-multi` mode (03-kernel.md section 5.6): `simorgh run` boots
+    everything except `orchestration`; a real subsystem token round-trip
+    (identities issued and *authenticated*, `bus/enforcement.py`) must
+    not raise `PolicyViolation` on the very first publish/subscribe --
+    that was unconditionally broken before this fix, since nothing ever
+    called `ReservedTopologyPolicy.authenticate()`."""
+
+    async def test_orchestration_is_excluded_from_the_main_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kernel = Kernel(_local_multi_config(tmp), clock=FakeClock())
+            await kernel.boot()
+            try:
+                self.assertNotIn("orchestration", kernel._supervisor.services)  # noqa: SLF001
+                self.assertIn("guardian", kernel._supervisor.services)  # noqa: SLF001
+                self.assertIn("execution", kernel._supervisor.services)  # noqa: SLF001
+            finally:
+                await kernel.shutdown()
+
+    async def test_boot_reaches_running_without_a_policy_violation(self):
+        # Regression: every subsystem's first bus call used to raise
+        # `PolicyViolation("... is not authenticated on this bus")` in any
+        # mode other than `single`, because `authenticate()` was never
+        # called anywhere -- `ContextFactory.build` issued a token and
+        # simply discarded it.
+        with tempfile.TemporaryDirectory() as tmp:
+            kernel = Kernel(_local_multi_config(tmp), clock=FakeClock())
+            await kernel.boot()
+            try:
+                self.assertEqual(kernel.state.state, RUNNING)
+            finally:
+                await kernel.shutdown()
+
+    async def test_single_mode_still_boots_orchestration_in_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kernel = _make_kernel(tmp)
+            await kernel.boot()
+            try:
+                self.assertIn("orchestration", kernel._supervisor.services)  # noqa: SLF001
+            finally:
+                await kernel.shutdown()
+
+    async def test_memory_bus_backend_is_refused_in_local_multi_mode(self):
+        # local-multi's entire premise is a shared cross-process backend;
+        # `memory` is in-process only and a worker against it would just
+        # never see anything -- fail loud at boot, not silently.
+        with tempfile.TemporaryDirectory() as tmp:
+            config = LoadedConfig({"runtime": {"mode": "local-multi", "data_dir": tmp}}, None)
+            kernel = Kernel(config, clock=FakeClock())
+            with self.assertRaises(ConfigError):
+                await kernel.boot()
+
+    async def test_shutdown_after_sqlite_ledger_boot_does_not_raise(self):
+        # Regression: `Kernel.shutdown()` used to append the final
+        # `system.state` event *after* `stop_all` had already closed the
+        # ledger's own backend connection via `ledger.service.Service.
+        # stop()` -- silently tolerated by `memory`/`jsonl`, but `sqlite`
+        # enforces "not started" and raised on every clean shutdown, in
+        # *any* mode (reproducible in plain `single` mode too).
+        with tempfile.TemporaryDirectory() as tmp:
+            config = LoadedConfig({"runtime": {"data_dir": tmp}, "ledger": {"backend": "sqlite"}}, None)
+            kernel = Kernel(config, clock=FakeClock())
+            await kernel.boot()
+            await kernel.shutdown()  # must not raise LedgerUnavailable
+            self.assertEqual(kernel.state.state, STOPPED)
+
+
+class TestWorkerKernel(unittest.IsolatedAsyncioTestCase):
+    """The `simorgh worker --id wN` process (`WorkerKernel`): only
+    `orchestration`, no HMAC approval secret, self-consistent identity
+    authentication."""
+
+    async def test_requires_local_multi_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = LoadedConfig({"runtime": {"data_dir": tmp}}, None)  # mode defaults to "single"
+            with self.assertRaises(KernelBootError):
+                WorkerKernel(config, worker_id="w1")
+
+    async def test_boots_only_orchestration_and_reports_healthy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            worker = WorkerKernel(_local_multi_config(tmp), worker_id="w1", clock=FakeClock())
+            await worker.boot()
+            try:
+                health = await worker.health()
+                self.assertEqual(health.status, "ok")
+                self.assertEqual(worker._ctx.name, "orchestration")  # noqa: SLF001
+                self.assertEqual(worker._ctx.instance_id, "w1")  # noqa: SLF001
+            finally:
+                await worker.shutdown()
+
+    async def test_never_receives_the_hmac_approval_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            worker = WorkerKernel(_local_multi_config(tmp), worker_id="w1", clock=FakeClock())
+            await worker.boot()
+            try:
+                self.assertEqual(worker._ctx.secrets.get("__hmac__"), None)  # noqa: SLF001
+            finally:
+                await worker.shutdown()
+
+    async def test_a_worker_and_the_main_kernel_share_one_sqlite_bus_and_ledger(self):
+        """Both processes point at the same `simorgh.toml`-derived
+        `${data_dir}` -- proving the paths actually agree is the
+        precondition for the real cross-process crash/resume drill in
+        `tests/simorgh/integration/`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _local_multi_config(tmp)
+            kernel = Kernel(config, clock=FakeClock())
+            await kernel.boot()
+            worker = WorkerKernel(config, worker_id="w1", clock=FakeClock())
+            await worker.boot()
+            try:
+                self.assertEqual(kernel._bus_backend._path, worker._bus_backend._path)  # noqa: SLF001
+                self.assertEqual(str(kernel.ledger.backend.path), str(worker.ledger.backend.path))
+            finally:
+                await worker.shutdown()
+                await kernel.shutdown()
+
+    async def test_worker_process_publishes_without_a_policy_violation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            worker = WorkerKernel(_local_multi_config(tmp), worker_id="w1", clock=FakeClock())
+            await worker.boot()
+            try:
+                # Orchestration's own Service already exercises publish/
+                # subscribe during start() (task.available, system.state.
+                # changed); a direct publish on its own Context bus proves
+                # the same self-issued token is accepted for a type it is
+                # actually allowed to produce.
+                await worker.bus.publish(Message.new(
+                    topics.SYSTEM_METRICS, source="orchestration@w1",
+                    payload={"subsystem": "orchestration", "counters": {}, "gauges": {}},
+                ))
+            finally:
+                await worker.shutdown()
 
 
 if __name__ == "__main__":
