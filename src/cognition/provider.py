@@ -26,6 +26,12 @@ best for that kind of task rather than static registration order. The
 default OutcomeStore is in-process only; a caller can substitute one backed
 by long_term memory to make that history persist across sessions.
 
+For high-stakes decisions where a single provider's blind spot is too
+costly to risk, CapabilityRegistry.complete_ensemble queries every
+available, capable provider concurrently (e.g. Claude and Gemini both
+registered for LONG_CONTEXT_REFLECTION) and reconciles their answers --
+see EnsembleResponse and complete_ensemble below.
+
 No real networked provider is wired in here (no credentials exist in this
 environment, and this project doesn't fake integrations it can't run or
 test). Adding one is a matter of implementing LLMProvider and registering
