@@ -56,6 +56,19 @@ class Proposal:
 
 
 TAKEAWAY_KIND = "takeaway"
+FEEDBACK_KIND = "feedback"
+
+
+def _intent_alignment_score(request_text: str, output: str) -> float:
+    """Cheap, LLM-free heuristic: fraction of significant request words
+    that reappear in the output. Not a semantic judge -- just enough
+    signal to flag outputs that plausibly drifted from the ask.
+    """
+    request_words = {w.lower() for w in request_text.split() if len(w) > 3}
+    if not request_words:
+        return 1.0
+    output_words = {w.lower() for w in output.split()}
+    return len(request_words & output_words) / len(request_words)
 
 # Where each sub-agent's own logic actually lives, so a per-outcome
 # takeaway can point at something patch-able rather than just naming the
@@ -165,6 +178,41 @@ class ReflectionAgent:
                 proposal.rationale,
                 agent=outcome.agent,
                 request_text=outcome.request_text,
+            )
+        return proposal
+
+    def critique_intent(
+        self, outcome: Outcome, alignment_threshold: float = 0.3
+    ) -> Proposal | None:
+        """Structured self-critique: scores a completed task's output
+        against its original request (intent), independent of the
+        succeeded/corrected_by_creator flags `reflect_on_outcome` relies
+        on. Catches drift that a "did it technically succeed" check
+        would miss -- an output can be marked successful yet barely
+        address what was actually asked. Uses the same free-heuristic
+        approach as `reflect_on_outcome` (no LLM call per turn); a
+        mismatch is stored as its own feedback memory (kind="feedback"),
+        kept separate from takeaways so future turns can be checked
+        against concrete intent/output pairs rather than only pass/fail
+        history.
+        """
+        score = _intent_alignment_score(outcome.request_text, outcome.output)
+        if score >= alignment_threshold:
+            return None
+
+        rationale = (
+            f"'{outcome.agent}' output for {outcome.request_text!r} scored "
+            f"{score:.0%} alignment with the original intent -- output may "
+            "have drifted from the ask; worth a targeted review."
+        )
+        proposal = Proposal(subject=outcome.agent, rationale=rationale, evidence_count=1)
+        if self._store is not None:
+            self._store.remember(
+                FEEDBACK_KIND,
+                proposal.rationale,
+                agent=outcome.agent,
+                request_text=outcome.request_text,
+                alignment_score=score,
             )
         return proposal
 
