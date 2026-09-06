@@ -63,14 +63,18 @@ class Worker:
 
         task = reply.payload.get("task") or {}
         mode = task.get("mode", "execute")
+        description = task.get("description", "")
         profile = profiles.for_task(kind, mode)
-        session = Session(task_id=task_id, kind=kind, mode=mode, profile=profile, worker_id=self.worker_id)
+        session = Session(
+            task_id=task_id, kind=kind, mode=mode, profile=profile,
+            worker_id=self.worker_id, user_text=description,
+        )
         session.budget.max_steps = profile.max_steps
         session.budget.max_revisions = profile.max_revisions
 
         await restore_step_count(session, self._ledger)
 
-        outcome = await self.run(session, user_text=task.get("description", ""))
+        outcome = await self.run(session, user_text=description)
         await self._report(session, outcome)
 
     async def run(self, session: Session, *, user_text: str = "") -> Outcome:
@@ -90,7 +94,10 @@ class Worker:
         `if session.kind == "chat": publish turn.completed` branch.
         """
         profile = profiles.for_task("chat", "execute")
-        session = Session(task_id=session_id, kind="chat", mode="execute", profile=profile, worker_id=self.worker_id)
+        session = Session(
+            task_id=session_id, kind="chat", mode="execute", profile=profile,
+            worker_id=self.worker_id, user_text=text,
+        )
         session.budget.max_steps = profile.max_steps
         session.budget.max_revisions = profile.max_revisions
         outcome = await self.run(session, user_text=text)
@@ -127,7 +134,7 @@ class Worker:
                 payload={
                     "session_id": session.task_id, "task_id": session.task_id,
                     "text": outcome.result_summary, "floor": outcome.floor,
-                    "tool_steps": len(session.steps),
+                    "tool_steps": len(session.steps), "user_text": session.user_text,
                 },
                 partition_key=f"task:{session.task_id}", clock=self._clock,
             )

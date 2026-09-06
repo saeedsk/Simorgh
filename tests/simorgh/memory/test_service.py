@@ -96,6 +96,51 @@ class MemoryServiceTestCase(unittest.IsolatedAsyncioTestCase):
         reply = await self.bus.request(retrieve, timeout=5.0)
         self.assertEqual(len(reply.payload["items"]), 1)
 
+    async def test_turn_completed_writes_an_episodic_record_of_both_sides(self):
+        """Flow 1's episodic-write arrow (milestone 104): a real chat
+        turn, with the human's own words, becomes a retrievable episodic
+        memory of both halves -- not just Sim's reply."""
+        stored: list[Message] = []
+
+        async def _on_stored(message: Message) -> None:
+            stored.append(message)
+
+        sub = await self.bus.subscribe(topics.MEMORY_STORED, _on_stored)
+        await self.bus.publish(Message.new(topics.TURN_COMPLETED, source="orchestration", payload={
+            "session_id": "sess-1", "task_id": "sess-1", "text": "hello back",
+            "floor": False, "tool_steps": 1, "user_text": "hello there",
+        }))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        await sub.unsubscribe()
+
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored[0].payload["kind"], "episodic")
+
+        reply = await self.bus.request(Message.new(topics.MEMORY_RETRIEVE, source="test", payload={
+            "query": "hello there", "kinds": ["episodic"], "k": 5,
+        }), timeout=5.0)
+        self.assertEqual(len(reply.payload["items"]), 1)
+        self.assertIn("hello there", reply.payload["items"][0]["content"])
+        self.assertIn("hello back", reply.payload["items"][0]["content"])
+
+    async def test_turn_completed_with_no_text_either_side_is_not_stored(self):
+        """The honest-floor path (`floor: true`, empty `text`) must not
+        pollute episodic memory with a blank record."""
+        stored: list[Message] = []
+
+        async def _on_stored(message: Message) -> None:
+            stored.append(message)
+
+        sub = await self.bus.subscribe(topics.MEMORY_STORED, _on_stored)
+        await self.bus.publish(Message.new(topics.TURN_COMPLETED, source="orchestration", payload={
+            "session_id": "sess-2", "task_id": "sess-2", "text": "", "floor": True, "tool_steps": 0,
+        }))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        await sub.unsubscribe()
+        self.assertEqual(stored, [])
+
     async def test_sleep_tick_publishes_consolidated_and_contradiction_events(self):
         await self._store_and_wait({"kind": "semantic", "content": "the sky is blue", "tags": ["sky"], "source_ref": ""})
         self.clock.advance(1.0)

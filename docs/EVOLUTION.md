@@ -2398,3 +2398,51 @@ Still ahead, roughly in order:
     publishing `memory.store` with both halves -- left for the next
     session rather than rushed alongside a different contracts-adjacent
     fix.
+
+105. **Flow 1's episodic-write arrow, closed: Simorgh remembers a
+    conversation from one turn to the next.** Milestone 104 deliberately
+    left this open rather than folding a contracts change into a
+    different fix; the creator then chose it directly as the next step
+    over two other offered options (keep hunting for more live bugs
+    first, or move on to Phase 4 capabilities).
+
+    The blocker was exactly what milestone 104 named: `turn.completed`
+    only ever carried the assistant's reply, never the human's own
+    words, so Memory had no way to write a two-sided record even if it
+    listened. Added `user_text` as an *optional* field to the
+    `turn.completed` catalog entry (`simorgh/contracts/messages/task.py`,
+    regenerated via `python -m simorgh.contracts.schemagen`) rather than
+    a breaking one -- an older producer that never sets it still
+    validates. Threaded it through `simorgh.orchestration`: `Session`
+    gained a `user_text` field, set once at construction in both call
+    sites that build a chat session (`Worker._on_available` from a real
+    Planning task's `description`, and `Worker.run_percept_chat` from
+    the live percept's own text), and `Worker._report` includes it in
+    the `turn.completed` payload it already builds.
+
+    `simorgh.memory.service.Service` now subscribes to `turn.completed`
+    directly and writes an episodic record combining both halves
+    (`"User: {user_text}\nSim: {reply_text}"`) through the same
+    `MemoryEngine.store()` path `memory.store` already used -- publishing
+    `memory.stored` afterward for parity with that path. A turn with
+    nothing said on either side (the honest-floor case: `floor: true`,
+    empty `text`, and no `user_text` either) is skipped rather than
+    filling episodic memory with blanks.
+
+    Verified live, not just in tests: in the same sandboxed repo copy,
+    sent one chat turn stating a fact ("my favorite color is teal"),
+    queried `memory.retrieve` directly to see the stored record, then
+    sent a second, independent chat turn asking what that favorite color
+    was -- and got back "Your favorite color is teal." A genuinely
+    interesting wrinkle surfaced in the same run: the *first* turn itself
+    hit the honest floor (`floor: true`, empty reply -- almost certainly
+    first-call cold-start latency against the real `claude` CLI
+    subprocess, not a logic bug, since the second and third live calls
+    in the same process all answered normally), yet the fact was still
+    captured and correctly recalled one turn later -- the episodic write
+    fires off the human's own `user_text` regardless of whether Sim's
+    own reply that turn was a real answer or the floor, which is exactly
+    the resilience the honest-floor design was for. 1982 tests passing
+    (2 new regression tests: a real two-sided episodic write is stored
+    and retrievable; a turn with nothing said on either side is not
+    stored).

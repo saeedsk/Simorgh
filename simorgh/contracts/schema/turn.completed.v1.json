@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/turn.completed.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "The chat-turn counterpart of task.completed (Flow 1).",
+  "description": "The chat-turn counterpart of task.completed (Flow 1). `user_text` is the human's own message for this turn -- optional so older producers/consumers built against v1 of this catalog entry still validate; Memory's episodic write (milestone 104) is the one consumer that actually needs it.",
   "properties": {
     "confidence": {
       "type": [
@@ -24,6 +24,12 @@
     },
     "tool_steps": {
       "type": "integer"
+    },
+    "user_text": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "verification_ref": {
       "type": [
