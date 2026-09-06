@@ -9,6 +9,16 @@ so `complete()` is guaranteed to return something rather than raise or
 hang -- Simorgh cannot be fully "starved" of the ability to respond, only
 degraded to a simpler response.
 
+On top of that failover, CapabilityRegistry gives the orchestrator a
+provider-agnostic negotiation layer: providers declare which Capabilities
+they support (tool use, streaming, long context, ...), TaskType maps a
+kind of work to the Capability it needs, and `complete_for(task_type, ...)`
+picks whichever registered provider (e.g. Claude vs. Gemini) currently
+supports and is available for that capability -- mid-session, per call --
+before falling back to the router's normal ordering. This lets the
+orchestrator switch providers based on what a task needs rather than a
+single static provider choice.
+
 No real networked provider is wired in here (no credentials exist in this
 environment, and this project doesn't fake integrations it can't run or
 test). Adding one is a matter of implementing LLMProvider and registering
