@@ -16,10 +16,13 @@ result looks like it missed the point.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from src.cognition.provider import CognitionRouter
 from src.orchestrator.tasks import Task
+
+_YES_NO_RE = re.compile(r"\b(YES|NO)\b", re.IGNORECASE)
 
 _VERIFY_PROMPT = """A change was just applied to address this task:
 
@@ -49,6 +52,26 @@ def verify_task_completion(
     answer. `passed=False` means "looks wrong" from the reviewer's read,
     not a security or correctness proof; it exists to catch a plausible-
     sounding but off-target change, not to replace the real gates.
+
+    Live-caught with a real provider (Claude Code CLI): the prompt asks
+    for "exactly one word first -- YES or NO," but the model doesn't
+    reliably comply -- it can narrate instead ("I'll check the actual
+    file that was modified to verify the claim.") and never actually
+    answer. The old strict "first line must start with YES" check
+    silently read that as a NO, wrongly BLOCKing a change that had
+    already passed the audit gate and the full isolated test suite
+    (confirmed live: a real ensemble-provider self-patch, fully correct
+    and committed, got sent back for a needless retry purely because
+    the reviewer rambled instead of answering). Scans every line for a
+    standalone YES/NO token instead of requiring it as the literal first
+    line -- gives the model credit for the real verdict wherever it
+    actually appears, the same "don't punish a format miss as if it
+    were the substantive answer" fix already applied elsewhere in this
+    pipeline (see first_line_argument, tool_protocol.py). A response
+    that never states a clear verdict at all defers to the mechanical
+    gates (passed=True), same as no real provider answering -- a
+    non-answer is evidence the reviewer didn't review, not evidence the
+    change looks wrong.
     """
     response = cognition.complete(
         _VERIFY_PROMPT.format(description=task.description, result=result)
@@ -57,6 +80,12 @@ def verify_task_completion(
         return VerificationResult(
             True, "no real reviewer available -- deferring to the audit/test gates alone"
         )
-    first_line = response.text.strip().splitlines()[0].strip().upper()
-    passed = first_line.startswith("YES")
-    return VerificationResult(passed, response.text.strip())
+    for line in response.text.strip().splitlines():
+        match = _YES_NO_RE.search(line.strip())
+        if match is not None:
+            return VerificationResult(match.group(1).upper() == "YES", response.text.strip())
+    return VerificationResult(
+        True,
+        "reviewer's response didn't contain a clear YES/NO verdict -- deferring to the "
+        "audit/test gates alone rather than treating a non-answer as a rejection",
+    )
