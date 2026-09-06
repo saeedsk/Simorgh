@@ -12,6 +12,7 @@ from src.main import (
     build_router,
     discover_command,
     discover_creative_improvements,
+    discover_creative_project,
     extract_batch_args,
     extract_evolve_args,
     extract_patch_args,
@@ -2739,6 +2740,84 @@ class TestDiscoverCreativeImprovements(unittest.TestCase):
         self.assertEqual(created[0].subject, "src/orchestrator/only.py")
 
 
+class TestDiscoverCreativeProject(unittest.TestCase):
+    """discover_creative_project is the multi-step complement to
+    discover_creative_improvements' single-file diversified sampling --
+    the harness's PROJECT_TASK tier reachable from the autonomous loop
+    itself, not just a human typing 'project <goal>'.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_no_real_provider_returns_none(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+
+        project = discover_creative_project(CognitionRouter(), task_store, repo_root=self.repo_root)
+
+        self.assertIsNone(project)
+        self.assertEqual(task_store.all(), [])
+
+    def test_unparseable_response_returns_none_and_creates_nothing(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition("I refuse to propose anything.")
+
+        project = discover_creative_project(cognition, task_store, repo_root=self.repo_root)
+
+        self.assertIsNone(project)
+        self.assertEqual(task_store.all(), [])
+
+    def test_a_goal_line_creates_and_decomposes_a_project(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _ScriptedBrainstormCognition(
+            [
+                "GOAL :: make Sim's memory genuinely self-correcting",
+                "1. src/memory/long_term.py :: a first concrete step\n"
+                "2. RESEARCH :: what approach fits best\n",
+            ]
+        )
+
+        project = discover_creative_project(cognition, task_store, repo_root=self.repo_root)
+
+        self.assertIsNotNone(project)
+        self.assertEqual(project.kind, PROJECT_TASK)
+        self.assertEqual(project.discovered_via, "creative_agenda")
+        self.assertEqual(project.description, "make Sim's memory genuinely self-correcting")
+        children = task_store.children(project.id)
+        self.assertEqual(len(children), 2)
+
+    def test_decomposition_that_produces_no_steps_leaves_the_project_pending_with_a_note(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _ScriptedBrainstormCognition(
+            ["GOAL :: an ambitious but vague goal", "I can't break this down."]
+        )
+
+        project = discover_creative_project(cognition, task_store, repo_root=self.repo_root)
+
+        self.assertIsNotNone(project)
+        refreshed = task_store.get(project.id)
+        self.assertEqual(refreshed.status, PENDING)
+        self.assertIn("no real steps", refreshed.note)
+
+    def test_provider_sink_reflects_a_real_attempt(self):
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        cognition = _FakeBrainstormCognition("I refuse to propose anything.")
+        sink: dict = {}
+
+        discover_creative_project(cognition, task_store, repo_root=self.repo_root, provider_sink=sink)
+
+        self.assertNotEqual(sink.get("provider_name"), "deterministic_fallback")
+
+
 class TestPlanGoal(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -3050,7 +3129,8 @@ class TestAutonomousAction(unittest.TestCase):
         reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
         cognition = _FakeBrainstormCognition("PATCH :: a genuinely ambitious idea\n")
 
-        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"), \
+             patch("src.main.random.random", return_value=1.0):  # never the rare project branch
             did_something = _autonomous_action(
                 task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
                 activity_log, cognition, repo_root=self.repo_root,
@@ -3059,6 +3139,58 @@ class TestAutonomousAction(unittest.TestCase):
         self.assertTrue(did_something)
         self.assertEqual(len(task_store.all()), 1)
         self.assertEqual(task_store.all()[0].discovered_via, "creative_agenda")
+
+    def test_rarely_proposes_a_project_instead_of_a_single_idea(self):
+        from src.main import _autonomous_action
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        cognition = _ScriptedBrainstormCognition(
+            [
+                "GOAL :: make Sim's memory genuinely self-correcting",
+                "1. src/memory/long_term.py :: a first concrete step",
+            ]
+        )
+
+        with patch("src.main.random.random", return_value=0.0):  # forces the project branch
+            did_something = _autonomous_action(
+                task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+                activity_log, cognition, repo_root=self.repo_root,
+            )
+
+        self.assertTrue(did_something)
+        tasks = task_store.all()
+        self.assertEqual(len(tasks), 2)  # the project, plus its one decomposed child
+        project = next(t for t in tasks if t.kind == PROJECT_TASK)
+        self.assertEqual(project.discovered_via, "creative_agenda")
+        self.assertEqual(len(task_store.children(project.id)), 1)
+
+    def test_a_failed_project_attempt_still_falls_through_to_a_single_idea(self):
+        from src.main import _autonomous_action
+
+        store = InMemoryStore()
+        task_store = TaskStore(store)
+        activity_log = ActivityLog(store)
+        reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
+        # No "GOAL ::" line -- discover_creative_project finds nothing,
+        # so this must still fall through to a real single-file idea.
+        cognition = _ScriptedBrainstormCognition(
+            ["I refuse to propose a goal.", "PATCH :: a fallback idea"]
+        )
+
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"), \
+             patch("src.main.random.random", return_value=0.0):
+            did_something = _autonomous_action(
+                task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
+                activity_log, cognition, repo_root=self.repo_root,
+            )
+
+        self.assertTrue(did_something)
+        tasks = task_store.all()
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0].kind, PATCH_TASK)
 
     def test_a_creative_attempt_that_finds_nothing_still_counts_as_action(self):
         # A real LLM call was still spent even when the brainstorm
@@ -3074,7 +3206,8 @@ class TestAutonomousAction(unittest.TestCase):
         reflection_agent = ReflectionAgent(OutcomeLog(store), store=store)
         cognition = _FakeBrainstormCognition("I refuse to answer.")
 
-        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"):
+        with patch("src.main.pick_diverse_target", return_value="src/orchestrator/foo.py"), \
+             patch("src.main.random.random", return_value=1.0):
             did_something = _autonomous_action(
                 task_store, reflection_agent, store, SkillResearchAgent(), None, AuditGate(),
                 activity_log, cognition, repo_root=self.repo_root,

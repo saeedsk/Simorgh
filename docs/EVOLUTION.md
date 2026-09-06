@@ -1929,3 +1929,38 @@ Still ahead, roughly in order:
     Sources (researched live via WebSearch/WebFetch before writing any
     code): [Building Effective AI Agents (Anthropic)](https://www.anthropic.com/engineering/building-effective-agents),
     [How Claude Code works (Claude Code docs)](https://code.claude.com/docs/en/how-claude-code-works).
+96. **The project tier made reachable autonomously, not just by typing
+    `project <goal>`.** Milestone 95 shipped `PROJECT_TASK` and the CLI
+    command, but nothing in the autonomous loop itself ever created one
+    -- the harness existed but wasn't actually live for Sim's own
+    self-directed work, only for a human invoking it by hand.
+    `discover_creative_project()` (`main.py`) closes that: rarely
+    (`DEFAULT_CREATIVE_PROJECT_CHANCE`, 20%, checked only on an empty-
+    backlog tick after the reactive pass finds nothing), asks one
+    genuinely open-ended "propose an ambitious multi-step goal" question
+    -- deliberately the one place left in this codebase that still lets
+    a model pick its own focus with no target chosen in advance, since a
+    real project's whole point is spanning more ground than a single
+    diversified-sampling target could represent -- then immediately
+    decomposes the result into real child tasks via `decompose_project`,
+    rather than leaving a vague one-liner nothing ever acts on. Falls
+    straight through to the ordinary per-file `discover_creative_improvements`
+    path when no real provider answers or the goal doesn't parse, so a
+    failed attempt is never a wasted tick.
+
+    Live-caught while wiring this in: sharing one `provider_sink` dict
+    across the project attempt and the fallback idea-search would have
+    silently lost track of a real, already-billed call if the project
+    attempt used a real provider but the fallback pass never got far
+    enough to call one itself (e.g. no diversified target available) --
+    the shared dict's last write would overwrite "attempted_creative" back
+    to `False`, letting `AutonomyController`'s cost-safety cooldown skip
+    starting despite real spend having happened. Fixed before it ever ran
+    for real: each call gets its own sink, and `attempted_creative` is
+    OR'd across both rather than overwritten by whichever ran last.
+
+    889 tests passing (7 new: `discover_creative_project`'s own success/
+    failure/decomposition-empty/provider-sink cases, and
+    `_autonomous_action`'s rare-project-branch and failed-project-falls-
+    through-to-a-single-idea paths, the latter two made deterministic via
+    a mocked `random.random` rather than left to a 20% coin flip).
