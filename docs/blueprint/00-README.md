@@ -76,7 +76,7 @@ Simorgh v1 recorded in `docs/EVOLUTION.md`.
 
 | Package | Spec status | Build owner | Phase |
 |---|---|---|---|
-| contracts | specified in `03` (catalog v1) | unassigned | 0 |
+| contracts | built (v1 catalog: 123 types, 21 domains) | Phase 0 agent | 0 |
 | bus, ledger, kernel | complete draft | unassigned | 0 |
 | cognition, memory | complete draft | unassigned | 1A |
 | guardian, execution | complete draft | unassigned | 1B |
@@ -114,3 +114,13 @@ Claim a package by editing this table and the spec's header (see `05` §7).
   drafting loop (Flow 4), and Interface owning every human-facing status
   surface. Open questions the spec authors recorded (each with a default)
   live in each spec's §12.
+- 2026-09-06 — `simorgh/contracts/` built (Phase 0, first package). Doc
+  fix while building: `turn` and `project` are their own first segment on
+  the wire, so they are domains; added to `03` §3's table (the prose had
+  listed them under `task.*`/`plan.*` only). Two shapes the prose left
+  open were pinned in code, non-breaking: `task.completed.verification_ref`
+  is a required-but-nullable key (a plan-mode completion has no review),
+  and `system.status.reply` is a minimal open object (`state`, `mode`,
+  `run_id`, `subsystems`, `uptime_seconds`, optional `metrics`) pending
+  the Kernel build. Every `*.reply` admits the §9 error shape as a second
+  `anyOf` branch, and its success branch forbids `ok: false`.

@@ -2015,3 +2015,42 @@ Still ahead, roughly in order:
     That the parallel-build process surfaced real interface gaps before
     a line of code exists is the strongest evidence so far that the
     contracts-first, boundary-enforced approach is the right one.
+98. **Phase 0 begins: `simorgh/contracts/` -- the one dependency every
+    v2 subsystem shares -- built to the blueprint.** The first code of
+    the re-architecture, and deliberately the least glamorous: 123
+    message types across 21 domains, each declared once in a tiny
+    field-type language (`fields.py`) from which `registry.define()`
+    generates both a frozen dataclass (`to_payload`/`from_payload`) and
+    a JSON Schema, so the two can never drift; `schemagen` writes the
+    schemas to `schema/` as checked-in files and a test fails if they
+    fall out of sync with the declarations. The envelope enforces every
+    section-2 invariant in the producer's process at publish time
+    (unknown type, bad payload, priority range, `<kind>:<id>` partition
+    keys, replies carry a correlation id, and the one the Bus spec
+    author flagged: a preempting priority-9 message may never set a
+    partition key, or `system.stop` could queue behind a held task
+    partition). `topics.py` carries the reserved-topology tables as
+    data -- who may subscribe to `action.proposed` (guardian only), who
+    may publish `action.approved` (guardian, plus the kernel for its
+    forged-token drill), execution's `action.denied` only with
+    `layer=token`, single-writer streams -- so the Kernel enforces
+    policy it reads rather than policy it hardcodes. `security.py` holds
+    the approval token (HMAC-SHA256 over the exact action: id, tool,
+    canonical-args hash, expiry; constant-time compare; a bounded
+    `ReplayGuard`) and the subsystem token for multi-process identity.
+    `protocols.py` is the Bus/Ledger/Subsystem/Context/Provider/Tool
+    interfaces, structural so a fake conforms by shape. `compat.py` is
+    the version-translator registry, present before it is needed.
+
+    The boundary rule from `02` section 4 is now a test, not a
+    convention: `tests/simorgh/test_module_boundaries.py` walks every
+    module under `simorgh/` by AST and fails on a subsystem importing
+    another subsystem, contracts importing anything but the standard
+    library, bus/ledger importing anything but contracts, or an
+    unguarded third-party import -- and it carries its own self-test
+    against temporary packages, because a boundary check that has never
+    been seen to fail is not evidence of anything. One documentation
+    fix surfaced by building: `turn.completed` and `project.*` are their
+    own first segment on the wire, so they are domains, not `task.*`/
+    `plan.*` entries. 84 new tests; the full suite is 973 and green, v1
+    untouched.
