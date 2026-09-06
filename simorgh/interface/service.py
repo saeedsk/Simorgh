@@ -123,7 +123,7 @@ class Service:
             return Health.down("not started")
         return Health.ok()
 
-    # -- REPL thread (readline blocks; bridged to asyncio via call_soon_threadsafe) ----
+    # -- REPL thread (readline blocks; bridged to asyncio via run_coroutine_threadsafe) --
     def _repl_main(self) -> None:
         print("simorgh> type a command, plain text to chat, or `help`. Ctrl-D to detach the REPL.")
         while not self._stop_repl.is_set():
@@ -133,7 +133,27 @@ class Service:
                 break
             except KeyboardInterrupt:
                 continue
-            self._loop.call_soon_threadsafe(asyncio.ensure_future, self._handle_line(line))
+            # Live-caught (creator's own real use, twice -- once before the
+            # think_timeout_s fix, again after it): this used to be
+            # `call_soon_threadsafe(asyncio.ensure_future, ...)`, a true
+            # fire-and-forget that let this thread's `input("> ")` loop
+            # right back around and re-block on the *next* line before
+            # `_handle_line` (running on the asyncio loop's own thread) had
+            # even started -- let alone printed a reply. A print from that
+            # other thread while this one is already inside a new blocking
+            # `input()` call routinely never became visible, or only
+            # showed up once the user pressed Enter again to force a
+            # redraw -- indistinguishable from the process being hung,
+            # which is exactly what got reported. `run_coroutine_threadsafe
+            # (...).result()` blocks this thread until the turn (including
+            # every print inside it) is actually done, so the next "> "
+            # prompt can never race ahead of the reply it belongs after.
+            try:
+                asyncio.run_coroutine_threadsafe(self._handle_line(line), self._loop).result()
+            except Exception as exc:  # noqa: BLE001 -- mirrors _handle_line's own
+                # crash boundary; a failure bridging threads must not kill
+                # this loop either (spec section 8).
+                print(render_mod.notice("error", f"[render error] {exc!r}", "interface", enabled=self._color))
 
     async def _handle_line(self, line: str) -> None:
         command = parse(line)

@@ -220,3 +220,20 @@ sequence that had failed 2-of-6 times before the fix ran clean 8-for-8
 afterward, with zero `context_too_large` errors on the task stream.
 Both fixes are commits `38fe8d7` and `1295762`; full write-up in
 `docs/EVOLUTION.md` milestones 122-123.
+
+**Residual, rarer edge case, found immediately after declaring victory:**
+one more `context_too_large` did occur on the very next probe after the
+clean 8-for-8 run (same error text, same 0.04s instant-fail signature) —
+so the fix reduced the failure rate substantially but didn't eliminate
+it outright. Layer 5's own summarization call
+(`_summarize_for_compaction`, `cognition/service.py:227-239`) has its
+own budget (`Budget(16_000, 2_000, 0.1)`) and could itself be getting
+overwhelmed if the raw retrieved content is large enough — not
+confirmed, not chased further in this trial (genuinely diminishing
+returns after two root-caused-and-fixed rounds on the same underlying
+symptom). Whoever picks this up next: `Assembler._memory_retrieve()`
+(`orchestration/context.py:71-79`) still has no per-item or aggregate
+size cap on what it pulls from Memory before handing it to Cognition at
+all — capping it there directly (rather than relying entirely on
+downstream compaction to save an unbounded input) is probably the more
+robust fix than anything in the compaction pipeline itself.

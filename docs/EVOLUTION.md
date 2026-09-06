@@ -3463,3 +3463,61 @@ Still ahead, roughly in order:
     request payload rather than just the outcome. Full suite green.
     Live-verified: the same rapid-fire probe sequence that reproduced
     the failure 2-of-6 times before the fix ran clean afterward.
+
+124. **The creator's own real CLI use, mid-cutover-trial, hit "hello"
+    producing nothing but ^M's -- the same visible symptom the very
+    first live-use report of this session (milestone ~104-ish) had,
+    now root-caused for real.** That earlier fix (threading
+    `think_timeout_s` through to `SessionRunner`) was a genuine,
+    necessary fix for a genuine bug -- but not the only one hiding
+    behind the identical symptom. This time: `_repl_main`
+    (`interface/service.py`) scheduled each line's handling with
+    `call_soon_threadsafe(asyncio.ensure_future, ...)` -- true fire-
+    and-forget -- then immediately looped back to the *next*
+    `input("> ")`, re-blocking this thread before the async handler
+    (running on the event loop's own thread) had even started, let
+    alone printed a reply. A `print()` from another thread while this
+    one already sat inside a fresh `input()` call routinely never
+    became visible, or only appeared once the user pressed Enter again
+    to force readline's redraw -- indistinguishable from a hang, which
+    is exactly what got reported both times.
+
+    Notably: this exact race was already *known and documented* in this
+    session's own test suite (`test_two_chats_in_flight_at_once_never_
+    cross_wire_their_replies`'s docstring described it as "exactly what
+    the real REPL thread does") -- the session_id-collision half of the
+    bug got fixed, but the underlying design flaw it was compensating
+    for (never waiting) was accepted as a given rather than treated as
+    the actual problem.
+
+    Fixed by making the REPL thread genuinely wait:
+    `asyncio.run_coroutine_threadsafe(self._handle_line(line),
+    self._loop).result()` blocks this thread until the turn --
+    including every print inside it -- is actually done, so the next
+    prompt can never race ahead of the reply it belongs after. 1 new
+    test (`ReplThreadOrderingTestCase`, real `run_repl=True` service,
+    mocked `input()`/`print()`) asserts the literal event order across
+    two turns; confirmed it fails against the pre-fix code (input
+    requested for line 2 before line 1's reply printed) and passes
+    against the fix. Full suite green.
+
+    Live-verified end to end, not just unit-tested: a real `sim.sh`
+    subprocess (Python driver, `stdin=PIPE`, isolated `$HOME`/
+    `SIMORGH_RUNTIME_DATA_DIR` -- learned the hard way earlier this same
+    session not to point a live-tested process at the real one) sent
+    "hello" and got a real, correctly-ordered reply back in 7.8s.
+
+    Honest process note: found because the creator hit it directly and
+    said so plainly ("it is intresting that you claim for past one hour
+    you have been testing sim v2, but you let a very basic cli access
+    be hidden from you") -- fair. The whole preceding trial drove the
+    dashboard's `/api/chat` HTTP endpoint exclusively, because that's
+    the channel scriptable without a live terminal; the actual primary
+    interface (the REPL) was never independently exercised until a real
+    user hit a real wall on it. Two live-trial mishaps compounded the
+    confusion in the moment: a first repro attempt was run against the
+    creator's own live session's shared real Ledger (killed once
+    noticed -- no interference from the fcntl-locked Ledger itself,
+    but real resource contention/noise regardless), and the eventual
+    clean repro needed a fully isolated `$HOME` to get an unambiguous
+    signal.
