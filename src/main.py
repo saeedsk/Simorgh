@@ -31,6 +31,7 @@ from __future__ import annotations
 import difflib
 import importlib
 import os
+import random
 import re
 import subprocess
 import sys
@@ -996,13 +997,33 @@ def _autonomous_action(
             # backlog (creator: "be creative, think big and come up with
             # big ideas"). Same audited propose_self_patch pipeline
             # picks these up next tick either way; only how the task got
-            # onto the backlog differs.
-            provider_sink: dict = {}
-            created = discover_creative_improvements(
-                cognition, task_store, repo_root=repo_root, provider_sink=provider_sink
-            )
-            attempted_creative = provider_sink.get("provider_name") != "deterministic_fallback"
-            label = "self-directed idea(s)"
+            # onto the backlog differs. Rarely (DEFAULT_CREATIVE_PROJECT_CHANCE),
+            # tries a genuinely multi-step PROJECT_TASK instead of the
+            # usual single-file diversified idea -- the harness's own
+            # project tier was otherwise only ever reachable by a human
+            # typing 'project <goal>', never something the autonomous
+            # loop reached for on its own.
+            if random.random() < DEFAULT_CREATIVE_PROJECT_CHANCE:
+                project_sink: dict = {}
+                project = discover_creative_project(
+                    cognition, task_store, repo_root=repo_root, provider_sink=project_sink
+                )
+                created = [project] if project is not None else []
+                label = "self-directed project"
+                attempted_creative = project_sink.get("provider_name") != "deterministic_fallback"
+            if not created:
+                idea_sink: dict = {}
+                created = discover_creative_improvements(
+                    cognition, task_store, repo_root=repo_root, provider_sink=idea_sink
+                )
+                label = "self-directed idea(s)"
+                # OR, not overwrite -- a real provider call already spent
+                # on the project attempt above must still count even if
+                # this fallback pass never gets far enough to call one
+                # itself (e.g. pick_diverse_target finds nothing).
+                attempted_creative = attempted_creative or (
+                    idea_sink.get("provider_name") != "deterministic_fallback"
+                )
         if created:
             print(
                 style(
@@ -2243,6 +2264,82 @@ def _creative_agenda_already_covered(candidate: str, existing_descriptions: list
         >= _CREATIVE_AGENDA_SIMILARITY_THRESHOLD
         for existing in existing_descriptions
     )
+
+
+_PROJECT_AGENDA_PROMPT = """You are Sim, deciding whether now is a good moment
+to start a genuinely ambitious, multi-step self-improvement project --
+not a single small patch, a real initiative worth breaking into several
+coordinated steps (some of which may be research, if the right approach
+isn't obvious yet).
+
+Files that already exist in this codebase (for context; a project step
+can revise one of these or introduce something new):
+{files}
+
+Propose ONE ambitious goal worth this kind of coordinated effort. Respond
+with ONLY one line:
+GOAL :: <one-sentence description of the ambitious goal>
+No other text before or after that line."""
+
+# Deliberately rare relative to a single-target creative-agenda tick:
+# a project reserves the ENTIRE backlog slot for itself until it's done
+# (main.py's _next_task never lets an unrelated task jump ahead of an
+# in-progress project's own children -- see _resolve_project_task), so
+# proposing one too often would crowd out the steady stream of small,
+# fast, diversified single-file ideas discover_creative_improvements
+# already provides. A project is the exception, not the default mode.
+DEFAULT_CREATIVE_PROJECT_CHANCE = 0.2
+_PROJECT_GOAL_LINE = re.compile(r"^\s*GOAL\s*::\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+
+
+def discover_creative_project(
+    cognition: CognitionRouter,
+    task_store: TaskStore,
+    repo_root: Path | None = None,
+    provider_sink: dict | None = None,
+) -> Task | None:
+    """The multi-step complement to discover_creative_improvements' own
+    single-file diversified sampling: occasionally (see
+    DEFAULT_CREATIVE_PROJECT_CHANCE), instead of one narrow "improve this
+    file" question, asks one genuinely open-ended question -- the same
+    framing the old single-call creative-agenda prompt used before it was
+    replaced with per-target sampling -- but for a GOAL, not a file-level
+    idea, and immediately decomposes it (`src/orchestrator/projects.py`'s
+    `decompose_project`) into real, tracked child tasks rather than
+    leaving it as a vague, un-actionable one-liner. This is deliberately
+    the ONE place left in this codebase that still asks a model to pick
+    its own focus without a pre-chosen target -- appropriate here since a
+    project's whole point is spanning more than one diversified-sampling
+    target, not something a single random module pick could represent.
+
+    Returns the created (and already-decomposed) project Task, or None
+    if no real provider answered, the response didn't parse, or
+    decomposition itself produced no real steps. Deterministic-fallback-
+    safe like every other creative/drafting call here.
+    """
+    root = repo_root or Path.cwd()
+    response = cognition.complete(
+        _PROJECT_AGENDA_PROMPT.format(files="\n".join(_list_source_files(root)) or "(none found)")
+    )
+    if provider_sink is not None:
+        provider_sink["provider_name"] = response.provider_name
+    if response.provider_name == "deterministic_fallback":
+        return None
+
+    match = _PROJECT_GOAL_LINE.search(response.text)
+    if match is None:
+        return None
+    goal = match.group(1).strip()
+    if not goal:
+        return None
+
+    project = task_store.add(goal, PROJECT_TASK, discovered_via="creative_agenda")
+    children = decompose_project(cognition, task_store, project, _list_source_files(root))
+    if not children:
+        task_store.update_status(
+            project.id, PENDING, note="decomposition produced no real steps -- will retry"
+        )
+    return project
 
 
 def propose_patch_batch(
