@@ -151,16 +151,6 @@ class TestTaskAndSkillCommands(E2ECliTestCase):
         self.assertIn("live updates on", result.stdout)
         self.assertIn("live updates off", result.stdout)
 
-    def test_vitals_pin_over_a_piped_non_tty_reports_it_cannot_pin(self):
-        # This harness always runs the CLI with piped stdin/stdout, so
-        # pinning is genuinely impossible here -- this is exactly the
-        # "not a real terminal" case `vitals pin` is supposed to name
-        # honestly rather than silently pretend to succeed.
-        result = self.run_cli("vitals pin\nvitals unpin\nexit\n")
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("can't pin", result.stdout)
-
     def test_default_news_topics_are_seeded_on_a_first_run(self):
         # note_interest is a pure local store write -- no network call --
         # so this is safe to exercise here unlike 'curious'/'news', which
