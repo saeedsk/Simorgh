@@ -2509,3 +2509,54 @@ Still ahead, roughly in order:
     replaced by exactly the false timeout message described above)
     before confirming it passes against the fix. 1988 tests passing (1
     new regression test).
+
+108. **Phase 4 begins: the creator chose "proceed" over redirecting the
+    wave plan, and the first of four Wave-1 forks landed.** Unlike Phase
+    1/3's concurrent forks sharing one working tree (which cost this
+    session an unauthorized push and a real module-boundary violation
+    that had to be cleaned up after the fact), all four Wave-1 forks run
+    in isolated git worktrees this time -- each on its own branch, no
+    shared-file collision possible, merged into `main` one at a time as
+    each lands rather than trusting social-convention file ownership
+    inside one tree.
+
+    First to land: the evaluator-optimizer loop (roadmap item 4.3,
+    harness-06 gap #5 -- "Verification is single-pass outcome-only, not
+    iterative or trajectory-aware"). The fork correctly found that the
+    bounded revise-with-feedback loop itself already existed
+    (`SessionRunner._verify_then_finish`, already covered by
+    `test_session_flows.py::TestPatchTaskWithOneRevision`) and did not
+    rebuild it -- exactly the "read what's already there first" framing
+    it was given. What it found instead were two real integration bugs
+    between Orchestration and the *real* Verification service, invisible
+    to every existing test because `FakeVerification` never reproduced
+    either real behavior:
+
+    1. One `verification_id` was minted before the revision loop and
+       reused across every retry. The real service's duplicate-request
+       rule -- `verify:<id>` already has a verdict -> re-emit it, meant
+       for at-least-once redelivery of the *same* request -- treated a
+       revision's new `verify.requested` as a redelivery of the first
+       and replayed the cached failing verdict forever, so a genuinely
+       fixed revision would spin to `max_revisions` and wrongly
+       `task.blocked` no matter how good the fix was.
+    2. `subject_ref` was sent as raw truncated text, not a blob id. The
+       real `VerificationService._resolve_subject` calls
+       `ledger.get_blob(subject_ref)` expecting a JSON
+       `{description, result, ...}` object -- every other producer's
+       shape. Raw text there silently resolved to `subject={}`, so the
+       semantic checklist review ran against nothing and lost its
+       feedback signal entirely.
+
+    Fixed: a fresh `verification_id` per attempt inside the loop, and a
+    new `_put_verify_subject` helper that blobs `{description, result}`
+    via `ledger.put_blob` before each `verify.requested`. The fork
+    verified its own regression test actually catches the bug (stashed
+    the fix, confirmed the test fails/hangs; restored it, confirmed it
+    passes) before reporting back -- the same discipline this session
+    established for every live-caught fix since milestone 104.
+
+    No `simorgh/contracts/` change was needed -- `subject_ref` was
+    already typed as an opaque blob-id string; the bug was purely in
+    what Orchestration put there, not the contract's shape. 1986 tests
+    passing at merge.
