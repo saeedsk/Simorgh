@@ -11,14 +11,47 @@ object store later -- see docs/EVOLUTION.md) without touching callers.
 from __future__ import annotations
 
 import abc
+import hashlib
 import json
+import math
 import os
+import re
 import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+_EMBED_DIM = 256
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> list[str]:
+    return _TOKEN_RE.findall(text.lower())
+
+
+def embed_text(text: str, dim: int = _EMBED_DIM) -> tuple[float, ...]:
+    """Lightweight, dependency-free semantic embedding via the hashing
+    trick: each token is hashed into one of `dim` buckets and accumulated,
+    then the resulting vector is L2-normalized. This is a stdlib-only
+    stand-in for a learned embedding model -- it captures shared
+    vocabulary between texts (so paraphrases with overlapping words score
+    as similar) without any network call or third-party model.
+    """
+    vector = [0.0] * dim
+    for token in _tokenize(text):
+        bucket = int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % dim
+        vector[bucket] += 1.0
+    norm = math.sqrt(sum(component * component for component in vector))
+    if norm == 0.0:
+        return tuple(vector)
+    return tuple(component / norm for component in vector)
+
+
+def cosine_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+    return sum(x * y for x, y in zip(a, b))
 
 
 @dataclass(frozen=True)
@@ -89,6 +122,33 @@ class MemoryStore(abc.ABC):
         record = MemoryRecord.create(kind, content, **metadata)
         self.add(record)
         return record
+
+    def semantic_search(
+        self,
+        query_text: str,
+        kind: str | None = None,
+        limit: int = 10,
+        min_similarity: float = 0.0,
+    ) -> list[MemoryRecord]:
+        """Return records most semantically similar to `query_text`,
+        ranked by cosine similarity of hashing-trick embeddings
+        (see embed_text) rather than recency or exact keyword match --
+        so a query surfaces records that share vocabulary/context even
+        if worded differently, and doesn't just return the newest ones.
+
+        Ties and near-ties fall back to recency: `query()` already
+        returns records newest-first, and Python's sort is stable, so
+        equally-similar records keep that relative order.
+        """
+        query_vector = embed_text(query_text)
+        candidates = self.query(kind=kind)
+        scored = [
+            (record, cosine_similarity(query_vector, embed_text(record.content)))
+            for record in candidates
+        ]
+        scored = [pair for pair in scored if pair[1] >= min_similarity]
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        return [record for record, _ in scored[:limit]]
 
     def _replace(self, record: MemoryRecord) -> None:
         """Durably update an existing record's content in place.
