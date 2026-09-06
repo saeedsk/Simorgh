@@ -39,6 +39,15 @@ takeaway/feedback records above, a delta is built by reading the most
 recent prior delta for the same subject first, so consecutive reflection
 cycles compound on each other's reasoning instead of each one starting
 cold from raw outcomes.
+
+A fourth pass, `ReflectionAgent.diff_self_model()`, steps back from any
+single subject and compares the *whole* current self-model -- durable
+self-knowledge plus self-critique confidence, across every subject --
+against the last stored snapshot of the same, to explicitly surface what
+has changed about Simorgh's own capabilities/behavior since then. Where
+`record_self_critique` diffs one subject's delta against its own prior
+delta, `diff_self_model` diffs the entire accumulated self-model against
+its own prior snapshot -- a step up in scope, not a duplicate of it.
 """
 
 from __future__ import annotations
