@@ -8,8 +8,8 @@
 > document and note it in `00-README.md`'s changelog.
 
 **Layer:** X Cross-cutting
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** built this session — see `simorgh/orchestration/README.md` for scope and gaps
+**Status:** built (v1 slice)
 **Depends on (contracts only):** `task.available`, `task.claim`/`.reply`, `percept.text.received`, `action.result`, `action.denied`, `action.needs_human`, `verify.result`, `system.state.changed`, `system.tick.second`, `cognition.think.reply`, `memory.retrieve.reply`, `self.summary.reply`, `world.env.query.reply`, `persona.voice.reply`, `ui.prompt.answered`
 **v1 code that migrates here:** `src/main.py` (`handle_turn`, `run_task` loop half, `work_on_next_task`, turn/relaunch context handoff), `src/agents/logic/base.py` (`LogicAgent` tool loop, markers, `_FINAL_TURN_HINT`, `_MAX_SKILLS_IN_PROMPT`), `src/orchestrator/research_task.py` (`ResearchAgent` loop), `src/orchestrator/self_patch.py` (the READ/DRAFT loop shape, not the checks), `src/agents/skills/research.py` (loop shape)
 
