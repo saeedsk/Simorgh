@@ -36,6 +36,7 @@ it ahead of the fallback in a CognitionRouter -- see docs/EVOLUTION.md,
 from __future__ import annotations
 
 import abc
+import concurrent.futures
 import enum
 from dataclasses import dataclass, field
 from typing import Any
@@ -89,6 +90,24 @@ class LLMResponse:
     text: str
     provider_name: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EnsembleResponse:
+    """Result of querying multiple providers concurrently for a single
+    high-stakes decision (see CapabilityRegistry.complete_ensemble). `text`
+    /`provider_name` are the reconciled answer a caller can use exactly
+    like an LLMResponse; `responses` and `agreement` are kept alongside it
+    so a caller that cares can inspect what each provider actually said
+    and whether they agreed, rather than only seeing the reconciled
+    outcome.
+    """
+
+    text: str
+    provider_name: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+    responses: tuple[LLMResponse, ...] = field(default_factory=tuple)
+    agreement: bool = True
 
 
 class LLMProvider(abc.ABC):
@@ -340,3 +359,70 @@ class CapabilityRegistry:
                 self._outcome_store.record(provider.name, task_type, success=True)
                 return response
         return self._router.complete(prompt, **kwargs)
+
+    def complete_ensemble(self, task_type: TaskType, prompt: str, **kwargs: Any) -> EnsembleResponse:
+        """Query every available provider that supports `task_type` (e.g.
+        Claude and Gemini both registered for LONG_CONTEXT_REFLECTION)
+        concurrently, via threads, for a single high-stakes decision --
+        instead of trusting whichever one provider `best_for_task` would
+        have picked alone. If every provider's answer agrees, returns that
+        answer. If they disagree, reconciles by empirical confidence (see
+        OutcomeStore): the provider with the strongest track record for
+        this TaskType wins, but the disagreement itself is preserved on
+        the returned EnsembleResponse (`.agreement`, `.responses`) so a
+        caller can escalate, log, or ask a human rather than silently
+        trusting the tiebreak. Falls back to the router's normal
+        starvation-proof `complete()` if no provider currently qualifies
+        or all of them fail.
+        """
+        candidates = [p for p in self.providers_for(task_type.required_capability) if p.available()]
+        if not candidates:
+            response = self._router.complete(prompt, **kwargs)
+            return EnsembleResponse(
+                text=response.text,
+                provider_name=response.provider_name,
+                metadata=response.metadata,
+                responses=(response,),
+                agreement=True,
+            )
+
+        results: list[LLMResponse] = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(candidates)) as executor:
+            future_to_provider = {executor.submit(p.complete, prompt, **kwargs): p for p in candidates}
+            for future in concurrent.futures.as_completed(future_to_provider):
+                provider = future_to_provider[future]
+                try:
+                    results.append(future.result())
+                except ProviderUnavailable:
+                    self._outcome_store.record(provider.name, task_type, success=False)
+
+        if not results:
+            response = self._router.complete(prompt, **kwargs)
+            return EnsembleResponse(
+                text=response.text,
+                provider_name=response.provider_name,
+                metadata=response.metadata,
+                responses=(response,),
+                agreement=True,
+            )
+
+        for result in results:
+            self._outcome_store.record(result.provider_name, task_type, success=True)
+
+        texts = {result.text.strip() for result in results}
+        agreement = len(texts) == 1
+        if agreement:
+            winner = results[0]
+        else:
+            winner = max(results, key=lambda r: self._outcome_store.confidence(r.provider_name, task_type))
+
+        metadata = dict(winner.metadata)
+        metadata["ensemble_agreement"] = agreement
+        metadata["ensemble_providers"] = [result.provider_name for result in results]
+        return EnsembleResponse(
+            text=winner.text,
+            provider_name=winner.provider_name,
+            metadata=metadata,
+            responses=tuple(results),
+            agreement=agreement,
+        )
