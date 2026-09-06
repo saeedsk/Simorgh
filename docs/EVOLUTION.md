@@ -2148,3 +2148,71 @@ Still ahead, roughly in order:
     untouched) rather than restarted, with the test suite -- entirely
     unwritten before the interruption -- as the remaining work. 1188
     tests passing (v1 + contracts + bus + 158 new for the ledger).
+101. **`simorgh/kernel/` built -- the composition root, and Phase 0's
+    last package.** Everything the other three packages built is inert
+    until something boots it in the right order and enforces the safety
+    topology for real: the Kernel loads config (file, env overrides,
+    validated `RuntimeConfig`), builds a layered secret store (a
+    subsystem sees only the secret names its own config section
+    declared, plus -- for `guardian`/`execution` alone -- the per-run
+    HMAC secret an approval token is signed with), runs the state
+    machine (`booting → running ↔ paused → stopping → stopped`, a
+    terminal `failed`, and a `scope="autonomous"` pause that suspends
+    autonomous work without blocking a human still typing -- distinct
+    from a full pause, and both idempotent), drives the Scheduler (three
+    tick loops off one injected `Clock`, and durable `system.schedule.*`
+    timers written to the Ledger before anything is armed, so a second
+    process pointed at the same data directory re-arms every outstanding
+    timer exactly where the first one left off -- the direct fix for a
+    v1 reminder being a bare `threading.Timer` a restart simply forgot),
+    and the Supervisor (every layer boots concurrently and is health-
+    gated before the next one starts, crashed services restart on a
+    backoff table within a 10-minute budget, and a `guardian`/`execution`
+    that exhausts that budget auto-pauses the whole system -- "nothing
+    may execute without the safety path" enforced by wiring a callback,
+    not by a comment asking nicely).
+
+    `--self-check` is the actual point of Phase 0: before any real work
+    is allowed to run, it proves the guarded-action path works end to
+    end over a real Bus and Ledger -- a stub Guardian and Execution
+    speaking the real `contracts.security` token contract, not a mock of
+    it. Four proofs, all passing for the first time: a legitimate
+    proposal is approved with a verifiable token and executed; a forged
+    token is rejected by Execution's own verification before the tool
+    ever runs; a proposal made while paused is denied at the paused
+    layer; and a throwaway source cannot subscribe to `action.proposed`
+    -- the bus's reserved-topology policy, built during the bus package,
+    exercised for real for the first time rather than only unit-tested
+    in isolation. `python -m simorgh --self-check` now exits 0 and
+    prints `OVERALL: PASS`.
+
+    Four integration tests go further than the unit suite could alone:
+    booting two toy subsystems standing in for not-yet-built Phase 1
+    packages through the real layer-ordered, health-gated Supervisor;
+    `system.pause` actually suspending the Scheduler's own idle/sleep
+    tick loops and `system.resume` restoring them, not just flipping a
+    state flag nothing reads; a schedule added before a simulated crash
+    (a clock whose `sleep()` never returns, so the first process
+    provably cannot fire it itself) surviving into a second, independent
+    `Kernel` instance pointed at the same on-disk Ledger and firing
+    there; and a toy `guardian` exhausting its restart budget through
+    the real `Supervisor._restart` accounting -- not the handler called
+    directly -- and auto-pausing the Kernel, while a non-safety-critical
+    subsystem doing the same does not.
+
+    Doc fix while building: `03`'s self-check walkthrough named its
+    second step as a bus publish-policy test; read against the actual
+    `PUBLISH_ONLY_BY` table, the Kernel is itself an allowed publisher of
+    `action.approved`, so publishing a forged one is never a policy
+    violation -- it is a token-verification failure Execution catches
+    downstream. The fourth step (a throwaway source subscribing to
+    `action.proposed`) is the real policy-violation proof; built to
+    match the table, not the earlier prose.
+
+    Phase 0 is now complete: `contracts → bus/ledger → kernel`, all four
+    packages built, tested, and proven to boot together for the first
+    time. Phase 1A/1B/1C (cognition/memory, guardian/execution,
+    worldmodel/persona/interface) can now start in parallel, each
+    against the same frozen contracts catalog and the same Kernel to
+    boot into. 1336 tests passing (v1 + contracts + bus + ledger + 148
+    new for the kernel: 139 unit, 9 integration).
