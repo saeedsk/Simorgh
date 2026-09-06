@@ -220,7 +220,8 @@ class CapabilityRegistry:
         `task_type`, without invoking it -- lets the orchestrator inspect
         which provider would be chosen (e.g. Claude vs. Gemini) before
         committing to a completion, so it can query and switch mid-session
-        based on the kind of work rather than a static provider choice.
+        based on the kind of work rather than a single static provider
+        choice.
         """
         return self.best_for(task_type.required_capability)
 
