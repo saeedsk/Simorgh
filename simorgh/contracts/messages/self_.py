@@ -24,7 +24,11 @@ SelfModelUpdated = define(t.SELF_MODEL_UPDATED, [
     F("reason", Str),
 ])
 SelfObservation = define(t.SELF_OBSERVATION, [
-    F("kind", Enum("restart", "change", "limitation", "success", "failure")),
+    F("kind", Enum("restart", "change", "limitation", "success", "failure", "open_question")),
     F("detail", Str),
     O("ref", Str),
-])
+], doc="`open_question` added alongside Self Model completeness (milestone "
+       "115): the Self Model's own `open_questions` section has no "
+       "producer yet -- nothing publishes this kind -- so it stays empty "
+       "until something does; the enum value exists so a future producer "
+       "doesn't also need a contracts change.")

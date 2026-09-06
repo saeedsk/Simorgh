@@ -2878,3 +2878,69 @@ Still ahead, roughly in order:
     exactly as section 6.2 already says, pending the deliberate
     Guardian-integration design decision recorded there. 2077 tests
     passing at this point in the session.
+
+115. **Wave 2 lands: re-grounding + drift detection, trust posture, and
+    Self Model completeness -- all three built as one combined thread
+    (a single fork, not three parallel ones) specifically because all
+    three touch `simorgh/reflection/`, which would have collided.**
+    Same pattern as every Phase 4 item before it: the session-mechanics
+    existed; the real gap was a specific, narrow wiring failure, found
+    by reading the actual code against the actual spec first.
+
+    **Re-grounding + drift (harness-06 gap #3):** `simorgh/planning/
+    reground.py` was fully written and completely dead -- `needs_check`/
+    `check` were never called from anywhere, `store.record_regrounded`
+    was never invoked, and `reflect.drift.detected` wasn't even in
+    Planning's `consumes` tuple, so a real drift signal from Reflection
+    had nowhere to land. Fixed: every dependent's PENDING -> AVAILABLE
+    transition now routes through a real re-grounding check (stale age,
+    a failed sibling, or a drift flag), a "no" verdict supersedes the
+    child with a replacement task and emits `plan.revised`, and a new
+    handler reacts to `reflect.drift.detected` directly. Two real bugs
+    found and fixed along the way: PENDING has no legal direct
+    transition to FAILED in the state table (routed through BLOCKED
+    instead), and a replacement task's `origin="planner"` isn't in the
+    wire contract's `TASK_ORIGIN` enum (fixed to the enum's actual
+    `"project"`).
+
+    **Trust posture:** only 1 of `09-guardian.md` section 5.3's 4
+    tightening triggers was wired (failure streak). `reflect.drift.
+    detected`, `reflect.health.finding`, and `cognition.provider.status`
+    weren't even in Guardian's `consumes`, and -- a second, independent
+    bug hiding behind the first -- `self._budgets` (which `rules.
+    BudgetRule` reads to deny on real spend pressure) was permanently
+    empty, so `BudgetRule` silently abstained on every single proposal
+    regardless of actual budget state. Fixed: all four triggers wired,
+    plus `system.resume` as the one human-only loosening path section
+    5.3 allows; a new `_fraction_used` helper converts `cognition.
+    provider.status`'s budget object into what `BudgetRule` needs,
+    fixing the dead rule as a direct side effect of wiring the trigger
+    that was supposed to feed it all along.
+
+    **Self Model completeness:** `worldmodel/selfmodel.py`'s own
+    docstring admitted every section but identity was a permanent
+    placeholder "because their real producers... don't exist yet" -- but
+    by this point in the session they do. `Service.consumes` never
+    listened to `learn.competence.updated`, `reflect.calibration.
+    updated`, `self.observation`, `learn.self_patch.applied/reverted`,
+    or `learn.skill.acquired` at all. `SELF.md` was rendered once at
+    boot and never touched again for the rest of a run. Fixed: real
+    mutators for competence/calibration/limitations/change-history/
+    skills/restarts, wired through a new `_apply()` that bumps the
+    Self Model's version, re-renders a real `SELF.md`, and publishes
+    `self.model.updated`; Reflection now also emits `self.observation
+    {kind: limitation}` per mined pattern -- the enum already allowed
+    it, nothing had ever produced it. Left honestly incomplete rather
+    than faked: `open_questions` stays empty, because nothing publishes
+    a wire event carrying one yet -- the fork flagged this instead of
+    inventing a producer, and reported exactly what contracts change
+    would unblock it.
+
+    Applied at integration: `open_question` added as an optional new
+    value to `SelfObservation`'s `kind` enum (`simorgh/contracts/
+    messages/self_.py`, schema regenerated) -- purely additive, so a
+    future producer doesn't also need its own contracts change, but no
+    producer added here; `open_questions` remains genuinely empty until
+    one exists. 2105 tests passing on the fork's own branch before
+    merge; full suite reconfirmed green after the contracts addition at
+    integration.
