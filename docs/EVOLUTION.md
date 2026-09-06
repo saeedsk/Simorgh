@@ -2611,3 +2611,52 @@ Still ahead, roughly in order:
     rather than hanging forever. No `simorgh/contracts/` change needed --
     `task.create.v1.json` already had the `risk` field; the gap was
     entirely in Planning never reading it. 2003 tests passing at merge.
+
+110. **Wave-1's third fork lands: skill acquisition as procedural
+    memory (roadmap item 4.7).** Read-first again: `learn.skill.
+    acquired` and its `PatchPipeline` publish already existed from Phase
+    3, `tool.registered` already anticipated `provider: "skill"`, and
+    Memory's `procedural` kind was already fully generic (store,
+    retrieve, decay, tags) -- just never actually written to for a
+    skill. What was genuinely missing: Execution had no way to *run* a
+    skill at all (`execution/README.md` said so outright) and nothing
+    made a skill discoverable by its own description.
+
+    Built: a `memory.store{kind: procedural}` publish alongside
+    `learn.skill.acquired` so a skill's description becomes a real,
+    retrievable record, not just an event; two new Execution tools --
+    `ApplySkillTool` (writes a skill's source under a scope-checked
+    `simorgh_skills/`) and `SkillTool` (`skill:<name>`, runs the skill's
+    own source in the same sandboxed subprocess `run_python_sandboxed`
+    already uses); and on-demand registration in
+    `simorgh.execution.service`, two ways -- eagerly on `learn.skill.
+    acquired` for a skill acquired in this process, and lazily in `_on_
+    approved` the first time an approved action names an unregistered
+    `skill:<name>`, reconstructing its path from the `skill_dir/<name>.py`
+    convention, covering a skill acquired in a *prior* process. Neither
+    path is a directory scan at boot -- "loaded on demand" means exactly
+    that.
+
+    The fork flagged rather than made one contracts change: `05-memory.
+    md`'s own dependency table already describes `learn.skill.acquired`
+    as producing `{name, description, path, tests}` directly, but the
+    real schema was `{name, path, tests}` -- no `description`. Rather
+    than editing `simorgh/contracts/` itself (every Wave-1 fork was
+    asked not to, to avoid concurrent contract edits across four
+    parallel worktrees), it worked around the gap with the separate
+    `memory.store` publish and reported the exact field to add. Applied
+    here at integration: `description` added as an *optional* `Str`
+    field on `LearnSkillAcquired` (schema regenerated via `python -m
+    simorgh.contracts.schemagen`), and `PatchPipeline`'s publish now
+    sets it -- the event itself is self-describing for a future direct
+    consumer, while the `memory.store` publish remains what actually
+    makes the skill durable and retrievable (an event on the bus is not
+    persisted state).
+
+    New integration test boots a real Kernel with real Guardian +
+    Execution + Memory, proving discoverability-by-description and both
+    the eager and lazy on-demand-loading paths through a real Guardian
+    approval, not a mock. Learning/execution/contracts suites
+    individually reconfirmed first (37, 48, and 77 tests respectively,
+    all passing, 123 schemas back in sync); full suite green at merge,
+    2018 tests.

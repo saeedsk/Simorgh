@@ -2,8 +2,14 @@
   "$id": "https://simorgh.local/schema/learn.skill.acquired.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "Payload of `learn.skill.acquired` (catalog v1).",
+  "description": "05-memory.md's own dependency table describes this as producing a procedural record {name, description, path, tests} directly -- `description` is optional here (a producer built against v1 of this catalog entry still validates) so a consumer can read it straight off this event once a producer sets it, instead of every consumer needing its own paired `memory.store` publish.",
   "properties": {
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "name": {
       "type": "string"
     },

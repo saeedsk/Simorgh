@@ -150,16 +150,19 @@ class PatchPipeline:
                  "patched": verify.get("mechanical", {}).get("patched") or 0}
 
         if self.kind == "skill":
-            await self._publish(topics.LEARN_SKILL_ACQUIRED, {"name": self._skill_name(), "path": self._subject or "", "tests": tests["patched"]})
+            await self._publish(topics.LEARN_SKILL_ACQUIRED, {
+                "name": self._skill_name(), "path": self._subject or "", "tests": tests["patched"],
+                "description": self._description,
+            })
             # Skill acquisition as procedural memory (roadmap 4.7): the
-            # `learn.skill.acquired` event itself carries no description
-            # field (LearnSkillAcquired is `{name, path, tests}` only --
-            # see the package README's open questions), so the
-            # description this pipeline was actually given is stored
-            # straight into Memory's procedural kind instead, over the
-            # already-generic `memory.store` command. This is what makes
-            # the skill discoverable by description later (Execution's
-            # `memory.retrieve{kinds:[procedural]}` lookup on load).
+            # event above now carries `description` too (an optional
+            # field added alongside this fix, milestone 110), but the
+            # durable, retrievable record still has to go through
+            # Memory's own store -- an event on the bus is not persisted
+            # state -- so this direct `memory.store` into the procedural
+            # kind remains what actually makes the skill discoverable by
+            # description later (Execution's `memory.retrieve{kinds:
+            # [procedural]}` lookup on load).
             await self._publish(topics.MEMORY_STORE, {
                 "kind": "procedural", "content": self._description,
                 "tags": ["skill", self._skill_name()], "source_ref": self._subject or "",
