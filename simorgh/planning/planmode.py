@@ -19,6 +19,15 @@ PROPOSED = "proposed"
 AWAITING_HUMAN = "awaiting_human"
 APPROVED = "approved"
 REJECTED = "rejected"
+TIMED_OUT = "timed_out"
+
+# Statuses a plan can no longer leave -- `_on_plan_reviewed` and
+# `_on_prompt_answered` must no-op on a plan already in one of these
+# (spec section 8, "duplicate messages ... a no-op"); without this a
+# human answer that arrives after `human_approval_timeout_seconds` has
+# already paused the task would attempt an illegal PAUSED -> COMPLETED
+# or PAUSED -> FAILED transition and crash the handler.
+RESOLVED_STATUSES = frozenset({APPROVED, REJECTED, TIMED_OUT})
 
 
 @dataclass
@@ -32,6 +41,13 @@ class PlanState:
     revisions: int = 0
     status: str = PROPOSED
     prompt_id: str | None = None
+    # When `status == AWAITING_HUMAN` was entered -- the clock reading
+    # `service.py` compares against `human_approval_timeout_seconds` on
+    # every `system.tick.second` to decide whether the human has gone
+    # unanswered long enough to pause the project task rather than hang
+    # on it forever (see this module's docstring and spec section 5.4's
+    # "timeout -> project task paused with reason").
+    prompt_asked_at: float | None = None
 
 
 def approval_decision(verdict: str, risk: str, auto_approve_max_risk: str) -> str:
@@ -65,4 +81,16 @@ def compute_diff(before: list[Step], after: list[Step]) -> dict:
     return {"added": added, "removed": removed, "reordered": reordered}
 
 
-__all__ = ["APPROVED", "AWAITING_HUMAN", "PROPOSED", "REJECTED", "PlanState", "approval_decision", "compute_diff"]
+def is_human_approval_timed_out(state: PlanState, *, now: float, timeout_seconds: float) -> bool:
+    """True iff `state` is still waiting on a human answer and has been
+    for at least `timeout_seconds` -- pure so the scan in `service.py`
+    (and its tests) don't need a real clock or bus."""
+    if state.status != AWAITING_HUMAN or state.prompt_asked_at is None:
+        return False
+    return (now - state.prompt_asked_at) >= timeout_seconds
+
+
+__all__ = [
+    "APPROVED", "AWAITING_HUMAN", "PROPOSED", "REJECTED", "RESOLVED_STATUSES", "TIMED_OUT",
+    "PlanState", "approval_decision", "compute_diff", "is_human_approval_timed_out",
+]

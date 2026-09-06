@@ -174,9 +174,9 @@ class Service:
         p = message.payload
         result = await self._intake.on_candidate(
             kind=p["kind"], description=p["description"], subject=p.get("subject"), area="",
-            origin=p.get("origin", "human"),
+            origin=p.get("origin", "human"), risk=p.get("risk"),
         ) if p["kind"] != "project" else await self._intake.on_goal_stated(
-            goal=p["description"], origin=p.get("origin", "human"), wants_project=True,
+            goal=p["description"], origin=p.get("origin", "human"), wants_project=True, risk=p.get("risk"),
         )
         if result.task is not None:
             await self._announce_created(result.task)
@@ -347,6 +347,7 @@ class Service:
         if self._scheduler is not None:
             await self._scheduler.scan_leases()
         await self._reconsider_blocked()
+        await self._reconsider_awaiting_human()
 
     async def _reconsider_blocked(self) -> None:
         now = self._ctx.clock.now()
@@ -422,6 +423,17 @@ class Service:
         state = planmode.PlanState(plan_id=plan_id, task_id=task.id, goal=task.description, steps=steps, risk=task.risk)
         self._plans[plan_id] = state
         self._plan_by_task[task.id] = plan_id
+        # The plan-mode Worker's own lease was for exploring, not for the
+        # review-plus-possible-human-decision window that starts now; left
+        # alone it would keep counting down from whenever `task.step` last
+        # refreshed it and could expire mid-review, which flips the
+        # project task straight back to `available` (TaskStore.expire_lease
+        # bypasses the transition table) -- i.e. a second Worker could claim
+        # and re-run plan mode while the first plan is still pending a
+        # decision. Extending it to cover the full approval-timeout budget
+        # keeps the task un-reclaimable for exactly as long as this plan
+        # is genuinely still being decided.
+        await self._store.refresh_lease(task.id, self.config.human_approval_timeout_seconds)
         await self._ctx.bus.publish(Message.new(
             topics.PLAN_PROPOSED, source=self._ctx.source,
             partition_key=f"plan:{plan_id}",
@@ -441,6 +453,8 @@ class Service:
         state = self._plans.get(p["plan_id"])
         if state is None:
             return
+        if state.status in planmode.RESOLVED_STATUSES:
+            return  # duplicate/late `plan.reviewed` for a plan already decided -- a no-op (spec section 8)
         decision = planmode.approval_decision(p["verdict"], state.risk, self.config.auto_approve_max_risk)
         if decision == "reject":
             state.status = planmode.REJECTED
@@ -454,6 +468,7 @@ class Service:
             prompt_id = uuid.uuid4().hex[:12]
             state.prompt_id = prompt_id
             state.status = planmode.AWAITING_HUMAN
+            state.prompt_asked_at = self._ctx.clock.now()
             self._prompt_to_plan[prompt_id] = state.plan_id
             await self._ctx.bus.publish(Message.new(
                 topics.UI_PROMPT, source=self._ctx.source,
@@ -487,11 +502,44 @@ class Service:
         state = self._plans.get(plan_id)
         if state is None:
             return
+        if state.status != planmode.AWAITING_HUMAN:
+            # Either a duplicate answer, or this plan already timed out and
+            # its task was paused (see `_reconsider_awaiting_human`) -- a
+            # late "yes" must not try to approve a paused task (PAUSED has
+            # no legal transition straight to COMPLETED) or re-reject an
+            # already-resolved one.
+            return
         if message.payload["answer"] == "yes":
             await self._approve_plan(state, approved_by="human")
         else:
             state.status = planmode.REJECTED
             await self._store.transition(state.task_id, FAILED, note="plan rejected by human")
+
+    async def _reconsider_awaiting_human(self) -> None:
+        """Spec section 5.4: an unanswered human-approval prompt must not
+        hang the project forever -- past `human_approval_timeout_seconds`
+        the task is paused with a reason instead, closing the same
+        never-hang guarantee Guardian-down/Verification-absent already get
+        (`04-build-plan-and-roadmap.md` section 5, graceful degradation)."""
+        now = self._ctx.clock.now()
+        for state in list(self._plans.values()):
+            if not planmode.is_human_approval_timed_out(
+                state, now=now, timeout_seconds=self.config.human_approval_timeout_seconds
+            ):
+                continue
+            state.status = planmode.TIMED_OUT
+            task = await self._store.get(state.task_id)
+            if task is not None and task.status not in (COMPLETED, FAILED, PAUSED):
+                await self._store.transition(
+                    state.task_id, PAUSED,
+                    note=f"plan {state.plan_id} awaiting human approval timed out after "
+                         f"{self.config.human_approval_timeout_seconds}s",
+                )
+            await self._notice(
+                "warn",
+                f"plan {state.plan_id} timed out waiting for a human approval answer; "
+                f"task {state.task_id} paused",
+            )
 
     async def _approve_plan(self, state: planmode.PlanState, *, approved_by: str) -> None:
         state.status = planmode.APPROVED
