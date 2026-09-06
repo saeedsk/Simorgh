@@ -73,6 +73,30 @@ class TestChatTurnWithOneToolCall(unittest.TestCase):
             await gx.stop()
 
     @run
+    async def test_chat_requests_allow_summarize_but_a_patch_task_does_not(self):
+        """Live-caught (v2 live trial, 2026-09-06): a chat turn whose
+        assembled memory-retrieval block happens to be large could exceed
+        budget even after layers 1-4, because `allow_summarize` -- layer
+        5, 04-cognition.md section 5's own "last resort" -- was never
+        opted into. Scoped to chat only: a patch/skill draft's own code
+        context must never be silently summarized away."""
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": "ok"}])
+            await cognition.start()
+            try:
+                runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+                chat = Session(task_id="c1", kind="chat", mode="execute", profile=profiles.CHAT)
+                await runner.run(chat, user_text="hello")
+                self.assertTrue(cognition.calls[0].payload["allow_summarize"])
+
+                patch = Session(task_id="p1", kind="patch", mode="execute", profile=profiles.PATCH)
+                await runner.run(patch, user_text="fix the thing")
+                self.assertFalse(cognition.calls[1].payload["allow_summarize"])
+            finally:
+                await cognition.stop()
+
+    @run
     async def test_no_cognition_available_degrades_to_the_honest_floor(self):
         async with Harness() as h:
             bus = h.client("orchestration")

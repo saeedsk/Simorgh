@@ -3422,3 +3422,44 @@ Still ahead, roughly in order:
     `context_too_large` error reply. Full suite green (2191 tests).
     Deployed to the live trial process; next occurrence should finally
     show the real code.
+
+123. **Milestone 122's intermittent-floor bug, actually root-caused and
+    fixed** (the visibility fix above worked exactly as intended: the
+    very next occurrence, minutes later, named the real cause instead
+    of vanishing). Real error, live-caught mid-trial:
+
+    ```
+    cognition error: context_too_large -- context still exceeds
+    budget after all compaction layers
+    ```
+
+    Traced the *why* rather than stopping at the *what*:
+    `SessionRunner._think()` (`orchestration/session.py`) never set
+    `allow_summarize` on its `cognition.think` request, so it silently
+    defaulted to `False` (`cognition/service.py`, `payload.get(
+    "allow_summarize", False)`). That means layers 1-4 of Cognition's
+    compaction pipeline (04-cognition.md section 5) were the only ones
+    ever available to an ordinary chat turn -- layer 5 (real model
+    summarization, the explicit "last resort" for exactly this
+    situation) was never opted into, despite already being fully built,
+    wired (`cognition/service.py`'s `Compactor(..., summarize=self.
+    _summarize_for_compaction)`), and tested. Orchestration's own
+    `Assembler._memory_retrieve()` (`orchestration/context.py`) pulls up
+    to 8 items from Memory's episodic/semantic pool per turn with no
+    per-item or aggregate size cap -- ordinarily fine, but this
+    session's real v1 migration (milestone 121) put some genuinely large
+    content into that same pool (full patch source, now blob-referenced
+    but still substantial inline elsewhere), so an unlucky retrieval
+    could produce an elastic "conversation" block too big for layers 1-4
+    alone to shrink under budget -- and with layer 5 never reachable,
+    that was a hard, terminal failure instead of a graceful degrade.
+
+    Fixed with the narrowest correct scope: `_think()` now sends
+    `allow_summarize: is_chat` -- `True` only for `kind="chat"` sessions,
+    still `False` for `patch`/`research`/`plan`/`skill` sessions, since
+    summarizing away a draft's own precise code context could silently
+    corrupt what a real code change needs. 1 new test asserts both sides
+    of that split against a real `FakeCognition`, checking the actual
+    request payload rather than just the outcome. Full suite green.
+    Live-verified: the same rapid-fire probe sequence that reproduced
+    the failure 2-of-6 times before the fix ran clean afterward.
