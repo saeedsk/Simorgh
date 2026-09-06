@@ -7,7 +7,7 @@
 
 **Layer:** 1 Cognitive core
 **Owner (build):** unassigned
-**Status:** draft
+**Status:** built (compaction layers 1-2 only; ensemble/CapabilityRegistry and compaction layers 3-5 are Phase 4, per this doc's own scope notes below)
 **Depends on (contracts only):** consumes `cognition.think`, `cognition.compact.request`, `system.state.changed`, `system.tick.second`; requests `persona.voice`, `self.summary`
 **v1 code that migrates here:** `src/cognition/provider.py`, `budget.py`, `claude_code_provider.py`, `gemini_provider.py`, `tool_protocol.py` (marker/tool-call parsing, `preview`, `ToolCapabilities`, `select_provider`, outcome ledger); prompt blocks `_IDENTITY_PREFIX`, `_CAPABILITY_REFERENCE`, `_TONE_REMINDER`, `_FINAL_TURN_HINT`, `_CONTINUE_HINT` from `src/agents/logic/base.py`; `_PATCH_DRAFT_PROMPT`/`_PATCH_EDIT_PROMPT` shapes and SEARCH/REPLACE parsing from `src/orchestrator/self_patch.py`
 
