@@ -3614,3 +3614,35 @@ Still ahead, roughly in order:
     identical to the one before it -- which is exactly why the second
     and third were mistaken for the first not having actually been
     fixed, when it had been.
+
+127. **First confirmed-working real CLI session, and the very next
+    thing it surfaced.** The creator's transcript after milestone 126:
+    "hello" answered; "vitlas" auto-corrected to `vitals` and rendered a
+    real panel -- the chat path is genuinely fixed end to end. Then they
+    pressed the Up arrow, and `^[[A` landed in the input line as literal
+    text, corrupting what followed. Cause: nothing in v2 ever imported
+    `readline` (explicitly descoped when Interface was first built --
+    "the readline history file... did not land this session"). Without
+    it, `input()` has no line editing or history at all; arrow keys are
+    just raw escape bytes to a cooked-mode tty. Not a hang, not a
+    regression -- a missing feature that only matters once a human is
+    actually typing into this REPL with normal terminal habits, which
+    is precisely the moment it started mattering.
+
+    Fixed the way v1's `main.py` always had it: `import readline` at
+    module level (guarded -- stock Windows CPython lacks it), which alone
+    fixes the garbling, plus history persistence at
+    `<data_dir>/interface/cli_history` (loaded before the first prompt,
+    written on `stop()`, 1000 entries). Both helpers are quiet no-ops
+    before `start()` or on any `OSError`. 2 new tests pin the wiring
+    (import present on this platform; helpers safe with no ctx and with
+    a real data dir) rather than libedit's own behavior, which needs a
+    real tty and differs between macOS's libedit and GNU readline.
+    Live-verified: a real `sim.sh` subprocess still answers "hello" and
+    exits cleanly with readline active; the history file is created.
+    One honest caveat left open: in that piped-stdin run the saved
+    history file was empty -- libedit may not record lines typed via
+    `input()` from a non-main thread the way GNU readline does, or a
+    non-tty stdin may skip history entirely. The garbling fix does not
+    depend on that; persistence across sessions is the part still to
+    confirm against a real terminal.
