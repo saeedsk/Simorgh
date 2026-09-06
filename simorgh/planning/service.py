@@ -60,6 +60,8 @@ class Service:
         topics.UI_PROMPT_ANSWERED,
         topics.RESEARCH_FINDING_RECORDED,
         topics.REFLECT_PATTERNS_FOUND,
+        topics.REFLECT_DRIFT_DETECTED,
+        topics.LEARN_SELF_PATCH_APPLIED,
         topics.SYSTEM_TICK_SECOND,
         topics.SYSTEM_TICK_IDLE,
         topics.SYSTEM_STATE_CHANGED,
@@ -101,6 +103,15 @@ class Service:
         self._prompt_to_plan: dict[str, str] = {}
         self._project_completed_emitted: set[str] = set()
         self._tick_n = 0
+        # Re-grounding (spec section 5.5): per-project flags consulted by
+        # `_maybe_reground_then_available` right before a PENDING child
+        # would otherwise become `available` un-checked.
+        self._project_sibling_failed: dict[str, bool] = {}
+        self._project_drift_flagged: dict[str, str] = {}
+        # `learn.self_patch.applied` subjects, most recent last, bounded --
+        # part of `changes_since` (spec 5.5: "learn.self_patch.applied
+        # subjects touching the child's subject").
+        self._recent_self_patches: list[tuple[str, float]] = []
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -130,6 +141,8 @@ class Service:
             topics.UI_PROMPT_ANSWERED: self._on_prompt_answered,
             topics.RESEARCH_FINDING_RECORDED: self._on_research_finding,
             topics.REFLECT_PATTERNS_FOUND: self._on_patterns_found,
+            topics.REFLECT_DRIFT_DETECTED: self._on_drift_detected,
+            topics.LEARN_SELF_PATCH_APPLIED: self._on_self_patch_applied,
             topics.SYSTEM_TICK_SECOND: self._on_tick_second,
             topics.SYSTEM_TICK_IDLE: self._on_tick_idle,
             topics.SYSTEM_STATE_CHANGED: self._on_state_changed,
@@ -264,6 +277,7 @@ class Service:
         if terminal:
             if task.status != FAILED:
                 await self._store.transition(task_id, FAILED, note=p.get("reason", ""))
+            self._mark_sibling_failure(task)
             await self._propagate_failure(task_id)
             await self._maybe_finish_project(task.parent_id)
             return
@@ -281,6 +295,7 @@ class Service:
             await self._store.transition(
                 task.id, FAILED, note=f"gave up after {task.attempts + 1} attempts: {reason}", attempt=True,
             )
+            self._mark_sibling_failure(task)
             await self._ctx.bus.publish(Message.new(
                 topics.TASK_FAILED, source=self._ctx.source,
                 partition_key=f"task:{task.id}",
@@ -307,7 +322,7 @@ class Service:
                 partition_key=f"task:{dep_id}", payload={"task_id": dep_id, "satisfied_by": task_id},
             ))
             if dependent.status == PENDING and dag.is_ready(dependent, self._store.index.tasks):
-                await self._store.transition(dep_id, AVAILABLE)
+                await self._maybe_reground_then_available(dependent)
 
     async def _propagate_failure(self, task_id: str) -> None:
         for dep_id in dag.dependents_of(task_id, self._store.index.tasks):
@@ -317,6 +332,160 @@ class Service:
             await self._store.record_dependency_event(dep_id, satisfied_by=None, failed_by=task_id)
             if dependent.status != BLOCKED:
                 await self._store.transition(dep_id, BLOCKED, note=f"dependency_failed:{task_id}")
+
+    # -- re-grounding (spec section 5.5) ---------------------------------------------
+
+    def _mark_sibling_failure(self, task: Task) -> None:
+        if task.parent_id is not None:
+            self._project_sibling_failed[task.parent_id] = True
+
+    async def _maybe_reground_then_available(self, task: Task) -> None:
+        """Before making a stale child `available` (spec section 5.5):
+        `reground.needs_check` is true if the child is older than
+        `regrounding_age_seconds`, a sibling has failed terminally since
+        the plan was approved, or (this build's extension of the same
+        knob) Reflection has flagged the project as drifting
+        (`_on_drift_detected`) -- closes harness-06 gap #3, "no drift/
+        re-grounding check across a multi-tick PROJECT_TASK." A clear
+        `no` verdict replaces the child; anything else (yes, or no clear
+        verdict -- a non-answer is never evidence of drift, `01` section
+        4.5) proceeds to `available` exactly as before this check
+        existed."""
+        project_id = task.parent_id
+        if project_id is None:
+            await self._store.transition(task.id, AVAILABLE)
+            return
+        sibling_failed = self.config.reground_after_sibling_failure and (
+            self._project_sibling_failed.get(project_id, False)
+            or project_id in self._project_drift_flagged
+        )
+        if not reground.needs_check(
+            task, now=self._ctx.clock.now(),
+            regrounding_age_seconds=self.config.regrounding_age_seconds,
+            sibling_failed_since=sibling_failed,
+        ):
+            await self._store.transition(task.id, AVAILABLE)
+            return
+        project = await self._store.get(project_id)
+        if project is None or self._cognition is None:
+            await self._store.transition(task.id, AVAILABLE)
+            return
+        still_valid, reason = await reground.check(
+            self._cognition, goal=project.description, child=task,
+            why=self._why_for_child(project_id, task), changes_since=self._changes_since(project_id, task),
+        )
+        await self._store.record_regrounded(task.id, still_valid=still_valid, reason=reason)
+        if still_valid is False:
+            await self._supersede_with_replacement(task, project_id, reason)
+            return
+        await self._store.transition(task.id, AVAILABLE)
+
+    def _why_for_child(self, project_id: str, task: Task) -> str:
+        """The plan-mode Step's recorded `why`, looked up by matching the
+        child's description back to the in-memory `PlanState` (spec 5.1's
+        "record of why each step is there"). `self._plans` is process-
+        lifetime only (see its own field comment); falling back to the
+        task's own `note` is an honest degrade, not a crash, once that
+        state is gone (e.g. after a restart)."""
+        plan_id = self._plan_by_task.get(project_id)
+        state = self._plans.get(plan_id) if plan_id else None
+        if state is not None:
+            for step in state.steps:
+                if step.description == task.description:
+                    return step.why
+        return task.note
+
+    def _changes_since(self, project_id: str, task: Task) -> list[str]:
+        """Spec 5.5's `changes_since`: sibling outcomes plus
+        `learn.self_patch.applied` subjects touching the child's
+        `subject`."""
+        changes: list[str] = []
+        for sibling in self._store.children(project_id):
+            if sibling.id == task.id:
+                continue
+            if sibling.status == FAILED:
+                suffix = f" ({sibling.note})" if sibling.note else ""
+                changes.append(f"sibling step failed: {sibling.description}{suffix}")
+            elif sibling.status == COMPLETED:
+                changes.append(f"sibling step completed: {sibling.description}")
+        if task.subject:
+            for subject, _ts in self._recent_self_patches:
+                if subject and (subject in task.subject or task.subject in subject):
+                    changes.append(f"self-patch applied touching {subject}")
+        return changes
+
+    async def _supersede_with_replacement(self, task: Task, project_id: str, reason: str) -> None:
+        """A `no` re-grounding verdict: the old child is `failed{reason:
+        superseded}`, never mutated, and a replacement child is created
+        in its place (spec 5.5). Known simplification, noted rather than
+        hidden: any *other* task that already depends on `task.id` keeps
+        pointing at the now-failed original rather than being re-pointed
+        at the replacement -- re-wiring the DAG's `depends_on` edges
+        after the fact is a larger change than this pass's scope; such a
+        dependent will see `dependency_failed` and go `blocked`, same as
+        any other upstream failure, rather than silently picking up the
+        revised step."""
+        note = f"superseded by re-grounding: {reason}" if reason else "superseded by re-grounding"
+        # `_maybe_reground_then_available`'s only caller reaches `task`
+        # while it is still PENDING (about to become `available`), and
+        # PENDING has no direct legal transition to FAILED (`model.py`'s
+        # `_TRANSITIONS`) -- only via BLOCKED, the same intermediate step
+        # `_propagate_failure` already uses for a PENDING dependent whose
+        # upstream failed.
+        await self._store.transition(task.id, BLOCKED, note=note)
+        await self._store.transition(task.id, FAILED, note=note)
+        # `origin="project"` -- same as every other plan-approved child
+        # (`_approve_plan`); `model.py`'s `ORIGINS` tuple has a "planner"
+        # value the wire contract's `TASK_ORIGIN` enum (`contracts/
+        # messages/task.py`) does not, so anything that reaches
+        # `task.created` on the bus must stay within the wire enum.
+        replacement = await self._store.create(
+            kind=task.kind, description=reason or task.description, subject=task.subject, origin="project",
+            parent_id=project_id, depends_on=task.depends_on, mode="execute", risk=task.risk,
+            scope=task.scope, initial_status=AVAILABLE,
+        )
+        await self._announce_created(replacement)
+        plan_id = self._plan_by_task.get(project_id, "")
+        await self._ctx.bus.publish(Message.new(
+            topics.PLAN_REVISED, source=self._ctx.source,
+            partition_key=f"plan:{plan_id}" if plan_id else None,
+            payload={
+                "plan_id": plan_id,
+                "reason": reason or f"re-grounding found {task.id} no longer serves the goal",
+                "diff": {"added": [replacement.id], "removed": [task.id], "reordered": []},
+            },
+        ))
+
+    async def _on_drift_detected(self, message: Message) -> None:
+        """Reflection's `reflect.drift.detected`: flags the drifting
+        task's project so its remaining PENDING siblings are re-grounded
+        before they next become available (see `_maybe_reground_then_
+        available`), and records the drift itself as a `plan.revised`
+        with a real reason -- closes harness-06 gap #3, "no drift/
+        re-grounding check across a multi-tick PROJECT_TASK.\""""
+        p = message.payload
+        task_id = p.get("task_id")
+        if not task_id:
+            return
+        task = await self._store.get(task_id)
+        if task is None or task.parent_id is None:
+            return
+        project_id = task.parent_id
+        reason = f"drift detected on {task_id} ({p.get('kind', '')}): {p.get('evidence', '')}"
+        self._project_drift_flagged[project_id] = reason
+        plan_id = self._plan_by_task.get(project_id, "")
+        await self._ctx.bus.publish(Message.new(
+            topics.PLAN_REVISED, source=self._ctx.source,
+            partition_key=f"plan:{plan_id}" if plan_id else None,
+            payload={"plan_id": plan_id, "reason": reason, "diff": {"added": [], "removed": [], "reordered": []}},
+        ))
+
+    async def _on_self_patch_applied(self, message: Message) -> None:
+        subject = message.payload.get("subject")
+        if not subject:
+            return
+        self._recent_self_patches.append((subject, message.ts))
+        self._recent_self_patches = self._recent_self_patches[-50:]
 
     async def _maybe_finish_project(self, project_id: str | None) -> None:
         if project_id is None or project_id in self._project_completed_emitted:
