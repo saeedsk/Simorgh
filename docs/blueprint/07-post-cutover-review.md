@@ -220,6 +220,44 @@ does something real, the banner's "where to start" list is a subset.
 This is a product decision that also removes a class of confusion the
 trial hit: Sim itself recited these 38 names as its "tools" (finding 4).
 
+### 3.9 Visibility while thinking (creator's ask; a stated philosophy)
+Raised during the review from real use: a web-chat request ("create a
+simple web-based maze") showed "thinking" for a long time with no sign
+of what Sim was doing or whether it was doing anything; the dashboard
+"practically didn't give any useful information to understand whether
+the system is working or not." The creator's stated philosophy is
+visibility into Sim's thinking process — and the substrate already has
+it: every turn appends `task.started` → `task.step` (phase, summary,
+ok) → `action.proposed`/`action.result`/`action.denied` →
+`task.completed` to `task:<session_id>` in the Ledger, in real time.
+Nothing surfaces it to the human while it happens. **Decisions:**
+(a) **CLI narration**: while a reply is pending, Interface prints one
+dim line per event for *this* session (`… thinking (step 1, gather)`,
+`… proposing read_file docs/x.md`, `… approved, ran in 0.4 s`,
+`… denied: <reason>`, `… done in 12.3 s`) — Interface already
+subscribes to the bus; this is a subscription on `task.step`/`action.*`
+filtered by the pending session id, no new contracts. (b) **Dashboard
+activity feed**: a "what Sim is doing now / just did" panel — recent
+turns, tasks, steps, actions with timestamps and outcomes, updating
+live — served from the same `task:*`/`activity` streams the read-only
+API already exposes (`/api/logs`), plus a `/api/activity` roll-up that
+merges them newest-first. Gauges stay, but the feed goes first: "is it
+working" is answered by events, not by counters. (c) The same feed is
+what the web chat shows under its "thinking" indicator. Acceptance:
+during a real multi-step turn, the CLI shows ≥ 1 narration line before
+the reply, and the dashboard shows the step within 3 s of the Ledger
+append.
+
+### 3.10 Self Model goals were never fed (fixed during the review)
+Reported live: `propose …` created a real task (`task created:
+baf727f147ed`) and a chat "show your tasks" a moment later answered
+"queue is completely clear." The World Model consumed no `task.*` event
+at all, so `goals.pending_tasks` was a constant 0 — the LLM answered
+truthfully from a line that could never change (`06-worldmodel.md` §5's
+`task.*` → goals row, unwired). Fixed: `update_goals` mutator +
+`task.created/completed/failed/blocked` handlers; `pending_tasks`,
+`active_projects` (kind=project), `recent_focus_areas` now move.
+
 ## 4. The testing-strategy change (the real lesson)
 
 Three gaps let every finding above through a 2,200-test suite:

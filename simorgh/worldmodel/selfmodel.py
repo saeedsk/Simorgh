@@ -203,6 +203,43 @@ def bump_restarts(model: SelfModel, *, restarts: int, updated_at: float) -> Self
     return replace(model, continuity=continuity, updated_at=updated_at)
 
 
+def update_goals(
+    model: SelfModel, *, updated_at: float, task_id: str, kind: str = "", status: str,
+    description: str = "", area: str | None = None,
+) -> SelfModel:
+    """Fold `task.created/completed/failed/blocked` into `goals`
+    (06-worldmodel.md section 5's `task.*` -> goals row). Live-caught
+    (post-cutover review): the World Model never consumed any `task.*`
+    event, so `pending_tasks` was a constant 0 -- asked "show your tasks"
+    in chat right after `propose` had created one, Sim answered from this
+    line and said its queue was empty. `status`: `pending` adds/keeps the
+    task; `completed`/`failed` removes it; `blocked` keeps it (still
+    outstanding). `kind == "project"` tasks are also tracked as active
+    projects while pending. Idempotent: replaying the same event is a
+    no-op that returns `model` unchanged."""
+    goals = dict(model.goals)
+    pending: dict = dict(goals.get("_pending", {}))
+    projects = [p for p in goals.get("active_projects", []) if p.get("project_id") != task_id]
+    was = pending.get(task_id)
+    if status == "completed" or status == "failed":
+        if was is None and len(projects) == len(goals.get("active_projects", [])):
+            return model
+        pending.pop(task_id, None)
+    else:  # pending | blocked -- outstanding either way
+        entry = {"kind": kind or (was or {}).get("kind", ""), "status": status,
+                 "description": description or (was or {}).get("description", "")}
+        if was == entry:
+            return model
+        pending[task_id] = entry
+        if entry["kind"] == "project":
+            projects.append({"project_id": task_id, "goal": entry["description"], "status": status})
+    focus = list(goals.get("recent_focus_areas", []))
+    if area and (not focus or focus[-1] != area):
+        focus = ([*focus, area])[-5:]
+    goals.update(_pending=pending, pending_tasks=len(pending), active_projects=projects, recent_focus_areas=focus)
+    return replace(model, goals=goals, updated_at=updated_at)
+
+
 def render_summary(model: SelfModel, budget_tokens: int) -> tuple[str, int]:
     """Ordered, budget-truncated rendering (spec section 5's priority
     order) -- a `[truncated: ...]` marker is always included when a

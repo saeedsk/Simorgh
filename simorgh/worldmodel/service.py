@@ -26,6 +26,7 @@ from .selfmodel import (
     add_limitation,
     add_skill,
     bump_restarts,
+    update_goals,
     build_static_model,
     compute_gaps,
     mitigate_limitations,
@@ -47,6 +48,7 @@ class Service:
         topics.LEARN_COMPETENCE_UPDATED, topics.REFLECT_CALIBRATION_UPDATED, topics.SELF_OBSERVATION,
         topics.LEARN_SELF_PATCH_APPLIED, topics.LEARN_SELF_PATCH_REVERTED, topics.LEARN_SKILL_ACQUIRED,
         topics.SYSTEM_STARTED,
+        topics.TASK_CREATED, topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
     )
     produces: tuple[str, ...] = (
         topics.WORLD_ENV_QUERY_REPLY, topics.SELF_SUMMARY_REPLY, topics.SELF_GAPS_REPLY,
@@ -97,6 +99,10 @@ class Service:
             await ctx.bus.subscribe(topics.LEARN_SELF_PATCH_REVERTED, self._on_self_patch_reverted),
             await ctx.bus.subscribe(topics.LEARN_SKILL_ACQUIRED, self._on_skill_acquired),
             await ctx.bus.subscribe(topics.SYSTEM_STARTED, self._on_system_started),
+            await ctx.bus.subscribe(topics.TASK_CREATED, self._on_task_created),
+            await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_finished),
+            await ctx.bus.subscribe(topics.TASK_FAILED, self._on_task_finished),
+            await ctx.bus.subscribe(topics.TASK_BLOCKED, self._on_task_blocked),
         ]
         ctx.logger.info("worldmodel.started", areas=len(self._capability_map.areas()))
 
@@ -218,6 +224,36 @@ class Service:
             section="continuity", reason=f"system.started (mode={message.payload.get('mode', '?')})",
         )
 
+    # -- goals: task.* -> goals (06-worldmodel.md section 5) ------------------------------------
+    # Live-caught (post-cutover review): nothing here consumed task events,
+    # so `goals.pending_tasks` was a constant 0 and a chat "show your tasks"
+    # right after `propose` had created one was answered "queue is empty".
+
+    async def _on_task_created(self, message: Message) -> None:
+        p = message.payload
+        await self._apply(
+            lambda m, now: update_goals(
+                m, updated_at=now, task_id=p["task_id"], kind=p.get("kind", ""), status="pending",
+                description=p.get("description", ""), area=_area_of(p.get("subject")),
+            ),
+            section="goals", reason=f"task.created: {p['task_id']}",
+        )
+
+    async def _on_task_finished(self, message: Message) -> None:
+        p = message.payload
+        status = "completed" if message.type == topics.TASK_COMPLETED else "failed"
+        await self._apply(
+            lambda m, now: update_goals(m, updated_at=now, task_id=p["task_id"], status=status),
+            section="goals", reason=f"task.{status}: {p['task_id']}",
+        )
+
+    async def _on_task_blocked(self, message: Message) -> None:
+        p = message.payload
+        await self._apply(
+            lambda m, now: update_goals(m, updated_at=now, task_id=p["task_id"], status="blocked"),
+            section="goals", reason=f"task.blocked: {p['task_id']}",
+        )
+
     # -- helpers --------------------------------------------------------------------------------
 
     async def _apply(self, mutate, *, section: str, reason: str) -> None:
@@ -242,6 +278,18 @@ class Service:
             topics.SELF_MODEL_UPDATED, source=self._ctx.source,
             payload={"version": self._model.version, "changed_sections": [section], "reason": reason},
         ))
+
+
+def _area_of(subject: str | None) -> str | None:
+    """`src/memory/store.py` -> `memory`; `simorgh/cognition/x.py` ->
+    `cognition`; a bare name -> itself; nothing -> None. Feeds
+    `goals.recent_focus_areas` (06-worldmodel.md section 4)."""
+    if not subject:
+        return None
+    parts = [p for p in str(subject).replace("\\", "/").split("/") if p]
+    if len(parts) >= 2 and parts[0] in ("src", "simorgh"):
+        return parts[1]
+    return parts[0] if parts else None
 
 
 __all__ = ["Service", "NAME", "VERSION"]

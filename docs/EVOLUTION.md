@@ -3780,3 +3780,30 @@ Still ahead, roughly in order:
       silhouette still reads in plain block glyphs. The brand SDK's
       compact 8-row mark (`render.logo()`) stays for narrow surfaces.
       3 new render tests. Full suite green (2221 tests).
+
+131. **"Show your tasks" → "queue is completely clear", seconds after
+    `propose` created one.** Reported live by the creator. The typed
+    command created a real task (Planning's `task.create`); the chat
+    question went to the model, whose only grounding is the Self Model's
+    goals line -- and the World Model never consumed any `task.*` event,
+    so `goals.pending_tasks` was a constant 0 (`06-worldmodel.md` §5's
+    `task.*` → goals row, spec'd and unwired, the same family as the
+    review's findings 2/4/5). Fixed: `update_goals` mutator
+    (`selfmodel.py`; pending/blocked keep a task outstanding,
+    completed/failed remove it, `kind=project` also tracks an active
+    project, `recent_focus_areas` from the subject's area; idempotent on
+    replay) and `task.created/completed/failed/blocked` handlers in
+    `worldmodel/service.py` through the same `_apply` path as every other
+    section, so the version bumps and `SELF.md` re-renders. 5 new unit
+    tests. Recorded as `07-post-cutover-review.md` §3.10.
+
+    Also decided from the same session, not yet built (`07` §3.9,
+    roadmap item 18): **visibility while thinking** -- the creator asked
+    Sim's web chat for a small web-based maze, saw "thinking" for a long
+    time with no sign of what it was doing, and found the dashboard
+    useless for "is it working". The Ledger already records every step
+    of the turn in real time; nothing shows it to the human while it
+    happens. Next: the CLI narrates each `task.step`/`action.*` of the
+    pending turn live, and the dashboard gets a live activity feed. That
+    is the next build item, ahead of the rest of Phase 6 -- it is a
+    stated philosophy of the project, not polish.

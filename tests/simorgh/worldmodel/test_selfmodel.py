@@ -21,6 +21,7 @@ from simorgh.worldmodel.selfmodel import (
     mitigate_limitations,
     render_summary,
     update_competence,
+    update_goals,
 )
 
 
@@ -135,6 +136,48 @@ class TestAddChange(unittest.TestCase):
             model = add_change(model, ts=float(i), kind="self_patch", summary=f"change {i}", updated_at=float(i))
         self.assertLessEqual(len(model.change_history), 200)
         self.assertEqual(model.change_history[-1]["summary"], "change 209")
+
+
+class TestUpdateGoals(unittest.TestCase):
+    """Live-caught (post-cutover review): the World Model never consumed
+    `task.*` events, so `goals.pending_tasks` was a constant 0 -- right
+    after `propose` created a real task, a chat "show your tasks" was
+    answered from this line: "queue is completely clear"."""
+
+    def test_created_task_is_counted_as_pending(self):
+        model = update_goals(_model(), updated_at=1.0, task_id="t1", kind="skill", status="pending",
+                             description="outcome feedback skill", area="learning")
+        self.assertEqual(model.goals["pending_tasks"], 1)
+        self.assertEqual(model.goals["recent_focus_areas"], ["learning"])
+        self.assertIn("1 pending task(s)", render_summary(model, budget_tokens=400)[0])
+
+    def test_completed_or_failed_task_leaves_the_pending_count(self):
+        model = update_goals(_model(), updated_at=1.0, task_id="t1", kind="skill", status="pending")
+        model = update_goals(model, updated_at=2.0, task_id="t2", kind="patch", status="pending")
+        model = update_goals(model, updated_at=3.0, task_id="t1", status="completed")
+        self.assertEqual(model.goals["pending_tasks"], 1)
+        model = update_goals(model, updated_at=4.0, task_id="t2", status="failed")
+        self.assertEqual(model.goals["pending_tasks"], 0)
+
+    def test_blocked_task_is_still_outstanding(self):
+        model = update_goals(_model(), updated_at=1.0, task_id="t1", kind="research", status="pending")
+        model = update_goals(model, updated_at=2.0, task_id="t1", status="blocked")
+        self.assertEqual(model.goals["pending_tasks"], 1)
+
+    def test_project_kind_is_also_an_active_project_until_done(self):
+        model = update_goals(_model(), updated_at=1.0, task_id="p1", kind="project", status="pending",
+                             description="make memory self-correcting")
+        self.assertEqual([p["project_id"] for p in model.goals["active_projects"]], ["p1"])
+        self.assertIn("1 active project(s)", render_summary(model, budget_tokens=400)[0])
+        model = update_goals(model, updated_at=2.0, task_id="p1", status="completed")
+        self.assertEqual(model.goals["active_projects"], [])
+
+    def test_replaying_the_same_event_is_a_no_op(self):
+        base = update_goals(_model(), updated_at=1.0, task_id="t1", kind="skill", status="pending", description="x")
+        again = update_goals(base, updated_at=2.0, task_id="t1", kind="skill", status="pending", description="x")
+        self.assertIs(again, base)
+        done = update_goals(base, updated_at=3.0, task_id="t1", status="completed")
+        self.assertIs(update_goals(done, updated_at=4.0, task_id="t1", status="completed"), done)
 
 
 class TestAddSkillAndRestarts(unittest.TestCase):
