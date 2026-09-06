@@ -140,6 +140,48 @@
   .worker-busy { background: rgba(227,179,65,.15); color: var(--accent); }
   .worker-idle { background: rgba(110,118,129,.15); color: var(--neutral); }
   footer { text-align: center; color: var(--text-dim); font-size: 11.5px; padding: 20px 0 40px; }
+
+  #chat-panel { display: flex; flex-direction: column; height: 360px; }
+  #chat-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #chat-log:empty::before {
+    content: "Say something -- this talks to the same running Kernel the panels above are watching.";
+    color: var(--text-dim);
+    font-style: italic;
+  }
+  .chat-msg { max-width: 78%; padding: 8px 12px; border-radius: 10px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  .chat-msg.user { align-self: flex-end; background: rgba(227,179,65,.16); border: 1px solid rgba(227,179,65,.3); }
+  .chat-msg.sim { align-self: flex-start; background: #1c2129; border: 1px solid var(--panel-border); }
+  .chat-msg.sim.floor { color: var(--text-dim); font-style: italic; }
+  .chat-msg.sim.pending { color: var(--text-dim); font-style: italic; }
+  .chat-msg.sim.error { color: var(--down); }
+  #chat-form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--panel-border); }
+  #chat-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 9px 12px;
+    font: inherit;
+  }
+  #chat-input:focus { outline: none; border-color: var(--accent); }
+  #chat-send {
+    background: var(--accent);
+    color: #1a1300;
+    border: none;
+    border-radius: 6px;
+    padding: 0 18px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  #chat-send:disabled { opacity: .5; cursor: default; }
 </style>
 </head>
 <body>
@@ -154,6 +196,16 @@
   </header>
   <div id="conn-banner">Lost contact with the running kernel — retrying…</div>
   <main>
+    <section>
+      <h2>Chat with Sim</h2>
+      <div class="panel" id="chat-panel">
+        <div id="chat-log"></div>
+        <form id="chat-form">
+          <input id="chat-input" type="text" placeholder="Say something to Sim…" autocomplete="off" maxlength="4000">
+          <button id="chat-send" type="submit">Send</button>
+        </form>
+      </div>
+    </section>
     <section>
       <h2>Subsystems</h2>
       <div id="layers"></div>
@@ -376,6 +428,66 @@
     }
   }
 
+  function setupChat() {
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("chat-input");
+    const send = document.getElementById("chat-send");
+    const log = document.getElementById("chat-log");
+
+    function addMessage(role, text, extraClass) {
+      const bubble = el("div", { class: "chat-msg " + role + (extraClass ? " " + extraClass : "") });
+      bubble.textContent = text;
+      log.appendChild(bubble);
+      log.scrollTop = log.scrollHeight;
+      return bubble;
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      input.disabled = true;
+      send.disabled = true;
+
+      addMessage("user", text);
+      const pending = addMessage("sim pending", "thinking…");
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text }),
+        });
+        const data = await res.json();
+        pending.classList.remove("pending");
+        if (!res.ok) {
+          pending.classList.add("error");
+          pending.textContent = data.error || ("request failed (" + res.status + ")");
+        } else if (data.error) {
+          pending.classList.add("error");
+          pending.textContent = data.error;
+        } else if (!data.text) {
+          pending.classList.add("floor");
+          pending.textContent = "(no real answer this turn -- floor reply, try again)";
+        } else {
+          if (data.floor) pending.classList.add("floor");
+          pending.textContent = data.text;
+        }
+      } catch (err) {
+        pending.classList.remove("pending");
+        pending.classList.add("error");
+        pending.textContent = "connection lost -- is Sim still running?";
+      } finally {
+        log.scrollTop = log.scrollHeight;
+        input.disabled = false;
+        send.disabled = false;
+        input.focus();
+      }
+    });
+  }
+
+  setupChat();
   poll();
 })();
 </script>

@@ -91,6 +91,7 @@ class Service:
                 ctx.bus, host=self.config.http_host, port=self.config.http_port,
                 clock=ctx.clock.now if hasattr(ctx.clock, "now") else None,
                 status_timeout_s=self.config.http_status_timeout_s,
+                chat_timeout_s=self.config.http_chat_timeout_s,
             )
             try:
                 await self._http.start()
@@ -168,7 +169,18 @@ class Service:
         }))
         try:
             reply_text = await asyncio.wait_for(fut, timeout=self.config.chat_reply_timeout_s)
-            print(reply_text)
+            if reply_text:
+                print(reply_text)
+            else:
+                # An honest-floor completion (no real provider answered in
+                # time) resolves the future with "", same as a real reply
+                # -- printing nothing here was indistinguishable from a
+                # hung REPL, live-caught by the creator's own first
+                # interactive use (see Worker's own think_timeout_s note,
+                # the actual root cause of the floor this was masking).
+                print(render_mod.notice(
+                    "warn", "(no real answer this turn -- floor reply, try again)", "cognition", enabled=self._color,
+                ))
         except asyncio.TimeoutError:
             print("no response -- the reasoning subsystem isn't built yet this session")
         finally:
