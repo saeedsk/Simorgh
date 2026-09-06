@@ -12,6 +12,7 @@ reground-every-N-steps restatement. See the package README.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 
 from simorgh.contracts import topics
@@ -159,13 +160,21 @@ class SessionRunner:
         return False, f"needs human: {result.payload.get('question', '')}"
 
     async def _verify_then_finish(self, session: Session, text: str, *, floor: bool) -> Outcome:
-        verification_id = uuid.uuid4().hex[:12]
         while True:
+            # A fresh verification_id per attempt (not just per session): a
+            # real Verification service treats a *repeated* id on
+            # `verify:<id>` as a redelivery and replays the recorded verdict
+            # instead of re-running checks (10 section 8, "duplicate
+            # request") -- reusing one id across revisions would silently
+            # replay the first (failing) verdict forever and never see the
+            # revised text (harness-06 gap #5: iterative verification).
+            verification_id = uuid.uuid4().hex[:12]
+            subject_ref = await self._put_verify_subject(session, text)
             msg = Message.new(
                 topics.VERIFY_REQUESTED, source="orchestration",
                 payload={
                     "verification_id": verification_id, "task_id": session.task_id,
-                    "kind": "task", "subject_ref": text[:2000],
+                    "kind": "task", "subject_ref": subject_ref,
                 },
                 partition_key=f"task:{session.task_id}", clock=self._clock,
             )
@@ -193,6 +202,18 @@ class SessionRunner:
                 return Outcome("blocked", reason="no real provider during revision", verification_ref=verification_id)
             text = think_reply.payload.get("text", text)
             session.messages.append({"role": "assistant", "content": text})
+
+    async def _put_verify_subject(self, session: Session, text: str) -> str:
+        """`verify.requested.subject_ref` is a blob ref, not raw text --
+        Verification's `_resolve_subject` reads it with `ledger.get_blob`
+        and expects a JSON object with `description`/`result` (the shape
+        every other producer, e.g. `learning/pipeline.py`'s
+        `candidate_ref`, already sends). Sending truncated raw text there
+        silently resolves to an empty subject and the semantic checklist
+        loses its signal.
+        """
+        payload = json.dumps({"description": session.user_text, "result": text[:2000]}).encode("utf-8")
+        return await self._ledger.put_blob(payload, content_type="application/json")
 
     # -- pause/resume -------------------------------------------------------------------------
 
