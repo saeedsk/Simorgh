@@ -313,7 +313,7 @@ class ToolCapabilities:
     def supports(self, marker: str) -> bool:
         """Case-insensitive membership check, matching how parse_marker
         itself matches markers -- so a caller can gate on `supports("read")`
-        regardless of how the marker's declared casing.
+        regardless of the marker's declared casing.
         """
         return marker.lower() in {m.lower() for m in self.markers}
 
