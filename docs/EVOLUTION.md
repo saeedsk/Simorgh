@@ -2560,3 +2560,54 @@ Still ahead, roughly in order:
     already typed as an opaque blob-id string; the bug was purely in
     what Orchestration put there, not the contract's shape. 1986 tests
     passing at merge.
+
+109. **Wave-1's second fork lands: Plan Mode's human-approval gate,
+    closing harness-06 gap #1.** Same pattern as milestone 108 -- read
+    what's already there before writing anything, and most of it was:
+    Planning's plan-mode session mechanics (`planmode.py`, `service.py`),
+    the risk-routing approval matrix (`planmode.approval_decision`,
+    already exactly "risk >= high -> human, else auto"), Verification's
+    plan review (`plan.proposed -> plan.reviewed`, already wired),
+    Guardian's plan-mode read-only enforcement, and Interface's
+    `ui.prompt` rendering all already existed and worked. The fork
+    touched nothing in `simorgh/guardian/`, `simorgh/interface/`, or
+    `simorgh/verification/` as a result -- there was nothing missing
+    there for this item.
+
+    What was genuinely broken, found by reading `07-planning.md` section
+    5.4 against the actual code rather than trusting that a passing test
+    suite meant the feature worked end to end (the same lesson as every
+    milestone since 104):
+
+    1. **`risk` was unreachable above "medium" through any real
+       message.** `task.create.v1.json` already had an optional `risk`
+       field, but `Intake.on_goal_stated`/`on_candidate` silently
+       dropped it, hardcoding "medium" for every project and "low" for
+       everything else -- so the entire "risk >= high -> human approval"
+       branch was dead code in the *built* system, reachable only by a
+       test that constructed a `Task` directly. Fixed: both intake
+       methods now accept and honor an optional `risk` override, and
+       `service.py`'s `_on_task_create` passes `payload["risk"]` through.
+    2. **No timeout on an unanswered human-approval prompt** -- a
+       project could hang forever waiting for a human who never answers.
+       Added a pure `is_human_approval_timed_out` predicate and a
+       `system.tick.second`-driven check that pauses the project with a
+       reason once `human_approval_timeout_seconds` elapses.
+    3. **A lease-expiry race**: the plan-mode task's short exploration
+       lease could expire mid-review, and `TaskStore.expire_lease` flips
+       status straight to `available` (bypassing the transition table),
+       letting a second Worker reclaim and re-run plan mode mid-decision.
+       Fixed by extending the lease to `human_approval_timeout_seconds`
+       once the plan enters review.
+    4. Guarded `_on_plan_reviewed`/`_on_prompt_answered` so a late human
+       answer arriving after a timeout-driven pause no-ops instead of
+       attempting an illegal `PAUSED -> COMPLETED` transition.
+
+    The new integration test boots a real Kernel with real Planning +
+    Verification and proves, end to end: low-risk auto-approves with no
+    `ui.prompt` ever sent; high-risk creates zero children until a
+    genuine external `ui.prompt.answered` arrives; a human "no" fails
+    the project with no children; an unanswered high-risk prompt pauses
+    rather than hanging forever. No `simorgh/contracts/` change needed --
+    `task.create.v1.json` already had the `risk` field; the gap was
+    entirely in Planning never reading it. 2003 tests passing at merge.
