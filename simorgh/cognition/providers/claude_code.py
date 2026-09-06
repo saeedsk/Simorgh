@@ -97,7 +97,27 @@ class ClaudeCodeProvider:
                     argv,
                     # Do NOT add "--bare": it skips keychain reads, which is
                     # where a normal macOS `claude login` session lives.
+                    #
+                    # stdin=DEVNULL is deliberate, not incidental: the full
+                    # prompt is already on argv (-p) and --disallowedTools
+                    # "*" means nothing here ever needs interactive input,
+                    # so this subprocess has no legitimate reason to read
+                    # stdin at all. Without it, subprocess.run leaves stdin
+                    # inherited from the parent -- when the Kernel itself
+                    # runs interactively (`sim.sh`), that parent stdin IS
+                    # the creator's real terminal. Live-caught: a call that
+                    # times out gets killed (`TimeoutExpired` below), and if
+                    # the `claude` binary had put that shared terminal into
+                    # raw/cbreak mode for its own use, a hard kill skips any
+                    # chance for it to restore that state -- the terminal
+                    # stays broken (Enter shows a literal ^M, no echo, no
+                    # further input works) for the rest of the session, with
+                    # no trace of why in this process's own output. Every
+                    # test that verified the REPL threading fix used a pipe
+                    # for stdin, never a real tty, so none of them could
+                    # have caught this.
                     capture_output=True, text=True, timeout=timeout, env=env, cwd=workdir,
+                    stdin=subprocess.DEVNULL,
                 )
             except subprocess.TimeoutExpired as exc:
                 raise ProviderUnavailable(f"claude CLI timed out after {timeout}s") from exc

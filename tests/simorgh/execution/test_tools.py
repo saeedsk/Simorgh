@@ -5,6 +5,7 @@ never the real project repository."""
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from simorgh.execution.config import Config
@@ -267,6 +268,84 @@ class TestGitRevertTool(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((self.root / "a.txt").exists())
         log = _git(self.root, "log", "-1", "--format=%an <%ae>")
         self.assertEqual(log.stdout.strip(), "Simorgh <simorgh@localhost>")
+
+
+class TestSubprocessesNeverInheritTerminalStdin(unittest.IsolatedAsyncioTestCase):
+    """Live-caught (the creator's own real `sim.sh` use): none of these
+    subprocess.run calls ever need interactive input, but without an
+    explicit `stdin=`, each inherits the parent's own stdin -- the real
+    terminal, when the Kernel runs interactively. A sandboxed run (or a
+    git call) that hits its own `timeout` gets killed; if the killed
+    child had put that shared terminal into raw/cbreak mode, the kill
+    skips its chance to restore it, and the terminal stays broken (Enter
+    shows a literal ^M, no further input works) for the rest of the
+    session -- exactly what got reported, and exactly what a piped-stdin
+    test (every earlier verification of the REPL fix) could never catch.
+    Wraps the real `subprocess.run` rather than faking it, so these stay
+    real end-to-end behavior tests, just with `stdin` observed."""
+
+    def _spy(self):
+        calls = []
+        real_run = subprocess.run
+
+        def _wrapped(*args, **kwargs):
+            calls.append(kwargs)
+            return real_run(*args, **kwargs)
+
+        return calls, _wrapped
+
+    async def test_run_python_sandboxed(self):
+        calls, spy = self._spy()
+        config = Config(repo_root=Path.cwd(), sandbox_timeout_s=5.0)
+        with unittest.mock.patch("simorgh.execution.tools.subprocess.run", side_effect=spy):
+            await RunPythonSandboxedTool(config).run({"code": "print('hi')"}, ctx=_ctx(config))
+        self.assertTrue(calls)
+        for kwargs in calls:
+            self.assertEqual(kwargs.get("stdin"), subprocess.DEVNULL)
+
+    async def test_skill_execution(self):
+        calls, spy = self._spy()
+        config = Config(repo_root=Path.cwd(), sandbox_timeout_s=5.0)
+        tool = SkillTool(config, skill_name="greet", description="greets", source="def run():\n    return 'hi'\n")
+        with unittest.mock.patch("simorgh.execution.tools.subprocess.run", side_effect=spy):
+            await tool.run({}, ctx=_ctx(config))
+        self.assertTrue(calls)
+        for kwargs in calls:
+            self.assertEqual(kwargs.get("stdin"), subprocess.DEVNULL)
+
+    async def test_git_commit(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        _git(root, "init", "-q")
+        _git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-q", "-m", "init")
+        (root / "changed.txt").write_text("v1")
+        config = Config(repo_root=root)
+
+        calls, spy = self._spy()
+        with unittest.mock.patch("simorgh.execution.tools.subprocess.run", side_effect=spy):
+            await GitCommitTool(config).run({"path": "changed.txt", "message": "m"}, ctx=_ctx(config))
+        self.assertTrue(calls)
+        for kwargs in calls:
+            self.assertEqual(kwargs.get("stdin"), subprocess.DEVNULL)
+
+    async def test_git_revert(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        _git(root, "init", "-q")
+        _git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-q", "-m", "init")
+        (root / "a.txt").write_text("v1")
+        _git(root, "add", "a.txt")
+        _git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "add a.txt")
+        config = Config(repo_root=root)
+
+        calls, spy = self._spy()
+        with unittest.mock.patch("simorgh.execution.tools.subprocess.run", side_effect=spy):
+            await GitRevertTool(config).run({}, ctx=_ctx(config))
+        self.assertTrue(calls)
+        for kwargs in calls:
+            self.assertEqual(kwargs.get("stdin"), subprocess.DEVNULL)
 
 
 class TestBuiltinTools(unittest.TestCase):

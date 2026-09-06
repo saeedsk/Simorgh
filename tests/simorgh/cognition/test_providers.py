@@ -31,6 +31,26 @@ class TestClaudeCodeProvider(unittest.IsolatedAsyncioTestCase):
         await provider.complete([{"role": "user", "content": "hello"}], tools=None, max_tokens=100)
         self.assertNotIn("--bare", captured["argv"])
 
+    async def test_never_inherits_the_real_terminal_stdin(self):
+        """Live-caught (the creator's own real `sim.sh` use): the full
+        prompt is already on argv (-p) and --disallowedTools "*" means
+        this subprocess never legitimately needs input -- but without an
+        explicit `stdin=`, it inherits the parent's own stdin, the real
+        terminal when the Kernel runs interactively. A call that times
+        out gets killed; if `claude` had put that shared terminal into
+        raw/cbreak mode, the kill skips its chance to restore it, and the
+        terminal stays broken (a literal ^M on every Enter, no further
+        input works) for the rest of the session."""
+        captured = {}
+
+        def runner(argv, **kwargs):
+            captured["kwargs"] = kwargs
+            return _fake_completed(json.dumps({"result": "hi", "is_error": False}))
+
+        provider = ClaudeCodeProvider(binary="claude", runner=runner)
+        await provider.complete([{"role": "user", "content": "hello"}], tools=None, max_tokens=100)
+        self.assertEqual(captured["kwargs"].get("stdin"), subprocess.DEVNULL)
+
     async def test_strips_credential_env_vars_ranked_above_the_subscription(self):
         captured = {}
 
