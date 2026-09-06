@@ -54,6 +54,30 @@ class TestVerifyTaskCompletion(unittest.TestCase):
 
         self.assertTrue(result.passed)
 
+    def test_a_rambling_answer_that_never_states_a_verdict_defers_to_true(self):
+        # Live-caught: Claude Code CLI narrated instead of answering
+        # ("I'll check the actual file that was modified to verify the
+        # claim.\n\n{}") and wrongly BLOCKed an already-correct,
+        # already-tested, already-committed self-patch. A non-answer must
+        # never be read as a NO.
+        cognition = CognitionRouter(
+            [FakeProvider("I'll check the actual file that was modified to verify the claim.\n\n{}")]
+        )
+
+        result = verify_task_completion(cognition, _task(), "[APPLIED] fixed it")
+
+        self.assertTrue(result.passed)
+        self.assertIn("didn't contain a clear YES/NO verdict", result.explanation)
+
+    def test_a_verdict_that_appears_after_narration_is_still_honored(self):
+        cognition = CognitionRouter(
+            [FakeProvider("Let me think about this.\nNO\nThis is an unrelated change.")]
+        )
+
+        result = verify_task_completion(cognition, _task(), "[APPLIED] unrelated change")
+
+        self.assertFalse(result.passed)
+
     def test_no_real_provider_defers_to_true(self):
         cognition = CognitionRouter()  # deterministic fallback only
 

@@ -1758,3 +1758,39 @@ Still ahead, roughly in order:
     `SIMORGH_CLAUDE_CODE_MAX_CALLS` remains the env-var override for
     anyone who wants a different value without editing source. 820
     tests passing (no test depended on the old default).
+92. **A live-caught false positive in task-completion verification --
+    caught by direct supervision of a restarted, freshly-uncapped
+    session.** The creator asked to kill the running instance and start
+    a fresh one under active supervision (a log tail + Monitor watching
+    for applied changes, rejections, and errors). The very first
+    self-patch it drafted -- a genuinely good one, adding
+    `CapabilityRegistry.complete_ensemble` (`provider.py`) to query
+    Claude and Gemini concurrently on high-stakes decisions and
+    reconcile disagreement -- passed the audit gate and the full
+    isolated test suite (820/820) and got applied and committed cleanly.
+    It was then wrongly sent back to BLOCKED anyway: `verify_task_completion`
+    (`src/orchestrator/verification.py`) asks a second, independent LLM
+    call to answer "YES or NO" as its literal first word, but Claude
+    Code CLI narrated instead ("I'll check the actual file that was
+    modified to verify the claim.\n\n{}") and never actually answered --
+    the old strict `first_line.startswith("YES")` check silently read
+    that non-answer as a NO. The change itself was never in question
+    (it had already cleared two independent, stronger gates); only the
+    quality-review step's own parsing was fragile against a real
+    provider that reasons out loud instead of complying with a strict
+    format -- the same failure shape already fixed twice elsewhere this
+    project (`first_line_argument`, `_FINAL_TURN_HINT`).
+
+    Fixed the same way: scans every line of the response for a
+    standalone YES/NO token instead of demanding it as the literal first
+    line, so a verdict stated after some narration still counts. A
+    response that never states a clear verdict at all now defers to the
+    mechanical gates (`passed=True`) exactly like "no real reviewer
+    available" already did -- a non-answer is evidence the reviewer
+    didn't review, not evidence the change looks wrong. The wrongly-
+    blocked task cost nothing but a wasted retry round (its next
+    reconsideration re-drafted a small, harmless docstring addition
+    referencing the already-good `complete_ensemble` feature) -- this
+    fix is what stops that class of waste from recurring. 822 tests
+    passing (2 new: the exact rambling-non-answer case, and a genuine
+    verdict stated after narration still being honored).
