@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 _CODE_FENCE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL)
@@ -287,3 +288,57 @@ def safe_list_dir(repo_root: Path, raw_path: str) -> str:
             names.append(f"... (truncated at {_MAX_LIST_ENTRIES} entries)")
             break
     return "\n".join(names) if names else "[empty directory]"
+
+
+@dataclass(frozen=True)
+class ToolCapabilities:
+    """What a provider can actually do through this protocol: which
+    markers it supports and the limits that apply to each -- so
+    orchestrator logic can ask "does this provider have LIST?" or "what's
+    its read ceiling?" instead of assuming every provider offers the
+    same fixed marker set at this module's own hardcoded limits.
+
+    The limits default to this module's own constants (`_MAX_READ_CHARS`
+    etc.) so a provider that doesn't customize anything behaves exactly
+    like the pre-negotiation code that assumed those constants applied
+    universally.
+    """
+
+    markers: tuple[str, ...]
+    max_read_chars: int = _MAX_READ_CHARS
+    max_patch_seed_chars: int = _MAX_PATCH_SEED_CHARS
+    max_list_entries: int = _MAX_LIST_ENTRIES
+    max_path_chars: int = _MAX_PATH_CHARS
+
+    def supports(self, marker: str) -> bool:
+        """Case-insensitive membership check, matching how parse_marker
+        itself matches markers -- so a caller can gate on `supports("read")`
+        regardless of how the marker's declared casing.
+        """
+        return marker.lower() in {m.lower() for m in self.markers}
+
+
+_DEFAULT_CAPABILITIES = ToolCapabilities(markers=("read", "list", "run", "draft"))
+
+_provider_capabilities: dict[str, ToolCapabilities] = {}
+
+
+def register_capabilities(provider: str, capabilities: ToolCapabilities) -> None:
+    """Record what `provider` (e.g. "anthropic", "openai") supports, so
+    a later get_capabilities(provider) reflects it. Overwrites any prior
+    registration for the same provider name (case-insensitive) rather
+    than accumulating stale entries across re-registration.
+    """
+    _provider_capabilities[provider.lower()] = capabilities
+
+
+def get_capabilities(provider: str | None) -> ToolCapabilities:
+    """The capabilities registered for `provider`, or the fixed default
+    toolset (every marker this module parses, at this module's own
+    limits) if `provider` is None or was never registered -- so existing
+    callers that don't participate in capability negotiation keep
+    working exactly as before it existed.
+    """
+    if provider is None:
+        return _DEFAULT_CAPABILITIES
+    return _provider_capabilities.get(provider.lower(), _DEFAULT_CAPABILITIES)
