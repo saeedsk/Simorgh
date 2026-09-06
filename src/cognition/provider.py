@@ -105,6 +105,11 @@ class CognitionRouter:
         self._successes: dict[str, int] = {}
         self._failures: dict[str, int] = {}
 
+    @property
+    def providers(self) -> list[LLMProvider]:
+        """Registered providers in priority order (read-only view)."""
+        return list(self._providers)
+
     def complete(self, prompt: str, **kwargs: Any) -> LLMResponse:
         last_error: Exception | None = None
         for provider in self._providers:
@@ -142,3 +147,35 @@ class CognitionRouter:
         of discovering the mismatch after a failed `complete()` call.
         """
         return [p for p in self._providers if p.supports(capability)]
+
+
+class CapabilityRegistry:
+    """Provider-agnostic index over a CognitionRouter's providers, keyed by
+    Capability, so an orchestrator can ask "which backends support tool-use,
+    streaming, or long-context reasoning" without depending on
+    CognitionRouter's internals or provider priority order.
+    """
+
+    def __init__(self, router: CognitionRouter) -> None:
+        self._router = router
+
+    def providers_for(self, capability: Capability) -> list[LLMProvider]:
+        """Providers (in priority order) that support `capability`."""
+        return self._router.providers_with_capability(capability)
+
+    def best_for(self, capability: Capability) -> LLMProvider | None:
+        """Highest-priority available provider that supports `capability`,
+        or None if no registered provider currently supports and is
+        available for it.
+        """
+        for provider in self.providers_for(capability):
+            if provider.available():
+                return provider
+        return None
+
+    def supported_capabilities(self) -> frozenset[Capability]:
+        """Union of all capabilities declared by any registered provider."""
+        caps: set[Capability] = set()
+        for provider in self._router.providers:
+            caps |= provider.capabilities
+        return frozenset(caps)
