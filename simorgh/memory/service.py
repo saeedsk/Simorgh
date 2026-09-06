@@ -19,7 +19,9 @@ DEFAULT_KEEP_PER_KIND = {"episodic": 2_000, "semantic": 2_000, "procedural": 500
 class Service:
     name = "memory"
     version = VERSION
-    consumes: tuple[str, ...] = (topics.MEMORY_RETRIEVE, topics.MEMORY_STORE, topics.SYSTEM_TICK_SLEEP)
+    consumes: tuple[str, ...] = (
+        topics.MEMORY_RETRIEVE, topics.MEMORY_STORE, topics.SYSTEM_TICK_SLEEP, topics.TURN_COMPLETED,
+    )
     produces: tuple[str, ...] = (
         topics.MEMORY_RETRIEVE_REPLY, topics.MEMORY_STORED, topics.MEMORY_CONTRADICTION_FLAGGED,
         topics.MEMORY_CONSOLIDATED, topics.MEMORY_FORGOTTEN,
@@ -35,9 +37,10 @@ class Service:
         self._sub_retrieve = await ctx.bus.subscribe(topics.MEMORY_RETRIEVE, self._on_retrieve)
         self._sub_store = await ctx.bus.subscribe(topics.MEMORY_STORE, self._on_store)
         self._sub_sleep = await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep)
+        self._sub_turn = await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
 
     async def stop(self) -> None:
-        for sub in (self._sub_retrieve, self._sub_store, self._sub_sleep):
+        for sub in (self._sub_retrieve, self._sub_store, self._sub_sleep, self._sub_turn):
             await sub.unsubscribe()
 
     async def health(self) -> Health:
@@ -75,6 +78,28 @@ class Service:
         )
         await self._ctx.bus.publish(Message.new(
             topics.MEMORY_STORED, source=self._ctx.source, payload={"ref": ref, "kind": payload["kind"]},
+        ))
+
+    async def _on_turn_completed(self, message: Message) -> None:
+        """Flow 1's own episodic-write arrow (02 section 5), closing the
+        gap milestone 104 left open: `turn.completed` didn't carry the
+        human's own words until that same milestone added `user_text`
+        (optional, so an older producer still validates) -- with nothing
+        said this turn there is nothing worth remembering, so an empty
+        pair is skipped rather than filling episodic memory with blanks
+        from the honest-floor path (`floor: true`, `text: ""`)."""
+        payload = message.payload
+        user_text = payload.get("user_text", "")
+        reply_text = payload.get("text", "")
+        if not user_text and not reply_text:
+            return
+        content = f"User: {user_text}\nSim: {reply_text}" if user_text else reply_text
+        ref = await self.engine.store(
+            kind="episodic", content=content, tags=[payload.get("session_id", "")],
+            source_ref=payload.get("task_id", ""), confidence=None,
+        )
+        await self._ctx.bus.publish(Message.new(
+            topics.MEMORY_STORED, source=self._ctx.source, payload={"ref": ref, "kind": "episodic"},
         ))
 
     async def _on_sleep(self, message: Message) -> None:

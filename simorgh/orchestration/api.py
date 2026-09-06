@@ -75,6 +75,7 @@ class Session:
     mode: Literal["plan", "execute"]
     profile: Profile
     worker_id: str = ""
+    user_text: str = ""
     depth: int = 0
     parent_id: str | None = None
     steps: list[Step] = field(default_factory=list)
