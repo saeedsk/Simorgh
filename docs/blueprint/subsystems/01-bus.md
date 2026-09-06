@@ -7,8 +7,8 @@
 > contradict them.
 
 **Layer:** 0 Substrate
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** built (2026-09-06)
+**Status:** built
 **Depends on (contracts only):** `contracts.envelope.Message`, `contracts.envelope.validate`, `contracts.topics` (catalog + pattern grammar), `contracts.protocols.Bus/Subscription/Ledger/Clock`
 **v1 code that migrates here:** none directly (v1 had no system bus; `src/memory/shared_bus.py` is a persona-state pub/sub that migrates to `persona`). The trace-writer replaces the durability role of `src/orchestrator/activity_log.py`'s tool-call records.
 
