@@ -1,8 +1,11 @@
 """Guardian configuration (09-guardian.md section 3.5). A subset of the
-spec's full table -- budget/classifier/human-prompt-timeout knobs are
-present but the subsystems they'd talk to (cognition, interface) don't
-exist yet this phase, so those paths degrade to their documented
-defaults (skip, don't block) rather than doing nothing at all.
+spec's full table. `budget_pressure_tighten_at` and `max_consecutive_
+failures` are live as of Phase 4 Wave 2 (`service.py` subscribes to
+`cognition.provider.status`/`reflect.drift.detected`/`reflect.health.
+finding`/`task.*` and feeds `Posture.tighten`); `classifier_enabled`
+and `human_prompt_timeout_s` still degrade to their documented defaults
+(skip, don't block) since Interface's `ui.prompt` round-trip and a real
+classifier subsystem don't exist yet this phase.
 """
 
 from __future__ import annotations

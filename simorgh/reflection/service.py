@@ -297,6 +297,13 @@ class Service:
                 "window": self.config.pattern_window_seconds,
                 "patterns": [{"kind": p.kind, "rate": p.rate, "proposal": p.proposal} for p in patterns],
             })
+            # 06-worldmodel.md section 5's ingestion table: a mined pattern
+            # is also a `self.observation{kind:limitation}` -- the only
+            # wire path a real limitation can reach the Self Model by
+            # today (World Model fuzzy-dedupes on ingest, so a pattern
+            # re-mined next window is a no-op there, not a duplicate).
+            for pattern in patterns:
+                await self._publish(message, topics.SELF_OBSERVATION, {"kind": "limitation", "detail": pattern.proposal})
         for task_type in self._calibration.task_types():
             summary = self._calibration.summary(task_type)
             if summary is None:

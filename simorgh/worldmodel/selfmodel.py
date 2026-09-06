@@ -1,21 +1,34 @@
-"""The Self Model -- **static this session** by explicit scope decision
-(see the build directive and spec section 12): identity is real, loaded
-and hashed from `docs/SOUL.md`; every other section (competence,
-limitations, change_history, goals, continuity, open_questions) is an
-honest, clearly-marked-empty placeholder, because their real producers
-(Learning, Reflection, Planning) don't exist yet. The full event-sourced
-`SelfModelProjection` -- folding `self:model` from `learn.*`/`reflect.*`/
-`task.*` events -- is Phase 3 work (docs/blueprint/subsystems/06-worldmodel.md
-section 5's ingestion-rules table). What's built now is the real,
-final shape (schema, `self.summary`/`self.gaps` request/reply, the
-`SELF.md` render) so Phase 3 only has to feed it, never redesign it.
+"""The Self Model. Identity is real, loaded and hashed from
+`docs/SOUL.md`. As of Phase 4 Wave 2 the other sections (competence,
+limitations, change_history, capabilities.skills, continuity) are real
+too, folded live from `learn.competence.updated`, `reflect.calibration.
+updated`, `self.observation{kind:limitation}`, `learn.self_patch.
+applied/reverted`, `learn.skill.acquired`, and `system.started` (see
+`service.py`'s handlers and `docs/blueprint/subsystems/06-worldmodel.md`
+section 5's ingestion-rules table). `open_questions` remains an honest,
+clearly-marked-empty placeholder: no subsystem publishes a wire event
+carrying one today (Reflection's critique step computes them, spec
+section 5.3 of `12-reflection.md`, but only records them to the Ledger
+and `memory.store` -- there is no message type a producer could put
+them on without a contracts change; see this package's README for the
+one-line addition that would close it).
+
+Simplification, honestly noted rather than hidden: mutations here are
+in-memory only for this session, not yet a fold of a durable `self:model`
+Ledger stream across restarts (spec section 4's "the Self Model is
+exactly the fold of this stream"). Every mutator below is a pure
+function of `(SelfModel, event fields) -> SelfModel`, so wiring a real
+replay-on-boot later is additive, not a redesign -- the same trade this
+module's previous build session made for the sections it left as
+placeholders entirely.
 """
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 _DIRECTIVES = (
@@ -90,6 +103,106 @@ def build_static_model(*, soul_path: Path, clock_now: float, areas: list[str], c
     )
 
 
+_LIMITATION_DEDUPE_THRESHOLD = 0.6
+_MAX_CHANGE_HISTORY = 200  # rendered/summarized down to the last few; see render_*
+
+
+def update_competence(
+    model: SelfModel, task_type: str, *, updated_at: float, success_rate: float | None = None,
+    samples: int | None = None, calibration: float | None = None,
+    stated_confidence: float | None = None, empirical_accuracy: float | None = None,
+) -> SelfModel:
+    """Folds `learn.competence.updated` and `reflect.calibration.updated`
+    into `competence[task_type]` -- either producer may arrive first or
+    alone, so this only ever sets the fields it was given (06-worldmodel.md
+    section 5's ingestion table, two separate rows feeding one section)."""
+    table = dict(model.competence)
+    entry = dict(table.get(task_type, {}))
+    if success_rate is not None:
+        entry["success_rate"] = success_rate
+    if samples is not None:
+        entry["samples"] = samples
+    if calibration is not None:
+        entry["calibration"] = calibration
+    if stated_confidence is not None:
+        entry["stated_confidence"] = stated_confidence
+    if empirical_accuracy is not None:
+        entry["empirical_accuracy"] = empirical_accuracy
+    stated = entry.get("stated_confidence")
+    empirical = entry.get("empirical_accuracy")
+    if isinstance(stated, (int, float)) and isinstance(empirical, (int, float)):
+        entry["overconfident"] = (stated - empirical) > 0.1
+    table[task_type] = entry
+    return replace(model, competence=table, updated_at=updated_at)
+
+
+def add_limitation(model: SelfModel, *, text: str, evidence: list[str], since: float, updated_at: float) -> SelfModel:
+    """Add-or-update by fuzzy match (06-worldmodel.md section 5: "difflib
+    >= 0.6 -- never duplicate"). A near-match refreshes evidence/`since`
+    on the existing entry instead of appending a near-identical one."""
+    for i, lim in enumerate(model.limitations):
+        if difflib.SequenceMatcher(None, lim["text"], text).ratio() >= _LIMITATION_DEDUPE_THRESHOLD:
+            merged = {**lim, "evidence": sorted(set(lim.get("evidence", [])) | set(evidence))}
+            limitations = list(model.limitations)
+            limitations[i] = merged
+            return replace(model, limitations=limitations, updated_at=updated_at)
+    entry = {
+        "id": f"lim-{len(model.limitations) + 1}", "text": text, "evidence": list(evidence),
+        "since": since, "status": "open",
+    }
+    return replace(model, limitations=[*model.limitations, entry], updated_at=updated_at)
+
+
+def mitigate_limitations(model: SelfModel, *, subject: str, updated_at: float) -> SelfModel:
+    """`learn.self_patch.applied` names a `subject`; any open limitation
+    whose text mentions it is marked mitigated (section 5's ingestion
+    rule for that event)."""
+    if not subject:
+        return model
+    changed = False
+    limitations = []
+    for lim in model.limitations:
+        if lim.get("status") == "open" and subject in lim["text"]:
+            lim = {**lim, "status": "mitigated"}
+            changed = True
+        limitations.append(lim)
+    return replace(model, limitations=limitations, updated_at=updated_at) if changed else model
+
+
+def add_change(
+    model: SelfModel, *, ts: float, kind: str, summary: str, updated_at: float,
+    subject: str | None = None, commit: str | None = None, tests: dict | None = None,
+) -> SelfModel:
+    """Append one `change_history` entry (bounded; see `_MAX_CHANGE_HISTORY`
+    -- section 5: "append (bounded 500; older summarized into a count)").
+    This session bounds at a smaller number since nothing yet folds a
+    durable stream on restart, so "500" would just mean "never trims
+    within one run"."""
+    entry: dict = {"ts": ts, "kind": kind, "summary": summary}
+    if subject is not None:
+        entry["subject"] = subject
+    if commit is not None:
+        entry["commit"] = commit
+    if tests is not None:
+        entry["tests"] = tests
+    history = [*model.change_history, entry][-_MAX_CHANGE_HISTORY:]
+    return replace(model, change_history=history, updated_at=updated_at)
+
+
+def add_skill(model: SelfModel, *, name: str, tests: int, updated_at: float) -> SelfModel:
+    caps = dict(model.capabilities)
+    skills = [s for s in caps.get("skills", []) if s.get("name") != name]
+    skills.append({"name": name, "tests": tests})
+    caps["skills"] = skills
+    return replace(model, capabilities=caps, updated_at=updated_at)
+
+
+def bump_restarts(model: SelfModel, *, restarts: int, updated_at: float) -> SelfModel:
+    continuity = dict(model.continuity)
+    continuity["restarts"] = restarts
+    return replace(model, continuity=continuity, updated_at=updated_at)
+
+
 def render_summary(model: SelfModel, budget_tokens: int) -> tuple[str, int]:
     """Ordered, budget-truncated rendering (spec section 5's priority
     order) -- a `[truncated: ...]` marker is always included when a
@@ -122,23 +235,25 @@ def _render_section(model: SelfModel, section: str) -> str | None:
         return f"I am {model.identity.name}. {model.identity.summary}".strip()
     if section == "competence":
         if not model.competence:
-            return "Competence: not yet tracked (Learning/Reflection not built this phase)."
+            return "Competence: not yet tracked (no learn.competence.updated seen this session)."
         rows = sorted(model.competence.items(), key=lambda kv: kv[1].get("samples", 0), reverse=True)[:5]
-        return "Competence: " + "; ".join(f"{k} {v.get('success_rate', 0):.0%} ({v.get('samples', 0)})" for k, v in rows)
+        return "Competence: " + "; ".join(_competence_row(k, v) for k, v in rows)
     if section == "limitations":
         if not model.limitations:
             return None
-        return "Known limitations: " + "; ".join(m["text"] for m in model.limitations[:3])
+        return "Known limitations: " + "; ".join(f"{m['text']} ({m['status']})" for m in model.limitations[:3])
     if section == "goals":
         active = model.goals.get("active_projects", [])
         return f"Working on: {len(active)} active project(s), {model.goals.get('pending_tasks', 0)} pending task(s)."
     if section == "capabilities":
         areas = model.capabilities.get("areas", [])
-        return f"My own code areas: {', '.join(areas) if areas else '(unknown)'}."
+        skills = model.capabilities.get("skills", [])
+        skill_note = f" Skills: {len(skills)} acquired." if skills else ""
+        return f"My own code areas: {', '.join(areas) if areas else '(unknown)'}.{skill_note}"
     if section == "change_history":
         if not model.change_history:
             return None
-        return f"Recently changed: {len(model.change_history)} entries."
+        return f"Recently changed: {len(model.change_history)} entries (latest: {model.change_history[-1]['summary']})."
     if section == "continuity":
         return f"Continuity: {model.continuity.get('restarts', 0)} restart(s) recorded."
     if section == "open_questions":
@@ -146,6 +261,22 @@ def _render_section(model: SelfModel, section: str) -> str | None:
             return None
         return "Open questions about myself: " + "; ".join(q["text"] for q in model.open_questions[:3])
     return None
+
+
+def _competence_row(task_type: str, entry: dict) -> str:
+    row = f"{task_type} {entry.get('success_rate', 0):.0%} ({entry.get('samples', 0)})"
+    stated, empirical = entry.get("stated_confidence"), entry.get("empirical_accuracy")
+    if isinstance(stated, (int, float)) and isinstance(empirical, (int, float)):
+        flag = " overconfident" if entry.get("overconfident") else ""
+        row += f" [stated {stated:.0%} -> empirical {empirical:.0%}{flag}]"
+    return row
+
+
+def _render_change(c: dict) -> str:
+    ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(c["ts"]))
+    subject = f" {c['subject']}" if c.get("subject") else ""
+    commit = f" ({c['commit']})" if c.get("commit") else ""
+    return f"- {ts} {c['kind']}{subject}{commit} -- {c['summary']}"
 
 
 def render_full_markdown(model: SelfModel) -> str:
@@ -163,13 +294,17 @@ def render_full_markdown(model: SelfModel) -> str:
         f"Areas of my own code: {areas}.",
         "",
         "## How well I do it",
-        "Not yet tracked -- Learning/Reflection are not built this phase." if not model.competence else str(model.competence),
+        "Not yet tracked -- no learn.competence.updated seen this session." if not model.competence
+        else "\n".join(f"- {_competence_row(k, v)}" for k, v in sorted(
+            model.competence.items(), key=lambda kv: kv[1].get("samples", 0), reverse=True,
+        )),
         "",
         "## What I know I'm bad at",
-        "(none recorded yet)" if not model.limitations else "\n".join(f"- {m['text']}" for m in model.limitations),
+        "(none recorded yet)" if not model.limitations
+        else "\n".join(f"- {m['id']} ({m['status']}): {m['text']}" for m in model.limitations),
         "",
-        "## What I've changed about myself",
-        "(none recorded yet)" if not model.change_history else "\n".join(str(c) for c in model.change_history[:10]),
+        "## What I've changed about myself (last 10)",
+        "(none recorded yet)" if not model.change_history else "\n".join(_render_change(c) for c in model.change_history[-10:][::-1]),
         "",
         "## What I'm working on",
         f"Pending tasks: {d['goals']['pending_tasks']}. Recent focus: {', '.join(d['goals']['recent_focus_areas']) or '(none)'}.",
