@@ -107,6 +107,25 @@ class TestTaskStore(unittest.TestCase):
 
         self.assertEqual(store.get(task.id).discovered_via, "scan")
 
+    def test_children_returns_only_tasks_with_that_parent_id(self):
+        store = TaskStore(InMemoryStore())
+        parent = store.add("big goal", SKILL_TASK)
+        other_parent = store.add("unrelated goal", SKILL_TASK)
+        child_a = store.add("step a", SKILL_TASK, parent_id=parent.id)
+        child_b = store.add("step b", SKILL_TASK, parent_id=parent.id)
+        store.add("someone else's step", SKILL_TASK, parent_id=other_parent.id)
+        store.add("no parent at all", SKILL_TASK)
+
+        children = store.children(parent.id)
+
+        self.assertEqual([t.id for t in children], [child_a.id, child_b.id])
+
+    def test_children_of_a_childless_task_is_empty(self):
+        store = TaskStore(InMemoryStore())
+        task = store.add("lonely task", SKILL_TASK)
+
+        self.assertEqual(store.children(task.id), [])
+
 
 if __name__ == "__main__":
     unittest.main()

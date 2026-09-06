@@ -1843,3 +1843,89 @@ Still ahead, roughly in order:
     on`/`off` for a periodic scrolling reprint. See milestone 89's entry
     above (rewritten in place to tell the full built-then-reverted arc
     rather than presenting the reverted version as still current).
+95. **A real work harness -- Task/Research/Project -- researched before
+    building, plus the fix for the "capability negotiation" repetition
+    problem milestone 92/93's supervision session watched happen live.**
+    The creator asked directly for "the right methodology and framework
+    to tackle handling task, research, projects," then explicitly asked
+    for research first: how a well-structured agent harness works in
+    general, and specifically how Claude Code's own harness handles
+    large projects. Researched via WebSearch/WebFetch against Anthropic's
+    own engineering writing and Claude Code's own docs before writing any
+    code -- see Sources below.
+
+    Two concrete mechanisms carried directly into this build:
+    - **Subagents work in their own context window; only a summary comes
+      back.** ("How Claude Code works" docs: "A subagent starts fresh...
+      the subagent's tool calls stay out of your context, and Claude
+      gets back a summary when the subagent finishes.") `RESEARCH_TASK`
+      (`src/orchestrator/research_task.py`, new) is that shape for Sim: a
+      bounded READ/LIST tool loop (`ResearchAgent`, reusing the exact
+      `parse_marker`/`safe_read_file`/`safe_list_dir` machinery
+      `SelfPatchAgent`/`SkillResearchAgent` already share) that can
+      actually open real files to check "does this already exist" before
+      concluding, producing a written finding (`kind=research_finding`
+      on the shared `MemoryStore`) instead of code. Deliberately never
+      given DRAFT/RUN/WRITE -- never touches `AuditGate`, the sandbox, or
+      the isolated test suite, because it never writes to `src/` itself.
+      A finding that concludes something concrete and well-scoped ends
+      with `FOLLOW-UP: <path> :: <description>`, spawning a real child
+      `PATCH_TASK` (filtered against `PROTECTED_SUBJECTS`, same
+      unfixable-target guard creative-agenda already has).
+    - **`PROJECT_TASK`**: a goal decomposed into ordered child tasks
+      (patch and/or research), reusing `Task`'s own long-unused
+      `parent_id` field rather than a new persistence layer --
+      `src/orchestrator/projects.py`'s `decompose_project()` is one LLM
+      call turning a goal into real children; `project_status()` is a
+      *pure function* of the children's current statuses, never
+      persisted as independent state, so it can never drift out of sync
+      with what actually happened to them. `main.py`'s `_next_task()`
+      now never hands a `PROJECT_TASK` with children straight to a
+      caller -- it resolves to the project's next unfinished child (or
+      the project itself, if not yet decomposed), and a stuck project
+      (every child terminal, nothing pickable) is skipped in favor of
+      the next ordered item rather than stalling the whole queue behind
+      it. `research <topic>`/`project <goal>`: the immediate-execution
+      CLI counterparts to `propose`/`patch`, same "create a real,
+      durable Task and run it right now" shape.
+
+    **The repetition fix, diagnosed by the creator mid-session while
+    directly watching it happen:** live supervision (milestone 92) had
+    just surfaced that an evening of creative-agenda runs produced 10+
+    near-duplicate "capability negotiation" ideas across two files --
+    milestone 92's fuzzy-dedup fix stops an *exact* repeat, but a model
+    given one open-ended "think ambitiously about your whole
+    architecture" prompt kept clustering on the same neighborhood of
+    genuinely-differently-worded ideas regardless. The creator's own
+    diagnosis and proposed fix, given directly mid-session: translate
+    the goal into a hierarchy of required capabilities, then sample
+    across the *leaves* of that hierarchy rather than letting the model
+    pick its own focus every time. Implemented as
+    `src/orchestrator/capability_map.py`: level 1 is each top-level
+    `src/` subdirectory, level 2 is the real `.py` modules inside it --
+    both pure filesystem listings, not LLM-generated, so they're free
+    and can never hallucinate a target or drift from the real tree.
+    Level 3 (the actual idea) is the only LLM call, and it's made
+    *after* `pick_diverse_target()` has already chosen the target by
+    structured random sampling (weighted away from areas the backlog
+    already covers) -- `discover_creative_improvements` (`main.py`) now
+    asks a narrow "propose one improvement for THIS file" question
+    `count` times instead of one open-ended "propose N ideas anywhere"
+    question. The model's own response is never trusted to restate the
+    target path, even if it tries -- `_parse_targeted_idea` only ever
+    extracts `PATCH`/`RESEARCH` + a description, so a model that ignores
+    "don't second-guess the target" can't quietly defeat the whole
+    mechanism by picking its own file anyway. Fuzzy dedup
+    (`_creative_agenda_already_covered`) stays as a second, independent
+    line of defense for the cases diversified sampling alone doesn't
+    cover.
+
+    882 tests passing (55 new: `capability_map.py`'s pure sampling
+    functions, `projects.py`'s decomposition/rollup, `research_task.py`'s
+    tool loop, `run_task`/`_next_task`'s project-unwrapping and rollup
+    hooks, `research`/`project` CLI commands, and the rebuilt
+    `discover_creative_improvements` test suite).
+
+    Sources (researched live via WebSearch/WebFetch before writing any
+    code): [Building Effective AI Agents (Anthropic)](https://www.anthropic.com/engineering/building-effective-agents),
+    [How Claude Code works (Claude Code docs)](https://code.claude.com/docs/en/how-claude-code-works).

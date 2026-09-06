@@ -34,6 +34,19 @@ TERMINAL_STATUSES = frozenset({DONE, FAILED})
 # a persisted record never breaks if this vocabulary grows.
 SKILL_TASK = "skill"
 PATCH_TASK = "patch"
+# An open investigation: produces a written finding (src/orchestrator/
+# research_task.py) instead of a code change, and may spawn a follow-up
+# PATCH_TASK (linked via parent_id) if it concludes something concrete is
+# worth building. The answer to "jump straight to drafting code" being
+# the only way an idea could be pursued -- some ideas are worth looking
+# into before committing drafting cycles to them.
+RESEARCH_TASK = "research"
+# A goal decomposed into an ordered set of child tasks (patch and/or
+# research), linked via parent_id -- see src/orchestrator/projects.py.
+# A project is never itself run through propose_self_patch/propose_skill
+# (it has no `subject`); working one means working its next unfinished
+# child.
+PROJECT_TASK = "project"
 
 
 @dataclass(frozen=True)
@@ -128,6 +141,13 @@ class TaskStore:
         that was never started.
         """
         return [t for t in self.all() if t.status not in TERMINAL_STATUSES]
+
+    def children(self, parent_id: str) -> list[Task]:
+        """Every task created with `parent_id` set to this one, in
+        creation order -- a project's own child tasks (see
+        src/orchestrator/projects.py), or a research task's follow-up.
+        """
+        return [t for t in self.all() if t.parent_id == parent_id]
 
 
 def _fold(task_id: str, events: list) -> Task:
