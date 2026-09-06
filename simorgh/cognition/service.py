@@ -51,7 +51,7 @@ class Service:
     produces: tuple[str, ...] = (
         topics.COGNITION_THINK_REPLY, topics.COGNITION_COMPACT_REPLY,
         topics.COGNITION_COMPACT_PRE, topics.COGNITION_COMPACT_DONE,
-        topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_HEALTH,
+        topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_HEALTH, topics.SYSTEM_METRICS,
     )
 
     def __init__(self, *, config: Config | None = None, providers: list | None = None) -> None:
@@ -242,7 +242,8 @@ class Service:
         self._tick_seconds += 1
         if self._tick_seconds % 30 != 0:  # 03 section 4.1: refresh every ~30s, not every second tick
             return
-        for status in [await b.status() for b in self._budgets.values()]:
+        statuses = [await b.status() for b in self._budgets.values()]
+        for status in statuses:
             await self._ctx.bus.publish(Message.new(
                 topics.COGNITION_PROVIDER_STATUS, source=self._ctx.source, payload={
                     "provider": status.provider, "available": not status.exhausted,
@@ -253,6 +254,26 @@ class Service:
                     },
                 },
             ))
+        # A dashboard's "LLM usage" view (02-system-architecture.md
+        # section 6.2's own creator-flagged item): the same rolling-
+        # window status each `cognition.provider.status` event above
+        # just carried, also folded into `system.metrics` so it reaches
+        # `system.status.request`'s single aggregated snapshot the way
+        # every other subsystem's own gauges already do -- no new topic,
+        # `gauges` already permits a structured value (milestone 112).
+        await self._ctx.bus.publish(Message.new(
+            topics.SYSTEM_METRICS, source=self._ctx.source, payload={
+                "subsystem": "cognition", "counters": {},
+                "gauges": {"providers": [
+                    {
+                        "name": s.provider, "calls": s.calls_in_window, "max_calls": s.max_calls,
+                        "spend_usd": round(s.spend_usd, 4), "max_spend_usd": s.max_spend_usd,
+                        "exhausted": s.exhausted,
+                    }
+                    for s in statuses
+                ]},
+            },
+        ))
 
     async def _emit_status(self, provider) -> None:
         exhausted = False

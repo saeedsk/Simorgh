@@ -19,6 +19,9 @@ class Config:
     notice_queue_max: int = 200
     shell_timeout_s: float = 120.0
     chat_reply_timeout_s: float = 8.0
+    http_host: str = "127.0.0.1"
+    http_port: int = 8765
+    http_status_timeout_s: float = 3.0
 
     def resolved_history_path(self) -> Path:
         return self.history_path.expanduser()

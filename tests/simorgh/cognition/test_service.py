@@ -297,6 +297,37 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
         self.assertEqual(seen, ["pre", "done"])
 
+    async def test_thirtieth_second_tick_publishes_provider_budgets_as_system_metrics(self):
+        """A dashboard's "LLM usage" view (02-system-architecture.md
+        section 6.2): the same rolling-window status `cognition.provider.
+        status` already carries every ~30s also folds into `system.
+        metrics`, the channel every other subsystem's own gauges use."""
+        config = CognitionConfig(
+            provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05,
+            providers={"fake_llm": ProviderConfig(max_calls=100, window_seconds=3600.0)},
+        )
+        await self._make(providers=[_FakeProvider()], config=config)
+
+        seen = []
+
+        async def _on_metrics(message: Message) -> None:
+            if message.payload.get("subsystem") == "cognition":
+                seen.append(message)
+
+        sub = await self.bus.subscribe(topics.SYSTEM_METRICS, _on_metrics)
+        for i in range(30):
+            await self.bus.publish(Message.new(topics.SYSTEM_TICK_SECOND, source="test", payload={"n": i}))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        await sub.unsubscribe()
+
+        self.assertEqual(len(seen), 1)
+        providers = seen[0].payload["gauges"]["providers"]
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(providers[0]["name"], "fake_llm")
+        self.assertEqual(providers[0]["max_calls"], 100)
+        self.assertFalse(providers[0]["exhausted"])
+
 
 if __name__ == "__main__":
     unittest.main()

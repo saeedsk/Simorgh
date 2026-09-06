@@ -216,6 +216,27 @@ class TestHealthAndStatus(unittest.IsolatedAsyncioTestCase):
             finally:
                 await kernel.shutdown()
 
+    async def test_status_snapshot_subsystems_carry_health_detail_layer_and_restarts(self):
+        """A dashboard needs more than a bare ok/degraded/down per
+        subsystem to be useful -- each `health()`'s own `detail` string
+        (e.g. guardian's "posture=guarded", orchestration's "0/1 worker(s) busy")
+        was already being computed and simply never left the Supervisor;
+        `layer` lets a UI group by boot order without duplicating
+        `LAYERS` itself; `restarts` surfaces supervisor activity."""
+        with tempfile.TemporaryDirectory() as tmp:
+            kernel = _make_kernel(tmp)
+            await kernel.boot()
+            try:
+                snap = kernel.status_snapshot()
+                by_name = {s["name"]: s for s in snap["subsystems"]}
+                self.assertEqual(by_name["bus"]["layer"], 0)
+                self.assertEqual(by_name["orchestration"]["layer"], 5)
+                for s in snap["subsystems"]:
+                    self.assertIsInstance(s["detail"], str)
+                    self.assertEqual(s["restarts"], 0)
+            finally:
+                await kernel.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,15 +21,17 @@ class Service:
     version = VERSION
     consumes: tuple[str, ...] = (
         topics.MEMORY_RETRIEVE, topics.MEMORY_STORE, topics.SYSTEM_TICK_SLEEP, topics.TURN_COMPLETED,
+        topics.SYSTEM_TICK_SECOND,
     )
     produces: tuple[str, ...] = (
         topics.MEMORY_RETRIEVE_REPLY, topics.MEMORY_STORED, topics.MEMORY_CONTRADICTION_FLAGGED,
-        topics.MEMORY_CONSOLIDATED, topics.MEMORY_FORGOTTEN,
+        topics.MEMORY_CONSOLIDATED, topics.MEMORY_FORGOTTEN, topics.SYSTEM_METRICS,
     )
 
     def __init__(self, *, config: Config | None = None, keep_per_kind: dict[str, int] | None = None) -> None:
         self._config = config or Config()
         self._keep_per_kind = keep_per_kind or dict(DEFAULT_KEEP_PER_KIND)
+        self._tick_seconds = 0
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -38,9 +40,10 @@ class Service:
         self._sub_store = await ctx.bus.subscribe(topics.MEMORY_STORE, self._on_store)
         self._sub_sleep = await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep)
         self._sub_turn = await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
+        self._sub_tick = await ctx.bus.subscribe(topics.SYSTEM_TICK_SECOND, self._on_tick)
 
     async def stop(self) -> None:
-        for sub in (self._sub_retrieve, self._sub_store, self._sub_sleep, self._sub_turn):
+        for sub in (self._sub_retrieve, self._sub_store, self._sub_sleep, self._sub_turn, self._sub_tick):
             await sub.unsubscribe()
 
     async def health(self) -> Health:
@@ -100,6 +103,21 @@ class Service:
         )
         await self._ctx.bus.publish(Message.new(
             topics.MEMORY_STORED, source=self._ctx.source, payload={"ref": ref, "kind": "episodic"},
+        ))
+
+    async def _on_tick(self, message: Message) -> None:
+        # A dashboard's "what does Sim remember" view (02-system-
+        # architecture.md section 6.2), on the same `system.metrics`
+        # channel every other subsystem's own gauges already use --
+        # every 30s, matching Cognition's own tick throttle, not every
+        # second tick (a stream read per kind is cheap but not free).
+        self._tick_seconds += 1
+        if self._tick_seconds % 30 != 0:
+            return
+        counts = await self.engine.counts()
+        await self._ctx.bus.publish(Message.new(
+            topics.SYSTEM_METRICS, source=self._ctx.source,
+            payload={"subsystem": "memory", "counters": {}, "gauges": {"records": counts}},
         ))
 
     async def _on_sleep(self, message: Message) -> None:

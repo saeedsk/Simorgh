@@ -200,5 +200,63 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health.status, "ok")
 
 
+class HttpEnabledWiringTestCase(unittest.IsolatedAsyncioTestCase):
+    """`http_enabled` follows `run_repl` by default (the dashboard is for
+    a human watching a `simorgh run` session, so it comes up exactly
+    when the REPL does) unless a caller overrides it either way -- kept
+    separate from `InterfaceTestCase` above so the other 28 tests there
+    never each pay for a real bound socket they don't need."""
+
+    def test_defaults_to_following_run_repl_true(self):
+        service = Service(run_repl=True)
+        self.assertTrue(service._http_enabled)  # noqa: SLF001
+
+    def test_defaults_to_following_run_repl_false(self):
+        service = Service(run_repl=False)
+        self.assertFalse(service._http_enabled)  # noqa: SLF001
+
+    def test_explicit_override_wins_over_run_repl(self):
+        self.assertTrue(Service(run_repl=False, http_enabled=True)._http_enabled)  # noqa: SLF001
+        self.assertFalse(Service(run_repl=True, http_enabled=False)._http_enabled)  # noqa: SLF001
+
+    async def test_boot_with_http_enabled_actually_serves_the_dashboard(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        clock = FakeClock()
+        ledger = make_ledger({"backend": "memory"}, clock=clock.now)
+        await ledger.start()
+        self.addAsyncCleanup(ledger.stop)
+        backend = make_backend(BusConfig(backend="memory"), clock=clock.now)
+        bus = make_client(backend, source="interface", ledger=ledger, clock=clock.now)
+        await bus.start()
+        self.addAsyncCleanup(bus.stop)
+
+        ctx = Context(
+            name="interface", instance_id="", run_id="test", mode="single",
+            bus=bus, ledger=ledger, config={}, secrets={}, clock=clock,
+            logger=_Logger(), data_dir=Path(tmp.name) / "data",
+        )
+        service = Service(InterfaceConfig(http_port=0), run_repl=False, http_enabled=True)
+        await service.start(ctx)
+        self.addAsyncCleanup(service.stop)
+
+        self.assertIsNotNone(service._http)  # noqa: SLF001
+
+        # Blocking socket I/O must run off the event loop -- the loop
+        # itself has to keep running for the asyncio HTTP server to
+        # accept and answer the connection.
+        def _get() -> int:
+            import http.client
+
+            conn = http.client.HTTPConnection("127.0.0.1", service._http.port, timeout=5)  # noqa: SLF001
+            conn.request("GET", "/")
+            status = conn.getresponse().status
+            conn.close()
+            return status
+
+        status = await asyncio.to_thread(_get)
+        self.assertEqual(status, 200)
+
+
 if __name__ == "__main__":
     unittest.main()

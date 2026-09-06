@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simorgh — live status</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-border: #262c36;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --accent: #e3b341;
+    --ok: #3fb950;
+    --degraded: #d29922;
+    --down: #f85149;
+    --neutral: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--panel-border);
+    background: linear-gradient(180deg, #11151c, #0d1117);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  header h1 {
+    font-size: 17px;
+    margin: 0;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+  }
+  .state-pill {
+    padding: 3px 11px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .state-running { background: rgba(63,185,80,.15); color: var(--ok); border: 1px solid rgba(63,185,80,.35); }
+  .state-paused { background: rgba(210,153,34,.15); color: var(--degraded); border: 1px solid rgba(210,153,34,.35); }
+  .state-stopping, .state-stopped { background: rgba(110,118,129,.15); color: var(--neutral); border: 1px solid rgba(110,118,129,.35); }
+  .state-unknown { background: rgba(248,81,73,.15); color: var(--down); border: 1px solid rgba(248,81,73,.35); }
+  .meta { color: var(--text-dim); font-size: 12.5px; }
+  .meta b { color: var(--text); font-weight: 600; }
+  .spacer { flex: 1; }
+  #conn-banner {
+    display: none;
+    padding: 8px 22px;
+    background: rgba(248,81,73,.12);
+    color: var(--down);
+    font-size: 13px;
+    border-bottom: 1px solid rgba(248,81,73,.3);
+  }
+  main { padding: 20px 22px 60px; max-width: 1240px; margin: 0 auto; }
+  section { margin-bottom: 26px; }
+  section > h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    font-weight: 650;
+    margin: 0 0 10px 2px;
+  }
+  .layer-group { margin-bottom: 16px; }
+  .layer-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin: 0 0 8px 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+  }
+  .card.status-ok::before { background: var(--ok); }
+  .card.status-degraded::before { background: var(--degraded); }
+  .card.status-down::before, .card.status-stopped::before { background: var(--down); }
+  .card.status-starting::before { background: var(--neutral); }
+  .card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .card-name { font-weight: 650; font-size: 14px; }
+  .card-status { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 650; }
+  .card.status-ok .card-status { color: var(--ok); }
+  .card.status-degraded .card-status { color: var(--degraded); }
+  .card.status-down .card-status, .card.status-stopped .card-status { color: var(--down); }
+  .card.status-starting .card-status { color: var(--neutral); }
+  .card-detail { margin-top: 6px; font-size: 12.5px; color: var(--text-dim); min-height: 1.2em; }
+  .card-foot { margin-top: 8px; font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; }
+  .card-foot .restarts.nonzero { color: var(--degraded); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--panel-border); }
+  th { color: var(--text-dim); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  td.num { text-align: right; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .panels-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .panels-row { grid-template-columns: 1fr; } }
+  .empty-row td { color: var(--text-dim); font-style: italic; }
+  .worker-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .worker-busy { background: rgba(227,179,65,.15); color: var(--accent); }
+  .worker-idle { background: rgba(110,118,129,.15); color: var(--neutral); }
+  footer { text-align: center; color: var(--text-dim); font-size: 11.5px; padding: 20px 0 40px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Simorgh</h1>
+    <span id="state-pill" class="state-pill state-unknown">unknown</span>
+    <span class="meta mono">run <b id="run-id">—</b></span>
+    <span class="meta mono">mode <b id="mode">—</b></span>
+    <span class="meta mono">uptime <b id="uptime">—</b></span>
+    <div class="spacer"></div>
+    <span class="meta mono" id="last-updated">—</span>
+  </header>
+  <div id="conn-banner">Lost contact with the running kernel — retrying…</div>
+  <main>
+    <section>
+      <h2>Subsystems</h2>
+      <div id="layers"></div>
+    </section>
+    <section class="panels-row">
+      <div>
+        <h2>Bus</h2>
+        <div class="panel">
+          <table>
+            <thead><tr><th>Metric</th><th class="num">Value</th></tr></thead>
+            <tbody id="bus-rows"><tr class="empty-row"><td colspan="2">waiting for data…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h2>Orchestration workers</h2>
+        <div class="panel">
+          <table>
+            <thead><tr><th>Worker</th><th>Status</th><th>Task</th><th>Kind</th></tr></thead>
+            <tbody id="worker-rows"><tr class="empty-row"><td colspan="4">waiting for data…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+    <section class="panels-row">
+      <div>
+        <h2>Cognition — LLM providers</h2>
+        <div class="panel">
+          <table>
+            <thead><tr><th>Provider</th><th>Status</th><th class="num">Calls</th><th class="num">Spend</th></tr></thead>
+            <tbody id="provider-rows"><tr class="empty-row"><td colspan="4">waiting for data…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h2>Memory — live records</h2>
+        <div class="panel">
+          <table>
+            <thead><tr><th>Kind</th><th class="num">Records</th></tr></thead>
+            <tbody id="memory-rows"><tr class="empty-row"><td colspan="2">waiting for data…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer>polling /api/status every second · Simorgh v2</footer>
+
+<script>
+(function () {
+  "use strict";
+  const POLL_MS = 1000;
+  let failures = 0;
+
+  function fmtUptime(s) {
+    if (typeof s !== "number") return "—";
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+    return (h > 0 ? h + "h " : "") + m + "m " + sec + "s";
+  }
+
+  function el(tag, attrs, children) {
+    const e = document.createElement(tag);
+    for (const k in (attrs || {})) {
+      if (k === "class") e.className = attrs[k];
+      else if (k === "text") e.textContent = attrs[k];
+      else e.setAttribute(k, attrs[k]);
+    }
+    (children || []).forEach((c) => e.appendChild(c));
+    return e;
+  }
+
+  function renderHeader(data) {
+    const state = data.state || "unknown";
+    const pill = document.getElementById("state-pill");
+    pill.className = "state-pill state-" + state;
+    pill.textContent = state;
+    document.getElementById("run-id").textContent = data.run_id || "—";
+    document.getElementById("mode").textContent = data.mode || "—";
+    document.getElementById("uptime").textContent = fmtUptime(data.uptime_seconds);
+    document.getElementById("last-updated").textContent = "updated " + new Date().toLocaleTimeString();
+  }
+
+  function renderSubsystems(data) {
+    const subsystems = data.subsystems || [];
+    const byLayer = {};
+    subsystems.forEach((s) => {
+      const layer = (s.layer === null || s.layer === undefined) ? "—" : s.layer;
+      (byLayer[layer] = byLayer[layer] || []).push(s);
+    });
+    const layers = Object.keys(byLayer).sort((a, b) => (a === "—" ? 99 : +a) - (b === "—" ? 99 : +b));
+    const root = document.getElementById("layers");
+    root.innerHTML = "";
+    layers.forEach((layer) => {
+      const group = el("div", { class: "layer-group" });
+      group.appendChild(el("div", { class: "layer-label", text: layer === "—" ? "kernel" : "layer " + layer }));
+      const cards = el("div", { class: "cards" });
+      byLayer[layer].sort((a, b) => a.name.localeCompare(b.name)).forEach((s) => {
+        const status = s.status || "starting";
+        const card = el("div", { class: "card status-" + status });
+        const top = el("div", { class: "card-top" });
+        top.appendChild(el("span", { class: "card-name", text: s.name }));
+        top.appendChild(el("span", { class: "card-status", text: status }));
+        card.appendChild(top);
+        card.appendChild(el("div", { class: "card-detail", text: s.detail || "" }));
+        const foot = el("div", { class: "card-foot" });
+        foot.appendChild(el("span", { class: "mono", text: "v" + (s.version || "0") }));
+        const restarts = s.restarts || 0;
+        foot.appendChild(el("span", {
+          class: "mono restarts" + (restarts > 0 ? " nonzero" : ""),
+          text: restarts + " restart" + (restarts === 1 ? "" : "s"),
+        }));
+        card.appendChild(foot);
+        cards.appendChild(card);
+      });
+      group.appendChild(cards);
+      root.appendChild(group);
+    });
+  }
+
+  function renderBus(data) {
+    const bus = (data.metrics && data.metrics.bus) || null;
+    const tbody = document.getElementById("bus-rows");
+    tbody.innerHTML = "";
+    if (!bus) {
+      tbody.appendChild(el("tr", { class: "empty-row" }, [el("td", { colspan: "2", text: "no bus metrics yet" })]));
+      return;
+    }
+    const rows = [];
+    Object.entries(bus.counters || {}).forEach(([k, v]) => rows.push(["counter." + k, v]));
+    Object.entries(bus.gauges || {}).forEach(([k, v]) => {
+      if (typeof v === "object") return; // structured gauges (e.g. orchestration's worker list) render elsewhere
+      rows.push([k, typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(2)) : v]);
+    });
+    if (!rows.length) {
+      tbody.appendChild(el("tr", { class: "empty-row" }, [el("td", { colspan: "2", text: "no activity yet" })]));
+      return;
+    }
+    rows.forEach(([k, v]) => {
+      const tr = el("tr", {}, [el("td", { class: "mono", text: k }), el("td", { class: "num mono", text: String(v) })]);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderWorkers(data) {
+    const orch = (data.metrics && data.metrics.orchestration) || null;
+    const workers = (orch && orch.gauges && orch.gauges.workers) || [];
+    const tbody = document.getElementById("worker-rows");
+    tbody.innerHTML = "";
+    if (!workers.length) {
+      tbody.appendChild(el("tr", { class: "empty-row" }, [el("td", { colspan: "4", text: "no workers reporting yet" })]));
+      return;
+    }
+    workers.forEach((w) => {
+      const busy = !!w.task_id;
+      const tr = el("tr", {}, [
+        el("td", { class: "mono", text: w.worker_id || "—" }),
+        el("td", {}, [el("span", { class: "worker-badge " + (busy ? "worker-busy" : "worker-idle"), text: busy ? "busy" : "idle" })]),
+        el("td", { class: "mono", text: w.task_id || "—" }),
+        el("td", { class: "mono", text: w.kind || "—" }),
+      ]);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderProviders(data) {
+    const cognition = (data.metrics && data.metrics.cognition) || null;
+    const providers = (cognition && cognition.gauges && cognition.gauges.providers) || [];
+    const tbody = document.getElementById("provider-rows");
+    tbody.innerHTML = "";
+    if (!providers.length) {
+      tbody.appendChild(el("tr", { class: "empty-row" }, [el("td", { colspan: "4", text: "no providers reporting yet" })]));
+      return;
+    }
+    providers.forEach((p) => {
+      const badge = el("span", {
+        class: "worker-badge " + (p.exhausted ? "worker-idle" : "worker-busy"),
+        text: p.exhausted ? "exhausted" : "available",
+      });
+      const calls = p.max_calls ? p.calls + " / " + p.max_calls : String(p.calls);
+      const spend = "$" + Number(p.spend_usd || 0).toFixed(4) + (p.max_spend_usd ? " / $" + p.max_spend_usd : "");
+      tbody.appendChild(el("tr", {}, [
+        el("td", { text: p.name || "—" }),
+        el("td", {}, [badge]),
+        el("td", { class: "num mono", text: calls }),
+        el("td", { class: "num mono", text: spend }),
+      ]));
+    });
+  }
+
+  function renderMemory(data) {
+    const memory = (data.metrics && data.metrics.memory) || null;
+    const records = (memory && memory.gauges && memory.gauges.records) || null;
+    const tbody = document.getElementById("memory-rows");
+    tbody.innerHTML = "";
+    if (!records) {
+      tbody.appendChild(el("tr", { class: "empty-row" }, [el("td", { colspan: "2", text: "no memory metrics yet" })]));
+      return;
+    }
+    Object.entries(records).forEach(([kind, n]) => {
+      tbody.appendChild(el("tr", {}, [el("td", { text: kind }), el("td", { class: "num mono", text: String(n) })]));
+    });
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch("/api/status", { cache: "no-store" });
+      const data = await res.json();
+      failures = 0;
+      document.getElementById("conn-banner").style.display = "none";
+      renderHeader(data);
+      renderSubsystems(data);
+      renderBus(data);
+      renderWorkers(data);
+      renderProviders(data);
+      renderMemory(data);
+    } catch (err) {
+      failures += 1;
+      if (failures >= 2) document.getElementById("conn-banner").style.display = "block";
+    } finally {
+      setTimeout(poll, POLL_MS);
+    }
+  }
+
+  poll();
+})();
+</script>
+</body>
+</html>
