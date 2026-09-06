@@ -27,6 +27,7 @@ from typing import Any
 
 _EMBED_DIM = 256
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_DEFAULT_CONFIDENCE_HALF_LIFE_SECONDS = 30 * 24 * 60 * 60
 
 
 def _tokenize(text: str) -> list[str]:
@@ -213,10 +214,29 @@ class MemoryStore(abc.ABC):
         ]
 
     def score_confidence(self, record: MemoryRecord) -> float:
-        """Return this record's current confidence, defaulting to 1.0 for
-        records that predate confidence tracking or were never contradicted.
+        """Return this record's current confidence: a stored base value
+        (1.0 unless lowered by flag_contradiction, defaulting to 1.0 for
+        records that predate confidence tracking) exponentially decayed by
+        time since it was last confirmed. Half-life defaults to
+        `_DEFAULT_CONFIDENCE_HALF_LIFE_SECONDS` (30 days) but can be
+        overridden per-record via `metadata["half_life_seconds"]` (0 or
+        negative disables decay for a record meant to never go stale).
+
+        Confirmation resets the clock: reconsolidate stamps
+        `metadata["last_confirmed_at"]` whenever a record's subject shows
+        up in recent activity, so a record that's still relevant keeps its
+        full confidence even if old, while one nobody has touched in a
+        long time quietly loses weight until reconsolidate prunes it.
         """
-        return float(record.metadata.get("confidence", 1.0))
+        base = float(record.metadata.get("confidence", 1.0))
+        half_life = float(
+            record.metadata.get("half_life_seconds", _DEFAULT_CONFIDENCE_HALF_LIFE_SECONDS)
+        )
+        if half_life <= 0:
+            return base
+        last_confirmed_at = float(record.metadata.get("last_confirmed_at", record.created_at))
+        elapsed = max(0.0, time.time() - last_confirmed_at)
+        return base * (0.5 ** (elapsed / half_life))
 
     def find_contradictions(
         self, kind: str = "semantic"
@@ -306,26 +326,31 @@ class MemoryStore(abc.ABC):
         first flag internal contradictions (via consolidate_contradictions,
         which halves confidence on each side of a conflicting pair), then
         cross-check every record against recent `activity_kind` (default:
-        "outcome") records, decaying confidence for any that find no
-        supporting mention there and pruning whatever falls below
-        `prune_below`. Meant to be called periodically by consolidation
-        (src/orchestrator/consolidation.py), not on every query -- it costs
-        one full scan of both the activity log and each kind, plus a
-        `_replace`/`delete` per record touched.
+        "outcome") records. A record whose subject shows up there is
+        "confirmed" -- its decay clock (`metadata["last_confirmed_at"]`,
+        see score_confidence) resets to now, so it keeps full confidence
+        even if old. Everything else -- including records with no
+        `subject` at all, which previously dodged this pass entirely -- is
+        scored by score_confidence's time-based half-life decay and pruned
+        once that falls below `prune_below`. Meant to be called
+        periodically by consolidation (src/orchestrator/consolidation.py),
+        not on every query -- it costs one full scan of both the activity
+        log and each kind, plus a `_replace`/`delete` per record touched.
 
         Folding contradiction-flagging in here means a record that's both
-        stale (absent from recent activity) and contradicted by a peer
-        loses confidence on both counts in the same pass, so it's pruned
-        sooner than either check alone would manage -- exactly the
-        "stale/contradictory" entries this pass exists to catch.
+        stale (absent from recent activity, so its confidence keeps
+        decaying) and contradicted by a peer (so its base confidence was
+        already halved) loses ground on both counts in the same pass, so
+        it's pruned sooner than either check alone would manage -- exactly
+        the "stale/contradictory" entries this pass exists to catch.
 
         Matching is a coarse, case-insensitive substring check of each
         record's `metadata["subject"]` (the same field find_contradictions
         keys on) against recent activity content/request_text -- not
-        semantic matching. That's deliberate: this only prunes what looks
-        stale by a cheap, auditable rule, and leaves ambiguous cases for
-        a human or a better-informed future agent rather than guessing.
-        Records without a `subject` are left untouched.
+        semantic matching. That's deliberate: this only confirms what
+        looks current by a cheap, auditable rule, and leaves ambiguous
+        cases for a human or a better-informed future agent rather than
+        guessing.
         """
         activity_records = self.query(kind=activity_kind, limit=activity_limit)
         haystack = " ".join(
@@ -337,23 +362,21 @@ class MemoryStore(abc.ABC):
             self.consolidate_contradictions(kind=kind)
             for record in self.query(kind=kind):
                 subject = record.metadata.get("subject")
-                if subject is None:
-                    continue
-                confidence = self.score_confidence(record)
-                if str(subject).lower() in haystack:
-                    confidence = min(1.0, confidence + 0.1)
+                confirmed = subject is not None and str(subject).lower() in haystack
+                if confirmed:
+                    confidence = float(record.metadata.get("confidence", 1.0))
                 else:
-                    confidence *= 0.5
+                    confidence = self.score_confidence(record)
                 if confidence < prune_below:
                     self.delete(record.id)
                     pruned_ids.append(record.id)
-                else:
+                elif confirmed:
                     updated = MemoryRecord(
                         id=record.id,
                         kind=record.kind,
                         content=record.content,
                         created_at=record.created_at,
-                        metadata={**record.metadata, "confidence": confidence},
+                        metadata={**record.metadata, "last_confirmed_at": time.time()},
                     )
                     self._replace(updated)
         return pruned_ids
