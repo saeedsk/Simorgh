@@ -67,6 +67,7 @@ class Capability(enum.Enum):
     TOOL_USE = "tool_use"
     STREAMING = "streaming"
     LONG_CONTEXT = "long_context"
+    VISION = "vision"
 
 
 class CostTier(enum.IntEnum):
