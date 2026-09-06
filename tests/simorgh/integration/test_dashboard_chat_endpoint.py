@@ -78,12 +78,15 @@ class TestDashboardChatEndpoint(unittest.IsolatedAsyncioTestCase):
         self._patch.stop()
         self._tmp.cleanup()
 
-    async def _post_chat(self, text: str) -> tuple[int, dict]:
+    async def _post_chat(self, text: str, session_id: str | None = None) -> tuple[int, dict]:
         import json
 
         def _do():
+            body = {"text": text}
+            if session_id is not None:
+                body["session_id"] = session_id
             conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-            conn.request("POST", "/api/chat", body=json.dumps({"text": text}),
+            conn.request("POST", "/api/chat", body=json.dumps(body),
                         headers={"Content-Type": "application/json"})
             resp = conn.getresponse()
             data = resp.read()
@@ -105,6 +108,25 @@ class TestDashboardChatEndpoint(unittest.IsolatedAsyncioTestCase):
         the real, successful round trip rather than inspecting internals."""
         status, _body = await self._post_chat("does this validate")
         self.assertEqual(status, 200)
+
+    async def test_a_client_supplied_session_id_reaches_memorys_real_episodic_write(self):
+        """02-system-architecture.md section 6.1: a client-supplied
+        session_id is the multi-session direction's first real step --
+        proven here against the *real* Memory subsystem (milestone 105's
+        episodic write on turn.completed), not just checked as a field
+        on the outgoing percept."""
+        status, _body = await self._post_chat("remember this exchange", session_id="dashboard-conv-1")
+        self.assertEqual(status, 200)
+
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+
+        reply = await self.kernel.bus.request(Message.new(
+            topics.MEMORY_RETRIEVE, source="test",
+            payload={"query": "remember this exchange", "kinds": ["episodic"], "k": 5},
+        ), timeout=5.0)
+        items = reply.payload["items"]
+        self.assertTrue(any("remember this exchange" in i["content"] for i in items))
 
 
 if __name__ == "__main__":

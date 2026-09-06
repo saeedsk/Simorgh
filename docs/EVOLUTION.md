@@ -3082,3 +3082,50 @@ Still ahead, roughly in order:
     Full suite green after the merge (interface: 59, kernel: 152,
     module boundaries: 7, all individually reconfirmed; `--self-check`:
     PASS) -- 2161 tests passing after the merge.
+
+118. **The first real step on multi-session support (02-system-
+    architecture.md section 6.1), taken directly rather than delegated:
+    dashboard chat now has real conversation continuity.** Before this,
+    `HttpApi._chat()` minted a brand-new random `session_id` on *every*
+    single message -- Memory's own episodic write (milestone 105) tags
+    records by exactly that field, so it never once had a chance to
+    group two messages from the same conversation together; every
+    message was, to Memory, a stranger who had never spoken before.
+
+    Fixed by letting a caller supply its own `session_id` in the
+    `/api/chat` request body, reused as-is instead of replaced. The
+    dashboard page generates one via `crypto.randomUUID()` the first
+    time it needs one and keeps it in `sessionStorage` -- "this browser
+    tab, until closed" is the right lifetime for one conversation; a
+    reload keeps talking to the same one, a fresh tab starts its own.
+
+    This reopens a question milestone 106's original fix closed by
+    fiat ("never share a key") without needing to reconsider it there:
+    a *client-supplied* session_id can legitimately collide if a caller
+    fires two requests for the same conversation before the first
+    resolves. Silently overwriting the pending correlation future
+    would be exactly the same bug milestone 106 fixed, wearing a new
+    excuse. Handled by refusing the second request outright -- a plain
+    `{"error": "turn already in flight"}`, HTTP 409 -- rather than ever
+    letting two futures alias one dict entry. In normal use this never
+    fires: the dashboard's own input is disabled while a reply is
+    pending, so one tab only ever has one turn in flight; it only
+    triggers for a genuinely concurrent caller, which is exactly who
+    needs the honest error instead of a silently wrong answer.
+
+    Verified live in the browser, not just in tests: stated a fact
+    ("my favorite color is teal") in one dashboard chat message, asked
+    a follow-up in a second message in the *same tab*, and got back
+    "You told me that your favorite color is teal." -- real recall
+    through the real pipeline, keyed by the stable per-tab id. New
+    integration test (`test_dashboard_chat_endpoint.py`) proves the
+    same thing programmatically against the real Memory subsystem, not
+    just by reading back the outgoing percept's own field. 2165 tests
+    passing.
+
+    This is one slice of section 6.1's full vision, not the whole
+    thing -- Interface still has no registry of concurrently *tracked*
+    sessions server-side (nothing yet remembers "this session_id has an
+    open turn history" beyond the single in-flight-or-not check above),
+    and there is still no WebSocket or other push transport, only the
+    existing HTTP POST. Both remain open for whoever continues this.

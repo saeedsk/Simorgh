@@ -529,11 +529,38 @@
   }
 
   // -- chat --------------------------------------------------------------
+  // One stable id for this tab's whole lifetime (section 6.1's own
+  // multi-session direction): reused on every /api/chat call so
+  // Memory's episodic write (milestone 105) actually groups a
+  // conversation instead of treating every message as a new stranger.
+  // sessionStorage, not localStorage -- "this tab, until closed" is
+  // exactly the right lifetime for one conversation; a reload keeps it,
+  // a fresh tab gets its own. Falls back to a timestamp+random string
+  // on the rare browser without `crypto.randomUUID` (older Safari/iOS).
+  function getOrCreateSessionId() {
+    const KEY = "simorgh-dashboard-session-id";
+    try {
+      let id = sessionStorage.getItem(KEY);
+      if (!id) {
+        id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+          : "sess-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+        sessionStorage.setItem(KEY, id);
+      }
+      return id;
+    } catch (err) {
+      // sessionStorage can throw in a locked-down context (private mode,
+      // some embedded webviews) -- a per-page-load id still works, it
+      // just won't survive a reload.
+      return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : "sess-" + Date.now();
+    }
+  }
+
   function setupChat() {
     const form = document.getElementById("chat-form");
     const input = document.getElementById("chat-input");
     const send = document.getElementById("chat-send");
     const log = document.getElementById("chat-log");
+    const sessionId = getOrCreateSessionId();
 
     function addMessage(role, text, extraClass) {
       const bubble = el("div", { class: "chat-msg " + role + (extraClass ? " " + extraClass : "") });
@@ -558,7 +585,7 @@
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: text }),
+          body: JSON.stringify({ text: text, session_id: sessionId }),
         });
         const data = await res.json();
         pending.classList.remove("pending");
