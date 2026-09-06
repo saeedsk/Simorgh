@@ -145,6 +145,15 @@ class CognitionRouter:
         """Registered providers in priority order (read-only view)."""
         return list(self._providers)
 
+    def register(self, provider: LLMProvider) -> None:
+        """Add a provider at runtime, ahead of any existing fallback, so
+        the orchestrator can bring a new backend (e.g. Gemini becoming
+        reachable) into rotation mid-session without rebuilding the
+        router from scratch.
+        """
+        insert_at = max(len(self._providers) - 1, 0)
+        self._providers.insert(insert_at, provider)
+
     def complete(self, prompt: str, **kwargs: Any) -> LLMResponse:
         last_error: Exception | None = None
         for provider in self._providers:
