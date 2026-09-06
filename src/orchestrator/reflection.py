@@ -62,9 +62,33 @@ class Proposal:
     evidence_count: int
 
 
+@dataclass(frozen=True)
+class ConfidenceRecord:
+    """One self-prediction paired with what actually happened, for a
+    given kind of decision (e.g. "which sub-agent to route to"). The gap
+    between `predicted_confidence` and `actual_outcome` is what lets
+    `ReflectionAgent.calibrate_confidence` tell a decision type Simorgh
+    has been reliably well-calibrated on from one it habitually over- or
+    under-trusts itself on.
+    """
+
+    decision_type: str
+    predicted_confidence: float
+    actual_outcome: float
+    timestamp: float = field(default_factory=time.time)
+
+    @property
+    def delta(self) -> float:
+        """Positive: outcome beat the prediction (under-confident).
+        Negative: outcome fell short of the prediction (over-confident).
+        """
+        return self.actual_outcome - self.predicted_confidence
+
+
 TAKEAWAY_KIND = "takeaway"
 FEEDBACK_KIND = "feedback"
 SELF_KNOWLEDGE_KIND = "self_knowledge"
+CONFIDENCE_KIND = "confidence_calibration"
 
 
 def _intent_alignment_score(request_text: str, output: str) -> float:
@@ -131,6 +155,44 @@ class OutcomeLog:
         ]
 
 
+class ConfidenceTracker:
+    """Records predicted-vs-actual confidence per decision type into a
+    MemoryStore (kind="confidence_calibration"), so `ReflectionAgent` can
+    later check whether a given kind of decision -- e.g. "which sub-agent
+    to route to" -- has run systematically over- or under-confident
+    before trusting a fresh prediction of the same kind at face value.
+    """
+
+    KIND = CONFIDENCE_KIND
+
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    def record(self, record: ConfidenceRecord) -> None:
+        self._store.remember(
+            self.KIND,
+            f"{record.decision_type}: predicted {record.predicted_confidence:.2f}, "
+            f"actual {record.actual_outcome:.2f}",
+            decision_type=record.decision_type,
+            predicted_confidence=record.predicted_confidence,
+            actual_outcome=record.actual_outcome,
+            timestamp=record.timestamp,
+        )
+
+    def recent(self, decision_type: str, limit: int = 100) -> list[ConfidenceRecord]:
+        records = self._store.query(kind=self.KIND, limit=limit)
+        return [
+            ConfidenceRecord(
+                decision_type=r.metadata["decision_type"],
+                predicted_confidence=r.metadata["predicted_confidence"],
+                actual_outcome=r.metadata["actual_outcome"],
+                timestamp=r.metadata.get("timestamp", r.created_at),
+            )
+            for r in records
+            if r.metadata.get("decision_type") == decision_type
+        ]
+
+
 class ReflectionAgent:
     """Reviews recent outcomes, grouped by sub-agent, and proposes -- never
     applies -- a review whenever an agent's failure/correction rate over
@@ -143,11 +205,33 @@ class ReflectionAgent:
         concern_threshold: float = 0.3,
         min_samples: int = 5,
         store: MemoryStore | None = None,
+        confidence: ConfidenceTracker | None = None,
     ) -> None:
         self._log = log
         self._concern_threshold = concern_threshold
         self._min_samples = min_samples
         self._store = store
+        self._confidence = confidence
+
+    def calibrate_confidence(
+        self, decision_type: str, predicted_confidence: float, min_samples: int = 5
+    ) -> float:
+        """Adjusts a fresh confidence prediction for `decision_type` using
+        the historical mean gap between past predictions and their actual
+        outcomes (`ConfidenceRecord.delta`) -- if this decision type has
+        systematically run over- or under-confident, nudges the raw
+        prediction toward what actually happened rather than trusting it
+        at face value. Returns `predicted_confidence` unchanged when no
+        tracker is configured or there isn't yet enough history
+        (`min_samples`) to distinguish a real pattern from noise.
+        """
+        if self._confidence is None:
+            return predicted_confidence
+        records = self._confidence.recent(decision_type, limit=min_samples * 4)
+        if len(records) < min_samples:
+            return predicted_confidence
+        mean_delta = sum(r.delta for r in records) / len(records)
+        return max(0.0, min(1.0, predicted_confidence + mean_delta))
 
     def reflect_on_outcome(self, outcome: Outcome) -> Proposal | None:
         """Immediate, per-turn takeaway: "what was the shortcoming here,
