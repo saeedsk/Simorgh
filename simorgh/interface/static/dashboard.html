@@ -246,6 +246,24 @@
       </div>
     </section>
     <section>
+      <h2>Activity — what Sim is doing</h2>
+      <div class="panel" id="activity-panel">
+        <div id="activity-now" class="activity-now">idle — no turn in flight</div>
+        <ol id="activity-feed" class="activity-feed"></ol>
+      </div>
+      <style>
+        .activity-now { font-weight: 600; margin-bottom: 8px; }
+        .activity-now.busy { color: #b8860b; }
+        .activity-feed { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto;
+                         font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+        .activity-feed li { padding: 3px 0; border-bottom: 1px solid rgba(127,127,127,.15); white-space: pre-wrap; }
+        .activity-feed .t { opacity: .6; margin-right: 8px; }
+        .activity-feed .k { display: inline-block; min-width: 9.5em; opacity: .85; }
+        .activity-feed .bad { color: #b22222; }
+        .activity-feed .who { opacity: .6; margin-left: 8px; }
+      </style>
+    </section>
+    <section>
       <h2>Subsystems</h2>
       <div id="layers"></div>
     </section>
@@ -761,6 +779,50 @@
   pollHistory();
   loadStreams().then(pollLogs);
   setInterval(loadStreams, STREAMS_POLL_MS);
+
+  // Activity feed (07-post-cutover-review.md §3.9): answers "is it doing
+  // anything?" with the turn's own events, newest first, plus what is in
+  // flight right now -- the same lines the CLI narrates.
+  const ACTIVITY_POLL_MS = 1500;
+  function escA(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+  function activityLabel(e) {
+    switch (e.type) {
+      case "percept.text.received": return ["heard", e.summary, e.channel ? "via " + e.channel : ""];
+      case "task.started": return ["thinking", "", ""];
+      case "task.step": return ["step " + (e.step_no ?? "?") + " " + (e.phase || ""),
+                                (e.tool ? e.tool + ": " : "") + (e.summary || ""), e.ok === false ? "FAILED" : (e.ok ? "ok" : "")];
+      case "action.result": return ["action " + (e.ok ? "ok" : "failed"), e.summary, e.duration_ms != null ? e.duration_ms + " ms" : ""];
+      case "action.denied": return ["action denied", e.summary, ""];
+      case "task.completed": return ["done", e.summary, ""];
+      case "task.failed": return ["failed", e.summary, ""];
+      case "task.blocked": return ["blocked", e.summary, ""];
+      case "turn.completed": return [e.floor ? "replied (floor)" : "replied", e.summary, ""];
+      default: return [e.type, e.summary || "", ""];
+    }
+  }
+  async function pollActivity() {
+    try {
+      const res = await fetch("/api/activity?limit=60", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      const now = document.getElementById("activity-now");
+      const busy = (data.pending_turns || []).length;
+      now.textContent = busy ? (busy + " turn" + (busy > 1 ? "s" : "") + " in flight — thinking…") : "idle — no turn in flight";
+      now.classList.toggle("busy", busy > 0);
+      const feed = document.getElementById("activity-feed");
+      feed.innerHTML = (data.events || []).map(e => {
+        const [kind, what, extra] = activityLabel(e);
+        const age = Math.max(0, Math.round(data.now - e.ts));
+        const bad = /FAILED|failed|denied/.test(kind + " " + extra) ? " bad" : "";
+        return '<li class="' + bad.trim() + '"><span class="t">' + age + 's ago</span>'
+          + '<span class="k">' + escA(kind) + '</span>' + escA(what)
+          + (extra ? ' <span class="who">' + escA(extra) + '</span>' : '')
+          + (e.task_id ? ' <span class="who">' + escA(String(e.task_id).slice(0, 8)) + '</span>' : '') + '</li>';
+      }).join("");
+    } catch (_) { /* transient; the conn banner covers outages */ }
+  }
+  pollActivity();
+  setInterval(pollActivity, ACTIVITY_POLL_MS);
 })();
 </script>
 </body>
