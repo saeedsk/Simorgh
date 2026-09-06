@@ -181,10 +181,14 @@ class GitCommitTool:
         root = self._config.repo_root
         run = lambda cmd: subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=30)
 
-        diff = run(["git", "diff", "--quiet", "HEAD", "--", path])
+        # `git diff --quiet HEAD` alone misses brand-new untracked files
+        # (they're outside what `diff` compares against HEAD at all), so
+        # the pre-check uses `status --porcelain` instead, which reports
+        # untracked/staged/unstaged changes uniformly.
+        status = run(["git", "status", "--porcelain", "--", path])
         head = run(["git", "rev-parse", "HEAD"])
         head_sha = head.stdout.strip() if head.returncode == 0 else ""
-        if diff.returncode == 0:
+        if not status.stdout.strip():
             path_sha = run(["git", "hash-object", str(root / path)])
             return ToolResult(
                 ok=False, error="nothing_to_commit",
