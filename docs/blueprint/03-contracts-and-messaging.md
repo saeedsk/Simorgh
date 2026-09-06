@@ -59,7 +59,9 @@ class Message:
 Invariants enforced by `contracts.envelope.validate()` on publish and on
 receive: `type` is in the catalog; `payload` validates against its
 schema; `priority` in 0–9; `partition_key`, when set, has the form
-`<kind>:<id>`; replies set `correlation_id` and use a `*.reply` type.
+`<kind>:<id>`; replies set `correlation_id` and use a `*.reply` type;
+messages with `priority >= 9` must not set `partition_key` (a preempting
+control message must never queue behind a held partition).
 
 ## 3. Topic taxonomy
 
@@ -74,6 +76,7 @@ contracts change reviewed like an API change.
 | `plan` | planning, verification | plan proposed/reviewed/approved/revised, re-grounding |
 | `task` | planning, orchestration | task lifecycle: created, available, claim, started, step, paused, completed, failed, blocked |
 | `action` | any → guardian → execution | the guarded action path: proposed, approved, denied, needs_human, result |
+| `guardian` | guardian | `guardian.review` (req/rep, used by Verification on candidate code), trust posture changed/request |
 | `tool` | execution | tool registry: registered, unavailable, invoked (telemetry) |
 | `verify` | verification | requested, result, plan review |
 | `memory` | memory | retrieve (req/rep), stored, consolidated, forgotten |
@@ -91,11 +94,25 @@ Patterns for subscription use `*` for one segment and `#` for the rest:
 `task.*`, `action.#`, `#` (everything — reserved for the trace writer and
 tests).
 
-**Reserved topology rules (enforced by the Kernel at subscribe time):**
+**Reserved topology rules (enforced by the Kernel at subscribe *and* publish time):**
 - `action.proposed`: subscribable only by `guardian`.
-- `action.approved`: subscribable only by `execution`.
-- `system.pause`, `system.stop`, `system.resume`: publishable only by
-  `interface` and `kernel` (and the CLI, which is Interface).
+- `action.approved`: subscribable only by `execution`; publishable only by
+  `guardian` (and `kernel`, solely for the `--self-check` forged-token
+  drill). This publish restriction is defense in depth alongside the HMAC
+  token, not a replacement for it.
+- `action.denied`: publishable by `guardian` (policy layers) and by
+  `execution` with `layer: token` only (a forged, expired, or replayed
+  approval). For `layer: classifier` denials Guardian emits the layer but
+  omits detailed `reasons`, so a denied proposer is not handed a recipe
+  for evasion.
+- `system.pause`, `system.stop`, `system.resume`, `system.restart`,
+  `system.reload`: publishable only by `interface`, `kernel`, and — for
+  `restart`/`reload` — `execution` (the `relaunch`/`hot_swap` tools).
+- `self.model.updated`: publishable only by `worldmodel` (one writer per
+  stream); `reflection` contributes via `self.observation`.
+- `plan.proposed`: publishable only by `planning` (a Worker's plan
+  artifact arrives via `task.completed.artifacts`; Planning validates it
+  and republishes, so `plan:<id>` has one owner).
 
 ## 4. Message catalog (v1)
 
@@ -107,14 +124,16 @@ subsystem spec expands the entries it owns. Payload fields are shown as
 ### 4.1 `system.*` (kernel)
 - `system.started` {mode, subsystems: [name@version], data_dir}
 - `system.state.changed` {state: running|paused|stopping|stopped, reason?}
-- `system.pause` / `system.resume` / `system.stop` {reason, requested_by} — priority 9
+- `system.pause` / `system.resume` / `system.stop` {reason, requested_by, scope?: all|autonomous} — priority 9. `scope: autonomous` pauses only self-initiated work (v1's `autonomous off`): Guardian denies proposals whose task `origin` is not `human`.
+- `system.restart` {reason, self_check_passed: bool, commit?} and `system.reload` {subsystem, trial: bool} — requested by Execution's `relaunch`/`hot_swap` tools; the Kernel performs them (in `local-multi`/`aws` modes Execution is not the Kernel process).
+- `system.schedule.add` / `.added` / `.cancel` {schedule_id, at|every_seconds, label, payload?} — durable reminders/timers (v1 `reminders.py`); fire as `percept.time.scheduled`.
 - `system.tick.second` {n}; `system.tick.idle` {idle_seconds}; `system.tick.sleep` {window_seconds}
 - `system.health` {subsystem, status: ok|degraded|down, detail?}
 - `system.metrics` {subsystem, counters: {…}, gauges: {…}}
 - `system.status.request` / `system.status.reply` {…snapshot…}
 
 ### 4.2 `percept.*`
-- `percept.text.received` {channel: cli|api|chat, text, user_id?, session_id}
+- `percept.text.received` {channel: cli|api|chat|command, text, user_id?, session_id, command?: str, steer?: bool} — Interface sets `channel: command` + `command` for routed commands (e.g. `interest`, `news`) so subsystems can ignore plain chat; `steer: true` marks a mid-task correction (Flow 5 interrupt/steer)
 - `percept.file.changed` {path, change: created|modified|deleted, sha256?}
 - `percept.web.fetched` {url, status, content_ref, sha256, fetched_at}
 - `percept.time.scheduled` {schedule_id, label}
@@ -123,13 +142,17 @@ subsystem spec expands the entries it owns. Payload fields are shown as
 - `intent.goal.stated` {goal, origin: human|curiosity|reflection, priority, constraints?: {scope?: [paths], deadline?}, wants_project: bool}
 
 ### 4.4 `task.*` (payload shapes in `07-planning.md`)
-- `task.created` {task_id, kind: chat|patch|skill|research|project, description, subject?, parent_id?, depends_on: [task_id], mode: plan|execute, origin, risk: low|medium|high}
+- `task.create` / `task.create.reply` {kind, description, subject?, parent_id?, depends_on?, mode?, origin, risk?, scope?} → {task_id, deduplicated_against?: task_id} — the request/reply form used by Interface commands and by Orchestration's sub-agent delegation; Planning applies fuzzy dedupe and emits `task.created`
+- `task.created` {task_id, kind: chat|patch|skill|research|project, description, subject?, parent_id?, depends_on: [task_id], mode: plan|execute, origin: human|curiosity|reflection|research|project, risk: low|medium|high, scope?: {paths: [...], network: bool}} — `scope` is derived by Planning from `subject`/parent/`intent.goal.stated.constraints`; Guardian's scope rule and Execution's constraints read it
 - `task.available` (command; consumer group `workers`) {task_id, kind, lease_seconds}
 - `task.claim` / `task.claim.reply` {task_id, worker_id} → {granted: bool, lease_until, task: {…}}
+- `task.list.request` / `.reply` {filter?: {status, kind, parent_id}} → {tasks: [{…}], projects: [{project_id, rollup, done, total, stalled: bool}]}
+- `task.work_next.request` / `.reply` {} → {task_id?, reason?} — v1 `work`
 - `task.started` {task_id, worker_id}
-- `task.step` {task_id, step_no, phase: gather|act|verify, summary, cost_usd?, tokens?}
+- `task.step` {task_id, step_no, phase: gather|act|verify, summary, tool?, action_id?, ok?, confidence?, cost_usd?, tokens?} — the trajectory Verification and Reflection read
 - `task.paused` {task_id, reason, resume_from_step}
-- `task.completed` {task_id, result_summary, artifacts: [ref], verification_ref}
+- `task.completed` {task_id, result_summary, artifacts: [ref], verification_ref, confidence?}
+- `turn.completed` {session_id, task_id, text, floor: bool, tool_steps, verification_ref?, confidence?} — the chat-turn counterpart of `task.completed` (Flow 1); consumed by Interface (render), Memory (episodic), Reflection, Curiosity
 - `task.failed` {task_id, reason, terminal: bool, attempts}
 - `task.blocked` {task_id, reason, retry_after?}
 - `task.dependency.satisfied` {task_id, satisfied_by}
@@ -156,25 +179,28 @@ subsystem spec expands the entries it owns. Payload fields are shown as
 
 ### 4.8 `verify.*`
 - `verify.requested` {verification_id, task_id, kind: task|plan|self_patch|skill, subject_ref, checklist_hint?}
-- `verify.result` {verification_id, verdict: pass|fail|insufficient_evidence, checklist: [{q, answer, evidence}], trajectory: {steps, wasted, recovered_errors}, feedback?, mechanical: {tests_passed?, baseline?, patched?}}
+- `verify.result` {verification_id, task_id, verdict: pass|fail|insufficient_evidence, checklist: [{q, answer, evidence}], trajectory: {steps, wasted, recovered_errors}, feedback?: {items: [{what, why, suggested_fix}]}, mechanical: {tests_passed?, baseline?, patched?}, confidence?} — Verification's own internal check messages use `partition_key = verification:<id>` and `correlation_id = verification_id`; the result is published on the task's partition
 
 ### 4.9 `memory.*`
-- `memory.retrieve` / `memory.retrieve.reply` {query, kinds: [working|episodic|semantic|procedural], k, filters?} → {items: [{ref, kind, content, score, confidence, ts}]}
+- `memory.retrieve` / `memory.retrieve.reply` {query, kinds: [working|episodic|semantic|procedural], k, budget_tokens?, filters?: {session_id?, task_type?, tags?, since?}} → {items: [{ref, kind, content, score, confidence, ts}], truncated: bool}
 - `memory.store` (command) {kind, content, tags, confidence?, source_ref}
 - `memory.stored` {ref, kind}
+- `memory.contradiction.flagged` {ref_a, ref_b, evidence, confidence_after} — emitted when a store or consolidation pass detects two records that cannot both hold (v1's halving-on-contradiction rule)
 - `memory.consolidated` {window, distilled: n, pruned: n}
 - `memory.forgotten` {refs, reason}
 
 ### 4.10 `world.*` / `self.*`
-- `world.env.query` / `.reply` {what: capability_map|file_index|tools|user_profile|git_state, args?} → {…}
+- `world.env.query` / `.reply` {what: capability_map|file_index|tools|user_profile|git_state, args?} → {facet, as_of, …} — `file_index` accepts `args: {path, max_chars}` and returns a bounded read-only content preview (World Model reads the repository tree and git state directly as observation; it never writes)
 - `world.env.observed` {facet, summary, ref}
 - `self.summary` / `self.summary.reply` {budget_tokens} → {text, version}
-- `self.gaps` / `self.gaps.reply` {k} → {gaps: [{competence, task_type, score, samples}], unexplored_areas: [...]}
-- `self.model.updated` {version, changed_sections: [...], reason}
-- `self.observation` {kind: restart|change|limitation|success|failure, detail, ref}
+- `self.gaps` / `self.gaps.reply` {k} → {version, gaps: [{competence, task_type, score, samples}], unexplored_areas: [{area, modules: [...], last_touched?, tasks_ever}]}
+- `self.model.updated` {version, changed_sections: [...], reason} — published only by `worldmodel`, the single writer of the `self:model` stream
+- `self.observation` {kind: restart|change|limitation|success|failure, detail, ref} — published by `reflection` (the writer of record for observations); World Model folds them into the model
 
 ### 4.11 `learn.*`
-- `learn.outcome.recorded` {task_id, task_type, succeeded: bool, verdict, cost_usd, duration_s, strategy?}
+- `learn.pipeline.run` (command; consumer group `learning`) {task_id, kind: patch|skill|evolve, subject?, description, prior_reasons?: [str]} / `learn.pipeline.completed` {task_id, outcome: applied|researched|rejected|reverted|floor, detail, commit?, verification_ref?} — how a Worker hands a `kind=patch|skill` task to Learning (Flow 4); Learning owns policy and sequencing, Execution owns the composite drafting tools (`self_patch.draft`, `skill.draft`), Verification owns the checks
+- `learn.strategy.suggest` / `.reply` {task_type, context?} → {strategy?: {approach, provider, purpose_config}, success_rate, samples} — procedural memory consulted by Orchestration before a task
+- `learn.outcome.recorded` {task_id, task_type, succeeded: bool, verdict, cost_usd, duration_s, strategy?, confidence?}
 - `learn.competence.updated` {task_type, success_rate, calibration, samples}
 - `learn.skill.acquired` {name, path, tests: n}
 - `learn.self_patch.applied` / `.reverted` {subject, commit, tests: {baseline, patched}, reason?}
@@ -184,12 +210,16 @@ subsystem spec expands the entries it owns. Payload fields are shown as
 - `reflect.patterns.found` {window, patterns: [{kind, agent?, rate, proposal}]}
 - `reflect.drift.detected` {task_id|plan_id, kind: goal|scope|behavior, evidence, recommendation}
 - `reflect.calibration.updated` {task_type, stated_confidence, empirical_accuracy}
-- `reflect.health.finding` {severity: info|warn|critical, detail, action_taken?}
+- `reflect.health.finding` {severity: info|warn|critical, detail, action_taken?: none|request_reset|request_pause_hint}
+- `reflect.review.request` / `.reply` {window_seconds?} → {patterns, takeaways} — v1 `reflect` command
 
 ### 4.13 `curiosity.*`
 - `curiosity.candidate` {kind: patch|research, subject?, description, area, why_this_area, novelty_score}
 - `curiosity.interest.updated` {topic, last_followed_up, items_found}
 - `curiosity.share.proposed` {kind: growth|news, content_ref}
+- `curiosity.discover.request` / `.reply` {} → {created: [task_id]} — v1 `discover`
+- `curiosity.share.request` / `.reply` {kind: growth|news} → {shared: bool, content_ref?} — v1 `growth`/`news`
+- `curiosity.interest.add` {topic|feed_url}; `curiosity.interest.list.request` / `.reply` → {interests: […]}; `curiosity.interest.follow_up.request` / `.reply` {topic?} → {items_found} — v1 `interest`/`interests`/`curious`
 
 ### 4.14 `persona.*`
 - `persona.state.changed` {valence, arousal, cognitive_load, source, previous}
@@ -198,8 +228,11 @@ subsystem spec expands the entries it owns. Payload fields are shown as
 
 ### 4.15 `ui.*` / `cognition.*` / `research.*`
 - `ui.notice` {level, text, source}; `ui.prompt` {prompt_id, question, options, default, timeout_s}; `ui.prompt.answered` {prompt_id, answer}; `ui.rendered` {channel, text}
-- `cognition.think` / `.reply` {purpose, messages: [{role, content}], tools?: [name], budget: {max_tokens, max_cost_usd}, require_real_provider: bool} → {text, tool_calls: [{tool, args}], provider, cost_usd, tokens, floor: bool}
+- `cognition.think` / `.reply` {purpose: chat|draft|plan|review|research|decompose|reground|consolidate, session_id?, messages: [{role, content}], tools?: [name], expected?: text|tool_calls|edit_blocks|verdict, budget: {max_tokens, max_cost_usd}, require_real_provider: bool, allow_summarize?: bool, last_step?: bool} → {text, tool_calls: [{tool, args}], edit_blocks?: [{search, replace}], provider, cost_usd, tokens, floor: bool, non_answer: bool, confidence?, agreement?: bool, compaction?: {layers_applied: [...], tokens_before, tokens_after}}
+- `cognition.compact.request` / `.reply` {session_id, target_tokens} → {layers_applied, tokens_before, tokens_after, summary_ref?}; `cognition.compact.pre` / `.done` {session_id, layer} — the `PreCompact` hook events so extensions can react before the model-summarization layer runs
 - `cognition.provider.status` {provider, available, budget: {…}}
+- `guardian.review` / `.reply` {subject, code_ref, kind: self_patch|skill} → {approved: bool, reasons: [str], layers_run: [...]} — the static denylist + adaptive-immunity check exposed to Verification
+- `guardian.posture.changed` {mode, trust_score, reason}; `guardian.posture.request` / `.reply` → {mode, trust_score, tightened_by: [...], paused_scope?} — v1 `autonomous status`
 - `research.finding.recorded` {task_id, finding_ref, follow_up?: {subject, description}}
 
 ## 5. Delivery semantics
@@ -216,7 +249,13 @@ subsystem spec expands the entries it owns. Payload fields are shown as
   lease is dropped and re-emitted by Planning).
 - **Ack/nack/retry.** Command handlers ack on success; nack with
   `retry_after` on transient failure; after `max_deliveries` the message
-  is moved to `dead:<type>` and a `system.health` degraded event fires.
+  is moved to the backend's dead-letter queue *and* appended to the
+  Ledger stream `dead:<type>` (so it survives backend rotation and is
+  queryable), and a `system.health` degraded event fires.
+- **Tracing.** The Bus's trace writer appends every message to
+  `trace:<trace_id>` subject to a per-type sample rate (`[bus.trace]
+  rates`), defaulting to 1.0 for everything and typically lowered only
+  for `system.tick.second` and `system.metrics`.
 - **Backpressure.** Publishers await; backends bound queue depth per
   consumer group and apply the Kernel's rate policy (also how LLM budget
   pressure slows Curiosity without special code).
@@ -240,13 +279,16 @@ class Ledger(Protocol):
     async def snapshot(self, stream: str, state: dict, at_seq: int) -> None
     async def load_snapshot(self, stream: str) -> tuple[dict, int] | None
     async def streams(self, prefix: str) -> list[str]
+    async def put_blob(self, data: bytes, *, content_type: str) -> str          # returns "blob:<sha256>"
+    async def get_blob(self, ref: str) -> bytes
+    async def compact(self, stream: str, *, before_seq: int, keep_snapshot: bool = True) -> int  # record compaction, distinct from context compaction
 
 class Subsystem(Protocol):
     name: str
     version: str
     consumes: tuple[str, ...]      # topic patterns (declared, checked by the Kernel)
     produces: tuple[str, ...]
-    async def start(self, ctx: Context) -> None   # ctx: bus, ledger, config, secrets, clock, logger, data_dir
+    async def start(self, ctx: Context) -> None   # ctx: name, instance_id, run_id, mode, bus, ledger, config, secrets, clock, logger, data_dir
     async def stop(self) -> None
     async def health(self) -> Health
 
@@ -327,7 +369,14 @@ written to the Ledger's blob area (`blobs/<sha256>`) and referenced by
 - The Kernel generates a per-run secret; `approval_token`s are
   HMAC-SHA256 over the canonical action; Execution verifies before
   running; tokens expire (`expires_at`, default 120 s).
-- Subscriptions to reserved topics are refused by subsystem name (§3).
+- Subscriptions to and publications on reserved topics are refused by
+  subsystem identity (§3). In `single` mode identity is the in-process
+  `Service` object. In `local-multi`/`aws` modes a subsystem's process
+  authenticates to the Bus with a per-run `subsystem_token` the Kernel
+  issues at `start()` (HMAC of `run_id|name|instance_id` under the
+  run secret); the backend stamps the verified `source` on every
+  message, so a forged `source` field in the envelope cannot bypass the
+  reserved-topic rules.
 - On the `aws` backend, topics/queues are per-deployment and IAM-scoped;
   the same token check still applies end-to-end because the secret is
   distributed by the Kernel, not by the transport.

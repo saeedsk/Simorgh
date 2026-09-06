@@ -1964,3 +1964,54 @@ Still ahead, roughly in order:
     `_autonomous_action`'s rare-project-branch and failed-project-falls-
     through-to-a-single-idea paths, the latter two made deterministic via
     a mocked `random.random` rather than left to a 20% coin flip).
+97. **The Simorgh v2 blueprint: a complete re-architecture, designed to
+    be built by many agents in parallel.** The creator asked for the
+    knowledge base to be read and then for a re-architecture toward a
+    capable, functional AGI foundation with a first-class harness for
+    projects and general work -- modular, clear interfaces, separate
+    directories, independently evolvable, async messaging, API-based,
+    hostable anywhere, and documented in enough detail that AI coding
+    agents can pick up pieces and build them. `docs/blueprint/` is the
+    result: six governing documents (vision and fifteen binding
+    principles; the sixteen-subsystem architecture with an enforced
+    import boundary and nine worked message flows; the full message
+    contract -- envelope, topic taxonomy, catalog, delivery semantics,
+    Bus/Ledger/Subsystem protocols, memory/SQLite/AWS backends; a phased
+    build plan with parallel tracks and a definition of done; build
+    instructions for AI agents; a v1 -> v2 migration map that carries
+    every live-caught lesson and its test) plus sixteen subsystem specs
+    on one mandatory template, ~67,000 words in all.
+
+    The architectural thesis is the name itself: thirty birds discovering
+    they are the Simorgh. Sixteen small subsystems, one package each,
+    share exactly one dependency (`simorgh/contracts`) and talk only
+    through typed, traceable messages on an async Bus; all state is an
+    append-only Ledger whose projections (task status, project rollups,
+    competence, the Self Model) are always rebuildable; safety is
+    structural -- every action is proposed, only the Guardian can approve
+    (with an HMAC-bound token), only Execution can run, and pause/stop/
+    Plan Mode/protected files/budgets are enforced at that one
+    chokepoint no reasoning can route around. The harness takes Claude
+    Code's shape from the research (a minimal gather->act->verify loop
+    around a rich operational harness: graduated context compaction,
+    Plan Mode, a durable backlog with a dependency DAG and re-grounding,
+    checklist-and-trajectory verification with an evaluator-optimizer
+    loop, isolated sub-agent delegation), and growth is a loop: outcomes
+    feed Learning, Reflection, and Curiosity, so the system measurably
+    learns what it can do, what it can't, and what to explore next --
+    self-awareness as a maintained, queryable Self Model rather than a
+    prompt.
+
+    Process note worth recording: the six core documents were written
+    by one author for coherence, then the sixteen specs were written in
+    parallel by five agents working only from those documents and the
+    template, exactly the way the blueprint proposes the *system* be
+    built. The specs came back with ~30 independently-found contract
+    gaps and ownership ambiguities (several found by more than one
+    agent: `turn.completed` used in a flow but absent from the catalog;
+    no scope on pause; no `guardian` domain; no task-create request) --
+    all folded into the governing documents in one integration pass,
+    every one non-breaking, and recorded in `00-README.md`'s changelog.
+    That the parallel-build process surfaced real interface gaps before
+    a line of code exists is the strongest evidence so far that the
+    contracts-first, boundary-enforced approach is the right one.
