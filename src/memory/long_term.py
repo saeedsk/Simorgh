@@ -211,6 +211,24 @@ class MemoryStore(abc.ABC):
             )
             self._replace(updated)
 
+    def consolidate_contradictions(
+        self, kind: str = "semantic"
+    ) -> list[tuple[MemoryRecord, MemoryRecord]]:
+        """Consolidation-time entry point: find every contradicting pair of
+        same-kind records and flag each one, in a single call.
+
+        Bundles find_contradictions + flag_contradiction so a sleep-time
+        consolidation pass (src/orchestrator/consolidation.py) doesn't
+        silently let conflicting records sit side by side at equal
+        confidence -- it just calls this once per kind. Returns the flagged
+        pairs so the caller can log or surface them for human/agent
+        reconciliation, which this method does not attempt on its own.
+        """
+        pairs = self.find_contradictions(kind=kind)
+        for record_a, record_b in pairs:
+            self.flag_contradiction(record_a.id, record_b.id)
+        return pairs
+
 
 class InMemoryStore(MemoryStore):
     """Non-durable, process-local memory store. Useful for tests, and as
