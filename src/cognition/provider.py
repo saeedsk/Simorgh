@@ -93,9 +93,22 @@ _TASK_TYPE_CAPABILITY: dict[TaskType, Capability] = {
 
 @dataclass(frozen=True)
 class LLMResponse:
+    """A completion returned by an LLMProvider.
+
+    `confidence` is an optional, provider-agnostic self-assessment in
+    [0, 1] of how much the provider trusts its own answer -- distinct from
+    OutcomeStore's empirical, historical confidence per (provider,
+    TaskType). A provider with no notion of self-assessed confidence
+    should leave this None rather than guessing a number. Callers (e.g.
+    the orchestrator) should treat None as "unreported", not "low", and
+    only trigger self-reflection or escalation when an explicit value
+    falls below their own threshold.
+    """
+
     text: str
     provider_name: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    confidence: float | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +127,7 @@ class EnsembleResponse:
     metadata: dict[str, Any] = field(default_factory=dict)
     responses: tuple[LLMResponse, ...] = field(default_factory=tuple)
     agreement: bool = True
+    confidence: float | None = None
 
 
 class LLMProvider(abc.ABC):
@@ -390,6 +404,7 @@ class CapabilityRegistry:
                 metadata=response.metadata,
                 responses=(response,),
                 agreement=True,
+                confidence=response.confidence,
             )
 
         results: list[LLMResponse] = []
@@ -410,6 +425,7 @@ class CapabilityRegistry:
                 metadata=response.metadata,
                 responses=(response,),
                 agreement=True,
+                confidence=response.confidence,
             )
 
         for result in results:
@@ -431,4 +447,5 @@ class CapabilityRegistry:
             metadata=metadata,
             responses=tuple(results),
             agreement=agreement,
+            confidence=winner.confidence,
         )
