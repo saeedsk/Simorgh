@@ -9,7 +9,7 @@
 
 **Layer:** 2 Agency
 **Owner (build):** unassigned
-**Status:** draft
+**Status:** built
 **Depends on (contracts only):** `verify.requested`, `plan.proposed`, `action.result`, `cognition.think.reply`, `guardian.review.reply`, `system.state.changed`
 **v1 code that migrates here:** `src/orchestrator/verification.py` (`verify_task_completion`, YES/NO line scan), from `src/orchestrator/self_patch.py`: `_docstring_regression_reason`, `check_main_py_invariants`, the use of `run_isolated_test_suite` (the runner itself moves to Execution), from `src/orchestrator/audit.py`: the sandboxed smoke run for new skills (as a check, not a gate)
 
