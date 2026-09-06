@@ -70,7 +70,7 @@ class Worker:
         task_id = message.payload["task_id"]
         kind = message.payload.get("kind", "chat")
         claim_req = Message.new(
-            topics.TASK_CLAIM, source="orchestration",
+            topics.TASK_CLAIM, source=self._bus.source,
             payload={"task_id": task_id, "worker_id": self.worker_id},
             partition_key=f"task:{task_id}", clock=self._clock,
         )
@@ -144,14 +144,14 @@ class Worker:
         else:
             payload = {"task_id": session.task_id, "reason": outcome.reason}
 
-        msg = Message.new(type_, source="orchestration", payload=payload,
+        msg = Message.new(type_, source=self._bus.source, payload=payload,
                           partition_key=f"task:{session.task_id}", clock=self._clock)
         await self._ledger.append(f"task:{session.task_id}", Event.from_message(msg, f"task:{session.task_id}"))
         await self._bus.publish(msg)
 
         if session.kind == "chat":
             turn = Message.new(
-                topics.TURN_COMPLETED, source="orchestration",
+                topics.TURN_COMPLETED, source=self._bus.source,
                 payload={
                     "session_id": session.task_id, "task_id": session.task_id,
                     "text": outcome.result_summary, "floor": outcome.floor,

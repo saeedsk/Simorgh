@@ -23,7 +23,8 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 }
 
 
-def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: str) -> dict:
+def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: str,
+                      proposed_by: str = "orchestration") -> dict:
     tool = call.get("tool", "")
     args = call.get("args", {})
     reversibility, network = _TOOL_POLICY.get(tool, ("irreversible", False))
@@ -36,5 +37,9 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
         "scope": {"paths": paths, "network": network},
         "reversibility": reversibility,
         "rationale": rationale,
-        "proposed_by": "orchestration",
+        # 16-orchestration.md section 3.2: `proposed_by:"orchestration@wN"`
+        # -- which Worker proposed it, not just which subsystem. The
+        # caller passes its own bound `bus.source`; the default here only
+        # covers a caller that never had one (e.g. an ad hoc unit test).
+        "proposed_by": proposed_by,
     }

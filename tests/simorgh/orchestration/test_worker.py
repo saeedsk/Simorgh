@@ -273,5 +273,83 @@ class TestResumeOnASecondWorker(unittest.TestCase):
             await gx.stop()
 
 
+class TestMultiProcessSourceAttribution(unittest.TestCase):
+    """`local-multi` mode (03-kernel.md section 5.6): every message a
+    Worker publishes used to hardcode `source="orchestration"` (worker.py/
+    session.py), no matter what per-process identity its own `BusClient`
+    was bound to. A `ReservedTopologyPolicy` built with `identities` set
+    (any mode other than `single`) authenticates only the *exact* source
+    string a process's `IdentityRegistry` issued a token for
+    (`orchestration@w1` for a `simorgh worker --id w1` process, see
+    `kernel.context.ContextFactory.build`) -- so every one of those
+    publishes raised `PolicyViolation: '...' is not authenticated`
+    before `worker.py`/`session.py` were changed to publish under
+    `self._bus.source` instead of the literal.
+    """
+
+    @run
+    async def test_a_worker_bound_to_an_instance_qualified_source_completes_under_a_strict_policy(self):
+        from simorgh.bus.enforcement import IdentityRegistry, ReservedTopologyPolicy
+        from simorgh.bus.factory import make_client as make_bus_client
+
+        async with Harness() as h:
+            identities = IdentityRegistry(b"test-secret", "run-1")
+            policy = ReservedTopologyPolicy(identities)
+            # Every source this scenario touches self-authenticates exactly
+            # once, mirroring `ContextFactory.build` -- a strict stand-in
+            # for what a real multi-process boot does per process.
+            for name, instance_id in (
+                ("planning", ""), ("cognition", ""), ("guardian", ""), ("execution", ""),
+                ("interface", ""), ("orchestration", "w1"),
+            ):
+                source = f"{name}@{instance_id}" if instance_id else name
+                policy.authenticate(source, identities.issue(name, instance_id))
+
+            def client(source: str):
+                return make_bus_client(h._bus_backend, source=source, ledger=h.ledger,  # noqa: SLF001
+                                       clock=h.clock.now, policy=policy)
+
+            planning = FakePlanning(client("planning"))
+            planning.add_task("t1", kind="chat", mode="execute", description="hi")
+            cognition = FakeCognition(client("cognition"), script=[
+                {"tool_calls": [{"tool": "read_file", "args": {"path": "x"}}]},
+                {"text": "hello back"},
+            ])
+            gx = FakeGuardianExecution(client("guardian"))
+            await planning.start()
+            await cognition.start()
+            await gx.start()
+
+            worker = Worker(client("orchestration@w1"), h.ledger, clock=h.clock.now, worker_id="w1",
+                            assemble_timeout_s=0.01)
+            await worker.start()
+
+            completed = {}
+
+            async def _on_turn(message):
+                completed["turn"] = message
+
+            sub = await client("interface").subscribe(topics.TURN_COMPLETED, _on_turn)
+
+            from simorgh.contracts.envelope import Message
+            await client("planning").publish(Message.new(
+                topics.TASK_AVAILABLE, source="planning",
+                payload={"task_id": "t1", "kind": "chat", "lease_seconds": 60.0},
+                clock=h.clock.now,
+            ))
+            await h.pump(60, real_delay=0.01)
+
+            self.assertIn("turn", completed)  # no PolicyViolation ever reached a handler's except-all
+            self.assertEqual(completed["turn"].payload["text"], "hello back")
+            self.assertEqual(len(gx.proposals), 1)  # the read_file step actually reached Guardian/Execution
+            self.assertEqual(gx.proposals[0].source, "orchestration@w1")  # attributed, not the bare literal
+
+            await sub.unsubscribe()
+            await worker.stop()
+            await gx.stop()
+            await cognition.stop()
+            await planning.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

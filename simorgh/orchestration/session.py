@@ -121,7 +121,7 @@ class SessionRunner:
     async def _think(self, session: Session, user_text: str, *, last_step: bool) -> Message | None:
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
         req = Message.new(
-            topics.COGNITION_THINK, source="orchestration",
+            topics.COGNITION_THINK, source=self._bus.source,
             payload={
                 "purpose": "chat" if session.profile.name == "chat" else "draft",
                 "messages": messages, "tools": list(session.profile.tools),
@@ -140,9 +140,10 @@ class SessionRunner:
         payload = to_action_payload(
             action_id=action_id, task_id=session.task_id, call=call,
             rationale=f"step {step_no} of {session.profile.name} session",
+            proposed_by=self._bus.source,
         )
         msg = Message.new(
-            topics.ACTION_PROPOSED, source="orchestration",
+            topics.ACTION_PROPOSED, source=self._bus.source,
             payload=payload, partition_key=f"task:{session.task_id}", clock=self._clock,
         )
         await self._bus.publish(msg)
@@ -171,7 +172,7 @@ class SessionRunner:
             verification_id = uuid.uuid4().hex[:12]
             subject_ref = await self._put_verify_subject(session, text)
             msg = Message.new(
-                topics.VERIFY_REQUESTED, source="orchestration",
+                topics.VERIFY_REQUESTED, source=self._bus.source,
                 payload={
                     "verification_id": verification_id, "task_id": session.task_id,
                     "kind": "task", "subject_ref": subject_ref,
@@ -244,11 +245,11 @@ class SessionRunner:
         await self._publish(session, topics.TASK_STEP, payload)
 
     async def _append(self, session: Session, type_: str, payload: dict) -> None:
-        msg = Message.new(type_, source="orchestration", payload=payload,
+        msg = Message.new(type_, source=self._bus.source, payload=payload,
                           partition_key=f"task:{session.task_id}", clock=self._clock)
         await self._ledger.append(f"task:{session.task_id}", Event.from_message(msg, f"task:{session.task_id}"))
 
     async def _publish(self, session: Session, type_: str, payload: dict) -> None:
-        msg = Message.new(type_, source="orchestration", payload=payload,
+        msg = Message.new(type_, source=self._bus.source, payload=payload,
                           partition_key=f"task:{session.task_id}", clock=self._clock)
         await self._bus.publish(msg)

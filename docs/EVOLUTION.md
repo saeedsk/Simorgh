@@ -3129,3 +3129,65 @@ Still ahead, roughly in order:
     open turn history" beyond the single in-flight-or-not check above),
     and there is still no WebSocket or other push transport, only the
     existing HTTP POST. Both remain open for whoever continues this.
+
+119. **`local-multi` mode lands, closing roadmap Phase 5 item 1 --
+    and turns up a real bug that was never local-multi-specific at
+    all.** Same read-first pattern as every Phase 4/5 item: the sqlite
+    bus/ledger backends (`simorgh/bus/backends/sqlite.py`, `simorgh/
+    ledger/backends/sqlite.py`) already existed from Phase 0, full WAL-
+    mode, competing-consumer semantics, already exercised by a real
+    multi-process test (`test_sqlite_multiprocess.py`); `RuntimeConfig.
+    mode` and the identity/policy scaffolding (`IdentityRegistry`,
+    `ReservedTopologyPolicy`) were already there too. What was missing
+    was four specific, real bugs, not a rewrite:
+
+    1. **`ReservedTopologyPolicy.authenticate()` was never called from
+       anywhere.** Any mode but `single` would have failed on the very
+       first subsystem publish/subscribe with `PolicyViolation` --
+       `local-multi`/`aws` boot had never actually worked, not once,
+       despite the scaffolding existing since Phase 0. Fixed in
+       `ContextFactory.build` and `Kernel.boot` (for the Kernel's own
+       "kernel" source).
+    2. **Orchestration hardcoded the literal string `"orchestration"`**
+       as its message source in four places (`worker.py`, `session.py`,
+       `context.py`, and `action.proposed`'s `proposed_by` field in
+       `tools.py`) instead of the process's own bound `bus.source`
+       (`orchestration@w1` in multi-process mode). Under a real policy
+       check, every single Worker publish would have raised
+       `PolicyViolation` the moment more than one Worker process
+       existed.
+    3. **`Kernel._bus_config()` never passed `data_dir`** to the sqlite
+       backend config, so a default sqlite bus silently resolved its
+       WAL file against the process's cwd, not the runtime data
+       directory -- quietly breaking `local-multi`'s entire "one shared
+       file" premise for anyone who didn't hand-configure `[bus.sqlite]
+       path` themselves.
+    4. **A `Kernel.shutdown()` ordering bug, not local-multi-specific
+       at all**: the final `system.state` ledger append happened
+       *after* `stop_all()` had already closed the ledger backend's own
+       connection, raising `LedgerUnavailable` on every clean shutdown
+       against a real (sqlite) ledger -- reproducible in plain `single`
+       mode too, just never noticed because every prior integration
+       test either used the `memory` ledger or didn't assert on a clean
+       shutdown's own success.
+
+    Built: `Kernel.boot()` now excludes the `orchestration` layer
+    entirely when `mode == "local-multi"` (each Worker is its own
+    process, not a task inside the Kernel's); a new `WorkerKernel`
+    (Ledger+Bus clients only, exactly one Orchestration Worker, no HMAC
+    approval secret since a Worker process never approves anything
+    itself) and a `simorgh worker --id wN` CLI subcommand to launch one;
+    boot-time validation that refuses `local-multi` against the
+    in-process-only `memory` backend outright instead of silently
+    hanging forever waiting for a second process that can never share
+    that backend.
+
+    Verified with a real crash/resume drill, not a simulation: spawns
+    two actual `simorgh worker` OS processes sharing one sqlite bus+
+    ledger file, SIGKILLs the first mid-task right after it durably
+    records one step, and proves the second process resumes and
+    completes without redoing that step -- the multi-process version of
+    the in-process resume logic `test_worker.py::TestResumeOnASecondWorker`
+    already proved back when orchestration was first built. 15 new
+    tests; full suite green (2138 on the fork's own branch before
+    merge). No `simorgh/contracts/` change needed.
