@@ -34,6 +34,16 @@ Bounded on top of (never instead of) every existing guard:
   instead of quietly grinding through the rest of the daily cap on a
   systematically broken pipeline. Requires `autonomous on` (which resets
   the streak) to resume -- a human checkpoint, not a silent retry.
+
+An optional `diagnostic_probe` callback lets the loop use genuinely idle
+time (no pending external work found by `perform_action`) to run a
+self-check instead of just waiting -- e.g. verifying the memory store is
+healthy, or reviewing recent action outcomes. It shares the same
+idle/cooldown pacing as real actions, but is logged under its own kind
+(`PROBE_ACTION_KIND`) and deliberately excluded from `max_actions_per_day`
+and the failure-streak breaker, since observing is not acting. Deciding
+*what* to probe stays external (main.py), the same separation of concerns
+already used for `perform_action`.
 """
 
 from __future__ import annotations
@@ -56,6 +66,7 @@ class ActionDigest:
     window_seconds: float
 
 ACTION_KIND = "autonomous_action"
+PROBE_ACTION_KIND = "autonomous_probe"
 
 # Retuned three times now, all from direct creator feedback, all
 # downward. First pass (300s/600s -> 60s/150s): "not acting on its own,
@@ -157,6 +168,7 @@ class AutonomyController:
         max_actions_per_day: int = DEFAULT_MAX_ACTIONS_PER_DAY,
         last_action_succeeded: Callable[[], bool | None] | None = None,
         max_consecutive_failures: int = DEFAULT_MAX_CONSECUTIVE_FAILURES,
+        diagnostic_probe: Callable[[], bool] | None = None,
     ) -> None:
         self._store = store
         self._clock = clock
@@ -170,6 +182,8 @@ class AutonomyController:
         self.max_consecutive_failures = max_consecutive_failures
         self._consecutive_failures = 0
         self._last_action_at = 0.0
+        self._diagnostic_probe = diagnostic_probe
+        self._last_probe_at = 0.0
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -240,12 +254,46 @@ class AutonomyController:
             return False
         return True
 
+    def _maybe_run_diagnostic_probe(self) -> None:
+        """Fallback for a genuinely idle tick where `perform_action`
+        found no external work: gives an injected `diagnostic_probe`
+        callback a chance to run one hypothesis-driven self-check (e.g.
+        verifying memory-store integrity or reviewing recent action
+        health) so idle time isn't pure waiting. Paced by the same
+        `action_cooldown_seconds` as real actions so it can't spam every
+        poll tick; logged under its own kind (`PROBE_ACTION_KIND`) so it
+        is never confused with -- or double-counted against -- the
+        daily action cap or the failure-streak circuit breaker, both of
+        which are about real actions only. What a probe actually checks
+        is entirely the injected callback's decision, same as
+        `perform_action` -- this file still never decides *what* to
+        work on, only *whether/when* it's allowed to.
+        """
+        if self._diagnostic_probe is None:
+            return
+        if time.time() - self._last_probe_at < self.action_cooldown_seconds:
+            return
+        self._last_probe_at = time.time()
+        try:
+            probe_ran = self._diagnostic_probe()
+        except Exception as exc:  # noqa: BLE001 -- same reasoning as
+            # the perform_action guard below: a broken probe must never
+            # take the background loop down.
+            print(style(f"🤖 [autonomous] diagnostic probe raised {exc!r} -- will try again later", "red", "bold"))
+            return
+        if probe_ran:
+            self._store.remember(PROBE_ACTION_KIND, "autonomous diagnostic probe run")
+            print(style("🔎 [autonomous] idle diagnostic probe (no pending external work)", "cyan", "bold"))
+
     def tick(self) -> bool:
         """One synchronous check-and-maybe-act cycle -- what the
         background loop calls repeatedly, but also directly callable
         (and unit-testable) without any real waiting or threading.
         Returns True only if `perform_action` actually ran and reported
-        real work done.
+        real work done. When it didn't (genuinely nothing pending), an
+        injected `diagnostic_probe` gets one paced chance to run instead
+        -- see `_maybe_run_diagnostic_probe` -- but that never changes
+        this method's return value or counts as an "action".
         """
         if not self.ready_to_act():
             return False
@@ -284,6 +332,8 @@ class AutonomyController:
                     )
             elif succeeded is True:
                 self._consecutive_failures = 0
+        else:
+            self._maybe_run_diagnostic_probe()
         return did_something
 
     def _loop(self) -> None:
