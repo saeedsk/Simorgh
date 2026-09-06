@@ -146,6 +146,71 @@ class MemoryStore(abc.ABC):
             if record_id in record.metadata.get("antecedent_ids", [])
         ]
 
+    def score_confidence(self, record: MemoryRecord) -> float:
+        """Return this record's current confidence, defaulting to 1.0 for
+        records that predate confidence tracking or were never contradicted.
+        """
+        return float(record.metadata.get("confidence", 1.0))
+
+    def find_contradictions(
+        self, kind: str = "semantic"
+    ) -> list[tuple[MemoryRecord, MemoryRecord]]:
+        """Find pairs of same-kind records that share a `metadata["subject"]`
+        but disagree on `content` -- e.g. two "semantic" facts about the same
+        subject that say different things. Consolidation
+        (src/orchestrator/consolidation.py) calls this at sleep time to
+        surface conflicts that would otherwise sit side by side in memory
+        forever, each queried back as if equally true.
+        """
+        records = self.query(kind=kind)
+        by_subject: dict[Any, list[MemoryRecord]] = {}
+        for record in records:
+            subject = record.metadata.get("subject")
+            if subject is None:
+                continue
+            by_subject.setdefault(subject, []).append(record)
+
+        pairs = []
+        for subject_records in by_subject.values():
+            for i, a in enumerate(subject_records):
+                for b in subject_records[i + 1 :]:
+                    if a.content != b.content:
+                        pairs.append((a, b))
+        return pairs
+
+    def flag_contradiction(self, record_a_id: str, record_b_id: str) -> None:
+        """Mark two records as contradicting each other and halve each
+        one's confidence, rather than letting both silently stand as
+        equally true. Tagged via `metadata["contradicts"]` /
+        `metadata["confidence"]` and written through `_replace` so recency
+        ordering is undisturbed. Neither record is deleted -- reconciling
+        (choosing one, merging, or discarding both) is left to a human or
+        a future agent with more context than a shared-subject match can
+        supply.
+        """
+        if record_a_id == record_b_id:
+            raise ValueError("a record cannot contradict itself")
+        for this_id, other_id in ((record_a_id, record_b_id), (record_b_id, record_a_id)):
+            record = self.get(this_id)
+            if record is None:
+                raise KeyError(this_id)
+            contradicts = list(record.metadata.get("contradicts", []))
+            if other_id not in contradicts:
+                contradicts.append(other_id)
+            confidence = float(record.metadata.get("confidence", 1.0)) * 0.5
+            updated = MemoryRecord(
+                id=record.id,
+                kind=record.kind,
+                content=record.content,
+                created_at=record.created_at,
+                metadata={
+                    **record.metadata,
+                    "contradicts": contradicts,
+                    "confidence": confidence,
+                },
+            )
+            self._replace(updated)
+
 
 class InMemoryStore(MemoryStore):
     """Non-durable, process-local memory store. Useful for tests, and as
