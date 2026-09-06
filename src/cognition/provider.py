@@ -19,6 +19,7 @@ it ahead of the fallback in a CognitionRouter -- see docs/EVOLUTION.md,
 from __future__ import annotations
 
 import abc
+import enum
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +29,17 @@ class ProviderUnavailable(Exception):
     (network error, rate limit, missing credentials, etc.). CognitionRouter
     catches this and tries the next provider.
     """
+
+
+class Capability(enum.Enum):
+    """A named ability a cognition backend may or may not support, so the
+    orchestrator can route tasks to a provider that actually supports what
+    a task needs instead of discovering a mismatch at call time.
+    """
+
+    TOOL_USE = "tool_use"
+    STREAMING = "streaming"
+    LONG_CONTEXT = "long_context"
 
 
 @dataclass(frozen=True)
@@ -41,6 +53,7 @@ class LLMProvider(abc.ABC):
     """Interface every cognition backend implements."""
 
     name: str
+    capabilities: frozenset[Capability] = frozenset()
 
     @abc.abstractmethod
     def available(self) -> bool:
@@ -55,6 +68,9 @@ class LLMProvider(abc.ABC):
         """Return a completion for `prompt`, or raise ProviderUnavailable."""
         raise NotImplementedError
 
+    def supports(self, capability: Capability) -> bool:
+        return capability in self.capabilities
+
 
 class DeterministicFallbackProvider(LLMProvider):
     """Always available, makes no network call, and cannot fail. This is
@@ -64,6 +80,7 @@ class DeterministicFallbackProvider(LLMProvider):
     """
 
     name = "deterministic_fallback"
+    capabilities: frozenset[Capability] = frozenset()
 
     def available(self) -> bool:
         return True
@@ -117,3 +134,11 @@ class CognitionRouter:
             }
             for name in names
         }
+
+    def providers_with_capability(self, capability: Capability) -> list[LLMProvider]:
+        """Return registered providers that declare support for `capability`,
+        in priority order, so a caller can route a task to one that can
+        actually handle it (e.g. tool-use or long-context reasoning) instead
+        of discovering the mismatch after a failed `complete()` call.
+        """
+        return [p for p in self._providers if p.supports(capability)]
