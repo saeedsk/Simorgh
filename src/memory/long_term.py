@@ -143,9 +143,19 @@ class MemoryStore(abc.ABC):
         so a query surfaces records that share vocabulary/context even
         if worded differently, and doesn't just return the newest ones.
 
+        Ranking multiplies similarity by score_confidence, so a stale or
+        repeatedly-contradicted record (see score_confidence,
+        flag_contradiction) sinks in results well before reconsolidate
+        gets around to pruning it -- confidence decay affects what
+        callers see immediately, not just what survives consolidation.
+
+        min_similarity filters on raw semantic similarity, not the
+        confidence-weighted score, so it still means "semantically
+        relevant enough" regardless of a record's current confidence.
+
         Ties and near-ties fall back to recency: `query()` already
         returns records newest-first, and Python's sort is stable, so
-        equally-similar records keep that relative order.
+        equally-ranked records keep that relative order.
         """
         query_vector = embed_text(query_text)
         candidates = self.query(kind=kind)
@@ -154,7 +164,7 @@ class MemoryStore(abc.ABC):
             for record in candidates
         ]
         scored = [pair for pair in scored if pair[1] >= min_similarity]
-        scored.sort(key=lambda pair: pair[1], reverse=True)
+        scored.sort(key=lambda pair: pair[1] * self.score_confidence(pair[0]), reverse=True)
         return [record for record, _ in scored[:limit]]
 
     def _replace(self, record: MemoryRecord) -> None:
