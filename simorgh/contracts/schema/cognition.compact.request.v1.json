@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/cognition.compact.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `cognition.compact.request` (catalog v1).",
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "target_tokens": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "session_id",
+    "target_tokens"
+  ],
+  "title": "cognition.compact.request",
+  "type": "object"
+}

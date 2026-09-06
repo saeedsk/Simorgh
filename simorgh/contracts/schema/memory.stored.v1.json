@@ -1,0 +1,26 @@
+{
+  "$id": "https://simorgh.local/schema/memory.stored.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `memory.stored` (catalog v1).",
+  "properties": {
+    "kind": {
+      "enum": [
+        "working",
+        "episodic",
+        "semantic",
+        "procedural"
+      ],
+      "type": "string"
+    },
+    "ref": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ref",
+    "kind"
+  ],
+  "title": "memory.stored",
+  "type": "object"
+}

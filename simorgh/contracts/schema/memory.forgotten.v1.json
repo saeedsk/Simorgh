@@ -1,0 +1,23 @@
+{
+  "$id": "https://simorgh.local/schema/memory.forgotten.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `memory.forgotten` (catalog v1).",
+  "properties": {
+    "reason": {
+      "type": "string"
+    },
+    "refs": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "refs",
+    "reason"
+  ],
+  "title": "memory.forgotten",
+  "type": "object"
+}

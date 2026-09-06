@@ -1,0 +1,39 @@
+{
+  "$id": "https://simorgh.local/schema/research.finding.recorded.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `research.finding.recorded` (catalog v1).",
+  "properties": {
+    "finding_ref": {
+      "type": "string"
+    },
+    "follow_up": {
+      "additionalProperties": true,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "description"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "finding_ref"
+  ],
+  "title": "research.finding.recorded",
+  "type": "object"
+}

@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/system.reload.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.reload` (catalog v1).",
+  "properties": {
+    "subsystem": {
+      "type": "string"
+    },
+    "trial": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "subsystem",
+    "trial"
+  ],
+  "title": "system.reload",
+  "type": "object"
+}

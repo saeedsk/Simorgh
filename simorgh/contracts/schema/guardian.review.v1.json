@@ -1,0 +1,28 @@
+{
+  "$id": "https://simorgh.local/schema/guardian.review.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `guardian.review` (catalog v1).",
+  "properties": {
+    "code_ref": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "self_patch",
+        "skill"
+      ],
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "subject",
+    "code_ref",
+    "kind"
+  ],
+  "title": "guardian.review",
+  "type": "object"
+}

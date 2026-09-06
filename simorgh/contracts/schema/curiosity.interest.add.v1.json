@@ -1,0 +1,23 @@
+{
+  "$id": "https://simorgh.local/schema/curiosity.interest.add.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Exactly one of topic / feed_url (validated by curiosity).",
+  "properties": {
+    "feed_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "topic": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "curiosity.interest.add",
+  "type": "object"
+}

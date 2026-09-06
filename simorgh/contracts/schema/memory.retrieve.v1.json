@@ -1,0 +1,76 @@
+{
+  "$id": "https://simorgh.local/schema/memory.retrieve.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `memory.retrieve` (catalog v1).",
+  "properties": {
+    "budget_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "filters": {
+      "additionalProperties": true,
+      "properties": {
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "since": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "task_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "k": {
+      "type": "integer"
+    },
+    "kinds": {
+      "items": {
+        "enum": [
+          "working",
+          "episodic",
+          "semantic",
+          "procedural"
+        ],
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "query": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "query",
+    "kinds",
+    "k"
+  ],
+  "title": "memory.retrieve",
+  "type": "object"
+}

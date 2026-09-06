@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/percept.time.scheduled.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `percept.time.scheduled` (catalog v1).",
+  "properties": {
+    "label": {
+      "type": "string"
+    },
+    "schedule_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schedule_id",
+    "label"
+  ],
+  "title": "percept.time.scheduled",
+  "type": "object"
+}

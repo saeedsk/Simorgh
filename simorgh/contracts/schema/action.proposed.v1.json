@@ -1,0 +1,72 @@
+{
+  "$id": "https://simorgh.local/schema/action.proposed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `action.proposed` (catalog v1).",
+  "properties": {
+    "action_id": {
+      "type": "string"
+    },
+    "args": {
+      "additionalProperties": true,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "proposed_by": {
+      "type": "string"
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "reversibility": {
+      "enum": [
+        "read_only",
+        "reversible",
+        "irreversible"
+      ],
+      "type": "string"
+    },
+    "scope": {
+      "additionalProperties": true,
+      "properties": {
+        "network": {
+          "type": "boolean"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "network"
+      ],
+      "type": "object"
+    },
+    "task_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action_id",
+    "tool",
+    "args",
+    "scope",
+    "reversibility",
+    "rationale",
+    "proposed_by"
+  ],
+  "title": "action.proposed",
+  "type": "object"
+}

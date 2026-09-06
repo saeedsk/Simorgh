@@ -1,0 +1,40 @@
+{
+  "$id": "https://simorgh.local/schema/task.completed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `task.completed` (catalog v1).",
+  "properties": {
+    "artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "result_summary": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "verification_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "task_id",
+    "result_summary",
+    "artifacts",
+    "verification_ref"
+  ],
+  "title": "task.completed",
+  "type": "object"
+}

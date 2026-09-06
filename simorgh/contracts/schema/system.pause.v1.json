@@ -1,0 +1,34 @@
+{
+  "$id": "https://simorgh.local/schema/system.pause.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Priority 9. scope=autonomous pauses only self-initiated work.",
+  "properties": {
+    "reason": {
+      "type": "string"
+    },
+    "requested_by": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "enum": [
+            "all",
+            "autonomous"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "reason",
+    "requested_by"
+  ],
+  "title": "system.pause",
+  "type": "object"
+}

@@ -1,0 +1,33 @@
+{
+  "$id": "https://simorgh.local/schema/action.needs_human.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `action.needs_human` (catalog v1).",
+  "properties": {
+    "action_id": {
+      "type": "string"
+    },
+    "default": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "options": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "question": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action_id",
+    "question",
+    "options"
+  ],
+  "title": "action.needs_human",
+  "type": "object"
+}

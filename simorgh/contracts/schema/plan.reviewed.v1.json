@@ -1,0 +1,56 @@
+{
+  "$id": "https://simorgh.local/schema/plan.reviewed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `plan.reviewed` (catalog v1).",
+  "properties": {
+    "checklist": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "q",
+          "answer",
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "feedback": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "plan_id": {
+      "type": "string"
+    },
+    "verdict": {
+      "enum": [
+        "approve",
+        "revise",
+        "reject",
+        "insufficient_evidence"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_id",
+    "verdict",
+    "checklist"
+  ],
+  "title": "plan.reviewed",
+  "type": "object"
+}

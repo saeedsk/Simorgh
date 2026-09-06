@@ -1,0 +1,24 @@
+{
+  "$id": "https://simorgh.local/schema/ui.notice.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `ui.notice` (catalog v1).",
+  "properties": {
+    "level": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "level",
+    "text",
+    "source"
+  ],
+  "title": "ui.notice",
+  "type": "object"
+}

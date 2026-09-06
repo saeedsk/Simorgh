@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/cognition.compact.pre.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "The PreCompact hook event.",
+  "properties": {
+    "layer": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "layer"
+  ],
+  "title": "cognition.compact.pre",
+  "type": "object"
+}

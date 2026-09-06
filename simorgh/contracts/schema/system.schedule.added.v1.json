@@ -1,0 +1,41 @@
+{
+  "$id": "https://simorgh.local/schema/system.schedule.added.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.schedule.added` (catalog v1).",
+  "properties": {
+    "at": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "every_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "label": {
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "properties": {},
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "schedule_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schedule_id",
+    "label"
+  ],
+  "title": "system.schedule.added",
+  "type": "object"
+}

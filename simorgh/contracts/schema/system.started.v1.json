@@ -1,0 +1,32 @@
+{
+  "$id": "https://simorgh.local/schema/system.started.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.started` (catalog v1).",
+  "properties": {
+    "data_dir": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "single",
+        "local-multi",
+        "aws"
+      ],
+      "type": "string"
+    },
+    "subsystems": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "mode",
+    "subsystems",
+    "data_dir"
+  ],
+  "title": "system.started",
+  "type": "object"
+}

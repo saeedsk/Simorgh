@@ -1,0 +1,28 @@
+{
+  "$id": "https://simorgh.local/schema/system.state.changed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.state.changed` (catalog v1).",
+  "properties": {
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state": {
+      "enum": [
+        "running",
+        "paused",
+        "stopping",
+        "stopped"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "state"
+  ],
+  "title": "system.state.changed",
+  "type": "object"
+}

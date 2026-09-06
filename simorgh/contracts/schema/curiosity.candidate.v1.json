@@ -1,0 +1,42 @@
+{
+  "$id": "https://simorgh.local/schema/curiosity.candidate.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `curiosity.candidate` (catalog v1).",
+  "properties": {
+    "area": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "patch",
+        "research"
+      ],
+      "type": "string"
+    },
+    "novelty_score": {
+      "type": "number"
+    },
+    "subject": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "why_this_area": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "description",
+    "area",
+    "why_this_area",
+    "novelty_score"
+  ],
+  "title": "curiosity.candidate",
+  "type": "object"
+}

@@ -1,0 +1,44 @@
+{
+  "$id": "https://simorgh.local/schema/plan.revised.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "A plan change is an event with a reason, never a silent overwrite.",
+  "properties": {
+    "diff": {
+      "additionalProperties": true,
+      "properties": {
+        "added": {
+          "items": {},
+          "type": "array"
+        },
+        "removed": {
+          "items": {},
+          "type": "array"
+        },
+        "reordered": {
+          "items": {},
+          "type": "array"
+        }
+      },
+      "required": [
+        "added",
+        "removed",
+        "reordered"
+      ],
+      "type": "object"
+    },
+    "plan_id": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_id",
+    "reason",
+    "diff"
+  ],
+  "title": "plan.revised",
+  "type": "object"
+}

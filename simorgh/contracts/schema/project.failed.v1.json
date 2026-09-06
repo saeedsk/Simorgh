@@ -1,0 +1,28 @@
+{
+  "$id": "https://simorgh.local/schema/project.failed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `project.failed` (catalog v1).",
+  "properties": {
+    "done": {
+      "type": "integer"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "total": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "project_id",
+    "done",
+    "total",
+    "summary"
+  ],
+  "title": "project.failed",
+  "type": "object"
+}

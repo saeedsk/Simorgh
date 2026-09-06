@@ -1,0 +1,46 @@
+{
+  "$id": "https://simorgh.local/schema/reflect.patterns.found.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `reflect.patterns.found` (catalog v1).",
+  "properties": {
+    "patterns": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "proposal": {
+            "type": "string"
+          },
+          "rate": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "rate",
+          "proposal"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "window": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "window",
+    "patterns"
+  ],
+  "title": "reflect.patterns.found",
+  "type": "object"
+}

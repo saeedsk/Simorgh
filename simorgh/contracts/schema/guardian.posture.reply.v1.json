@@ -1,0 +1,118 @@
+{
+  "$id": "https://simorgh.local/schema/guardian.posture.reply.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "observe",
+            "plan",
+            "guarded",
+            "trusted",
+            "locked"
+          ],
+          "type": "string"
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "paused_scope": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "autonomous"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tightened_by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "trust_score": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "mode",
+        "trust_score",
+        "tightened_by"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        "ok": {
+          "const": false
+        }
+      },
+      "required": [
+        "ok",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "Payload of `guardian.posture.reply` (catalog v1).",
+  "title": "guardian.posture.reply"
+}

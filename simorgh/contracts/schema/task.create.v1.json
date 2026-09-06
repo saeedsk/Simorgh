@@ -1,0 +1,110 @@
+{
+  "$id": "https://simorgh.local/schema/task.create.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Request form used by Interface commands and sub-agent delegation; Planning dedupes and emits task.created.",
+  "properties": {
+    "depends_on": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "chat",
+        "patch",
+        "skill",
+        "research",
+        "project"
+      ],
+      "type": "string"
+    },
+    "mode": {
+      "anyOf": [
+        {
+          "enum": [
+            "plan",
+            "execute"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "origin": {
+      "enum": [
+        "human",
+        "curiosity",
+        "reflection",
+        "research",
+        "project"
+      ],
+      "type": "string"
+    },
+    "parent_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "risk": {
+      "anyOf": [
+        {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scope": {
+      "additionalProperties": true,
+      "properties": {
+        "network": {
+          "type": "boolean"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths",
+        "network"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "subject": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "description",
+    "origin"
+  ],
+  "title": "task.create",
+  "type": "object"
+}

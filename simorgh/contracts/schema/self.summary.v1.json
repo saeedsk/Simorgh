@@ -1,0 +1,16 @@
+{
+  "$id": "https://simorgh.local/schema/self.summary.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `self.summary` (catalog v1).",
+  "properties": {
+    "budget_tokens": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "budget_tokens"
+  ],
+  "title": "self.summary",
+  "type": "object"
+}

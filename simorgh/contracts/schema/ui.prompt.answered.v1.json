@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/ui.prompt.answered.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `ui.prompt.answered` (catalog v1).",
+  "properties": {
+    "answer": {
+      "type": "string"
+    },
+    "prompt_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "prompt_id",
+    "answer"
+  ],
+  "title": "ui.prompt.answered",
+  "type": "object"
+}

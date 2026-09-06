@@ -1,0 +1,48 @@
+{
+  "$id": "https://simorgh.local/schema/percept.text.received.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "channel=command + command for routed commands; steer=true marks a mid-task correction.",
+  "properties": {
+    "channel": {
+      "enum": [
+        "cli",
+        "api",
+        "chat",
+        "command"
+      ],
+      "type": "string"
+    },
+    "command": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "steer": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "channel",
+    "text",
+    "session_id"
+  ],
+  "title": "percept.text.received",
+  "type": "object"
+}

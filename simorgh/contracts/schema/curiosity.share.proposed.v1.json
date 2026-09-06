@@ -1,0 +1,24 @@
+{
+  "$id": "https://simorgh.local/schema/curiosity.share.proposed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `curiosity.share.proposed` (catalog v1).",
+  "properties": {
+    "content_ref": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "growth",
+        "news"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "content_ref"
+  ],
+  "title": "curiosity.share.proposed",
+  "type": "object"
+}

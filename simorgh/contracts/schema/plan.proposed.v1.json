@@ -1,0 +1,83 @@
+{
+  "$id": "https://simorgh.local/schema/plan.proposed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Published only by planning (single owner of plan:<id>).",
+  "properties": {
+    "estimated_cost": {
+      "type": "number"
+    },
+    "goal": {
+      "type": "string"
+    },
+    "plan_id": {
+      "type": "string"
+    },
+    "risk": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "patch",
+              "skill",
+              "research"
+            ],
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "why": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "kind",
+          "description",
+          "depends_on",
+          "why"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_id",
+    "task_id",
+    "goal",
+    "steps",
+    "risk",
+    "estimated_cost"
+  ],
+  "title": "plan.proposed",
+  "type": "object"
+}

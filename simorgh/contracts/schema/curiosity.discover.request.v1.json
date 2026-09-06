@@ -1,0 +1,10 @@
+{
+  "$id": "https://simorgh.local/schema/curiosity.discover.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `curiosity.discover.request` (catalog v1).",
+  "properties": {},
+  "required": [],
+  "title": "curiosity.discover.request",
+  "type": "object"
+}

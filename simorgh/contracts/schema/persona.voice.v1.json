@@ -1,0 +1,21 @@
+{
+  "$id": "https://simorgh.local/schema/persona.voice.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `persona.voice` (catalog v1).",
+  "properties": {
+    "context": {
+      "enum": [
+        "chat",
+        "notice",
+        "report"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "context"
+  ],
+  "title": "persona.voice",
+  "type": "object"
+}

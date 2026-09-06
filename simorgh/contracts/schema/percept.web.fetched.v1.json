@@ -1,0 +1,32 @@
+{
+  "$id": "https://simorgh.local/schema/percept.web.fetched.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `percept.web.fetched` (catalog v1).",
+  "properties": {
+    "content_ref": {
+      "type": "string"
+    },
+    "fetched_at": {
+      "type": "number"
+    },
+    "sha256": {
+      "type": "string"
+    },
+    "status": {
+      "type": "integer"
+    },
+    "url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "url",
+    "status",
+    "content_ref",
+    "sha256",
+    "fetched_at"
+  ],
+  "title": "percept.web.fetched",
+  "type": "object"
+}

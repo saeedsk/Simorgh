@@ -1,0 +1,16 @@
+{
+  "$id": "https://simorgh.local/schema/system.tick.second.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.tick.second` (catalog v1).",
+  "properties": {
+    "n": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "n"
+  ],
+  "title": "system.tick.second",
+  "type": "object"
+}

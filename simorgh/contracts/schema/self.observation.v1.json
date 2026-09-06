@@ -1,0 +1,33 @@
+{
+  "$id": "https://simorgh.local/schema/self.observation.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `self.observation` (catalog v1).",
+  "properties": {
+    "detail": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "restart",
+        "change",
+        "limitation",
+        "success",
+        "failure"
+      ],
+      "type": "string"
+    },
+    "ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "detail"
+  ],
+  "title": "self.observation",
+  "type": "object"
+}

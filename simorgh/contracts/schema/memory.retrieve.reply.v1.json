@@ -1,0 +1,128 @@
+{
+  "$id": "https://simorgh.local/schema/memory.retrieve.reply.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "items": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "confidence": {
+                "type": "number"
+              },
+              "content": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "working",
+                  "episodic",
+                  "semantic",
+                  "procedural"
+                ],
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              },
+              "ts": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "ref",
+              "kind",
+              "content",
+              "score",
+              "confidence",
+              "ts"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "items",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        "ok": {
+          "const": false
+        }
+      },
+      "required": [
+        "ok",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "Payload of `memory.retrieve.reply` (catalog v1).",
+  "title": "memory.retrieve.reply"
+}

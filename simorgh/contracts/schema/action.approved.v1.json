@@ -1,0 +1,58 @@
+{
+  "$id": "https://simorgh.local/schema/action.approved.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Carries the HMAC approval token Execution must verify (security.py).",
+  "properties": {
+    "action_id": {
+      "type": "string"
+    },
+    "approval_token": {
+      "type": "string"
+    },
+    "args_sha256": {
+      "type": "string"
+    },
+    "constraints": {
+      "additionalProperties": true,
+      "properties": {
+        "max_output_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "timeout_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "expires_at": {
+      "type": "number"
+    },
+    "mode_at_approval": {
+      "type": "string"
+    },
+    "tool": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action_id",
+    "tool",
+    "args_sha256",
+    "expires_at",
+    "approval_token",
+    "mode_at_approval"
+  ],
+  "title": "action.approved",
+  "type": "object"
+}

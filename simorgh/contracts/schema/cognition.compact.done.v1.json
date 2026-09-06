@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/cognition.compact.done.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `cognition.compact.done` (catalog v1).",
+  "properties": {
+    "layer": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "layer"
+  ],
+  "title": "cognition.compact.done",
+  "type": "object"
+}

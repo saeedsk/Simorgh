@@ -1,0 +1,50 @@
+{
+  "$id": "https://simorgh.local/schema/task.list.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `task.list.request` (catalog v1).",
+  "properties": {
+    "filter": {
+      "additionalProperties": true,
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "chat",
+                "patch",
+                "skill",
+                "research",
+                "project"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parent_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "task.list.request",
+  "type": "object"
+}

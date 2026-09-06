@@ -1,0 +1,44 @@
+{
+  "$id": "https://simorgh.local/schema/turn.completed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "The chat-turn counterpart of task.completed (Flow 1).",
+  "properties": {
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "floor": {
+      "type": "boolean"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "tool_steps": {
+      "type": "integer"
+    },
+    "verification_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "session_id",
+    "task_id",
+    "text",
+    "floor",
+    "tool_steps"
+  ],
+  "title": "turn.completed",
+  "type": "object"
+}

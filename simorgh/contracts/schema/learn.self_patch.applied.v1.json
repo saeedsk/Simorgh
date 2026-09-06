@@ -1,0 +1,43 @@
+{
+  "$id": "https://simorgh.local/schema/learn.self_patch.applied.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `learn.self_patch.applied` (catalog v1).",
+  "properties": {
+    "commit": {
+      "type": "string"
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subject": {
+      "type": "string"
+    },
+    "tests": {
+      "additionalProperties": true,
+      "properties": {
+        "baseline": {
+          "type": "integer"
+        },
+        "patched": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "baseline",
+        "patched"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "subject",
+    "commit",
+    "tests"
+  ],
+  "title": "learn.self_patch.applied",
+  "type": "object"
+}

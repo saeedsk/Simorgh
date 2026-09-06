@@ -1,0 +1,31 @@
+{
+  "$id": "https://simorgh.local/schema/system.health.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `system.health` (catalog v1).",
+  "properties": {
+    "detail": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "degraded",
+        "down"
+      ],
+      "type": "string"
+    },
+    "subsystem": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "subsystem",
+    "status"
+  ],
+  "title": "system.health",
+  "type": "object"
+}

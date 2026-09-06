@@ -1,0 +1,110 @@
+{
+  "$id": "https://simorgh.local/schema/cognition.think.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `cognition.think` (catalog v1).",
+  "properties": {
+    "allow_summarize": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "budget": {
+      "additionalProperties": true,
+      "properties": {
+        "max_cost_usd": {
+          "type": "number"
+        },
+        "max_tokens": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_tokens",
+        "max_cost_usd"
+      ],
+      "type": "object"
+    },
+    "expected": {
+      "anyOf": [
+        {
+          "enum": [
+            "text",
+            "tool_calls",
+            "edit_blocks",
+            "verdict"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "last_step": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "messages": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "purpose": {
+      "enum": [
+        "chat",
+        "draft",
+        "plan",
+        "review",
+        "research",
+        "decompose",
+        "reground",
+        "consolidate"
+      ],
+      "type": "string"
+    },
+    "require_real_provider": {
+      "type": "boolean"
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "purpose",
+    "messages",
+    "budget",
+    "require_real_provider"
+  ],
+  "title": "cognition.think",
+  "type": "object"
+}

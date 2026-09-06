@@ -1,0 +1,100 @@
+{
+  "$id": "https://simorgh.local/schema/task.created.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `task.created` (catalog v1).",
+  "properties": {
+    "depends_on": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "description": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "chat",
+        "patch",
+        "skill",
+        "research",
+        "project"
+      ],
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "plan",
+        "execute"
+      ],
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "human",
+        "curiosity",
+        "reflection",
+        "research",
+        "project"
+      ],
+      "type": "string"
+    },
+    "parent_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "risk": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "type": "string"
+    },
+    "scope": {
+      "additionalProperties": true,
+      "properties": {
+        "network": {
+          "type": "boolean"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths",
+        "network"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "subject": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "kind",
+    "description",
+    "depends_on",
+    "mode",
+    "origin",
+    "risk"
+  ],
+  "title": "task.created",
+  "type": "object"
+}

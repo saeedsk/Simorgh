@@ -1,0 +1,25 @@
+{
+  "$id": "https://simorgh.local/schema/learn.strategy.suggest.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `learn.strategy.suggest` (catalog v1).",
+  "properties": {
+    "context": {
+      "additionalProperties": true,
+      "properties": {},
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "task_type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_type"
+  ],
+  "title": "learn.strategy.suggest",
+  "type": "object"
+}

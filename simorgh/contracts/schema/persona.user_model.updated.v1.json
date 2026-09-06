@@ -1,0 +1,22 @@
+{
+  "$id": "https://simorgh.local/schema/persona.user_model.updated.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `persona.user_model.updated` (catalog v1).",
+  "properties": {
+    "confidence": {
+      "type": "number"
+    },
+    "facet": {
+      "type": "string"
+    },
+    "value": {}
+  },
+  "required": [
+    "facet",
+    "value",
+    "confidence"
+  ],
+  "title": "persona.user_model.updated",
+  "type": "object"
+}

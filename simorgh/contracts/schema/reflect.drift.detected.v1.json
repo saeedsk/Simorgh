@@ -1,0 +1,41 @@
+{
+  "$id": "https://simorgh.local/schema/reflect.drift.detected.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "At least one of task_id / plan_id (validated by consumers).",
+  "properties": {
+    "evidence": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "goal",
+        "scope",
+        "behavior"
+      ],
+      "type": "string"
+    },
+    "plan_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "recommendation": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "evidence",
+    "recommendation"
+  ],
+  "title": "reflect.drift.detected",
+  "type": "object"
+}

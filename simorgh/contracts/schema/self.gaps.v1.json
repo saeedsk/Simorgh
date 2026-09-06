@@ -1,0 +1,16 @@
+{
+  "$id": "https://simorgh.local/schema/self.gaps.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `self.gaps` (catalog v1).",
+  "properties": {
+    "k": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "k"
+  ],
+  "title": "self.gaps",
+  "type": "object"
+}

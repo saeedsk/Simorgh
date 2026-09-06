@@ -1,0 +1,10 @@
+{
+  "$id": "https://simorgh.local/schema/task.work_next.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `task.work_next.request` (catalog v1).",
+  "properties": {},
+  "required": [],
+  "title": "task.work_next.request",
+  "type": "object"
+}

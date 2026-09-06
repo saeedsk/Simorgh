@@ -1,0 +1,28 @@
+{
+  "$id": "https://simorgh.local/schema/learn.experiment.result.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `learn.experiment.result` (catalog v1).",
+  "properties": {
+    "experiment_id": {
+      "type": "string"
+    },
+    "metric": {
+      "type": "number"
+    },
+    "promoted": {
+      "type": "boolean"
+    },
+    "variant": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "experiment_id",
+    "variant",
+    "metric",
+    "promoted"
+  ],
+  "title": "learn.experiment.result",
+  "type": "object"
+}

@@ -1,0 +1,116 @@
+{
+  "$id": "https://simorgh.local/schema/learn.strategy.suggest.reply.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "samples": {
+          "type": "integer"
+        },
+        "strategy": {
+          "additionalProperties": true,
+          "properties": {
+            "approach": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "purpose_config": {
+              "additionalProperties": true,
+              "properties": {},
+              "required": [],
+              "type": "object"
+            }
+          },
+          "required": [
+            "approach",
+            "provider",
+            "purpose_config"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "success_rate": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "success_rate",
+        "samples"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        "ok": {
+          "const": false
+        }
+      },
+      "required": [
+        "ok",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "Payload of `learn.strategy.suggest.reply` (catalog v1).",
+  "title": "learn.strategy.suggest.reply"
+}
