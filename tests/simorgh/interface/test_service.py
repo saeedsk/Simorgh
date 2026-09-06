@@ -9,6 +9,7 @@ import contextlib
 import io
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from simorgh.bus.config import Config as BusConfig
@@ -126,17 +127,17 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_two_chats_in_flight_at_once_never_cross_wire_their_replies(self):
         """`_handle_chat` used to key `_pending_turns` by the REPL's own
-        fixed `self.session_id`, not a fresh id per turn -- sending a
-        second message before the first one's reply arrived (exactly
-        what the real REPL thread does: it never waits for one line's
-        reply before reading the next) silently overwrote the first
-        call's dict entry, so whichever turn.completed happened to land
-        first resolved the *second* call's future regardless of content,
-        and the first call's own future was orphaned until it timed out
-        with a false "no response". Reproduced here without any real
-        timing race: both `_handle_line` calls are fired concurrently,
-        just like the REPL thread fires them, before either's percept is
-        answered."""
+        fixed `self.session_id`, not a fresh id per turn -- two chats truly
+        overlapping (concurrent dashboard/API callers, still a real
+        possibility even now that `_repl_main` itself serializes one line
+        at a time -- see `ReplThreadOrderingTestCase`) would silently
+        overwrite the first call's dict entry, so whichever turn.completed
+        happened to land first resolved the *second* call's future
+        regardless of content, and the first call's own future was
+        orphaned until it timed out with a false "no response". Reproduced
+        here without any real timing race: both `_handle_line` calls are
+        fired concurrently, exercising the collision directly rather than
+        depending on real overlap actually happening."""
         replies = {"first message": "reply to first", "second message": "reply to second"}
 
         async def _responder(message: Message) -> None:
@@ -198,6 +199,91 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_health_ok(self):
         health = await self.service.health()
         self.assertEqual(health.status, "ok")
+
+
+class ReplThreadOrderingTestCase(unittest.IsolatedAsyncioTestCase):
+    """Live-caught (the creator's own real use, via a real terminal):
+    `_repl_main` used to schedule each line's handling with
+    `call_soon_threadsafe(asyncio.ensure_future, ...)` and immediately
+    loop back to the *next* `input("> ")` without waiting -- so the next
+    prompt could (and, per the creator's report, reliably did) appear,
+    and re-block this thread inside a fresh `input()` call, before the
+    previous line's reply had even started printing. The reply usually
+    became invisible or badly garbled once printed from another thread
+    while this one sat inside `input()`, reading as a total hang. This
+    exercises the *real* REPL thread (`run_repl=True`), not `_handle_line`
+    called directly, since the bug was specifically in how the thread
+    loops, not in `_handle_line` itself."""
+
+    async def test_next_prompt_never_requested_before_the_previous_replys_printed(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        clock = FakeClock()
+        ledger = make_ledger({"backend": "memory"}, clock=clock.now)
+        await ledger.start()
+        self.addAsyncCleanup(ledger.stop)
+        backend = make_backend(BusConfig(backend="memory"), clock=clock.now)
+        bus = make_client(backend, source="interface", ledger=ledger, clock=clock.now)
+        await bus.start()
+        self.addAsyncCleanup(bus.stop)
+        other = make_client(backend, source="other", ledger=ledger, clock=clock.now)
+        await other.start()
+        self.addAsyncCleanup(other.stop)
+
+        events: list[str] = []
+        real_print = print
+
+        def _tracking_print(*args, **kwargs):
+            if args and "reply to" in str(args[0]):
+                events.append(f"printed:{args[0]}")
+            real_print(*args, **kwargs)
+
+        async def _responder(message: Message) -> None:
+            # A real delay -- long enough that the old fire-and-forget
+            # code would have already requested the next input() well
+            # before this resolves.
+            await asyncio.sleep(0.05)
+            await other.publish(other.new(topics.TURN_COMPLETED, {
+                "session_id": message.payload["session_id"], "task_id": "t",
+                "text": f"reply to {message.payload['text']}", "floor": True, "tool_steps": 0,
+            }))
+
+        sub = await other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
+        self.addAsyncCleanup(sub.unsubscribe)
+
+        lines = iter(["first", "second"])
+
+        def _fake_input(prompt: str = "") -> str:
+            try:
+                line = next(lines)
+            except StopIteration:
+                raise EOFError from None
+            events.append(f"input_requested:{line}")
+            return line
+
+        ctx = Context(
+            name="interface", instance_id="", run_id="test", mode="single",
+            bus=bus, ledger=ledger, config={}, secrets={}, clock=clock,
+            logger=_Logger(), data_dir=Path(tmp.name) / "data",
+        )
+        service = Service(InterfaceConfig(chat_reply_timeout_s=2.0), run_repl=True, http_enabled=False)
+        with unittest.mock.patch("builtins.input", side_effect=_fake_input), \
+             unittest.mock.patch("builtins.print", side_effect=_tracking_print):
+            await service.start(ctx)
+            # The REPL runs on its own daemon thread; give it a real
+            # moment to actually finish both turns rather than a fixed
+            # asyncio.sleep(0), since it's genuinely OS-thread-scheduled.
+            for _ in range(50):
+                if len(events) >= 4:
+                    break
+                await asyncio.sleep(0.02)
+            await service.stop()
+
+        self.assertEqual(
+            events,
+            ["input_requested:first", "printed:reply to first",
+             "input_requested:second", "printed:reply to second"],
+        )
 
 
 class HttpEnabledWiringTestCase(unittest.IsolatedAsyncioTestCase):
