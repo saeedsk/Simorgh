@@ -9,7 +9,7 @@
 
 **Layer:** 2 Agency
 **Owner (build):** unassigned
-**Status:** draft
+**Status:** built (`simorgh/planning/`; unit + integration tests passing — see section 9/12)
 **Depends on (contracts only):** `intent.goal.stated`, `task.claim`, `task.started`, `task.step`, `task.paused`, `task.completed`, `task.failed`, `task.blocked`, `plan.proposed` (own), `plan.reviewed`, `ui.prompt.answered`, `curiosity.candidate`, `research.finding.recorded`, `system.tick.second`, `system.tick.idle`, `system.state.changed`, `cognition.think.reply`, `world.env.query.reply`
 **v1 code that migrates here:** `src/orchestrator/tasks.py`, `src/orchestrator/projects.py`, `src/orchestrator/discovery.py`, and from `src/main.py`: `run_task` (status transitions only), `_next_task`, `_resolve_project_task`, `_maybe_roll_up_project`, `_reconsider_blocked_tasks`, `_run_project_task`, `plan_goal`, `_creative_agenda_already_covered`, `MAX_TASK_ATTEMPTS`, `MAX_BLOCKED_RETRY_ATTEMPTS`
 
@@ -500,3 +500,17 @@ Size: **L**. Parallelizable after step 2: (dag + rollup) ∥ (planmode + decompo
 4. **Chat turns as tasks.** Should `kind=chat` sessions be Ledger tasks
    at all? *Default:* yes but with `lease_seconds = 60` and no
    reconsideration, so a turn interrupted by `system.stop` is visible.
+5. **`task.create`'s `depends_on` is unused by the built `Service`.**
+   The catalog (`contracts/messages/task.py`) carries an optional
+   `depends_on` on `task.create`, but `Service._on_task_create` routes
+   every non-project request through `Intake.on_candidate`, which has no
+   `depends_on` parameter and always creates the task `available` —
+   an external caller cannot currently request a task with a dependency
+   edge; edges only ever arise internally, from Plan Mode decomposition
+   (`Service._approve_plan`), which already handles them correctly
+   (`PENDING` when a step has `depends_on`, `AVAILABLE` otherwise) and is
+   what this build's DAG/dependency-ordering integration coverage
+   exercises. Wiring `task.create`'s `depends_on` through — and deciding
+   what `task.create.reply` should carry on a cycle/unknown-dependency
+   rejection, since today's reply schema has no error field — is left
+   for whoever next touches intake.

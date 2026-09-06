@@ -40,7 +40,7 @@ class Intake:
         if wants_project:
             task = await self._store.create(
                 kind="project", description=goal, origin=origin, mode="plan", risk="medium",
-                priority=priority, initial_status="pending",
+                priority=priority, initial_status="available",  # no depends_on -> available, not pending (spec section 5.1's state diagram)
             )
         else:
             task = await self._store.create(
