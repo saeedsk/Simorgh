@@ -125,7 +125,8 @@ class Service:
 
     # -- REPL thread (readline blocks; bridged to asyncio via run_coroutine_threadsafe) --
     def _repl_main(self) -> None:
-        print("simorgh> type a command, plain text to chat, or `help`. Ctrl-D to detach the REPL.")
+        print(render_mod.banner(enabled=self._color))
+        print("Ctrl-D to detach the REPL.")
         while not self._stop_repl.is_set():
             try:
                 line = input("> ")

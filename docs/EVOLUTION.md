@@ -3521,3 +3521,48 @@ Still ahead, roughly in order:
     but real resource contention/noise regardless), and the eventual
     clean repro needed a fully isolated `$HOME` to get an unambiguous
     signal.
+
+    **Addendum, same day:** the creator reported the identical symptom
+    again immediately after this fix shipped, which briefly looked like
+    the fix hadn't worked. It had -- the actual cause this second time
+    was two more of this session's own leftover background `sim.sh`
+    processes (from re-verification attempts) still holding the real
+    dashboard port and Ledger, adding noise. Once cleared, re-verified
+    the fix cleanly twice more: once against Gemini (an isolated-`$HOME`
+    scratch run, where Claude Code CLI's keychain-backed login isn't
+    reachable) and once against the creator's real Claude Code CLI
+    credentials (isolating only `SIMORGH_RUNTIME_DATA_DIR`, leaving
+    `$HOME` real) -- both a real subprocess `sim.sh`, both a real
+    "hello" answered correctly in order, ~7-8s. The fix stands; the
+    confusion was entirely this session's own test-process hygiene, not
+    a second bug.
+
+125. **The creator's next reaction, once the CLI actually worked: "no
+    prompt, no logo, no list of commands" -- fair, the REPL's whole
+    startup message was one flat sentence.** Built `render.banner()`
+    (`interface/render.py`) as the new startup splash, replacing it.
+
+    The design leans on something real rather than decoration: `سی مرغ`
+    ("si morgh," thirty birds) is a pun on `سیمرغ` (Simorgh) that IS the
+    point of Attar's *Conference of the Birds* -- thirty birds journey
+    to find the Simorgh and discover they themselves, together, are it.
+    That's the same shape as this system's own sixteen subsystems
+    composing one being, so the banner's epigraph names the pun
+    directly rather than reaching for generic ornamental unicode.
+    Scrolling text only, plain SGR color codes -- milestone 94's hard
+    rule, unchanged -- so a piped/redirected session sees the identical
+    layout, just without color. Below the mark: a curated ten-command
+    "here's where to start" list (not all 30+ `COMMAND_NAMES` -- `help`
+    still lists everything), picked for what's real and working right
+    now, not what's aspirational -- `pending`/`log`/`trace`/`digest`/
+    `remind` are honest `_NOT_YET` stubs this session (`dispatch.py`)
+    and were deliberately left off a *first-impression* list.
+
+    4 new tests (`test_render.py`): the existing milestone-94 escape-
+    sequence safety check now covers `banner()` too; a no-color variant
+    is asserted to contain zero escape bytes at all; every line is
+    asserted to fit 80 columns (this trial's own earlier lesson about
+    buffered/redirected sessions being hard to eyeball, generalized: a
+    banner that only looks right in a wide terminal isn't actually
+    right). Full suite green. Live-verified: a real `sim.sh` subprocess
+    (piped `exit` after a short delay) renders and exits cleanly.
