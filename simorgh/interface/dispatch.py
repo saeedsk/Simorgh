@@ -278,7 +278,10 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         ), render_ok="proposed: run sandboxed code")
 
     if name == "budget":
-        return await _request(bus, topics.GUARDIAN_POSTURE_REQUEST, {}, timeout=3.0, render=lambda p: f"posture: {p}")
+        return await _request(bus, topics.GUARDIAN_POSTURE_REQUEST, {}, timeout=3.0, render=lambda p: (
+            f"posture: {p.get('mode', 'unknown')}   trust: {p.get('trust_score', 0.0):.1f}"
+            + (("\n  tightened by: " + "; ".join(p["tightened_by"])) if p.get("tightened_by") else "")
+        ))
 
     if name == "remind":
         return Outcome(_NOT_YET + " (no percept.time.schedule.request in the contract catalog yet -- see §12)")

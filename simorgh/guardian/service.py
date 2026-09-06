@@ -55,12 +55,14 @@ class Service:
         topics.REFLECT_HEALTH_FINDING,
         topics.COGNITION_PROVIDER_STATUS,
         topics.SYSTEM_RESUME,
+        topics.GUARDIAN_POSTURE_REQUEST,
     )
     produces = (
         topics.ACTION_APPROVED,
         topics.ACTION_DENIED,
         topics.ACTION_NEEDS_HUMAN,
         topics.GUARDIAN_POSTURE_CHANGED,
+        topics.GUARDIAN_POSTURE_REPLY,
     )
 
     def __init__(self, *, config: Config | None = None, pipeline: Pipeline | None = None) -> None:
@@ -96,6 +98,7 @@ class Service:
         self._subs.append(await ctx.bus.subscribe(topics.REFLECT_HEALTH_FINDING, self._on_health_finding))
         self._subs.append(await ctx.bus.subscribe(topics.COGNITION_PROVIDER_STATUS, self._on_provider_status))
         self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_RESUME, self._on_resume))
+        self._subs.append(await ctx.bus.subscribe(topics.GUARDIAN_POSTURE_REQUEST, self._on_posture_request))
 
     async def stop(self) -> None:
         for sub in self._subs:
@@ -181,6 +184,18 @@ class Service:
             topics.GUARDIAN_POSTURE_CHANGED, source="guardian",
             payload={"mode": self._posture.level, "trust_score": 1.0, "reason": "system.resume"},
         ))
+
+    async def _on_posture_request(self, message: Message) -> None:
+        """`guardian.posture.request` -> `.reply` (contracts/messages/
+        guardian.py). Live-caught (post-cutover review, 2026-09-06): the
+        pair existed in the catalog and Interface's `budget` command sent
+        the request, but nothing ever answered -- the command timed out
+        every time. The reply is the same projection `health()` reports."""
+        await self._ctx.bus.reply(message, type=topics.GUARDIAN_POSTURE_REPLY, payload={
+            "mode": self._posture.level,
+            "trust_score": 1.0 if self._posture.level == self._posture.baseline and not self._posture.reasons else 0.0,
+            "tightened_by": list(self._posture.reasons),
+        })
 
     # -- the pipeline ----------------------------------------------------
 

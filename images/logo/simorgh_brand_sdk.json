@@ -1,0 +1,94 @@
+{
+    "metadata": {
+        "system_name": "Simorgh AGI",
+        "version": "0.1.0",
+        "description": "Machine-readable Simorgh AGI Brand System SDK designed for automated ingestion."
+    },
+    "brand_colors": {
+        "primary_gold": {
+            "hex": "#C5A059",
+            "rgb": [
+                197,
+                160,
+                89
+            ]
+        },
+        "crimson_red": {
+            "hex": "#8B0000",
+            "rgb": [
+                139,
+                0,
+                0
+            ]
+        },
+        "lapis_blue": {
+            "hex": "#0F52BA",
+            "rgb": [
+                15,
+                82,
+                186
+            ]
+        },
+        "emerald_green": {
+            "hex": "#50C878",
+            "rgb": [
+                80,
+                200,
+                120
+            ]
+        },
+        "amethyst_purple": {
+            "hex": "#9966CC",
+            "rgb": [
+                153,
+                102,
+                204
+            ]
+        }
+    },
+    "typography": {
+        "primary_font": "Simorgh Display",
+        "fallback": "serif"
+    },
+    "assets": {
+        "high_resolution_master": {
+            "identifier": "simorgh_master_high_res",
+            "dimensions": "4096x4096px",
+            "dpi": 300,
+            "type": "raster",
+            "note": "Reference for primary high-detail extraction."
+        },
+        "responsive_sizes": [
+            {
+                "identifier": "logo_sm",
+                "size": "256x256px",
+                "usage": "favicon, small UI elements, microVM process icons"
+            },
+            {
+                "identifier": "logo_md",
+                "size": "512x512px",
+                "usage": "standard web headers, dashboard badges"
+            },
+            {
+                "identifier": "logo_lg",
+                "size": "1024x1024px",
+                "usage": "presentations, splash screens, main repo readmes"
+            }
+        ]
+    },
+    "cli_integration": {
+        "encoding": "utf-8",
+        "format": "ansi_escape_codes_24bit",
+        "note": "Print these lines sequentially to render the full-color Unicode Simorgh in compatible terminals. Uses 24-bit true color mapping aligned with the brand palette.",
+        "logo_lines": [
+            "\u001b[38;2;197;160;89m             ▲             \u001b[0m",
+            "\u001b[38;2;197;160;89m           ▲ █ ▲           \u001b[0m",
+            "\u001b[38;2;15;82;186m   ◄██▄\u001b[38;2;197;160;89m▄▄▄███████▄▄▄\u001b[38;2;139;0;0m▄██►   \u001b[0m",
+            "\u001b[38;2;15;82;186m ◄█████\u001b[38;2;197;160;89m█████████████\u001b[38;2;139;0;0m█████► \u001b[0m",
+            "\u001b[38;2;80;200;120m     ▼████\u001b[38;2;197;160;89m███████\u001b[38;2;80;200;120m████▼     \u001b[0m",
+            "\u001b[38;2;153;102;204m       ╰██\u001b[38;2;197;160;89m█████\u001b[38;2;153;102;204m██╯       \u001b[0m",
+            "\u001b[38;2;197;160;89m           ▼ █ ▼           \u001b[0m",
+            "\u001b[38;2;197;160;89m             ▼             \u001b[0m"
+        ]
+    }
+}
