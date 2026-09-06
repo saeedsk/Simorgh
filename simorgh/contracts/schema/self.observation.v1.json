@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/self.observation.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "Payload of `self.observation` (catalog v1).",
+  "description": "`open_question` added alongside Self Model completeness (milestone 115): the Self Model's own `open_questions` section has no producer yet -- nothing publishes this kind -- so it stays empty until something does; the enum value exists so a future producer doesn't also need a contracts change.",
   "properties": {
     "detail": {
       "type": "string"
@@ -13,7 +13,8 @@
         "change",
         "limitation",
         "success",
-        "failure"
+        "failure",
+        "open_question"
       ],
       "type": "string"
     },
