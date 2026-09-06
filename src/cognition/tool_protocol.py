@@ -311,6 +311,23 @@ def safe_list_dir(
 
 
 @dataclass(frozen=True)
+class ToolSchema:
+    """A structured, provider-advertised description of a single
+    marker-based tool -- its marker name, a human/model-readable
+    description, and an optional argument hint -- so code that builds a
+    tool list for an LLM prompt can read this generically instead of
+    hardcoding per-provider text for what each marker means. Purely
+    descriptive metadata: advertising a schema does not by itself wire
+    up any new marker-handling logic (that still lives in, and must be
+    reviewed alongside, functions like safe_read_file/safe_list_dir).
+    """
+
+    marker: str
+    description: str
+    argument_hint: str = ""
+
+
+@dataclass(frozen=True)
 class ToolCapabilities:
     """What a provider can actually do through this protocol: which
     markers it supports and the limits that apply to each -- so
@@ -329,6 +346,12 @@ class ToolCapabilities:
     etc.) so a provider that doesn't customize anything behaves exactly
     like the pre-negotiation code that assumed those constants applied
     universally.
+
+    `schemas` is the structured half of negotiation: `advertise_schema`
+    and `request_schema` (below) let a provider add or look up a
+    ToolSchema for one of its markers without needing to re-register
+    this whole dataclass, so a prompt-builder can self-discover what a
+    marker means at runtime instead of a hardcoded per-provider branch.
     """
 
     markers: tuple[str, ...]
@@ -336,6 +359,7 @@ class ToolCapabilities:
     max_patch_seed_chars: int = _MAX_PATCH_SEED_CHARS
     max_list_entries: int = _MAX_LIST_ENTRIES
     max_path_chars: int = _MAX_PATH_CHARS
+    schemas: tuple[ToolSchema, ...] = ()
 
     def supports(self, marker: str) -> bool:
         """Case-insensitive membership check, matching how parse_marker
@@ -343,6 +367,18 @@ class ToolCapabilities:
         regardless of the marker's declared casing.
         """
         return marker.lower() in {m.lower() for m in self.markers}
+
+    def schema_for(self, marker: str) -> ToolSchema | None:
+        """The advertised ToolSchema for `marker` (case-insensitive), or
+        None if this provider never advertised one for it -- distinct
+        from `supports()`, since a marker can be supported (and safely
+        executed) without ever having had a structured schema advertised
+        for it.
+        """
+        for schema in self.schemas:
+            if schema.marker.lower() == marker.lower():
+                return schema
+        return None
 
 
 _DEFAULT_CAPABILITIES = ToolCapabilities(markers=("read", "list", "run", "draft"))
@@ -369,6 +405,52 @@ def get_capabilities(provider: str | None) -> ToolCapabilities:
     if provider is None:
         return _DEFAULT_CAPABILITIES
     return _provider_capabilities.get(provider.lower(), _DEFAULT_CAPABILITIES)
+
+
+def advertise_schema(provider: str, schema: ToolSchema) -> None:
+    """Let `provider` add or replace a single ToolSchema at runtime,
+    without needing to re-register its entire ToolCapabilities via
+    register_capabilities -- so a provider can incrementally advertise a
+    newly available tool as negotiation progresses, and Sim's
+    prompt-building code can pick it up via request_schema instead of a
+    hardcoded per-provider branch. The schema's marker is added to the
+    provider's `markers` tuple if not already present (case-insensitive
+    dedup); any existing schema previously advertised for the same
+    marker is replaced, not duplicated. If `provider` was never
+    registered, this starts it from an empty-markers ToolCapabilities
+    using this module's own defaults for every other field -- it does
+    not grant the new marker any actual execution behavior, which still
+    has to exist (and be reviewed) in code like safe_read_file.
+    """
+    key = provider.lower()
+    existing = _provider_capabilities.get(key, ToolCapabilities(markers=()))
+    remaining_schemas = tuple(
+        s for s in existing.schemas if s.marker.lower() != schema.marker.lower()
+    )
+    markers = existing.markers
+    if schema.marker.lower() not in {m.lower() for m in markers}:
+        markers = markers + (schema.marker,)
+    _provider_capabilities[key] = ToolCapabilities(
+        markers=markers,
+        max_read_chars=existing.max_read_chars,
+        max_patch_seed_chars=existing.max_patch_seed_chars,
+        max_list_entries=existing.max_list_entries,
+        max_path_chars=existing.max_path_chars,
+        schemas=remaining_schemas + (schema,),
+    )
+
+
+def request_schema(provider: str, marker: str) -> ToolSchema | None:
+    """The ToolSchema `provider` has advertised for `marker`, or None if
+    the provider was never registered or never advertised that marker --
+    the read side of the negotiation handshake, letting a caller build a
+    tool's description generically instead of hardcoding per-provider
+    text for what each marker means.
+    """
+    caps = _provider_capabilities.get(provider.lower())
+    if caps is None:
+        return None
+    return caps.schema_for(marker)
 
 
 def select_provider(
