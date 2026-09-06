@@ -236,14 +236,22 @@ class MemoryStore(abc.ABC):
         activity_limit: int = 200,
         prune_below: float = 0.1,
     ) -> list[str]:
-        """Confidence-weighted consolidation pass: cross-check durable
-        records of `kinds` against recent activity (default: "outcome")
-        records, decaying confidence for any that find no supporting
-        mention there and pruning whatever falls below `prune_below`.
-        Meant to be called periodically by consolidation
-        (src/orchestrator/consolidation.py), not on every query --
-        it costs one full scan of both the activity log and each kind,
-        plus a `_replace`/`delete` per record touched.
+        """Confidence-weighted consolidation pass: for each of `kinds`,
+        first flag internal contradictions (via consolidate_contradictions,
+        which halves confidence on each side of a conflicting pair), then
+        cross-check every record against recent `activity_kind` (default:
+        "outcome") records, decaying confidence for any that find no
+        supporting mention there and pruning whatever falls below
+        `prune_below`. Meant to be called periodically by consolidation
+        (src/orchestrator/consolidation.py), not on every query -- it costs
+        one full scan of both the activity log and each kind, plus a
+        `_replace`/`delete` per record touched.
+
+        Folding contradiction-flagging in here means a record that's both
+        stale (absent from recent activity) and contradicted by a peer
+        loses confidence on both counts in the same pass, so it's pruned
+        sooner than either check alone would manage -- exactly the
+        "stale/contradictory" entries this pass exists to catch.
 
         Matching is a coarse, case-insensitive substring check of each
         record's `metadata["subject"]` (the same field find_contradictions
@@ -260,6 +268,7 @@ class MemoryStore(abc.ABC):
 
         pruned_ids = []
         for kind in kinds:
+            self.consolidate_contradictions(kind=kind)
             for record in self.query(kind=kind):
                 subject = record.metadata.get("subject")
                 if subject is None:
