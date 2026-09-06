@@ -78,9 +78,21 @@ class RollingWindowBudget:
         configured per-1M prices."""
         if response.cost_usd is not None:
             return float(response.cost_usd)
+        return self.estimate_cost(response.input_tokens, response.output_tokens)
+
+    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """Per-call budget accounting (04 section 7, "Budgets account;
+        Guardian enforces"): a *pre-call* cost estimate from configured
+        per-1M prices, used by `Router.complete` to refuse a candidate
+        whose price would blow a single request's own `max_cost_usd`
+        before any money is spent. Providers with no configured price
+        (e.g. Claude Code CLI, whose real cost is unknown until the call
+        completes) estimate to 0.0, so this never blocks them --
+        unknown-price providers are accounted for after the fact via
+        `record()`, not gated ahead of time."""
         return (
-            (response.input_tokens / 1_000_000) * self._config.price_in
-            + (response.output_tokens / 1_000_000) * self._config.price_out
+            (input_tokens / 1_000_000) * self._config.price_in
+            + (output_tokens / 1_000_000) * self._config.price_out
         )
 
 

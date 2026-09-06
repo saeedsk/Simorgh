@@ -102,6 +102,22 @@ class TestRollingWindowBudget(unittest.IsolatedAsyncioTestCase):
         status = await budget.status()
         self.assertAlmostEqual(status.spend_usd, 2.0 + 2.0)
 
+    async def test_public_estimate_cost_is_a_pre_call_projection_not_tied_to_a_response(self):
+        # Per-call budget accounting (04 section 7): the Router needs a
+        # cost estimate *before* spending anything, from raw token counts
+        # -- not from a ProviderResponse that doesn't exist yet.
+        budget = RollingWindowBudget(
+            "gemini", ProviderConfig(price_in=2.0, price_out=4.0), self.ledger, clock=self.clock,
+        )
+        self.assertAlmostEqual(budget.estimate_cost(1_000_000, 500_000), 2.0 + 2.0)
+
+    async def test_public_estimate_cost_is_zero_for_an_unpriced_provider(self):
+        # Claude Code CLI reports real cost only on completion -- with no
+        # configured price, the pre-call estimate must be 0.0 so it's
+        # never blocked ahead of time by the per-call budget check.
+        budget = RollingWindowBudget("claude_code_cli", ProviderConfig(), self.ledger, clock=self.clock)
+        self.assertEqual(budget.estimate_cost(500_000, 500_000), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
