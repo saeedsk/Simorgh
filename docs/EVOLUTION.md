@@ -3566,3 +3566,51 @@ Still ahead, roughly in order:
     banner that only looks right in a wide terminal isn't actually
     right). Full suite green. Live-verified: a real `sim.sh` subprocess
     (piped `exit` after a short delay) renders and exits cleanly.
+
+126. **Milestone 124's REPL fix was real and correct, but the creator
+    kept hitting the identical symptom -- because it was never the only
+    bug behind it.** "I feel we are living in different worlds": every
+    verification of 124 (both mine and the follow-up re-checks) used
+    `subprocess.Popen(..., stdin=PIPE)` -- never a real terminal at all.
+    The actual, still-live cause only shows up with one: every
+    `subprocess.run` call across the codebase that shells out to a real
+    program on a timeout (`ClaudeCodeProvider._complete_sync`,
+    `GitStateFacet`'s polling, `RunPythonSandboxedTool`, `SkillTool`,
+    `GitCommitTool`, `GitRevertTool`) never set an explicit `stdin=`.
+    Left unset, `subprocess.run` inherits the *parent's* stdin -- and
+    when the Kernel runs interactively (`sim.sh`), that parent stdin
+    *is* the creator's real terminal. None of these subprocesses ever
+    legitimately need input (the whole prompt is already on `argv` for
+    the LLM call; the sandboxed/git ones are fully non-interactive by
+    design) -- but if one times out and gets killed
+    (`subprocess.TimeoutExpired` -> the process is killed, not asked to
+    exit), and the killed child had put that *shared* terminal into
+    raw/cbreak mode for its own purposes, the kill skips its only chance
+    to restore it. The terminal stays broken for the rest of the
+    session: Enter echoes a literal `^M`, nothing else works, and
+    nothing in Simorgh's own output says why -- because nothing in
+    Simorgh crashed. A pipe is never a terminal, so no test built on one
+    -- including every earlier verification this same day -- could ever
+    have caught this.
+
+    Fixed everywhere the pattern occurs: `stdin=subprocess.DEVNULL` on
+    all six call sites, each with a comment explaining why (not just
+    what). 7 new tests across three files -- `test_providers.py`,
+    `test_tools.py` (one shared pattern covering all four
+    `execution/tools.py` sites), and a new `test_git_state_facet.py` --
+    each wraps the *real* `subprocess.run` and asserts `stdin` on every
+    call, confirmed to fail against the pre-fix code first. The
+    `!<command>` shell-passthrough in `interface/dispatch.py` is
+    deliberately untouched -- that one is the human's own direct shell
+    authority and is *supposed* to inherit the real terminal. Full suite
+    green.
+
+    The honest throughline across 104, 124, and this one: three
+    separate, real bugs have now produced the exact same surface symptom
+    ("hello" + `^M` + silence) at three different points in this
+    project's life, for three unrelated reasons (an unthreaded timeout
+    default; a fire-and-forget REPL loop; inherited terminal stdin
+    poisoned by a killed subprocess). Each looked, from the outside,
+    identical to the one before it -- which is exactly why the second
+    and third were mistaken for the first not having actually been
+    fixed, when it had been.

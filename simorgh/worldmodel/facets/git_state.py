@@ -29,6 +29,7 @@ class GitStateFacet:
             try:
                 result = subprocess.run(
                     ["git", *args], cwd=self._repo_root, capture_output=True, text=True, timeout=5,
+                    stdin=subprocess.DEVNULL,
                 )
             except (OSError, subprocess.TimeoutExpired):
                 return None

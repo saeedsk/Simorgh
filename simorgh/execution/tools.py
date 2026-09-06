@@ -7,6 +7,17 @@ that don't depend on a subsystem that doesn't exist yet this phase
 (`SkillTool`, Phase 4 roadmap item 4.7 -- skill acquisition as
 procedural memory). `web_fetch`, `shell`, `relaunch`, `hot_swap`, and
 `isolated_test_suite` are still deferred; see README.md.
+
+Every `subprocess.run` call here passes `stdin=subprocess.DEVNULL`
+deliberately, not incidentally (live-caught, see `cognition/providers/
+claude_code.py`'s own longer note on the same pattern): none of these
+subprocesses ever need interactive input, but without an explicit
+`stdin=`, each one inherits the parent's own stdin -- the creator's
+real terminal, when `sim.sh` runs interactively. A sandboxed run that
+hits its own `timeout` gets killed; if the killed child had put that
+shared terminal into raw/cbreak mode, the kill skips its chance to
+restore it, and the terminal stays broken for the rest of the session
+with no trace of why.
 """
 
 from __future__ import annotations
@@ -106,6 +117,7 @@ class RunPythonSandboxedTool:
                 completed = subprocess.run(
                     [sys.executable, "-I", str(script)], capture_output=True, text=True,
                     cwd=workdir, env={}, timeout=timeout, preexec_fn=preexec,
+                    stdin=subprocess.DEVNULL,
                 )
             except subprocess.TimeoutExpired as exc:
                 return ToolResult(
@@ -214,7 +226,9 @@ class GitCommitTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         path, message = args["path"], args["message"]
         root = self._config.repo_root
-        run = lambda cmd: subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=30)
+        run = lambda cmd: subprocess.run(
+            cmd, cwd=root, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+        )
 
         # `git diff --quiet HEAD` alone misses brand-new untracked files
         # (they're outside what `diff` compares against HEAD at all), so
@@ -262,7 +276,9 @@ class GitRevertTool:
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         root = self._config.repo_root
-        run = lambda cmd: subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=30)
+        run = lambda cmd: subprocess.run(
+            cmd, cwd=root, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+        )
         result = run([
             "git", "-c", f"user.name={_SIM_GIT_AUTHOR_NAME}", "-c", f"user.email={_SIM_GIT_AUTHOR_EMAIL}",
             "revert", "--no-edit", "HEAD",
@@ -323,6 +339,7 @@ class SkillTool:
                 completed = subprocess.run(
                     [sys.executable, "-I", str(driver), json.dumps(args)], capture_output=True, text=True,
                     cwd=workdir, env={}, timeout=timeout, preexec_fn=preexec,
+                    stdin=subprocess.DEVNULL,
                 )
             except subprocess.TimeoutExpired as exc:
                 return ToolResult(
