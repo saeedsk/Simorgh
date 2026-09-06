@@ -42,6 +42,31 @@ class Capability(enum.Enum):
     LONG_CONTEXT = "long_context"
 
 
+class TaskType(enum.Enum):
+    """A category of work the orchestrator wants performed, mapped to the
+    Capability a provider must have to serve it well. This is the seam
+    that lets the orchestrator ask for e.g. "long-context reflection" or
+    "fast tool use" and get routed to whichever registered provider
+    actually supports that, without hardcoding provider names or relying
+    on static priority order.
+    """
+
+    TOOL_USE = "tool_use"
+    LONG_CONTEXT_REFLECTION = "long_context_reflection"
+    STREAMING_RESPONSE = "streaming_response"
+
+    @property
+    def required_capability(self) -> Capability:
+        return _TASK_TYPE_CAPABILITY[self]
+
+
+_TASK_TYPE_CAPABILITY: dict[TaskType, Capability] = {
+    TaskType.TOOL_USE: Capability.TOOL_USE,
+    TaskType.LONG_CONTEXT_REFLECTION: Capability.LONG_CONTEXT,
+    TaskType.STREAMING_RESPONSE: Capability.STREAMING,
+}
+
+
 @dataclass(frozen=True)
 class LLMResponse:
     text: str
@@ -179,3 +204,18 @@ class CapabilityRegistry:
         for provider in self._router.providers:
             caps |= provider.capabilities
         return frozenset(caps)
+
+    def complete_for(self, task_type: TaskType, prompt: str, **kwargs: Any) -> LLMResponse:
+        """Negotiate a provider for `task_type` mid-session: try the
+        highest-priority available provider that supports the capability
+        the task requires, and fall back to the router's normal
+        starvation-proof ordering (ending in DeterministicFallbackProvider)
+        if none currently qualifies or the chosen provider fails.
+        """
+        provider = self.best_for(task_type.required_capability)
+        if provider is not None:
+            try:
+                return provider.complete(prompt, **kwargs)
+            except ProviderUnavailable:
+                pass
+        return self._router.complete(prompt, **kwargs)
