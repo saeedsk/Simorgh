@@ -8,8 +8,8 @@
 > document and note it in `00-README.md`'s changelog.
 
 **Layer:** 3 Growth
-**Owner (build):** unassigned
-**Status:** draft
+**Owner (build):** built 2026-09-06 (`simorgh/learning/`, see its `README.md` build log)
+**Status:** built — outcome/competence/strategy core and the full patch/skill pipeline (Flow 4); `evolve` batch pipelines, hot-swap experiments, and knowledge distillation are explicitly deferred (honest `floor` outcomes, not silent gaps — see the package README's Open questions)
 **Depends on (contracts only):** `task.completed`, `task.failed`, `task.blocked`, `verify.result`, `action.result`, `action.denied`, `tool.invoked`, `tool.registered`, `research.finding.recorded`, `reflect.patterns.found`, `system.tick.sleep`, `system.state.changed`, `learn.pipeline.run` (command, see §3.1 note), `learn.strategy.suggest` (request)
 **v1 code that migrates here:** `src/main.py` (`propose_self_patch`, `propose_patch_batch`, `propose_skill`, `propose_skill_batch`, `_relaunch_or_rollback`, `_attempt_hot_swap`, `_patch_commit_message`), `src/orchestrator/self_patch.py` (`SelfPatchAgent` policy half; `run_isolated_test_suite`, `_docstring_regression_reason`, `check_main_py_invariants` go to Verification; `relaunch` goes to Execution), `src/orchestrator/deployment.py` (`DeploymentManager` promote/rollback policy), `src/agents/skills/research.py` (`SkillResearchAgent` policy half), `src/agents/skills/registry.py`, `src/orchestrator/reflection.py` (`OutcomeLog` only)
 
@@ -316,3 +316,4 @@ Size **L**; steps 2–3 and 4–6 parallelizable by two agents (outcomes/compete
 2. Should distilled notes be proposed as a *research-reviewed* write (Verification `kind=doc`) before commit? **Default:** no in Phase 3 (reversible commit is enough); add in Phase 4 if low-quality notes appear.
 3. Bisecting a failed evolve batch instead of reverting all. **Default:** revert all; revisit in Phase 5.
 4. Task-type granularity for competence (`patch` vs `patch:src/memory` vs per-file). **Default:** both `kind` and `kind:area`, with `suggest` backing off to the coarser key when the fine one has < `min_samples_for_trust`.
+5. **Contract gaps found against the real generated schemas while building** (`simorgh/contracts/messages/learn.py`, `action.py` — full detail in `simorgh/learning/README.md`'s Open questions): (a) `learn.strategy.suggest.reply`'s real schema is a single best `{success_rate, samples, strategy?}`, not this spec's §3.3 ranked `suggestions` list with a `floor: bool` — this build treats the field's absence as the floor signal; (b) the real `ActionResult` carries no `metadata` field (unlike the `ToolResult` Python protocol), so there is no clean wire channel for Execution to signal "floor" distinctly from an ordinary draft failure — a non-breaking fix would be an optional `metadata: Obj()` field; (c) `learn.pipeline.run`/`learn.pipeline.completed` already exist in the real catalog — any note elsewhere suggesting they need adding is stale.
