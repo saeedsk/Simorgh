@@ -3020,3 +3020,65 @@ Still ahead, roughly in order:
     persona -- a real signal about how strongly the persona/self-model
     prompt asserts identity, not a plumbing defect, and worth a future
     look at Persona's own prompt construction rather than a fix here.
+
+117. **The admin observe-tier fork lands: metrics history, a logs
+    viewer, and real process resource usage -- all three of section
+    6.2's observe-tier items, closing that half of the creator's own
+    two-part dashboard request.** Landed on its own isolated worktree
+    branch while milestone 116's think_timeout_s/chat-box fix was being
+    built directly on `main` in parallel -- both touched `simorgh/
+    interface/httpapi.py`, `dashboard.html`, `config.py`, and `service.py`
+    at the same time, the first *real* merge conflict this session's
+    worktree-isolation strategy has hit (every prior Wave-1/Wave-2 fork
+    happened to land on disjoint files). Resolved by hand rather than
+    picking a side: read both full versions of each conflicted file and
+    wrote the combined version directly, keeping the fork's routing/
+    history/logs work and milestone 116's chat route/timeout fix
+    together in one coherent file, then re-ran the full suite to
+    confirm the merge produced *working* code, not just conflict-marker-
+    free code.
+
+    What was built, against the real section 6.2 spec (the fork read it
+    directly, not a paraphrase): **metrics history** via a new
+    `MetricsHistoryWriter` (`simorgh/kernel/metrics.py`) snapshotting
+    `MetricsTable.per_subsystem` to a dedicated `metrics:history` Ledger
+    stream on its own schedule -- confirmed first that mining
+    `trace:<trace_id>` for this (the other option section 6.2 named) is
+    a dead end in practice, not just theoretically lossy, because
+    `system.metrics` is sampled to `0.0` in the Bus's own default trace-
+    sampling config. `GET /api/history?subsystem=&minutes=` serves it;
+    the dashboard renders three plain-SVG sparklines (bus queue depth,
+    bus throughput derived from counter deltas, orchestration workers-
+    busy) -- no chart library, matching the page's existing no-CDN-
+    dependency discipline. **A logs viewer**: `GET /api/logs?stream=&
+    limit=` (a tail over any Ledger stream -- "structured logs are
+    Ledger events," section 7, so this needed no new capture, only a
+    query surface) and `GET /api/streams` for a stream picker; a
+    dashboard panel with a stream/limit selector and client-side text
+    filtering, so typing in the filter box never fires a new request.
+    **Real process resource usage** -- genuinely untracked anywhere
+    before this, not just unsurfaced: `process_gauges()`/
+    `ProcessMetricsPublisher` use only `resource.getrusage`, `os.
+    getloadavg`, `threading.active_count` (stdlib only, no `psutil`) to
+    publish `system.metrics{subsystem: "process"}` on the exact channel
+    every other subsystem's own gauges already ride -- zero changes
+    needed to `StatusServer`/aggregation, just the publisher and a new
+    panel. Along the way, reused a previously-unwired `[runtime]
+    metrics_every_s` config knob that already existed in `RuntimeConfig`
+    with no consumer, for both this publisher's interval and the
+    history writer's.
+
+    LLM usage, section 6.2's fourth observe-tier item, was deliberately
+    left out -- the creator flagged it as postponable if it was a lot of
+    work, and it already has real live coverage from the Cognition
+    provider-status panel milestone 112 shipped, so it wasn't a gap
+    worth this fork's time. No `simorgh/contracts/` change needed
+    anywhere: `system.metrics`'s `subsystem` field is an unconstrained
+    string, and the Kernel already writes raw Ledger events with custom
+    `type` strings outside the Bus topic registry (precedent: `system.
+    state`), so neither the new `"process"` subsystem value nor the new
+    `metrics:history` stream's event type needed a schema change.
+
+    Full suite green after the merge (interface: 59, kernel: 152,
+    module boundaries: 7, all individually reconfirmed; `--self-check`:
+    PASS) -- 2161 tests passing after the merge.
