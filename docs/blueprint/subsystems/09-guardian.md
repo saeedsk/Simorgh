@@ -9,7 +9,7 @@
 
 **Layer:** 2 Agency
 **Owner (build):** unassigned
-**Status:** draft
+**Status:** built
 **Depends on (contracts only):** `action.proposed` (exclusive), `system.state.changed`, `system.tick.second`, `task.created`, `task.started`, `task.completed`, `task.failed`, `tool.registered`, `tool.unavailable`, `cognition.provider.status`, `reflect.drift.detected`, `reflect.health.finding`, `ui.prompt.answered`, `cognition.think.reply`
 **v1 code that migrates here:** `src/orchestrator/audit.py` (`AuditGate`, `PROTECTED_SUBJECTS`, denylist table, `_check_adaptive_immunity`, `REJECTED_KIND`), `src/orchestrator/soul.py` (directive loading), the failure-streak circuit breaker from `src/orchestrator/autonomy.py`, budget-cap enforcement from `src/main.py` (`DEFAULT_CLAUDE_CODE_MAX_CALLS`, `DEFAULT_DAILY_BUDGET_USD` semantics), `src/orchestrator/apply.py` scope constants (mirrored)
 
@@ -445,3 +445,21 @@ Size: **M/L**. Parallelizable after step 2: rules are independent files.
    uses system mode.
 4. **Should `trusted` ever be default?** *Default:* no; `trusted` exists
    for a creator who has reviewed enough history to set it in config.
+5. **(Found during the build) `action.denied`'s wire `DENY_LAYER` enum
+   (`contracts/messages/action.py`) is narrower than this section's own
+   layer names.** The enum allows only `{policy, denylist, immunity,
+   budget, paused, scope, classifier, token}`; this section's pseudocode
+   (§5.1) names `mode`, `protected`, and `reversibility` as distinct
+   layers, none of which are in the enum. *Resolved for this build:*
+   `guardian/service.py`'s `_WIRE_DENY_LAYER` collapses those three to
+   `policy` on the wire (the specific rule that fired is still visible in
+   `reasons`), rather than editing the shared contract unilaterally.
+   *Open:* should question 1's contracts change also widen `DENY_LAYER`
+   to match this section's own taxonomy?
+6. **kernel/selfcheck.py still runs its own inline stub Guardian and
+   Execution**, not these real subsystems. Swapping `--self-check` (and
+   `kernel/registry.py`'s `build_factories`) over to the real
+   `guardian.Service`/`execution.Service` is a deliberate follow-up, not
+   done as part of this build (`tests/simorgh/integration/
+   test_guardian_execution_action_path.py` proves the real subsystems
+   reproduce the same four properties independently in the meantime).

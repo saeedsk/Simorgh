@@ -9,7 +9,7 @@
 
 **Layer:** 2 Agency
 **Owner (build):** unassigned
-**Status:** draft
+**Status:** built
 **Depends on (contracts only):** `action.approved` (exclusive), `system.state.changed`, `system.tick.second`, `learn.skill.acquired`
 **v1 code that migrates here:** `src/orchestrator/apply.py`, `src/orchestrator/git_ops.py`, `src/sandboxing/sandbox.py`, `src/tools/web_fetch.py`, `src/cognition/tool_protocol.py` (`safe_read_file`, `safe_list_dir`, `read_file_for_patch`, `_resolve_safe_path`, `ToolCapabilities`), `src/orchestrator/self_patch.py` (`relaunch`, `run_isolated_test_suite`), `src/orchestrator/deployment.py`, `src/main.py` (`_run_shell_passthrough`, `run_skill_code`, `use_skill`), `src/agents/skills/registry.py` (loading applied skills as tools)
 
@@ -432,3 +432,23 @@ different agents one file each.
 4. **MCP adapters.** Out of scope for Phase 1–3; the `provider: mcp` slot
    exists so tool discovery can be deferred (`harness-01` extensibility
    layering).
+5. **(Found during the build) The real, built `ToolContext`
+   (`contracts/protocols.py`) is narrower than this spec's own shape.**
+   It has `action_id, task_id, scope, constraints, data_dir, clock,
+   logger, ledger, bus` -- no `repo_root`, `blobs: BlobStore`, `channel`,
+   or `kernel_control: KernelControl`. Question 1's `KernelControl`
+   injection in particular has no home on the actual contract yet.
+   *Resolved for this build:* `execution/config.py`'s own `Config`
+   carries `repo_root` instead (tools read it off `self._config`, not
+   `ctx`); `relaunch`/`hot_swap` are not implemented this pass (deferred,
+   see README.md), so the missing `kernel_control` field never had to be
+   exercised. *Open:* should `contracts/protocols.py`'s `ToolContext` be
+   widened to match this section, or should this section be narrowed to
+   match the built contract?
+6. **kernel/selfcheck.py still runs its own inline stub Guardian and
+   Execution**, not this real subsystem. Swapping `--self-check` (and
+   `kernel/registry.py`'s `build_factories`) over to the real
+   `execution.Service`/`guardian.Service` is a deliberate follow-up, not
+   done as part of this build (`tests/simorgh/integration/
+   test_guardian_execution_action_path.py` proves the real subsystems
+   reproduce the same four properties independently in the meantime).
