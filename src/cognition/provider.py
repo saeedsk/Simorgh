@@ -294,6 +294,20 @@ class CapabilityRegistry:
             return None
         return max(candidates, key=lambda p: self._outcome_store.confidence(p.name, task_type))
 
+    def leaderboard(self, task_type: TaskType) -> list[tuple[LLMProvider, float]]:
+        """All available providers that support `task_type`, ranked by
+        empirical confidence (highest first) -- the full ranking
+        `best_for_task` picks its winner from, so a caller (e.g. the
+        orchestrator or a monitor backed by long_term memory) can see why
+        a given provider was chosen instead of only the outcome.
+        """
+        candidates = [p for p in self.providers_for(task_type.required_capability) if p.available()]
+        return sorted(
+            ((p, self._outcome_store.confidence(p.name, task_type)) for p in candidates),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+
     def record_outcome(self, provider_name: str, task_type: TaskType, success: bool) -> None:
         """Record an empirical outcome for `provider_name` at `task_type`,
         so future `best_for_task` / `complete_for` calls route to whichever
