@@ -35,7 +35,14 @@ def _patched_build_factories():
     real = kernel_registry.build_factories
 
     def _build(*, bus_client, ledger_client):
+        # `real()` now wires every subsystem (docs/EVOLUTION.md milestone
+        # 103) -- when this test was first written it returned only
+        # bus/ledger, so filtering down to that plus `planning` itself is
+        # what actually keeps this "no cognition, guardian, execution, or
+        # any other Phase 1 subsystem present" scenario true, rather than
+        # relying on `real()`'s own (now much larger) output.
         factories = real(bus_client=bus_client, ledger_client=ledger_client)
+        factories = {name: factories[name] for name in ("bus", "ledger")}
         factories["planning"] = lambda: PlanningService()
         return factories
 

@@ -1,10 +1,12 @@
 # Simorgh Architecture
 
 > **Simorgh v2 blueprint:** a complete re-architecture of this system into sixteen
-> message-driven subsystems is designed, documented, and ready to build under
-> [`docs/blueprint/`](blueprint/00-README.md). This file describes the *current* v1
-> implementation (`src/`), which remains the running system until the migration in
-> `docs/blueprint/06-migration-from-v1.md` completes.
+> message-driven subsystems is designed, documented, and now **built** --
+> `simorgh/` under [`docs/blueprint/`](blueprint/00-README.md) boots as one system
+> (`tests/simorgh/integration/test_kernel_boots_all_sixteen_subsystems.py`). This
+> file describes the *current* v1 implementation (`src/`), which remains the
+> running system until the migration in `docs/blueprint/06-migration-from-v1.md`
+> completes and `simorgh/` is wired to the creator's real providers/config.
 
 See `project_simorgh_groundwork.md` at the repo root for the original design
 brief, `docs/SOUL.md` for identity/values, `docs/EVOLUTION.md` for the
