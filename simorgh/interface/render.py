@@ -98,3 +98,56 @@ def vitals(snapshot: VitalsSnapshot) -> str:
     if snapshot.budget:
         lines.append(f"budget: {snapshot.budget}")
     return "\n".join(lines)
+
+
+_RULE_WIDTH = 68
+_QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("status", "subsystem health at a glance"),
+    ("propose <topic>", "draft a new skill, audited before it lands"),
+    ("patch <path> <description>", "revise existing code, tested before it lands"),
+    ("tasks / work", "see the backlog, advance the next item"),
+    ("research <topic>", "investigate a question, no code written"),
+    ("project <goal>", "break a goal into tracked steps"),
+    ("autonomous [on|off]", "control the idle self-improvement loop"),
+    ("vitals", "mood, memory, curiosity as bar meters"),
+    ("pause / resume / stop", "hold everything, or let it continue"),
+    ("exit", "leave (Ctrl-D also detaches)"),
+)
+
+
+def banner(*, enabled: bool = True) -> str:
+    """The startup splash. `سی مرغ` ("si morgh", thirty birds) is a pun
+    on `سیمرغ` (Simorgh) that IS the point of Attar's `Conference of the
+    Birds`: thirty birds journey to find the Simorgh and discover they
+    themselves, together, are it -- the same shape as this system's own
+    sixteen subsystems composing one being. That's the reference this
+    banner actually earns, not decoration for its own sake. Scrolling
+    text only (module docstring's hard rule) -- no cursor control, so
+    this is exactly what a redirected/piped session sees too, just
+    without the color codes.
+    """
+    rule = style("─" * _RULE_WIDTH, "dim", enabled=enabled)
+    mark_plain = "◆  سیمرغ  ·  SIMORGH  ◆"
+    mark = style(style(mark_plain.center(_RULE_WIDTH), "bold", enabled=enabled), "yellow", enabled=enabled)
+    epigraph = style(
+        '"si morgh": thirty birds, one Simorgh -- Attar\'s Conference of\n'
+        "the Birds. Sixteen subsystems, one self.",
+        "dim", enabled=enabled,
+    )
+    lines = [
+        rule,
+        mark,
+        rule,
+        "",
+        epigraph,
+        "",
+        "Type plain text to chat, or a command below ('/' is optional).",
+        "`help` lists everything; here's where to start:",
+        "",
+    ]
+    width = max(len(name) for name, _ in _QUICK_COMMANDS)
+    for name, desc in _QUICK_COMMANDS:
+        label = style(name.ljust(width), "cyan", enabled=enabled)
+        lines.append(f"  {label}   {desc}")
+    lines.append(rule)
+    return "\n".join(lines)
