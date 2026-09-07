@@ -70,6 +70,25 @@ def diff_block(lines: list[str], *, label: str = "", max_lines: int = 60, enable
     return f"{header}\n{body}\n{footer}"
 
 
+def prompt_banner(question: str, options: list[str], *, enabled: bool = True) -> str:
+    """A boxed confirmation banner for a pending `ui.prompt` -- "Explicit
+    Gating" in the creator's own Claude Code reference: a visually
+    distinct block for the one moment execution is genuinely waiting on
+    a human decision, not another dim narration line. Pure scrolling
+    text, box-drawing glyphs only -- no cursor control (module
+    docstring's rule). Width/padding are computed on the *plain* text
+    before `style()` wraps it in SGR codes, the same order `banner()`'s
+    own `mark_plain.center(...)` uses -- an SGR code adds bytes but no
+    printed columns, so padding computed after wrapping would misalign."""
+    opts_plain = " / ".join(options)
+    width = max(len(question), len(opts_plain), 24)
+    top = "╭" + "─" * (width + 2) + "╮"
+    bottom = "╰" + "─" * (width + 2) + "╯"
+    q_line = "│ " + style(question.ljust(width), "bold", enabled=enabled) + " │"
+    o_line = "│ " + style(opts_plain.ljust(width), "cyan", enabled=enabled) + " │"
+    return "\n".join([top, q_line, o_line, bottom])
+
+
 def checklist(items: list[tuple[str, str]], title: str = "") -> str:
     """`items`: [(status, label)] where status is one of
     done/doing/pending/failed."""

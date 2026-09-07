@@ -4504,3 +4504,65 @@ Still ahead, roughly in order:
     actually sends. Fixed by correcting the guard to the string
     Persona really publishes. 1 test updated to match (confirmed to fail
     against the pre-fix string first); full suite green.
+
+145. **A real redraw-in-place status footer -- the creator's own
+    explicit call, made knowingly against a standing rule.** After the
+    creator sent a detailed technical breakdown of how Claude Code's own
+    terminal renders (cell-diffing, a live footer, "breathing verbs"
+    instead of a static spinner, icons folding a completed step into one
+    permanent line), they were asked directly: richer scrolling text
+    within the existing "never touch the cursor" rule, or the real
+    thing. They chose the real thing, on purpose, after the tradeoff was
+    named plainly -- milestone 94 had reverted an earlier pinned panel
+    because raw cursor sequences fought `readline`.
+
+    - **New `interface/live_status.py`** is the one place in this
+      package that owns cursor-movement/erase/hide-cursor escape
+      sequences -- `render.py`'s own hard rule ("the only escape
+      sequences this module ever emits are SGR color codes") stays
+      exactly true, untouched. `LiveStatus` is gated to `sys.stdout.
+      isatty()` by default (`live_status_enabled`, mirroring `color_
+      enabled`/`unicode_mode`'s own `auto|on|off` pattern, new
+      `[interface] live_status` config key) -- a redirected/piped/
+      headless run, every existing test included (`io.StringIO.isatty()`
+      is always False), sees byte-for-byte the same plain scrolling
+      output as before. `verb_for(phase, tool)` maps the real `task.
+      step` fields already flowing through narration to a present-tense
+      verb (`Reading`, `Fetching`, `Patching`, `Proposing`, `Calling` for
+      any `mcp_*` tool, ...) instead of one static "thinking" for the
+      whole turn.
+    - **Why this avoids the exact conflict milestone 94 hit**: every
+      footer redraw happens only while the REPL thread is blocked inside
+      `run_coroutine_threadsafe(...).result()` -- never while `input()`
+      itself is actively reading keystrokes. `readline`'s own line/cursor
+      tracking and this module's writes are never live at the same
+      moment, by construction (the REPL's own threading model,
+      `_repl_main`'s docstring), not by luck. Not verified against a
+      real interactive terminal by the agent that built it -- no tty in
+      its own tool environment -- named honestly as worth the creator's
+      own real-terminal check, with `live_status = "off"` as the
+      immediate escape hatch.
+    - **`interface/service.py::_out()`** is the one gate every scrolling
+      line in the file now passes through: clears the footer first (so
+      a `print()` never lands interleaved with it), prints, restores the
+      footer if a turn is still in flight. `_on_task_event` and
+      `_handle_chat`'s heartbeat update the footer in place for an
+      in-flight step instead of a fresh dim line each tick -- the actual
+      fix for "a couple of dots," not a style pass -- and fold a step
+      with a real outcome into one permanent ✅/❌-iconed scrolling
+      line, Claude Code's own convention from the creator's reference.
+    - **New `render.prompt_banner()`** -- a boxed confirmation banner
+      (box-drawing glyphs only, no cursor control, same file, same hard
+      rule) for a pending `ui.prompt`, replacing a plain `[prompt] ...`
+      line -- "Explicit Gating" from the same reference, the one moment
+      execution is genuinely waiting on a human decision.
+    - **`_on_needs_human`'s raw-dict line removed** -- redundant with
+      `_on_prompt`'s own real, answerable rendering of the identical
+      escalation, and the same raw-structure-on-screen pattern already
+      fixed once this session for `status`.
+
+    A `live_status.py` unit-test file was written by a forked agent in
+    parallel (working only on that one new, otherwise-untouched file)
+    while this milestone's own `service.py`/`render.py` wiring was
+    written directly -- the creator's own suggestion, tried for real:
+    genuinely independent scope, no file overlap, no merge risk.

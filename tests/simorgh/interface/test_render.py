@@ -38,6 +38,7 @@ class RenderTestCase(unittest.TestCase):
         text += render.vitals(VitalsSnapshot(mood=0.2, energy=0.1, load=0.3, stale=False))
         text += render.diff_block(["+added", "-removed", " same"], enabled=True)
         text += render.banner(enabled=True)
+        text += render.prompt_banner("Approve propose_mcp_server?", ["yes", "no"], enabled=True)
         for match in _ESC.finditer(text):
             params = match.group(0).lstrip("\x1b[")
             # SGR parameters are digits separated by `;` -- this includes
@@ -182,6 +183,37 @@ class RenderTestCase(unittest.TestCase):
         # gets something readable in a standard 80-column window.
         for line in render.banner(enabled=False).splitlines():
             self.assertLessEqual(len(line), 80, repr(line))
+
+    def test_prompt_banner_shows_the_question_and_every_option(self):
+        out = render.prompt_banner("Approve propose_mcp_server?", ["yes", "no"], enabled=False)
+        self.assertIn("Approve propose_mcp_server?", out)
+        self.assertIn("yes", out)
+        self.assertIn("no", out)
+        self.assertIn("╭", out)
+        self.assertIn("╰", out)
+
+    def test_prompt_banner_disabled_color_has_no_escape_sequences(self):
+        out = render.prompt_banner("Approve?", ["yes", "no"], enabled=False)
+        self.assertNotIn("\x1b[", out)
+
+    def test_prompt_banner_box_lines_all_align_to_the_same_width(self):
+        # Padding is computed on the plain text before `style()` wraps it
+        # (render.py's own established pattern, `banner()`'s `mark_plain.
+        # center(...)`) -- confirm the top/question/options/bottom lines
+        # all come out the same visual width even with color enabled,
+        # where the question/options lines carry invisible SGR bytes the
+        # naive `len()` below would otherwise be fooled by if padding had
+        # been computed in the wrong order.
+        out = render.prompt_banner("Approve a genuinely long question here?", ["yes", "no"], enabled=True)
+        lines = out.splitlines()
+        strip_sgr = re.compile(r"\x1b\[[^m]*m")
+        visible = [len(strip_sgr.sub("", line)) for line in lines]
+        self.assertEqual(len(set(visible)), 1, f"box lines don't align: {visible}")
+
+    def test_prompt_banner_a_long_option_list_still_fits_one_box(self):
+        out = render.prompt_banner("Pick one", ["approve", "reject", "defer"], enabled=False)
+        for option in ("approve", "reject", "defer"):
+            self.assertIn(option, out)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,19 @@ text instead of moving a cursor or recalling history, corrupting
 whatever the creator was mid-typing. Muscle-memory terminal habits
 (history recall, in-line editing) are not optional polish once a human
 is actually typing into this REPL for real.
+
+**Redraw-in-place status footer, 2026-09-06** (the creator's own
+explicit call, after being shown the tradeoff against `render.py`'s
+"scrolling blocks only" rule -- see `live_status.py`'s module docstring
+for the full design and why that rule still holds byte-for-byte
+whenever stdout isn't a real interactive terminal). `self._out()` is
+the one gate every scrolling line in this file passes through, so the
+footer and ordinary output never interleave mid-line; `_on_task_event`
+and `_handle_chat`'s heartbeat update the footer in place for an
+in-flight step instead of printing a fresh dim line each tick (the
+creator: "a couple of dots" -- the direct fix, not a style pass), and
+fold a step with a real outcome into one permanent ✅/❌-iconed
+scrolling line.
 """
 
 from __future__ import annotations
@@ -59,6 +72,7 @@ from . import render as render_mod
 from .config import Config
 from .dispatch import dispatch
 from .httpapi import HttpApi
+from .live_status import LiveStatus, live_status_enabled, verb_for
 from .parser import parse
 from .vitals import VitalsCache
 
@@ -116,6 +130,7 @@ class Service:
         self._pending_prompts: dict[str, dict] = {}  # prompt_id -> payload, oldest-first (dict preserves insertion order)
         self._prompt_timeouts: dict[str, asyncio.Task] = {}  # prompt_id -> its own timeout watchdog
         self._color = render_mod.color_enabled(self.config.color)
+        self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
         self._http: HttpApi | None = None
 
     async def start(self, ctx: Context) -> None:
@@ -135,6 +150,7 @@ class Service:
             await ctx.bus.subscribe(topics.TASK_STEP, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_event),
         ]
+        self._live.start()
         if self._run_repl:
             self._stop_repl.clear()
             self._repl_thread = threading.Thread(target=self._repl_main, name="interface-repl", daemon=True)
@@ -161,6 +177,7 @@ class Service:
 
     async def stop(self) -> None:
         self._stop_repl.set()
+        self._live.stop()
         for task in self._prompt_timeouts.values():
             if not task.done():
                 task.cancel()
@@ -181,6 +198,18 @@ class Service:
         if self._ctx is None:
             return Health.down("not started")
         return Health.ok()
+
+    def _out(self, text: str) -> None:
+        """The one gate every scrolling line in this REPL passes
+        through (`live_status.py`'s own module docstring has the full
+        design): clears the live-status footer first so a `print()`
+        from here never lands interleaved with it, prints normally, then
+        restores the footer if a turn is still actively rendering one.
+        A no-op-footer (non-interactive stdout) makes this exactly a
+        plain `print()`."""
+        self._live.clear()
+        print(text)
+        self._live.restore()
 
     def _history_path(self):
         explicit = self.config.resolved_history_path()
@@ -268,7 +297,7 @@ class Service:
             return
         try:
             if command.guessed_from:
-                print(f"[guessing '{command.guessed_from}' -> '{command.name}']")
+                self._out(f"[guessing '{command.guessed_from}' -> '{command.name}']")
 
             if command.name is None:
                 await self._handle_chat(command.args)
@@ -277,11 +306,11 @@ class Service:
             outcome = await dispatch(command, bus=self._ctx.bus, clock=self._ctx.clock,
                                       session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger)
             if outcome.text:
-                print(outcome.text)
+                self._out(outcome.text)
             if outcome.exit_repl:
                 self._stop_repl.set()
         except Exception as exc:  # noqa: BLE001 -- the REPL must survive a handler crash (spec section 8)
-            print(render_mod.notice("error", f"[render error] {exc!r}", "interface", enabled=self._color))
+            self._out(render_mod.notice("error", f"[render error] {exc!r}", "interface", enabled=self._color))
 
     async def _handle_chat(self, text: str) -> None:
         # A fresh id per turn, not `self.session_id` (the REPL's own
@@ -297,6 +326,8 @@ class Service:
         fut: asyncio.Future = self._loop.create_future()
         self._pending_turns[session_id] = fut
         self._turn_started[session_id] = time.monotonic()
+        if self._live.enabled:
+            self._live.render("⏺ Thinking...  [0s]")
         await self._ctx.bus.publish(self._ctx.bus.new(topics.PERCEPT_TEXT_RECEIVED, {
             "channel": "cli", "text": text, "session_id": session_id,
         }))
@@ -305,14 +336,21 @@ class Service:
             # Silence never lasts longer than narrate_heartbeat_s: the
             # step narration (_on_task_event) covers *what* is happening;
             # this covers "still alive" between steps (a long model call).
+            # Live footer: updates the same line in place instead of a
+            # fresh scrolling line each tick (the creator: "a couple of
+            # dots" -- this is the direct fix, not just a style pass).
             while True:
                 await asyncio.sleep(self.config.narrate_heartbeat_s)
                 elapsed = time.monotonic() - self._turn_started.get(session_id, time.monotonic())
-                print(render_mod.style(f"  ... still thinking  [{elapsed:.0f}s]", "dim", enabled=self._color))
+                if self._live.enabled:
+                    self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
+                else:
+                    print(render_mod.style(f"  ... still thinking  [{elapsed:.0f}s]", "dim", enabled=self._color))
 
         beat = asyncio.ensure_future(_heartbeat()) if self.config.narrate else None
         try:
             reply_text = await asyncio.wait_for(fut, timeout=self.config.chat_reply_timeout_s)
+            self._live.clear()
             if reply_text:
                 print(reply_text)
             else:
@@ -326,8 +364,10 @@ class Service:
                     "warn", "(no real answer this turn -- floor reply, try again)", "cognition", enabled=self._color,
                 ))
         except asyncio.TimeoutError:
+            self._live.clear()
             print("no response -- the reasoning subsystem isn't built yet this session")
         finally:
+            self._live.clear()
             if beat is not None:
                 beat.cancel()
             self._pending_turns.pop(session_id, None)
@@ -345,7 +385,7 @@ class Service:
             # not a conversation. `debug` is the level a subsystem uses
             # for exactly that: never meant for this surface.
             return
-        print(render_mod.notice(level, p.get("text", ""), p.get("source", ""), enabled=self._color))
+        self._out(render_mod.notice(level, p.get("text", ""), p.get("source", ""), enabled=self._color))
 
     async def _on_prompt(self, message: Message) -> None:
         """Live-caught (the creator, real use: typed "yes" twice at a
@@ -368,7 +408,8 @@ class Service:
         options = p.get("options", [])
         default = p.get("default") or (options[0] if options else "")
         self._pending_prompts[prompt_id] = p
-        print(f"[prompt] {p.get('question', '')} (options: {options}; reply here, or waits {p.get('timeout_s', 0):.0f}s then defaults to {default!r})")
+        banner = render_mod.prompt_banner(p.get("question", ""), options, enabled=self._color)
+        self._out(f"{banner}\nreply here, or waits {p.get('timeout_s', 0):.0f}s then defaults to {default!r}")
 
         async def _watchdog() -> None:
             await self._ctx.clock.sleep(p.get("timeout_s", 0) or 0)  # injected Clock, not raw asyncio.sleep -- FakeClock-testable
@@ -385,21 +426,27 @@ class Service:
         await self._ctx.bus.publish(self._ctx.bus.new(topics.UI_PROMPT_ANSWERED, {
             "prompt_id": prompt_id, "answer": answer,
         }))
-        print(f"[prompt] answered {answer!r} {note}".rstrip())
+        self._out(f"[prompt] answered {answer!r} {note}".rstrip())
 
     async def _on_needs_human(self, message: Message) -> None:
+        # `_on_prompt` (`ui.prompt`, fired by Guardian for the exact same
+        # escalation) already renders the real, answerable question --
+        # this raw-dict line used to print alongside it, unformatted and
+        # redundant (the same raw-structure-on-screen issue already fixed
+        # elsewhere this session for `status`). A short, clean marker is
+        # still worth keeping for anyone scrolling back through a log.
         p = message.payload
-        print(render_mod.notice("warn", f"needs human: {p}", "guardian", enabled=self._color))
+        self._out(render_mod.notice("warn", f"action {p.get('action_id', '')} needs approval", "guardian", enabled=self._color))
 
     async def _on_action_denied(self, message: Message) -> None:
         p = message.payload
-        print(render_mod.notice("warn", f"\U0001f6ab denied ({p.get('layer', '')}): {p.get('reasons', p)}", "guardian", enabled=self._color))
+        self._out(render_mod.notice("warn", f"\U0001f6ab denied ({p.get('layer', '')}): {p.get('reasons', p)}", "guardian", enabled=self._color))
 
     async def _on_persona_state(self, message: Message) -> None:
         self.vitals.on_persona_state(message.payload)
 
     async def _on_state_changed(self, message: Message) -> None:
-        print(render_mod.notice("info", f"system state: {message.payload.get('state')}", "kernel", enabled=self._color))
+        self._out(render_mod.notice("info", f"system state: {message.payload.get('state')}", "kernel", enabled=self._color))
 
     async def _on_metrics(self, message: Message) -> None:
         self.vitals.on_system_metrics(message.payload)
@@ -411,10 +458,23 @@ class Service:
         """Live narration (07-post-cutover-review.md §3.9): the creator
         watched "thinking" for a long time with no sign of what Sim was
         doing. The Ledger already records every step of a turn as it
-        happens; this prints the ones for a turn *this REPL* is waiting
-        on -- a chat turn's task_id IS its session_id (`worker.py::
-        run_percept_chat`) -- as dim one-liners, and stays silent for
-        every other task (autonomous ticks, other sessions)."""
+        happens; this narrates the ones for a turn *this REPL* is
+        waiting on -- a chat turn's task_id IS its session_id
+        (`worker.py::run_percept_chat`) -- and stays silent for every
+        other task (autonomous ticks, other sessions).
+
+        On a real interactive terminal (`self._live.enabled`), an
+        in-flight step (`ok` absent -- the pre-think announcement, or
+        any other "still working" signal) updates the redraw-in-place
+        footer with a "breathing verb" (`live_status.verb_for`) instead
+        of adding a scrolling line -- this is the actual fix for "a
+        couple of dots," not just a style pass. A step with a real
+        outcome folds into one permanent scrolling line with a
+        ✅/❌ icon (Claude Code's own convention, the creator's
+        reference) so the transcript reads as a clean history, not a
+        wall of identical dim lines. Anything without a live terminal
+        (redirected/piped/headless, every existing test) gets the exact
+        prior scrolling-dim-line behavior, unchanged."""
         if not self.config.narrate:
             return
         p = message.payload
@@ -422,12 +482,11 @@ class Service:
         if task_id not in self._pending_turns:
             return
         elapsed = time.monotonic() - self._turn_started.get(task_id, time.monotonic())
-        if message.type == topics.TASK_STARTED:
-            text = "thinking..."
-        elif message.type == topics.TASK_STEP:
+
+        if message.type == topics.TASK_STEP:
             phase, summary, tool = p.get("phase", ""), p.get("summary", ""), p.get("tool")
             ok = p.get("ok")
-            mark = "" if ok is None else (" ok" if ok else " FAILED")
+            step_no = p.get("step_no", "?")
             # Live-caught (the creator: "I'd like ... code diffs ...
             # similar UI experience as claude code cli" -- 07-post-
             # cutover-review.md §3.11): a real diff now travels in this
@@ -437,7 +496,23 @@ class Service:
             # squeezed into one dim narration line.
             head, sep, diff_body = summary.partition("\n\n--- a/")
             what = f"{tool}: {head}" if tool else head
-            text = f"step {p.get('step_no', '?')} ({phase}) {what}{mark}"
+
+            if self._live.enabled:
+                if ok is None:
+                    verb = verb_for(phase, tool)
+                    detail = f" {head}" if head else ""
+                    self._live.render(f"⏺ {verb}...{detail}  [{elapsed:.0f}s]")
+                    return
+                icon = "✅" if ok else "❌"
+                self._out(f"{icon} step {step_no} ({phase}) {what}  [{elapsed:.1f}s]")
+                if sep:
+                    lines = (sep[2:] + diff_body).splitlines()
+                    self._out(render_mod.diff_block(lines, label=head, enabled=self._color))
+                self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
+                return
+
+            mark = "" if ok is None else (" ok" if ok else " FAILED")
+            text = f"step {step_no} ({phase}) {what}{mark}"
             print(render_mod.style(f"  ... {text}  [{elapsed:.1f}s]", "dim", enabled=self._color))
             if sep:
                 # `sep` is the matched separator "\n\n--- a/"; strip its two
@@ -445,7 +520,16 @@ class Service:
                 lines = (sep[2:] + diff_body).splitlines()
                 print(render_mod.diff_block(lines, label=head, enabled=self._color))
             return
+
+        if message.type == topics.TASK_STARTED:
+            if self._live.enabled:
+                self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
+                return
+            text = "thinking..."
         else:  # task.completed -- the reply itself prints from _handle_chat
+            if self._live.enabled:
+                self._live.clear()
+                return
             text = "done"
         print(render_mod.style(f"  ... {text}  [{elapsed:.1f}s]", "dim", enabled=self._color))
 

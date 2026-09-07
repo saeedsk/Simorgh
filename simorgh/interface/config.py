@@ -27,6 +27,13 @@ class Config:
     # never lasts longer than `narrate_heartbeat_s`.
     narrate: bool = True
     narrate_heartbeat_s: float = 10.0
+    # Redraw-in-place status footer (the creator's own explicit call,
+    # 2026-09-06, after being shown the tradeoff against `render.py`'s
+    # scrolling-only rule -- see `live_status.py`'s module docstring for
+    # the full design). auto: on for a real interactive terminal, off
+    # for anything redirected/piped/headless (tests included, since
+    # `io.StringIO.isatty()` is always False).
+    live_status: str = "auto"  # auto | on | off
     prompt_timeout_s: float = 120.0
     vitals_idle_reprint_s: float = 3.0
     vitals_interval_s: float = 15.0
