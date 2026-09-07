@@ -3,16 +3,28 @@ the CLI REPL, command dispatch, vitals, and console rendering. Layer 5
 (registry.py).
 
 **Honest about this session's scope** (see the spec header and its own
-§12): the general Phase 5 HTTP/WebSocket API, notice mid-line queueing,
-and interactive `ui.prompt` answer collection via the REPL's own stdin
-did not land this session -- `ui.prompt` is rendered and always
-resolves to its default on timeout (never silently proceeds), which is
-the safe half of the spec's S2 behavior without the full interactive
-half. One narrow slice of that Phase 5 item *did* land here, pulled
-forward: a read-only live-status dashboard (`httpapi.py`), because the
-creator asked to actually see the running system -- which subsystems
-are loaded, bus/worker activity -- while first working with v2, not
-just infer it from REPL scrollback.
+§12): the general Phase 5 HTTP/WebSocket API and notice mid-line
+queueing did not land this session. One narrow slice of that Phase 5
+item *did* land here, pulled forward: a read-only live-status dashboard
+(`httpapi.py`), because the creator asked to actually see the running
+system -- which subsystems are loaded, bus/worker activity -- while
+first working with v2, not just infer it from REPL scrollback.
+
+**Interactive `ui.prompt` answer collection, added later, live-caught**
+(the creator, real use: typed "yes" at a pending Guardian approval
+question -- three separate times, worded three different ways -- and
+each time it was silently auto-answered "no" instead, because `_on_
+prompt` printed the question and *immediately* resolved it to the
+default with no window for a real answer, and the model was never shown
+the pending question at all since it's a local `print()`, not part of
+`session.messages`). `_handle_line` now checks a typed line against any
+pending prompt's `options` *before* command parsing or chat -- a match
+resolves that prompt directly, bypassing dispatch and the model
+entirely, since an approval answer is not a conversational act. A
+background watchdog still auto-answers with `default` at `timeout_s` so
+a prompt nobody is watching (the HTTP API, a detached session) never
+hangs forever -- "always resolves," just no longer "resolves
+immediately no matter what gets typed."
 
 The readline history file (originally also descoped) landed later,
 live-caught: without importing `readline` at all, `input()` has no
@@ -52,6 +64,23 @@ from .vitals import VitalsCache
 
 VERSION = "0.1.0"
 
+_YES_NO_SHORTHAND = {"y": "yes", "n": "no"}
+
+
+def _match_pending_answer(typed: str, options: list[str]) -> str | None:
+    """A typed line that exactly names one of the pending prompt's own
+    `options` (case-insensitive) answers it -- `y`/`n` also work when
+    the options are literally yes/no, the overwhelmingly common case.
+    Anything else (a real chat message, an unrelated command) is left
+    alone; `None` means "not an answer, handle normally."""
+    lowered = typed.lower()
+    for option in options:
+        if lowered == option.lower():
+            return option
+    if {o.lower() for o in options} == {"yes", "no"} and lowered in _YES_NO_SHORTHAND:
+        return _YES_NO_SHORTHAND[lowered]
+    return None
+
 
 class Service:
     name = "interface"
@@ -84,6 +113,8 @@ class Service:
         self._stop_repl = threading.Event()
         self._pending_turns: dict[str, asyncio.Future] = {}
         self._turn_started: dict[str, float] = {}  # session_id -> monotonic start, for narration timing
+        self._pending_prompts: dict[str, dict] = {}  # prompt_id -> payload, oldest-first (dict preserves insertion order)
+        self._prompt_timeouts: dict[str, asyncio.Task] = {}  # prompt_id -> its own timeout watchdog
         self._color = render_mod.color_enabled(self.config.color)
         self._http: HttpApi | None = None
 
@@ -130,6 +161,11 @@ class Service:
 
     async def stop(self) -> None:
         self._stop_repl.set()
+        for task in self._prompt_timeouts.values():
+            if not task.done():
+                task.cancel()
+        self._prompt_timeouts.clear()
+        self._pending_prompts.clear()
         for sub in self._subs:
             await sub.unsubscribe()
         self._subs = []
@@ -214,6 +250,19 @@ class Service:
                 print(render_mod.notice("error", f"[render error] {exc!r}", "interface", enabled=self._color))
 
     async def _handle_line(self, line: str) -> None:
+        stripped = line.strip()
+        if self._pending_prompts and stripped:
+            # The oldest pending prompt wins if more than one is somehow
+            # queued at once (dict preserves insertion order) -- multiple
+            # concurrent approvals disambiguated by id ("yes <id>") is a
+            # real gap, not attempted here; the one-action-per-step design
+            # (session.py's own module docstring) makes it rare in
+            # practice.
+            prompt_id, payload = next(iter(self._pending_prompts.items()))
+            match = _match_pending_answer(stripped, payload.get("options", []))
+            if match is not None:
+                await self._resolve_prompt(prompt_id, match)
+                return
         command = parse(line)
         if command is None:
             return
@@ -299,17 +348,44 @@ class Service:
         print(render_mod.notice(level, p.get("text", ""), p.get("source", ""), enabled=self._color))
 
     async def _on_prompt(self, message: Message) -> None:
-        """Renders the prompt and its default; always resolves on
-        timeout rather than blocking on the REPL's own stdin (see this
-        module's docstring -- interactive answer collection isn't
-        wired to the shared input stream this session)."""
+        """Live-caught (the creator, real use: typed "yes" twice at a
+        pending Guardian approval and both times it was silently
+        answered "no" instead, since this printed the question then
+        *immediately* auto-answered with the default -- there was never
+        a window for a real answer to land). Now genuinely interactive:
+        stores the prompt as pending and answers it for real the next
+        time `_handle_line` sees input that matches its `options`; a
+        background watchdog still auto-answers with `default` at
+        `timeout_s` so a prompt from a channel with nobody watching (the
+        HTTP API, a detached session) never hangs forever -- "always
+        resolves," just no longer "resolves immediately no matter what
+        gets typed."
+        """
         p = message.payload
+        prompt_id = p.get("prompt_id", "")
+        if not prompt_id:
+            return
         options = p.get("options", [])
         default = p.get("default") or (options[0] if options else "")
-        print(f"[prompt] {p.get('question', '')} (options: {options}; defaulting to {default!r})")
+        self._pending_prompts[prompt_id] = p
+        print(f"[prompt] {p.get('question', '')} (options: {options}; reply here, or waits {p.get('timeout_s', 0):.0f}s then defaults to {default!r})")
+
+        async def _watchdog() -> None:
+            await self._ctx.clock.sleep(p.get("timeout_s", 0) or 0)  # injected Clock, not raw asyncio.sleep -- FakeClock-testable
+            if prompt_id in self._pending_prompts:
+                await self._resolve_prompt(prompt_id, default, note="(timed out)")
+
+        self._prompt_timeouts[prompt_id] = asyncio.ensure_future(_watchdog())
+
+    async def _resolve_prompt(self, prompt_id: str, answer: str, *, note: str = "") -> None:
+        self._pending_prompts.pop(prompt_id, None)
+        task = self._prompt_timeouts.pop(prompt_id, None)
+        if task is not None and not task.done():
+            task.cancel()
         await self._ctx.bus.publish(self._ctx.bus.new(topics.UI_PROMPT_ANSWERED, {
-            "prompt_id": p.get("prompt_id", ""), "answer": default,
+            "prompt_id": prompt_id, "answer": answer,
         }))
+        print(f"[prompt] answered {answer!r} {note}".rstrip())
 
     async def _on_needs_human(self, message: Message) -> None:
         p = message.payload

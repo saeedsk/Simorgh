@@ -31,16 +31,17 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # `mcp_servers` config entry.
     "mcp_ddg_search_ddg_search": ("read_only", True),
     "mcp_ddg_search_ddg_get_answer": ("read_only", True),
-    # `propose_mcp_server` (execution/tools.py's own docstring: "where is
-    # the autonomy") only records a proposal -- it never installs or runs
-    # anything, so Guardian may allow it (even auto-allow it in a trusted
-    # posture, same as any other irreversible action) without that being
-    # a real capability grant. The actual boundary is downstream and
-    # absolute: only the `mcp` CLI command ever writes `simorgh.toml`,
-    # and nothing in the tool-calling pipeline can reach that code path
-    # -- not a Guardian policy a trusted posture could loosen, a
-    # structural one.
-    "propose_mcp_server": ("irreversible", False),
+    # `propose_mcp_server` (execution/tools.py's own docstring has the
+    # full history -- changed same day from `irreversible` to
+    # `reversible`, the creator: "sim should just create it, period ...
+    # remove any rule that prevents it") only records a proposal, never
+    # installs or runs anything, so Guardian auto-allows it in guarded
+    # posture without that being a real capability grant. The actual
+    # boundary is downstream and absolute: only the `mcp` CLI command
+    # ever writes `simorgh.toml`, and nothing in the tool-calling
+    # pipeline can reach that code path in any posture -- not a Guardian
+    # policy this entry could loosen, a structural one.
+    "propose_mcp_server": ("reversible", False),
 }
 
 # `cognition/parser.py::_parse_markers` only ever extracts one string per

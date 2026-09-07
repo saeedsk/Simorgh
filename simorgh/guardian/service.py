@@ -56,11 +56,13 @@ class Service:
         topics.COGNITION_PROVIDER_STATUS,
         topics.SYSTEM_RESUME,
         topics.GUARDIAN_POSTURE_REQUEST,
+        topics.UI_PROMPT_ANSWERED,
     )
     produces = (
         topics.ACTION_APPROVED,
         topics.ACTION_DENIED,
         topics.ACTION_NEEDS_HUMAN,
+        topics.UI_PROMPT,
         topics.GUARDIAN_POSTURE_CHANGED,
         topics.GUARDIAN_POSTURE_REPLY,
     )
@@ -99,6 +101,7 @@ class Service:
         self._subs.append(await ctx.bus.subscribe(topics.COGNITION_PROVIDER_STATUS, self._on_provider_status))
         self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_RESUME, self._on_resume))
         self._subs.append(await ctx.bus.subscribe(topics.GUARDIAN_POSTURE_REQUEST, self._on_posture_request))
+        self._subs.append(await ctx.bus.subscribe(topics.UI_PROMPT_ANSWERED, self._on_prompt_answered))
 
     async def stop(self) -> None:
         for sub in self._subs:
@@ -185,6 +188,60 @@ class Service:
             payload={"mode": self._posture.level, "trust_score": 1.0, "reason": "system.resume"},
         ))
 
+    async def _on_prompt_answered(self, message: Message) -> None:
+        """Resolves a real human answer to a `needs_human` escalation
+        (`_on_proposed`'s own comment on the matching `ui.prompt` publish
+        has the "why" -- `action.needs_human` alone was never
+        answerable). `prompt_id` doubles as `action_id`; any other
+        `ui.prompt` (Planning's own plan-mode approval, for instance)
+        answers here too but is harmlessly ignored -- its `prompt_id`
+        never names a real `action:<id>` stream with a `received` event,
+        so the lookup below just finds nothing and returns. The full
+        original proposal is read back from the Ledger, the same
+        re-fetch-don't-trust-the-message pattern `execution/README.md`'s
+        `_fetch_proposed_args` already uses for approved actions --
+        Guardian's own in-memory state discarded the proposal the moment
+        it escalated (`_on_proposed`'s `needs_human` branch just
+        `return`s), but the `received` event this same method appended
+        beforehand is still there."""
+        p = message.payload
+        action_id = p.get("prompt_id", "")
+        if not action_id:
+            return
+        stream = f"action:{action_id}"
+        events = await self._ctx.ledger.read(stream)
+        received = next((e for e in events if e.type == "received"), None)
+        if received is None:
+            return  # not one of ours -- a different prompt_id namespace entirely
+        if any(e.type == "answered" for e in events):
+            return  # already resolved -- a stray duplicate (e.g. the timeout watchdog raced a real answer)
+
+        proposal = received.payload["proposal"]
+        answer = p.get("answer", "no")
+        if answer != "yes":
+            await self._ctx.ledger.append(stream, self._event(stream, "answered", {"answer": answer, "outcome": "denied"}))
+            await self._ctx.bus.publish(message.caused(
+                topics.ACTION_DENIED, {"action_id": action_id, "reasons": ["human declined"], "layer": "policy"},
+                source="guardian",
+            ))
+            return
+        if self._system_state in ("paused", "stopping"):
+            await self._ctx.ledger.append(stream, self._event(stream, "answered", {"answer": answer, "outcome": "denied"}))
+            await self._ctx.bus.publish(message.caused(
+                topics.ACTION_DENIED, {"action_id": action_id, "reasons": [f"system is {self._system_state}"], "layer": "policy"},
+                source="guardian",
+            ))
+            return
+
+        token, expires_at, args_sha256 = self._tokens.issue(action_id, proposal["tool"], proposal["args"])
+        await self._ctx.ledger.append(stream, self._event(stream, "answered", {"answer": answer, "outcome": "approved"}))
+        await self._ctx.bus.publish(message.caused(
+            topics.ACTION_APPROVED,
+            {"action_id": action_id, "tool": proposal["tool"], "args_sha256": args_sha256, "expires_at": expires_at,
+             "approval_token": token, "mode_at_approval": self._config.mode},
+            source="guardian",
+        ))
+
     async def _on_posture_request(self, message: Message) -> None:
         """`guardian.posture.request` -> `.reply` (contracts/messages/
         guardian.py). Live-caught (post-cutover review, 2026-09-06): the
@@ -233,10 +290,25 @@ class Service:
             return
 
         if verdict.kind == "needs_human":
+            question = f"Approve {p['tool']}? ({'; '.join(verdict.reasons)})"
             await self._ctx.bus.publish(message.caused(
                 topics.ACTION_NEEDS_HUMAN,
-                {"action_id": action_id, "question": f"Approve {p['tool']}? ({'; '.join(verdict.reasons)})",
-                 "options": ["yes", "no"], "default": "no"},
+                {"action_id": action_id, "question": question, "options": ["yes", "no"], "default": "no"},
+                source="guardian",
+            ))
+            # Live-caught (the creator, real use: answered "yes" three
+            # separate times and every one silently resolved "no"
+            # instead): `action.needs_human` alone was never actually
+            # answerable -- nothing consumed a reply to it. `ui.prompt`/
+            # `ui.prompt_answered` already existed as a real, working
+            # question/answer pair (Interface renders it and now
+            # actually waits, `interface/service.py`'s own docstring);
+            # `prompt_id = action_id` is what lets `_on_prompt_answered`
+            # below find its way back to this exact pending proposal.
+            await self._ctx.bus.publish(message.caused(
+                topics.UI_PROMPT,
+                {"prompt_id": action_id, "question": question, "options": ["yes", "no"],
+                 "timeout_s": self._config.human_prompt_timeout_s, "default": "no"},
                 source="guardian",
             ))
             return

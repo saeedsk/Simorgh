@@ -488,3 +488,26 @@ listed it:**
   in code. `cognition.think` is never gated (by design); every effect-
   producing entry point — chat `tool_calls` *and* every typed CLI
   command — publishes `action.proposed` first. No bypass was found.
+- **`needs_human` ↔ `ui.prompt`/timeout/fresh-token lifecycle (build
+  step 6 above, `human.py`) was fully specified — this section's own
+  §5.4 table (`ui.prompt.answered` → `action.approved`/`action.denied
+  {layer: human}`) and §7's worked scenario — but never actually built:
+  no dedicated `human.py` landed, and `action.needs_human` had no
+  consumer of any answer at all. Resolved, 2026-09-06, live** (the
+  creator: typed "yes" at a real pending approval, worded three
+  different ways across three turns, and every one silently resolved
+  "no" — because nothing was listening). The logic landed directly in
+  `service.py` rather than a separate `human.py` (this build's existing
+  pattern for every rule/projection so far); `layer: "human"` from this
+  section's own prose was never actually added to the wire's
+  `DENY_LAYER` enum (`contracts/messages/action.py` has `{policy,
+  denylist, immunity, budget, paused, scope, classifier, token}` only),
+  so a human's "no" collapses to `layer: "policy"` — the same convention
+  `_WIRE_DENY_LAYER` already uses for `mode`/`protected`/`reversibility`,
+  not a new gap. `EVOLUTION.md` milestone 143 has the full record,
+  including a same-day follow-up: `propose_mcp_server`'s own
+  `reversibility` moved from `irreversible` to `reversible` at the
+  creator's explicit request ("remove any rule that prevents it"),
+  since a proposal-only tool being gated behind human escalation was
+  redundant with `mcp approve`'s own, separate, structural gate one
+  layer down.
