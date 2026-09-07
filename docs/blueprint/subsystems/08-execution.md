@@ -431,7 +431,26 @@ different agents one file each.
    least the reversible policy.
 4. **MCP adapters.** Out of scope for Phase 1–3; the `provider: mcp` slot
    exists so tool discovery can be deferred (`harness-01` extensibility
-   layering).
+   layering). *Resolved, 2026-09-06* (the creator: "let's build MCP
+   support and establish famous MCP servers and make them available for
+   Sim") -- `execution/mcp.py`: a hand-rolled stdio JSON-RPC client
+   (newline-delimited, not the third-party `mcp` SDK -- see the module's
+   own docstring for why), a human-configured static `mcp_servers` list
+   (Sim cannot add a server to itself -- a deliberate rejection of a
+   second model's suggestion to autonomously query a public MCP registry
+   at runtime, which would both violate `test_module_boundaries.py`'s
+   dependency rule and Guardian's whole "reviewed capability" premise),
+   registered through the same `tool.registered` path a skill uses. One
+   real gap surfaced by wiring this in: the marker-based tool-calling
+   path (`cognition/parser.py`) only ever produces a single string
+   argument, but most real MCP tools have multi-field schemas -- reachable
+   through the `Tool` protocol directly, but not yet callable by the
+   model via a real chat turn unless the tool happens to have exactly one
+   required argument (`execution/README.md`'s "MCP servers" section has
+   the worked example, `brave_web_search`'s single `query` field). Fixing
+   this generally needs a structured-JSON-arguments output mode in
+   Cognition, not just an Execution-side change -- open, not attempted
+   this pass.
 5. **(Found during the build) The real, built `ToolContext`
    (`contracts/protocols.py`) is narrower than this spec's own shape.**
    It has `action_id, task_id, scope, constraints, data_dir, clock,

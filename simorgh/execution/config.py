@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
+from .mcp import McpServerConfig
+
 
 @dataclass(frozen=True)
 class Config:
@@ -40,6 +42,11 @@ class Config:
     web_fetch_window_s: float = 3600.0
     web_fetch_allow_private_networks: bool = False
     web_fetch_user_agent: str = "Simorgh/2.0 (personal AI assistant; +https://github.com/saeedsk/Simorgh)"
+    # -- MCP (mcp.py's own module docstring): a human-configured, static
+    # list of external tool servers. Empty by default -- Sim never adds
+    # to this itself; each entry is a deliberate capability grant, same
+    # spirit as `web_fetch_allow_private_networks` defaulting False.
+    mcp_servers: tuple[McpServerConfig, ...] = ()
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":
@@ -51,5 +58,15 @@ class Config:
         for key in ("readable_roots", "write_scopes_source", "write_scopes_skills"):
             if key in kwargs:
                 kwargs[key] = tuple(kwargs[key])
+        if "mcp_servers" in kwargs:
+            kwargs["mcp_servers"] = tuple(
+                server if isinstance(server, McpServerConfig) else McpServerConfig(
+                    name=server["name"], command=server["command"],
+                    args=tuple(server.get("args", ())), env=dict(server.get("env", {})),
+                    read_only_tools=frozenset(server.get("read_only_tools", ())),
+                    timeout_s=float(server.get("timeout_s", 15.0)),
+                )
+                for server in kwargs["mcp_servers"]
+            )
         kwargs = {k: v for k, v in kwargs.items() if k in cls.__dataclass_fields__}
         return cls(**kwargs)
