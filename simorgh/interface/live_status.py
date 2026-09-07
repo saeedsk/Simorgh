@@ -113,10 +113,29 @@ class LiveStatus:
         self._enabled = sys.stdout.isatty() if enabled is None else enabled
         self._drawn = False
         self._text = ""
+        self._sink = None
+
+    def redirect(self, sink) -> None:
+        """Send this line somewhere else instead of writing escape codes.
+
+        The prompt_toolkit prompt (`tui.py`) owns the bottom of the
+        screen and draws its own toolbar, so the two cannot both write
+        there -- the clear-and-restore dance this class does around every
+        print exists precisely because nothing else was coordinating. A
+        sink hands the same text to the prompt's footer instead, and every
+        `render`/`clear` caller stays exactly as it was. `redirect(None)`
+        puts it back.
+        """
+        self._sink = sink
+        if sink is not None:
+            self.clear()
 
     @property
     def enabled(self) -> bool:
-        return self._enabled
+        # True while redirected as well: the call sites guard their
+        # `render` calls on this, and a redirected footer is still a
+        # footer that gets drawn -- just by the prompt, not by us.
+        return self._enabled or self._sink is not None
 
     def start(self) -> None:
         if self._enabled:
@@ -132,6 +151,9 @@ class LiveStatus:
 
     def render(self, text: str) -> None:
         self._text = text
+        if self._sink is not None:
+            self._sink(text)
+            return
         if not self._enabled:
             return
         cols = _terminal_width()
@@ -141,6 +163,9 @@ class LiveStatus:
         self._drawn = True
 
     def clear(self) -> None:
+        if self._sink is not None:
+            self._sink("")
+            return
         if not self._enabled or not self._drawn:
             return
         sys.stdout.write(_TO_COL0 + _CLEAR_LINE)
