@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from .api import Budget
+from .providers import together as together_provider
 
 DEFAULT_PURPOSE_BUDGETS: dict[str, Budget] = {
     "chat": Budget(12_000, 1_000, 0.05),
@@ -30,14 +31,35 @@ class ProviderConfig:
     max_spend_usd: float | None = None
     timeout_seconds: float = 180.0
     model: str = ""
+    # Per 1M tokens. `price_cached_in` defaults to `price_in` when left at
+    # 0 (see `RollingWindowBudget.estimate_cost`) -- a provider with no
+    # cache tier prices every prompt token the same way.
     price_in: float = 0.0
     price_out: float = 0.0
+    price_cached_in: float = 0.0
 
 
 @dataclass(frozen=True)
 class Config:
-    provider_order: tuple[str, ...] = ("claude_code_cli", "gemini", "floor")
+    # The creator, 2026-09-07: Together is Sim's LLM now, GLM-5.3-Flash the
+    # default model. It leads the order, so it is what answers unless it is
+    # unavailable (no TOGETHER_API_KEY) or out of budget; the Claude Code
+    # CLI and Gemini stay behind it as failover, and the floor behind them.
+    provider_order: tuple[str, ...] = ("together", "claude_code_cli", "gemini", "floor")
     providers: Mapping[str, ProviderConfig] = field(default_factory=lambda: {
+        "together": ProviderConfig(
+            max_calls=int(os.environ.get("SIMORGH_LLM_DAILY_MAX_CALLS", "1500")),
+            window_seconds=86_400.0,
+            max_spend_usd=float(os.environ.get("SIMORGH_LLM_DAILY_BUDGET_USD", "2.0")),
+            timeout_seconds=180.0,
+            # Published GLM-5.3-Flash pricing, per 1M tokens. These drive
+            # the Router's *pre-call* estimate; the real bill comes from
+            # the provider's own cache-aware arithmetic on the response.
+            model=together_provider.DEFAULT_MODEL,
+            price_in=together_provider.PRICE_IN,
+            price_out=together_provider.PRICE_OUT,
+            price_cached_in=together_provider.PRICE_CACHED_IN,
+        ),
         "claude_code_cli": ProviderConfig(
             max_calls=int(os.environ.get("SIMORGH_CLAUDE_CODE_MAX_CALLS", "500")),
             window_seconds=18_000.0, timeout_seconds=180.0,

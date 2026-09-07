@@ -74,13 +74,16 @@ class RollingWindowBudget:
 
     def _estimate_cost(self, response: ProviderResponse) -> float:
         """Prefer a provider-reported cost (Claude Code CLI's own
-        `total_cost_usd`) when present; otherwise token counts times the
-        configured per-1M prices."""
+        `total_cost_usd`, Together's own cache-aware arithmetic) when
+        present; otherwise token counts times the configured per-1M
+        prices."""
         if response.cost_usd is not None:
             return float(response.cost_usd)
-        return self.estimate_cost(response.input_tokens, response.output_tokens)
+        return self.estimate_cost(
+            response.input_tokens, response.output_tokens, response.cached_input_tokens,
+        )
 
-    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
+    def estimate_cost(self, input_tokens: int, output_tokens: int, cached_input_tokens: int = 0) -> float:
         """Per-call budget accounting (04 section 7, "Budgets account;
         Guardian enforces"): a *pre-call* cost estimate from configured
         per-1M prices, used by `Router.complete` to refuse a candidate
@@ -90,9 +93,15 @@ class RollingWindowBudget:
         completes) estimate to 0.0, so this never blocks them --
         unknown-price providers are accounted for after the fact via
         `record()`, not gated ahead of time."""
+        # A provider that prices cached prompt tokens lower (Together bills
+        # them at $0.03/1M against $0.15/1M) sets `price_cached_in`; one
+        # that does not charges the ordinary input rate for them, which is
+        # also the right reading of "this provider has no cache tier".
+        cached_price = self._config.price_cached_in or self._config.price_in
         return (
             (input_tokens / 1_000_000) * self._config.price_in
             + (output_tokens / 1_000_000) * self._config.price_out
+            + (cached_input_tokens / 1_000_000) * cached_price
         )
 
 
