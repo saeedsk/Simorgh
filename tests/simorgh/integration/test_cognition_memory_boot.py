@@ -48,7 +48,7 @@ class _FakeProvider:
 def _patched_build_factories(*, cognition_providers):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False):
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
         factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
         factories["cognition"] = lambda: CognitionService(
             config=CognitionConfig(provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05),

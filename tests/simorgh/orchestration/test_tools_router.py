@@ -60,7 +60,7 @@ class TestToolCallRouter(unittest.TestCase):
     def test_the_wired_mcp_example_tool_is_read_only_network_and_remapped(self):
         payload = to_action_payload(
             action_id="a8", task_id="t1",
-            call={"tool": "mcp_brave_search_brave_web_search", "args": {"argument": "amazon stock price"}},
+            call={"tool": "mcp_ddg_search_ddg_search", "args": {"argument": "amazon stock price"}},
             rationale="r",
         )
         self.assertEqual(payload["reversibility"], "read_only")

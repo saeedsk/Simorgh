@@ -113,6 +113,38 @@ class TestInteractiveFlag(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(factories["interface"]()._run_repl)  # noqa: SLF001
 
 
+class TestExecutionConfigFromSimorghToml(unittest.IsolatedAsyncioTestCase):
+    """`execution/README.md`'s "MCP servers" section, step 1: `simorgh.
+    toml`'s `[execution]` section now reaches the real `execution.Config`
+    a booted Kernel's Execution subsystem runs with -- `registry.
+    build_factories`'s `execution_config` parameter, threaded from
+    `Kernel.boot` via `self.config.section("execution")`, the same
+    pattern `bus`/`ledger`/`orchestration` already use."""
+
+    async def test_an_mcp_servers_entry_in_simorgh_toml_reaches_the_booted_execution_service(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = LoadedConfig({
+                "runtime": {"data_dir": tmp},
+                "execution": {"mcp_servers": [{
+                    # A command that can never actually launch -- proves
+                    # the config reached Execution without needing a real
+                    # MCP server (or network) in this test; Execution's
+                    # own graceful-degradation is covered separately in
+                    # tests/simorgh/execution/test_service.py.
+                    "name": "ddg_search", "command": "/no/such/binary-xyz", "args": ["-y", "ddg-search-mcp"],
+                }]},
+            }, None)
+            kernel = Kernel(config, secrets=EnvSecretStore({}), clock=FakeClock())
+            await kernel.boot()
+            try:
+                execution = kernel._supervisor.services["execution"].service  # noqa: SLF001
+                self.assertEqual(len(execution._config.mcp_servers), 1)  # noqa: SLF001
+                self.assertEqual(execution._config.mcp_servers[0].name, "ddg_search")  # noqa: SLF001
+                self.assertEqual(execution._config.mcp_servers[0].args, ("-y", "ddg-search-mcp"))  # noqa: SLF001
+            finally:
+                await kernel.shutdown()
+
+
 class TestPauseResumeStop(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()

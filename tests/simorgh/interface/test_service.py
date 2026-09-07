@@ -77,6 +77,20 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
             await self._pump()
         self.assertIn("hi there", out.getvalue())
 
+    async def test_debug_level_notices_never_reach_the_human(self):
+        """Live-caught: planning's own dedup bookkeeping ("duplicate
+        candidate, matches task ...", `planning/service.py::_notice`)
+        was printing straight into the chat transcript, interleaved with
+        real replies -- a `debug`-level notice is internal telemetry,
+        not something a person watching the REPL asked to see."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            await self.bus.publish(self.bus.new(
+                topics.UI_NOTICE, {"level": "debug", "text": "duplicate candidate, matches task abc123", "source": "planning"},
+            ))
+            await self._pump()
+        self.assertNotIn("duplicate candidate", out.getvalue())
+
     async def test_pause_resume_stop_round_trip(self):
         """Flow 5: pause -> resume -> stop, all real `system.*` commands
         published by Interface (proven against a real bus; the full

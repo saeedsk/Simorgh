@@ -34,7 +34,7 @@ from simorgh.planning.service import Service as PlanningService
 def _patched_build_factories():
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False):
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
         # `real()` now wires every subsystem (docs/EVOLUTION.md milestone
         # 103) -- when this test was first written it returned only
         # bus/ledger, so filtering down to that plus `planning` itself is

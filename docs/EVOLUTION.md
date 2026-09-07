@@ -4127,7 +4127,90 @@ Still ahead, roughly in order:
     `read_only`, a server that fails to start degrades `health()` without
     blocking boot, one broken server doesn't block a working one,
     `stop()` closes every started client); `test_tools_router.py` (1 --
-    the wired `brave_web_search` example is read-only, network-scoped,
-    and correctly remapped). No test launches a real subprocess --
-    `McpClient`'s `spawn` is injectable, same testing seam as
-    `WebFetchTool`'s `opener`/`resolver`. Full suite green (2,273 tests).
+    the wired example tool is read-only, network-scoped, and correctly
+    remapped). No test launches a real subprocess -- `McpClient`'s
+    `spawn` is injectable, same testing seam as `WebFetchTool`'s
+    `opener`/`resolver`. Full suite green (2,273 tests).
+
+139. **No paid MCP access, real `simorgh.toml` wiring, and a debug leak
+    -- three fast follow-ups the creator raised within minutes of
+    milestone 138 shipping.**
+
+    - **"I don't like the idea to pay for MCP access, sim should be
+      able to put together its need from open source mcp servers."**
+      The one worked example was `server-brave-search`, which needs
+      `BRAVE_API_KEY`. Swapped for `ddg-search-mcp` (npm, MIT, no key)
+      -- verified live against the real npm registry this session
+      (`npm view <pkg>`), not recalled from training data, which can
+      misname or hallucinate a package. Two tools wired end-to-end:
+      `ddg_search` (general web search) and `ddg_get_answer`
+      (instant-answer/QnA), both single-required-argument (`query`).
+      `@modelcontextprotocol/server-sequential-thinking` (also free, also
+      verified) registered as a second known-good example, not
+      marker-wired -- its one tool needs 4 required fields, the same
+      structured-calling ceiling milestone 138 already named.
+    - **Closed the `simorgh.toml` gap milestone 138 had left open.**
+      `kernel/registry.py::build_factories` built every subsystem with
+      zero arguments by explicit design; `execution.Config` was the one
+      subsystem config *not* reachable from `simorgh.toml` at all (unlike
+      `bus`/`ledger`/`orchestration`). Added an `execution_config`
+      parameter to `build_factories` and threaded `ExecutionConfig.
+      from_mapping(self.config.section("execution"))` through from
+      `Kernel.boot` (`kernel/service.py`) -- the same pattern the others
+      already used. `mcp_servers` is a real `[[execution.mcp_servers]]`
+      TOML entry now (`execution/README.md`'s step 1), not a Python edit.
+      **Fallout, caught by the full suite, not narrower runs:** 16
+      integration test files each patch `simorgh.kernel.service.
+      build_factories` with their own fake `_build(*, bus_client,
+      ledger_client, run_repl=False)` (the seam `test_kernel_boot_two_
+      toy_subsystems.py` established) -- none of those fakes' signatures
+      accepted the new keyword, so every one of them broke with
+      `TypeError: unexpected keyword argument 'execution_config'` the
+      moment `Kernel.boot` started passing it unconditionally. Not
+      visible running any single test file (each passed alone); only the
+      full 2,200+-test run surfaced it, since a narrower run's fakes
+      never collided with the real signature. Fixed by adding
+      `execution_config=None` to all 17 occurrences across those 16
+      files, mirroring how `run_repl=False` was already present on every
+      one of them from an earlier such change -- an established
+      convention, not a new one.
+    - **A debug leak in the live chat transcript.** The creator pasted a
+      real session showing `[debug] duplicate candidate, matches task
+      9a269961274e (planning)` printed straight into the conversation,
+      between two real replies. `planning/service.py`'s own dedup
+      bookkeeping (`_notice("debug", ...)`) publishes `ui.notice` exactly
+      like every other notice; `interface/service.py::_on_notice` printed
+      every level unconditionally. `debug` is internal telemetry -- not
+      information a person watching the REPL asked for. Fixed: `_on_
+      notice` now returns immediately on `level == "debug"`, every other
+      level unchanged.
+
+    Net effect on the creator's actual complaint ("sim says it cannot
+    [browse the web]... what kind of AGI is this"): the process they were
+    talking to when they saw that was still running milestone 137's
+    predecessor -- `web_fetch` was already real and already in `CHAT`'s
+    tool list by the time of that transcript, just not loaded into that
+    already-running Sim process. Restarting picks it up. The deeper
+    question underneath -- why can't Sim add capabilities to itself
+    without a human editing code/config -- got answered in chat, not
+    code, this round: Sim already has a real self-directed pathway
+    (`propose`/skill acquisition through AuditGate, Learning's
+    `PatchPipeline`), but MCP-server registration and now `simorgh.toml`
+    specifically stayed human-gated on purpose (`execution/mcp.py`'s own
+    docstring: arbitrary `npx -y <package>` is a real supply-chain
+    surface, and `apply_source_patch`'s `write_scopes_source` doesn't
+    even reach `simorgh.toml` today, so even a reviewed self-patch can't
+    touch it yet) -- a genuine, load-bearing tradeoff to explain and
+    defend, not silently loosen under social pressure. A narrower
+    "Sim proposes a server, one human approval" middle path was named as
+    a real option, not built this round pending the creator's own call
+    on how much autonomy they actually want here.
+
+    1 new test (`test_debug_level_notices_never_reach_the_human`,
+    `test_service.py`) confirmed to fail against the pre-fix code; the
+    `execution_config`/`build_factories` wiring covered by 2 new registry
+    tests and 1 new real-Kernel-boot test
+    (`TestExecutionConfigFromSimorghToml`, `kernel/test_service.py`) that
+    boots with a real `simorgh.toml`-shaped `[[execution.mcp_servers]]`
+    entry and asserts it reached the live Execution subsystem. Full
+    suite green (2,277 tests).

@@ -118,7 +118,7 @@ class _ToyVerification:
 def _patched_build_factories(*, guardian_script, verify_script, toys: dict, learning_config: LearningConfig | None = None):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False):
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
         factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
         factories["guardian"] = lambda: toys.setdefault("guardian", _ToyGuardian(guardian_script))
         factories["verification"] = lambda: toys.setdefault("verification", _ToyVerification(verify_script))

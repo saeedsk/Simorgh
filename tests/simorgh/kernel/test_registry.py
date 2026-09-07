@@ -60,6 +60,23 @@ class TestBuildFactories(unittest.TestCase):
         factories = build_factories(bus_client=object(), ledger_client=object(), run_repl=True)
         self.assertTrue(factories["interface"]()._run_repl)  # noqa: SLF001
 
+    def test_execution_config_none_still_yields_the_default_config(self):
+        factories = build_factories(bus_client=object(), ledger_client=object())
+        execution = factories["execution"]()
+        self.assertEqual(execution._config.mcp_servers, ())  # noqa: SLF001
+
+    def test_an_execution_config_reaches_the_execution_factory(self):
+        from simorgh.execution.config import Config as ExecutionConfig
+        from simorgh.execution.mcp import McpServerConfig
+
+        server = McpServerConfig(name="ddg_search", command="npx", args=("-y", "ddg-search-mcp"))
+        factories = build_factories(
+            bus_client=object(), ledger_client=object(),
+            execution_config=ExecutionConfig(mcp_servers=(server,)),
+        )
+        execution = factories["execution"]()
+        self.assertEqual(execution._config.mcp_servers, (server,))  # noqa: SLF001
+
 
 class TestKnownLayers(unittest.TestCase):
     def test_filters_out_names_with_no_factory_but_keeps_layer_slots(self):
