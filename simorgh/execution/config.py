@@ -1,9 +1,9 @@
 """Execution configuration (08-execution.md section 3.5) -- a working
-subset: the knobs the tools built this phase actually read. Web fetch,
-shell, relaunch, hot_swap, and isolated_test_suite (and their config
-keys) are still deferred -- see simorgh/execution/README.md. Skill
-tools (`apply_skill`, `SkillTool`, on-demand `learn.skill.acquired`
-loading -- Phase 4 roadmap item 4.7) are built this pass.
+subset: the knobs the tools built this phase actually read. Shell,
+relaunch, hot_swap, and isolated_test_suite (and their config keys) are
+still deferred -- see simorgh/execution/README.md. Skill tools
+(`apply_skill`, `SkillTool`, on-demand `learn.skill.acquired`
+loading -- Phase 4 roadmap item 4.7) and `web_fetch` are built this pass.
 """
 
 from __future__ import annotations
@@ -32,6 +32,14 @@ class Config:
     skill_dir: str = "simorgh_skills"
     write_scopes_skills: tuple[str, ...] = ("simorgh_skills/",)
     skill_lookup_timeout_s: float = 2.0
+    # -- web_fetch (08-execution.md section 5.2/3.5; the one reviewed path
+    # for real outbound network access -- see WebFetchTool's own docstring)
+    web_fetch_timeout_s: float = 10.0
+    web_fetch_max_bytes: int = 200_000
+    web_fetch_max_calls: int = 30
+    web_fetch_window_s: float = 3600.0
+    web_fetch_allow_private_networks: bool = False
+    web_fetch_user_agent: str = "Simorgh/2.0 (personal AI assistant; +https://github.com/saeedsk/Simorgh)"
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":

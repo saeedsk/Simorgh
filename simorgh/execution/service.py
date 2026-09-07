@@ -47,7 +47,7 @@ class Service:
     name = "execution"
     version = "0.1.0"
     consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED, topics.LEARN_SKILL_ACQUIRED)
-    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED)
+    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED)
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None) -> None:
         self._config = config or Config()
@@ -244,6 +244,25 @@ class Service:
                 topics.TOOL_INVOKED, source="execution",
                 payload={"name": tool.name, "action_id": action_id, "duration_ms": duration_ms, "ok": result.ok},
             ))
+            if tool.name == "web_fetch" and result.ok:
+                # 08-execution.md section 4.2's `percept.web.fetched` row
+                # ("after web_fetch -- memory, curiosity"): the contract
+                # (`contracts/messages/percept.py`) requires a `content_ref`
+                # unconditionally, not the size-gated inline preview above,
+                # so a small fetch still gets its own blob rather than
+                # reusing `output_ref` (which stays "" under the inline
+                # threshold).
+                content_ref = output_ref or await self._ctx.ledger.put_blob(output.encode("utf-8"), content_type="text/plain")
+                await self._ctx.bus.publish(Message.new(
+                    topics.PERCEPT_WEB_FETCHED, source="execution",
+                    payload={
+                        "url": result.metadata.get("url", ""),
+                        "status": int(result.metadata.get("status") or 0),
+                        "content_ref": content_ref,
+                        "sha256": result.metadata.get("sha256", ""),
+                        "fetched_at": float(result.metadata.get("fetched_at") or 0.0),
+                    },
+                ))
 
     async def _finish(self, action_id: str) -> None:
         await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "finished", {"action_id": action_id}))

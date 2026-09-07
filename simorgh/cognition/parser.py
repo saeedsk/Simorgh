@@ -7,8 +7,11 @@ live-caught lesson (see docs/EVOLUTION.md), not a fresh design:
 - A model doesn't always stop at a marker; it keeps reasoning out loud
   in the same response. For a single-bare-token argument (a path, a
   name), only the first non-empty line was ever the real answer
-  (`first_line_argument`). For a code-bearing marker (`DRAFT`/`RUN`),
-  everything after the marker is the payload, kept intact.
+  (`first_line_argument`). For a code-bearing marker (v1: `DRAFT`/`RUN`;
+  v2's markers are the real tool names from `session.profile.tools`
+  (`orchestration/profiles.py`), so this is `draft_candidate`/
+  `run_python_sandboxed` -- see `_CODE_BEARING_MARKERS` below), everything
+  after the marker is the payload, kept intact.
 - A "verdict" response (`YES`/`NO`) can be silently non-compliant: the
   model narrates instead of answering. Scanning every line for a
   standalone YES/NO, and reporting `non_answer=True` when none is found,
@@ -33,6 +36,13 @@ _EDIT_BLOCK_RE = re.compile(
     r"<<<<<<< SEARCH\n(?P<old>.*?)\n=======\n(?P<new>.*?)\n>>>>>>> REPLACE", re.DOTALL,
 )
 _DEFAULT_PREVIEW_LIMIT = 150
+# v2's real markers are the tool names from `session.profile.tools`
+# (`orchestration/profiles.py`), so this has to name `draft_candidate`/
+# `run_python_sandboxed`, not v1's short `DRAFT`/`RUN` -- kept alongside
+# the v1 names since callers (including this module's own tests) are
+# free to configure any marker vocabulary, and a code-bearing tool
+# should keep its full payload under either naming scheme.
+_CODE_BEARING_MARKERS = {"DRAFT", "RUN", "DRAFT_CANDIDATE", "RUN_PYTHON_SANDBOXED"}
 
 
 def preview(text: str, limit: int = _DEFAULT_PREVIEW_LIMIT) -> str:
@@ -123,8 +133,14 @@ class OutputParser:
         if marker is None:
             return ParsedOutput(kind="final", text=payload)
         # Multi-line-payload markers (code-bearing) keep the payload intact;
-        # single-token markers use only the first line (the live-caught lesson).
-        arg = payload if marker.upper() in {"DRAFT", "RUN"} else first_line_argument(payload)
+        # single-token markers use only the first line (the live-caught
+        # lesson). Live-caught a second time: this used to check
+        # `marker.upper() in {"DRAFT", "RUN"}` -- v1's short marker names,
+        # which never match v2's real markers (`session.profile.tools`'
+        # full tool names, e.g. `draft_candidate`/`run_python_sandboxed`),
+        # so every code-bearing call silently lost everything past its
+        # first line.
+        arg = payload if marker.upper() in _CODE_BEARING_MARKERS else first_line_argument(payload)
         return ParsedOutput(kind="tool_calls", text=text.strip(), tool_calls=({"tool": marker, "args": {"argument": arg}},))
 
     def _parse_edit_blocks(self, text: str) -> ParsedOutput:

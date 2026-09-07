@@ -127,6 +127,22 @@ class TestOutputParser(unittest.TestCase):
         result = self.parser.parse(text, {"kind": "markers", "markers": ("DRAFT", "RUN")})
         self.assertEqual(result.tool_calls[0]["args"]["argument"], "def f():\n    return 1")
 
+    def test_markers_real_v2_code_bearing_tool_names_keep_full_payload(self):
+        """Live-caught: the real markers a session actually configures are
+        `session.profile.tools`' full tool names (`orchestration/
+        profiles.py`), not v1's short `DRAFT`/`RUN` -- `RUN_PYTHON_
+        SANDBOXED`/`DRAFT_CANDIDATE` used to fall through to
+        `first_line_argument` and silently lose everything past the first
+        line of real multi-line code."""
+        text = "RUN_PYTHON_SANDBOXED: def f():\n    return 1\n"
+        result = self.parser.parse(text, {"kind": "markers", "markers": ("RUN_PYTHON_SANDBOXED", "READ_FILE")})
+        self.assertEqual(result.tool_calls, ({"tool": "run_python_sandboxed", "args": {"argument": "def f():\n    return 1"}},))
+
+    def test_markers_real_v2_single_token_tool_still_uses_first_line_only(self):
+        text = "READ_FILE: docs/SOUL.md\nbecause it looks relevant to the bug"
+        result = self.parser.parse(text, {"kind": "markers", "markers": ("READ_FILE", "RUN_PYTHON_SANDBOXED")})
+        self.assertEqual(result.tool_calls, ({"tool": "read_file", "args": {"argument": "docs/SOUL.md"}},))
+
     def test_markers_no_marker_present_is_a_final_answer(self):
         result = self.parser.parse("just answering directly", {"kind": "markers", "markers": ("DRAFT",)})
         self.assertEqual(result.kind, "final")

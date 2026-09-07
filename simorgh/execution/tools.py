@@ -3,9 +3,9 @@ implements `contracts.protocols.Tool`. Scoped this build to the tools
 that don't depend on a subsystem that doesn't exist yet this phase
 (Cognition for drafting loops) -- `read_file`, `list_dir`,
 `run_python_sandboxed`, `apply_source_patch`, `git_commit`,
-`git_revert`, `apply_skill`, and on-demand `skill:<name>` tools
-(`SkillTool`, Phase 4 roadmap item 4.7 -- skill acquisition as
-procedural memory). `web_fetch`, `shell`, `relaunch`, `hot_swap`, and
+`git_revert`, `apply_skill`, `web_fetch`, and on-demand `skill:<name>`
+tools (`SkillTool`, Phase 4 roadmap item 4.7 -- skill acquisition as
+procedural memory). `shell`, `relaunch`, `hot_swap`, and
 `isolated_test_suite` are still deferred; see README.md.
 
 Every `subprocess.run` call here passes `stdin=subprocess.DEVNULL`
@@ -23,12 +23,18 @@ with no trace of why.
 from __future__ import annotations
 
 import difflib
+import hashlib
+import ipaddress
 import json
+import socket
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
+from collections import deque
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     import resource
@@ -71,6 +77,110 @@ class ListDirTool:
         content = pathsafety.safe_list_dir(self._config.repo_root, args.get("path", ""), readable_roots=self._config.readable_roots)
         ok = not content.startswith("[refused:")
         return ToolResult(ok=ok, output=content, error=None if ok else content)
+
+
+class FetchRefused(Exception):
+    """No request was made (or its result is discarded): a disallowed
+    scheme, a hostname that resolves to a private/internal address, a
+    DNS failure, or an exhausted rate limit."""
+
+
+class WebFetchTool:
+    """Port of v1's `src/tools/web_fetch.py` -- the one reviewed path for
+    real outbound network access (Guardian's own denylist,
+    `guardian/config.py`, already refuses `urllib`/`requests`/`socket` in
+    drafted code specifically so this hand-built tool is the only way in).
+    Every fetch is: http/https GET only; blocked from private/loopback/
+    link-local/reserved/multicast addresses after DNS resolution (SSRF
+    protection); bounded in time and response size; rate-limited over a
+    rolling window; identified by an honest User-Agent, never a spoofed
+    browser string.
+
+    `08-execution.md` section 5.2 lists this as `reversibility=read_only`,
+    and Guardian's `ReversibilityRule` allows read-only actions
+    unconditionally -- there is no independent network-scope rule yet
+    (`guardian/rules.py::ScopeRule` notes the same kind of gap for task
+    scope). The tool's own SSRF guard, size/rate caps, and honest logging
+    are the actual safety boundary today, matching v1's own design intent
+    (this module's docstring) rather than a Guardian-level escalation
+    this build doesn't have.
+
+    v1 rate-limited durably via `MemoryStore` (a rolling query over
+    logged fetches, surviving restarts); this build's `ToolContext` has
+    no injected memory client, so the limiter here is an in-process
+    rolling window instead -- resets on restart, which is an honest,
+    smaller guarantee than v1's, not a silent regression (a tool
+    instance is constructed once at boot and reused for the process's
+    lifetime, per `execution/service.py`'s `start()`, so the window is
+    real across a session, just not across restarts)."""
+
+    name = "web_fetch"
+    description = "Fetch a URL's content over HTTP(S) GET. Read-only; SSRF-guarded; rate-limited."
+    read_only = True
+    reversibility = "read_only"
+    args_schema = {"type": "object", "required": ["url"], "properties": {"url": {"type": "string"}}}
+
+    def __init__(self, config: Config, *, opener=None, resolver=None) -> None:
+        self._config = config
+        self._opener = opener or urllib.request.urlopen
+        self._resolver = resolver or socket.getaddrinfo
+        self._recent_calls: deque[float] = deque()
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        url = args["url"]
+        try:
+            self._validate_url(url)
+            self._enforce_rate_limit(ctx)
+        except FetchRefused as exc:
+            return ToolResult(ok=False, error=str(exc))
+
+        request = urllib.request.Request(url, headers={"User-Agent": self._config.web_fetch_user_agent})
+        try:
+            with self._opener(request, timeout=self._config.web_fetch_timeout_s) as response:
+                status_code = getattr(response, "status", 200)
+                raw = response.read(self._config.web_fetch_max_bytes + 1)
+        except Exception as exc:  # noqa: BLE001 -- any network failure becomes a ToolResult, never a crash
+            return ToolResult(ok=False, error=f"fetch failed: {exc!r}")
+
+        truncated = len(raw) > self._config.web_fetch_max_bytes
+        content = raw[: self._config.web_fetch_max_bytes].decode("utf-8", errors="replace")
+        return ToolResult(
+            ok=True, output=content,
+            metadata={
+                "url": url, "status": status_code, "truncated": truncated,
+                "sha256": hashlib.sha256(raw[: self._config.web_fetch_max_bytes]).hexdigest(),
+                "fetched_at": ctx.clock.now(),
+            },
+        )
+
+    def _validate_url(self, url: str) -> None:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise FetchRefused(f"refusing {url!r}: only http/https URLs are allowed")
+        if not parsed.hostname:
+            raise FetchRefused(f"refusing {url!r}: no hostname")
+        if self._config.web_fetch_allow_private_networks:
+            return
+        try:
+            addrinfo = self._resolver(parsed.hostname, None)
+        except socket.gaierror as exc:
+            raise FetchRefused(f"refusing {url!r}: could not resolve host: {exc!r}") from exc
+        for entry in addrinfo:
+            ip = ipaddress.ip_address(entry[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+                raise FetchRefused(f"refusing {url!r}: resolves to a private/internal address ({ip}) -- SSRF protection")
+
+    def _enforce_rate_limit(self, ctx: ToolContext) -> None:
+        now = ctx.clock.now()
+        cutoff = now - self._config.web_fetch_window_s
+        while self._recent_calls and self._recent_calls[0] < cutoff:
+            self._recent_calls.popleft()
+        if len(self._recent_calls) >= self._config.web_fetch_max_calls:
+            raise FetchRefused(
+                f"rate limit exceeded: {len(self._recent_calls)}/{self._config.web_fetch_max_calls} "
+                f"fetches in the last {self._config.web_fetch_window_s:.0f}s"
+            )
+        self._recent_calls.append(now)
 
 
 def _apply_rlimits(cpu_seconds: int, memory_bytes: int):
@@ -385,5 +495,5 @@ def builtin_tools(config: Config) -> list:
     return [
         ReadFileTool(config), ListDirTool(config), RunPythonSandboxedTool(config),
         ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
-        ApplySkillTool(config),
+        ApplySkillTool(config), WebFetchTool(config),
     ]

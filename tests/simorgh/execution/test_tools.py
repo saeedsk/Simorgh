@@ -18,8 +18,11 @@ from simorgh.execution.tools import (
     ReadFileTool,
     RunPythonSandboxedTool,
     SkillTool,
+    WebFetchTool,
     builtin_tools,
 )
+
+from tests.simorgh.helpers import FakeClock
 
 
 def _ctx(config: Config, constraints: dict | None = None):
@@ -389,8 +392,146 @@ class TestBuiltinTools(unittest.TestCase):
         names = {tool.name for tool in builtin_tools(Config(repo_root=Path.cwd()))}
         self.assertEqual(names, {
             "read_file", "list_dir", "run_python_sandboxed",
-            "apply_source_patch", "git_commit", "git_revert", "apply_skill",
+            "apply_source_patch", "git_commit", "git_revert", "apply_skill", "web_fetch",
         })
+
+
+class _FakeFetchResponse:
+    def __init__(self, data: bytes, status: int = 200) -> None:
+        self._data = data
+        self.status = status
+
+    def read(self, n: int = -1) -> bytes:
+        return self._data if n is None or n < 0 else self._data[:n]
+
+    def __enter__(self) -> "_FakeFetchResponse":
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
+
+
+class TestWebFetchTool(unittest.IsolatedAsyncioTestCase):
+    """08-execution.md section 5.2's `web_fetch` row: SSRF-guarded,
+    size/rate-capped GET. `opener`/`resolver` are injected (v1's own
+    testing seam, `src/tools/web_fetch.py`) so no real network call or
+    DNS lookup happens here."""
+
+    def setUp(self):
+        self.config = Config()
+        self.clock = FakeClock()
+
+    def _ctx(self) -> "ToolContext":
+        from simorgh.contracts.protocols import ToolContext
+        return ToolContext(
+            action_id="a1", task_id=None, scope={}, constraints={},
+            data_dir=self.config.repo_root, clock=self.clock, logger=None, ledger=None,
+        )
+
+    def _public_resolver(self, host, port):
+        return [(2, 1, 6, "", ("93.184.216.34", 0))]
+
+    async def test_fetches_and_returns_the_body_with_metadata(self):
+        tool = WebFetchTool(
+            self.config, resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(b"hello world", status=200),
+        )
+        result = await tool.run({"url": "https://example.com/"}, ctx=self._ctx())
+        self.assertTrue(result.ok)
+        self.assertEqual(result.output, "hello world")
+        self.assertEqual(result.metadata["url"], "https://example.com/")
+        self.assertEqual(result.metadata["status"], 200)
+        self.assertEqual(result.metadata["fetched_at"], self.clock.now())
+        self.assertEqual(len(result.metadata["sha256"]), 64)
+
+    async def test_refuses_a_non_http_scheme(self):
+        tool = WebFetchTool(self.config)
+        result = await tool.run({"url": "ftp://example.com/file"}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("only http/https", result.error)
+
+    async def test_refuses_a_url_that_resolves_to_a_private_address(self):
+        tool = WebFetchTool(self.config, resolver=lambda host, port: [(2, 1, 6, "", ("127.0.0.1", 0))])
+        result = await tool.run({"url": "http://internal.example/"}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("SSRF", result.error)
+
+    async def test_refuses_a_url_that_resolves_to_a_metadata_endpoint(self):
+        # 169.254.169.254 -- the cloud-metadata SSRF target the execution
+        # spec calls out by name (08-execution.md section 5.2).
+        tool = WebFetchTool(self.config, resolver=lambda host, port: [(2, 1, 6, "", ("169.254.169.254", 0))])
+        result = await tool.run({"url": "http://169.254.169.254/"}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("SSRF", result.error)
+
+    async def test_a_dns_failure_is_refused_not_a_crash(self):
+        import socket as socket_mod
+
+        def _raise(host, port):
+            raise socket_mod.gaierror("nodename nor servname provided")
+
+        tool = WebFetchTool(self.config, resolver=_raise)
+        result = await tool.run({"url": "http://does-not-resolve.invalid/"}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("could not resolve", result.error)
+
+    async def test_truncates_at_the_configured_max_bytes(self):
+        config = Config(web_fetch_max_bytes=5)
+        tool = WebFetchTool(
+            config, resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(b"hello world", status=200),
+        )
+        result = await tool.run({"url": "https://example.com/"}, ctx=self._ctx())
+        self.assertTrue(result.ok)
+        self.assertEqual(result.output, "hello")
+        self.assertTrue(result.metadata["truncated"])
+
+    async def test_a_network_failure_becomes_a_result_not_a_crash(self):
+        def _raise(req, timeout):
+            raise OSError("connection refused")
+
+        tool = WebFetchTool(self.config, resolver=self._public_resolver, opener=_raise)
+        result = await tool.run({"url": "https://example.com/"}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("fetch failed", result.error)
+
+    async def test_rate_limit_is_enforced_within_the_window(self):
+        config = Config(web_fetch_max_calls=2, web_fetch_window_s=3600.0)
+        tool = WebFetchTool(
+            config, resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(b"ok"),
+        )
+        ctx = self._ctx()
+        self.assertTrue((await tool.run({"url": "https://example.com/a"}, ctx=ctx)).ok)
+        self.assertTrue((await tool.run({"url": "https://example.com/b"}, ctx=ctx)).ok)
+        third = await tool.run({"url": "https://example.com/c"}, ctx=ctx)
+        self.assertFalse(third.ok)
+        self.assertIn("rate limit", third.error)
+
+    async def test_rate_limit_window_rolls_off_old_calls(self):
+        config = Config(web_fetch_max_calls=1, web_fetch_window_s=60.0)
+        tool = WebFetchTool(
+            config, resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(b"ok"),
+        )
+        ctx = self._ctx()
+        self.assertTrue((await tool.run({"url": "https://example.com/a"}, ctx=ctx)).ok)
+        self.assertFalse((await tool.run({"url": "https://example.com/b"}, ctx=ctx)).ok)
+        self.clock.advance(61.0)
+        self.assertTrue((await tool.run({"url": "https://example.com/c"}, ctx=ctx)).ok)
+
+    async def test_allow_private_networks_skips_the_ssrf_guard(self):
+        config = Config(web_fetch_allow_private_networks=True)
+
+        def _fail_if_called(host, port):
+            raise AssertionError("resolver should not be consulted when private networks are allowed")
+
+        tool = WebFetchTool(
+            config, resolver=_fail_if_called,
+            opener=lambda req, timeout: _FakeFetchResponse(b"local"),
+        )
+        result = await tool.run({"url": "http://127.0.0.1:8000/"}, ctx=self._ctx())
+        self.assertTrue(result.ok)
 
 
 if __name__ == "__main__":
