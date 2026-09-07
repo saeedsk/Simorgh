@@ -4048,3 +4048,86 @@ Still ahead, roughly in order:
     pipeline-bug tests confirmed to fail against the pre-fix code first.
     `builtin_tools()`'s scoped-set test updated. Full suite green
     (2,254 tests).
+
+138. **MCP support** (the creator: "let's build MCP support and
+    establish famous MCP servers and make them available for Sim" --
+    relaying a second model's suggestions as advice, not instructions,
+    per their own framing: "no need to follow any single instruction of
+    Gemini"). `08-execution.md` section 12 Q4 had reserved a `provider:
+    mcp` slot on `tool.registered` since the initial build and left MCP
+    itself unimplemented; resolved now.
+
+    - **What got built:** `execution/mcp.py` -- a hand-rolled stdio
+      JSON-RPC 2.0 client (newline-delimited, MCP's real stdio framing;
+      not the third-party `mcp` SDK, which isn't installed and whose
+      only value here would be the same ~150 lines) speaking
+      `initialize` / `tools/list` / `tools/call` to a subprocess.
+      `McpToolProxy` adapts one discovered tool to `contracts.protocols.
+      Tool`; `Service._start_mcp_server` (`execution/service.py`) starts
+      every server in the new `execution.Config.mcp_servers` list at
+      boot, registers each tool through the same `tool.registered` event
+      a skill uses (World Model's `ToolsFacet` needed no changes), and
+      never lets one broken server block the rest of Execution -- or
+      therefore the Kernel -- from booting (a `start()`/`list_tools()`
+      failure is caught, logged, folded into `health()`'s degraded
+      detail, and skipped).
+    - **Two deliberate rejections, both from the second model's advice,
+      both explained to the creator at the time:** no autonomous
+      registry discovery (querying `registry.modelcontextprotocol.io`
+      and installing whatever it finds at runtime) -- Sim cannot add a
+      server to itself; a human adds one to `mcp_servers`, matching
+      Guardian's whole "reviewed capability, not a self-expanding attack
+      surface" premise. No `langchain-community`/`composio-core`
+      dependency -- `tests/simorgh/test_module_boundaries.py` (an
+      AST-enforced test, not a convention) already forbids any
+      third-party import under `simorgh/` except one guarded adapter;
+      a large agent-framework dependency would violate it outright.
+    - **The real gap this surfaced:** the marker-based tool-calling path
+      only ever extracts a single string argument (milestone 137's own
+      `_MARKER_ARG_KEY`), but most real MCP tools have multi-field
+      schemas. An MCP tool is reachable through the `Tool` protocol the
+      moment it's registered, but the model can only actually call it
+      from a live chat turn if it has exactly one required argument --
+      recorded honestly in `08-execution.md` section 12 Q4 as open,
+      needing a structured-JSON-arguments output mode in Cognition to
+      fix generally, not attempted this pass.
+    - **One example wired all the way through**, as a template:
+      `server-brave-search` (real web search -- the concrete fix for
+      "Sim can't search the web," needing the creator's own
+      `BRAVE_API_KEY`, never handled by Sim) gets `_TOOL_POLICY`/
+      `_MARKER_ARG_KEY` entries in `orchestration/tools.py`
+      (`mcp_brave_search_brave_web_search` -> `query`, its one required
+      field). Deliberately NOT added to any `Profile.tools` tuple by
+      default -- `mcp_servers` defaults to empty and a profile is shared
+      by every session, so offering the marker unconditionally would give
+      the model a tool that fails "unknown tool" everywhere the server
+      isn't actually configured. `execution/README.md`'s new "MCP
+      servers" section has the full three-step recipe (register the
+      server, route it in `orchestration/tools.py`, opt it into a
+      profile) and explicitly recommends against MCP equivalents for
+      filesystem/git/memory -- Simorgh's own native tools for those are
+      more trusted and already exist.
+    - **A pre-existing gap, found and left alone, not fixed:**
+      `kernel/registry.py` builds every subsystem's `Service` with
+      zero arguments by explicit design ("richer wiring... is
+      deliberately a later, separate configuration change, not something
+      this composition point should hardcode") -- unlike `bus`/`ledger`/
+      `orchestration`, `execution.Config` is not yet wired to
+      `simorgh.toml` at all, so `mcp_servers` (like every other execution
+      knob) is reachable only by editing `registry.py`'s one lambda
+      directly today. Named as a real follow-up, not silently patched
+      around by breaking that file's own stated architecture.
+
+    22 new tests: `test_mcp.py` (new file, 13 -- handshake, `tools/list`,
+    `tools/call`, a JSON-RPC error raises `McpTransportError`, a closed
+    stream returns `None` instead of hanging, `close()` terminates and
+    waits on the process, proxy naming/reversibility/args_schema/content-
+    joining/error-handling); `test_service.py` (9 -- every tool a server
+    declares registers, a server-named read-only tool registers as
+    `read_only`, a server that fails to start degrades `health()` without
+    blocking boot, one broken server doesn't block a working one,
+    `stop()` closes every started client); `test_tools_router.py` (1 --
+    the wired `brave_web_search` example is read-only, network-scoped,
+    and correctly remapped). No test launches a real subprocess --
+    `McpClient`'s `spawn` is injectable, same testing seam as
+    `WebFetchTool`'s `opener`/`resolver`. Full suite green (2,273 tests).

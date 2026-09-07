@@ -77,6 +77,70 @@ not just `web_fetch` -- actually worked from a real chat turn once a
 model tried to call one; see `orchestration/tools.py` and `cognition/
 parser.py`'s own docstrings for the fixes.
 
+## MCP servers (the creator: "let's build MCP support and establish
+famous MCP servers and make them available for Sim")
+
+`mcp.py`'s own module docstring has the full design and the two
+deliberate rejections (no autonomous registry discovery at runtime, no
+`langchain-community`/`composio-core` dependency -- both were suggested
+by a second model the creator consulted; both conflict with this
+codebase's own rules, see the docstring). Short version: a human adds a
+server to `execution.Config.mcp_servers`; every tool it declares
+registers through the same `tool.registered` path a skill uses and flows
+through the exact same Guardian pipeline as any builtin tool. Sim cannot
+add a server to itself.
+
+**Enabling a server is three small, deliberate edits** (each one is a
+real capability grant, not something to automate away):
+
+1. **Register the server.** `execution.Config`'s zero-arg construction in
+   `kernel/registry.py` (`"execution": lambda: ExecutionService()`) is
+   deliberate -- richer wiring for *any* subsystem is "a later, separate
+   configuration change" per that file's own docstring, not something
+   `simorgh.toml` reaches yet for `execution` specifically (unlike
+   `bus`/`ledger`/`orchestration`, which already have that wiring). Until
+   that generalization happens, enabling a server means editing that one
+   lambda directly, e.g.:
+   ```python
+   "execution": lambda: ExecutionService(config=Config(mcp_servers=(
+       McpServerConfig(
+           name="brave_search", command="npx",
+           args=("-y", "@modelcontextprotocol/server-brave-search"),
+           env={"BRAVE_API_KEY": "..."},  # the human's own key -- never Sim's to fetch or store
+           read_only_tools=frozenset({"brave_web_search", "brave_local_search"}),
+       ),
+   ))),
+   ```
+2. **Tell `orchestration/tools.py` how to route it.** Add the server's
+   real registered tool name (`mcp_<server>_<tool>`, e.g.
+   `mcp_brave_search_brave_web_search`) to `_TOOL_POLICY` (reversibility,
+   network) and, if the tool has exactly one required argument, to
+   `_MARKER_ARG_KEY` -- both already have this one example wired in as a
+   worked template. A tool with more than one required argument isn't
+   reachable through the current single-argument marker path yet (the
+   same ceiling `08-execution.md`'s open-questions entry below names).
+3. **Add it to a `Profile.tools` tuple** (`orchestration/profiles.py`) so
+   Cognition actually offers the marker to the model. Deliberately not
+   done for the one wired example (`mcp_brave_search_brave_web_search`)
+   by default: `mcp_servers` defaults to empty, and a profile is shared
+   by every session regardless of what's actually configured -- adding an
+   unconfigured server's tool name here would offer the model a marker
+   that always fails with "unknown tool" everywhere the server isn't
+   set up. Add it once the server from step 1 is actually running.
+
+**Known-good servers worth knowing about**, from the official
+`modelcontextprotocol/servers` catalog -- none auto-installed, none
+wired past step 1 above: `server-brave-search` (real web search, needs
+`BRAVE_API_KEY` -- the concrete fix for "Sim can't search the web," and
+the one example above); `server-sequential-thinking` (no key, no
+filesystem/network access, but its one tool takes 4+ required fields --
+not reachable via markers without the structured-calling upgrade in the
+open question below). `server-filesystem`/`server-git`/`server-memory`
+are NOT recommended here -- Simorgh already has native, more-trusted
+equivalents (`read_file`/`list_dir`/`apply_source_patch`,
+`git_commit`/`git_revert`, and the real Memory subsystem); running a
+third-party subprocess for the same job would be strictly worse.
+
 ## Deliberate scope cuts (see 08-execution.md section 12 for the full list)
 
 - `shell`, `relaunch`, and `hot_swap` are NOT built this pass -- they

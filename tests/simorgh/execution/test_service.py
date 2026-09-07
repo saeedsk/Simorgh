@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from simorgh.bus.config import Config as BusConfig
@@ -23,6 +24,7 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context
 from simorgh.execution.config import Config as ExecutionConfig
+from simorgh.execution.mcp import McpServerConfig
 from simorgh.execution.service import Service
 from simorgh.ledger.factory import make_ledger
 from tests.simorgh.helpers import FakeClock
@@ -164,6 +166,113 @@ class TestSkillAcquiredRegistersOnDemand(_ExecutionServiceTestCase):
         await sub.unsubscribe()
 
         self.assertEqual(len(seen), 1)
+
+
+class _FakeMcpClient:
+    """Stands in for `mcp.McpClient` at the `Service._start_mcp_server`
+    boundary -- `execution/test_mcp.py` already covers the real client's
+    wire protocol against a fake process; this only has to prove
+    `Service` wires registration/error-handling correctly."""
+
+    def __init__(self, server: McpServerConfig, *, tools=None, start_exc: Exception | None = None) -> None:
+        self.server = server
+        self._tools = tools if tools is not None else []
+        self._start_exc = start_exc
+        self.started = False
+        self.closed = False
+
+    async def start(self) -> None:
+        if self._start_exc is not None:
+            raise self._start_exc
+        self.started = True
+
+    async def list_tools(self) -> list[dict]:
+        return self._tools
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class TestMcpServerWiring(_ExecutionServiceTestCase):
+    """`Service._start_mcp_server` (`execution/mcp.py`'s own module
+    docstring: a human-configured, static server list, registered
+    through the same `tool.registered` path a skill uses). Asserts
+    against `self.service._registry` directly, matching this file's
+    existing skill-registration tests -- a `tool.registered` subscription
+    set up before `start()` doesn't reliably observe a publish that
+    happens synchronously *during* `start()` itself over this bus's
+    memory backend (unlike the skill tests above, whose publish is a
+    later, test-triggered `learn.skill.acquired`)."""
+
+    async def _boot(self, *, config: ExecutionConfig) -> None:
+        self.service = Service(config=config)
+        await self.service.start(self.ctx)
+
+    async def test_registers_every_tool_a_configured_server_declares(self):
+        server = McpServerConfig(name="search", command="fake-search")
+        tools = [
+            {"name": "web_search", "description": "search the web", "inputSchema": {"type": "object"}},
+            {"name": "web_search_news", "description": "search news", "inputSchema": {"type": "object"}},
+        ]
+        with unittest.mock.patch("simorgh.execution.service.McpClient", lambda s: _FakeMcpClient(s, tools=tools)):
+            await self._boot(config=ExecutionConfig(repo_root=self.root, mcp_servers=(server,)))
+
+        self.assertIn("mcp_search_web_search", self.service._registry)  # noqa: SLF001
+        self.assertIn("mcp_search_web_search_news", self.service._registry)  # noqa: SLF001
+        self.assertEqual(self.service._registry["mcp_search_web_search"].description, "search the web")  # noqa: SLF001
+
+    async def test_a_server_named_read_only_tool_registers_as_read_only(self):
+        server = McpServerConfig(name="search", command="fake-search", read_only_tools=frozenset({"web_search"}))
+        tools = [{"name": "web_search", "description": "d", "inputSchema": {}}]
+        with unittest.mock.patch("simorgh.execution.service.McpClient", lambda s: _FakeMcpClient(s, tools=tools)):
+            await self._boot(config=ExecutionConfig(repo_root=self.root, mcp_servers=(server,)))
+        tool = self.service._registry["mcp_search_web_search"]  # noqa: SLF001
+        self.assertEqual(tool.reversibility, "read_only")
+        self.assertTrue(tool.read_only)
+
+    async def test_a_server_that_fails_to_start_degrades_instead_of_crashing_boot(self):
+        server = McpServerConfig(name="broken", command="does-not-exist")
+        with unittest.mock.patch(
+            "simorgh.execution.service.McpClient",
+            lambda s: _FakeMcpClient(s, start_exc=OSError("no such file")),
+        ):
+            await self._boot(config=ExecutionConfig(repo_root=self.root, mcp_servers=(server,)))
+
+        self.assertEqual([n for n in self.service._registry if n.startswith("mcp_")], [])  # noqa: SLF001
+        health = await self.service.health()
+        self.assertEqual(health.status, "degraded")
+        self.assertIn("broken", health.detail)
+
+    async def test_one_broken_server_does_not_block_a_working_one(self):
+        broken = McpServerConfig(name="broken", command="does-not-exist")
+        working = McpServerConfig(name="search", command="fake-search")
+        tools = [{"name": "web_search", "description": "d", "inputSchema": {}}]
+
+        def _factory(server: McpServerConfig):
+            if server.name == "broken":
+                return _FakeMcpClient(server, start_exc=OSError("no such file"))
+            return _FakeMcpClient(server, tools=tools)
+
+        with unittest.mock.patch("simorgh.execution.service.McpClient", _factory):
+            await self._boot(config=ExecutionConfig(repo_root=self.root, mcp_servers=(broken, working)))
+
+        self.assertEqual([n for n in self.service._registry if n.startswith("mcp_")], ["mcp_search_web_search"])  # noqa: SLF001
+
+    async def test_stop_closes_every_started_mcp_client(self):
+        server = McpServerConfig(name="search", command="fake-search")
+        clients: list[_FakeMcpClient] = []
+
+        def _factory(s: McpServerConfig) -> _FakeMcpClient:
+            client = _FakeMcpClient(s, tools=[{"name": "web_search", "description": "d", "inputSchema": {}}])
+            clients.append(client)
+            return client
+
+        with unittest.mock.patch("simorgh.execution.service.McpClient", _factory):
+            self.service = Service(config=ExecutionConfig(repo_root=self.root, mcp_servers=(server,)))
+            await self.service.start(self.ctx)
+
+        await self.service.stop()
+        self.assertTrue(clients[0].closed)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ both already use.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 
 from simorgh.contracts import topics
@@ -36,6 +37,7 @@ from simorgh.contracts.protocols import Health, ToolContext
 
 from . import pathsafety
 from .config import Config
+from .mcp import McpClient, McpServerConfig, McpToolProxy
 from .tools import SkillTool, builtin_tools
 from .verifier import ApprovalVerifier
 
@@ -57,6 +59,8 @@ class Service:
         self._paused = False
         self._semaphore: asyncio.Semaphore | None = None
         self._degraded_detail = ""
+        self._mcp_clients: list[McpClient] = []
+        self._mcp_errors: list[str] = []
 
     async def start(self, ctx) -> None:
         self._ctx = ctx
@@ -77,6 +81,9 @@ class Service:
             ))
             await ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name}))
 
+        for server in self._config.mcp_servers:
+            await self._start_mcp_server(server)
+
         await self._replay_inflight()
 
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_APPROVED, self._on_approved, group="execution"))
@@ -87,11 +94,48 @@ class Service:
         for sub in self._subs:
             await sub.unsubscribe()
         self._subs.clear()
+        for client in self._mcp_clients:
+            await client.close()
+        self._mcp_clients.clear()
 
     async def health(self) -> Health:
         if self._degraded_detail:
             return Health.degraded(self._degraded_detail)
+        if self._mcp_errors:
+            return Health.degraded("; ".join(self._mcp_errors))
         return Health.ok(f"{len(self._registry)} tools registered")
+
+    # -- MCP servers (mcp.py's own module docstring: a human-configured,
+    # static list -- never autonomously expanded) ---------------------------
+    async def _start_mcp_server(self, server: McpServerConfig) -> None:
+        """Start one configured MCP server and register every tool it
+        declares. Never raises: a server that fails to launch, times out,
+        or speaks a broken protocol is logged and skipped -- one
+        misconfigured server must not stop the rest of Execution (and
+        therefore the whole Kernel) from booting."""
+        client = McpClient(server)
+        try:
+            await asyncio.wait_for(client.start(), timeout=server.timeout_s)
+            specs = await asyncio.wait_for(client.list_tools(), timeout=server.timeout_s)
+        except Exception as exc:  # noqa: BLE001 -- a bad server degrades, never crashes Execution's boot
+            detail = f"mcp server {server.name!r} failed to start: {exc!r}"
+            self._mcp_errors.append(detail)
+            self._ctx.logger.warning("mcp_server_start_failed", server=server.name, detail=repr(exc))
+            with contextlib.suppress(Exception):
+                await client.close()
+            return
+
+        self._mcp_clients.append(client)
+        for spec in specs:
+            tool = McpToolProxy(client, server, spec)
+            self._registry[tool.name] = tool
+            await self._ctx.bus.publish(Message.new(
+                topics.TOOL_REGISTERED, source="execution",
+                payload={"name": tool.name, "version": "1", "description": tool.description,
+                         "read_only": tool.read_only, "reversibility": tool.reversibility,
+                         "schema_ref": "", "provider": "mcp"},
+            ))
+            await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name, "provider": "mcp"}))
 
     async def _on_state_changed(self, message: Message) -> None:
         self._paused = message.payload["state"] in ("paused", "stopping")
