@@ -76,3 +76,32 @@ python -m simorgh --self-check
 `python -m src.main` (v1's own entry point) still runs, but now prints a
 retirement notice and hands off into v2 -- see `src/main.py`'s
 `__main__` guard.
+
+## Guardian's approval gate
+
+Every rule in Guardian's pipeline (`guardian/rules.py::DEFAULT_PIPELINE`)
+still runs regardless of the setting below and can still deny outright:
+paused state, mode, protected subjects (`docs/SOUL.md`, `simorgh/guardian/`,
+`simorgh/execution/`, `simorgh/contracts/`, `simorgh/kernel/`,
+`simorgh.toml`, ...), the code denylist, adaptive immunity (rejects
+proposals too similar to a previously-rejected one), and budget
+exhaustion. Only once every one of those abstains does the last rule,
+`ReversibilityRule`, decide what happens to an *irreversible* action
+(`apply_source_patch`, `git_commit`, `git_revert`, `propose_mcp_server`)
+that nothing else objected to: escalate to a human, or auto-approve.
+
+`sim.sh`'s own default is auto-approve (`irreversible_requires_human =
+false`) -- looser than `guardian.config.Config`'s own dataclass default
+(`true`, kept safe for direct/library use and unit tests). Toggle it from
+a shell without touching `simorgh.toml`:
+
+```
+SIMORGH_GUARDIAN_AUTO_APPROVE=0 ./sim.sh   # require human approval again
+SIMORGH_GUARDIAN_AUTO_APPROVE=1 ./sim.sh   # explicit auto-approve (already the default)
+```
+
+or set `irreversible_requires_human = true` under `[guardian]` in
+`simorgh.toml` -- either one wins over the `sim.sh` baseline. With
+auto-approve on, `~/.simorgh/ledger/streams/guardian:rejected.jsonl` is
+the only after-the-fact signal that a proposal got that far and was
+still denied by an earlier rule.

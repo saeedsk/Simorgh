@@ -52,7 +52,7 @@ NEEDS_HMAC_SECRET: frozenset[str] = frozenset({"guardian", "execution"})
 
 def build_factories(
     *, bus_client: BusClient, ledger_client: LedgerClient, run_repl: bool = False,
-    execution_config: object | None = None,
+    execution_config: object | None = None, guardian_config: object | None = None,
 ) -> dict[str, Callable[[], Subsystem]]:
     """Zero-arg constructors per subsystem name, for `Supervisor.start_layer`.
     `bus`/`ledger` wrap the clients the Kernel already built (section 5.1:
@@ -64,15 +64,20 @@ def build_factories(
     a later, separate configuration change, not something this
     composition point should hardcode.
 
-    `execution_config` is the one exception, added for MCP server config
-    (`execution/mcp.py`'s module docstring, `execution/README.md`'s "MCP
-    servers" section): `Kernel.boot` passes `execution.Config.from_mapping
-    (self.config.section("execution"))`, the same `simorgh.toml`-section
-    pattern `bus`/`ledger`/`orchestration` already use elsewhere in this
-    file's caller -- so a human can now add an `[execution] mcp_servers`
+    `execution_config` and `guardian_config` are the exceptions, each
+    added for the same reason: `Kernel.boot` passes
+    `execution.Config.from_mapping(self.config.section("execution"))`
+    (MCP server config -- `execution/mcp.py`'s module docstring,
+    `execution/README.md`'s "MCP servers" section) and
+    `guardian.config.Config.from_mapping(self.config.section("guardian"))`
+    (the approval-gate switches -- `guardian/config.py`'s own
+    `SIMORGH_GUARDIAN_AUTO_APPROVE` docstring), the same
+    `simorgh.toml`-section pattern `bus`/`ledger`/`orchestration` already
+    use elsewhere in this file's caller -- so a human can add an
+    `[execution] mcp_servers` or `[guardian] irreversible_requires_human`
     entry to `simorgh.toml` instead of editing this file's lambda
     directly. `None` (every caller other than `Kernel.boot` -- tests,
-    `--self-check`) means `ExecutionService()`'s own default `Config()`.
+    `--self-check`) means each `Service()`'s own default `Config()`.
 
     `run_repl` defaults False -- a blocking `readline` loop must never
     start under a test or `--self-check` boot, where nothing will ever
@@ -103,7 +108,7 @@ def build_factories(
         "cognition": lambda: CognitionService(),
         "memory": lambda: MemoryService(),
         "worldmodel": lambda: WorldModelService(),
-        "guardian": lambda: GuardianService(),
+        "guardian": lambda: GuardianService(config=guardian_config),
         "execution": lambda: ExecutionService(config=execution_config),
         "verification": lambda: VerificationService(),
         "planning": lambda: PlanningService(),

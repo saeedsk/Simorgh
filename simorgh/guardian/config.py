@@ -10,6 +10,7 @@ classifier subsystem don't exist yet this phase.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Mapping
 
@@ -67,11 +68,24 @@ class Config:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":
-        if not data:
-            return cls()
-        kwargs = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        """`[guardian]` table -> Config, with a `SIMORGH_GUARDIAN_AUTO_APPROVE`
+        environment override (same `SIMORGH_<SECTION>_<KEY>`-after-the-file
+        precedence `kernel/config.py`'s module docstring describes, and
+        `bus.config`/`ledger.config` already apply) for the one field a
+        human actually wants to flip from a shell without editing
+        `simorgh.toml`: `irreversible_requires_human` -- ReversibilityRule's
+        last-resort gate for an action nothing else in the pipeline denied,
+        the "does an irreversible self-modification need my eyes on it
+        first" switch (`rules.py::ReversibilityRule`). `1`/`true`/`yes`/`on`
+        means auto-approve (`irreversible_requires_human=False`); anything
+        else means require it. Checked whether or not the file set the
+        field -- the shell is meant to win outright, not just fill a gap."""
+        kwargs = {k: v for k, v in (data or {}).items() if k in cls.__dataclass_fields__}
         if "protected_subjects" in kwargs:
             kwargs["protected_subjects"] = tuple(kwargs["protected_subjects"])
         if "autonomous_origins" in kwargs:
             kwargs["autonomous_origins"] = tuple(kwargs["autonomous_origins"])
+        env_auto_approve = os.environ.get("SIMORGH_GUARDIAN_AUTO_APPROVE")
+        if env_auto_approve is not None:
+            kwargs["irreversible_requires_human"] = env_auto_approve.strip().lower() not in ("1", "true", "yes", "on")
         return cls(**kwargs)

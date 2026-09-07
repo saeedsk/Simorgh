@@ -39,8 +39,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 def _patched_build_factories():
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
-        factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None, guardian_config=None):
+        factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl, guardian_config=guardian_config)
         factories["guardian"] = lambda: GuardianService(config=GuardianConfig(mode="guarded"))
         factories["execution"] = lambda: ExecutionService(config=ExecutionConfig(repo_root=_REPO_ROOT))
         return factories
