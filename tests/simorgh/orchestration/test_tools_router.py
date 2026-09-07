@@ -1,6 +1,6 @@
 import unittest
 
-from simorgh.orchestration.tools import marker_hint, to_action_payload
+from simorgh.orchestration.tools import marker_hint, register_tool_policy, to_action_payload
 
 
 class TestToolCallRouter(unittest.TestCase):
@@ -86,6 +86,48 @@ class TestToolCallRouter(unittest.TestCase):
 
     def test_marker_hint_is_none_for_an_unknown_tool(self):
         self.assertIsNone(marker_hint("not_a_real_tool"))
+
+    def test_a_two_field_tool_splits_the_marker_payload_at_its_first_line(self):
+        """apply_source_patch/apply_skill/git_commit are model-callable
+        now (profiles.py, 2026-09-07); the one-string marker layer carries
+        both fields as first-line + rest."""
+        payload = to_action_payload(
+            action_id="a9", task_id="t1",
+            call={"tool": "apply_source_patch", "args": {"argument": "simorgh/foo.py\ndef f():\n    return 1\n"}},
+            rationale="r",
+        )
+        self.assertEqual(payload["args"], {"subject": "simorgh/foo.py", "code": "def f():\n    return 1\n"})
+        self.assertEqual(payload["reversibility"], "reversible")
+        commit = to_action_payload(
+            action_id="a10", task_id="t1",
+            call={"tool": "git_commit", "args": {"argument": "simorgh/foo.py\nadd f"}}, rationale="r",
+        )
+        self.assertEqual(commit["args"], {"path": "simorgh/foo.py", "message": "add f"})
+
+    def test_a_no_argument_tool_gets_empty_args_from_a_bare_marker(self):
+        payload = to_action_payload(
+            action_id="a11", task_id="t1", call={"tool": "git_revert", "args": {"argument": ""}}, rationale="r",
+        )
+        self.assertEqual(payload["args"], {})
+        self.assertEqual(payload["reversibility"], "reversible")
+
+    def test_an_announced_external_tool_becomes_routable_with_an_input_key(self):
+        register_tool_policy("ddg_search_ext", reversibility="read_only", provider="external")
+        payload = to_action_payload(
+            action_id="a12", task_id="t1",
+            call={"tool": "ddg_search_ext", "args": {"argument": "amazon stock"}}, rationale="r",
+        )
+        self.assertEqual(payload["args"], {"input": "amazon stock"})
+        self.assertEqual(payload["reversibility"], "read_only")
+        self.assertTrue(payload["scope"]["network"])
+
+    def test_a_hand_written_policy_wins_over_a_later_announcement(self):
+        register_tool_policy("read_file", reversibility="irreversible", provider="mcp")
+        payload = to_action_payload(
+            action_id="a13", task_id="t1", call={"tool": "read_file", "args": {"path": "docs/x"}}, rationale="r",
+        )
+        self.assertEqual(payload["reversibility"], "read_only")
+        self.assertFalse(payload["scope"]["network"])
 
 
 if __name__ == "__main__":

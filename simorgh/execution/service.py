@@ -37,6 +37,7 @@ from simorgh.contracts.protocols import Health, ToolContext
 
 from . import pathsafety
 from .config import Config
+from .external import load_external_tools
 from .mcp import McpClient, McpServerConfig, McpToolProxy
 from .tools import SkillTool, builtin_tools
 from .verifier import ApprovalVerifier
@@ -71,13 +72,19 @@ class Service:
         self._verifier = ApprovalVerifier(self._secret)
         self._semaphore = asyncio.Semaphore(self._config.max_concurrent_actions)
 
-        for tool in builtin_tools(self._config) + self._extra_tools:
+        # External adapters (external.py) load last so a hand-built tool of
+        # the same name is never shadowed by an optional package's.
+        external = load_external_tools(self._config.external_tools, logger=ctx.logger)
+        for tool in builtin_tools(self._config) + self._extra_tools + external:
+            if tool.name in self._registry:
+                ctx.logger.warning("tool_name_collision", name=tool.name, provider=getattr(tool, "provider", "builtin"))
+                continue
             self._registry[tool.name] = tool
             await ctx.bus.publish(Message.new(
                 topics.TOOL_REGISTERED, source="execution",
                 payload={"name": tool.name, "version": "1", "description": tool.description,
                          "read_only": tool.read_only, "reversibility": tool.reversibility,
-                         "schema_ref": "", "provider": "builtin"},
+                         "schema_ref": "", "provider": getattr(tool, "provider", "builtin")},
             ))
             await ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name}))
 

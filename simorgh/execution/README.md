@@ -197,6 +197,38 @@ more-trusted equivalents (`read_file`/`list_dir`/`apply_source_patch`,
 `git_commit`/`git_revert`, and the real Memory subsystem); running a
 third-party subprocess for the same job would be strictly worse.
 
+## External toolsets (`external.py`)
+
+Open-source tool libraries, wrapped behind the `Tool` protocol so Guardian
+gates every call exactly as for a builtin -- their own agent runners are
+not used. Configure any number under `[[execution.external_tools]]`:
+
+```toml
+[[execution.external_tools]]
+import_path = "langchain_community.tools:DuckDuckGoSearchRun"   # LangChain BaseTool (class or instance)
+kind = "langchain"                                              # auto | callable | langchain | pydantic_ai | composio
+reversibility = "read_only"                                     # what Guardian's ReversibilityRule sees
+read_only = true
+
+[[execution.external_tools]]
+import_path = "my_pkg.tools:toolset"                            # pydantic_ai FunctionToolset -> one tool per function
+kind = "pydantic_ai"
+
+[[execution.external_tools]]
+import_path = "composio_langchain:ComposioToolSet"              # hosted: needs COMPOSIO_API_KEY in the environment
+kind = "composio"
+kwargs = { actions = ["GITHUB_GET_THE_AUTHENTICATED_USER"] }
+
+[[execution.external_tools]]
+import_path = "my_pkg.helpers:word_count"                       # any plain callable
+```
+
+Every adapter takes one string argument, `input` (a callable with several
+parameters receives them when `input` is a JSON object). A package that
+isn't installed, a bad import path, or a constructor error skips that one
+tool with an `external_tool_load_failed` warning -- never a boot failure.
+`pip install` the extras you actually use; nothing here is required.
+
 ## Deliberate scope cuts (see 08-execution.md section 12 for the full list)
 
 - `shell`, `relaunch`, and `hot_swap` are NOT built this pass -- they

@@ -12,9 +12,19 @@ CHAT = Profile(
     tools=("read_file", "list_dir", "search_code", "web_fetch", "run_python_sandboxed", "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
+# The creator, 2026-09-07: "gives sim more freedom in autonomously
+# working and evolving without too much gate". Until then the patch/
+# skill profiles could only `draft_candidate` -- and the draft->verify->
+# apply loop that was supposed to land a draft was never built, so Sim
+# literally could not change its own code. The model may now apply and
+# commit directly; Guardian still sees every call (ProtectedRule keeps
+# guardian/kernel/contracts/execution/SOUL.md/simorgh.toml off-limits,
+# DenylistRule still rejects raw sockets/subprocesses in drafted code),
+# and `run_tests` is there so it can check itself before committing.
 PATCH = Profile(
-    name="patch", tools=("read_file", "list_dir", "search_code", "run_tests", "draft_candidate"),
-    read_only=False, max_steps=6, max_revisions=2, scaffold="patch",
+    name="patch",
+    tools=("read_file", "list_dir", "search_code", "run_tests", "apply_source_patch", "git_commit", "git_revert"),
+    read_only=False, max_steps=8, max_revisions=2, scaffold="patch",
 )
 RESEARCH = Profile(
     name="research", tools=("read_file", "list_dir", "search_code", "web_fetch", "run_tests"),
@@ -25,8 +35,8 @@ PLAN = Profile(
     read_only=True, max_steps=8, max_revisions=0, scaffold="plan", verify=True,
 )
 SKILL = Profile(
-    name="skill", tools=("read_file", "list_dir", "search_code", "draft_candidate"),
-    read_only=False, max_steps=5, max_revisions=2, scaffold="skill",
+    name="skill", tools=("read_file", "list_dir", "search_code", "run_tests", "apply_skill", "git_commit"),
+    read_only=False, max_steps=6, max_revisions=2, scaffold="skill",
 )
 
 BY_KIND: dict[str, Profile] = {

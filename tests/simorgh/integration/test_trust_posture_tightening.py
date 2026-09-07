@@ -34,6 +34,7 @@ from simorgh.kernel.config import LoadedConfig
 from simorgh.kernel.secrets import EnvSecretStore
 from simorgh.kernel.service import Kernel
 from simorgh.kernel.state import RUNNING
+from tests.simorgh.helpers import FakeClock
 
 
 def _patched_build_factories(fixture_guardian_config: GuardianConfig):
@@ -72,7 +73,10 @@ class _TrustPostureTestCase(unittest.IsolatedAsyncioTestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         config = LoadedConfig({"runtime": {"data_dir": tmp.name}}, None)
-        kernel = Kernel(config, secrets=EnvSecretStore({}))
+        # Injected clock (not `_WallClock`): Guardian's lock-TTL expiry
+        # sleeps through `ctx.clock`, so a real clock would make
+        # `TestLockExpiresOnItsOwn` wait the full `lock_ttl_s` for real.
+        kernel = Kernel(config, secrets=EnvSecretStore({}), clock=FakeClock())
         patch = mock.patch("simorgh.kernel.service.build_factories", new=_patched_build_factories(guardian_config))
         patch.start()
         self.addCleanup(patch.stop)
@@ -103,8 +107,27 @@ class TestDriftDetectedTightensPosture(_TrustPostureTestCase):
 
 
 class TestCriticalHealthFindingLocksPosture(_TrustPostureTestCase):
-    async def test_critical_health_finding_locks_but_a_warn_finding_does_not(self) -> None:
+    async def test_critical_health_finding_tightens_to_guarded_by_default(self) -> None:
+        """2026-09-07 (guardian/config.py's own note): a critical health
+        finding used to hard-lock the whole system until a human typed
+        `resume` -- live-caught turning a budget-driven floor reply into
+        an hours-long stall. Default is `guarded` now; `locked` stays
+        available by config (next test)."""
         kernel = await self._boot(GuardianConfig(mode="trusted", baseline_posture="trusted"))
+        bus = kernel.bus
+        changed = _Collector()
+        await bus.subscribe(topics.GUARDIAN_POSTURE_CHANGED, changed)
+        await bus.publish(Message.new(
+            topics.REFLECT_HEALTH_FINDING, source="reflection",
+            payload={"severity": "critical", "detail": "valence pinned at -1.0"},
+        ))
+        await _pump()
+        self.assertEqual(len(changed.messages), 1)
+        self.assertEqual(changed.messages[0].payload["mode"], "guarded")
+
+    async def test_critical_health_finding_locks_but_a_warn_finding_does_not(self) -> None:
+        kernel = await self._boot(GuardianConfig(mode="trusted", baseline_posture="trusted",
+                                                 health_critical_tightens_to="locked", lock_ttl_s=0.0))
         bus = kernel.bus
         changed = _Collector()
         await bus.subscribe(topics.GUARDIAN_POSTURE_CHANGED, changed)
@@ -123,6 +146,42 @@ class TestCriticalHealthFindingLocksPosture(_TrustPostureTestCase):
         await _pump()
         self.assertEqual(len(changed.messages), 1)
         self.assertEqual(changed.messages[0].payload["mode"], "locked")
+
+
+class TestLockExpiresOnItsOwn(_TrustPostureTestCase):
+    async def test_a_lock_returns_to_baseline_after_lock_ttl_s(self) -> None:
+        """2026-09-07: a lock is a circuit breaker, not a verdict -- it
+        expires back to baseline on its own (`lock_ttl_s`) instead of
+        waiting for a human to type `resume`. `FakeClock.sleep` advances
+        instantly, so the expiry lands on the next pump."""
+        kernel = await self._boot(GuardianConfig(
+            mode="trusted", baseline_posture="trusted", health_critical_tightens_to="locked", lock_ttl_s=60.0,
+        ))
+        bus = kernel.bus
+        changed = _Collector()
+        await bus.subscribe(topics.GUARDIAN_POSTURE_CHANGED, changed)
+        await bus.publish(Message.new(
+            topics.REFLECT_HEALTH_FINDING, source="reflection",
+            payload={"severity": "critical", "detail": "valence pinned at -1.0"},
+        ))
+        await _pump(40)
+        modes = [m.payload["mode"] for m in changed.messages]
+        self.assertEqual(modes, ["locked", "trusted"])
+        self.assertIn("lock expired", changed.messages[-1].payload["reason"])
+
+    async def test_lock_ttl_zero_keeps_the_old_wait_for_resume_behavior(self) -> None:
+        kernel = await self._boot(GuardianConfig(
+            mode="trusted", baseline_posture="trusted", health_critical_tightens_to="locked", lock_ttl_s=0.0,
+        ))
+        bus = kernel.bus
+        changed = _Collector()
+        await bus.subscribe(topics.GUARDIAN_POSTURE_CHANGED, changed)
+        await bus.publish(Message.new(
+            topics.REFLECT_HEALTH_FINDING, source="reflection",
+            payload={"severity": "critical", "detail": "valence pinned at -1.0"},
+        ))
+        await _pump(40)
+        self.assertEqual([m.payload["mode"] for m in changed.messages], ["locked"])
 
 
 class TestBudgetPressureTightensAndFeedsBudgetRule(_TrustPostureTestCase):

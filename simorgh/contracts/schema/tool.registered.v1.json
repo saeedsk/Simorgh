@@ -14,7 +14,8 @@
       "enum": [
         "builtin",
         "skill",
-        "mcp"
+        "mcp",
+        "external"
       ],
       "type": "string"
     },

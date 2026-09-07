@@ -42,7 +42,12 @@ _DEFAULT_PREVIEW_LIMIT = 150
 # the v1 names since callers (including this module's own tests) are
 # free to configure any marker vocabulary, and a code-bearing tool
 # should keep its full payload under either naming scheme.
-_CODE_BEARING_MARKERS = {"DRAFT", "RUN", "DRAFT_CANDIDATE", "RUN_PYTHON_SANDBOXED"}
+_CODE_BEARING_MARKERS = {
+    "DRAFT", "RUN", "DRAFT_CANDIDATE", "RUN_PYTHON_SANDBOXED",
+    # Multi-line payloads whose first line is a path and the rest is the
+    # complete file body (`orchestration/tools.py::_MARKER_SPLIT_FIRST_LINE`).
+    "APPLY_SOURCE_PATCH", "APPLY_SKILL",
+}
 
 
 def preview(text: str, limit: int = _DEFAULT_PREVIEW_LIMIT) -> str:

@@ -7,6 +7,7 @@ approval, and records the full decision on `action:<action_id>` plus
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from simorgh.contracts import topics
@@ -77,6 +78,7 @@ class Service:
         self._rejected_excerpts: list[str] = []
         self._failure_streak: dict[str, int] = {}
         self._subs: list = []
+        self._lock_expiry: asyncio.Task | None = None
         self._degraded_detail = ""
         self.charter_text = ""
 
@@ -107,6 +109,9 @@ class Service:
         for sub in self._subs:
             await sub.unsubscribe()
         self._subs.clear()
+        if self._lock_expiry is not None and not self._lock_expiry.done():
+            self._lock_expiry.cancel()
+            self._lock_expiry = None
 
     async def health(self) -> Health:
         if self._degraded_detail:
@@ -148,6 +153,31 @@ class Service:
             topics.GUARDIAN_POSTURE_CHANGED, source="guardian",
             payload={"mode": to, "trust_score": 0.0, "reason": reason},
         ))
+        if self._posture.level == "locked" and self._config.lock_ttl_s > 0:
+            self._arm_lock_expiry()
+
+    def _arm_lock_expiry(self) -> None:
+        if self._lock_expiry is not None and not self._lock_expiry.done():
+            self._lock_expiry.cancel()
+        self._lock_expiry = asyncio.ensure_future(self._expire_lock(self._config.lock_ttl_s))
+
+    async def _expire_lock(self, ttl_s: float) -> None:
+        """A lock is a circuit breaker, not a verdict: the creator
+        (2026-09-07) asked for autonomy that doesn't stall until a human
+        types `resume`. After `lock_ttl_s` a still-locked posture goes
+        back to baseline on its own -- the only non-human loosening path,
+        and only ever from `locked`, never from `guarded` (a budget or
+        drift tightening stays until a human or a restart)."""
+        await self._ctx.clock.sleep(ttl_s)
+        if self._posture.level != "locked":
+            return
+        self._posture.reset_to_baseline()
+        self._failure_streak.clear()
+        await self._ctx.ledger.append(TRUST_STREAM, self._event(TRUST_STREAM, "reset_to_baseline", {"by": "ttl"}))
+        await self._ctx.bus.publish(Message.new(
+            topics.GUARDIAN_POSTURE_CHANGED, source="guardian",
+            payload={"mode": self._posture.level, "trust_score": 0.0, "reason": f"lock expired after {ttl_s:.0f}s"},
+        ))
 
     # -- 09-guardian.md section 5.3's other tightening triggers --------------
     # `_on_task_outcome` above already wires the failure-streak trigger;
@@ -164,7 +194,10 @@ class Service:
     async def _on_health_finding(self, message: Message) -> None:
         p = message.payload
         if p.get("severity") == "critical":
-            await self._tighten("locked", f"critical health finding: {p.get('detail', '')}")
+            # `guarded` by default now (config.py's own note): live-caught,
+            # a floor-reply-pinned valence locked the whole session for
+            # hours over what was really a budget problem.
+            await self._tighten(self._config.health_critical_tightens_to, f"critical health finding: {p.get('detail', '')}")
 
     async def _on_provider_status(self, message: Message) -> None:
         p = message.payload
@@ -182,6 +215,8 @@ class Service:
             return
         self._posture.reset_to_baseline()
         self._failure_streak.clear()
+        if self._lock_expiry is not None and not self._lock_expiry.done():
+            self._lock_expiry.cancel()
         await self._ctx.ledger.append(TRUST_STREAM, self._event(TRUST_STREAM, "reset_to_baseline", {"by": "human"}))
         await self._ctx.bus.publish(Message.new(
             topics.GUARDIAN_POSTURE_CHANGED, source="guardian",

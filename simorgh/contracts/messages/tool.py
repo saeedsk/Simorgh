@@ -14,7 +14,7 @@ ToolRegistered = define(t.TOOL_REGISTERED, [
     F("read_only", Bool),
     F("reversibility", REVERSIBILITY),
     F("schema_ref", Str),
-    F("provider", Enum("builtin", "skill", "mcp")),
+    F("provider", Enum("builtin", "skill", "mcp", "external")),
 ])
 ToolUnavailable = define(t.TOOL_UNAVAILABLE, [F("name", Str), F("reason", Str)])
 ToolInvoked = define(t.TOOL_INVOKED, [
