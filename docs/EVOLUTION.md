@@ -3903,3 +3903,33 @@ Still ahead, roughly in order:
       1 new session test asserts the announcement (phase, purpose,
       `ok` absent) and that it never reaches the Ledger. Full suite
       green.
+
+135. **The residual `context_too_large` (milestone 123's own recorded
+    open item, `07-post-cutover-review.md` §3.4d/§3.3) hit real use
+    within minutes of the narration work shipping** -- and, because it
+    did, was immediately visible instead of silent: "step 1 (gather)
+    cognition error: context_too_large ... FAILED [0.0s]" printed right
+    there in the REPL. Fixed both recommended caps from the review:
+
+    - `orchestration/context.py::Assembler._memory_retrieve` now bounds
+      each retrieved item to 800 chars and the whole block to 4,000 --
+      generous (most real items are far smaller), bites only the rare
+      outlier, keeps the highest-ranked matches and drops the rest
+      honestly rather than silently truncating the whole block.
+    - `cognition/compaction.py`'s layer 5 (`_layer5_auto_compact`) now
+      bounds its own input to 40,000 chars before the summarization
+      call, via a new `_bounded_body` helper: keeps the most recent
+      segments (usually the more relevant ones), drops the oldest whole
+      segments rather than truncating mid-segment, and states the drop
+      honestly in the body it sends ("N earlier segment(s) omitted").
+      Closes the exact gap milestone 123 named: the "last resort" layer
+      had no size limit on its own input, so a large-enough retrieval
+      could make the last resort fail its own call too.
+
+    6 new tests (`test_context.py`, new file -- oversized single item,
+    many-small-items aggregate cap, small items untouched; `test_
+    compaction.py` -- `_bounded_body` directly, and one real end-to-end
+    `compact()` run with layers 2/3 disabled and a tight budget so the
+    cap actually gets exercised rather than being pre-empted by earlier
+    layers), each confirmed to fail against the pre-fix code first.
+    Full suite green.

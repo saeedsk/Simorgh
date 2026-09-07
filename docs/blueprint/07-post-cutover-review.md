@@ -248,6 +248,52 @@ during a real multi-step turn, the CLI shows ≥ 1 narration line before
 the reply, and the dashboard shows the step within 3 s of the Ledger
 append.
 
+### 3.11 A Claude-Code-like CLI experience (creator's ask)
+"in v1 there was a nice unicode based command line interface which was
+inspired by claude code cli... I'd like similar UI experience... with
+nice unicode characters, icons, shorten and expansion of text, code
+diffs, showing sub task, sub agents, possible commands, etc." Status,
+piece by piece, so this reads as a real plan rather than a promise:
+
+- **Possible commands** -- done (§3.8, the banner).
+- **Showing sub-task** -- done (§3.9, live narration + the dashboard
+  activity feed): every `task.step`/`action.*` of the pending turn
+  prints live, including a pre-think announcement before the slow wait.
+- **Icons** -- `render.checklist()` already has them (✅/🏗️/○/❌) but is
+  wired to nothing; not a new build, a connection (below).
+- **Code diffs** -- the real gap. `render.diff_block()` exists (a v1
+  port) but nothing calls it: `apply_source_patch`
+  (`execution/tools.py::_write_scoped_file`) overwrites a file and
+  returns `f"wrote {subject}"`, discarding the old content -- there is
+  no diff to show because nothing computes one. `ActionResult`'s wire
+  schema also has no field for it beyond `stdout_preview`/
+  `output_ref`, which `ToolResult.metadata` doesn't reach (a gap the
+  agency review fork separately found: "no clean wire channel ... for
+  floor" -- diffs are the same shape of gap). *Decision:* read the old
+  file content before writing in `_write_scoped_file`, compute a
+  unified diff, and put it where `output`/`output_ref` already flow
+  (no contracts change needed) -- the CLI/dashboard render it with
+  `render.diff_block()` once a patch's own `ACTION_RESULT` carries it.
+  `pending` (currently `_NOT_YET`) is the natural home for reviewing a
+  diff after the fact too.
+- **Sub-agents** -- `delegate.py` doesn't exist (already tracked,
+  roadmap item 16, size L, `07` §2's agency section). Visibility here
+  waits on delegation existing at all.
+- **Shorten/expansion of text** -- the most open-ended item; two
+  concrete readings, both real: (a) long tool output is already bounded
+  (`stdout_preview`) with a full version behind `output_ref` --
+  `pending`/`log` (both `_NOT_YET`) are where "expand" would live; (b)
+  real token *streaming* from the provider, which is the only way to
+  narrate *inside* a single model call rather than only around it
+  (named honestly as the real ceiling in §3.9/milestone 132) -- a
+  materially larger change (the `claude` CLI supports `--output-format
+  stream-json`) than anything else in this list, not undertaken here.
+
+Net: two of five are done, one is a wiring connection (icons ride along
+with the diff work), one is a real but scoped build (diffs), one waits
+on an existing larger roadmap item (sub-agents), and one is named as
+the honest ceiling rather than attempted (streaming).
+
 ### 3.10 Self Model goals were never fed (fixed during the review)
 Reported live: `propose …` created a real task (`task created:
 baf727f147ed`) and a chat "show your tasks" a moment later answered
