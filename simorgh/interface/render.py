@@ -10,6 +10,7 @@ scroll-region sequences.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 from .vitals import VitalsSnapshot
@@ -51,6 +52,44 @@ def code_block(code: str, *, label: str = "", max_lines: int = 30) -> str:
     header = f"--- {label} ---" if label else "---"
     footer = f"[truncated: {len(lines) - max_lines} more line(s)]" if truncated else "---"
     return f"{header}\n{body}\n{footer}"
+
+
+_MD_FENCE_RE = re.compile(r"```[a-zA-Z0-9_+-]*\n(.*?)```", re.DOTALL)
+_MD_HEADER_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_MD_CODE_RE = re.compile(r"`([^`\n]+?)`")
+_MD_FENCE_PLACEHOLDER = "\x00FENCE{}\x00"
+
+
+def markdown(text: str, *, enabled: bool = True) -> str:
+    """A deliberately small subset of Markdown -> ANSI (live-caught: a
+    chat-tuned model naturally writes `**bold**`/`` `code` ``/headers/
+    fenced blocks, and this REPL was printing that syntax completely
+    unprocessed -- literal asterisks and backticks on screen). Not a
+    CommonMark parser -- good enough for what a real reply actually
+    contains, not a guarantee for arbitrary markdown input. Fenced code
+    blocks are extracted and rendered via `code_block()` *before* the
+    other patterns run, so a stray `**`/backtick inside a code sample is
+    never touched -- then spliced back in by placeholder. The markdown
+    delimiters are always stripped (`re.sub`'s replacement keeps only
+    the *inner* captured text), independent of `enabled`; `enabled` only
+    controls whether the result also gets real SGR styling instead of
+    plain unstyled text."""
+    if not text:
+        return text
+    blocks: list[str] = []
+
+    def _stash_fence(match: "re.Match[str]") -> str:
+        blocks.append(code_block(match.group(1).rstrip("\n")))
+        return _MD_FENCE_PLACEHOLDER.format(len(blocks) - 1)
+
+    working = _MD_FENCE_RE.sub(_stash_fence, text)
+    working = _MD_HEADER_RE.sub(lambda m: style(m.group(2), "bold", enabled=enabled), working)
+    working = _MD_BOLD_RE.sub(lambda m: style(m.group(1), "bold", enabled=enabled), working)
+    working = _MD_CODE_RE.sub(lambda m: style(m.group(1), "cyan", enabled=enabled), working)
+    for i, block in enumerate(blocks):
+        working = working.replace(_MD_FENCE_PLACEHOLDER.format(i), block)
+    return working
 
 
 def diff_block(lines: list[str], *, label: str = "", max_lines: int = 60, enabled: bool = True) -> str:

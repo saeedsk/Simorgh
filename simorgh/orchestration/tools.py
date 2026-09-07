@@ -71,6 +71,33 @@ _MARKER_ARG_KEY: dict[str, str] = {
     "propose_mcp_server": "proposal",
 }
 
+# Live-caught (the creator, real use): told to use `propose_mcp_server`,
+# the model wrote `PROPOSE_MCP_SERVER: {"name": "...", "description":
+# "...", "reason": "..."}` -- valid-looking JSON, wrong field
+# (`description` isn't real), no `command` at all. Nothing had ever told
+# it the tool's *own* expected sub-format -- the general marker
+# instruction (`cognition/service.py::_tool_instruction_block`) only
+# ever named the tool, never its argument shape, and Cognition can't
+# read `execution/tools.py`'s own `description` field itself (crossing
+# the subsystem boundary `test_module_boundaries.py` enforces). A short,
+# hand-maintained hint here, threaded through `cognition.think`'s
+# `tool_hints` field (`session.py::_think`) and surfaced by that same
+# instruction block, is the fix -- only tools whose one marker argument
+# has real internal structure need an entry; a bare path/url/code
+# argument is self-explanatory from the tool's own name.
+_MARKER_ARG_HINT: dict[str, str] = {
+    "propose_mcp_server": (
+        "key: value lines, one per line -- name (lowercase_snake_case), "
+        "command (one of npx/uvx/node/python/python3), args (comma-separated, optional), "
+        "reason (required, why this server is needed). Example:\n"
+        "name: web_search\ncommand: npx\nargs: -y, some-mcp-package\nreason: real web search, no key needed"
+    ),
+}
+
+
+def marker_hint(tool: str) -> str | None:
+    return _MARKER_ARG_HINT.get(tool)
+
 
 def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: str,
                       proposed_by: str = "orchestration") -> dict:

@@ -2,6 +2,7 @@
 each a port of a v1 tool. Uses throwaway temp directories/git repos --
 never the real project repository."""
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -470,6 +471,38 @@ class TestProposeMcpServerTool(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok)
         events = await self.ledger.read(MCP_PROPOSALS_STREAM)
         self.assertEqual(events[0].payload["env_keys"], ["BRAVE_API_KEY", "ANOTHER_KEY"])
+
+    async def test_a_json_object_argument_is_accepted_too(self):
+        """Live-caught (the creator, real use): asked to use this tool,
+        the model wrote `{"name": "web-search", "command": "npx", ...}`
+        instead of the documented `key: value` lines -- a very natural
+        pull toward JSON for structured data. Recognized keys are
+        extracted the same as the line-based format."""
+        proposal = json.dumps({
+            "name": "web_search", "command": "npx", "args": ["-y", "some-mcp-package"],
+            "reason": "real web search, no key needed",
+        })
+        result = await ProposeMcpServerTool().run({"proposal": proposal}, ctx=self._ctx())
+        self.assertTrue(result.ok, result.error)
+        events = await self.ledger.read(MCP_PROPOSALS_STREAM)
+        self.assertEqual(events[0].payload["name"], "web_search")
+        self.assertEqual(events[0].payload["args"], ["-y", "some-mcp-package"])
+
+    async def test_a_json_objects_unrecognized_keys_are_dropped_not_guessed_at(self):
+        # The live example used "description" instead of the real
+        # "reason" field -- must not be silently accepted as an alias;
+        # the resulting proposal should fail validation honestly.
+        proposal = json.dumps({"name": "web_search", "description": "does a web search"})
+        result = await ProposeMcpServerTool().run({"proposal": proposal}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("command", result.error)
+
+    async def test_malformed_json_falls_back_to_line_parsing_not_a_crash(self):
+        result = await ProposeMcpServerTool().run(
+            {"proposal": '{"name": "x", not valid json'}, ctx=self._ctx(),
+        )
+        self.assertFalse(result.ok)  # falls through to line parsing, finds no real fields
+        self.assertIn("name", result.error)
 
 
 class TestBuiltinTools(unittest.TestCase):

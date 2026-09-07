@@ -158,6 +158,31 @@ class TestChatTurnWithOneToolCall(unittest.TestCase):
                 await cognition.stop()
 
     @run
+    async def test_a_tool_with_real_argument_structure_gets_its_own_hint(self):
+        """Live-caught (the creator, real use): told to use
+        `propose_mcp_server`, the model invented a wrong JSON shape --
+        the general "here's the marker syntax" instruction never
+        explained any tool's own argument format. `tool_hints` is how
+        `orchestration/tools.py::marker_hint`'s hand-maintained per-tool
+        addenda reach Cognition's prompt-building (`cognition/service.py`
+        picks them up from here)."""
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": "ok"}])
+            await cognition.start()
+            try:
+                runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+                chat = Session(task_id="c10", kind="chat", mode="execute", profile=profiles.CHAT)
+                await runner.run(chat, user_text="hello")
+                hints = cognition.calls[0].payload["tool_hints"]
+                self.assertIn("propose_mcp_server", hints)
+                self.assertIn("command", hints["propose_mcp_server"])
+                # a self-explanatory tool (read_file) gets no hint at all
+                self.assertNotIn("read_file", hints)
+            finally:
+                await cognition.stop()
+
+    @run
     async def test_no_cognition_available_degrades_to_the_honest_floor(self):
         async with Harness() as h:
             bus = h.client("orchestration")

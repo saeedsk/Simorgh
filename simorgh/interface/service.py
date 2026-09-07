@@ -352,7 +352,7 @@ class Service:
             reply_text = await asyncio.wait_for(fut, timeout=self.config.chat_reply_timeout_s)
             self._live.clear()
             if reply_text:
-                print(reply_text)
+                print(render_mod.markdown(reply_text, enabled=self._color))
             else:
                 # An honest-floor completion (no real provider answered in
                 # time) resolves the future with "", same as a real reply

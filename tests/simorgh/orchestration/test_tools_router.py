@@ -1,6 +1,6 @@
 import unittest
 
-from simorgh.orchestration.tools import to_action_payload
+from simorgh.orchestration.tools import marker_hint, to_action_payload
 
 
 class TestToolCallRouter(unittest.TestCase):
@@ -73,6 +73,19 @@ class TestToolCallRouter(unittest.TestCase):
             call={"tool": "web_fetch", "args": {"url": "https://example.com"}}, rationale="r",
         )
         self.assertEqual(payload["args"], {"url": "https://example.com"})
+
+    def test_marker_hint_exists_for_propose_mcp_server(self):
+        hint = marker_hint("propose_mcp_server")
+        self.assertIsNotNone(hint)
+        self.assertIn("command", hint)
+        self.assertIn("reason", hint)
+
+    def test_marker_hint_is_none_for_a_tool_with_a_self_explanatory_argument(self):
+        self.assertIsNone(marker_hint("web_fetch"))
+        self.assertIsNone(marker_hint("read_file"))
+
+    def test_marker_hint_is_none_for_an_unknown_tool(self):
+        self.assertIsNone(marker_hint("not_a_real_tool"))
 
 
 if __name__ == "__main__":
