@@ -11,6 +11,10 @@ from typing import Protocol
 
 from .model import Step
 
+# The live source tree first. `src/` is v1 -- retired but not deleted --
+# and is kept only so a step naming it is not silently dropped.
+DEFAULT_SOURCE_ROOTS: tuple[str, ...] = ("simorgh/", "src/")
+
 _PATCH_LINE = re.compile(r"^\s*\d+[.):]\s*(\S+)\s*::\s*(.+)$")
 _RESEARCH_LINE = re.compile(r"^\s*\d+[.):]\s*RESEARCH\s*::\s*(.+)$", re.IGNORECASE)
 
@@ -21,7 +25,7 @@ planning it.
 Project goal: {goal}
 
 Files that already exist in this codebase (prefer revising one of
-these when it genuinely fits; naming a new path under src/ is fine
+these when it genuinely fits; naming a new path under simorgh/ is fine
 too, for something genuinely new):
 {files}
 
@@ -34,13 +38,13 @@ that inform later patches should come first.
 
 Respond with ONLY a numbered list, one per line, in exactly one of
 these two formats:
-1. <repo-relative path under src/> :: <description of the patch>
+1. <repo-relative path under simorgh/> :: <description of the patch>
 2. RESEARCH :: <question or topic to investigate>
 ...
 No other text before or after the list."""
 
 
-def parse_steps(text: str, expected: int) -> list[Step]:
+def parse_steps(text: str, expected: int, roots: tuple[str, ...] = DEFAULT_SOURCE_ROOTS) -> list[Step]:
     """Returns up to `expected` `Step`s. A RESEARCH line is checked
     first: it would also match `_PATCH_LINE` (with "RESEARCH" captured
     as the path), so order is what keeps a research step from being
@@ -61,7 +65,13 @@ def parse_steps(text: str, expected: int) -> list[Step]:
         if not patch_match:
             continue
         path, description = patch_match.group(1).strip(), patch_match.group(2).strip()
-        if path.startswith("src/") and "src/agents/skills/" not in path and description:
+        # Live-caught 2026-09-07: this read `path.startswith("src/")`.
+        # `src/` is the *v1* tree; the live code is `simorgh/`. So every
+        # step naming a real file was silently dropped here, and combined
+        # with the prompt below (which also said "under src/") the
+        # decomposer was aimed squarely at retired code. Not one project
+        # in the creator's ledger had ever produced a child step.
+        if path.startswith(roots) and "src/agents/skills/" not in path and description:
             # Default edge (spec 5.4 step 4): a research step is a
             # dependency of every later patch step, per the prompt's own
             # ordering instruction.
