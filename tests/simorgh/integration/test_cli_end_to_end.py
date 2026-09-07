@@ -119,6 +119,25 @@ class CliEndToEndTestCase(unittest.IsolatedAsyncioTestCase):
         ids = {t["task_id"] for t in self.created_tasks}
         self.assertGreaterEqual(len(ids), 2, "the second request reused the first task's id")
 
+    async def test_the_tasks_command_prints_the_tasks_not_just_a_count(self):
+        """Live-caught (the creator, 2026-09-07): `tasks` printed "100
+        task(s), 20 project(s)" and nothing else, so a backlog of a
+        hundred looked exactly like a backlog of one.
+
+        This asserts through the REPL rather than on the renderer alone
+        because the first attempt at the fix shipped a NameError in the
+        render lambda, and `_handle_line`'s crash boundary turned it into
+        a printed "[render error]" that no test noticed."""
+        await self._type("improve simorgh/hello.py add a module docstring")
+        await self._wait_for(lambda: bool(self.created_tasks), what="a task to list")
+
+        out = await self._type("tasks")
+        self.assertNotIn("render error", out)
+        self.assertIn("task(s)", out)
+        # the task's own id and kind, not merely how many there are
+        self.assertIn(self.created_tasks[0]["task_id"][:12], out)
+        self.assertIn("patch", out)
+
     async def test_an_unknown_command_does_not_reach_planning_or_cognition(self):
         """The REPL's own parsing is a seam too: a line that is not a
         command must not silently manufacture work."""

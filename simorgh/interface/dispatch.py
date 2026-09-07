@@ -27,6 +27,7 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event
 from simorgh.ledger.client import LedgerClient
 
+from . import render as render_mod
 from .parser import Command
 from .vitals import VitalsCache
 
@@ -181,8 +182,14 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
             return await _request(bus, topics.TASK_WORK_NEXT_REQUEST, {}, timeout=5.0, render=lambda p: (
                 f"working: {p['task_id']}" if p.get("task_id") else f"nothing to work on ({p.get('reason', 'idle')})"
             ), watch=True)
-        return await _request(bus, topics.TASK_LIST_REQUEST, {}, timeout=3.0, render=lambda p: (
-            f"{len(p.get('tasks', []))} task(s), {len(p.get('projects', []))} project(s)"
+        # Live-caught (the creator, 2026-09-07): "it only show the total
+        # number of tasks, not the tasks details". The reply has always
+        # carried every field -- id, kind, status, origin, description --
+        # and this rendered `len()` of it and dropped the rest, so a
+        # backlog of 100 looked exactly like a backlog of 1.
+        show_all = args.strip() == "all"
+        return await _request(bus, topics.TASK_LIST_REQUEST, {}, timeout=3.0, render=lambda p: render_mod.task_list(
+            p.get("tasks", []), p.get("projects", []), limit=1000 if show_all else 20,
         ))
 
     if name == "auto":

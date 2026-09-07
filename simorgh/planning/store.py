@@ -28,6 +28,7 @@ from .model import (
     FAILED,
     IN_PROGRESS,
     PENDING,
+    TERMINAL_STATUSES,
     Lease,
     Scope,
     Task,
@@ -87,7 +88,14 @@ class TaskIndex:
         elif event.type == "lease_expired":
             current = self.tasks.get(task_id)
             if current is not None:
-                self.tasks[task_id] = replace(current, lease=None, status=AVAILABLE, updated_at=event.ts)
+                # Releasing the lease of a task that already finished must
+                # not re-open it. This guard lives in `apply` rather than
+                # only at the point of expiry because it also governs
+                # replay: a ledger already holding 1,204 of these events
+                # would otherwise resurrect every completed task again on
+                # the next boot, exactly as it had been doing.
+                status = current.status if current.status in TERMINAL_STATUSES else AVAILABLE
+                self.tasks[task_id] = replace(current, lease=None, status=status, updated_at=event.ts)
         # "dependency_satisfied"/"dependency_failed"/"regrounded" are
         # informational -- the real transition they cause is always a
         # separate "status_changed"/"created" event, so nothing to apply.
