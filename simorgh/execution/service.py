@@ -307,6 +307,24 @@ class Service:
                         "fetched_at": float(result.metadata.get("fetched_at") or 0.0),
                     },
                 ))
+            if tool.name == "propose_mcp_server" and result.ok:
+                # `ProposeMcpServerTool`'s own docstring: it only records
+                # a proposal, so the human learns about it the same way
+                # any other notice reaches them -- `ui.notice`, printed
+                # live by Interface -- rather than needing to think to
+                # go check a Ledger stream nobody looks at unprompted.
+                await self._ctx.bus.publish(Message.new(
+                    topics.UI_NOTICE, source="execution",
+                    payload={
+                        "level": "info",
+                        "text": (
+                            f"Sim proposed an MCP server: {result.metadata.get('name', '')} "
+                            f"({result.metadata.get('proposal_id', '')}) -- {result.metadata.get('reason', '')} "
+                            "Review with `mcp`."
+                        ),
+                        "source": "execution",
+                    },
+                ))
 
     async def _finish(self, action_id: str) -> None:
         await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "finished", {"action_id": action_id}))

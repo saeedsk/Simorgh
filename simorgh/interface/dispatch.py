@@ -15,15 +15,34 @@ from __future__ import annotations
 import subprocess
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 from simorgh.bus.client import BusClient
 from simorgh.contracts import topics
+from simorgh.contracts.envelope import Event
+from simorgh.ledger.client import LedgerClient
 
 from .parser import Command
 from .vitals import VitalsCache
 
 _NO_RESPONSE = "no response -- that subsystem isn't wired up in this build yet"
 _NOT_YET = "not yet available in this build"
+
+# Must match `execution/tools.py::MCP_PROPOSALS_STREAM` -- a plain string
+# agreement, not a shared import, since `interface` may not import
+# `execution` (`test_module_boundaries.py`'s subsystem-isolation rule);
+# Ledger stream names aren't part of the typed contract catalog the way
+# bus topics are, so this is the same kind of agreement `execution/
+# service.py`'s own `INFLIGHT_STREAM`/`TOOLS_STREAM` constants are.
+MCP_PROPOSALS_STREAM = "mcp:proposals"
+# `simorgh.toml`'s primary search location (`kernel/config.py::find_
+# config_path`'s first candidate, `./simorgh.toml`) -- this command
+# targets the same file a normal `sim.sh` boot would read next, but
+# doesn't replicate that function's full `$SIMORGH_CONFIG`/`${data_dir}`
+# fallback search (kernel-only code `interface` may not import); `mcp
+# approve` says exactly where it wrote, so a non-default setup is a
+# visible, honest mismatch to notice and move by hand, not a silent one.
+_SIMORGH_TOML_PATH = Path("simorgh.toml")
 
 
 @dataclass
@@ -76,7 +95,8 @@ async def run_shell(command: str, *, timeout: float) -> str:
     return out.rstrip() or f"[exit {result.returncode}, no output]"
 
 
-async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, vitals: VitalsCache) -> Outcome:
+async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, vitals: VitalsCache,
+                    ledger: LedgerClient) -> Outcome:
     name, args = command.name, command.args
     now = clock.now()
 
@@ -286,8 +306,120 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "remind":
         return Outcome(_NOT_YET + " (no percept.time.schedule.request in the contract catalog yet -- see §12)")
 
+    if name == "mcp":
+        return await _mcp_command(args, bus=bus, ledger=ledger, clock=clock)
+
     # unrecognized after autocorrect failed, or plain chat text
     return Outcome("", exit_repl=False)
+
+
+async def _mcp_pending_proposals(ledger: LedgerClient) -> dict[str, dict]:
+    """The latest event per `proposal_id`, filtered to still-`pending`
+    (an `approved`/`rejected` event for the same id supersedes it) --
+    `execution/tools.py::ProposeMcpServerTool`'s own docstring has the
+    full design: this stream is the one durable record of what Sim has
+    asked for and what a human has decided."""
+    events = await ledger.read(MCP_PROPOSALS_STREAM)
+    latest: dict[str, dict] = {}
+    for event in events:
+        proposal_id = event.payload.get("proposal_id")
+        if proposal_id:
+            latest[proposal_id] = event.payload
+    return {pid: p for pid, p in latest.items() if p.get("status") == "pending"}
+
+
+async def _mcp_active_tools_line(bus: BusClient) -> str:
+    try:
+        reply = await bus.request(bus.new(topics.WORLD_ENV_QUERY, {"what": "tools", "args": {}}), timeout=3.0)
+    except TimeoutError:
+        return "active MCP tools: unavailable (no response)"
+    except Exception as exc:  # noqa: BLE001 -- a status line reporting its own failure, never a crash
+        return f"active MCP tools: error ({exc!r})"
+    names = sorted(t["name"] for t in reply.payload.get("tools", []) if t.get("provider") == "mcp")
+    return "active MCP tools: " + (", ".join(names) if names else "none configured")
+
+
+def _toml_string(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
+def _toml_string_array(items: list[str]) -> str:
+    return "[" + ", ".join(_toml_string(item) for item in items) + "]"
+
+
+def _mcp_server_toml_block(proposal: dict) -> str:
+    """A standalone `[[execution.mcp_servers]]` block, appended to the
+    end of the file rather than parsing-and-rewriting the whole
+    document -- TOML's array-of-tables syntax allows a new element
+    anywhere, so this never touches (or risks corrupting/reformatting)
+    anything already in `simorgh.toml`, comments included."""
+    lines = ["", "[[execution.mcp_servers]]",
+             f"name = {_toml_string(proposal['name'])}",
+             f"command = {_toml_string(proposal['command'])}"]
+    if proposal.get("args"):
+        lines.append(f"args = {_toml_string_array(proposal['args'])}")
+    if proposal.get("read_only_tools"):
+        lines.append(f"read_only_tools = {_toml_string_array(proposal['read_only_tools'])}")
+    if proposal.get("env_keys"):
+        # Never a real value -- Sim only ever proposes the variable
+        # *names* a server needs (`ProposeMcpServerTool`'s own
+        # validation); the human adds an `env` table by hand if the
+        # server actually needs one.
+        lines.append(f"# env vars this server needs (add real values yourself): {', '.join(proposal['env_keys'])}")
+    lines.append(f"# approved via `mcp approve` -- Sim's own reason: {proposal.get('reason', '')}")
+    return "\n".join(lines) + "\n"
+
+
+async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock) -> Outcome:
+    parts = args.split(None, 1)
+    sub = parts[0] if parts else ""
+
+    if sub == "approve":
+        if len(parts) < 2 or not parts[1].strip():
+            return Outcome("usage: mcp approve <proposal_id>")
+        proposal_id = parts[1].strip()
+        pending = await _mcp_pending_proposals(ledger)
+        proposal = pending.get(proposal_id)
+        if proposal is None:
+            return Outcome(f"no pending proposal {proposal_id!r} -- see `mcp` for the current list")
+        with _SIMORGH_TOML_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(_mcp_server_toml_block(proposal))
+        await ledger.append(MCP_PROPOSALS_STREAM, Event(
+            stream=MCP_PROPOSALS_STREAM, type="approved", ts=clock.now(), trace_id="", causation_id=None,
+            payload={**proposal, "status": "approved"},
+        ))
+        return Outcome(f"approved: wrote {proposal['name']!r} to {_SIMORGH_TOML_PATH} -- restart Sim to load it")
+
+    if sub == "reject":
+        if len(parts) < 2 or not parts[1].strip():
+            return Outcome("usage: mcp reject <proposal_id> [reason]")
+        rest = parts[1].split(None, 1)
+        proposal_id, reason = rest[0], (rest[1] if len(rest) > 1 else "")
+        pending = await _mcp_pending_proposals(ledger)
+        proposal = pending.get(proposal_id)
+        if proposal is None:
+            return Outcome(f"no pending proposal {proposal_id!r} -- see `mcp` for the current list")
+        await ledger.append(MCP_PROPOSALS_STREAM, Event(
+            stream=MCP_PROPOSALS_STREAM, type="rejected", ts=clock.now(), trace_id="", causation_id=None,
+            payload={**proposal, "status": "rejected", "rejection_reason": reason},
+        ))
+        return Outcome(f"rejected: {proposal['name']!r}" + (f" -- {reason}" if reason else ""))
+
+    # bare `mcp`: what's pending, and what's already running
+    pending = await _mcp_pending_proposals(ledger)
+    lines: list[str] = []
+    if pending:
+        lines.append(f"{len(pending)} pending MCP server proposal(s):")
+        for proposal_id, proposal in pending.items():
+            command_line = " ".join([proposal.get("command", ""), *proposal.get("args", [])])
+            lines.append(f"  {proposal_id}  {proposal.get('name', '')}  ({command_line})")
+            lines.append(f"    reason: {proposal.get('reason', '')}")
+        lines.append("  `mcp approve <id>` or `mcp reject <id> [reason]`")
+    else:
+        lines.append("no pending MCP server proposals")
+    lines.append(await _mcp_active_tools_line(bus))
+    return Outcome("\n".join(lines))
 
 
 __all__ = ["dispatch", "run_shell", "Outcome"]

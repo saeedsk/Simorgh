@@ -226,7 +226,7 @@ class Service:
                 return
 
             outcome = await dispatch(command, bus=self._ctx.bus, clock=self._ctx.clock,
-                                      session_id=self.session_id, vitals=self.vitals)
+                                      session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger)
             if outcome.text:
                 print(outcome.text)
             if outcome.exit_repl:

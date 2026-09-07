@@ -8,7 +8,7 @@ from __future__ import annotations
 from .api import Profile
 
 CHAT = Profile(
-    name="chat", tools=("read_file", "list_dir", "web_fetch", "run_python_sandboxed"),
+    name="chat", tools=("read_file", "list_dir", "web_fetch", "run_python_sandboxed", "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
 PATCH = Profile(

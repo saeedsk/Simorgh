@@ -31,6 +31,16 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # `mcp_servers` config entry.
     "mcp_ddg_search_ddg_search": ("read_only", True),
     "mcp_ddg_search_ddg_get_answer": ("read_only", True),
+    # `propose_mcp_server` (execution/tools.py's own docstring: "where is
+    # the autonomy") only records a proposal -- it never installs or runs
+    # anything, so Guardian may allow it (even auto-allow it in a trusted
+    # posture, same as any other irreversible action) without that being
+    # a real capability grant. The actual boundary is downstream and
+    # absolute: only the `mcp` CLI command ever writes `simorgh.toml`,
+    # and nothing in the tool-calling pipeline can reach that code path
+    # -- not a Guardian policy a trusted posture could loosen, a
+    # structural one.
+    "propose_mcp_server": ("irreversible", False),
 }
 
 # `cognition/parser.py::_parse_markers` only ever extracts one string per
@@ -52,6 +62,12 @@ _MARKER_ARG_KEY: dict[str, str] = {
     # the same tools.
     "mcp_ddg_search_ddg_search": "query",
     "mcp_ddg_search_ddg_get_answer": "query",
+    # `propose_mcp_server` has a genuinely multi-field schema (name,
+    # command, args, ...), but its one `args_schema` property is a
+    # single free-form text block the tool parses itself
+    # (`_parse_mcp_proposal_text`), so it's still single-argument at the
+    # marker layer -- see the tool's own docstring.
+    "propose_mcp_server": "proposal",
 }
 
 

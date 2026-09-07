@@ -4214,3 +4214,64 @@ Still ahead, roughly in order:
     boots with a real `simorgh.toml`-shaped `[[execution.mcp_servers]]`
     entry and asserts it reached the live Execution subsystem. Full
     suite green (2,277 tests).
+
+140. **"Sim proposes a server, one human approval" -- the middle path
+    milestone 139 named but didn't build, built now** (the creator:
+    "implement Sim proposes a specific MCP server (with its reasoning),
+    and you approve or reject once").
+
+    - **`ProposeMcpServerTool`** (`execution/tools.py`): a new builtin
+      tool, `propose_mcp_server`. Single-argument at the marker layer
+      (`orchestration/tools.py`'s own ceiling for genuinely multi-field
+      schemas) by design, not by accident -- the model writes one
+      `key: value` text block (`name`, `command`, `args`,
+      `read_only_tools`, `env_keys`, `reason`), parsed leniently by
+      `_parse_mcp_proposal_text`. Validates `name` (safe identifier),
+      `command` (a small allowlist -- `npx`/`uvx`/`node`/`python`/
+      `python3` -- never an arbitrary path), `reason` (required, becomes
+      the audit trail), and `env_keys` (variable *names* only, checked
+      against an UPPER_SNAKE_CASE shape -- a value here is refused
+      outright, never silently accepted). On success, records a
+      `pending` proposal in a new Ledger stream (`mcp:proposals`) --
+      does not touch `simorgh.toml` itself. `execution/service.py`
+      publishes a `ui.notice` after a successful proposal so the human
+      sees it live, the same surface milestone 139's debug-leak fix
+      just cleaned up.
+    - **The actual boundary, structural rather than a Guardian policy**:
+      nothing in the tool-calling pipeline can write `simorgh.toml`. The
+      only code path that does is a new `mcp` CLI command
+      (`interface/dispatch.py`) -- entirely human-invoked, never
+      reachable from `action.proposed`/`tool_calls` at all. Bare `mcp`
+      lists pending proposals (latest Ledger event per `proposal_id`,
+      filtered to `status: pending`) plus currently active `mcp_*`
+      tools (`world.env.query{what:"tools"}`, already-existing
+      plumbing). `mcp approve <id>` appends a real
+      `[[execution.mcp_servers]]` block to `simorgh.toml` -- text
+      appended to the end of the file, never a parse-and-rewrite of the
+      whole document, so nothing already there (comments included) is
+      ever touched or reformatted -- and marks the proposal `approved`
+      in the Ledger; `mcp reject <id> [reason]` marks it `rejected`
+      without writing anything. `propose_mcp_server` is
+      `reversibility=irreversible` and Guardian may allow it (even
+      auto-allow it in a trusted posture, like any other irreversible
+      action) without that being a real capability grant, since it only
+      records intent -- the file write is the actual grant, and it has
+      no Guardian-reachable path at all, trusted posture or not.
+    - **Registered in `CHAT`'s profile** (`orchestration/profiles.py`)
+      unconditionally, unlike the MCP-server tool markers milestone 138
+      held back -- `propose_mcp_server` is a real builtin, always
+      registered, so offering it to the model never risks an "unknown
+      tool" the way an unconfigured server's marker would.
+
+    18 new tests: `TestProposeMcpServerTool` (`test_tools.py`, 7 --
+    valid proposal recorded pending, multiline reason kept whole,
+    invalid name/command/missing reason/malformed env key all refused
+    before anything is recorded, env keys never carry a value); a new
+    `test_dispatch.py` (11 -- bare `mcp` with none/one/superseded
+    pending, `approve` writes a real TOML block and marks approved,
+    approving appends without disturbing existing file content
+    (comments included), env keys noted as names never as a fake `env`
+    table, approving twice is a clean "unknown proposal" the second
+    time, `reject` marks rejected and never touches the file, usage
+    messages for both without an id). `builtin_tools()`'s scoped-set
+    test updated. Full suite green (2,296 tests).
