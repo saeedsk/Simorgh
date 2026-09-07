@@ -3,6 +3,7 @@ TOML-style dict, ignoring unknown keys and coercing list fields to the
 tuples the frozen dataclass expects."""
 
 import unittest
+import unittest.mock
 
 from simorgh.guardian.config import DEFAULT_DENYLIST, DEFAULT_PROTECTED_SUBJECTS, Config
 
@@ -35,6 +36,29 @@ class TestConfigFromMapping(unittest.TestCase):
         self.assertEqual(config.protected_subjects, DEFAULT_PROTECTED_SUBJECTS)
         self.assertIn("docs/SOUL.md", config.protected_subjects)
         self.assertEqual(dict(config.denylist), DEFAULT_DENYLIST)
+
+    def test_dataclass_default_still_requires_human_approval(self):
+        """Kept safe on purpose (`kernel/service.py::boot`'s own comment
+        on why its baseline diverges) -- `guardian/test_rules.py::
+        test_irreversible_escalates_by_default` depends on exactly this."""
+        self.assertTrue(Config().irreversible_requires_human)
+
+    def test_shell_env_var_enables_auto_approve_regardless_of_the_file(self):
+        with unittest.mock.patch.dict("os.environ", {"SIMORGH_GUARDIAN_AUTO_APPROVE": "1"}):
+            self.assertFalse(Config.from_mapping(None).irreversible_requires_human)
+            self.assertFalse(Config.from_mapping({"irreversible_requires_human": True}).irreversible_requires_human)
+
+    def test_shell_env_var_off_values_require_human_approval(self):
+        for off in ("0", "false", "no", "off", "anything-else"):
+            with unittest.mock.patch.dict("os.environ", {"SIMORGH_GUARDIAN_AUTO_APPROVE": off}):
+                self.assertTrue(Config.from_mapping({"irreversible_requires_human": False}).irreversible_requires_human)
+
+    def test_no_env_var_leaves_the_file_and_default_alone(self):
+        with unittest.mock.patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("SIMORGH_GUARDIAN_AUTO_APPROVE", None)
+            self.assertTrue(Config.from_mapping(None).irreversible_requires_human)
+            self.assertFalse(Config.from_mapping({"irreversible_requires_human": False}).irreversible_requires_human)
 
 
 if __name__ == "__main__":

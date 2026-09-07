@@ -36,13 +36,19 @@ from simorgh.kernel.service import Kernel
 from simorgh.kernel.state import RUNNING
 
 
-def _patched_build_factories(guardian_config: GuardianConfig):
+def _patched_build_factories(fixture_guardian_config: GuardianConfig):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
+    # `_build`'s own `guardian_config` parameter has to keep that exact
+    # name -- `Kernel.boot` calls it as a keyword arg -- so it inevitably
+    # shadows this closure's `fixture_guardian_config`; renamed the
+    # closure's own fixture rather than risk `_build`'s body silently
+    # reading whatever `Kernel.boot` computed instead of the config this
+    # test actually wants to exercise.
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None, guardian_config=None):
         factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
         factories = {name: factories[name] for name in ("bus", "ledger")}
-        factories["guardian"] = lambda: GuardianService(config=guardian_config)
+        factories["guardian"] = lambda: GuardianService(config=fixture_guardian_config)
         return factories
 
     return _build

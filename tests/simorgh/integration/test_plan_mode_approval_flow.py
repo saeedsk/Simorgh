@@ -58,14 +58,14 @@ STEPS_TEXT = "1. src/orchestrator/retry.py :: add exponential backoff with jitte
 def _patched_build_factories(planning_config: PlanningConfig):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None, guardian_config=None):
         # Only bus/ledger (Phase 0) plus the two subsystems this scenario
         # is actually about -- Planning and Verification -- exactly like
         # test_planning_kernel_boot.py's `_patched_build_factories`, so
         # this stays "no Orchestration, no Guardian, no Cognition" and the
         # test drives the plan-mode Worker's and the human's messages by
         # hand.
-        factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
+        factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl, guardian_config=guardian_config)
         factories = {name: factories[name] for name in ("bus", "ledger")}
         factories["planning"] = lambda: PlanningService(planning_config)
         factories["verification"] = lambda: VerificationService()
