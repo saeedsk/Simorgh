@@ -4275,3 +4275,58 @@ Still ahead, roughly in order:
     time, `reject` marks rejected and never touches the file, usage
     messages for both without an id). `builtin_tools()`'s scoped-set
     test updated. Full suite green (2,296 tests).
+
+141. **Command-surface consolidation, finally implemented** (the
+    creator, weeks-old request from earlier in this same session: "the
+    remaining commands from v1 are so scattered ... I'd like to
+    consolidate, simplify" -- recorded as a decision in
+    `07-post-cutover-review.md` §3.8 and `15-interface.md` §12 q5 but
+    never actually built, interrupted by the MCP work). `COMMAND_NAMES`
+    (`parser.py`) goes from 38 to 12: `status`, `tasks`, `improve`,
+    `plan`, `research`, `interests`, `auto`, `pause`, `resume`, `exit`,
+    `mcp`, `help`.
+
+    - **`status`** merges `vitals`/`budget`/`skills` into one panel
+      (health, vitals, Guardian posture, registered tools), each piece
+      answered independently through a new shared `_panel_piece` helper
+      -- one subsystem not responding degrades only its own line, never
+      blanks the whole panel.
+    - **`improve`** replaces `propose`/`patch`/`batch`/`evolve` with two
+      call shapes: `improve <path> <description>` (a patch task) or
+      `improve <topic>` (a skill task), disambiguated by a regex
+      (`_PATH_HINT`) on the first token -- a slash or file-extension-
+      shaped suffix means path, anything else means topic.
+    - **`tasks`**/**`tasks work`** replaces `tasks`/`work`.
+      **`plan <goal>`** replaces `plan <n> <goal>`/`project <goal>` (the
+      `<n>` was v1 cruft nothing downstream ever read).
+      **`interests [<topic>]`** replaces `interest`/`interests`/
+      `curious` (bare lists, an argument adds -- `curious`'s follow-up
+      behavior is dropped, per the original decision). **`auto
+      [on|off|now]`** replaces `autonomous`/`discover`/`news`/`growth`
+      -- `now` publishes `system.tick.idle` directly, the real
+      scheduler-driven idle-loop trigger, rather than the old direct
+      curiosity-service pokes. **`exit`** replaces `exit`/`quit`/`stop`
+      -- one command that both requests `system.stop` and leaves the
+      REPL (the old separate `stop`, which did the former but not the
+      latter, was itself part of the confusion being removed).
+    - **Removed outright** (dashboard/Guardian-gated-tools cover these,
+      or they were honest `_NOT_YET` stubs): `reflect`, `digest`,
+      `pending`, `log`, `trace`, `remind`, `history`, `run`, `use`,
+      `fetch`, and `sleep` (never actually named in the original
+      decision's Keep or Remove lists -- a genuine oversight there,
+      resolved the same way as the rest of Remove on the same "reduce
+      confusion" reasoning, and noted as such in `15-interface.md`).
+    - **`mcp`**, added earlier the same day (milestone 140), lands on
+      the Keep list too -- 12 names, not 11, exactly as
+      `15-interface.md`'s own note on adding it predicted.
+
+    No new tests (a renaming/consolidation of existing coverage, not new
+    behavior): `test_parser.py`'s autocorrect test switched from the
+    now-gone `propose`→`porpose` example to `improve`→`imporve`;
+    `test_service.py`'s `status` test now sets up all three panel-piece
+    responders and asserts the merged output; its old standalone
+    `vitals` test renamed to exercise `status` instead; its pause/resume
+    round-trip test uses `exit` instead of the removed `stop`;
+    `test_render.py`'s banner test checks for `improve <topic>` instead
+    of the removed `propose <topic>`. Full suite green (2,296 tests --
+    unchanged count, confirming this really was a pure rename/consolidation).

@@ -186,15 +186,15 @@ def splash(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
 
 
 _QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("status", "subsystem health at a glance"),
-    ("propose <topic>", "draft a new skill, audited before it lands"),
-    ("patch <path> <description>", "revise existing code, tested before it lands"),
-    ("tasks / work", "see the backlog, advance the next item"),
+    ("status", "health, vitals, posture, and tools in one panel"),
+    ("improve <path> <description>", "revise existing code, tested before it lands"),
+    ("improve <topic>", "draft a new skill, audited before it lands"),
+    ("tasks / tasks work", "see the backlog, advance the next item"),
     ("research <topic>", "investigate a question, no code written"),
-    ("project <goal>", "break a goal into tracked steps"),
-    ("autonomous [on|off]", "control the idle self-improvement loop"),
-    ("vitals", "mood, memory, curiosity as bar meters"),
-    ("pause / resume / stop", "hold everything, or let it continue"),
+    ("plan <goal>", "break a goal into tracked steps"),
+    ("auto [on|off|now]", "control the idle self-improvement loop"),
+    ("mcp", "review external tools Sim has proposed"),
+    ("pause / resume", "hold everything, or let it continue"),
     ("exit", "leave (Ctrl-D also detaches)"),
 )
 
