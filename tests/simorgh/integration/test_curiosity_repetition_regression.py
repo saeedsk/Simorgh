@@ -71,7 +71,14 @@ class RepetitionRegressionTest(unittest.IsolatedAsyncioTestCase):
             bus=self.bus, ledger=self.ledger, config={}, secrets={}, clock=self.clock,
             logger=_Logger(), data_dir=Path(self._tmp.name) / "data",
         )
-        self.config = CuriosityConfig(candidates_per_tick=1, project_chance=0.0, recent_subjects=30)
+        # These tests drive back-to-back ticks to exercise the sampler's
+        # spread; the exploration pacing (`min_explore_interval_seconds`,
+        # which keeps the idle heartbeat from draining the LLM budget) is
+        # a separate property, covered in tests/simorgh/curiosity.
+        self.config = CuriosityConfig(
+            candidates_per_tick=1, project_chance=0.0, recent_subjects=30,
+            min_explore_interval_seconds=0.0,
+        )
         self.service = Service(config=self.config, seed=42)
         await self.service.start(self.ctx)
 
@@ -221,7 +228,7 @@ class RepetitionRegressionTest(unittest.IsolatedAsyncioTestCase):
 
         self._think_sub = await self.requester.subscribe(topics.COGNITION_THINK, answer_no_goal_then_patch)
 
-        forced_cfg = CuriosityConfig(candidates_per_tick=1, project_chance=1.0)
+        forced_cfg = CuriosityConfig(candidates_per_tick=1, project_chance=1.0, min_explore_interval_seconds=0.0)
         forced = Service(config=forced_cfg, seed=1)
         await forced.start(Context(
             name="curiosity2", instance_id="", run_id="regress2", mode="single",
