@@ -49,8 +49,10 @@ def _patched_build_factories():
 
 
 class _Collector:
-    """Observes the two topics an ordinary (non-reserved) client is
-    allowed to subscribe to on the action path."""
+    """Observes the topics an ordinary (non-reserved) client is allowed
+    to subscribe to on the action path, plus `action.needs_human` and
+    `ui.prompt` (both broadcast, no reservation) for the real-approval
+    tests below."""
 
     def __init__(self, bus) -> None:
         self.bus = bus
@@ -59,6 +61,8 @@ class _Collector:
     async def start(self) -> None:
         await self.bus.subscribe(topics.ACTION_DENIED, self._on)
         await self.bus.subscribe(topics.ACTION_RESULT, self._on, group="collector-result")
+        await self.bus.subscribe(topics.ACTION_NEEDS_HUMAN, self._on)
+        await self.bus.subscribe(topics.UI_PROMPT, self._on)
 
     async def _on(self, message: Message) -> None:
         self.events.append(message)
@@ -67,7 +71,13 @@ class _Collector:
 async def _wait_for(events: list, action_id: str, type_: str, *, attempts: int = 300):
     for _ in range(attempts):
         for m in events:
-            if m.payload.get("action_id") == action_id and m.type == type_:
+            # ui.prompt keys its payload by `prompt_id`, not `action_id`
+            # (it's a generic question/answer contract Guardian reuses,
+            # not action-specific) -- `prompt_id == action_id` by
+            # `_on_proposed`'s own construction, so either field name
+            # correlates a `ui.prompt` back to the same proposal.
+            id_ = m.payload.get("action_id") or m.payload.get("prompt_id")
+            if id_ == action_id and m.type == type_:
                 return m
         await asyncio.sleep(0.01)
     return None
@@ -169,6 +179,109 @@ class TestGuardianExecutionActionPath(unittest.IsolatedAsyncioTestCase):
         # _WIRE_DENY_LAYER); the specific rule that fired is in reasons.
         self.assertEqual(denied.payload["layer"], "policy")
         self.assertIn("protected", denied.payload["reasons"][0])
+
+
+class TestNeedsHumanIsActuallyAnswerable(unittest.IsolatedAsyncioTestCase):
+    """Live-caught (the creator, real use): `action.needs_human` was
+    published and then never consumed by anything -- there was no way
+    for a real "yes" to ever reach Guardian and let the action through.
+    Fixed by also publishing `ui.prompt` (`prompt_id = action_id`) and
+    having Guardian answer `ui.prompt_answered` for it directly, reusing
+    the pre-existing question/answer contract instead of a new one."""
+
+    async def _boot(self) -> Kernel:
+        tmp = tempfile.TemporaryDirectory()
+        config = LoadedConfig({"runtime": {"data_dir": tmp.name}}, None)
+        kernel = Kernel(config, secrets=EnvSecretStore({}))
+        patcher = mock.patch("simorgh.kernel.service.build_factories", new=_patched_build_factories())
+        patcher.start()
+        await kernel.boot()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(tmp.cleanup)
+        self.addAsyncCleanup(kernel.shutdown)
+        self.assertEqual(kernel.state.state, RUNNING)
+        return kernel
+
+    async def test_needs_human_also_publishes_a_real_answerable_prompt(self):
+        kernel = await self._boot()
+        collector = _Collector(kernel.bus)
+        await collector.start()
+
+        await kernel.bus.publish(_proposal(
+            "human-1", tool="propose_mcp_server",
+            args={"proposal": "name: ddg_search\ncommand: npx\nreason: test"}, reversibility="irreversible",
+        ))
+        prompt = await _wait_for(collector.events, "human-1", topics.UI_PROMPT)
+        self.assertIsNotNone(prompt, "action.needs_human never produced an answerable ui.prompt")
+        self.assertEqual(prompt.payload["prompt_id"], "human-1")
+        self.assertEqual(prompt.payload["options"], ["yes", "no"])
+
+    async def test_a_real_yes_answer_approves_it_and_the_tool_actually_runs(self):
+        kernel = await self._boot()
+        collector = _Collector(kernel.bus)
+        await collector.start()
+
+        await kernel.bus.publish(_proposal(
+            "human-2", tool="propose_mcp_server",
+            args={"proposal": "name: ddg_search\ncommand: npx\nreason: test"}, reversibility="irreversible",
+        ))
+        self.assertIsNotNone(await _wait_for(collector.events, "human-2", topics.UI_PROMPT))
+
+        await kernel.bus.publish(Message.new(
+            topics.UI_PROMPT_ANSWERED, source="test", payload={"prompt_id": "human-2", "answer": "yes"},
+        ))
+        result = await _wait_for(collector.events, "human-2", topics.ACTION_RESULT)
+        self.assertIsNotNone(result, "no action.result after a real 'yes' answer")
+        self.assertTrue(result.payload["ok"], result.payload)
+
+    async def test_a_real_no_answer_denies_it(self):
+        kernel = await self._boot()
+        collector = _Collector(kernel.bus)
+        await collector.start()
+
+        await kernel.bus.publish(_proposal(
+            "human-3", tool="propose_mcp_server",
+            args={"proposal": "name: ddg_search\ncommand: npx\nreason: test"}, reversibility="irreversible",
+        ))
+        self.assertIsNotNone(await _wait_for(collector.events, "human-3", topics.UI_PROMPT))
+
+        await kernel.bus.publish(Message.new(
+            topics.UI_PROMPT_ANSWERED, source="test", payload={"prompt_id": "human-3", "answer": "no"},
+        ))
+        denied = await _wait_for(collector.events, "human-3", topics.ACTION_DENIED)
+        self.assertIsNotNone(denied)
+        self.assertIn("human declined", denied.payload["reasons"])
+
+    async def test_answering_twice_only_resolves_once(self):
+        kernel = await self._boot()
+        collector = _Collector(kernel.bus)
+        await collector.start()
+
+        await kernel.bus.publish(_proposal(
+            "human-4", tool="propose_mcp_server",
+            args={"proposal": "name: ddg_search\ncommand: npx\nreason: test"}, reversibility="irreversible",
+        ))
+        self.assertIsNotNone(await _wait_for(collector.events, "human-4", topics.UI_PROMPT))
+
+        for answer in ("yes", "no"):  # the second answer, whatever it is, must be a no-op
+            await kernel.bus.publish(Message.new(
+                topics.UI_PROMPT_ANSWERED, source="test", payload={"prompt_id": "human-4", "answer": answer},
+            ))
+        await asyncio.sleep(0.1)
+        results = [m for m in collector.events if m.payload.get("action_id") == "human-4" and m.type == topics.ACTION_RESULT]
+        denials = [m for m in collector.events if m.payload.get("action_id") == "human-4" and m.type == topics.ACTION_DENIED]
+        self.assertEqual(len(results) + len(denials), 1, "a second answer must never re-resolve an already-answered action")
+
+    async def test_an_unrelated_prompt_id_is_ignored_not_a_crash(self):
+        kernel = await self._boot()
+        collector = _Collector(kernel.bus)
+        await collector.start()
+
+        await kernel.bus.publish(Message.new(
+            topics.UI_PROMPT_ANSWERED, source="test", payload={"prompt_id": "no-such-action", "answer": "yes"},
+        ))
+        await asyncio.sleep(0.1)  # must not raise, and must not fabricate any action.* event
+        self.assertEqual([m for m in collector.events if m.payload.get("action_id") == "no-such-action"], [])
 
 
 if __name__ == "__main__":

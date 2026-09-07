@@ -91,6 +91,70 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
             await self._pump()
         self.assertNotIn("duplicate candidate", out.getvalue())
 
+    async def test_a_pending_prompt_is_answered_for_real_not_the_default(self):
+        """Live-caught (the creator, real use: typed "yes" at a pending
+        Guardian approval three separate times, worded three different
+        ways, and each one was silently auto-answered "no" instead --
+        `_on_prompt` used to print the question and *immediately*
+        resolve it to `default` with no real window to answer). A typed
+        line matching the prompt's own `options` now resolves it for
+        real, bypassing dispatch/chat entirely.
+
+        Calls `_on_prompt` directly rather than publish-then-pump: under
+        `FakeClock`, the watchdog's own `clock.sleep(timeout_s)` resolves
+        after a single tick regardless of `timeout_s`'s actual size (the
+        fake clock's whole point is not to block wall-clock time), so
+        any pump long enough to observe delivery is also long enough to
+        let the watchdog "expire" the prompt first -- a test-environment
+        race, not a real one (a real `Clock.sleep` genuinely waits).
+        Calling the handler directly, then answering with no intervening
+        `await`, proves the *answer path* deterministically; the
+        watchdog's own real firing is covered separately below."""
+        answers: list[dict] = []
+        sub = await self.other.subscribe(topics.UI_PROMPT_ANSWERED, lambda m: answers.append(m.payload) or asyncio.sleep(0))
+        await self.service._on_prompt(self.bus.new(topics.UI_PROMPT, {
+            "prompt_id": "p1", "question": "Approve propose_mcp_server?",
+            "options": ["yes", "no"], "timeout_s": 1800.0, "default": "no",
+        }))
+        out = await self._line("yes")
+        await self._pump()
+        await sub.unsubscribe()
+        self.assertEqual(answers, [{"prompt_id": "p1", "answer": "yes"}])
+        self.assertIn("answered 'yes'", out)
+
+    async def test_a_bare_y_answers_a_yes_no_prompt(self):
+        answers: list[dict] = []
+        sub = await self.other.subscribe(topics.UI_PROMPT_ANSWERED, lambda m: answers.append(m.payload) or asyncio.sleep(0))
+        await self.service._on_prompt(self.bus.new(topics.UI_PROMPT, {
+            "prompt_id": "p2", "question": "Approve?", "options": ["yes", "no"], "timeout_s": 1800.0, "default": "no",
+        }))
+        await self._line("y")
+        await self._pump()
+        await sub.unsubscribe()
+        self.assertEqual(answers, [{"prompt_id": "p2", "answer": "yes"}])
+
+    async def test_a_line_that_doesnt_match_any_option_is_handled_normally(self):
+        await self.bus.publish(self.bus.new(topics.UI_PROMPT, {
+            "prompt_id": "p3", "question": "Approve?", "options": ["yes", "no"], "timeout_s": 1800.0, "default": "no",
+        }))
+        await self._pump()
+        out = await self._line("status")  # a real command, not an answer -- must not be swallowed
+        self.assertNotIn("answered", out)
+
+    async def test_no_pending_prompt_means_a_bare_yes_is_ordinary_chat(self):
+        out = await self._line("yes")
+        self.assertNotIn("answered", out)
+
+    async def test_the_watchdog_auto_answers_the_default_when_nobody_types_anything(self):
+        answers: list[dict] = []
+        sub = await self.other.subscribe(topics.UI_PROMPT_ANSWERED, lambda m: answers.append(m.payload) or asyncio.sleep(0))
+        await self.bus.publish(self.bus.new(topics.UI_PROMPT, {
+            "prompt_id": "p4", "question": "Approve?", "options": ["yes", "no"], "timeout_s": 0.05, "default": "no",
+        }))
+        await asyncio.sleep(0.15)
+        await sub.unsubscribe()
+        self.assertEqual(answers, [{"prompt_id": "p4", "answer": "no"}])
+
     async def test_pause_resume_exit_round_trip(self):
         """Flow 5: pause -> resume -> exit, all real `system.*` commands
         published by Interface (proven against a real bus; the full

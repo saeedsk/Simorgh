@@ -4398,3 +4398,74 @@ Still ahead, roughly in order:
     tools-bearing profile), each confirmed to fail against the pre-fix
     code first (`KeyError: 'expected'` / the instruction text simply
     absent). Full suite green (2,299 tests).
+
+143. **`action.needs_human` was never actually answerable, and the
+    creator hit it within minutes of milestone 142 shipping** -- typed
+    "yes" at a real pending Guardian approval, worded three different
+    ways across three separate turns, and every single time it silently
+    resolved "no" instead. Two compounding causes, both structural, both
+    fixed:
+
+    - **Nothing ever consumed an answer to `action.needs_human`.**
+      Guardian published it and returned -- no subscriber anywhere in
+      the codebase ever listened for a reply. `interface/service.py`'s
+      own `_on_needs_human` just printed the raw payload. There was no
+      code path from "human types yes" to "Guardian approves the
+      action," full stop, regardless of how the human answered.
+    - **Even `ui.prompt` -- a real, working question/answer contract
+      already used by Planning's plan-mode approval -- never actually
+      waited for an answer.** `_on_prompt` printed the question and
+      *immediately* resolved it to `default` (`"no"`), a deliberate
+      choice from the original build (this module's own docstring said
+      so plainly: "interactive answer collection ... did not land this
+      session"). That scope cut was reasonable when written; it became
+      the single biggest blocker to using Sim at all once irreversible
+      actions started actually reaching the model (milestone 142).
+
+    Fixed by reusing the existing `ui.prompt`/`ui.prompt_answered` pair
+    instead of inventing a new contract: Guardian's `needs_human` branch
+    now also publishes `ui.prompt` with `prompt_id = action_id`;
+    Interface tracks pending prompts and lets `_handle_line` intercept a
+    typed line matching the prompt's own `options` *before* command
+    parsing or chat, resolving it directly -- an approval answer is not
+    a conversational act, so it never reaches the model. A background
+    watchdog (`Clock.sleep`, not raw `asyncio.sleep` -- FakeClock-testable,
+    and a real wait in production) still auto-answers `default` at
+    `timeout_s` so a prompt nobody is watching (the HTTP API, a detached
+    session) never hangs forever. Guardian's new `_on_prompt_answered`
+    resolves the real proposal by re-reading it from the `action:<id>`
+    Ledger stream's own `received` event -- the same re-fetch-don't-
+    trust-the-message pattern `execution/README.md`'s
+    `_fetch_proposed_args` already established for approved actions,
+    since Guardian's in-memory state discards a proposal the moment it
+    escalates.
+
+    **A second, related fix from the same real session.** Once
+    answering actually worked, the creator asked directly: "sim should
+    just create it, period ... remove any rule that prevents it ...
+    loosen up rules that limit sim." `propose_mcp_server`'s own
+    `reversibility` changed from `irreversible` to `reversible`
+    (`execution/tools.py`, `orchestration/tools.py`'s matching
+    `_TOOL_POLICY` entry) -- it only ever records a proposal, so gating
+    the *recording* behind a human-approval escalation was redundant
+    with the real gate one layer down anyway. Guardian now auto-allows
+    it in guarded posture, same as `read_file`: Sim can propose a server
+    with zero friction. The actual capability grant -- writing to
+    `simorgh.toml`, only ever `mcp approve`'s job -- stays exactly as
+    gated as before on purpose: that boundary is structural (no code
+    path from the tool-calling pipeline reaches it, in any Guardian
+    posture), not a trust-level policy this change touches, and the
+    creator was told plainly that removing it too is a materially
+    different, bigger decision (unsupervised arbitrary third-party code
+    execution) they'd need to ask for specifically.
+
+    14 new tests: `test_guardian_execution_action_path.py` (5, real
+    Kernel boot -- `needs_human` produces a real answerable `ui.prompt`;
+    a real "yes" answer approves it and the tool actually runs; a real
+    "no" denies it; answering twice only resolves once; an unrelated
+    `prompt_id` is ignored, not a crash) and `interface/test_service.py`
+    (5 -- a pending prompt is answered for real, not defaulted; a bare
+    `y`/`n` shorthand works; a non-matching line is handled normally,
+    not swallowed; no pending prompt means a bare "yes" is ordinary
+    chat; the watchdog still auto-answers the default when nobody
+    types anything). Full suite green (2,309 tests).

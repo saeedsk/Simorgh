@@ -221,13 +221,26 @@ class ProposeMcpServerTool:
     Deliberately does NOT touch `simorgh.toml` itself -- it only
     validates and records a proposal (this stream) for a human to review
     with the `mcp` CLI command (`interface/dispatch.py`), the only code
-    path that ever writes the file. That split is the actual answer to
-    "where is the autonomy": Sim can express intent and reasoning on its
-    own, fast, with no human drafting the proposal for it -- but a new
-    external subprocess with new network reach is a capability grant
-    serious enough to keep outside Guardian's mode-dependent trust levels
-    entirely, not just behind an `irreversible` escalation that
-    `mode=trusted` could auto-allow without a human ever seeing it.
+    path that ever writes the file.
+
+    `reversibility="reversible"` (changed same day from `irreversible`,
+    the creator: "sim should just create it, period ... remove any rule
+    that prevents it"): this call only records a proposal, so gating the
+    *proposal itself* behind Guardian's human-escalation path was
+    redundant with the real gate one layer down and, worse, genuinely
+    unanswerable at the time this was first written (`interface/
+    service.py`'s own docstring on the `_on_prompt` fix has the story --
+    `action.needs_human` had no consumer at all, so every escalation
+    silently resolved "no" no matter what the human typed). Now that a
+    real answer path exists it *could* go back to `irreversible`, but
+    the creator's ask was to remove the friction, not just make it
+    answerable, so this stays `reversible`: Guardian auto-allows it in
+    guarded/trusted posture, same as `read_file`. The actual capability
+    grant remains exactly as gated as before -- writing to `simorgh.
+    toml` is `mcp approve`'s job alone, a human-only CLI action with no
+    code path reachable from a tool call in any Guardian posture. That
+    second gate is structural, not a trust-level policy, and stays
+    unless the creator asks for that one specifically to go too.
 
     Single-argument, marker-compatible (`orchestration/tools.py`'s own
     ceiling for tools with a genuinely structured, multi-field schema):
@@ -242,7 +255,7 @@ class ProposeMcpServerTool:
         "read_only_tools (comma-separated), env_keys (comma-separated names only -- never values), reason."
     )
     read_only = False
-    reversibility = "irreversible"
+    reversibility = "reversible"
     args_schema = {"type": "object", "required": ["proposal"], "properties": {"proposal": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
