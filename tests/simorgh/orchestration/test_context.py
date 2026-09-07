@@ -87,3 +87,76 @@ class TestMemoryRetrieveSizeCap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheAssembledPrompt(unittest.TestCase):
+    """Token audit, 2026-09-07. Two things the assembler was getting
+    wrong, both measured against a real booted system."""
+
+    async def _assemble(self, session, *, user_text="", answer_identity=True):
+        async with Harness() as h:
+            other = h.client("worldmodel")
+            subs = []
+            if answer_identity:
+                async def _self(message):
+                    await other.reply(message, type=topics.SELF_SUMMARY_REPLY,
+                                      payload={"text": "SELF SUMMARY BLOCK"})
+
+                async def _voice(message):
+                    await other.reply(message, type=topics.PERSONA_VOICE_REPLY,
+                                      payload={"style_block": "VOICE BLOCK", "mood_phrase": ""})
+
+                subs.append(await other.subscribe(topics.SELF_SUMMARY, _self))
+                subs.append(await other.subscribe(topics.PERSONA_VOICE, _voice))
+            blocks = await Assembler(h.client("orchestration")).assemble(
+                session, session.profile.scaffold, user_text=user_text,
+            )
+            for sub in subs:
+                await sub.unsubscribe()
+            return blocks
+
+    @run
+    async def test_the_voice_and_self_summary_are_not_fetched_here(self):
+        """Cognition's own assembler owns both as protected blocks (04
+        section 5). Fetching them here too put a verbatim second copy in
+        every prompt -- 198 of 819 measured tokens -- and cost two extra
+        bus round trips per think call."""
+        session = Session(task_id="t1", kind="patch", mode="execute",
+                          profile=profiles.PATCH, user_text="add a docstring")
+        blocks = await self._assemble(session)
+        text = " ".join(b["content"] for b in blocks)
+        self.assertNotIn("SELF SUMMARY BLOCK", text)
+        self.assertNotIn("VOICE BLOCK", text)
+
+    @run
+    async def test_the_task_is_present_on_a_later_step_not_only_the_first(self):
+        """`session.py` clears `pending_user_text` after one use, and the
+        request never entered `session.messages` -- so from step 2 of 8 a
+        patch session no longer had the instruction in front of it, only
+        its own tool output. A run that applied a file and then stopped
+        had genuinely lost the task by then."""
+        session = Session(task_id="t1", kind="patch", mode="execute",
+                          profile=profiles.PATCH, user_text="add a docstring to the retry helper")
+        session.messages.append({"role": "assistant", "content": "[tool_call read_file] -> ..."})
+        blocks = await self._assemble(session, user_text="")  # a later step passes none
+        self.assertIn("add a docstring to the retry helper",
+                      " ".join(b["content"] for b in blocks))
+
+    @run
+    async def test_the_task_comes_before_the_transcript(self):
+        session = Session(task_id="t1", kind="patch", mode="execute",
+                          profile=profiles.PATCH, user_text="the task")
+        session.messages.append({"role": "assistant", "content": "a step"})
+        blocks = await self._assemble(session)
+        contents = [b["content"] for b in blocks]
+        self.assertLess(contents.index("the task"), contents.index("a step"))
+
+    @run
+    async def test_a_session_with_no_task_text_still_assembles(self):
+        session = Session(task_id="t1", kind="chat", mode="execute", profile=profiles.CHAT)
+        blocks = await self._assemble(session)
+        self.assertEqual(blocks, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
