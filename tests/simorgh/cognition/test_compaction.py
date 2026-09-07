@@ -294,6 +294,62 @@ class TestCompactorLayer5AutoCompact(unittest.IsolatedAsyncioTestCase):
         self.assertIn("SUMMARY: did the thing, touched foo.py", result.text)
         self.assertIsNotNone(result.summary_ref)
 
+    async def test_bounded_body_keeps_the_most_recent_segments_under_the_cap(self):
+        """Live-caught, real use (07-post-cutover-review.md section 3.4d):
+        layer 5 was the "last resort" for context_too_large, but nothing
+        capped its own input -- a genuinely large `pre_collapse` (layers
+        1-3 don't always shrink it enough on their own, e.g. under a more
+        realistic budget than a tiny test `limit_tokens`) could make
+        `body` too large for the `consolidate` purpose's own budget to
+        accept, so the last resort could fail its own call instead of
+        saving the request. Targets `_bounded_body` directly -- the unit
+        `_layer5_auto_compact` actually calls -- rather than fighting
+        `compact()`'s own layers 1-3, which already shrink a tiny-budget
+        test fixture before layer 5 ever sees it."""
+        from simorgh.cognition.compaction import Compactor, _LAYER5_INPUT_MAX_CHARS, _Segment
+
+        # 20 segments of ~3000 chars each = ~60,000 chars, well over the cap.
+        segments = [
+            _Segment({"role": "user", "content": f"seg{i} " + "w" * 3000}, 750) for i in range(20)
+        ]
+        body, dropped = Compactor._bounded_body(segments)  # noqa: SLF001
+
+        self.assertLess(len(body), _LAYER5_INPUT_MAX_CHARS + 100)  # a little slack at the boundary segment
+        self.assertGreater(dropped, 0)
+        self.assertIn("seg19", body)  # the most recent segments are kept
+        self.assertNotIn("seg0 ", body)  # the oldest were dropped, not silently truncated mid-segment
+        # Order preserved for what's kept (oldest-of-the-kept first).
+        self.assertLess(body.index(f"seg{20 - 1 - dropped + 1}"), body.index("seg19"))
+
+    async def test_a_huge_input_still_gets_a_real_summary_end_to_end(self):
+        """The end-to-end path: even when `pre_collapse` is large enough
+        to need the cap, layer 5 still fires and produces a real summary
+        -- the cap degrades gracefully, it doesn't just fail differently."""
+        received: list[str] = []
+
+        async def _summarize(text: str) -> str:
+            received.append(text)
+            return "compact summary"
+
+        config = Config(collapse_keep_full_segments=1, snip_trigger_fraction=100.0, microcompact_trigger_fraction=100.0)
+        compactor = Compactor(config, self.ledger, bus=self.bus, summarize=_summarize)
+        # Layers 2/3 are disabled above (trigger fractions set unreachably
+        # high) so `pre_collapse` reaching layer 5 stays the full, large
+        # set of segments -- only layer 4's headline-collapse runs before
+        # it, and a low `limit_tokens` keeps even the collapsed total over
+        # budget so layer 5 actually fires.
+        messages = [
+            {"role": "user", "content": f"seg{i} " + "w" * 3000} for i in range(20)
+        ] + [{"role": "user", "content": "the newest turn, must survive"}]
+        result = await compactor.compact(messages, limit_tokens=5, allow_summarize=True, session_id="s1")
+
+        self.assertIn(5, result.layers_applied)
+        self.assertEqual(len(received), 1)
+        from simorgh.cognition.compaction import _LAYER5_INPUT_MAX_CHARS
+        self.assertLess(len(received[0]), _LAYER5_INPUT_MAX_CHARS + 2_000)  # prompt prefix + cap, real headroom
+        self.assertIn("the newest turn, must survive", result.text)
+        self.assertIn("compact summary", result.text)
+
     async def test_replaces_the_collapsed_older_segments_not_the_newest(self):
         async def _summarize(text: str) -> str:
             return "compact summary"
