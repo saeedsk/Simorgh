@@ -284,6 +284,21 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("here is the real answer", out)
         self.assertNotIn("wt1", self.service._watched_tasks)  # cleaned up once printed
 
+    async def test_a_deduplicated_task_create_says_so_and_is_not_watched(self):
+        """The reply that used to print as "task created: <old id>"."""
+        async def _responder(message: Message) -> None:
+            await self.other.reply(message, type=topics.TASK_CREATE_REPLY, payload={
+                "ok": True, "task_id": "old1", "deduplicated_against": "old1",
+            })
+
+        sub = await self.other.subscribe(topics.TASK_CREATE, _responder)
+        out = await self._line("improve web access")
+        await sub.unsubscribe()
+        self.assertIn("not created", out)
+        self.assertIn("old1", out)
+        self.assertNotIn("task created", out)
+        self.assertNotIn("old1", self.service._watched_tasks)
+
     async def test_a_diff_shaped_step_summary_renders_as_a_real_diff_block(self):
         """07-post-cutover-review.md §3.11: `execution/tools.py` now embeds
         a unified diff in a successful apply_source_patch's own output,

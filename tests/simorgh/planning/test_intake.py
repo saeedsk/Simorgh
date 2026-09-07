@@ -28,6 +28,40 @@ async def _intake():
     return Intake(store, dedupe_threshold=0.45), store
 
 
+class TestDedupeIsForAutonomousOriginsOnly(unittest.TestCase):
+    """2026-09-07, live-caught: `improve docs/A.md ...`, `improve
+    docs/B.md ...` and a third all returned the first task's id at the
+    45% fuzzy threshold, so only the first ever ran."""
+
+    @run
+    async def test_a_curiosity_candidate_is_deduped_against_a_similar_task(self):
+        intake, _store = await _intake()
+        first = await intake.on_candidate(kind="patch", description="improve web access via mcp", subject=None, area="")
+        second = await intake.on_candidate(kind="patch", description="improve mcp web access", subject=None, area="")
+        self.assertIsNone(second.task)
+        self.assertEqual(second.duplicate_of, first.task.id)
+
+    @run
+    async def test_a_human_request_is_never_deduped(self):
+        intake, _store = await _intake()
+        first = await intake.on_candidate(
+            kind="patch", description="improve web access via mcp", subject="docs/A.md", area="", origin="human",
+        )
+        second = await intake.on_candidate(
+            kind="patch", description="improve mcp web access", subject="docs/B.md", area="", origin="human",
+        )
+        self.assertIsNotNone(second.task)
+        self.assertNotEqual(second.task.id, first.task.id)
+
+    @run
+    async def test_a_human_goal_is_never_deduped_either(self):
+        intake, _store = await _intake()
+        first = await intake.on_goal_stated(goal="plan web access", origin="human", wants_project=True)
+        second = await intake.on_goal_stated(goal="plan for web access mcp", origin="human", wants_project=True)
+        self.assertIsNotNone(second.task)
+        self.assertNotEqual(second.task.id, first.task.id)
+
+
 class TestGoalStatedRiskOverride(unittest.TestCase):
     @run
     async def test_project_risk_defaults_to_medium_when_omitted(self):
