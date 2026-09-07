@@ -1,5 +1,8 @@
-"""ContextAssembler (16 section 5): gathers memory/self/world/persona for
-one `cognition.think` call. Every request uses `bus.request_or_error`
+"""ContextAssembler (16 section 5): gathers the memory block and the
+session transcript for one `cognition.think` call. The persona voice and
+the self summary are deliberately *not* gathered here -- Cognition's own
+assembler owns those as protected blocks, and fetching them here too sent
+both twice in every prompt (see `assemble`). Every request uses `bus.request_or_error`
 with a short timeout and degrades to simply omitting that block on a
 timeout or error reply -- other Phase 1 subsystems may not exist yet in
 this same build, and even once they do, a slow one must never stall a
@@ -33,24 +36,35 @@ class Assembler:
         self._timeout_s = timeout_s
 
     async def assemble(self, session: Session, purpose: str, user_text: str = "") -> list[dict]:
+        """The messages for one `cognition.think`.
+
+        Deliberately *not* the persona voice or the self summary. Both
+        used to be fetched here and prepended, and Cognition's own
+        assembler fetches and prepends them again as protected blocks (04
+        section 5's prompt assembly order, which is their designed home).
+        Measured 2026-09-07: every think call carried both twice -- 198 of
+        819 prompt tokens were a verbatim second copy -- and paid for two
+        extra bus round trips to Persona and Self per call. The second
+        copy was also the worse-placed one, landing inside the user turn
+        behind a literal "[system]" prefix.
+        """
         blocks: list[dict] = []
 
-        self_text = await self._self_summary()
-        if self_text:
-            blocks.append({"role": "system", "content": self_text})
-
-        voice = await self._persona_voice()
-        if voice:
-            blocks.append({"role": "system", "content": voice})
-
-        mem = await self._memory_retrieve(user_text or session.task_id, session)
+        task = session.user_text or user_text
+        mem = await self._memory_retrieve(task or session.task_id, session)
         if mem:
             blocks.append({"role": "system", "content": "Relevant memory:\n" + mem})
 
-        for m in session.messages:
-            blocks.append(m)
-        if user_text:
-            blocks.append({"role": "user", "content": user_text})
+        # Live-caught by the same audit: this was sent on the *first* step
+        # only (`session.py` clears `pending_user_text` after one use) and
+        # never entered `session.messages`, so from step 2 of 8 the model
+        # no longer had the request in front of it -- only its own tool
+        # calls and their output. A patch session that applied a file and
+        # then stopped had, by then, genuinely lost the instruction.
+        if task:
+            blocks.append({"role": "user", "content": task})
+
+        blocks.extend(session.messages)
         return blocks
 
     async def _request(self, type_: str, payload: dict) -> Message | None:
@@ -65,18 +79,6 @@ class Assembler:
         if reply.payload.get("ok") is False:
             return None
         return reply
-
-    async def _self_summary(self) -> str:
-        reply = await self._request(topics.SELF_SUMMARY, {"budget_tokens": 300})
-        return reply.payload.get("text", "") if reply else ""
-
-    async def _persona_voice(self) -> str:
-        reply = await self._request(topics.PERSONA_VOICE, {"context": "chat"})
-        if not reply:
-            return ""
-        style = reply.payload.get("style_block", "")
-        mood = reply.payload.get("mood_phrase", "")
-        return "\n".join(x for x in (style, mood) if x)
 
     async def _memory_retrieve(self, query: str, session: Session) -> str:
         reply = await self._request(
