@@ -122,6 +122,26 @@ class TestPlanningBootsAsARealKernelService(unittest.IsolatedAsyncioTestCase):
         [task] = [t for t in list_reply.payload["tasks"] if t["task_id"] == task_id]
         self.assertEqual(task["status"], "completed")
 
+    async def test_a_new_task_is_offered_to_workers_immediately_not_only_on_the_idle_tick(self) -> None:
+        """Live-caught by the CLI end-to-end test, 2026-09-07: the only
+        caller of `Scheduler.dispatch_ready` was the idle-tick handler,
+        and the Kernel's idle tick needs `idle_threshold_s` (10s) of no
+        percepts first -- which every typed line resets. A task typed at
+        the REPL sat unclaimed for at least ten seconds, and someone who
+        kept typing could starve their own work indefinitely."""
+        bus = self.kernel.bus
+        available: list[str] = []
+        sub = await bus.subscribe(
+            topics.TASK_AVAILABLE, lambda m: available.append(m.payload["task_id"]) or asyncio.sleep(0),
+        )
+        create_reply = await bus.request(Message.new(
+            topics.TASK_CREATE, source="tester",
+            payload={"kind": "patch", "description": "make the dispatcher prompt", "origin": "human"},
+        ))
+        await _pump()
+        await sub.unsubscribe()
+        self.assertIn(create_reply.payload["task_id"], available)
+
     async def test_second_autonomous_task_create_with_similar_description_is_deduped(self) -> None:
         bus = self.kernel.bus
         first = await bus.request(Message.new(

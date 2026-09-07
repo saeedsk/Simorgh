@@ -86,7 +86,7 @@ consumer of Planning's events and a requester of `task.claim`.
 | `research.finding.recorded` | event | fact | if `follow_up` present, create a child `patch` task under the research task |
 | `reflect.patterns.found` | event | fact | port of `discover_improvements`: each pattern's proposal becomes a `patch` task (deduped) |
 | `system.tick.second` | event | tick | lease-expiry scan, stalled detection, reconsideration timers |
-| `system.tick.idle` | event | tick | if any task is `available`, re-emit `task.available` for the highest-priority ready one (idempotent) |
+| `system.tick.idle` | event | tick | if any task is `available`, re-emit `task.available` for the highest-priority ready one (idempotent). A *newly created* task does not wait for this: `_announce_created` dispatches straight away, since the idle tick needs 10s of no percepts and a human at the REPL keeps resetting that |
 | `system.state.changed` | event | fact | `paused`: stop emitting `task.available`; `stopping`: same and flush |
 | `cognition.think.reply` | reply | rep | decomposition and re-grounding answers (correlated) |
 | `world.env.query.reply` | reply | rep | file listing for decomposition prompts |
