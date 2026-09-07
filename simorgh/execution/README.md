@@ -201,8 +201,14 @@ third-party subprocess for the same job would be strictly worse.
 
 - `shell`, `relaunch`, and `hot_swap` are NOT built this pass -- they
   need a `KernelControl` contract that doesn't exist yet.
-  `isolated_test_suite` and the `skill.draft`/`self_patch.draft`
-  Cognition-backed drafting-loop tools are also not built -- Learning's
+  `isolated_test_suite` landed later as the standalone `run_tests` tool
+  (pytest against a throwaway copy of the repo, never the live tree;
+  `tools.py::RunTestsTool`), alongside `search_code` (regex search across
+  `readable_roots`, accelerated by `ripgrep` when it's on `PATH`, pure
+  stdlib otherwise -- the same optional-external-binary pattern as the
+  `claude` CLI). What is still NOT built is the full read/draft/test
+  *loop* around it: the `skill.draft`/`self_patch.draft`
+  Cognition-backed drafting-loop tools -- Learning's
   `PatchPipeline` proposes them, but they depend on Cognition composing
   a multi-step read/draft/test loop, which is out of this build's scope
   (see `simorgh/learning/README.md`'s own open questions for the
