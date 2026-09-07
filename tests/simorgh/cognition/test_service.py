@@ -167,6 +167,23 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("key: value lines", joined)
         self.assertIn("reason (required)", joined)
 
+    async def test_task_rules_reach_the_real_system_prompt(self):
+        """`assembler.py` has had a protected `task_rules` block since it
+        was written (04 section 5.4) and this service never passed one,
+        so `Profile.scaffold` had nowhere to land -- live 2026-09-07, a
+        patch session applied its edit and never committed it because
+        nothing ever told it to."""
+        provider = _FakeProvider(text="ok")
+        await self._make(providers=[provider])
+        request = Message.new(topics.COGNITION_THINK, source="test", payload={
+            "purpose": "draft", "messages": [{"role": "user", "content": "tighten the retry loop"}],
+            "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False,
+            "task_rules": "Commit with git_commit before your final answer.",
+        })
+        await self.bus.request(request, timeout=5.0)
+        joined = "\n".join(m["content"] for m in provider.received_messages if m["role"] == "system")
+        self.assertIn("Commit with git_commit before your final answer.", joined)
+
     async def test_a_hint_for_a_tool_not_offered_this_turn_is_ignored(self):
         provider = _FakeProvider(text="ok")
         await self._make(providers=[provider])

@@ -174,6 +174,7 @@ class Service:
         try:
             assembled = await self._assembler.assemble(
                 purpose=purpose.value, messages=payload["messages"],
+                task_rules=payload.get("task_rules", ""),
                 last_step=payload.get("last_step", False),
             )
             protected = [b for b in assembled.blocks if b.protected]

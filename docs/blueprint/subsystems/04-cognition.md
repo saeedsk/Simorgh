@@ -191,7 +191,7 @@ with a token estimate):
 1. `constitution` (protected) — the directive list from `docs/SOUL.md` §Core Directives, loaded at start, hashed; identical every call.
 2. `voice` (protected) — `persona.voice.reply.style_block` + mood phrase (the v1 `_IDENTITY_PREFIX`/`_TONE_REMINDER`, now owned by Persona).
 3. `self_summary` (protected) — `self.summary.reply.text` at the purpose's budget (chat 300 tokens, draft 600, plan 800).
-4. `task_rules` (protected) — caller-supplied rules for this purpose (scope, format, `_CAPABILITY_REFERENCE`-style tool descriptions for the tools the caller passed).
+4. `task_rules` (protected) — caller-supplied rules for this purpose (scope, format, `_CAPABILITY_REFERENCE`-style tool descriptions for the tools the caller passed). Filled from `cognition.think`'s optional `task_rules` field; Orchestration renders it per profile in `orchestration/scaffolds.py`, which is what tells a patch session to commit what it applied.
 5. `memory` (elastic) — caller-supplied retrieved items (Cognition does not call Memory itself; Orchestration does, so retrieval policy stays with the caller).
 6. `conversation` (elastic) — the caller's `messages`.
 7. `tool_results` (elastic, layer-1 target) — tool outputs in the conversation.
