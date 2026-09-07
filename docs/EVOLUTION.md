@@ -3933,3 +3933,53 @@ Still ahead, roughly in order:
     cap actually gets exercised rather than being pre-empted by earlier
     layers), each confirmed to fail against the pre-fix code first.
     Full suite green.
+
+136. **Real code diffs in the CLI and dashboard** (the creator: "in v1
+    there was a nice unicode base command line interface ... code
+    diffs, showing sub task, sub agents ..."; decision recorded at
+    `07-post-cutover-review.md` §3.11). A patch tool overwriting a file
+    used to just say "wrote path" -- no visibility into what actually
+    changed.
+
+    - `execution/tools.py::_write_scoped_file` now reads the file's old
+      content before overwriting it and, if it already existed and the
+      content actually changed, computes a real `difflib.unified_diff`
+      and appends it to the tool's own `output` -- the existing pipe
+      (`ToolResult.output` -> `ActionResult.stdout_preview`) carries it
+      to the wire with no contracts change.
+    - That put a full diff inside what used to be a short one-line
+      step summary, which collided with an existing constraint from
+      this same session's context-budget work: `session.py`'s
+      `_propose_and_await` fed its return value into *two* different
+      places -- the model's own next-turn context (`session.messages`,
+      must stay tight) and the published `Step`/`task.step` (Ledger,
+      CLI narration, dashboard feed -- room for a real diff). Split the
+      one return value into two: `_propose_and_await` now returns
+      `(ok, summary, detail)` -- `summary` stays capped at 200 chars
+      for the model's own context, `detail` gets a new, separate
+      2,000-char cap (`_DETAIL_CHARS`) for everything a human or the
+      narrator reads. `session.messages` keeps using `summary`; the
+      published `Step` now uses `detail`.
+    - The CLI's live narrator (`interface/service.py::_on_task_event`)
+      and the dashboard's activity-feed JS (`static/dashboard.html`)
+      both now recognize the "<head>\n\n--- a/..." shape a successful
+      patch produces, split the plain head line from the diff, and
+      render the diff as its own block (`render.diff_block` in the
+      CLI -- green `+`/red `-` SGR; a `<pre class="diff">` with the
+      same color convention in the dashboard) instead of dumping raw
+      diff text inline in the one-line "step N (act) ..." narration.
+
+    3 new tests in `test_tools.py` (new file has no diff; overwriting
+    with different content produces a real unified diff; overwriting
+    with identical content has no diff -- 29/29 in the module passing)
+    plus 1 new test in `test_service.py`
+    (`test_a_diff_shaped_step_summary_renders_as_a_real_diff_block`,
+    confirmed the "--- a/" header never lands in the one-line dim
+    narration and does land as its own colored block below it). The
+    dashboard JS is not covered by the Python suite (no JS tests exist
+    in this repo); the backend contract it depends on -- `task.step`
+    entries reach `/api/activity` with `summary` untruncated -- was
+    already covered by `test_dashboard_chat_endpoint.py`. Existing
+    orchestration suites (`test_session_flows.py`, `test_worker.py`,
+    48 tests) re-run green after the 3-tuple change to confirm no
+    caller broke. Full suite green.

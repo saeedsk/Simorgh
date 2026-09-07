@@ -343,8 +343,23 @@ class Service:
             phase, summary, tool = p.get("phase", ""), p.get("summary", ""), p.get("tool")
             ok = p.get("ok")
             mark = "" if ok is None else (" ok" if ok else " FAILED")
-            what = f"{tool}: {summary}" if tool else summary
+            # Live-caught (the creator: "I'd like ... code diffs ...
+            # similar UI experience as claude code cli" -- 07-post-
+            # cutover-review.md §3.11): a real diff now travels in this
+            # step's own `summary` (up to 2000 chars -- see session.py's
+            # `_propose_and_await`, which keeps the *model's* own copy
+            # short separately); render it as a real diff block, not
+            # squeezed into one dim narration line.
+            head, sep, diff_body = summary.partition("\n\n--- a/")
+            what = f"{tool}: {head}" if tool else head
             text = f"step {p.get('step_no', '?')} ({phase}) {what}{mark}"
+            print(render_mod.style(f"  ... {text}  [{elapsed:.1f}s]", "dim", enabled=self._color))
+            if sep:
+                # `sep` is the matched separator "\n\n--- a/"; strip its two
+                # leading newlines to put back the "--- a/..." diff header.
+                lines = (sep[2:] + diff_body).splitlines()
+                print(render_mod.diff_block(lines, label=head, enabled=self._color))
+            return
         else:  # task.completed -- the reply itself prints from _handle_chat
             text = "done"
         print(render_mod.style(f"  ... {text}  [{elapsed:.1f}s]", "dim", enabled=self._color))
