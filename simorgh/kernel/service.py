@@ -29,6 +29,7 @@ from simorgh.execution.config import Config as ExecutionConfig
 from simorgh.guardian.config import Config as GuardianConfig
 from simorgh.ledger.factory import make_ledger
 
+from .bootprogress import make_boot_progress
 from .api import RuntimeConfig
 from .config import ConfigError, LoadedConfig
 from .context import ContextFactory, make_logger
@@ -126,14 +127,20 @@ class Kernel:
         self._bus_backend = None
         self.ledger = None
         self.bus = None  # the Kernel's own BusClient
+        # Names each boot stage as it runs (the creator, 2026-09-07: "add
+        # some progress bar at startup with details of what is being
+        # loaded"). A no-op unless this is an interactive run on a TTY.
+        self.progress = make_boot_progress(interactive)
 
     async def boot(self) -> None:
         from .supervisor import BootFailed, BootTimeout, Supervisor
 
         _require_cross_process_backends(self.config, self.runtime)
         self.runtime.data_dir.mkdir(parents=True, exist_ok=True)
+        self.progress.stage("ledger", f"opening {self.runtime.data_dir}")
         self.ledger = make_ledger(self._ledger_mapping(), clock=self._clock)
         await self.ledger.start()
+        self.progress.done(self._ledger_detail())
 
         # Reuses the same per-run secret for subsystem-identity tokens
         # (multi-process modes) as for approval tokens: both are HMAC
@@ -143,8 +150,10 @@ class Kernel:
         # independent secrets if `local-multi`/`aws` harden further.
         identities = IdentityRegistry(self._hmac_secret, self.run_id) if self.runtime.mode != "single" else None
         policy = ReservedTopologyPolicy(identities)
+        self.progress.stage("bus", self._bus_config().backend)
         self._bus_backend = make_bus_backend(self._bus_config(), clock=self._clock.now)
         await self._bus_backend.start()
+        self.progress.done()
         if identities is not None:
             # The Kernel's own client is built directly (not through
             # `ContextFactory.build`, which self-authenticates every other
@@ -190,12 +199,16 @@ class Kernel:
             for layer in self._own_layers(factories):
                 if not layer:
                     continue
+                self.progress.stage("subsystems", ", ".join(layer))
                 await self._supervisor.start_layer(layer, lambda name: ctx_factory.build(name), factories)
+                self.progress.done()
                 started.append(layer)
         except (BootFailed, BootTimeout) as exc:
+            self.progress.done("failed")
             await self._append_state(self.state.boot_failed(str(exc)))
             raise KernelBootError(str(exc)) from exc
 
+        self.progress.stage("ticks, status, metrics")
         self._scheduler = Scheduler(
             bus=self.bus, ledger=self.ledger, clock=self._clock, logger=make_logger("kernel"),
             idle_threshold_s=self.runtime.idle_threshold_s, idle_tick_cooldown_s=self.runtime.idle_tick_cooldown_s,
@@ -226,6 +239,7 @@ class Kernel:
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_RESUME, self._on_resume))
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_STOP, self._on_stop))
 
+        self.progress.done()
         change = self.state.boot_complete()
         await self._append_state(change)
         await self.bus.publish(validate(Message.new(
@@ -237,6 +251,22 @@ class Kernel:
         await self.bus.publish(validate(Message.new(
             topics.SYSTEM_STATE_CHANGED, source="kernel", payload={"state": RUNNING}, clock=self._clock.now,
         )))
+        self.progress.finish(f"{len(self._supervisor.services)} subsystems, run {self.run_id}")
+
+    def _ledger_detail(self) -> str:
+        """What the Ledger actually did: how many streams it trusted from
+        the on-disk index versus had to re-read. A boot that suddenly
+        rescans everything says so here, which is the symptom the 38s
+        regression had no way to show."""
+        backend = getattr(self.ledger, "backend", None)
+        scanned = getattr(backend, "scanned_on_start", None)
+        trusted = getattr(backend, "trusted_on_start", None)
+        if scanned is None or trusted is None:
+            return self.runtime.ledger_backend if hasattr(self.runtime, "ledger_backend") else ""
+        total = scanned + trusted
+        if not scanned:
+            return f"{total:,} streams, all current"
+        return f"{total:,} streams, {scanned:,} re-read"
 
     def _subsystem_versions(self) -> list[str]:
         return [f"{s.name}@{getattr(s.service, 'version', '0')}" for s in self._supervisor.services.values()]

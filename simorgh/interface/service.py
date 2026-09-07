@@ -110,9 +110,19 @@ class Service:
         topics.SYSTEM_RESUME, topics.SYSTEM_STOP, topics.UI_PROMPT_ANSWERED, topics.SYSTEM_HEALTH,
     )
 
-    def __init__(self, config: Config | None = None, *, run_repl: bool = True, http_enabled: bool | None = None) -> None:
+    def __init__(self, config: Config | None = None, *, run_repl: bool = True,
+                 http_enabled: bool | None = None, wait_for_boot: bool = False) -> None:
         self.config = config or Config()
         self._run_repl = run_repl
+        # The REPL thread starts during the `persona, interface` boot
+        # layer, so without this the splash and the "> " prompt printed
+        # on top of the Kernel's own boot progress, and the later layers
+        # reported themselves underneath an already-live prompt. Set only
+        # by the Kernel's factory: a Service constructed directly (tests,
+        # an embedding) has no Kernel to wait for and must not block.
+        self._wait_for_boot = wait_for_boot
+        self._booted = threading.Event()
+        self._dashboard_line = ""
         # Follows `run_repl` by default: the dashboard is for a human
         # actually watching a `simorgh run` session, so it comes up
         # automatically exactly when the REPL does, and stays off for
@@ -186,7 +196,13 @@ class Service:
             )
             try:
                 await self._http.start()
-                print(f"dashboard: {self._http.url}")
+                line = f"dashboard: {self._http.url}"
+                # Same reason as the splash: printing this from `start()`
+                # lands it in the middle of the Kernel's boot progress.
+                if self._run_repl and self._wait_for_boot:
+                    self._dashboard_line = line
+                else:
+                    print(line)
             except OSError as exc:
                 print(f"dashboard: could not bind {self.config.http_host}:{self.config.http_port} ({exc})")
                 self._http = None
@@ -283,9 +299,27 @@ class Service:
             pass
 
     # -- REPL thread (readline blocks; bridged to asyncio via run_coroutine_threadsafe) --
+    def _wait_for_boot_or_stop(self) -> bool:
+        """Hold the splash until the Kernel reports `running`. Returns
+        False if the REPL was told to stop first, so a failed boot or an
+        immediate shutdown does not leave this thread parked for the full
+        timeout. Bounded either way: a system that never reaches `running`
+        still gets a usable prompt rather than a silent terminal."""
+        deadline = time.monotonic() + self.config.boot_wait_s
+        while time.monotonic() < deadline:
+            if self._stop_repl.is_set():
+                return False
+            if self._booted.wait(timeout=0.05):
+                return True
+        return True
+
     def _repl_main(self) -> None:
         self._load_readline_history()
+        if self._wait_for_boot and not self._wait_for_boot_or_stop():
+            return  # asked to stop before the system ever came up
         print(render_mod.banner(enabled=self._color, unicode=render_mod.unicode_mode(self.config.unicode)))
+        if self._dashboard_line:
+            print(self._dashboard_line)
         print("Ctrl-D to detach the REPL.")
         while not self._stop_repl.is_set():
             self._input_pending = True
@@ -490,7 +524,10 @@ class Service:
         self.vitals.on_persona_state(message.payload)
 
     async def _on_state_changed(self, message: Message) -> None:
-        self._out(render_mod.notice("info", f"system state: {message.payload.get('state')}", "kernel", enabled=self._color))
+        state = message.payload.get("state")
+        if state == "running":
+            self._booted.set()  # releases the REPL thread's splash
+        self._out(render_mod.notice("info", f"system state: {state}", "kernel", enabled=self._color))
 
     async def _on_metrics(self, message: Message) -> None:
         self.vitals.on_system_metrics(message.payload)

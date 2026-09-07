@@ -27,6 +27,10 @@ class Config:
     # never lasts longer than `narrate_heartbeat_s`.
     narrate: bool = True
     narrate_heartbeat_s: float = 10.0
+    # How long the REPL thread holds its splash waiting for the Kernel
+    # to reach `running`, so boot progress is not overprinted. Bounded:
+    # a boot that never completes still gets a usable prompt.
+    boot_wait_s: float = 20.0
     # Redraw-in-place status footer (the creator's own explicit call,
     # 2026-09-06, after being shown the tradeoff against `render.py`'s
     # scrolling-only rule -- see `live_status.py`'s module docstring for

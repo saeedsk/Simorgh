@@ -322,10 +322,20 @@ processes (`07-planning.md`): the claim appends `task.claimed` with
 `granted: false`.
 
 ### 5.5 Lifecycle
-`start()` opens/validates the data dir, rebuilds `index.json` if stale,
-verifies the last line of each stream, takes the LOCK (jsonl). `stop()`
-flushes, releases. `health()`: `degraded` on fsync errors or free disk
-< 5 %, `down` if the data dir is unwritable.
+`start()` opens/validates the data dir, reads `index.json`, and re-reads
+only the streams whose file length no longer matches the recorded one --
+verifying (and truncating) the last line of those. Appends only grow a
+file, so a crash always leaves a length the index does not have, which is
+what puts a torn stream back on the scan path. Streams the index still
+matches are trusted as-is, and their `.idx` idempotency cache is read on
+first use rather than at start. `stop()` flushes, releases. `health()`:
+`degraded` on fsync errors or free disk < 5 %, `down` if the data dir is
+unwritable.
+
+Scanning every stream unconditionally is what made boot take 38 seconds
+on a real 192,456-stream ledger (2026-09-07); `scanned_on_start` /
+`trusted_on_start` report the split, and the Kernel's boot progress
+prints it.
 
 ## 6. Key behaviors — worked scenarios
 

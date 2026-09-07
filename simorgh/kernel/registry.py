@@ -116,7 +116,7 @@ def build_factories(
         "reflection": lambda: ReflectionService(),
         "curiosity": lambda: CuriosityService(),
         "persona": lambda: PersonaService(),
-        "interface": lambda: InterfaceService(run_repl=run_repl),
+        "interface": lambda: InterfaceService(run_repl=run_repl, wait_for_boot=run_repl),
         "orchestration": lambda: OrchestrationService(),
     }
 
