@@ -10,6 +10,7 @@ implemented this session (see README).
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
@@ -146,7 +147,16 @@ class Worker:
 
         msg = Message.new(type_, source=self._bus.source, payload=payload,
                           partition_key=f"task:{session.task_id}", clock=self._clock)
-        await self._ledger.append(f"task:{session.task_id}", Event.from_message(msg, f"task:{session.task_id}"))
+        # Live-caught (the creator: "step 1 final answer ok [31.5s]" then a
+        # minute of "still thinking" and no reply): the Ledger refuses any
+        # inline string over its threshold (4096 chars by default), so a
+        # long real answer raised ValidationError right here -- before the
+        # TASK_COMPLETED/TURN_COMPLETED publishes below -- and the finished
+        # reply was never delivered. The Ledger event gets a preview plus a
+        # blob ref; the bus messages keep the full text.
+        event = Event.from_message(msg, f"task:{session.task_id}")
+        event = await self._deoversize_for_ledger(event, ("result_summary", "reason"))
+        await self._ledger.append(f"task:{session.task_id}", event)
         await self._bus.publish(msg)
 
         if session.kind == "chat":
@@ -160,3 +170,25 @@ class Worker:
                 partition_key=f"task:{session.task_id}", clock=self._clock,
             )
             await self._bus.publish(turn)
+
+    async def _deoversize_for_ledger(self, event: Event, fields: tuple[str, ...]) -> Event:
+        """Same convention as `kernel/migrate_v1.py`'s `_deoversize` and
+        the `*_ref`/`blob:<sha256>` scheme `verification/service.py` and
+        `execution/service.py` already use for real code and tool output:
+        any oversized field is blob-stored and renamed `<field>_ref`, with
+        a short inline preview kept under the original key so a Ledger
+        reader (a log viewer, `pending`) still shows something without
+        fetching the blob. Only touches the Ledger's own copy of the
+        payload -- the bus `Message` (and so `turn.completed`'s real
+        reader, the REPL/HTTP client) always keeps the full text."""
+        threshold = self._ledger.inline_threshold
+        payload = dict(event.payload)
+        changed = False
+        for field in fields:
+            value = payload.get(field)
+            if isinstance(value, str) and len(value) > threshold:
+                ref = await self._ledger.put_blob(value.encode("utf-8"), content_type="text/plain")
+                payload[field] = value[: threshold - 1] + "…"  # -1 leaves room for the ellipsis itself
+                payload[f"{field}_ref"] = ref
+                changed = True
+        return replace(event, payload=payload) if changed else event
