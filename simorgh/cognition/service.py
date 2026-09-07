@@ -23,6 +23,7 @@ from .parser import OutputParser
 from .providers.base import FloorProvider
 from .providers.claude_code import ClaudeCodeProvider
 from .providers.gemini import GeminiProvider
+from .providers.together import DEFAULT_MODEL as together_default_model, TogetherProvider
 from .router import Router
 
 VERSION = "0.1.0"
@@ -111,7 +112,22 @@ class Service:
             # real Service, not a mock of this class).
             real_providers = list(self._injected_providers)
         else:
-            real_providers = [ClaudeCodeProvider(timeout_seconds=self._config.providers["claude_code_cli"].timeout_seconds)]
+            real_providers = []
+            together_cfg = self._config.providers.get("together")
+            if together_cfg is not None:
+                # `ctx.secrets` first so an operator can keep the key in
+                # the 0600 secrets file (`[cognition] secrets =
+                # ["TOGETHER_API_KEY"]`); the provider falls back to the
+                # plain environment variable, which is how it is normally
+                # set and needs no config at all.
+                real_providers.append(TogetherProvider(
+                    api_key=ctx.secrets.get("TOGETHER_API_KEY"),
+                    model=together_cfg.model or together_default_model,
+                    timeout_seconds=together_cfg.timeout_seconds,
+                ))
+            real_providers.append(
+                ClaudeCodeProvider(timeout_seconds=self._config.providers["claude_code_cli"].timeout_seconds),
+            )
             gemini_cfg = self._config.providers.get("gemini")
             if gemini_cfg is not None:
                 real_providers.append(GeminiProvider(model=gemini_cfg.model or "gemini-3.8-flash"))

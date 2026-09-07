@@ -102,6 +102,35 @@ class TestRollingWindowBudget(unittest.IsolatedAsyncioTestCase):
         status = await budget.status()
         self.assertAlmostEqual(status.spend_usd, 2.0 + 2.0)
 
+    async def test_cached_prompt_tokens_are_billed_at_the_cached_rate(self):
+        """Together's GLM-5.3-Flash prices cached input at $0.03/1M
+        against $0.15/1M, so a warm cache has to be cheaper here or the
+        daily cap throttles Sim on money it never spent."""
+        budget = RollingWindowBudget(
+            "together", ProviderConfig(price_in=0.15, price_out=0.50, price_cached_in=0.03),
+            self.ledger, clock=self.clock,
+        )
+        self.assertAlmostEqual(budget.estimate_cost(0, 0, 1_000_000), 0.03)
+        self.assertAlmostEqual(budget.estimate_cost(1_000_000, 1_000_000, 1_000_000), 0.15 + 0.50 + 0.03)
+
+    async def test_a_provider_with_no_cache_tier_bills_cached_tokens_as_ordinary_input(self):
+        budget = RollingWindowBudget(
+            "gemini", ProviderConfig(price_in=2.0, price_out=4.0), self.ledger, clock=self.clock,
+        )
+        self.assertAlmostEqual(budget.estimate_cost(0, 0, 1_000_000), 2.0)
+
+    async def test_a_recorded_response_with_cached_tokens_spends_the_cached_rate(self):
+        budget = RollingWindowBudget(
+            "together", ProviderConfig(price_in=0.15, price_out=0.50, price_cached_in=0.03),
+            self.ledger, clock=self.clock,
+        )
+        await budget.record(ProviderResponse(
+            text="x", provider="together", input_tokens=0, output_tokens=0,
+            cached_input_tokens=1_000_000, cost_usd=None,
+        ))
+        status = await budget.status()
+        self.assertAlmostEqual(status.spend_usd, 0.03)
+
     async def test_public_estimate_cost_is_a_pre_call_projection_not_tied_to_a_response(self):
         # Per-call budget accounting (04 section 7): the Router needs a
         # cost estimate *before* spending anything, from raw token counts

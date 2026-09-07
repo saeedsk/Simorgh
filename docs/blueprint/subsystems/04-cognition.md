@@ -119,7 +119,10 @@ class OutputParser:
 
 | Key | Type | Default | Controls |
 |---|---|---|---|
-| `providers.order` | list[str] | `["claude_code_cli","gemini","floor"]` | Failover priority |
+| `providers.order` | list[str] | `["together","claude_code_cli","gemini","floor"]` | Failover priority |
+| `providers.together.model` | str | `zai-org/GLM-5.3-Flash` | Sim's default model (the creator, 2026-09-07) |
+| `providers.together.max_calls` / `.max_spend_usd` / `.window_seconds` | int/float/float | 1500 / 2.0 / 86400 | Rolling caps (env `SIMORGH_LLM_DAILY_MAX_CALLS`, `SIMORGH_LLM_DAILY_BUDGET_USD`) |
+| `providers.together.price_in` / `.price_out` / `.price_cached_in` | float | 0.15 / 0.50 / 0.03 | $/1M tokens; cached prompt tokens are billed at their own tier |
 | `providers.claude_code_cli.max_calls` / `.window_seconds` | int / float | 500 / 18000 | Rolling call cap (env `SIMORGH_CLAUDE_CODE_MAX_CALLS`) |
 | `providers.gemini.max_calls` / `.max_spend_usd` / `.window_seconds` | int/float/float | 1500 / 2.0 / 86400 | Rolling caps (env `SIMORGH_LLM_DAILY_MAX_CALLS`, `SIMORGH_LLM_DAILY_BUDGET_USD`) |
 | `providers.gemini.model` / `.price_in` / `.price_out` | str/float/float | `gemini-3.8-flash` / 0.75 / 3.75 | Model and $/1M tokens for estimates |
@@ -157,6 +160,10 @@ cognition/
     base.py         FloorProvider (deterministic templates by purpose)
     claude_code.py  subprocess `claude -p --output-format json --disallowedTools "*"` (NEVER --bare)
     gemini.py       lazy `google.genai` import; absent if missing
+    together.py     stdlib urllib POST to the OpenAI-compatible endpoint;
+                    no SDK dependency. Reads TOGETHER_API_KEY (env or the
+                    scoped secret store); prices its own responses because
+                    cached prompt tokens bill at a separate rate
   budget.py         RollingWindowBudget over ledger stream
   router.py         Router + CapabilityRegistry (best_for, best_with_context_window, best_within_cost, leaderboard, complete_ensemble)
   assembler.py      PromptAssembler: block ordering + protection + token estimate

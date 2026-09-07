@@ -143,6 +143,10 @@ class ProviderResponse:
     provider: str
     input_tokens: int = 0
     output_tokens: int = 0
+    # Prompt tokens served from the provider's cache, priced at its own
+    # (much lower) rate. Always the part of the prompt NOT counted in
+    # `input_tokens`, so the two add up to the whole prompt exactly once.
+    cached_input_tokens: int = 0
     cost_usd: float | None = None  # provider-reported, when available
     tool_calls: tuple[dict, ...] = ()
     metadata: dict = field(default_factory=dict)
