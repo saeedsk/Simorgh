@@ -50,12 +50,17 @@ def _expected_spec(payload: dict) -> dict:
 # session.py` request-side fix (`expected: "tool_calls"`) makes parsing
 # reachable at all; this is the other missing half -- a real instruction
 # in the prompt, or a model has no way to discover this protocol from
-# first principles. Deliberately generic (tool names only, no per-tool
-# argument semantics) rather than reaching into Execution's tool
-# registry for real descriptions -- that would cross the subsystem
-# boundary `test_module_boundaries.py` enforces; a competent model reads
-# a self-descriptive name like `web_fetch` or `propose_mcp_server` and
-# infers the argument shape well enough in context.
+# first principles. Tool names alone (no per-tool argument semantics)
+# rather than reaching into Execution's tool registry for real
+# descriptions -- that would cross the subsystem boundary
+# `test_module_boundaries.py` enforces; a self-descriptive name like
+# `web_fetch` is enough on its own. **Second live-catch, same day**: a
+# name alone was NOT enough for `propose_mcp_server` -- its one argument
+# has real internal structure, and the model invented a wrong JSON shape
+# rather than the real `key: value` lines. `payload["tool_hints"]`
+# (`orchestration/tools.py::marker_hint`, threaded through by `session.
+# py`) is the fix -- a short, hand-maintained, per-tool addendum for the
+# handful of tools that actually need one.
 def _tool_instruction_block(payload: dict) -> str | None:
     if payload.get("expected") != "tool_calls":
         return None
@@ -63,13 +68,17 @@ def _tool_instruction_block(payload: dict) -> str | None:
     if not tools:
         return None
     names = ", ".join(sorted(tool.upper() for tool in tools))
-    return (
+    lines = [
         "Tools available this turn: " + names + ". To use one, write its name "
         "in capitals, a colon, then your argument, as the very first line of "
         "your reply -- nothing before it. For example:\nWEB_FETCH: https://example.com\n"
         "Only do this when you genuinely need that tool right now; otherwise "
-        "just answer in plain text as normal, with no marker line."
-    )
+        "just answer in plain text as normal, with no marker line.",
+    ]
+    for tool, hint in (payload.get("tool_hints") or {}).items():
+        if tool in tools and hint:
+            lines.append(f"{tool.upper()}'s own argument format:\n{hint}")
+    return "\n\n".join(lines)
 
 
 class Service:

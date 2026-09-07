@@ -145,6 +145,41 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("PROPOSE_MCP_SERVER", joined)
         self.assertIn(":", joined)  # the marker syntax itself, not just the bare names
 
+    async def test_a_tool_hint_reaches_the_real_system_prompt(self):
+        """Live-caught (the creator, real use): a model told to use
+        `propose_mcp_server` invented a wrong JSON argument shape --
+        the general marker instruction never explained any tool's own
+        argument format. `tool_hints` (`orchestration/tools.py::
+        marker_hint`, threaded by `session.py`) is how a per-tool
+        addendum reaches this prompt."""
+        provider = _FakeProvider(text="ok")
+        await self._make(providers=[provider])
+        request = Message.new(topics.COGNITION_THINK, source="test", payload={
+            "purpose": "chat", "messages": [{"role": "user", "content": "add a web search tool"}],
+            "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False,
+            "expected": "tool_calls", "tools": ["propose_mcp_server"],
+            "tool_hints": {"propose_mcp_server": "key: value lines -- name, command, reason (required)"},
+        })
+        await self.bus.request(request, timeout=5.0)
+        system_texts = [m["content"] for m in provider.received_messages if m["role"] == "system"]
+        joined = "\n".join(system_texts)
+        self.assertIn("PROPOSE_MCP_SERVER", joined)
+        self.assertIn("key: value lines", joined)
+        self.assertIn("reason (required)", joined)
+
+    async def test_a_hint_for_a_tool_not_offered_this_turn_is_ignored(self):
+        provider = _FakeProvider(text="ok")
+        await self._make(providers=[provider])
+        request = Message.new(topics.COGNITION_THINK, source="test", payload={
+            "purpose": "chat", "messages": [{"role": "user", "content": "hi"}],
+            "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False,
+            "expected": "tool_calls", "tools": ["web_fetch"],
+            "tool_hints": {"propose_mcp_server": "should never appear -- not offered this turn"},
+        })
+        await self.bus.request(request, timeout=5.0)
+        system_texts = [m["content"] for m in provider.received_messages if m["role"] == "system"]
+        self.assertFalse(any("should never appear" in t for t in system_texts))
+
     async def test_no_tool_instruction_leaks_in_when_no_tools_are_offered(self):
         provider = _FakeProvider(text="ok")
         await self._make(providers=[provider])

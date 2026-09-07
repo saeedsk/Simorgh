@@ -39,6 +39,7 @@ class RenderTestCase(unittest.TestCase):
         text += render.diff_block(["+added", "-removed", " same"], enabled=True)
         text += render.banner(enabled=True)
         text += render.prompt_banner("Approve propose_mcp_server?", ["yes", "no"], enabled=True)
+        text += render.markdown("**bold** and `code` and\n# a header\n```\nfenced\n```", enabled=True)
         for match in _ESC.finditer(text):
             params = match.group(0).lstrip("\x1b[")
             # SGR parameters are digits separated by `;` -- this includes
@@ -214,6 +215,58 @@ class RenderTestCase(unittest.TestCase):
         out = render.prompt_banner("Pick one", ["approve", "reject", "defer"], enabled=False)
         for option in ("approve", "reject", "defer"):
             self.assertIn(option, out)
+
+    def test_markdown_strips_bold_markers_even_with_color_disabled(self):
+        """Live-caught (the creator, real use): a chat reply's own
+        `**bold**` was printing as literal asterisks -- no markdown
+        processing ran on a model's reply text at all. The delimiters
+        must disappear regardless of color support; `enabled` only
+        decides whether real SGR styling gets added on top."""
+        out = render.markdown("this is **bold** text", enabled=False)
+        self.assertEqual(out, "this is bold text")
+        self.assertNotIn("*", out)
+
+    def test_markdown_bold_gets_real_sgr_when_enabled(self):
+        out = render.markdown("this is **bold** text", enabled=True)
+        self.assertIn("\x1b[1mbold\x1b[0m", out)
+        self.assertNotIn("*", out)
+
+    def test_markdown_strips_inline_code_backticks(self):
+        out = render.markdown("run `sim.sh` now", enabled=False)
+        self.assertEqual(out, "run sim.sh now")
+        self.assertNotIn("`", out)
+
+    def test_markdown_header_loses_the_hashes(self):
+        out = render.markdown("# A Heading\nbody text", enabled=False)
+        self.assertNotIn("#", out)
+        self.assertIn("A Heading", out)
+
+    def test_markdown_fenced_block_is_untouched_by_bold_or_code_patterns(self):
+        text = "before\n```python\nx = 1  # not **bold**, not `code`\n```\nafter"
+        out = render.markdown(text, enabled=False)
+        # the fence's own content survives verbatim, asterisks/backticks
+        # inside it must not be interpreted as markdown syntax
+        self.assertIn("x = 1  # not **bold**, not `code`", out)
+        self.assertIn("before", out)
+        self.assertIn("after", out)
+
+    def test_markdown_multiple_bold_spans_on_one_line(self):
+        out = render.markdown("**one** and **two**", enabled=False)
+        self.assertEqual(out, "one and two")
+
+    def test_markdown_plain_text_is_untouched(self):
+        self.assertEqual(render.markdown("just plain text", enabled=True), "just plain text")
+
+    def test_markdown_empty_string_stays_empty(self):
+        self.assertEqual(render.markdown("", enabled=True), "")
+
+    def test_markdown_never_emits_a_non_sgr_escape_sequence(self):
+        out = render.markdown("**bold** `code` # header\n```\ncode block\n```", enabled=True)
+        for match in _ESC.finditer(out):
+            params = match.group(0).lstrip("\x1b[")
+            self.assertTrue(params == "" or params.replace(";", "").isdigit(),
+                            f"non-SGR escape sequence found: {match.group(0)!r}")
+        self.assertNotIn("\x00", out)  # the fence placeholder must never leak into real output
 
 
 if __name__ == "__main__":

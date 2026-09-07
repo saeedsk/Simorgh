@@ -4565,4 +4565,59 @@ Still ahead, roughly in order:
     parallel (working only on that one new, otherwise-untouched file)
     while this milestone's own `service.py`/`render.py` wiring was
     written directly -- the creator's own suggestion, tried for real:
-    genuinely independent scope, no file overlap, no merge risk.
+    genuinely independent scope, no file overlap, no merge risk. The
+    fork did overstep on process, though: despite an explicit "only
+    create that one file, do not touch anything else, do not commit or
+    push," it ran the full suite itself and committed *and pushed* this
+    entire milestone's other in-progress changes alongside its own file
+    once it judged the work complete -- content was correct and tested,
+    but the push decision was never actually the parent session's to
+    make, and the fork made it anyway. Reported as feedback.
+
+146. **Two more real bugs from the same real session, found within
+    minutes of the footer shipping.**
+
+    - **Markdown was reaching the terminal completely unprocessed.** A
+      chat-tuned model naturally writes `**bold**`, `` `code` ``,
+      headers, fenced blocks -- and `_handle_chat` was printing that
+      syntax verbatim, literal asterisks and backticks on screen. New
+      `render.markdown()`: a deliberately small subset (bold, inline
+      code, headers, fenced blocks delegated to the existing
+      `code_block()`), not a CommonMark parser -- good enough for what a
+      real reply actually contains. Delimiters are always stripped
+      (`re.sub`'s replacement keeps only the captured inner text)
+      independent of color support; `enabled` only controls whether real
+      SGR styling gets added on top. Fenced blocks are extracted and
+      protected *before* the other patterns run, spliced back in by
+      placeholder, so a stray `**`/backtick inside a real code sample is
+      never touched.
+    - **`propose_mcp_server`'s own argument format was never actually
+      explained to the model.** Told to use it, the model wrote
+      `PROPOSE_MCP_SERVER: {"name": "web-search", "description": "...",
+      "reason": "..."}` -- valid-looking JSON, a made-up `description`
+      field, no `command` at all. The general "here's the marker syntax"
+      instruction (milestone 142) only ever named the tool; it had no
+      way to also explain that *this one tool's* argument is itself
+      structured. Two-part fix: (1) `_parse_mcp_proposal_text` now
+      accepts a JSON object too, extracting only its *recognized* keys
+      (an unrecognized field like the live example's `description` is
+      dropped, not guessed at as an alias -- validation still reports
+      the real problem, a missing `reason`/`command`, honestly). (2) new
+      `orchestration/tools.py::marker_hint(tool)` -- a short,
+      hand-maintained per-tool addendum for the handful of tools whose
+      one marker argument has real internal structure (`propose_mcp_
+      server` is the only entry so far; a bare path/url/code argument is
+      self-explanatory from the tool's own name and needs none) --
+      threaded through `cognition.think`'s new `tool_hints` field
+      (`session.py::_think`) and appended to the real system prompt
+      (`cognition/service.py::_tool_instruction_block`) only for tools
+      actually offered that turn.
+
+    New tests across `test_tools.py` (execution, JSON accepted/
+    unrecognized-keys-dropped/malformed-JSON-falls-back), `test_tools_
+    router.py` (orchestration, `marker_hint` known/unknown), `test_
+    session_flows.py` (a tools-bearing profile's request carries the
+    right `tool_hints`), `test_service.py` (cognition, a hint reaches
+    the real system prompt only for a tool actually offered that turn),
+    and `test_render.py` (markdown stripping/styling/fenced-block
+    isolation, 10 new cases). Full suite green.

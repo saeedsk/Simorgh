@@ -20,7 +20,7 @@ from simorgh.contracts.envelope import Event, Message
 
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
-from .tools import to_action_payload
+from .tools import marker_hint, to_action_payload
 
 ACTION_TIMEOUT_S = 5.0
 VERIFY_TIMEOUT_S = 5.0
@@ -156,6 +156,14 @@ class SessionRunner:
                 # markers, indistinguishable from asking for `final`
                 # except for the wasted round-trip.
                 "expected": "tool_calls" if session.profile.tools else "text",
+                # Live-caught: the general "here's the marker syntax"
+                # instruction (cognition/service.py) never told the model
+                # a tool's own argument *shape* -- a model asked to use
+                # propose_mcp_server invented a JSON format with a made-up
+                # field instead of the real key:value one. Only tools with
+                # real internal structure need an entry (orchestration/
+                # tools.py::_MARKER_ARG_HINT); most don't.
+                "tool_hints": {t: h for t in session.profile.tools if (h := marker_hint(t))},
                 "budget": {"max_tokens": 2000, "max_cost_usd": 0.5},
                 "require_real_provider": False, "last_step": last_step,
                 # Live-caught (v2 live trial, 2026-09-06): a chat turn

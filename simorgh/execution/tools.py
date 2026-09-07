@@ -194,10 +194,43 @@ _PROPOSAL_FIELD_RE = re.compile(r"^\s*([a-zA-Z_]+)\s*:\s*(.*)$")
 _PROPOSAL_KEYS = frozenset({"name", "command", "args", "read_only_tools", "env_keys", "reason"})
 
 
+def _parse_mcp_proposal_json(text: str) -> dict[str, str] | None:
+    """Live-caught: despite the tool's own `description` spelling out
+    `key: value` lines, a model reached for JSON anyway (a very natural
+    pull for structured data) -- `PROPOSE_MCP_SERVER: {"name": ...}`.
+    Returns `None` (never raises) for anything that isn't a JSON object,
+    so the caller falls through to the line-based parser; a real JSON
+    object gets only its *recognized* keys extracted -- an unrecognized
+    key (the live example used `"description"`, not one of this tool's
+    real fields) is silently dropped, not guessed at, so validation
+    still reports the real problem (a missing `reason`/`command`)
+    honestly instead of papering over it with a wrong alias."""
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        obj = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    fields: dict[str, str] = {}
+    for key in _PROPOSAL_KEYS:
+        value = obj.get(key)
+        if value is None:
+            continue
+        fields[key] = ", ".join(str(v) for v in value) if isinstance(value, list) else str(value)
+    return fields
+
+
 def _parse_mcp_proposal_text(text: str) -> dict[str, str]:
     """`key: value` lines, case-insensitive keys, lenient about a value
     (like `reason`) spanning multiple lines -- a model's own free-form
-    output, not a format worth being strict about."""
+    output, not a format worth being strict about. A JSON object is
+    accepted too (`_parse_mcp_proposal_json`), tried first."""
+    from_json = _parse_mcp_proposal_json(text)
+    if from_json is not None:
+        return from_json
     fields: dict[str, str] = {}
     key: str | None = None
     for line in text.splitlines():
