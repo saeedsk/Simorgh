@@ -131,6 +131,33 @@ class TestChatTurnWithOneToolCall(unittest.TestCase):
                 await cognition.stop()
 
     @run
+    async def test_a_profile_with_tools_actually_asks_cognition_to_parse_for_them(self):
+        """Live-caught, real use (the creator, repeatedly: "no MCP
+        servers connected... no fetch tool" -- even after both were
+        real, registered, and in `profiles.CHAT.tools`): this request
+        never set `expected: "tool_calls"` at all, so `cognition/
+        service.py::_expected_spec` always fell through to `{"kind":
+        "final"}` -- every model reply was read as a plain answer no
+        matter what it wrote, and the GATHER -> THINK -> (tool_calls ->
+        PROPOSE | final) loop this package's own README describes was
+        unreachable from a real chat turn. `session.profile.tools`
+        being non-empty is what should turn this on -- a profile with no
+        tools has nothing to ask for."""
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": "ok"}])
+            await cognition.start()
+            try:
+                runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+                self.assertTrue(profiles.CHAT.tools)  # the profile this bug actually hit
+                chat = Session(task_id="c9", kind="chat", mode="execute", profile=profiles.CHAT)
+                await runner.run(chat, user_text="hello")
+                self.assertEqual(cognition.calls[0].payload["expected"], "tool_calls")
+                self.assertEqual(set(cognition.calls[0].payload["tools"]), set(profiles.CHAT.tools))
+            finally:
+                await cognition.stop()
+
+    @run
     async def test_no_cognition_available_degrades_to_the_honest_floor(self):
         async with Harness() as h:
             bus = h.client("orchestration")

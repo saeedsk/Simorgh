@@ -37,12 +37,14 @@ class _FakeProvider:
         self._text = text
         self._raises = raises
         self.calls = 0
+        self.received_messages: list[dict] | None = None
 
     def available(self) -> bool:
         return True
 
     async def complete(self, messages, *, tools, max_tokens, timeout=None):
         self.calls += 1
+        self.received_messages = messages
         if self._raises is not None:
             raise self._raises
         return ProviderResponse(text=self._text, provider=self.name, input_tokens=10, output_tokens=5, cost_usd=0.001)
@@ -117,6 +119,42 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         })
         reply = await self.bus.request(request, timeout=5.0)
         self.assertEqual(reply.payload["tool_calls"], [{"tool": "read", "args": {"argument": "src/foo.py"}}])
+
+    async def test_tool_calls_expected_actually_tells_the_model_the_marker_syntax(self):
+        """Live-caught, real use: `orchestration/session.py` never set
+        `expected: "tool_calls"` at all, so this whole path was
+        unreachable from a real chat turn -- and even with that fixed,
+        nothing ever told the model tools exist or how to invoke them
+        (`_expected_spec` only *parses* a reply, it never shapes the
+        prompt). A model with no instruction has no way to discover a
+        bespoke `TOOL: argument` convention on its own; every real
+        request needs a real system message naming its tools and the
+        exact syntax, not just a parser ready to notice one if it
+        happens to appear."""
+        provider = _FakeProvider(text="ok")
+        await self._make(providers=[provider])
+        request = Message.new(topics.COGNITION_THINK, source="test", payload={
+            "purpose": "chat", "messages": [{"role": "user", "content": "what's the weather"}],
+            "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False,
+            "expected": "tool_calls", "tools": ["web_fetch", "propose_mcp_server"],
+        })
+        await self.bus.request(request, timeout=5.0)
+        system_texts = [m["content"] for m in provider.received_messages if m["role"] == "system"]
+        joined = "\n".join(system_texts)
+        self.assertIn("WEB_FETCH", joined)
+        self.assertIn("PROPOSE_MCP_SERVER", joined)
+        self.assertIn(":", joined)  # the marker syntax itself, not just the bare names
+
+    async def test_no_tool_instruction_leaks_in_when_no_tools_are_offered(self):
+        provider = _FakeProvider(text="ok")
+        await self._make(providers=[provider])
+        request = Message.new(topics.COGNITION_THINK, source="test", payload={
+            "purpose": "chat", "messages": [{"role": "user", "content": "hi"}],
+            "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False,
+        })
+        await self.bus.request(request, timeout=5.0)
+        system_texts = [m["content"] for m in provider.received_messages if m["role"] == "system"]
+        self.assertFalse(any("WEB_FETCH" in t for t in system_texts))
 
     async def test_edit_blocks_expected_kind_parses_search_replace(self):
         text = "<<<<<<< SEARCH\nfoo\n=======\nbar\n>>>>>>> REPLACE\n"
