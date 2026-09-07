@@ -7,6 +7,7 @@ lesson, `discovery.py`'s own docstring)."""
 
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass
 
 from .dedupe import is_duplicate
@@ -25,10 +26,18 @@ class Intake:
         self._store = store
         self._threshold = dedupe_threshold
 
-    def _find_duplicate(self, description: str) -> str | None:
+    def _find_duplicate(self, description: str, *, origin: str = "curiosity") -> str | None:
+        """Live-caught (the creator, 2026-09-07): three different `improve`
+        requests -- different paths, different wording -- each came back
+        as the *first* one's id, and the later two never ran. The 45%
+        fuzzy match here exists for the autonomous streams (curiosity
+        candidates, reflection patterns, research follow-ups), where the
+        same idea genuinely does resurface in slightly different words. A
+        human typing a request is authoritative: if they ask again, or
+        ask something merely similar, they get a new task, always."""
+        if origin == "human":
+            return None
         for tid, desc in self._store.descriptions():
-            import difflib
-
             if difflib.SequenceMatcher(None, description, desc).ratio() >= self._threshold:
                 return tid
         return None
@@ -36,7 +45,7 @@ class Intake:
     async def on_goal_stated(
         self, *, goal: str, origin: str, wants_project: bool, priority: int = 0, risk: str | None = None,
     ) -> IntakeResult:
-        dup = self._find_duplicate(goal)
+        dup = self._find_duplicate(goal, origin=origin)
         if dup:
             return IntakeResult(None, duplicate_of=dup)
         if wants_project:
@@ -61,7 +70,7 @@ class Intake:
         self, *, kind: str, description: str, subject: str | None, area: str, origin: str = "curiosity",
         risk: str | None = None,
     ) -> IntakeResult:
-        dup = self._find_duplicate(description)
+        dup = self._find_duplicate(description, origin=origin)
         if dup:
             return IntakeResult(None, duplicate_of=dup)
         scope = Scope(paths=(subject,) if subject else (), network=kind == "research") if (subject or kind == "research") else None

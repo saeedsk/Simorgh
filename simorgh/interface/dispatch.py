@@ -64,6 +64,20 @@ class Outcome:
     task_id: str | None = None
 
 
+def _render_created(label: str = "task"):
+    """Live-caught: three different `improve` requests all printed
+    "task created: 4cc3c407277b" -- Planning's intake had deduplicated
+    each against the first (already-completed) task and replied with
+    `deduplicated_against`, which this surface silently dropped, so the
+    human saw a fresh task that never ran. Say so instead."""
+    def _render(p: dict) -> str:
+        if p.get("deduplicated_against"):
+            return (f"not created -- too similar to existing {label} {p['task_id']}; "
+                    f"rephrase, or `tasks` to see it")
+        return f"{label} created: {p['task_id']}"
+    return _render
+
+
 async def _request(bus: BusClient, type_: str, payload: dict, *, timeout: float, render, watch: bool = False) -> Outcome:
     try:
         reply = await bus.request(bus.new(type_, payload), timeout=timeout)
@@ -74,7 +88,9 @@ async def _request(bus: BusClient, type_: str, payload: dict, *, timeout: float,
     if reply.payload.get("ok") is False:
         err = reply.payload.get("error", {})
         return Outcome(f"error: {err.get('code', 'unknown')} -- {err.get('detail', '')}")
-    task_id = reply.payload.get("task_id") if watch else None
+    # A deduplicated reply names an *existing* task -- often already
+    # completed -- so there is no completion coming to watch for.
+    task_id = reply.payload.get("task_id") if watch and not reply.payload.get("deduplicated_against") else None
     return Outcome(render(reply.payload), task_id=task_id)
 
 
@@ -141,24 +157,24 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         if rest and _PATH_HINT.search(first):
             return await _request(bus, topics.TASK_CREATE, {
                 "kind": "patch", "description": rest.strip(), "subject": first, "origin": "human", "mode": "execute",
-            }, timeout=5.0, render=lambda p: f"task created: {p['task_id']}", watch=True)
+            }, timeout=5.0, render=_render_created(), watch=True)
         return await _request(bus, topics.TASK_CREATE, {
             "kind": "skill", "description": args, "origin": "human", "mode": "execute",
-        }, timeout=5.0, render=lambda p: f"task created: {p['task_id']}", watch=True)
+        }, timeout=5.0, render=_render_created(), watch=True)
 
     if name == "plan":
         if not args:
             return Outcome("usage: plan <goal>")
         return await _request(bus, topics.TASK_CREATE, {
             "kind": "project", "description": args, "origin": "human", "mode": "plan",
-        }, timeout=5.0, render=lambda p: f"project task created: {p['task_id']}", watch=True)
+        }, timeout=5.0, render=_render_created("project task"), watch=True)
 
     if name == "research":
         if not args:
             return Outcome("usage: research <topic>")
         return await _request(bus, topics.TASK_CREATE, {
             "kind": "research", "description": args, "origin": "human",
-        }, timeout=5.0, render=lambda p: f"task created: {p['task_id']}", watch=True)
+        }, timeout=5.0, render=_render_created(), watch=True)
 
     if name == "tasks":
         if args.strip() == "work":

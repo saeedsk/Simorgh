@@ -122,7 +122,23 @@ class TestPlanningBootsAsARealKernelService(unittest.IsolatedAsyncioTestCase):
         [task] = [t for t in list_reply.payload["tasks"] if t["task_id"] == task_id]
         self.assertEqual(task["status"], "completed")
 
-    async def test_second_task_create_with_similar_description_is_deduped(self) -> None:
+    async def test_second_autonomous_task_create_with_similar_description_is_deduped(self) -> None:
+        bus = self.kernel.bus
+        first = await bus.request(Message.new(
+            topics.TASK_CREATE, source="tester",
+            payload={"kind": "patch", "description": "add retry jitter to the HTTP client", "origin": "curiosity"},
+        ))
+        second = await bus.request(Message.new(
+            topics.TASK_CREATE, source="tester",
+            payload={"kind": "patch", "description": "add jitter to HTTP client retries", "origin": "curiosity"},
+        ))
+        self.assertEqual(second.payload.get("deduplicated_against"), first.payload["task_id"])
+
+    async def test_a_humans_similar_request_is_never_deduped(self) -> None:
+        """Live-caught (2026-09-07): three different `improve` requests
+        all came back as the first one's id and the later two never ran.
+        Fuzzy dedupe is for the autonomous streams; a human asking is
+        authoritative (`planning/intake.py::_find_duplicate`)."""
         bus = self.kernel.bus
         first = await bus.request(Message.new(
             topics.TASK_CREATE, source="tester",
@@ -132,7 +148,8 @@ class TestPlanningBootsAsARealKernelService(unittest.IsolatedAsyncioTestCase):
             topics.TASK_CREATE, source="tester",
             payload={"kind": "patch", "description": "add jitter to HTTP client retries", "origin": "human"},
         ))
-        self.assertEqual(second.payload.get("deduplicated_against"), first.payload["task_id"])
+        self.assertNotIn("deduplicated_against", second.payload)
+        self.assertNotEqual(second.payload["task_id"], first.payload["task_id"])
 
     async def test_project_decompose_children_and_dependency_ordering(self) -> None:
         bus, ledger = self.kernel.bus, self.kernel.ledger
