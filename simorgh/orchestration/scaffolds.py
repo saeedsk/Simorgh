@@ -74,11 +74,30 @@ before you conclude. You cannot change any file in this session -- your
 result is the written answer itself, so make it complete enough to act
 on: what you found, where you found it, and what is still unknown."""
 
+# The format below is not decoration: Planning parses this answer with
+# `planning/decomposer.py::parse_steps`, which reads exactly these two
+# line shapes and silently ignores everything else. Live-caught
+# 2026-09-07: the scaffold said only "give ordered steps", so the model
+# answered in prose with markdown headings, `parse_steps` found nothing,
+# and Planning took its "decomposition produced no real steps" branch --
+# every time. All 21 of the creator's projects sat at 0/0 steps and not
+# one task in the whole ledger had a parent. The producer and the parser
+# had never been told the same thing.
 _PLAN = """\
 Produce a plan, not a change. You have read-only tools, so ground the
-plan in what the code actually does today: name the real files and
-functions the work touches. Give ordered steps, each one small enough to
-be a single task, and say what would make the plan wrong."""
+plan in what the code actually does today: read before you decide, and
+name the real files the work touches.
+
+Your final answer must be ONLY a numbered list, one step per line, each
+line in exactly one of these two forms:
+
+  1. simorgh/<path>.py :: what to change in that file and why
+  2. RESEARCH :: a question to settle before the later steps
+
+Order matters: a RESEARCH step that informs later steps comes first.
+Name a real path you have actually looked at. Anything that is not one
+of those two line shapes is discarded, so no preamble, no headings, no
+prose after the list -- the list is the whole answer."""
 
 _CHAT = """\
 Answer the person. Use a tool when it would make the answer true rather

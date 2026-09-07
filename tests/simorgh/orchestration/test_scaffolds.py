@@ -11,7 +11,8 @@ import unittest
 
 from simorgh.contracts import topics
 from simorgh.orchestration import profiles, scaffolds
-from simorgh.orchestration.api import Session
+from simorgh.orchestration.api import Outcome, Session
+from simorgh.orchestration.worker import Worker
 from simorgh.orchestration.session import SessionRunner
 
 from .fakes import FakeCognition, FakeGuardianExecution
@@ -49,6 +50,56 @@ class TestRenderedRules(unittest.TestCase):
             name="x", tools=("read_file",), read_only=True, max_steps=1, max_revisions=0, scaffold="nope",
         )
         self.assertIn("read_file", scaffolds.render(profile))
+
+
+class TestThePlanSessionProducesAParseablePlan(unittest.TestCase):
+    """Live-caught 2026-09-07: the plan scaffold said only "give ordered
+    steps", so the model answered in prose with markdown headings.
+    Planning parses that answer with `parse_steps`, which reads two exact
+    line shapes and ignores everything else, so it always found nothing
+    and every project stayed at 0/0 steps."""
+
+    def test_a_worker_reports_the_plan_text_as_an_artifact(self):
+        """`Worker._report` sent the literal `[]`, always, so the plan
+        text never reached Planning at all."""
+        import asyncio
+        import json
+
+        from .harness import Harness
+
+        async def _run() -> list[str]:
+            async with Harness() as h:
+                worker = Worker(h.client("orchestration"), h.ledger, clock=h.clock.now)
+                session = Session(
+                    task_id="p1", kind="project", mode="plan", profile=profiles.PLAN,
+                    user_text="add a --version flag",
+                )
+                refs = await worker._artifacts_for(  # noqa: SLF001
+                    session, Outcome("completed", result_summary="1. simorgh/x.py :: do it"),
+                )
+                self.assertEqual(len(refs), 1)
+                blob = json.loads((await h.ledger.get_blob(refs[0])).decode())
+                self.assertIn("steps_text", blob)
+                self.assertIn("simorgh/x.py", blob["steps_text"])
+                return refs
+
+        asyncio.run(_run())
+
+    def test_an_execute_session_reports_no_plan_artifact(self):
+        import asyncio
+
+        from .harness import Harness
+
+        async def _run() -> None:
+            async with Harness() as h:
+                worker = Worker(h.client("orchestration"), h.ledger, clock=h.clock.now)
+                session = Session(
+                    task_id="t1", kind="patch", mode="execute", profile=profiles.PATCH, user_text="do it",
+                )
+                refs = await worker._artifacts_for(session, Outcome("completed", result_summary="done"))  # noqa: SLF001
+                self.assertEqual(refs, [])
+
+        asyncio.run(_run())
 
 
 class TestTheRulesReachCognition(unittest.TestCase):

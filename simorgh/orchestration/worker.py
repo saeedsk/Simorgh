@@ -9,6 +9,8 @@ implemented this session (see README).
 
 from __future__ import annotations
 
+import json
+
 import uuid
 from dataclasses import replace
 
@@ -125,6 +127,38 @@ class Worker:
         outcome = await self.run(session, user_text=text)
         await self._report(session, outcome)
 
+    async def _artifacts_for(self, session: Session, outcome: Outcome) -> list[str]:
+        """A plan session's whole product is the plan text, and Planning
+        reads it from an artifact blob shaped `{"steps_text": ...}`
+        (`_on_plan_worker_result`).
+
+        Live-caught 2026-09-07: this list was the literal `[]`, always. So
+        Planning always resolved an empty plan, `parse_steps` always
+        returned nothing, and every project took the "decomposition
+        produced no real steps -- will retry" branch. All 21 of the
+        creator's projects sat at `0/0 steps` and no task in the entire
+        ledger had a `parent_id`: not one project had ever been
+        decomposed, and none could have been.
+
+        Only plan sessions produce one. Every other kind reports its
+        result in `result_summary` as before.
+        """
+        if session.mode != "plan" or not outcome.result_summary:
+            return []
+        try:
+            blob = json.dumps({
+                "goal": session.user_text, "steps_text": outcome.result_summary,
+            }).encode("utf-8")
+            return [await self._ledger.put_blob(blob, content_type="application/json")]
+        except Exception as exc:  # noqa: BLE001 -- a blob failure must not lose the completion itself
+            self._log_artifact_failure(session, exc)
+            return []
+
+    def _log_artifact_failure(self, session: Session, exc: Exception) -> None:
+        logger = getattr(self._bus, "logger", None)
+        if logger is not None:
+            logger.warning("orchestration.plan_artifact_failed", task_id=session.task_id, error=repr(exc))
+
     async def _report(self, session: Session, outcome: Outcome) -> None:
         if outcome.kind == "paused":
             return  # session.py already emitted task.paused
@@ -136,7 +170,8 @@ class Worker:
         if outcome.kind == "completed":
             payload = {
                 "task_id": session.task_id, "result_summary": outcome.result_summary,
-                "artifacts": [], "verification_ref": outcome.verification_ref,
+                "artifacts": await self._artifacts_for(session, outcome),
+                "verification_ref": outcome.verification_ref,
             }
             if outcome.confidence is not None:
                 payload["confidence"] = outcome.confidence

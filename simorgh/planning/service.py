@@ -593,7 +593,7 @@ class Service:
                 text = data.get("steps_text", "") if isinstance(data, dict) else ""
             except Exception:  # noqa: BLE001 -- a malformed artifact must not crash Planning
                 text = ""
-        steps = parse_steps(text, self.config.project_step_count) if text else []
+        steps = parse_steps(text, self.config.project_step_count, self.config.source_roots) if text else []
         if not steps:
             await self._store.transition(
                 task.id, PENDING if task.status != PENDING else task.status,
