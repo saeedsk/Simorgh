@@ -326,3 +326,89 @@ def banner(*, enabled: bool = True, unicode: str = "auto") -> str:
         lines.append(f"  {label}   {desc}")
     lines.append(rule)
     return "\n".join(lines)
+
+_STATUS_COLOR = {
+    "in_progress": "cyan", "available": "yellow", "pending": "dim", "blocked": "magenta",
+    "completed": "green", "failed": "red", "paused": "dim", "awaiting_human": "magenta",
+}
+
+
+def task_list(tasks: list[dict], projects: list[dict], *, limit: int = 20, enabled: bool = True) -> str:
+    """The `tasks` command's real output.
+
+    Live-caught (the creator, 2026-09-07): "when I run tasks command it
+    only show the total number of tasks, not the tasks details". The
+    reply had carried every field all along -- id, kind, status, origin,
+    description -- and `dispatch.py` rendered `len(...)` of it and threw
+    the rest away, so a backlog of 100 was indistinguishable from a
+    backlog of 1 and there was no way to see what any of them were.
+
+    Grouped by status with the work that is actually moving first, since
+    "what is Sim doing" is the question being asked, and truncated with a
+    count of what was left out rather than printing a hundred lines.
+    """
+    if not tasks and not projects:
+        return "no tasks"
+
+    order = ["in_progress", "available", "blocked", "awaiting_human", "pending", "paused", "failed", "completed"]
+    by_status: dict[str, list[dict]] = {}
+    for task in tasks:
+        by_status.setdefault(task.get("status", "?"), []).append(task)
+
+    lines: list[str] = []
+    summary = "  ".join(
+        style(f"{len(by_status[s])} {s}", _STATUS_COLOR.get(s, "dim"), enabled=enabled)
+        for s in order if by_status.get(s)
+    )
+    extra = [s for s in by_status if s not in order]
+    if extra:
+        summary += "  " + "  ".join(f"{len(by_status[s])} {s}" for s in sorted(extra))
+    lines.append(f"{len(tasks)} task(s): {summary}" if summary else f"{len(tasks)} task(s)")
+
+    shown = 0
+    for status in order + sorted(extra):
+        group = by_status.get(status)
+        if not group:
+            continue
+        for task in group:
+            if shown >= limit:
+                break
+            lines.append("  " + _task_line(task, enabled=enabled))
+            shown += 1
+        if shown >= limit:
+            break
+    if len(tasks) > shown:
+        lines.append(style(f"  ... {len(tasks) - shown} more (`tasks all` to see them)", "dim", enabled=enabled))
+
+    if projects:
+        lines.append("")
+        lines.append(f"{len(projects)} project(s):")
+        for project in projects[:limit]:
+            rollup = project.get("rollup", "?")
+            stalled = "  stalled" if project.get("stalled") else ""
+            lines.append(
+                f"  {project.get('project_id', '?')[:12]:12s}  "
+                f"{style(rollup, _STATUS_COLOR.get(rollup, 'dim'), enabled=enabled)}  "
+                f"{project.get('done', 0)}/{project.get('total', 0)} steps{stalled}"
+            )
+        if len(projects) > limit:
+            lines.append(style(f"  ... {len(projects) - limit} more", "dim", enabled=enabled))
+    return "\n".join(lines)
+
+
+def _task_line(task: dict, *, enabled: bool = True) -> str:
+    status = task.get("status", "?")
+    origin = task.get("origin", "?")
+    description = (task.get("description") or "").replace("\n", " ").strip()
+    subject = task.get("subject") or ""
+    if subject and subject not in description:
+        description = f"{subject}: {description}"
+    if len(description) > 68:
+        description = description[:67] + "…"
+    return (
+        f"{task.get('task_id', '?')[:12]:12s}  "
+        f"{style(f'{status:<12s}', _STATUS_COLOR.get(status, 'dim'), enabled=enabled)}  "
+        f"{task.get('kind', '?'):<8s}  "
+        f"{style(f'{origin:<9s}', 'dim', enabled=enabled)}  {description}"
+    )
+

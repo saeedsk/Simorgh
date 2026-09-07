@@ -14,7 +14,7 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Bus, Clock
 
-from .model import Task
+from .model import TERMINAL_STATUSES, Task
 from .store import TaskStore
 
 DEFAULT_PRIORITY_WEIGHTS = {"human": 3, "reflection": 2, "curiosity": 1}
@@ -52,8 +52,14 @@ class Scheduler:
             await self._bus.publish(message)
 
     async def scan_leases(self) -> None:
+        """Return abandoned work to the queue. A lease that outlives its
+        task's completion is not abandoned work -- expiring it used to
+        reset the task to `available` and hand it straight back to a
+        worker, which is how 101 tasks generated 1,305 claims."""
         now = self._clock.now()
         for task in list(self._store.index.tasks.values()):
+            if task.status in TERMINAL_STATUSES:
+                continue
             if task.lease is not None and task.lease.until <= now:
                 await self._store.expire_lease(task.id)
 

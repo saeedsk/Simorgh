@@ -74,9 +74,18 @@ class Task:
     plan_id: str | None = None
 
     def with_status(self, status: str, *, note: str = "", updated_at: float, attempt: bool = False) -> "Task":
+        # A finished task keeps no lease. It used to: completion left the
+        # worker's lease in place, `Scheduler.scan_leases` expired it
+        # `lease_seconds` later like any other, and `lease_expired` reset
+        # the status to `available` -- so every completed task came back
+        # to life ten minutes after finishing and was worked again.
+        # Live-caught 2026-09-07: one project task carried 16 rounds of
+        # claimed -> started -> completed -> lease_expired -> claimed, and
+        # 101 real tasks had produced 1,305 claims and 1,218 completions.
         return replace(
             self, status=status, note=note or self.note, updated_at=updated_at,
             attempts=self.attempts + (1 if attempt else 0),
+            lease=None if status in TERMINAL_STATUSES else self.lease,
         )
 
 
