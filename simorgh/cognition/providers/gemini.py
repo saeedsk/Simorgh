@@ -25,6 +25,10 @@ class GeminiProvider:
         self._model = model
         self._client = client
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     def available(self) -> bool:
         return bool(self._api_key)
 

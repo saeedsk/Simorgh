@@ -47,4 +47,10 @@ CognitionProviderStatus = define(t.COGNITION_PROVIDER_STATUS, [
     F("provider", Str),
     F("available", Bool),
     F("budget", Obj()),
+    # Which model this provider is actually configured to call, and
+    # whether it is the one currently answering. Without these, nothing
+    # downstream can say what is thinking -- asked directly, Sim could
+    # only answer honestly that it had no way to know (2026-09-07).
+    O("model", Str),
+    O("selected", Bool),
 ])

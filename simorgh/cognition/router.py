@@ -34,6 +34,23 @@ class Router:
     def candidate_names(self) -> list[str]:
         return [name for name in self._order if name in self._by_name] + [self._floor.name]
 
+    def selected_name(self) -> str:
+        """The provider a call would go to right now: first in the
+        configured order that is actually available. Budget exhaustion is
+        not consulted -- that needs an await, and this exists to answer
+        "what is thinking for me", which should not require I/O."""
+        for name in self._order:
+            provider = self._by_name.get(name)
+            if provider is not None and provider.available():
+                return name
+        return self._floor.name
+
+    def model_of(self, name: str) -> str:
+        provider = self._by_name.get(name)
+        if provider is None:
+            return self._floor.model if name == self._floor.name else ""
+        return getattr(provider, "model", "") or ""
+
     async def complete(
         self, purpose: Purpose, messages: list[dict], *, tools: list[dict] | None,
         budget: Budget, timeout: float,

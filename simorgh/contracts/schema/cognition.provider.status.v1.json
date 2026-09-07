@@ -13,8 +13,20 @@
       "required": [],
       "type": "object"
     },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "provider": {
       "type": "string"
+    },
+    "selected": {
+      "type": [
+        "boolean",
+        "null"
+      ]
     }
   },
   "required": [

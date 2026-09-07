@@ -83,6 +83,10 @@ class TogetherProvider:
         # Nothing in the suite may make a real network call.
         self._transport = transport
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     def available(self) -> bool:
         return bool(self._api_key)
 

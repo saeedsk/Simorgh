@@ -24,6 +24,12 @@ class Config:
     pattern_window_seconds: float = 86400.0
     pattern_min_rate: float = 0.5
     pattern_min_samples: int = 3
+    # Repeated Guardian denials. One denial is Guardian working; the
+    # same denial five times in an hour is a defect or a bad habit,
+    # and either way it is Sim's job to raise, not the creator's to
+    # read off the terminal (reflection/denials.py).
+    denial_window_seconds: float = 3600.0
+    denial_min_repeats: int = 5
 
     calibration_bins: int = 10
     calibration_min_samples: int = 10
@@ -53,6 +59,8 @@ class Config:
             pattern_window_seconds=float(pattern.get("window_seconds", 86400.0)),
             pattern_min_rate=float(pattern.get("min_rate", 0.5)),
             pattern_min_samples=int(pattern.get("min_samples", 3)),
+            denial_window_seconds=float(data.get("denial_window_seconds", cls.denial_window_seconds)),
+            denial_min_repeats=int(data.get("denial_min_repeats", cls.denial_min_repeats)),
             calibration_bins=int(calibration.get("bins", 10)),
             calibration_min_samples=int(calibration.get("min_samples", 10)),
         )

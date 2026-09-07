@@ -29,6 +29,10 @@ TEMPLATES: dict[Purpose, str] = {
 
 class FloorProvider:
     name = "floor"
+    # Not a model at all -- the honest, offline template. Named so
+    # anything reporting "what is thinking for me" can say so plainly
+    # rather than leaving a blank.
+    model = "(none -- canned replies)"
 
     def available(self) -> bool:
         return True

@@ -64,6 +64,7 @@ class Service:
     produces = _PRODUCES
 
     def __init__(self, *, config: Config | None = None, seed: int | None = None) -> None:
+        self._config_from_caller = config
         self._config = config or Config()
         self._engine = DriveEngine(self._config)
         self._sampler = DriveWeightedSampler(self._engine)
@@ -96,6 +97,13 @@ class Service:
     # -- Subsystem protocol ---------------------------------------------------------------
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
+        # `Context.config` is this subsystem's `[curiosity]` section.
+        # Nothing read it before, so every knob in it was dead --
+        # including `min_explore_interval_seconds`, whose whole point
+        # is being tunable. An explicitly-passed config still wins.
+        if self._config_from_caller is None and ctx.config:
+            self._config = Config.from_mapping(dict(ctx.config))
+            self._recent = RecentCandidates(maxlen=self._config.recent_subjects)
         self._bus = ctx.bus
         self._ledger = ctx.ledger
         self._clock = ctx.clock
