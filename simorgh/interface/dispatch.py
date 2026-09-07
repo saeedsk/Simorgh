@@ -54,9 +54,17 @@ _SIMORGH_TOML_PATH = Path("simorgh.toml")
 class Outcome:
     text: str
     exit_repl: bool = False
+    # Set only by a `_request(..., watch=True)` call that created a real
+    # task (`plan`/`improve`/`research`/`tasks work`) -- `service.py::
+    # _handle_line` registers it in `_watched_tasks` so `_on_task_event`
+    # narrates the eventual `task.completed` instead of it landing only
+    # in the Ledger, unseen (live-caught: `improve web access` printed
+    # "task created: <id>" and then nothing, ever, for a task that in
+    # fact ran to completion with a real answer).
+    task_id: str | None = None
 
 
-async def _request(bus: BusClient, type_: str, payload: dict, *, timeout: float, render) -> Outcome:
+async def _request(bus: BusClient, type_: str, payload: dict, *, timeout: float, render, watch: bool = False) -> Outcome:
     try:
         reply = await bus.request(bus.new(type_, payload), timeout=timeout)
     except TimeoutError:
@@ -66,7 +74,8 @@ async def _request(bus: BusClient, type_: str, payload: dict, *, timeout: float,
     if reply.payload.get("ok") is False:
         err = reply.payload.get("error", {})
         return Outcome(f"error: {err.get('code', 'unknown')} -- {err.get('detail', '')}")
-    return Outcome(render(reply.payload))
+    task_id = reply.payload.get("task_id") if watch else None
+    return Outcome(render(reply.payload), task_id=task_id)
 
 
 async def _publish(bus: BusClient, type_: str, payload: dict, *, render_ok: str) -> Outcome:
@@ -132,30 +141,30 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         if rest and _PATH_HINT.search(first):
             return await _request(bus, topics.TASK_CREATE, {
                 "kind": "patch", "description": rest.strip(), "subject": first, "origin": "human", "mode": "execute",
-            }, timeout=5.0, render=lambda p: f"task created: {p['task_id']}")
+            }, timeout=5.0, render=lambda p: f"task created: {p['task_id']}", watch=True)
         return await _request(bus, topics.TASK_CREATE, {
             "kind": "skill", "description": args, "origin": "human", "mode": "execute",
-        }, timeout=5.0, render=lambda p: f"task created: {p['task_id']}")
+        }, timeout=5.0, render=lambda p: f"task created: {p['task_id']}", watch=True)
 
     if name == "plan":
         if not args:
             return Outcome("usage: plan <goal>")
         return await _request(bus, topics.TASK_CREATE, {
             "kind": "project", "description": args, "origin": "human", "mode": "plan",
-        }, timeout=5.0, render=lambda p: f"project task created: {p['task_id']}")
+        }, timeout=5.0, render=lambda p: f"project task created: {p['task_id']}", watch=True)
 
     if name == "research":
         if not args:
             return Outcome("usage: research <topic>")
         return await _request(bus, topics.TASK_CREATE, {
             "kind": "research", "description": args, "origin": "human",
-        }, timeout=5.0, render=lambda p: f"task created: {p['task_id']}")
+        }, timeout=5.0, render=lambda p: f"task created: {p['task_id']}", watch=True)
 
     if name == "tasks":
         if args.strip() == "work":
             return await _request(bus, topics.TASK_WORK_NEXT_REQUEST, {}, timeout=5.0, render=lambda p: (
                 f"working: {p['task_id']}" if p.get("task_id") else f"nothing to work on ({p.get('reason', 'idle')})"
-            ))
+            ), watch=True)
         return await _request(bus, topics.TASK_LIST_REQUEST, {}, timeout=3.0, render=lambda p: (
             f"{len(p.get('tasks', []))} task(s), {len(p.get('projects', []))} project(s)"
         ))

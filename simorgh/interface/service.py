@@ -127,6 +127,12 @@ class Service:
         self._stop_repl = threading.Event()
         self._pending_turns: dict[str, asyncio.Future] = {}
         self._turn_started: dict[str, float] = {}  # session_id -> monotonic start, for narration timing
+        # task_ids `dispatch()` created (`plan`/`improve`/`research`/`tasks
+        # work`) that this REPL fired off but isn't blocking on -- narrated
+        # the same as a `_pending_turns` chat turn (`_on_task_event`), but
+        # their `task.completed` prints the real `result_summary` instead
+        # of resolving an awaited future (nothing's awaiting these).
+        self._watched_tasks: set[str] = set()
         self._pending_prompts: dict[str, dict] = {}  # prompt_id -> payload, oldest-first (dict preserves insertion order)
         self._prompt_timeouts: dict[str, asyncio.Task] = {}  # prompt_id -> its own timeout watchdog
         self._color = render_mod.color_enabled(self.config.color)
@@ -342,6 +348,9 @@ class Service:
                                       session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger)
             if outcome.text:
                 self._out(outcome.text)
+            if outcome.task_id:
+                self._watched_tasks.add(outcome.task_id)
+                self._turn_started[outcome.task_id] = time.monotonic()
             if outcome.exit_repl:
                 self._stop_repl.set()
         except Exception as exc:  # noqa: BLE001 -- the REPL must survive a handler crash (spec section 8)
@@ -495,8 +504,24 @@ class Service:
         doing. The Ledger already records every step of a turn as it
         happens; this narrates the ones for a turn *this REPL* is
         waiting on -- a chat turn's task_id IS its session_id
-        (`worker.py::run_percept_chat`) -- and stays silent for every
-        other task (autonomous ticks, other sessions).
+        (`worker.py::run_percept_chat`) -- or one it fired off and is
+        still watching for (`_watched_tasks`, populated by `_handle_line`
+        from `Outcome.task_id` -- `plan`/`improve`/`research`/`tasks
+        work`) -- and stays silent for every other task (autonomous
+        ticks, other sessions).
+
+        Live-caught (the creator, real use: `improve web access` printed
+        "task created: c30b6e3360c3" and then nothing -- the task really
+        ran, stepped, and completed with a real, useful answer, visible
+        only by reading the Ledger directly, because this handler's own
+        `_pending_turns` filter treated a task the REPL itself just
+        created exactly like a stranger's autonomous tick: intentional
+        silence, aimed at the wrong case). A watched task's `task.
+        completed` now prints its `result_summary` through `_out()` --
+        same footer/prompt-safe gate as everything else in this file --
+        instead of the placeholder "done" a chat-driven completion
+        already replaces with the model's real answer over in
+        `_handle_chat`.
 
         On a real interactive terminal (`self._live.enabled`), an
         in-flight step (`ok` absent -- the pre-think announcement, or
@@ -514,7 +539,8 @@ class Service:
             return
         p = message.payload
         task_id = p.get("task_id", "")
-        if task_id not in self._pending_turns:
+        watched = task_id in self._watched_tasks
+        if task_id not in self._pending_turns and not watched:
             return
         elapsed = time.monotonic() - self._turn_started.get(task_id, time.monotonic())
 
@@ -561,9 +587,16 @@ class Service:
                 self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
                 return
             text = "thinking..."
-        else:  # task.completed -- the reply itself prints from _handle_chat
-            if self._live.enabled:
-                self._live.clear()
+        else:  # task.completed
+            self._live.clear()
+            if watched:
+                self._watched_tasks.discard(task_id)
+                self._turn_started.pop(task_id, None)
+                reply_text = p.get("result_summary", "")
+                header = render_mod.notice("info", f"task {task_id} finished", "orchestration", enabled=self._color)
+                self._out(f"{header}\n{render_mod.markdown(reply_text, enabled=self._color)}" if reply_text else header)
+                return
+            if self._live.enabled:  # the reply itself prints from _handle_chat
                 return
             text = "done"
         print(render_mod.style(f"  ... {text}  [{elapsed:.1f}s]", "dim", enabled=self._color))
