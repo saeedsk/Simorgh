@@ -122,6 +122,7 @@ class ShareScheduler(Protocol):                    # port of socializing.py
 | `temperature` | float | 0.7 | Softmax temperature over area scores; 0 → greedy, high → uniform |
 | `project_chance` | float | 0.2 | v1 `DEFAULT_CREATIVE_PROJECT_CHANCE`; applied only with no active project |
 | `boredom_after_seconds` | float | 1800 | Idle with empty backlog before boredom drive reaches 1.0 |
+| `min_explore_interval_seconds` | float | 300 | Minimum wall-clock spacing between exploration ticks, independent of the Kernel's ~3s idle tick; 0 disables. A `curiosity.discover.request` bypasses it |
 | `budget.backoff_below_remaining` | float | 0.2 | Fraction of any provider's window remaining below which exploration rate halves |
 | `budget.stop_below_remaining` | float | 0.05 | Below this, no candidates (research-only ticks still allowed if a free provider exists) |
 | `interest.follow_up_cooldown_seconds` | float | 3600 | Per topic |

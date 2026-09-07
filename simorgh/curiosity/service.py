@@ -91,6 +91,7 @@ class Service:
         self._ctx: Context | None = None
         self._last_tick_record: dict = {}
         self._cognition_attempted = False
+        self._last_explored_at: float | None = None
 
     # -- Subsystem protocol ---------------------------------------------------------------
     async def start(self, ctx: Context) -> None:
@@ -318,11 +319,26 @@ class Service:
         if not force and self._backlog.effective_count > 0:
             await self._record_tick(skipped_reason="backlog_nonempty")
             return []
+        # The Kernel's idle tick is a ~3s heartbeat (`idle_tick_cooldown_s`),
+        # but an exploration tick costs `candidates_per_tick` LLM calls. Live
+        # 2026-09-07: an unattended night at heartbeat rate drained both the
+        # daily USD budget and the `claude_code_cli` call quota within hours,
+        # after which Cognition fell back to its canned reply and the mood /
+        # reflection / Guardian chain read that as a system fault. Explore on
+        # our own clock instead: at most one tick per
+        # `min_explore_interval_seconds`. `force` (a human's `discover`) and
+        # the sleep tick are never throttled.
+        if not force and self._explore_cooldown_remaining() > 0.0:
+            await self._record_tick(skipped_reason="explore_cooldown")
+            return []
         boredom = min(1.0, idle_seconds / self._config.boredom_after_seconds) if self._config.boredom_after_seconds > 0 else 0.0
         rate = self._exploration_rate()
         if rate <= 0.0 and not self._budget.any_free and not force:
             await self._record_tick(skipped_reason="budget")
             return []
+        # Past every guard: this tick is going to spend cognition, so it
+        # starts the cooldown. Skipped ticks are free and must not.
+        self._last_explored_at = self._now()
 
         created: list[str] = []
         if not self._active_project.is_active(self._now()) and self._rng.random() < self._config.project_chance * max(rate, 0.0):
@@ -367,6 +383,13 @@ class Service:
             cognition_attempted=self._cognition_attempted,
         )
         return created
+
+    def _explore_cooldown_remaining(self) -> float:
+        """Seconds still owed before the next exploration tick may run."""
+        interval = self._config.min_explore_interval_seconds
+        if interval <= 0.0 or self._last_explored_at is None:
+            return 0.0
+        return max(0.0, interval - (self._now() - self._last_explored_at))
 
     def _exploration_rate(self) -> float:
         remaining = self._budget.worst_remaining

@@ -25,6 +25,12 @@ class Config:
     temperature: float = 0.7
     project_chance: float = 0.2  # v1 DEFAULT_CREATIVE_PROJECT_CHANCE
     boredom_after_seconds: float = 1800.0
+    # The Kernel emits `system.tick.idle` every ~3s while idle, but an
+    # exploration tick spends `candidates_per_tick` LLM calls, so at
+    # heartbeat rate an unattended night exhausts the day's budget in
+    # hours (live, 2026-09-07). Exploration runs on this clock instead;
+    # 0 disables the throttle, and a human's `discover` always bypasses it.
+    min_explore_interval_seconds: float = 300.0
     staleness_horizon_seconds: float = 7 * 86400.0
     budget_backoff_below_remaining: float = 0.2
     budget_stop_below_remaining: float = 0.05

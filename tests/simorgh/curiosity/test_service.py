@@ -6,6 +6,7 @@ boundary), so these tests exercise the real `request_or_error` /
 graceful-degradation path, not mocks of `service.py`'s own internals."""
 
 import asyncio
+import dataclasses
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,6 +48,7 @@ class CuriosityServiceTestCase(unittest.IsolatedAsyncioTestCase):
             logger=_Logger(), data_dir=Path(self._tmp.name) / "data",
         )
         self.config = CuriosityConfig(candidates_per_tick=1, boredom_after_seconds=60.0, project_chance=0.0)
+        self._extra_services: list[Service] = []
         self.service = Service(config=self.config, seed=7)
         await self.service.start(self.ctx)
 
@@ -120,6 +122,33 @@ class CuriosityServiceTestCase(unittest.IsolatedAsyncioTestCase):
                 self.fail("timed out waiting for condition")
             await asyncio.sleep(0.01)
 
+    async def _tick(self, svc, *, idle_seconds: float) -> dict:
+        """Publish one `system.tick.idle` and wait for the tick record it
+        produces. Asserting on the record rather than on emitted
+        candidates keeps these tests independent of `RecentCandidates`'s
+        similarity filter (the fake Cognition always answers the same)."""
+        svc._last_tick_record = {}
+        await self.bus.publish(self.bus.new(topics.SYSTEM_TICK_IDLE, {"idle_seconds": idle_seconds}))
+        await self._wait_until(lambda: bool(svc._last_tick_record))
+        return svc._last_tick_record
+
+    async def _service(self, **overrides):
+        """Replace the default service with one configured differently,
+        on the same bus (the default one is stopped first so a single
+        `system.tick.idle` is not handled twice). Returns it plus the
+        test requester, and is cleaned up by `asyncTearDown`."""
+        await self.service.stop()
+        cfg = dataclasses.replace(self.config, **overrides)
+        svc = Service(config=cfg, seed=7)
+        self._extra_services.append(svc)
+        await svc.start(Context(
+            name="curiosity", instance_id="", run_id="test", mode="single",
+            bus=self.bus, ledger=self.ledger, config={}, secrets={}, clock=self.clock,
+            logger=_Logger(), data_dir=Path(self._tmp.name) / f"data{len(self._extra_services)}",
+        ))
+        self.service = svc
+        return svc, self.requester
+
     # -- tick gating ------------------------------------------------------------------
     async def test_tick_skipped_when_backlog_nonempty(self):
         await self.bus.publish(self.bus.new(topics.TASK_CREATED, {
@@ -179,6 +208,62 @@ class CuriosityServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service._last_tick_record.get("skipped_reason"), "already_running")
         gate.set()
         await self._pump(10)
+
+    # -- exploration cooldown ---------------------------------------------------------
+    async def test_a_second_idle_tick_inside_the_explore_interval_is_skipped(self):
+        """Live 2026-09-07: the Kernel's ~3s idle heartbeat drove one
+        exploration tick each, draining the day's LLM budget overnight.
+        Exploration keeps its own clock (`min_explore_interval_seconds`)."""
+        svc, requester = await self._service(min_explore_interval_seconds=300.0)
+        seen = []
+        sub = await requester.subscribe(topics.CURIOSITY_CANDIDATE, lambda m: seen.append(m) or asyncio.sleep(0))
+        await self.bus.publish(self.bus.new(topics.SYSTEM_TICK_IDLE, {"idle_seconds": 5.0}))
+        await self._wait_until(lambda: len(seen) >= 1)
+
+        self.clock.advance(3.0)  # one kernel idle heartbeat later
+        await self.bus.publish(self.bus.new(topics.SYSTEM_TICK_IDLE, {"idle_seconds": 8.0}))
+        await self._wait_until(lambda: svc._last_tick_record.get("skipped_reason") == "explore_cooldown")
+        await sub.unsubscribe()
+        self.assertEqual(len(seen), 1)
+
+    async def test_the_next_tick_after_the_interval_elapses_explores_again(self):
+        svc, _requester = await self._service(min_explore_interval_seconds=300.0)
+        await self._tick(svc, idle_seconds=5.0)
+        self.assertIsNone(svc._last_tick_record.get("skipped_reason"))
+
+        self.clock.advance(301.0)
+        await self._tick(svc, idle_seconds=306.0)
+        self.assertIsNone(svc._last_tick_record.get("skipped_reason"))
+        self.assertTrue(svc._last_tick_record["picked"])
+
+    async def test_a_skipped_tick_does_not_start_the_cooldown(self):
+        """Only a tick that actually spends cognition arms the interval;
+        a paused/backlog skip is free and must not delay the next one."""
+        svc, _requester = await self._service(min_explore_interval_seconds=300.0)
+        await self.bus.publish(self.bus.new(topics.SYSTEM_STATE_CHANGED, {"state": "paused"}))
+        await self._pump()
+        await self._tick(svc, idle_seconds=5.0)
+        self.assertEqual(svc._last_tick_record.get("skipped_reason"), "paused")
+
+        await self.bus.publish(self.bus.new(topics.SYSTEM_STATE_CHANGED, {"state": "running"}))
+        await self._pump()
+        await self._tick(svc, idle_seconds=6.0)
+        self.assertIsNone(svc._last_tick_record.get("skipped_reason"))
+
+    async def test_a_humans_discover_request_bypasses_the_cooldown(self):
+        svc, requester = await self._service(min_explore_interval_seconds=300.0)
+        await self._tick(svc, idle_seconds=5.0)
+        self.assertIsNotNone(svc._last_explored_at)
+        svc._last_tick_record = {}
+        await requester.request(requester.new(topics.CURIOSITY_DISCOVER_REQUEST, {}), timeout=2)
+        self.assertIsNone(svc._last_tick_record.get("skipped_reason"))
+        self.assertTrue(svc._last_tick_record["picked"])
+
+    async def test_a_zero_interval_disables_the_throttle(self):
+        svc, _requester = await self._service(min_explore_interval_seconds=0.0)
+        await self._tick(svc, idle_seconds=5.0)
+        await self._tick(svc, idle_seconds=6.0)
+        self.assertIsNone(svc._last_tick_record.get("skipped_reason"))
 
     # -- discover / share request-reply ------------------------------------------------
     async def test_discover_request_forces_a_tick_and_returns_created_ids(self):
