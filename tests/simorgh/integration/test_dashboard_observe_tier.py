@@ -16,9 +16,12 @@ test doesn't:
   test never fights a real port already in use.
 - `interactive=True` also starts a real REPL thread blocking on this
   process's own `input()`. `builtins.input` is patched to raise
-  `EOFError` immediately so that thread exits the moment it starts
+  `EOFError` so that thread exits as soon as it reads a line
   (`Service._repl_main`'s own `except EOFError: break`) -- the HTTP
-  server's own start does not depend on the REPL thread either way.
+  server's own start does not depend on the REPL thread either way. The
+  patch is held for the whole test rather than just `boot()`, because
+  the REPL now waits for `running` before printing its splash and
+  reaching `input()`, which puts that read after boot has returned.
 """
 
 from __future__ import annotations
@@ -92,8 +95,14 @@ class TestDashboardObserveTier(unittest.IsolatedAsyncioTestCase):
         patched_config = mock.patch(
             "simorgh.interface.service.Config", side_effect=lambda: InterfaceConfig(http_port=0),
         )
-        patched_input = mock.patch("builtins.input", side_effect=EOFError)
-        with patched_config, patched_input:
+        # Held for the whole test, not just `boot()`: the REPL thread now
+        # waits for the Kernel to report `running` before it prints its
+        # splash and reaches `input()` (so boot progress is not
+        # overprinted), which lands that call *after* boot returns.
+        self._patched_input = mock.patch("builtins.input", side_effect=EOFError)
+        self._patched_input.start()
+        self.addCleanup(self._patched_input.stop)
+        with patched_config:
             self.kernel = Kernel(config, secrets=EnvSecretStore({}), interactive=True)
             await self.kernel.boot()
 

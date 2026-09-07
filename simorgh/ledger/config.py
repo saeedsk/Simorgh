@@ -23,6 +23,12 @@ class Config:
     tail_poll_ms: int = 100
     keep_tail: int = 50
     retention: dict = field(default_factory=dict)  # prefix -> "7d" | "forever" (defaults merged in compaction)
+    # Seconds after start before the first compaction pass. Compaction
+    # otherwise runs only on `system.tick.sleep`, whose loop waits a
+    # full `sleep_every_s` (6h) before its first tick -- so a session
+    # shorter than that never compacted at all, and expired streams
+    # accumulated forever (192,456 of them by 2026-09-07). 0 disables.
+    compact_after_start_s: float = 30.0
     allow_fallback: bool = False  # fall back to jsonl if the configured backend is unavailable
     dynamodb_table: str = ""
     dynamodb_bucket: str = ""
@@ -52,6 +58,7 @@ class Config:
             keep_tail=keep_tail,
             retention={k: v for k, v in retention.items() if k != "keep_tail"},  # type: ignore[union-attr]
             allow_fallback=bool(m.get("allow_fallback", cls.allow_fallback)),
+            compact_after_start_s=float(m.get("compact_after_start_s", cls.compact_after_start_s)),  # type: ignore[arg-type]
             dynamodb_table=str(dynamo.get("table", "")),  # type: ignore[union-attr]
             dynamodb_bucket=str(dynamo.get("bucket", "")),  # type: ignore[union-attr]
         )

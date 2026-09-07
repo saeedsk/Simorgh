@@ -8,6 +8,8 @@ cannot persist, `degraded` when free disk is under 5 %.
 
 from __future__ import annotations
 
+import asyncio
+
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message, validate
 from simorgh.contracts.protocols import Context, Health
@@ -35,6 +37,7 @@ class Service:
         self.policy = RetentionPolicy.parse(self.config.retention, keep_tail=self.config.keep_tail)
         self._ctx: Context | None = None
         self._subscription = None
+        self._first_compaction: asyncio.Task | None = None
         self.compactions = 0
         self.last_report: dict | None = None
 
@@ -43,13 +46,46 @@ class Service:
         if not self.client.started:
             await self.client.start()
         self._subscription = await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep)
+        if self.config.compact_after_start_s > 0:
+            self._first_compaction = asyncio.create_task(self._compact_after_start(), name="ledger-first-compaction")
         ctx.logger.info("ledger.started", backend=type(self.client.backend).__name__)
 
     async def stop(self) -> None:
         if self._subscription is not None:
             await self._subscription.unsubscribe()
             self._subscription = None
+        if self._first_compaction is not None:
+            self._first_compaction.cancel()
+            try:
+                await self._first_compaction
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise from a background pass
+                pass
+            self._first_compaction = None
         await self.client.stop()
+
+    async def _compact_after_start(self) -> None:
+        """One compaction pass shortly after boot.
+
+        Live-caught 2026-09-07: retention already said `trace:` streams
+        expire after 7 days, and 190,865 of them were still on disk (1.8GB)
+        because the only thing that ran compaction was `system.tick.sleep`
+        -- and the Kernel's sleep loop waits a full `sleep_every_s` (6h)
+        before its *first* tick. A session that ends before then compacted
+        nothing, so in practice compaction had never run at all.
+
+        Deliberately not done inside `start()`: the pass walks every
+        stream, and boot is not the place to wait for it. Failures are
+        logged and dropped -- a ledger that cannot compact is still a
+        ledger that works.
+        """
+        try:
+            await asyncio.sleep(self.config.compact_after_start_s)
+            await self._compact("start")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            if self._ctx is not None:
+                self._ctx.logger.warning("ledger.first_compaction_failed", error=repr(exc))
 
     async def health(self) -> Health:
         if not self.client.started:
@@ -72,17 +108,24 @@ class Service:
             if self._ctx is not None:
                 self._ctx.logger.warning("ledger.bad_tick", problems=problems, type=message.type)
             return  # a malformed tick has no side effects
-        now = self._ctx.clock.now() if self._ctx is not None else message.ts
+        await self._compact("sleep_tick", cause=message)
+
+    async def _compact(self, reason: str, *, cause: Message | None = None) -> None:
+        """One retention pass, from either trigger (the 6-hourly sleep
+        tick, or once shortly after start). Records what it removed."""
+        now = self._ctx.clock.now() if self._ctx is not None else (cause.ts if cause is not None else 0.0)
         report = await run_compaction(self.client.backend, self.policy, now=now)
         self.compactions += 1
         self.last_report = report.as_payload()
         if report.streams_deleted or report.events_truncated:
             await self.client.append(
                 COMPACTION_STREAM,
-                Event(stream=COMPACTION_STREAM, type="ledger.compacted", ts=now, trace_id=message.trace_id,
-                      causation_id=message.id, payload=report.as_payload()),
+                Event(stream=COMPACTION_STREAM, type="ledger.compacted", ts=now,
+                      trace_id=cause.trace_id if cause is not None else "",
+                      causation_id=cause.id if cause is not None else None,
+                      payload={**report.as_payload(), "reason": reason}),
             )
-        await self.publish_metrics(cause=message)
+        await self.publish_metrics(cause=cause)
 
     async def publish_metrics(self, *, cause: Message | None = None) -> None:
         if self._ctx is None:

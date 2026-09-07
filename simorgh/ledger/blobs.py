@@ -103,12 +103,21 @@ class LocalBlobStore:
         return data
 
     def stat(self) -> dict:
+        """Counted with `os.walk`/`scandir` rather than `Path.rglob`,
+        which builds a Path per entry and then stats each one twice (once
+        for `is_file`, once for the size). The Ledger's `health()` calls
+        this, so on a large store it was 1.8s of every boot and of every
+        health poll."""
         count = total = 0
-        if self.root.exists():
-            for path in self.root.rglob("*"):
-                if path.is_file() and not path.name.endswith((".meta", ".tmp")):
-                    count += 1
-                    total += path.stat().st_size
+        for dirpath, _dirnames, filenames in os.walk(self.root):
+            for name in filenames:
+                if name.endswith((".meta", ".tmp")):
+                    continue
+                try:
+                    total += os.stat(os.path.join(dirpath, name)).st_size
+                except OSError:
+                    continue  # vanished mid-walk: not worth failing a health check
+                count += 1
         return {"blobs": count, "blob_bytes": total}
 
 
