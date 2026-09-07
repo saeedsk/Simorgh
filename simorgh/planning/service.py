@@ -225,6 +225,18 @@ class Service:
             topics.TASK_CREATED, source=self._ctx.source,
             partition_key=f"task:{task.id}", payload=payload,
         ))
+        # Live-caught by the CLI end-to-end test, 2026-09-07: nothing
+        # dispatched a task at the moment it became ready. The only caller
+        # of `dispatch_ready` was `_on_tick_idle`, and the Kernel's idle
+        # tick needs `idle_threshold_s` (10s) of *no percepts* first --
+        # and every line the human types is a percept that resets it. So a
+        # task typed at the REPL sat unclaimed for at least ten seconds,
+        # and a person who kept typing could starve their own work
+        # indefinitely. Dispatch is idempotent (keyed on
+        # `{task.id}:{task.updated_at}`), so this is a no-op when the idle
+        # tick later notices the same still-available task.
+        if self._scheduler is not None:
+            await self._scheduler.dispatch_ready()
 
     # -- claiming / lifecycle ---------------------------------------------------------
 
