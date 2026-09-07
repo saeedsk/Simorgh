@@ -83,6 +83,24 @@ def _terminal_width(default: int = 80) -> int:
         return default
 
 
+def clear_current_line() -> None:
+    """Blanks whatever's on the terminal's current line right now.
+
+    Distinct from `LiveStatus.clear()`, which only erases a footer
+    *this class itself* drew (a no-op the rest of the time). Live-caught
+    (the creator, real use, twice): a bare `input("> ")` prompt has no
+    footer to protect, so a bus handler's `_out()` printing while that
+    prompt sits on screen (an autonomous task's own notice, a Guardian
+    denial for work the REPL didn't start) wrote straight onto the same
+    line as the "> " -- garbled text mid-prompt, easy to mistake for the
+    process hanging. `service.py::_out()` calls this whenever
+    `_input_pending` says a real `input()` call is blocked right now,
+    same no-op-off-a-real-tty guarantee as everything else here."""
+    if sys.stdout.isatty():
+        sys.stdout.write(_TO_COL0 + _CLEAR_LINE)
+        sys.stdout.flush()
+
+
 class LiveStatus:
     """One in-place-updating line. `render(text)` overwrites it;
     `clear()` erases it back to nothing (call before printing anything

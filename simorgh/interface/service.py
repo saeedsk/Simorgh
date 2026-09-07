@@ -72,7 +72,7 @@ from . import render as render_mod
 from .config import Config
 from .dispatch import dispatch
 from .httpapi import HttpApi
-from .live_status import LiveStatus, live_status_enabled, verb_for
+from .live_status import LiveStatus, clear_current_line, live_status_enabled, verb_for
 from .parser import parse
 from .vitals import VitalsCache
 
@@ -131,6 +131,17 @@ class Service:
         self._prompt_timeouts: dict[str, asyncio.Task] = {}  # prompt_id -> its own timeout watchdog
         self._color = render_mod.color_enabled(self.config.color)
         self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
+        # True only while `_repl_main`'s thread is genuinely blocked
+        # inside `input("> ")` -- the one window where a bus-handler's
+        # `_out()` (running on the asyncio loop's own thread, for work
+        # this REPL didn't start: an autonomous tick, a background
+        # `dispatch()`ed task) can print straight over a bare prompt with
+        # no footer to protect it. Plain bool, not a Lock: CPython's GIL
+        # makes a single assignment atomic, and the one real race (an
+        # `_out()` call landing in the few instructions around the flag
+        # flip) costs at most one skipped/extra cosmetic redisplay, never
+        # a correctness bug.
+        self._input_pending = False
         self._http: HttpApi | None = None
 
     async def start(self, ctx: Context) -> None:
@@ -206,10 +217,31 @@ class Service:
         from here never lands interleaved with it, prints normally, then
         restores the footer if a turn is still actively rendering one.
         A no-op-footer (non-interactive stdout) makes this exactly a
-        plain `print()`."""
+        plain `print()`.
+
+        Live-caught (the creator, real use, twice): the footer isn't the
+        only thing that can be on screen when this fires from a bus
+        handler -- a bare `input("> ")` prompt has no footer to clear,
+        so a notice/denial for work the REPL didn't itself start (an
+        autonomous tick, a background `dispatch()`ed task like
+        `improve`) printed straight onto the same line as "> ",
+        indistinguishable from the process hanging or answering its own
+        prompt. `_input_pending` is only True in that exact window, so
+        this branch never fires mid-turn (the REPL thread is blocked in
+        `run_coroutine_threadsafe(...).result()`, not `input()`, while a
+        turn it started is in flight) -- `readline.redisplay()` restores
+        the prompt *and* any not-yet-submitted text the human was typing,
+        which a naive reprinted `"> "` would have silently dropped."""
         self._live.clear()
+        if self._input_pending:
+            clear_current_line()
         print(text)
         self._live.restore()
+        if self._input_pending and readline is not None and sys.stdout.isatty():
+            try:
+                readline.redisplay()
+            except Exception:  # noqa: BLE001 -- best-effort cosmetic redraw only
+                pass
 
     def _history_path(self):
         explicit = self.config.resolved_history_path()
@@ -250,12 +282,15 @@ class Service:
         print(render_mod.banner(enabled=self._color, unicode=render_mod.unicode_mode(self.config.unicode)))
         print("Ctrl-D to detach the REPL.")
         while not self._stop_repl.is_set():
+            self._input_pending = True
             try:
                 line = input("> ")
             except EOFError:
                 break
             except KeyboardInterrupt:
                 continue
+            finally:
+                self._input_pending = False
             # Live-caught (creator's own real use, twice -- once before the
             # think_timeout_s fix, again after it): this used to be
             # `call_soon_threadsafe(asyncio.ensure_future, ...)`, a true
