@@ -70,11 +70,17 @@ class TestHealthMonitor(unittest.TestCase):
         self.assertEqual(finding.action_taken, NONE)
 
     def test_health_reset_source_is_not_observed_loop_guard(self):
+        """Live-caught: this used to check the guard against
+        "health_reset" (underscore), but `persona/service.py::_on_
+        health_finding` -- the only real publisher of a reset -- has
+        always sent "health.reset" (dot). The two never matched in real
+        use; this test passed the whole time by checking the same wrong
+        string the guard itself used, never catching the mismatch."""
         for i in range(4):
             self.monitor.observe(-0.95, 0.0, 0.1, "logic", float(i))
         self.assertIsNotNone(self.monitor.inspect())
         # A reset-sourced sample must not be treated as a fresh signal.
-        self.monitor.observe(0.0, 0.0, 0.0, "health_reset", 10.0)
+        self.monitor.observe(0.0, 0.0, 0.0, "health.reset", 10.0)
         # buffer unchanged in length by the guarded sample:
         self.assertEqual(len(self.monitor._buf), 4)  # noqa: SLF001
 

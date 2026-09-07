@@ -54,9 +54,17 @@ class HealthMonitor:
         self._buf: list[Sample] = []
 
     def observe(self, valence: float, arousal: float, cognitive_load: float, source: str, ts: float) -> None:
-        if source == "health_reset":
+        if source == "health.reset":
             # Loop guard (spec section 3.1): the reset we ourselves
-            # requested is not a fresh signal to re-inspect.
+            # requested is not a fresh signal to re-inspect. Live-caught:
+            # this checked "health_reset" (underscore) while `persona/
+            # service.py::_on_health_finding` -- the only real publisher
+            # of a reset -- has always sent "health.reset" (dot, matching
+            # its other dotted `source` values like "percept.text"). The
+            # two never matched, so every reset was fed straight back
+            # into the ring buffer as an ordinary sample instead of being
+            # skipped -- harmless on its own (a reset value is never
+            # itself extreme), but real drift from the documented guard.
             return
         self._buf.append(Sample(valence, arousal, cognitive_load, source, ts))
         if len(self._buf) > self._config.health_window:

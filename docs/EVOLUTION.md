@@ -4469,3 +4469,38 @@ Still ahead, roughly in order:
     not swallowed; no pending prompt means a bare "yes" is ordinary
     chat; the watchdog still auto-answers the default when nobody
     types anything). Full suite green (2,309 tests).
+
+144. **Why `resume` kept needing to be run again: found by reading the
+    real Ledger, not guessing.** The creator hit `locked` posture a
+    third time within the same session, immediately after a `resume`.
+    Rather than repeat the same advice, read `~/.simorgh/ledger/streams/
+    guardian%3Atrust.jsonl` directly (read-only, alongside the live
+    process -- never through the `Ledger` client, to avoid any lock
+    contention with the running Kernel) and found the real cause:
+    repeated `tightened {reason: "critical health finding: valence
+    pinned at an extreme for the last 5 transitions", to: "locked"}`
+    events, several within minutes of each other. Not Guardian's
+    consecutive-failure counter (that one only counts autonomous-origin
+    task outcomes, per `_on_task_outcome`'s own `origin in self._config.
+    autonomous_origins` check) -- Persona's own mood model, legitimately
+    pinned negative by an unusually failure-dense session (this exact
+    session, spent finding and reproducing real bugs), re-triggering the
+    same critical finding faster than anything cleared it.
+
+    The self-healing half of this was already fully built --
+    `reflection/health.py`'s `Finding.action_taken = REQUEST_RESET`, and
+    `persona/service.py::_on_health_finding` genuinely does reset
+    valence/arousal to baseline on exactly that signal -- but `health.py`'s
+    own loop guard (`observe()`: "the reset we ourselves requested is
+    not a fresh signal to re-inspect") checked `source == "health_reset"`
+    while Persona has only ever published `source="health.reset"` (a
+    dot, matching its other dotted `source` values). The two never
+    matched, so every reset got fed straight back into the ring buffer
+    as an ordinary sample instead of being excluded -- harmless in
+    isolation (a reset value is never itself extreme, so it still broke
+    the "5 consecutive pinned" streak), but real, undetected drift from
+    a mechanism this file's own tests only ever checked against the same
+    wrong string the guard used, never against what `persona/service.py`
+    actually sends. Fixed by correcting the guard to the string
+    Persona really publishes. 1 test updated to match (confirmed to fail
+    against the pre-fix string first); full suite green.
