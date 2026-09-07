@@ -261,6 +261,10 @@
         .activity-feed .k { display: inline-block; min-width: 9.5em; opacity: .85; }
         .activity-feed .bad { color: #b22222; }
         .activity-feed .who { opacity: .6; margin-left: 8px; }
+        .activity-feed .diff { margin: 4px 0 2px 9.5em; padding: 4px 6px; background: rgba(127,127,127,.08);
+                                border-radius: 4px; white-space: pre; overflow-x: auto; }
+        .activity-feed .diff .add { color: #1a7f37; }
+        .activity-feed .diff .del { color: #b22222; }
       </style>
     </section>
     <section>
@@ -785,12 +789,37 @@
   // flight right now -- the same lines the CLI narrates.
   const ACTIVITY_POLL_MS = 1500;
   function escA(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+  // A successful apply_source_patch embeds a real unified diff in its own
+  // step summary (execution/tools.py::_write_scoped_file,
+  // 07-post-cutover-review.md §3.11) as "<head>\n\n--- a/<file>\n...".
+  // Split it out so it renders as a real diff block, not raw text inline.
+  function splitDiff(s) {
+    const marker = "\n\n--- a/";
+    const i = (s || "").indexOf(marker);
+    if (i === -1) return [s || "", ""];
+    return [s.slice(0, i), s.slice(i + 2)];  // keep the "--- a/..." header, drop the blank line before it
+  }
+  function diffHtml(diffText) {
+    if (!diffText) return "";
+    const maxLines = 60;
+    const lines = diffText.split("\n");
+    const shown = lines.slice(0, maxLines).map(l => {
+      const cls = l.startsWith("+") && !l.startsWith("+++") ? "add"
+                : l.startsWith("-") && !l.startsWith("---") ? "del" : "";
+      return cls ? '<span class="' + cls + '">' + escA(l) + '</span>' : escA(l);
+    }).join("\n");
+    const footer = lines.length > maxLines ? "\n[truncated: " + (lines.length - maxLines) + " more line(s)]" : "";
+    return '<pre class="diff">' + shown + footer + '</pre>';
+  }
   function activityLabel(e) {
     switch (e.type) {
       case "percept.text.received": return ["heard", e.summary, e.channel ? "via " + e.channel : ""];
       case "task.started": return ["thinking", "", ""];
-      case "task.step": return ["step " + (e.step_no ?? "?") + " " + (e.phase || ""),
-                                (e.tool ? e.tool + ": " : "") + (e.summary || ""), e.ok === false ? "FAILED" : (e.ok ? "ok" : "")];
+      case "task.step": {
+        const [head, diffText] = splitDiff(e.summary || "");
+        return ["step " + (e.step_no ?? "?") + " " + (e.phase || ""),
+                (e.tool ? e.tool + ": " : "") + head, e.ok === false ? "FAILED" : (e.ok ? "ok" : ""), diffText];
+      }
       case "action.result": return ["action " + (e.ok ? "ok" : "failed"), e.summary, e.duration_ms != null ? e.duration_ms + " ms" : ""];
       case "action.denied": return ["action denied", e.summary, ""];
       case "task.completed": return ["done", e.summary, ""];
@@ -811,13 +840,14 @@
       now.classList.toggle("busy", busy > 0);
       const feed = document.getElementById("activity-feed");
       feed.innerHTML = (data.events || []).map(e => {
-        const [kind, what, extra] = activityLabel(e);
+        const [kind, what, extra, diffText] = activityLabel(e);
         const age = Math.max(0, Math.round(data.now - e.ts));
         const bad = /FAILED|failed|denied/.test(kind + " " + extra) ? " bad" : "";
         return '<li class="' + bad.trim() + '"><span class="t">' + age + 's ago</span>'
           + '<span class="k">' + escA(kind) + '</span>' + escA(what)
           + (extra ? ' <span class="who">' + escA(extra) + '</span>' : '')
-          + (e.task_id ? ' <span class="who">' + escA(String(e.task_id).slice(0, 8)) + '</span>' : '') + '</li>';
+          + (e.task_id ? ' <span class="who">' + escA(String(e.task_id).slice(0, 8)) + '</span>' : '')
+          + diffHtml(diffText) + '</li>';
       }).join("");
     } catch (_) { /* transient; the conn banner covers outages */ }
   }

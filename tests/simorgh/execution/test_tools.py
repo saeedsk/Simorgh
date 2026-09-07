@@ -121,6 +121,42 @@ class TestApplySourcePatchTool(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(result.ok)
 
+    async def test_a_new_file_has_no_diff(self):
+        """Live-caught (the creator: "I'd like ... code diffs" --
+        07-post-cutover-review.md §3.11): render.diff_block() existed but
+        nothing ever produced a diff -- a real patch just silently
+        replaced a file. A brand-new file has no "before" to diff
+        against."""
+        result = await ApplySourcePatchTool(self.config).run(
+            {"subject": "src/new_module.py", "code": "x = 1\n"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.metadata["diff"], "")
+        self.assertNotIn("---", result.output)
+
+    async def test_overwriting_an_existing_file_produces_a_real_unified_diff(self):
+        (self.root / "src").mkdir()
+        (self.root / "src" / "existing.py").write_text("VALUE = 1\n")
+        result = await ApplySourcePatchTool(self.config).run(
+            {"subject": "src/existing.py", "code": "VALUE = 2\n"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok)
+        diff = result.metadata["diff"]
+        self.assertIn("-VALUE = 1", diff)
+        self.assertIn("+VALUE = 2", diff)
+        self.assertIn("a/src/existing.py", diff)
+        self.assertIn("b/src/existing.py", diff)
+        self.assertIn(diff, result.output)  # the wire path (output -> stdout_preview/output_ref)
+
+    async def test_rewriting_a_file_with_identical_content_has_no_diff(self):
+        (self.root / "src").mkdir()
+        (self.root / "src" / "same.py").write_text("VALUE = 1\n")
+        result = await ApplySourcePatchTool(self.config).run(
+            {"subject": "src/same.py", "code": "VALUE = 1\n"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.metadata["diff"], "")
+
 
 class TestApplySkillTool(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

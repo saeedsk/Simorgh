@@ -109,8 +109,11 @@ class SessionRunner:
 
             if tool_calls and not is_last:
                 call = tool_calls[0]  # one action per step (section 7)
-                ok, summary = await self._propose_and_await(session, call, step_no)
-                step = Step(step_no, "act", summary, tool=call.get("tool"), ok=ok)
+                ok, summary, detail = await self._propose_and_await(session, call, step_no)
+                # `detail` (narration/Ledger, generously bounded) vs `summary`
+                # (the model's own next-turn context, tightly bounded) are
+                # deliberately different lengths -- see `_propose_and_await`.
+                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok)
                 session.record(step)
                 await self._record_step(session, step)
                 session.messages.append({"role": "assistant", "content": f"[tool_call {call.get('tool')}] -> {summary}"})
@@ -185,7 +188,20 @@ class SessionRunner:
             return None
         return reply
 
-    async def _propose_and_await(self, session: Session, call: dict, step_no: int) -> tuple[bool, str]:
+    # Live-caught (the creator: "I'd like ... code diffs ... similar UI
+    # experience as claude code cli" -- 07-post-cutover-review.md §3.11):
+    # a real diff (`execution/tools.py::_write_scoped_file`) now travels
+    # through `output`/`stdout_preview`, but the old 200-char cap here
+    # existed for the *model's own next-turn context* (`session.messages`
+    # -- keeping tool output small is deliberate, this session's own
+    # context_too_large work), not for what a human watching narration
+    # gets to see. Returns both: `summary` (200 chars, unchanged, goes to
+    # the model) and `detail` (2000 chars, goes only to the published
+    # `task.step` -- the Ledger, the CLI narration, the dashboard feed --
+    # never back into the model's own context).
+    _DETAIL_CHARS = 2000
+
+    async def _propose_and_await(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
         action_id = uuid.uuid4().hex[:12]
         payload = to_action_payload(
             action_id=action_id, task_id=session.task_id, call=call,
@@ -202,13 +218,17 @@ class SessionRunner:
             key="action_id", value=action_id, timeout=self._action_timeout_s,
         )
         if result is None:
-            return False, f"{call.get('tool')}: no response (timed out)"
+            text = f"{call.get('tool')}: no response (timed out)"
+            return False, text, text
         if result.type == topics.ACTION_RESULT:
-            return result.payload.get("ok", False), result.payload.get("stdout_preview", "")[:200]
+            full = result.payload.get("stdout_preview", "")
+            return result.payload.get("ok", False), full[:200], full[: self._DETAIL_CHARS]
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
-            return False, f"denied: {reasons}"
-        return False, f"needs human: {result.payload.get('question', '')}"
+            text = f"denied: {reasons}"
+            return False, text, text
+        text = f"needs human: {result.payload.get('question', '')}"
+        return False, text, text
 
     async def _verify_then_finish(self, session: Session, text: str, *, floor: bool) -> Outcome:
         while True:

@@ -22,6 +22,7 @@ with no trace of why.
 
 from __future__ import annotations
 
+import difflib
 import json
 import subprocess
 import sys
@@ -147,11 +148,36 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
     if not scope_ok:
         return ToolResult(ok=False, error=f"refused: {subject!r} resolves outside the writable scope")
     already_existed = target.exists()
+    # Live-caught (the creator: "I'd like ... code diffs ... similar UI
+    # experience as claude code cli" -- 07-post-cutover-review.md §3.11):
+    # `render.diff_block()` was ported from v1 but nothing ever produced a
+    # diff to show it, because nothing captured the old content before
+    # overwriting -- a real patch just silently replaced a file with no
+    # before/after anywhere. Read it now, before the write, so a real
+    # unified diff can travel through `output` -- the existing pipe to
+    # `ActionResult.stdout_preview`/`output_ref`, no contracts change --
+    # instead of adding a diff-shaped field that only this one tool uses.
+    old_text = ""
+    if already_existed:
+        try:
+            old_text = target.read_text()
+        except (OSError, UnicodeDecodeError):
+            old_text = ""  # binary or unreadable -- diff honestly unavailable, not fabricated
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(code)
+    output = f"wrote {subject}"
+    diff_text = ""
+    if already_existed and old_text and old_text != code:
+        diff_lines = list(difflib.unified_diff(
+            old_text.splitlines(keepends=True), code.splitlines(keepends=True),
+            fromfile=f"a/{subject}", tofile=f"b/{subject}",
+        ))
+        if diff_lines:
+            diff_text = "".join(diff_lines)
+            output += "\n\n" + diff_text
     return ToolResult(
-        ok=True, output=f"wrote {subject}", side_effects=(f"file_write:{subject}",),
-        metadata={"overwrote_existing": already_existed},
+        ok=True, output=output, side_effects=(f"file_write:{subject}",),
+        metadata={"overwrote_existing": already_existed, "diff": diff_text},
     )
 
 

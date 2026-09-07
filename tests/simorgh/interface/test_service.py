@@ -147,6 +147,38 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("the reply", out)
         self.assertLess(out.index("thinking..."), out.index("the reply"))
 
+    async def test_a_diff_shaped_step_summary_renders_as_a_real_diff_block(self):
+        """07-post-cutover-review.md §3.11: `execution/tools.py` now embeds
+        a unified diff in a successful apply_source_patch's own output,
+        which travels through as this step's `summary`. The CLI should
+        render it with `render.diff_block` (colored +/- lines), not dump
+        the raw "--- a/..." text inline in the one-line dim narration."""
+        diff_summary = (
+            "wrote src/foo.py\n\n"
+            "--- a/src/foo.py\n+++ b/src/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+        )
+
+        async def _responder(message: Message) -> None:
+            sid = message.payload["session_id"]
+            await self.other.publish(self.other.new(topics.TASK_STEP, {
+                "task_id": sid, "step_no": 1, "phase": "act", "summary": diff_summary,
+                "tool": "apply_source_patch", "ok": True,
+            }))
+            await asyncio.sleep(0)
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": sid, "task_id": sid, "text": "done", "floor": False, "tool_steps": 1,
+            }))
+
+        sub = await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
+        out = await self._line("please patch src/foo.py")
+        await sub.unsubscribe()
+        self.assertIn("step 1 (act) apply_source_patch: wrote src/foo.py ok", out)
+        self.assertNotIn("--- a/src/foo.py", out.split("\n")[0])  # not squeezed into the one-line narration
+        self.assertIn("--- a/src/foo.py", out)
+        self.assertIn("+++ b/src/foo.py", out)
+        self.assertIn("-old", out)
+        self.assertIn("+new", out)
+
     async def test_plain_chat_gets_a_real_turn_completed(self):
         async def _responder(message: Message) -> None:
             await asyncio.sleep(0)
