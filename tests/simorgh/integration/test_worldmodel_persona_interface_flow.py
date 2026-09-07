@@ -56,7 +56,7 @@ async def _pump(n: int = 40) -> None:
 def _patched_build_factories(instances: dict):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False):
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
         # `real()` now wires every subsystem (docs/EVOLUTION.md milestone
         # 103) -- when this test was first written it returned only
         # bus/ledger, so filtering down to that is what actually keeps

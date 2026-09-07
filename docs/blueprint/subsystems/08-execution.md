@@ -447,10 +447,23 @@ different agents one file each.
    through the `Tool` protocol directly, but not yet callable by the
    model via a real chat turn unless the tool happens to have exactly one
    required argument (`execution/README.md`'s "MCP servers" section has
-   the worked example, `brave_web_search`'s single `query` field). Fixing
-   this generally needs a structured-JSON-arguments output mode in
-   Cognition, not just an Execution-side change -- open, not attempted
-   this pass.
+   the worked examples, `ddg_search`/`ddg_get_answer`'s single `query`
+   field). Fixing this generally needs a structured-JSON-arguments output
+   mode in Cognition, not just an Execution-side change -- open, not
+   attempted this pass. *Follow-up, same day* (the creator: "I don't like
+   the idea to pay for MCP access, sim should be able to put together its
+   need from open source mcp servers") -- the first worked example
+   (`brave_web_search`) needed a paid-tier-adjacent API key; swapped for
+   `ddg-search-mcp` (free, no key, verified live against npm rather than
+   recalled from training data) and closed a second pre-existing gap in
+   the same pass: `kernel/registry.py`'s `build_factories` built every
+   subsystem zero-arg by explicit design, so `execution.Config` -- unlike
+   `bus`/`ledger`/`orchestration` -- was not reachable from `simorgh.toml`
+   at all. `build_factories` now takes an `execution_config` parameter
+   and `Kernel.boot` threads `self.config.section("execution")` through
+   it (same pattern the others already used), so `mcp_servers` is a real
+   `simorgh.toml` `[[execution.mcp_servers]]` entry now, not a Python
+   edit.
 5. **(Found during the build) The real, built `ToolContext`
    (`contracts/protocols.py`) is narrower than this spec's own shape.**
    It has `action_id, task_id, scope, constraints, data_dir, clock,

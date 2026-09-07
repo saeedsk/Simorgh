@@ -52,6 +52,7 @@ NEEDS_HMAC_SECRET: frozenset[str] = frozenset({"guardian", "execution"})
 
 def build_factories(
     *, bus_client: BusClient, ledger_client: LedgerClient, run_repl: bool = False,
+    execution_config: object | None = None,
 ) -> dict[str, Callable[[], Subsystem]]:
     """Zero-arg constructors per subsystem name, for `Supervisor.start_layer`.
     `bus`/`ledger` wrap the clients the Kernel already built (section 5.1:
@@ -59,9 +60,19 @@ def build_factories(
     subsystem" -- their `Service` does not create the bus/ledger, it
     reports health/metrics for the one that already exists). Every other
     entry constructs its `Service` with defaults; richer wiring (real
-    Cognition providers, extra Execution tools, a non-default Guardian
-    pipeline) is deliberately a later, separate configuration change, not
-    something this composition point should hardcode.
+    Cognition providers, a non-default Guardian pipeline) is deliberately
+    a later, separate configuration change, not something this
+    composition point should hardcode.
+
+    `execution_config` is the one exception, added for MCP server config
+    (`execution/mcp.py`'s module docstring, `execution/README.md`'s "MCP
+    servers" section): `Kernel.boot` passes `execution.Config.from_mapping
+    (self.config.section("execution"))`, the same `simorgh.toml`-section
+    pattern `bus`/`ledger`/`orchestration` already use elsewhere in this
+    file's caller -- so a human can now add an `[execution] mcp_servers`
+    entry to `simorgh.toml` instead of editing this file's lambda
+    directly. `None` (every caller other than `Kernel.boot` -- tests,
+    `--self-check`) means `ExecutionService()`'s own default `Config()`.
 
     `run_repl` defaults False -- a blocking `readline` loop must never
     start under a test or `--self-check` boot, where nothing will ever
@@ -93,7 +104,7 @@ def build_factories(
         "memory": lambda: MemoryService(),
         "worldmodel": lambda: WorldModelService(),
         "guardian": lambda: GuardianService(),
-        "execution": lambda: ExecutionService(),
+        "execution": lambda: ExecutionService(config=execution_config),
         "verification": lambda: VerificationService(),
         "planning": lambda: PlanningService(),
         "learning": lambda: LearningService(),

@@ -66,7 +66,7 @@ _FAREWELL_SKILL = 'def run(name="world"):\n    return f"farewell {name}"\n'
 def _patched_build_factories(*, repo_root: Path):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False):
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
         factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
         factories["guardian"] = lambda: GuardianService(config=GuardianConfig(mode="guarded"))
         factories["execution"] = lambda: ExecutionService(config=ExecutionConfig(repo_root=repo_root))

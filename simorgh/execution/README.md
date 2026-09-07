@@ -90,54 +90,75 @@ registers through the same `tool.registered` path a skill uses and flows
 through the exact same Guardian pipeline as any builtin tool. Sim cannot
 add a server to itself.
 
+No paid API key anywhere in this pass -- the creator was explicit ("I
+don't like the idea to pay for MCP access, sim should be able to put
+together its need from open source mcp servers"), so every server named
+below was checked (`npm view <pkg>`, live, this session -- not recalled
+from training data, which can be stale or simply wrong about exact
+package names) to confirm it's free, real, and needs no key before it
+went in this file.
+
 **Enabling a server is three small, deliberate edits** (each one is a
 real capability grant, not something to automate away):
 
-1. **Register the server.** `execution.Config`'s zero-arg construction in
-   `kernel/registry.py` (`"execution": lambda: ExecutionService()`) is
-   deliberate -- richer wiring for *any* subsystem is "a later, separate
-   configuration change" per that file's own docstring, not something
-   `simorgh.toml` reaches yet for `execution` specifically (unlike
-   `bus`/`ledger`/`orchestration`, which already have that wiring). Until
-   that generalization happens, enabling a server means editing that one
-   lambda directly, e.g.:
-   ```python
-   "execution": lambda: ExecutionService(config=Config(mcp_servers=(
-       McpServerConfig(
-           name="brave_search", command="npx",
-           args=("-y", "@modelcontextprotocol/server-brave-search"),
-           env={"BRAVE_API_KEY": "..."},  # the human's own key -- never Sim's to fetch or store
-           read_only_tools=frozenset({"brave_web_search", "brave_local_search"}),
-       ),
-   ))),
+1. **Register the server**, in `simorgh.toml`:
+   ```toml
+   [[execution.mcp_servers]]
+   name = "ddg_search"
+   command = "npx"
+   args = ["-y", "ddg-search-mcp"]
+   read_only_tools = ["ddg_search", "ddg_get_answer", "ddg_search_news", "ddg_fetch_content"]
    ```
+   `Kernel.boot` now reads `simorgh.toml`'s `[execution]` section into a
+   real `execution.Config` (`kernel/service.py`, via `registry.
+   build_factories`'s new `execution_config` parameter) -- the same
+   pattern `bus`/`ledger`/`orchestration` already had; `execution` did
+   not, until this pass (`08-execution.md` section 12 Q4 names it as a
+   pre-existing gap, closed here rather than left for later). No Python
+   edit needed for this step anymore.
 2. **Tell `orchestration/tools.py` how to route it.** Add the server's
    real registered tool name (`mcp_<server>_<tool>`, e.g.
-   `mcp_brave_search_brave_web_search`) to `_TOOL_POLICY` (reversibility,
+   `mcp_ddg_search_ddg_search`) to `_TOOL_POLICY` (reversibility,
    network) and, if the tool has exactly one required argument, to
-   `_MARKER_ARG_KEY` -- both already have this one example wired in as a
-   worked template. A tool with more than one required argument isn't
-   reachable through the current single-argument marker path yet (the
-   same ceiling `08-execution.md`'s open-questions entry below names).
+   `_MARKER_ARG_KEY` -- both already have `ddg_search`/`ddg_get_answer`
+   wired in as a worked template. A tool with more than one required
+   argument isn't reachable through the current single-argument marker
+   path yet (the same ceiling `08-execution.md`'s open-questions entry
+   below names).
 3. **Add it to a `Profile.tools` tuple** (`orchestration/profiles.py`) so
    Cognition actually offers the marker to the model. Deliberately not
-   done for the one wired example (`mcp_brave_search_brave_web_search`)
-   by default: `mcp_servers` defaults to empty, and a profile is shared
-   by every session regardless of what's actually configured -- adding an
-   unconfigured server's tool name here would offer the model a marker
-   that always fails with "unknown tool" everywhere the server isn't
-   set up. Add it once the server from step 1 is actually running.
+   done for the wired examples by default: `mcp_servers` defaults to
+   empty, and a profile is shared by every session regardless of what's
+   actually configured -- adding an unconfigured server's tool name here
+   would offer the model a marker that always fails with "unknown tool"
+   everywhere the server isn't set up. Add it once the server from step 1
+   is actually running.
 
-**Known-good servers worth knowing about**, from the official
-`modelcontextprotocol/servers` catalog -- none auto-installed, none
-wired past step 1 above: `server-brave-search` (real web search, needs
-`BRAVE_API_KEY` -- the concrete fix for "Sim can't search the web," and
-the one example above); `server-sequential-thinking` (no key, no
-filesystem/network access, but its one tool takes 4+ required fields --
-not reachable via markers without the structured-calling upgrade in the
-open question below). `server-filesystem`/`server-git`/`server-memory`
-are NOT recommended here -- Simorgh already has native, more-trusted
-equivalents (`read_file`/`list_dir`/`apply_source_patch`,
+**Free, no-key servers verified this session** (`npm view <pkg>`,
+2026-09-06 -- re-verify before relying on any of these again, since npm
+packages can be renamed, deprecated, or go stale):
+
+- **`ddg-search-mcp`** (npm, MIT, v1.4.1 at verification, "no API key
+  needed" in its own description) -- the concrete fix for "Sim can't
+  search the web," and the two tools wired end-to-end above:
+  `ddg_search` (general web search) and `ddg_get_answer` (an
+  instant-answer/QnA tool), both single-required-argument (`query`).
+  Also exposes `ddg_search_news`, `ddg_search_images`,
+  `ddg_search_videos`, `ddg_fetch_content`, `ddg_get_suggestions`,
+  `ddg_get_definition`, `ddg_convert_currency` -- registrable via step 1
+  the same way, not yet routed past that (most take more than one
+  required argument).
+- **`@modelcontextprotocol/server-sequential-thinking`** (npm, official
+  `modelcontextprotocol` org, no key, no filesystem/network access) --
+  structured step-by-step reasoning. Its one tool,
+  `sequential_thinking`, takes 4 required fields (`thought`,
+  `nextThoughtNeeded`, `thoughtNumber`, `totalThoughts`) -- registrable,
+  but not reachable via markers without the structured-calling upgrade
+  the open question below names.
+
+**`server-filesystem`/`server-git`/`server-memory`** (also official,
+also free) are NOT recommended here -- Simorgh already has native,
+more-trusted equivalents (`read_file`/`list_dir`/`apply_source_patch`,
 `git_commit`/`git_revert`, and the real Memory subsystem); running a
 third-party subprocess for the same job would be strictly worse.
 

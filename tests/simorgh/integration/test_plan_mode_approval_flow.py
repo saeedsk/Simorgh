@@ -58,7 +58,7 @@ STEPS_TEXT = "1. src/orchestrator/retry.py :: add exponential backoff with jitte
 def _patched_build_factories(planning_config: PlanningConfig):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False):
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
         # Only bus/ledger (Phase 0) plus the two subsystems this scenario
         # is actually about -- Planning and Verification -- exactly like
         # test_planning_kernel_boot.py's `_patched_build_factories`, so

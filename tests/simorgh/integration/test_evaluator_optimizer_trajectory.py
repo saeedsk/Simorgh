@@ -166,7 +166,7 @@ class _ToyPlanning:
 def _patched_build_factories(*, tasks: dict, toys: dict):
     real = kernel_registry.build_factories
 
-    def _build(*, bus_client, ledger_client, run_repl=False):
+    def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None):
         factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl)
         factories["cognition"] = lambda: toys.setdefault("cognition", _ScriptedCognition())
         factories["planning"] = lambda: toys.setdefault("planning", _ToyPlanning(tasks))

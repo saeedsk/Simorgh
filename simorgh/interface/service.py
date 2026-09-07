@@ -287,7 +287,16 @@ class Service:
     # -- bus handlers -----------------------------------------------------------------
     async def _on_notice(self, message: Message) -> None:
         p = message.payload
-        print(render_mod.notice(p.get("level", "info"), p.get("text", ""), p.get("source", ""), enabled=self._color))
+        level = p.get("level", "info")
+        if level == "debug":
+            # Live-caught: internal bookkeeping (planning's own dedup
+            # notices -- "duplicate candidate, matches task ...") was
+            # printing straight into the human's chat transcript,
+            # interleaved with real replies -- information for a log,
+            # not a conversation. `debug` is the level a subsystem uses
+            # for exactly that: never meant for this surface.
+            return
+        print(render_mod.notice(level, p.get("text", ""), p.get("source", ""), enabled=self._color))
 
     async def _on_prompt(self, message: Message) -> None:
         """Renders the prompt and its default; always resolves on

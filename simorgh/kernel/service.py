@@ -25,6 +25,7 @@ from simorgh.bus.factory import make_backend as make_bus_backend, make_client as
 from simorgh.contracts import security, topics
 from simorgh.contracts.envelope import Message, validate
 from simorgh.contracts.protocols import Health
+from simorgh.execution.config import Config as ExecutionConfig
 from simorgh.ledger.factory import make_ledger
 
 from .api import RuntimeConfig
@@ -152,7 +153,10 @@ class Kernel:
         self.bus = make_bus_client(self._bus_backend, source="kernel", ledger=self.ledger, clock=self._clock.now,
                                    policy=policy)
 
-        factories = build_factories(bus_client=self.bus, ledger_client=self.ledger, run_repl=self._interactive)
+        factories = build_factories(
+            bus_client=self.bus, ledger_client=self.ledger, run_repl=self._interactive,
+            execution_config=ExecutionConfig.from_mapping(self.config.section("execution")),
+        )
         ctx_factory = ContextFactory(
             bus_backend=self._bus_backend, ledger=self.ledger, config=self.config, secrets=self._secrets,
             clock=self._clock, runtime=self.runtime, run_id=self.run_id, hmac_secret=self._hmac_secret,

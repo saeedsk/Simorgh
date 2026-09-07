@@ -25,10 +25,12 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # (`mcp_<server>_<tool>`), for every MCP tool they want the model to
     # actually be able to call -- registering the server alone (Guardian
     # would still gate the call) is not enough, since a marker-driven
-    # call also needs the remap below. brave_web_search is the one
-    # example wired end-to-end this pass (README.md's "MCP servers"
-    # section has the matching `mcp_servers` config entry).
-    "mcp_brave_search_brave_web_search": ("read_only", True),
+    # call also needs the remap below. ddg_search/ddg_get_answer (free,
+    # no API key -- `ddg-search-mcp` on npm) are the two wired end-to-end
+    # this pass; README.md's "MCP servers" section has the matching
+    # `mcp_servers` config entry.
+    "mcp_ddg_search_ddg_search": ("read_only", True),
+    "mcp_ddg_search_ddg_get_answer": ("read_only", True),
 }
 
 # `cognition/parser.py::_parse_markers` only ever extracts one string per
@@ -45,9 +47,11 @@ _MARKER_ARG_KEY: dict[str, str] = {
     "web_fetch": "url",
     "run_python_sandboxed": "code",
     "draft_candidate": "code",
-    # brave_web_search's own `inputSchema` has one required string field,
-    # `query` -- see `_TOOL_POLICY`'s comment on the same tool.
-    "mcp_brave_search_brave_web_search": "query",
+    # ddg_search/ddg_get_answer's own `inputSchema`s each have one
+    # required string field, `query` -- see `_TOOL_POLICY`'s comment on
+    # the same tools.
+    "mcp_ddg_search_ddg_search": "query",
+    "mcp_ddg_search_ddg_get_answer": "query",
 }
 
 
