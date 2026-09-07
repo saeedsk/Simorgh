@@ -15,7 +15,7 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Health
 
 from . import rules as rule_defs
-from .api import BudgetStatus, DecisionContext, Proposal
+from .api import BudgetStatus, DecisionContext, Proposal, ToolInfo
 from .charter import load_charter
 from .config import Config
 from .pipeline import Pipeline
@@ -304,6 +304,22 @@ class Service:
             now=self._ctx.clock.now(), system_state=self._system_state, posture=self._posture,
             config=self._config, budgets=dict(self._budgets),
             rejected_similarity=self._rejected_similarity,
+            # Live-caught 2026-09-07: this was never passed, so `ctx.tool`
+            # was always None, and `ModeRule`'s `bool(ctx.tool and
+            # ctx.tool.read_only)` was therefore always False -- every
+            # tool looked like a writing tool. In plan mode that denies
+            # *everything*, `read_file` and `list_dir` included, which are
+            # the only tools a plan session has. So plan sessions could
+            # not read a single file, which is why all 20 of the creator's
+            # projects sat at 0/0 steps: nothing could ever produce a plan
+            # to decompose. The proposal already carries the declared
+            # reversibility Execution registered for that tool, which is
+            # exactly the fact the rule needs.
+            tool=ToolInfo(
+                name=proposal.tool,
+                read_only=proposal.reversibility == "read_only",
+                reversibility=proposal.reversibility,
+            ),
         )
 
         stream = f"action:{action_id}"
@@ -319,7 +335,8 @@ class Service:
             reasons = () if verdict.layer == "classifier" else verdict.reasons
             wire_layer = _WIRE_DENY_LAYER.get(verdict.layer, verdict.layer)
             await self._ctx.bus.publish(message.caused(
-                topics.ACTION_DENIED, {"action_id": action_id, "reasons": list(reasons), "layer": wire_layer},
+                topics.ACTION_DENIED,
+                {"action_id": action_id, "reasons": list(reasons), "layer": wire_layer, "tool": proposal.tool},
                 source="guardian",
             ))
             return

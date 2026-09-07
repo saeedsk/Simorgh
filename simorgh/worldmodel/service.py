@@ -47,7 +47,7 @@ class Service:
         topics.TOOL_REGISTERED, topics.TOOL_UNAVAILABLE, topics.PERSONA_USER_MODEL_UPDATED,
         topics.LEARN_COMPETENCE_UPDATED, topics.REFLECT_CALIBRATION_UPDATED, topics.SELF_OBSERVATION,
         topics.LEARN_SELF_PATCH_APPLIED, topics.LEARN_SELF_PATCH_REVERTED, topics.LEARN_SKILL_ACQUIRED,
-        topics.SYSTEM_STARTED,
+        topics.SYSTEM_STARTED, topics.COGNITION_PROVIDER_STATUS,
         topics.TASK_CREATED, topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
     )
     produces: tuple[str, ...] = (
@@ -95,6 +95,7 @@ class Service:
             await ctx.bus.subscribe(topics.LEARN_COMPETENCE_UPDATED, self._on_competence_updated),
             await ctx.bus.subscribe(topics.REFLECT_CALIBRATION_UPDATED, self._on_calibration_updated),
             await ctx.bus.subscribe(topics.SELF_OBSERVATION, self._on_self_observation),
+            await ctx.bus.subscribe(topics.COGNITION_PROVIDER_STATUS, self._on_provider_status),
             await ctx.bus.subscribe(topics.LEARN_SELF_PATCH_APPLIED, self._on_self_patch_applied),
             await ctx.bus.subscribe(topics.LEARN_SELF_PATCH_REVERTED, self._on_self_patch_reverted),
             await ctx.bus.subscribe(topics.LEARN_SKILL_ACQUIRED, self._on_skill_acquired),
@@ -136,6 +137,28 @@ class Service:
             return
         payload = {"ok": True, "facet": what, "as_of": self._ctx.clock.now(), **data}
         await self._ctx.bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload=payload)
+
+    async def _on_provider_status(self, message: Message) -> None:
+        """Record what is actually doing the thinking.
+
+        `SelfModel.capabilities["providers"]` was declared when the self
+        model was written and populated by nobody, and no section
+        rendered it. So asked "which LLM are you using", Sim answered --
+        honestly and correctly -- that it had no way to know: its own
+        cognition backend was the one thing about itself it could not
+        see. Live-caught by the creator, 2026-09-07.
+        """
+        p = message.payload
+        name = p.get("provider")
+        if not name:
+            return
+        providers = [x for x in self._model.capabilities.get("providers", []) if x.get("name") != name]
+        providers.append({
+            "name": name, "model": p.get("model", ""),
+            "available": bool(p.get("available", False)), "selected": bool(p.get("selected", False)),
+        })
+        providers.sort(key=lambda x: (not x["selected"], x["name"]))
+        self._model.capabilities["providers"] = providers
 
     async def _on_self_summary(self, message: Message) -> None:
         budget = message.payload.get("budget_tokens", 300)

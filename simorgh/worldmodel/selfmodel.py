@@ -248,7 +248,8 @@ def render_summary(model: SelfModel, budget_tokens: int) -> tuple[str, int]:
     matching this project's other rough token-budgeting (no tokenizer
     dependency in the core).
     """
-    order = ("identity", "competence", "limitations", "goals", "capabilities", "change_history", "continuity", "open_questions")
+    order = ("identity", "substrate", "competence", "limitations", "goals", "capabilities",
+             "change_history", "continuity", "open_questions")
     lines: list[str] = []
     dropped: list[str] = []
     budget_chars = budget_tokens * 4
@@ -289,6 +290,22 @@ def _render_section(model: SelfModel, section: str) -> str | None:
             f"assistant name; that is not who is answering here. "
             f"{model.identity.summary}"
         ).strip()
+    if section == "substrate":
+        # What is actually doing the thinking. Second only to identity,
+        # because "which model are you?" is a question about who is
+        # answering, and Sim had no way to answer it: `capabilities
+        # ["providers"]` was declared with the self model and filled by
+        # nobody (live-caught by the creator, 2026-09-07).
+        providers = model.capabilities.get("providers") or []
+        if not providers:
+            return None
+        active = next((p for p in providers if p.get("selected")), None)
+        others = [p for p in providers if p is not active]
+        line = "Thinking with: "
+        line += _provider_row(active) if active else "(no provider selected yet)"
+        if others:
+            line += ". Also configured: " + ", ".join(_provider_row(p) for p in others)
+        return line + "."
     if section == "competence":
         if not model.competence:
             return "Competence: not yet tracked (no learn.competence.updated seen this session)."
@@ -317,6 +334,12 @@ def _render_section(model: SelfModel, section: str) -> str | None:
             return None
         return "Open questions about myself: " + "; ".join(q["text"] for q in model.open_questions[:3])
     return None
+
+
+def _provider_row(entry: dict) -> str:
+    name, model = entry.get("name", "?"), entry.get("model", "")
+    row = f"{name} ({model})" if model else name
+    return row if entry.get("available", True) else row + " [unavailable]"
 
 
 def _competence_row(task_type: str, entry: dict) -> str:

@@ -25,6 +25,12 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "tool": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

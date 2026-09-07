@@ -25,6 +25,7 @@ from simorgh.contracts.protocols import Context, Health
 
 from .calibration import CalibrationTable
 from .config import Config
+from .denials import DenialMiner
 from .critique import parse_critique
 from .drift import DriftTracker, parse_verdict
 from .health import HealthMonitor
@@ -64,6 +65,7 @@ class Service:
         topics.LEARN_SKILL_ACQUIRED,
         topics.SYSTEM_STARTED, topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_TICK_SLEEP,
         topics.REFLECT_REVIEW_REQUEST,
+        topics.ACTION_DENIED,
     )
     produces: tuple[str, ...] = (
         topics.REFLECT_HEALTH_FINDING, topics.REFLECT_PATTERNS_FOUND, topics.REFLECT_CALIBRATION_UPDATED,
@@ -72,19 +74,42 @@ class Service:
     )
 
     def __init__(self, config: Config | None = None) -> None:
+        self._config_from_caller = config
         self.config = config or Config()
         self._ctx: Context | None = None
         self._subs: list = []
         self._health = HealthMonitor(self.config)
         self._last_health_severity: str | None = None
         self._patterns = PatternMiner(self.config)
+        self._denials = DenialMiner(
+            window_seconds=self.config.denial_window_seconds,
+            min_repeats=self.config.denial_min_repeats,
+        )
         self._calibration = CalibrationTable(self.config)
         self._tasks: dict[str, _TaskMeta] = {}
         self._paused = False
         self._review_sem: asyncio.Semaphore | None = None
 
+    def _rebuild_from_config(self) -> None:
+        """Re-make the pieces that were built from config defaults."""
+        self._health = HealthMonitor(self.config)
+        self._patterns = PatternMiner(self.config)
+        self._denials = DenialMiner(
+            window_seconds=self.config.denial_window_seconds,
+            min_repeats=self.config.denial_min_repeats,
+        )
+        self._calibration = CalibrationTable(self.config)
+
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
+        # `Context.config` is this subsystem's own `[reflection]` section
+        # (03 section 6). Nothing read it, here or anywhere -- so every
+        # knob in that section was dead, and only the dataclass defaults
+        # ever applied. An explicitly-constructed config still wins, which
+        # is how tests and embeddings inject one.
+        if self._config_from_caller is None and ctx.config:
+            self.config = Config.from_mapping(dict(ctx.config))
+            self._rebuild_from_config()
         self._review_sem = asyncio.Semaphore(self.config.max_concurrent_reviews)
         self._subs = [
             await ctx.bus.subscribe(topics.PERSONA_STATE_CHANGED, self._on_persona_state),
@@ -103,6 +128,7 @@ class Service:
             await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_system_state),
             await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep),
             await ctx.bus.subscribe(topics.REFLECT_REVIEW_REQUEST, self._on_review_request),
+            await ctx.bus.subscribe(topics.ACTION_DENIED, self._on_action_denied),
         ]
         ctx.logger.info("reflection.started")
 
@@ -285,6 +311,38 @@ class Service:
 
     async def _on_system_state(self, message: Message) -> None:
         self._paused = message.payload.get("state") in ("paused", "stopping", "stopped")
+
+    async def _on_action_denied(self, message: Message) -> None:
+        """A denial that keeps repeating becomes a task Sim opens for
+        itself.
+
+        The creator, 2026-09-07: "why should [it] take precious time of
+        creator to review random warning". Until now `action.denied` had
+        one consumer that did anything with it -- the Interface, which
+        printed it at a human. This subsystem, whose whole job is turning
+        patterns into work, never saw one.
+
+        Raised the moment the threshold is crossed rather than on the
+        six-hourly sleep tick, because a denial loop should not run for
+        hours before anything notices; `DenialMiner` reports each group
+        once per window so this cannot itself become a flood.
+        """
+        p = message.payload
+        reasons = p.get("reasons") or []
+        now = self._ctx.clock.now() if self._ctx is not None else message.ts
+        pattern = self._denials.add(
+            tool=p.get("tool", ""), reason=reasons[0] if reasons else "",
+            layer=p.get("layer", ""), now=now,
+        )
+        if pattern is None:
+            return
+        await self._append(PATTERNS_STREAM, "denial_pattern", {
+            "tool": pattern.tool, "reason": pattern.reason, "count": pattern.count,
+        })
+        await self._publish(message, topics.REFLECT_PATTERNS_FOUND, {
+            "window": self.config.denial_window_seconds,
+            "patterns": [{"kind": "repeated_denial", "rate": 1.0, "proposal": pattern.proposal}],
+        })
 
     # -- sleep tick: pattern mining + calibration emission -----------------------------------
 

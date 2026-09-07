@@ -316,15 +316,23 @@ class Service:
     async def _on_state_changed(self, message: Message) -> None:
         self._paused = message.payload.get("state") in ("paused", "stopping")
 
+    def _model_of(self, provider_name: str) -> str:
+        """The model this provider is configured to call, for the status
+        broadcast. Empty when the provider does not name one."""
+        return self._router.model_of(provider_name) if self._router is not None else ""
+
     async def _on_tick(self, message: Message) -> None:
         self._tick_seconds += 1
         if self._tick_seconds % 30 != 0:  # 03 section 4.1: refresh every ~30s, not every second tick
             return
         statuses = [await b.status() for b in self._budgets.values()]
+        selected = self._router.selected_name() if self._router is not None else None
         for status in statuses:
             await self._ctx.bus.publish(Message.new(
                 topics.COGNITION_PROVIDER_STATUS, source=self._ctx.source, payload={
                     "provider": status.provider, "available": not status.exhausted,
+                    "model": self._model_of(status.provider),
+                    "selected": status.provider == selected,
                     "budget": {
                         "window_seconds": status.window_seconds, "calls": status.calls_in_window,
                         "max_calls": status.max_calls, "spend_usd": status.spend_usd,

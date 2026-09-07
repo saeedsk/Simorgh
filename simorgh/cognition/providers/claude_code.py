@@ -55,6 +55,10 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 class ClaudeCodeProvider:
     name = "claude_code_cli"
+    # The `claude` CLI picks its own model from the caller's
+    # subscription; this provider never names one, so it says that
+    # rather than guessing a version that may be wrong.
+    model = "whatever the `claude` CLI is signed in as"
 
     def __init__(
         self, binary: str = "claude", timeout_seconds: float = 180.0,

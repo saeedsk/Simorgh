@@ -34,6 +34,10 @@ ActionDenied = define(t.ACTION_DENIED, [
     F("action_id", Str),
     F("reasons", List(Str)),
     F("layer", DENY_LAYER),
+    # Which tool was refused. Without it a consumer can only count that
+    # *something* was denied, which is not enough to raise a useful task
+    # about it (reflection/denials.py).
+    O("tool", Str),
 ], doc="layer=classifier omits detailed reasons; execution may publish only layer=token.")
 ActionNeedsHuman = define(t.ACTION_NEEDS_HUMAN, [
     F("action_id", Str),
