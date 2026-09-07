@@ -56,6 +56,7 @@ import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 
 try:
     import readline  # noqa: F401 -- imported for its side effect: input() gains
@@ -69,6 +70,7 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
 from . import render as render_mod
+from . import tui
 from .config import Config
 from .dispatch import dispatch
 from .httpapi import HttpApi
@@ -123,6 +125,9 @@ class Service:
         self._wait_for_boot = wait_for_boot
         self._booted = threading.Event()
         self._dashboard_line = ""
+        self._tui = None            # the prompt_toolkit prompt, when available
+        self._tui_task = None
+        self._footer = ""           # what the sticky footer under the prompt shows
         # Follows `run_repl` by default: the dashboard is for a human
         # actually watching a `simorgh run` session, so it comes up
         # automatically exactly when the REPL does, and stays off for
@@ -180,8 +185,15 @@ class Service:
         self._live.start()
         if self._run_repl:
             self._stop_repl.clear()
-            self._repl_thread = threading.Thread(target=self._repl_main, name="interface-repl", daemon=True)
-            self._repl_thread.start()
+            if self._use_tui():
+                # The prompt runs as a task on this same loop, so a typed
+                # line is handled where the bus already is -- no thread to
+                # bridge back from, and the buffer stays live while a turn
+                # is in flight.
+                self._tui_task = asyncio.ensure_future(self._tui_main())
+            else:
+                self._repl_thread = threading.Thread(target=self._repl_main, name="interface-repl", daemon=True)
+                self._repl_thread.start()
         if self._http_enabled:
             self._http = HttpApi(
                 ctx.bus, ledger=ctx.ledger, host=self.config.http_host, port=self.config.http_port,
@@ -210,6 +222,17 @@ class Service:
 
     async def stop(self) -> None:
         self._stop_repl.set()
+        if self._tui is not None:
+            self._tui.stop()
+            self._tui = None
+        if self._tui_task is not None:
+            self._tui_task.cancel()
+            try:
+                await self._tui_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise from the prompt
+                pass
+            self._tui_task = None
+        self._live.redirect(None)
         self._live.stop()
         for task in self._prompt_timeouts.values():
             if not task.done():
@@ -312,6 +335,98 @@ class Service:
             if self._booted.wait(timeout=0.05):
                 return True
         return True
+
+    # -- prompt_toolkit prompt (same loop as the bus) -----------------------
+    def _use_tui(self) -> bool:
+        """Whether to run the prompt_toolkit prompt rather than the
+        readline REPL. Off when the config says so, when the dependency is
+        absent, or when stdin is not a terminal -- a full-screen-capable
+        prompt has nothing to attach to in a pipe, and the readline path
+        handles that case correctly already."""
+        if not self.config.rich_prompt:
+            return False
+        if not tui.available():
+            return False
+        try:
+            return sys.stdin.isatty() and sys.stdout.isatty()
+        except (AttributeError, ValueError):
+            return False
+
+    async def _tui_main(self) -> None:
+        if self._wait_for_boot:
+            await self._await_boot()
+        print(render_mod.banner(enabled=self._color, unicode=render_mod.unicode_mode(self.config.unicode)))
+        if self._dashboard_line:
+            print(self._dashboard_line)
+        print("Enter sends  ·  Ctrl-J newline  ·  / commands  ·  @ files  ·  Ctrl-C cancels, twice exits")
+        # The live-status footer and this prompt cannot both own the
+        # bottom line. prompt_toolkit's toolbar wins: it redraws with the
+        # prompt instead of racing it, which is the whole reason
+        # `live_status.py` had to clear and restore around every print.
+        # Redirecting rather than silencing keeps every "Thinking... [4s]"
+        # call site working, now rendered in the toolbar.
+        self._live.redirect(self._set_footer)
+        self._tui = tui.Tui(
+            on_line=self._handle_line_guarded,
+            on_interrupt=self._cancel_current_turn,
+            footer_text=lambda: self._footer,
+            history_path=self._history_path(),
+            root=Path.cwd(),
+        )
+        try:
+            await self._tui.run()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- the prompt dying must not take the process with it
+            print(render_mod.notice("error", f"[prompt error] {exc!r}", "interface", enabled=self._color))
+        finally:
+            self._stop_repl.set()
+            await self._request_stop()
+
+    def _set_footer(self, text: str) -> None:
+        self._footer = text
+        # Nudge the prompt so a footer change shows without waiting for
+        # the next keystroke.
+        session = getattr(self._tui, "_session", None)
+        app = getattr(session, "app", None)
+        if app is not None and app.is_running:
+            app.invalidate()
+
+    async def _await_boot(self) -> None:
+        deadline = time.monotonic() + self.config.boot_wait_s
+        while time.monotonic() < deadline and not self._booted.is_set() and not self._stop_repl.is_set():
+            await asyncio.sleep(0.05)
+
+    async def _handle_line_guarded(self, line: str) -> None:
+        """`_handle_line` already has its own crash boundary; this one
+        covers the prompt's own call path so a raising handler can never
+        end the session (spec section 8)."""
+        try:
+            await self._handle_line(line)
+        except Exception as exc:  # noqa: BLE001
+            self._out(render_mod.notice("error", f"[render error] {exc!r}", "interface", enabled=self._color))
+
+    def _cancel_current_turn(self) -> None:
+        """Ctrl-C on an empty buffer: ask the system to stop what it is
+        doing rather than killing the session."""
+        if not self._watched_tasks and not self._pending_turns:
+            self._out("nothing running")
+            return
+        self._out("interrupt: asking the current work to pause (`resume` to continue)")
+        asyncio.ensure_future(self._ctx.bus.publish(self._ctx.bus.new(
+            topics.SYSTEM_PAUSE, {"reason": "interrupt", "requested_by": "human"},
+        )))
+
+    async def _request_stop(self) -> None:
+        """Leaving the prompt ends the run, the same way Ctrl-D did."""
+        if self._ctx is None:
+            return
+        try:
+            await self._ctx.bus.publish(self._ctx.bus.new(
+                topics.SYSTEM_STOP, {"reason": "repl_exit", "requested_by": "human"},
+            ))
+        except Exception:  # noqa: BLE001 -- shutting down anyway
+            pass
 
     def _repl_main(self) -> None:
         self._load_readline_history()

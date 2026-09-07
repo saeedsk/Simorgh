@@ -10,3 +10,11 @@ google-genai
 # claude.com/product/claude-code) and authenticated once via `claude
 # login`. If that binary isn't on PATH, this provider is simply
 # unavailable and Simorgh falls back exactly as if no provider existed.
+
+# The interactive prompt (simorgh/interface/tui.py): sticky footer, a
+# completion menu for `/` commands and `@` paths, multi-line editing,
+# live syntax colouring, persistent history. Optional in the same way as
+# the above -- `tui.available()` is false without it and the Interface
+# falls back to its readline REPL, which is still the path used whenever
+# stdout is not a terminal.
+prompt-toolkit>=3.0
