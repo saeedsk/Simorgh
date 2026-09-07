@@ -95,6 +95,69 @@ class TestWorkerClaimLoop(unittest.TestCase):
             await planning.stop()
 
 
+class TestLongReplyDoesNotGetLostAtTheLedger(unittest.TestCase):
+    """Live-caught (the creator's own real use): a long real answer made
+    the CLI narrate a completed step and then sit on "still thinking"
+    for over a minute -- the reply never arrived. Cause: `_report`
+    appended `result_summary` to the Ledger inline, and the Ledger
+    refuses any inline string over `inline_threshold` (4096 chars) --
+    `ValidationError` raised there, before either TASK_COMPLETED or
+    TURN_COMPLETED ever published. `07-post-cutover-review.md`-class bug:
+    built and tested at every layer except with content long enough to
+    hit a real limit."""
+
+    @run
+    async def test_a_reply_longer_than_the_inline_threshold_still_arrives_in_full(self):
+        async with Harness() as h:
+            long_reply = "x" * 5000  # over the Ledger's 4096-char inline_threshold
+            planning = FakePlanning(h.client("planning"))
+            planning.add_task("t1", kind="chat", mode="execute", description="hi")
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": long_reply}])
+            await planning.start()
+            await cognition.start()
+
+            worker = Worker(
+                h.client("orchestration"), h.ledger, clock=h.clock.now, worker_id="w1",
+                assemble_timeout_s=0.01,
+            )
+            await worker.start()
+
+            completed = {}
+
+            async def _on_turn(message):
+                completed["turn"] = message
+
+            sub = await h.client("interface").subscribe(topics.TURN_COMPLETED, _on_turn)
+
+            from simorgh.contracts.envelope import Message
+            await h.client("planning").publish(Message.new(
+                topics.TASK_AVAILABLE, source="planning",
+                payload={"task_id": "t1", "kind": "chat", "lease_seconds": 60.0},
+                clock=h.clock.now,
+            ))
+            await h.pump(30, real_delay=0.01)
+
+            self.assertIn("turn", completed, "no turn.completed ever arrived -- the reply was lost")
+            self.assertEqual(completed["turn"].payload["text"], long_reply)  # the bus keeps the full text
+
+            events = await h.ledger.read("task:t1")
+            [event] = [e for e in events if e.type == topics.TASK_COMPLETED]
+            # The Ledger's own copy keeps a short preview (so a log viewer
+            # still shows something) plus a ref to the full text -- it
+            # never re-raises ValidationError by staying oversized inline.
+            self.assertLess(len(event.payload["result_summary"]), len(long_reply))
+            self.assertTrue(long_reply.startswith(event.payload["result_summary"][:-1]))  # real prefix, not fabricated
+            self.assertIn("result_summary_ref", event.payload)
+            self.assertTrue(event.payload["result_summary_ref"].startswith("blob:"))
+            blob = await h.ledger.backend.get_blob(event.payload["result_summary_ref"])
+            self.assertEqual(blob.decode("utf-8"), long_reply)  # the Ledger's blob also keeps the full text
+
+            await sub.unsubscribe()
+            await worker.stop()
+            await planning.stop()
+            await cognition.stop()
+
+
 class TestPerceptTextRunsAChatTurnWithNoPlanningTask(unittest.TestCase):
     @run
     async def test_percept_text_received_produces_turn_completed_with_no_task_ever_created(self):
