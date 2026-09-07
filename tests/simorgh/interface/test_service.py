@@ -248,6 +248,42 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("the reply", out)
         self.assertLess(out.index("thinking..."), out.index("the reply"))
 
+    async def test_a_dispatch_created_task_prints_its_real_completion(self):
+        """Live-caught (the creator, real use): `improve web access`
+        printed "task created: <id>" and then nothing -- the task really
+        ran, stepped, and completed with a real `result_summary`, visible
+        only by reading the Ledger directly. `_on_task_event` only ever
+        narrated a `_pending_turns` chat turn; a `dispatch()`-created task
+        (`plan`/`improve`/`research`/`tasks work`) was never registered
+        anywhere it checked, so its `task.completed` fell on the floor.
+        `Outcome.task_id` (set by `_request(..., watch=True)`) now lands
+        in `_watched_tasks`, and this is the round trip end to end: the
+        `improve` command's own `task created: ...` line prints first
+        (synchronously, from `dispatch()`'s reply), then the task's real
+        answer prints later once `task.completed` arrives -- unprompted,
+        with nothing further typed into the REPL."""
+        async def _responder(message: Message) -> None:
+            await self.other.reply(message, type=topics.TASK_CREATE_REPLY, payload={
+                "ok": True, "task_id": "wt1",
+            })
+            await asyncio.sleep(0)
+            await self.other.publish(self.other.new(topics.TASK_STARTED, {"task_id": "wt1", "worker_id": "w1"}))
+            await self.other.publish(self.other.new(topics.TASK_COMPLETED, {
+                "task_id": "wt1", "result_summary": "here is the real answer", "artifacts": [],
+                "verification_ref": "v1",
+            }))
+
+        sub = await self.other.subscribe(topics.TASK_CREATE, _responder)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            await self.service._handle_line("improve web access")
+            await self._pump(20)
+        await sub.unsubscribe()
+        out = buf.getvalue()
+        self.assertIn("task created: wt1", out)
+        self.assertIn("here is the real answer", out)
+        self.assertNotIn("wt1", self.service._watched_tasks)  # cleaned up once printed
+
     async def test_a_diff_shaped_step_summary_renders_as_a_real_diff_block(self):
         """07-post-cutover-review.md §3.11: `execution/tools.py` now embeds
         a unified diff in a successful apply_source_patch's own output,
