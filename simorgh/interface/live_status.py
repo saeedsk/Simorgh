@@ -1,0 +1,137 @@
+"""A live, redraw-in-place status line beneath the REPL's scrolling
+output (the creator's explicit call, 2026-09-06, after being shown the
+tradeoff plainly: a real Claude-Code-style footer, not just richer
+scrolling text).
+
+`render.py`'s own hard rule (milestone 94, restated in
+`docs/blueprint/subsystems/15-interface.md` section 7) stays exactly
+true: "the only escape sequences `render.py` ever emits are SGR color
+codes." This module is the one place in this package that owns real
+cursor-movement/erase/hide-cursor escape sequences, and it only ever
+writes them when `sys.stdout.isatty()` -- a redirected file, a pipe, or
+a headless/detached run sees the identical plain scrolling text as
+before, with zero of the sequences below. `enabled=False` (the no-TTY
+path) makes every method here a no-op by construction, not by a
+separate code path someone could let drift out of sync.
+
+The footer is deliberately one physical line: multi-line in-place
+redraw needs cursor-up-by-N plus per-line erase, and N only stays
+correct if nothing else ever prints without going through this same
+class first -- a much larger invariant to hold across a REPL with many
+independent `print()` call sites. `interface/service.py`'s own `_out()`
+is the one gate: every scrolling line clears the footer first and
+restores it after, so the footer and real output never interleave
+mid-line.
+"""
+
+from __future__ import annotations
+
+import shutil
+import sys
+
+_HIDE_CURSOR = "\x1b[?25l"
+_SHOW_CURSOR = "\x1b[?25h"
+_CLEAR_LINE = "\x1b[2K"
+_TO_COL0 = "\r"
+
+# "Breathing verbs" (the creator's own term, from the Claude Code
+# reference they sent): a phase+tool pair maps to a present-tense verb
+# instead of one static "thinking" for the whole turn. Sourced from the
+# real `task.step` `phase`/`tool` fields already flowing through
+# `_on_task_event` -- not invented state, the same data the old dim
+# narration line already had.
+_VERBS: dict[tuple[str, str | None], str] = {
+    ("gather", None): "Thinking",
+    ("act", "read_file"): "Reading",
+    ("act", "list_dir"): "Listing",
+    ("act", "web_fetch"): "Fetching",
+    ("act", "run_python_sandboxed"): "Running",
+    ("act", "apply_source_patch"): "Patching",
+    ("act", "apply_skill"): "Applying",
+    ("act", "git_commit"): "Committing",
+    ("act", "git_revert"): "Reverting",
+    ("act", "propose_mcp_server"): "Proposing",
+    ("verify", None): "Verifying",
+}
+_DEFAULT_VERB = "Working"
+
+
+def verb_for(phase: str, tool: str | None) -> str:
+    if tool and tool.startswith("mcp_"):
+        return "Calling"
+    return _VERBS.get((phase, tool)) or _VERBS.get((phase, None)) or _DEFAULT_VERB
+
+
+def live_status_enabled(mode: str = "auto") -> bool:
+    """Mirrors `render.py::color_enabled`/`unicode_mode`'s own
+    resolution pattern: `off`/`on` are explicit; `auto` (the default)
+    follows `sys.stdout.isatty()`, so tests (which redirect stdout to an
+    `io.StringIO` -- never a tty) and any redirected/piped/headless run
+    get the plain scrolling fallback without needing to know this
+    feature exists, and a real interactive terminal gets the footer."""
+    if mode == "off":
+        return False
+    if mode == "on":
+        return True
+    return sys.stdout.isatty()
+
+
+def _terminal_width(default: int = 80) -> int:
+    try:
+        return shutil.get_terminal_size((default, 24)).columns
+    except OSError:
+        return default
+
+
+class LiveStatus:
+    """One in-place-updating line. `render(text)` overwrites it;
+    `clear()` erases it back to nothing (call before printing anything
+    else); `start()`/`stop()` hide/restore the terminal cursor for the
+    footer's own lifetime. Every method is a no-op when `enabled` is
+    False (the default resolves from `sys.stdout.isatty()`, so a
+    redirected/piped/headless run never touches an escape sequence)."""
+
+    def __init__(self, *, enabled: bool | None = None) -> None:
+        self._enabled = sys.stdout.isatty() if enabled is None else enabled
+        self._drawn = False
+        self._text = ""
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def start(self) -> None:
+        if self._enabled:
+            sys.stdout.write(_HIDE_CURSOR)
+            sys.stdout.flush()
+
+    def stop(self) -> None:
+        if not self._enabled:
+            return
+        self.clear()
+        sys.stdout.write(_SHOW_CURSOR)
+        sys.stdout.flush()
+
+    def render(self, text: str) -> None:
+        self._text = text
+        if not self._enabled:
+            return
+        cols = _terminal_width()
+        line = text if len(text) < cols else text[: max(0, cols - 1)]
+        sys.stdout.write(_TO_COL0 + _CLEAR_LINE + line)
+        sys.stdout.flush()
+        self._drawn = True
+
+    def clear(self) -> None:
+        if not self._enabled or not self._drawn:
+            return
+        sys.stdout.write(_TO_COL0 + _CLEAR_LINE)
+        sys.stdout.flush()
+        self._drawn = False
+
+    def restore(self) -> None:
+        """Re-draws the last `render()`ed text -- used after a scrolling
+        `print()` to put the footer back beneath the new line, if a
+        turn is still in flight."""
+        if self._text:
+            self.render(self._text)

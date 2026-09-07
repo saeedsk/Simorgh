@@ -582,5 +582,144 @@ class HttpEnabledWiringTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
 
 
+class LiveStatusIntegrationTestCase(unittest.IsolatedAsyncioTestCase):
+    """`live_status="on"` forced explicitly (the real "auto" default
+    always resolves False under a captured, non-tty stdout -- see
+    `InterfaceTestCase`'s own class docstring and `live_status.py`'s
+    `live_status_enabled`) -- proves `_on_task_event`/`_handle_chat`
+    actually take the redraw-in-place branch, not just the unchanged
+    fallback every other test in this file exercises."""
+
+    async def asyncSetUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.clock = FakeClock()
+        self.ledger = make_ledger({"backend": "memory"}, clock=self.clock.now)
+        await self.ledger.start()
+        self.backend = make_backend(BusConfig(backend="memory"), clock=self.clock.now)
+        self.bus = make_client(self.backend, source="interface", ledger=self.ledger, clock=self.clock.now)
+        await self.bus.start()
+        self.ctx = Context(
+            name="interface", instance_id="", run_id="test", mode="single",
+            bus=self.bus, ledger=self.ledger, config={}, secrets={}, clock=self.clock,
+            logger=_Logger(), data_dir=Path(self._tmp.name) / "data",
+        )
+        self.service = Service(
+            InterfaceConfig(chat_reply_timeout_s=0.3, live_status="on", narrate_heartbeat_s=1000.0),
+            run_repl=False,
+        )
+        await self.service.start(self.ctx)
+        self.other = make_client(self.backend, source="other", ledger=self.ledger, clock=self.clock.now)
+        await self.other.start()
+
+    async def asyncTearDown(self):
+        await self.service.stop()
+        await self.other.stop()
+        await self.bus.stop()
+        await self.ledger.stop()
+        self._tmp.cleanup()
+
+    async def _line(self, text: str) -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            await self.service._handle_line(text)  # noqa: SLF001
+        return buf.getvalue()
+
+    async def _pump(self, n: int = 10) -> None:
+        for _ in range(n):
+            await asyncio.sleep(0)
+
+    async def test_a_pending_chat_turn_renders_a_footer_not_a_scrolling_line(self):
+        async def _responder(message):
+            sid = message.payload["session_id"]
+            await self.other.publish(self.other.new(topics.TASK_STARTED, {"task_id": sid, "worker_id": "w1"}))
+            await asyncio.sleep(0)
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": sid, "task_id": sid, "text": "the reply", "floor": False, "tool_steps": 0,
+            }))
+
+        sub = await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
+        out = await self._line("hello")
+        await sub.unsubscribe()
+        # The footer's own escape sequences must appear (proof the live
+        # branch really ran)...
+        self.assertIn("\x1b[2K", out)
+        self.assertIn("Thinking", out)
+        # ...but the old scrolling "... thinking... [Ns]" dim line must not.
+        self.assertNotIn("... thinking...", out)
+        self.assertIn("the reply", out)
+
+    async def test_a_completed_step_folds_into_one_permanent_iconed_line(self):
+        async def _responder(message):
+            sid = message.payload["session_id"]
+            await self.other.publish(self.other.new(topics.TASK_STEP, {
+                "task_id": sid, "step_no": 1, "phase": "act", "summary": "read docs/SOUL.md",
+                "tool": "read_file", "ok": True,
+            }))
+            await asyncio.sleep(0)
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": sid, "task_id": sid, "text": "done", "floor": False, "tool_steps": 1,
+            }))
+
+        sub = await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
+        out = await self._line("what does SOUL.md say?")
+        await sub.unsubscribe()
+        self.assertIn("✅ step 1 (act) read_file: read docs/SOUL.md", out)
+
+    async def test_a_failed_step_folds_into_a_permanent_line_with_the_failure_icon(self):
+        async def _responder(message):
+            sid = message.payload["session_id"]
+            await self.other.publish(self.other.new(topics.TASK_STEP, {
+                "task_id": sid, "step_no": 1, "phase": "act", "summary": "denied: nope",
+                "tool": "propose_mcp_server", "ok": False,
+            }))
+            await asyncio.sleep(0)
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": sid, "task_id": sid, "text": "done", "floor": False, "tool_steps": 1,
+            }))
+
+        sub = await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
+        out = await self._line("propose something")
+        await sub.unsubscribe()
+        self.assertIn("❌ step 1 (act) propose_mcp_server: denied: nope", out)
+
+    async def test_an_in_flight_step_updates_the_footer_with_a_breathing_verb(self):
+        async def _responder(message):
+            sid = message.payload["session_id"]
+            await self.other.publish(self.other.new(topics.TASK_STEP, {
+                "task_id": sid, "step_no": 1, "phase": "act", "summary": "",
+                "tool": "read_file",
+                # no "ok" key at all -- an in-flight/announced step, not a completed one
+            }))
+            await asyncio.sleep(0)
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": sid, "task_id": sid, "text": "done", "floor": False, "tool_steps": 1,
+            }))
+
+        sub = await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
+        out = await self._line("read something")
+        await sub.unsubscribe()
+        self.assertIn("Reading", out)  # verb_for("act", "read_file")
+        self.assertNotIn("step 1", out)  # never folded into a permanent line -- no "ok" means no outcome yet
+
+    async def test_a_notice_clears_and_restores_the_footer_around_itself(self):
+        async def _responder(message):
+            sid = message.payload["session_id"]
+            await self.other.publish(self.other.new(topics.TASK_STARTED, {"task_id": sid, "worker_id": "w1"}))
+            await asyncio.sleep(0)
+            await self.other.publish(self.other.new(topics.UI_NOTICE, {
+                "level": "info", "text": "a real notice", "source": "test",
+            }))
+            await asyncio.sleep(0)
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": sid, "task_id": sid, "text": "done", "floor": False, "tool_steps": 0,
+            }))
+
+        sub = await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
+        out = await self._line("hello")
+        await sub.unsubscribe()
+        self.assertIn("a real notice", out)
+        self.assertIn("Thinking", out)  # the footer reappears after the notice
+
+
 if __name__ == "__main__":
     unittest.main()
