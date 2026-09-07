@@ -13,7 +13,7 @@ COMMAND_NAMES = (
     "reflect", "propose", "improve", "patch", "batch", "plan", "evolve", "research",
     "project", "discover", "tasks", "work", "autonomous", "digest", "news", "growth",
     "pending", "skills", "use", "log", "trace", "fetch", "interest", "interests",
-    "curious", "sleep", "history", "run", "budget", "vitals", "remind",
+    "curious", "sleep", "history", "run", "budget", "vitals", "remind", "mcp",
     "status", "pause", "resume", "stop", "exit", "quit", "help",
 )
 

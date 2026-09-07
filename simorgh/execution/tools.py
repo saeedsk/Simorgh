@@ -26,12 +26,14 @@ import difflib
 import hashlib
 import ipaddress
 import json
+import re
 import socket
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
+import uuid
 from collections import deque
 from pathlib import Path
 from urllib.parse import urlparse
@@ -41,6 +43,7 @@ try:
 except ImportError:  # POSIX-only
     resource = None  # type: ignore[assignment]
 
+from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
 from . import pathsafety
@@ -181,6 +184,98 @@ class WebFetchTool:
                 f"fetches in the last {self._config.web_fetch_window_s:.0f}s"
             )
         self._recent_calls.append(now)
+
+
+MCP_PROPOSALS_STREAM = "mcp:proposals"
+_PROPOSAL_ALLOWED_COMMANDS = frozenset({"npx", "uvx", "node", "python", "python3"})
+_PROPOSAL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_PROPOSAL_ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_PROPOSAL_FIELD_RE = re.compile(r"^\s*([a-zA-Z_]+)\s*:\s*(.*)$")
+_PROPOSAL_KEYS = frozenset({"name", "command", "args", "read_only_tools", "env_keys", "reason"})
+
+
+def _parse_mcp_proposal_text(text: str) -> dict[str, str]:
+    """`key: value` lines, case-insensitive keys, lenient about a value
+    (like `reason`) spanning multiple lines -- a model's own free-form
+    output, not a format worth being strict about."""
+    fields: dict[str, str] = {}
+    key: str | None = None
+    for line in text.splitlines():
+        match = _PROPOSAL_FIELD_RE.match(line)
+        if match and match.group(1).lower() in _PROPOSAL_KEYS:
+            key = match.group(1).lower()
+            fields[key] = match.group(2).strip()
+        elif key is not None:
+            fields[key] = (fields[key] + "\n" + line).strip()
+    return fields
+
+
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+class ProposeMcpServerTool:
+    """Sim's own half of "propose a server, one human approval" (the
+    creator, live, 2026-09-06: "I'd like sim to move fast evolve fast,
+    autonomously add this kind of feature... where is the autonomy?").
+    Deliberately does NOT touch `simorgh.toml` itself -- it only
+    validates and records a proposal (this stream) for a human to review
+    with the `mcp` CLI command (`interface/dispatch.py`), the only code
+    path that ever writes the file. That split is the actual answer to
+    "where is the autonomy": Sim can express intent and reasoning on its
+    own, fast, with no human drafting the proposal for it -- but a new
+    external subprocess with new network reach is a capability grant
+    serious enough to keep outside Guardian's mode-dependent trust levels
+    entirely, not just behind an `irreversible` escalation that
+    `mode=trusted` could auto-allow without a human ever seeing it.
+
+    Single-argument, marker-compatible (`orchestration/tools.py`'s own
+    ceiling for tools with a genuinely structured, multi-field schema):
+    the model writes one `key: value` text block instead, parsed
+    leniently by `_parse_mcp_proposal_text`.
+    """
+
+    name = "propose_mcp_server"
+    description = (
+        "Propose adding an MCP server for a human to review (the `mcp` command). Never installs or runs "
+        "anything itself. Argument is a block of `key: value` lines: name, command, args (comma-separated), "
+        "read_only_tools (comma-separated), env_keys (comma-separated names only -- never values), reason."
+    )
+    read_only = False
+    reversibility = "irreversible"
+    args_schema = {"type": "object", "required": ["proposal"], "properties": {"proposal": {"type": "string"}}}
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        fields = _parse_mcp_proposal_text(args.get("proposal", ""))
+        name = fields.get("name", "")
+        command = fields.get("command", "")
+        reason = fields.get("reason", "")
+        if not _PROPOSAL_NAME_RE.match(name):
+            return ToolResult(ok=False, error="invalid or missing 'name' -- lowercase letters/digits/underscore, starting with a letter")
+        if command not in _PROPOSAL_ALLOWED_COMMANDS:
+            return ToolResult(ok=False, error=f"'command' must be one of {sorted(_PROPOSAL_ALLOWED_COMMANDS)}, got {command!r}")
+        if not reason:
+            return ToolResult(ok=False, error="missing 'reason' -- explain why this server is needed")
+        server_args = _split_csv(fields.get("args", ""))
+        read_only_tools = _split_csv(fields.get("read_only_tools", ""))
+        env_keys = _split_csv(fields.get("env_keys", ""))
+        for key in env_keys:
+            if not _PROPOSAL_ENV_KEY_RE.match(key):
+                return ToolResult(ok=False, error=f"invalid env key name {key!r} -- UPPER_SNAKE_CASE, no values, ever")
+
+        proposal_id = uuid.uuid4().hex[:12]
+        payload = {
+            "proposal_id": proposal_id, "name": name, "command": command, "args": server_args,
+            "read_only_tools": read_only_tools, "env_keys": env_keys, "reason": reason, "status": "pending",
+        }
+        await ctx.ledger.append(MCP_PROPOSALS_STREAM, Event(
+            stream=MCP_PROPOSALS_STREAM, type="proposed", ts=ctx.clock.now(),
+            trace_id="", causation_id=None, payload=payload,
+        ))
+        return ToolResult(
+            ok=True, output=f"proposal {proposal_id} recorded: {name} ({command}) -- awaiting human review via `mcp`",
+            metadata={"proposal_id": proposal_id, "name": name, "reason": reason},
+        )
 
 
 def _apply_rlimits(cpu_seconds: int, memory_bytes: int):
@@ -495,5 +590,5 @@ def builtin_tools(config: Config) -> list:
     return [
         ReadFileTool(config), ListDirTool(config), RunPythonSandboxedTool(config),
         ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
-        ApplySkillTool(config), WebFetchTool(config),
+        ApplySkillTool(config), WebFetchTool(config), ProposeMcpServerTool(),
     ]

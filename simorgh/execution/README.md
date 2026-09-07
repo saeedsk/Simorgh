@@ -98,8 +98,43 @@ from training data, which can be stale or simply wrong about exact
 package names) to confirm it's free, real, and needs no key before it
 went in this file.
 
-**Enabling a server is three small, deliberate edits** (each one is a
-real capability grant, not something to automate away):
+### Two ways to add a server: a human directly, or Sim proposes one
+
+**Path A -- a human adds it directly**, the three steps below. Fastest,
+no review step, appropriate when the human is the one who decided a
+server is needed.
+
+**Path B -- Sim proposes, a human approves or rejects once**
+(`ProposeMcpServerTool`, `tools.py`; the creator, live, having just
+watched Sim tell them "no MCP servers connected" for the third time:
+"where is the autonomy? ... I'd like sim to move fast evolve fast,
+autonomously add this kind of feature"). Sim calls `propose_mcp_server`
+with its reasoning; the tool validates (name shape, `command` restricted
+to a small allowlist -- `npx`/`uvx`/`node`/`python`/`python3` -- args,
+`env_keys` as variable *names* only, never values) and records a
+pending proposal in the Ledger (`mcp:proposals`), then Interface prints
+a `ui.notice` so the human sees it live. The human reviews with `mcp`
+(lists pending proposals and currently active `mcp_*` tools), then `mcp
+approve <id>` (appends a real `[[execution.mcp_servers]]` block to
+`simorgh.toml` -- text-appended, never a parse-and-rewrite of the whole
+file, so nothing already there, comments included, is ever touched) or
+`mcp reject <id> [reason]`.
+
+This is the actual answer to "where is the autonomy": Sim can express
+intent and reasoning on its own, fast, with no human drafting the
+proposal for it -- but the file write itself is structurally
+human-only. `propose_mcp_server`'s own `run()` never touches
+`simorgh.toml`; only `interface/dispatch.py`'s `mcp approve` does, and
+nothing in the tool-calling pipeline can reach that code path. That's
+deliberate and not just a Guardian policy a trusted posture could
+loosen (`orchestration/tools.py`'s `_TOOL_POLICY` comment on this tool
+has the same point) -- a new external subprocess with new network reach
+is a capability grant serious enough to keep outside Guardian's
+mode-dependent trust levels entirely.
+
+**Enabling a server directly (Path A) is three small, deliberate
+edits** (each one is a real capability grant, not something to automate
+away):
 
 1. **Register the server**, in `simorgh.toml`:
    ```toml

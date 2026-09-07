@@ -10,17 +10,20 @@ from pathlib import Path
 
 from simorgh.execution.config import Config
 from simorgh.execution.tools import (
+    MCP_PROPOSALS_STREAM,
     ApplySkillTool,
     ApplySourcePatchTool,
     GitCommitTool,
     GitRevertTool,
     ListDirTool,
+    ProposeMcpServerTool,
     ReadFileTool,
     RunPythonSandboxedTool,
     SkillTool,
     WebFetchTool,
     builtin_tools,
 )
+from simorgh.ledger.factory import make_ledger
 
 from tests.simorgh.helpers import FakeClock
 
@@ -387,12 +390,95 @@ class TestSubprocessesNeverInheritTerminalStdin(unittest.IsolatedAsyncioTestCase
             self.assertEqual(kwargs.get("stdin"), subprocess.DEVNULL)
 
 
+class TestProposeMcpServerTool(unittest.IsolatedAsyncioTestCase):
+    """`ProposeMcpServerTool`'s own docstring: Sim's half of "propose a
+    server, one human approval" -- validates and records, never touches
+    `simorgh.toml` itself (`interface/dispatch.py`'s `mcp` command,
+    tested separately, is the only code path that does)."""
+
+    async def asyncSetUp(self):
+        self.clock = FakeClock()
+        self.ledger = make_ledger({"backend": "memory"}, clock=self.clock)
+        await self.ledger.start()
+
+    async def asyncTearDown(self):
+        await self.ledger.stop()
+
+    def _ctx(self):
+        from simorgh.contracts.protocols import ToolContext
+        return ToolContext(
+            action_id="a1", task_id=None, scope={}, constraints={},
+            data_dir=Path("."), clock=self.clock, logger=None, ledger=self.ledger,
+        )
+
+    async def test_records_a_valid_proposal_pending_in_the_ledger(self):
+        proposal = (
+            "name: ddg_search\n"
+            "command: npx\n"
+            "args: -y, ddg-search-mcp\n"
+            "read_only_tools: ddg_search, ddg_get_answer\n"
+            "reason: free web search, no API key needed"
+        )
+        result = await ProposeMcpServerTool().run({"proposal": proposal}, ctx=self._ctx())
+        self.assertTrue(result.ok)
+        self.assertEqual(result.metadata["name"], "ddg_search")
+        events = await self.ledger.read(MCP_PROPOSALS_STREAM)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].payload["status"], "pending")
+        self.assertEqual(events[0].payload["command"], "npx")
+        self.assertEqual(events[0].payload["args"], ["-y", "ddg-search-mcp"])
+        self.assertEqual(events[0].payload["read_only_tools"], ["ddg_search", "ddg_get_answer"])
+        self.assertEqual(events[0].payload["proposal_id"], result.metadata["proposal_id"])
+
+    async def test_a_multiline_reason_is_kept_whole(self):
+        proposal = "name: x\ncommand: npx\nreason: line one\nline two"
+        result = await ProposeMcpServerTool().run({"proposal": proposal}, ctx=self._ctx())
+        self.assertTrue(result.ok)
+        events = await self.ledger.read(MCP_PROPOSALS_STREAM)
+        self.assertEqual(events[0].payload["reason"], "line one\nline two")
+
+    async def test_rejects_an_invalid_name(self):
+        result = await ProposeMcpServerTool().run(
+            {"proposal": "name: DDG Search\ncommand: npx\nreason: x"}, ctx=self._ctx(),
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("name", result.error)
+        self.assertEqual(await self.ledger.read(MCP_PROPOSALS_STREAM), [])
+
+    async def test_rejects_a_disallowed_command(self):
+        result = await ProposeMcpServerTool().run(
+            {"proposal": "name: x\ncommand: bash\nreason: y"}, ctx=self._ctx(),
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("command", result.error)
+
+    async def test_requires_a_reason(self):
+        result = await ProposeMcpServerTool().run({"proposal": "name: x\ncommand: npx"}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("reason", result.error)
+
+    async def test_rejects_a_malformed_env_key(self):
+        result = await ProposeMcpServerTool().run(
+            {"proposal": "name: x\ncommand: npx\nreason: y\nenv_keys: sk-abc123lowercase"}, ctx=self._ctx(),
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("env key", result.error)
+
+    async def test_env_keys_never_carries_a_value_only_names(self):
+        proposal = "name: x\ncommand: npx\nreason: y\nenv_keys: BRAVE_API_KEY, ANOTHER_KEY"
+        result = await ProposeMcpServerTool().run({"proposal": proposal}, ctx=self._ctx())
+        self.assertTrue(result.ok)
+        events = await self.ledger.read(MCP_PROPOSALS_STREAM)
+        self.assertEqual(events[0].payload["env_keys"], ["BRAVE_API_KEY", "ANOTHER_KEY"])
+
+
 class TestBuiltinTools(unittest.TestCase):
     def test_registers_exactly_the_scoped_set(self):
         names = {tool.name for tool in builtin_tools(Config(repo_root=Path.cwd()))}
         self.assertEqual(names, {
             "read_file", "list_dir", "run_python_sandboxed",
             "apply_source_patch", "git_commit", "git_revert", "apply_skill", "web_fetch",
+            "propose_mcp_server",
         })
 
 
