@@ -82,6 +82,19 @@ class SessionRunner:
 
             step_no = session.next_step_no()
             is_last = session.budget.is_last_step
+            # Live-caught (the creator: "not informative ... what do you
+            # mean thinking"): every narration event before this one fired
+            # *after* `_think()` already had its reply -- during the real
+            # wait (the slow part, seconds to well over a minute for a
+            # real model call) nothing was published at all. This is a
+            # bus-only heads-up (no Ledger append, no `session.record()`
+            # -- it isn't a completed step, just an announcement of intent)
+            # so a live narrator has something concrete to say *while*
+            # waiting, not just after.
+            await self._publish(session, topics.TASK_STEP, {
+                "task_id": session.task_id, "step_no": step_no, "phase": "gather",
+                "summary": f"asking the model (purpose={'chat' if session.profile.name == 'chat' else 'draft'})",
+            })
             think_reply = await self._think(session, pending_user_text, last_step=is_last)
             pending_user_text = ""
 

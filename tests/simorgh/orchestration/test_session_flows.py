@@ -19,6 +19,40 @@ class TestChatTurnWithOneToolCall(unittest.TestCase):
     """S1 (16 section 6): a tool_calls reply, then a final text reply."""
 
     @run
+    async def test_a_thinking_announcement_publishes_before_the_slow_wait(self):
+        """Live-caught (the creator: "not informative ... what do you mean
+        thinking"): every narration event used to fire only *after*
+        `_think()` already had its reply -- nothing was published during
+        the real wait itself (the slow part). `_think()` now announces
+        intent on the bus (not the Ledger -- it isn't a completed step)
+        before making the call, naming the purpose."""
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": "hi"}])
+            await cognition.start()
+
+            seen = []
+            sub = await h.client("observer").subscribe(topics.TASK_STEP, lambda m: seen.append(m.payload))
+
+            runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+            session = Session(task_id="t-announce", kind="chat", mode="execute", profile=profiles.CHAT)
+            await runner.run(session, user_text="hello")
+
+            self.assertGreaterEqual(len(seen), 1)
+            announcement = seen[0]
+            self.assertEqual(announcement["phase"], "gather")
+            self.assertIn("purpose=chat", announcement["summary"])
+            self.assertNotIn("ok", announcement)  # not a completed step
+
+            # It must never reach the Ledger -- it's an in-flight
+            # announcement, not a real recorded step.
+            events = await h.ledger.read("task:t-announce")
+            self.assertEqual(len([e for e in events if e.type == topics.TASK_STEP]), 1)  # only the real one
+
+            await sub.unsubscribe()
+            await cognition.stop()
+
+    @run
     async def test_gather_think_act_gather_think_final(self):
         async with Harness() as h:
             bus = h.client("orchestration")

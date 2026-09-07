@@ -3855,3 +3855,51 @@ Still ahead, roughly in order:
     one story. 1 new integration test over a real Kernel: after a real
     turn, the feed lists that session's percept → started → step →
     replied, newest first, with nothing in flight. Full suite green.
+
+134. **Two more real problems the creator caught in the same real
+    session -- one a lost reply, one a hollow narration.**
+
+    - **A long reply could vanish outright.** "step 1 final answer ok
+      [31.5s]" then a full minute of "still thinking" and nothing.
+      `_report` (`orchestration/worker.py`) appended `result_summary`
+      to the Ledger inline; the Ledger refuses any inline string over
+      `inline_threshold` (4096 chars) and raises `ValidationError` --
+      before either `TASK_COMPLETED` or `TURN_COMPLETED` ever
+      published, so a genuinely good, long, real answer was silently
+      lost with no error surfaced anywhere. Same failure shape as
+      milestone 121's migration bug, same fix: `_deoversize_for_ledger`
+      blob-stores the oversized field for the Ledger's own copy (a
+      short inline preview plus a `<field>_ref`, the project's
+      established convention) while the bus message -- what the REPL
+      and the dashboard actually read -- keeps the full text
+      untouched. Covers both `result_summary` (completed) and `reason`
+      (failed/blocked). 1 new worker test with a 5,000-char reply,
+      confirmed to fail against the pre-fix code first (the exact
+      symptom: no `turn.completed` ever arrives).
+    - **The narration itself was hollow.** "not informative ... what do
+      you mean thinking" -- fair: every step event fired *after*
+      `_think()` already had its reply, so during the real wait (the
+      slow part, seconds to well over a minute for a genuine model
+      call) nothing was published at all; a plain chat turn with no
+      tool calls has exactly one step, logged retroactively. `run()`
+      now publishes a bus-only announcement ("asking the model
+      (purpose=chat)", `phase: gather`) immediately before the slow
+      `_think()` call -- not appended to the Ledger, since it isn't a
+      completed step, just a stated intent -- so a live narrator has
+      something concrete to say *while* waiting:
+
+      ```
+        ... thinking...  [0.0s]
+        ... step 1 (gather) asking the model (purpose=chat)  [0.0s]
+        ... still thinking  [10s]
+        ... step 1 (gather) final answer ok  [31.5s]
+        ... done  [31.5s]
+      ```
+
+      Named honestly: this is the real ceiling of what's observable for
+      a plain conversational answer without a much larger change (token
+      streaming from the provider) -- there is no finer-grained
+      "thinking trace" underneath a single `cognition.think` call today.
+      1 new session test asserts the announcement (phase, purpose,
+      `ok` absent) and that it never reaches the Ledger. Full suite
+      green.
