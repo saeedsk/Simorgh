@@ -27,7 +27,13 @@ from .streams import is_per_id
 _DURATION = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhd])\s*$")
 _UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 
-DEFAULT_RETENTION: dict[str, str] = {"trace:": "7d", "dead:": "30d", "activity": "90d"}
+# `trace:` is one stream -- and one idempotency file -- per traced
+# message, so its cost is file *count*, not bytes: 192,332 of them on
+# the creator's ledger held 364MB of JSON in 1.5GB of disk, all of it
+# written inside a single day. A trace answers "why did Sim just do
+# that", which is a question asked within hours, so a week of them was
+# never read and only ever slowed the boot that had to stat them.
+DEFAULT_RETENTION: dict[str, str] = {"trace:": "2d", "dead:": "30d", "activity": "90d"}
 
 
 def parse_duration(text: str | float | int | None) -> float | None:
