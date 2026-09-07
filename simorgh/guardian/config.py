@@ -57,7 +57,18 @@ class Config:
     protected_subjects: tuple[str, ...] = DEFAULT_PROTECTED_SUBJECTS
     denylist: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_DENYLIST))
     immunity_similarity_threshold: float = 0.85
-    max_consecutive_failures: int = 5
+    # The creator, 2026-09-07: "more freedom in autonomously working and
+    # evolving without too much gate". A hard `locked` posture that only a
+    # human typing `resume` could undo turned every transient problem (a
+    # budget-driven floor reply pinning valence, a short failure streak)
+    # into a stall lasting the rest of the session. Three loosenings:
+    # a health finding now tightens to `guarded` (still gated, still
+    # working) rather than `locked`; the failure streak that does lock
+    # is three times longer; and a lock expires back to baseline on its
+    # own after `lock_ttl_s` (0 disables -- the old behavior).
+    max_consecutive_failures: int = 15
+    health_critical_tightens_to: str = "guarded"  # guarded | locked
+    lock_ttl_s: float = 600.0
     budget_pressure_tighten_at: float = 0.9
     irreversible_requires_human: bool = True
     reversible_auto_in_guarded: bool = True

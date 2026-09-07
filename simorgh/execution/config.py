@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
+from .external import ExternalToolSpec
 from .mcp import McpServerConfig
 
 
@@ -65,12 +66,22 @@ class Config:
     # to this itself; each entry is a deliberate capability grant, same
     # spirit as `web_fetch_allow_private_networks` defaulting False.
     mcp_servers: tuple[McpServerConfig, ...] = ()
+    # -- open-source toolset adapters (external.py's module docstring):
+    # LangChain tools, pydantic_ai toolsets, Composio, plain callables --
+    # each an optional import, wrapped behind the Tool protocol so
+    # Guardian still gates every call.
+    external_tools: tuple[ExternalToolSpec, ...] = ()
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":
         if not data:
             return cls()
         kwargs = dict(data)
+        if "external_tools" in kwargs:
+            kwargs["external_tools"] = tuple(
+                spec if isinstance(spec, ExternalToolSpec) else ExternalToolSpec.from_mapping(spec)
+                for spec in kwargs["external_tools"]
+            )
         if "repo_root" in kwargs:
             kwargs["repo_root"] = Path(kwargs["repo_root"])
         for key in ("readable_roots", "write_scopes_source", "write_scopes_skills"):

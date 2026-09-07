@@ -12,6 +12,7 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
 from .config import Config
+from .tools import register_tool_policy
 from .worker import Worker
 
 NAME = "orchestration"
@@ -24,7 +25,7 @@ class Service:
     consumes: tuple[str, ...] = (
         topics.TASK_AVAILABLE, topics.SYSTEM_STATE_CHANGED,
         topics.ACTION_RESULT, topics.ACTION_DENIED, topics.ACTION_NEEDS_HUMAN, topics.VERIFY_RESULT,
-        topics.PERCEPT_TEXT_RECEIVED,
+        topics.PERCEPT_TEXT_RECEIVED, topics.TOOL_REGISTERED,
     )
     produces: tuple[str, ...] = (
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_PAUSED, topics.TASK_COMPLETED,
@@ -37,6 +38,7 @@ class Service:
         self._workers: list[Worker] = []
         self._ctx: Context | None = None
         self._percept_sub = None
+        self._tool_sub = None
         self._next_worker = 0
         self._metrics_task: asyncio.Task | None = None
 
@@ -48,11 +50,27 @@ class Service:
             await worker.start()
             self._workers.append(worker)
         self._percept_sub = await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept)
+        # Execution announces every tool it registers -- builtin, skill,
+        # MCP, external adapters -- and the router's policy table (which
+        # used to be hand-edited per tool, see tools.py's own MCP note)
+        # learns them here, so a newly wired open-source tool is callable
+        # without anyone editing orchestration.
+        self._tool_sub = await ctx.bus.subscribe(topics.TOOL_REGISTERED, self._on_tool_registered)
         if self.config.metrics_interval_s > 0:
             self._metrics_task = asyncio.create_task(self._metrics_loop(), name="orchestration-metrics")
         ctx.logger.info("orchestration.started", workers=len(self._workers))
 
+    async def _on_tool_registered(self, message) -> None:
+        p = message.payload
+        register_tool_policy(
+            p.get("name", ""), reversibility=p.get("reversibility", "irreversible"),
+            provider=p.get("provider", "builtin"),
+        )
+
     async def stop(self) -> None:
+        if self._tool_sub is not None:
+            await self._tool_sub.unsubscribe()
+            self._tool_sub = None
         if self._percept_sub is not None:
             await self._percept_sub.unsubscribe()
             self._percept_sub = None

@@ -105,3 +105,41 @@ or set `irreversible_requires_human = true` under `[guardian]` in
 auto-approve on, `~/.simorgh/ledger/streams/guardian:rejected.jsonl` is
 the only after-the-fact signal that a proposal got that far and was
 still denied by an earlier rule.
+
+### Autonomy loosenings (2026-09-07)
+
+The creator asked for "more freedom in autonomously working and evolving
+without too much gate". Three changes, all in `guardian/config.py`:
+
+- A critical Reflection health finding tightens posture to `guarded`
+  (still working, still gated), not `locked` -- `health_critical_tightens_to`.
+- A lock is a circuit breaker, not a verdict: it expires back to the
+  baseline posture after `lock_ttl_s` (default 10 min; `0` restores
+  wait-for-`resume`). The consecutive-failure streak that locks is 15,
+  not 5.
+- The patch/skill task profiles (`orchestration/profiles.py`) can call
+  `apply_source_patch` / `apply_skill`, `git_commit`, `git_revert`, and
+  `run_tests` directly. Previously the model could only `draft_candidate`,
+  and the draft->verify->apply loop that was meant to land a draft was
+  never built -- so Sim could not actually change its own code.
+
+What did not loosen: `ProtectedRule` (Sim cannot edit `simorgh/guardian/`,
+`simorgh/kernel/`, `simorgh/contracts/`, `simorgh/execution/`,
+`docs/SOUL.md`, `simorgh.toml`) and `DenylistRule` (no raw sockets,
+subprocesses, `eval`, `ctypes` in drafted code). Those are the two
+guardrails that protect the creator rather than slow Sim down.
+
+## External toolsets (open-source tools)
+
+`execution/external.py` wraps tools from LangChain (`BaseTool`s such as
+`DuckDuckGoSearchRun`, `WikipediaQueryRun`), pydantic_ai
+`FunctionToolset`s, Composio toolsets (hosted; needs `COMPOSIO_API_KEY`),
+or any plain Python callable behind Sim's own `Tool` protocol. They are
+listed under `[[execution.external_tools]]` in `simorgh.toml`, imported
+lazily by string, and skipped with a warning if the package is missing --
+the stdlib-only floor still boots with nothing installed. The frameworks'
+own agent loops are deliberately not used: only their tool
+implementations, so every call still goes through Guardian like
+`read_file` does. Execution announces each one on `tool.registered`
+(`provider="external"`) and Orchestration's router learns its policy from
+that announcement -- no per-tool edit in `orchestration/tools.py`.

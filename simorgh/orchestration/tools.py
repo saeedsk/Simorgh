@@ -22,6 +22,15 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "run_python_sandboxed": ("reversible", False),
     "run_tests": ("reversible", False),
     "draft_candidate": ("reversible", False),
+    # Model-callable since 2026-09-07 (profiles.py's own note): the tools
+    # that actually land a change. Each declares itself `reversible` in
+    # execution/tools.py (git_revert exists precisely so they are), so
+    # Guardian auto-allows them in guarded posture; ProtectedRule and
+    # DenylistRule still run first and still deny outright.
+    "apply_source_patch": ("reversible", False),
+    "apply_skill": ("reversible", False),
+    "git_commit": ("reversible", False),
+    "git_revert": ("reversible", False),
     # -- MCP (execution/mcp.py's own module docstring): a human adds an
     # entry here, by the server's registered tool name
     # (`mcp_<server>_<tool>`), for every MCP tool they want the model to
@@ -99,6 +108,55 @@ _MARKER_ARG_HINT: dict[str, str] = {
 }
 
 
+# Two-field tools reachable through the one-string marker layer: the
+# first line of the payload is the first key, everything after it the
+# second. `cognition/parser.py::_CODE_BEARING_MARKERS` keeps the payload
+# multi-line for exactly these names.
+_MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
+    "apply_source_patch": ("subject", "code"),
+    "apply_skill": ("subject", "code"),
+    "git_commit": ("path", "message"),
+}
+_MARKER_ARG_HINT.update({
+    "apply_source_patch": (
+        "first line: the file path to write (inside src/ or simorgh/); every "
+        "following line: the COMPLETE new content of that file. Example:\n"
+        "APPLY_SOURCE_PATCH: simorgh/foo.py\ndef f():\n    return 1\n"
+    ),
+    "apply_skill": (
+        "first line: the skill module path (inside simorgh_skills/); every "
+        "following line: the complete module source, defining run(**args)."
+    ),
+    "git_commit": "first line: the one path to commit; second line: the commit message.",
+    "git_revert": "no argument -- write just the marker: GIT_REVERT:",
+    "run_tests": "a test file or directory to run (e.g. tests/simorgh/guardian), or empty for the whole suite.",
+    "search_code": "a regular expression to search for across the readable tree.",
+})
+# Tools whose marker takes no argument at all.
+_MARKER_NO_ARGS = frozenset({"git_revert"})
+
+# Filled at runtime from Execution's `tool.registered` announcements
+# (`orchestration/service.py::_on_tool_registered`) -- MCP servers,
+# acquired skills, and open-source adapters (`execution/external.py`)
+# become routable without a hand edit here. A hand-written entry above
+# always wins over an announced one, so a human can still pin a stricter
+# policy for any tool.
+_DYNAMIC_TOOLS: dict[str, str] = {}
+
+
+def register_tool_policy(name: str, *, reversibility: str, provider: str) -> None:
+    if not name:
+        return
+    _DYNAMIC_TOOLS[name] = provider
+    if name not in _TOOL_POLICY:
+        _TOOL_POLICY[name] = (reversibility, provider in ("mcp", "external"))
+    if name not in _MARKER_ARG_KEY and provider == "external":
+        # `execution/external.py` wraps every adapter behind one string
+        # argument named `input` -- the shape LangChain's own `run(tool_input)`
+        # already uses -- so the marker layer needs no per-tool schema.
+        _MARKER_ARG_KEY[name] = "input"
+
+
 def marker_hint(tool: str) -> str | None:
     return _MARKER_ARG_HINT.get(tool)
 
@@ -107,8 +165,16 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
                       proposed_by: str = "orchestration") -> dict:
     tool = call.get("tool", "")
     args = call.get("args", {})
-    if isinstance(args, dict) and set(args) == {"argument"} and tool in _MARKER_ARG_KEY:
-        args = {_MARKER_ARG_KEY[tool]: args["argument"]}
+    if isinstance(args, dict) and set(args) == {"argument"}:
+        raw = args["argument"]
+        if tool in _MARKER_SPLIT_FIRST_LINE:
+            first, second = _MARKER_SPLIT_FIRST_LINE[tool]
+            head, _, rest = str(raw).partition("\n")
+            args = {first: head.strip(), second: rest}
+        elif tool in _MARKER_NO_ARGS:
+            args = {}
+        elif tool in _MARKER_ARG_KEY:
+            args = {_MARKER_ARG_KEY[tool]: raw}
     reversibility, network = _TOOL_POLICY.get(tool, ("irreversible", False))
     paths = [args["path"]] if isinstance(args, dict) and "path" in args else []
     return {
