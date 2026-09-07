@@ -14,6 +14,16 @@ from simorgh.contracts.envelope import Message
 from .api import Session
 
 DEFAULT_TIMEOUT_S = 0.25
+# Live-caught (context_too_large, real use -- 07-post-cutover-review.md
+# §3.4d/§3.3): a single migrated/long memory record could make the
+# elastic "conversation" block too large for Cognition's layers 1-4 to
+# shrink under budget even with layer 5 available (§3.2's own recorded
+# residual gap). Bounding what's handed to Cognition in the first place
+# is the more robust fix than relying entirely on downstream compaction
+# to save an unbounded input -- these are deliberately generous (most
+# real memory items are far smaller) so they bite only the rare outlier.
+_MEMORY_ITEM_MAX_CHARS = 800
+_MEMORY_BLOCK_MAX_CHARS = 4_000
 
 
 class Assembler:
@@ -76,7 +86,18 @@ class Assembler:
         if not reply:
             return ""
         items = reply.payload.get("items", [])
-        return "\n".join(f"- {i.get('content', '')}" for i in items[:8])
+        lines: list[str] = []
+        total = 0
+        for i in items[:8]:
+            content = str(i.get("content", ""))
+            if len(content) > _MEMORY_ITEM_MAX_CHARS:
+                content = content[:_MEMORY_ITEM_MAX_CHARS] + "…"
+            line = f"- {content}"
+            if total + len(line) > _MEMORY_BLOCK_MAX_CHARS and lines:
+                break  # keep the strongest (highest-ranked) matches, drop the rest honestly
+            lines.append(line)
+            total += len(line)
+        return "\n".join(lines)
 
     async def world_facet(self, what: str, args: dict | None = None) -> dict | None:
         reply = await self._request(topics.WORLD_ENV_QUERY, {"what": what, "args": args or {}})
