@@ -70,6 +70,18 @@ _COMPACT_PROMPT = (
 
 Summarizer = Callable[[str], Awaitable[str]]
 
+# Live-caught (real use, context_too_large recurring even with
+# allow_summarize=True -- 07-post-cutover-review.md §3.4d): nothing
+# capped layer 5's own input before handing it to the model. A single
+# oversized retrieval (or many small ones) could make `body` itself too
+# large for the `consolidate` purpose's own budget (16,000 tokens
+# default, `cognition/service.py::_summarize_for_compaction`) to
+# accept, so the "last resort" layer could fail its own call instead of
+# saving the request. ~4 chars/token, matching this project's other
+# rough token-budgeting (no tokenizer dependency in the core); generous
+# headroom under the consolidate budget, not a tight fit.
+_LAYER5_INPUT_MAX_CHARS = 40_000
+
 
 def _is_protected(message: dict) -> bool:
     return bool(message.get("protected")) or message.get("role") == "system"
@@ -267,7 +279,9 @@ class Compactor:
         sid = session_id or "unspecified"
         await self._emit_compact_pre(sid, purpose=purpose, tokens=current_tokens)
 
-        body = "\n\n".join(f"[{s.message.get('role', 'user')}] {s.message.get('content', '')}" for s in older_elastic)
+        body, dropped_oldest = self._bounded_body(older_elastic)
+        if dropped_oldest:
+            body = f"[{dropped_oldest} earlier segment(s) omitted -- too large even for summarization]\n\n" + body
         summary_text = (await self._summarize(_COMPACT_PROMPT + body)).strip()
         summary_content = f"[compacted summary of {len(older_elastic)} earlier steps]\n{summary_text}"
         summary_seg = _Segment({"role": "system", "content": summary_content}, estimate_tokens(summary_content))
@@ -280,6 +294,28 @@ class Compactor:
             tokens_before=sum(s.tokens for s in pre_collapse), tokens_after=tokens_after, summary_ref=summary_ref,
         )
         return result, True, summary_ref
+
+    @staticmethod
+    def _bounded_body(segments: list[_Segment]) -> tuple[str, int]:
+        """Keeps the most recent segments (usually the more relevant ones
+        for "what's happening now") up to `_LAYER5_INPUT_MAX_CHARS`,
+        dropping the oldest first rather than truncating mid-segment --
+        each kept segment stays intact and readable. Returns the joined
+        body and how many oldest segments were dropped (0 in the common
+        case where nothing needed to be)."""
+        kept: list[str] = []
+        total = 0
+        newest_first = list(reversed(segments))
+        cutoff = len(newest_first)
+        for idx, s in enumerate(newest_first):
+            line = f"[{s.message.get('role', 'user')}] {s.message.get('content', '')}"
+            if total + len(line) > _LAYER5_INPUT_MAX_CHARS and kept:
+                cutoff = idx
+                break
+            kept.append(line)
+            total += len(line)
+        kept.reverse()
+        return "\n\n".join(kept), len(newest_first) - cutoff
 
     async def _store_summary(self, session_id: str, text: str) -> str | None:
         if self._ledger is None:
