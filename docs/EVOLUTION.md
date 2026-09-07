@@ -4330,3 +4330,71 @@ Still ahead, roughly in order:
     `test_render.py`'s banner test checks for `improve <topic>` instead
     of the removed `propose <topic>`. Full suite green (2,296 tests --
     unchanged count, confirming this really was a pure rename/consolidation).
+
+142. **The actual reason Sim kept saying "I don't have that" -- found
+    by reading a hallucinated tool call.** The creator pasted a live
+    transcript: asked Sim to propose the DuckDuckGo MCP server (fully
+    built and registered by this point -- milestones 138-140), and Sim
+    answered with several paragraphs of prose *describing* a JSON MCP
+    config and a fabricated `**Tool: bash**` block with fake `ls`/`find`
+    output showing an empty sandbox directory -- never actually calling
+    `propose_mcp_server`, a tool that was genuinely available to it.
+    That fabricated path, `/private/var/.../simorgh-claude-code-<hash>`,
+    is real -- it's `ClaudeCodeProvider`'s own throwaway `tempfile.
+    TemporaryDirectory` (`cognition/providers/claude_code.py`) -- which
+    is what made this worth chasing rather than dismissing as a generic
+    hallucination: the model was narrating a plausible-sounding *fake*
+    tool interaction instead of emitting a real one, in a session that
+    genuinely does shell out to the real `claude` CLI underneath.
+
+    Reading the actual request path end to end found two independent,
+    compounding gaps, both now fixed:
+
+    - **`orchestration/session.py::_think` never set `expected` on the
+      `cognition.think` request at all.** `cognition/service.py::
+      _expected_spec` — correctly written, correctly tested in
+      isolation — always fell through to `{"kind": "final"}` as a
+      result, for every real chat or draft turn. `04-cognition.md`
+      section 12's own item 2 recorded "`expected` added to the
+      contract" as done; nobody had gone back and made the one real
+      caller actually populate it. Every "tool_calls" test that ever
+      passed did so through `FakeCognition`, which returns whatever
+      `tool_calls` a test script hands it directly — none of them
+      exercised the real request-shaping code at all. Fixed: `_think`
+      now sends `expected: "tool_calls"` whenever `session.profile.
+      tools` is non-empty.
+    - **Nothing ever told the model the marker protocol exists.**
+      Fixing the line above only makes *parsing* reachable -- a model
+      has no way to discover a bespoke `TOOL_NAME: argument` convention
+      from first principles, and `Assembler.assemble`
+      (`orchestration/context.py`) never mentioned tools at all.
+      Cognition now injects a real system message (new `_tool_
+      instruction_block`, `cognition/service.py`) naming the available
+      tools and the exact syntax, generated from the bare tool names
+      already on the wire request -- deliberately generic, not real
+      per-tool argument descriptions, since that would mean Cognition
+      reaching into Execution's tool registry across the subsystem
+      boundary `test_module_boundaries.py` enforces.
+
+    This independently reproduces -- from underneath, at the request-
+    shaping layer rather than the marker-vocabulary layer --
+    `16-orchestration.md` section 12 item 6's own "worst finding" from
+    the original post-cutover review: "a self-improving agent that
+    role-plays the capability through its most natural surface." That
+    item's `propose`/`patch`-as-tools decision is still the right shape
+    for the specific gap it names and remains open on its own terms;
+    this fix closes the mechanism underneath every marker-reachable tool
+    that already existed (`read_file`, `web_fetch`, `run_python_
+    sandboxed`, `propose_mcp_server`, the two `ddg_search`/`ddg_get_
+    answer` MCP tools once configured, ...) -- none of which had ever
+    actually been callable from a real chat turn before today, no matter
+    how correct their own registration and parsing code was.
+
+    4 new tests: `test_service.py` (cognition, 2 -- a `tool_calls`
+    request's system messages actually name the tools and the marker
+    syntax; no tools offered means no instruction leaks in) and
+    `test_session_flows.py` (orchestration, 1 -- `_think` sends
+    `expected: "tool_calls"` with the right tool names for a
+    tools-bearing profile), each confirmed to fail against the pre-fix
+    code first (`KeyError: 'expected'` / the instruction text simply
+    absent). Full suite green (2,299 tests).

@@ -142,6 +142,20 @@ class SessionRunner:
             payload={
                 "purpose": "chat" if is_chat else "draft",
                 "messages": messages, "tools": list(session.profile.tools),
+                # Live-caught: this request never actually asked Cognition
+                # to parse tool calls -- `expected` was never set, so
+                # `cognition/service.py::_expected_spec` always fell
+                # through to `{"kind": "final"}` and every model reply was
+                # treated as a plain answer, no matter what it wrote. The
+                # GATHER -> THINK -> (tool_calls -> PROPOSE | final ->
+                # VERIFY) loop this module's own docstring describes was
+                # real code with no way to ever reach its tool_calls
+                # branch from a real chat turn. `expected: "tool_calls"`
+                # only when this profile actually has tools to offer --
+                # an empty list would ask Cognition to scan for zero
+                # markers, indistinguishable from asking for `final`
+                # except for the wasted round-trip.
+                "expected": "tool_calls" if session.profile.tools else "text",
                 "budget": {"max_tokens": 2000, "max_cost_usd": 0.5},
                 "require_real_provider": False, "last_step": last_step,
                 # Live-caught (v2 live trial, 2026-09-06): a chat turn

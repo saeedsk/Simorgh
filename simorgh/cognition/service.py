@@ -41,6 +41,37 @@ def _expected_spec(payload: dict) -> dict:
     return {"kind": "final"}
 
 
+# Live-caught (the creator, real use: Sim telling them "no MCP servers
+# connected... no fetch tool" turn after turn, even after `web_fetch`
+# and `propose_mcp_server` were real, registered, and in `session.
+# profile.tools`): `_expected_spec` above only ever *parses* a reply for
+# markers -- nothing ever told the model the marker convention exists in
+# the first place, or which tool names it could write. `orchestration/
+# session.py` request-side fix (`expected: "tool_calls"`) makes parsing
+# reachable at all; this is the other missing half -- a real instruction
+# in the prompt, or a model has no way to discover this protocol from
+# first principles. Deliberately generic (tool names only, no per-tool
+# argument semantics) rather than reaching into Execution's tool
+# registry for real descriptions -- that would cross the subsystem
+# boundary `test_module_boundaries.py` enforces; a competent model reads
+# a self-descriptive name like `web_fetch` or `propose_mcp_server` and
+# infers the argument shape well enough in context.
+def _tool_instruction_block(payload: dict) -> str | None:
+    if payload.get("expected") != "tool_calls":
+        return None
+    tools = tuple(payload.get("tools") or ())
+    if not tools:
+        return None
+    names = ", ".join(sorted(tool.upper() for tool in tools))
+    return (
+        "Tools available this turn: " + names + ". To use one, write its name "
+        "in capitals, a colon, then your argument, as the very first line of "
+        "your reply -- nothing before it. For example:\nWEB_FETCH: https://example.com\n"
+        "Only do this when you genuinely need that tool right now; otherwise "
+        "just answer in plain text as normal, with no marker line."
+    )
+
+
 class Service:
     name = "cognition"
     version = VERSION
@@ -170,9 +201,15 @@ class Service:
             # something with real system-prompt authority overrides it
             # (see that provider's own module docstring).
             protected_text = "\n\n".join(b.text for b in protected)
+            tool_instructions = _tool_instruction_block(payload)
             think_messages: list[dict] = []
             if protected_text:
                 think_messages.append({"role": "system", "content": protected_text})
+            if tool_instructions:
+                # Not counted in `protected_tokens`'s budget check above --
+                # a short fixed-shape string, not worth the extra
+                # bookkeeping given the budget check already ran.
+                think_messages.append({"role": "system", "content": tool_instructions})
             if compacted.text:
                 think_messages.append({"role": "user", "content": compacted.text})
             if not think_messages:
