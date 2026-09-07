@@ -57,10 +57,30 @@ description" half of the roadmap item; a Memory that never answers (not
 booted, or nothing stored yet) degrades to a synthesized description
 rather than blocking the load.
 
+## Web fetch (built later this session -- 07-post-cutover-review.md, "essential toolset")
+
+`WebFetchTool` (`tools.py`) is the one reviewed path for real outbound
+network access -- Guardian's own denylist (`guardian/config.py`) already
+refuses `urllib`/`requests`/`socket` in drafted code specifically so this
+hand-built tool is the only way in. Ported from v1's `src/tools/
+web_fetch.py`: http/https GET only, SSRF-guarded (private/loopback/
+link-local/reserved/multicast addresses refused after DNS resolution),
+size/time-bounded, rate-limited over a rolling window (in-process, not
+durable across restarts like v1's `MemoryStore`-backed limiter -- see the
+tool's own docstring). A successful fetch also publishes `percept.web.
+fetched` (`execution/service.py`'s `_on_approved`, after `ACTION_RESULT`)
+with a blob-stored `content_ref`, closing the contract 08-execution.md
+section 4.2 already specified (`memory`, `curiosity` are its documented
+consumers; neither reads it yet this session). Live-caught while wiring
+this in: two bugs in the *existing* tool-calls pipeline meant no tool --
+not just `web_fetch` -- actually worked from a real chat turn once a
+model tried to call one; see `orchestration/tools.py` and `cognition/
+parser.py`'s own docstrings for the fixes.
+
 ## Deliberate scope cuts (see 08-execution.md section 12 for the full list)
 
-- `web_fetch`, `shell`, `relaunch`, and `hot_swap` are NOT built this
-  pass -- they need a `KernelControl` contract that doesn't exist yet.
+- `shell`, `relaunch`, and `hot_swap` are NOT built this pass -- they
+  need a `KernelControl` contract that doesn't exist yet.
   `isolated_test_suite` and the `skill.draft`/`self_patch.draft`
   Cognition-backed drafting-loop tools are also not built -- Learning's
   `PatchPipeline` proposes them, but they depend on Cognition composing

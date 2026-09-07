@@ -22,11 +22,29 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "draft_candidate": ("reversible", False),
 }
 
+# `cognition/parser.py::_parse_markers` only ever extracts one string per
+# marker line -- `{"argument": <str>}` (v1's marker vocabulary was
+# single-argument by design; see this package's README "Not done this
+# session"). Real tool `args_schema`s use a tool-specific key (`path`,
+# `url`, `code`), so a marker-shaped call has to be remapped onto that
+# key before Execution ever sees it -- live-caught: without this, every
+# real tool call from a marker reply failed with a bare `KeyError` on its
+# own required arg (e.g. `web_fetch` needs `url`, not `argument`).
+_MARKER_ARG_KEY: dict[str, str] = {
+    "read_file": "path",
+    "list_dir": "path",
+    "web_fetch": "url",
+    "run_python_sandboxed": "code",
+    "draft_candidate": "code",
+}
+
 
 def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: str,
                       proposed_by: str = "orchestration") -> dict:
     tool = call.get("tool", "")
     args = call.get("args", {})
+    if isinstance(args, dict) and set(args) == {"argument"} and tool in _MARKER_ARG_KEY:
+        args = {_MARKER_ARG_KEY[tool]: args["argument"]}
     reversibility, network = _TOOL_POLICY.get(tool, ("irreversible", False))
     paths = [args["path"]] if isinstance(args, dict) and "path" in args else []
     return {

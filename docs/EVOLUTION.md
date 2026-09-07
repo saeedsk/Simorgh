@@ -3983,3 +3983,68 @@ Still ahead, roughly in order:
     orchestration suites (`test_session_flows.py`, `test_worker.py`,
     48 tests) re-run green after the 3-tuple change to confirm no
     caller broke. Full suite green.
+
+137. **`web_fetch`, and two pre-existing bugs that meant no tool actually
+    worked from a real chat turn.** The creator, live, over the web chat:
+    "sim toolset is very poor... can you browse web?" -- and, watching
+    Sim's own reply, noticed it claimed to be running from "a temp
+    sandbox... not my actual source tree," a second, separate tell that
+    something in the tool-calling path was silently failing rather than
+    genuinely absent.
+
+    - **`web_fetch` itself.** `08-execution.md` section 5.2 had fully
+      specified this tool (SSRF guard, size caps, `percept.web.fetched`)
+      since the initial build; `execution/README.md`'s own "deliberate
+      scope cuts" list just never got worked off. Ported from v1's
+      `src/tools/web_fetch.py` (`WebFetchTool`, `execution/tools.py`):
+      http/https GET only, private/loopback/link-local/reserved/
+      multicast/metadata (`169.254.169.254`) addresses refused after DNS
+      resolution, size and time bounds, a rolling in-process rate limit
+      (v1's was durable via `MemoryStore`; this build's `ToolContext` has
+      no injected memory client -- an honest, smaller guarantee, not a
+      silent regression, since the tool instance persists for the
+      process's whole lifetime). A successful fetch now actually
+      publishes `percept.web.fetched` (`execution/service.py`), closing
+      a contract that existed but nothing produced.
+    - **Bug 1: multi-line code got silently truncated to one line.**
+      `cognition/parser.py::_parse_markers` decided whether a marker's
+      payload was code-bearing (keep multi-line intact) by checking
+      `marker.upper() in {"DRAFT", "RUN"}` -- v1's short marker names.
+      But v2's real markers are the full tool names from `session.
+      profile.tools` (`orchestration/profiles.py`): `RUN_PYTHON_
+      SANDBOXED`, `DRAFT_CANDIDATE`. Neither ever matched, so every real
+      multi-line code payload silently fell back to first-line-only.
+    - **Bug 2: every real tool call failed with a bare `KeyError`.**
+      `orchestration/tools.py::to_action_payload` passed the marker
+      parser's generic `{"argument": <str>}` straight through to
+      Execution, but every tool's real `args_schema` wants a specific
+      key (`path`, `url`, `code`). `execution/service.py`'s broad
+      `except Exception` caught the resulting `KeyError` and turned it
+      into an opaque `ACTION_RESULT{error: "'path'"}` -- nothing
+      anywhere said the pipeline itself, not the model's tool choice,
+      was at fault. This explains far more than the missing `web_fetch`:
+      `read_file`/`list_dir`/`run_python_sandboxed` were equally broken
+      from a real chat turn the whole time; a model discovering every
+      tool call fails would rationally describe itself as toolless.
+      Fixed with a `_MARKER_ARG_KEY` table mapping each real tool name
+      to its actual arg key, applied only when the args are still in
+      the marker's raw `{"argument": ...}` shape.
+
+    Live-caught a second time (self-referential, worth naming): I found
+    both bugs by reading the pipeline start-to-finish while wiring
+    `web_fetch` in, not by being told where they were -- the same
+    "verify against the real code, not the transcript" discipline this
+    file has recorded before (milestone 128 and others).
+
+    12 new tests: `TestWebFetchTool` (`test_tools.py`, 10 cases -- real
+    fetch with metadata, non-http scheme refused, private-address and
+    metadata-IP SSRF refusal, DNS-failure-is-a-result-not-a-crash,
+    truncation, network-failure-is-a-result, rate limit enforced and
+    rolling off, `allow_private_networks` skips the guard); 2 in
+    `test_parser.py` for the real v2 marker names (code-bearing kept
+    whole, single-token still first-line-only); 3 in
+    `test_tools_router.py` for the remap (every real tool's key,
+    unknown tool left alone, already-correct args left alone). Both
+    pipeline-bug tests confirmed to fail against the pre-fix code first.
+    `builtin_tools()`'s scoped-set test updated. Full suite green
+    (2,254 tests).

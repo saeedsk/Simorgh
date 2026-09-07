@@ -472,4 +472,50 @@ two subprocess requirements that must be stated, not assumed:**
   v2's port did not carry it either. *Default:* `start_new_session=True`
   and `os.killpg(pgid, SIGKILL)` on `TimeoutExpired`; acceptance: a
   script that forks a long-sleeping child leaves no live grandchild
-  after the tool returns `error="timeout"`.
+  after the tool returns `error="timeout"`. *Status: still open* --
+  not touched by the `web_fetch` build below.
+
+**`web_fetch` built, 2026-09-06 (the creator, live: "sim toolset is very
+poor... can you browse web?"):** `WebFetchTool` (`tools.py`) is the row
+this table already specified (section 5.2) but nothing had implemented.
+Ported from v1's `src/tools/web_fetch.py` almost unchanged (SSRF guard,
+size cap, honest User-Agent); the one real difference is rate-limiting:
+v1's was durable (a `MemoryStore` rolling query, survives restarts), this
+build's `ToolContext` has no injected memory client, so it's an
+in-process rolling window on the tool instance instead (real for a
+session's lifetime -- tools are constructed once at `start()` -- just not
+across restarts). Config keys are flat on `execution.Config`
+(`web_fetch_timeout_s`, `web_fetch_max_bytes`, `web_fetch_max_calls`,
+`web_fetch_window_s`, `web_fetch_allow_private_networks`,
+`web_fetch_user_agent`) rather than this section's illustrative
+`rate_limits: {web_fetch: "30/min", ...}` token-bucket table; the actual
+default (30 calls / 3,600s) matches v1's own shipped constant, which is
+more conservative than the "30/min" sketch here, kept as the real value
+rather than the illustration. `percept.web.fetched` now actually
+publishes (`execution/service.py`'s `_on_approved`, gated on
+`tool.name == "web_fetch" and result.ok`), with a blob-stored
+`content_ref` even for a fetch small enough that `output_ref` stays ""
+under the general inline-preview threshold -- the contract requires
+`content_ref` unconditionally, there's no inline alternative field on
+this message.
+
+**Two pre-existing bugs in the tool_calls pipeline, found while wiring
+`web_fetch` in** (neither is in this subsystem, both blocked every real
+tool call, not just `web_fetch` -- noted here since this is where the
+symptom was first live-caught): `cognition/parser.py::_parse_markers`
+checked `marker.upper() in {"DRAFT", "RUN"}` for which markers keep
+their full multi-line payload, but the real markers a session configures
+are `session.profile.tools`' full tool names
+(`orchestration/profiles.py`) -- `RUN_PYTHON_SANDBOXED`/
+`DRAFT_CANDIDATE`, never matching the v1-short-name check, so real
+multi-line code got silently truncated to its first line.
+`orchestration/tools.py::to_action_payload` never translated the
+marker parser's generic `{"argument": <str>}` shape onto a tool's real
+`args_schema` key (`path`/`url`/`code`), so every marker-driven call
+reached Execution with the wrong key and failed with a bare `KeyError`
+on the tool's own required arg -- caught by `service.py`'s broad
+`except Exception`, surfacing only as an opaque `error="'path'"` (or
+`"'url'"`, `"'code'"`) with no indication anywhere that the pipeline
+itself, not the model's tool choice, was at fault. Both fixed with
+tests confirmed to fail against the pre-fix code first; see each file's
+own docstring/comment for the fix.
