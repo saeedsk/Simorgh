@@ -36,9 +36,31 @@ class Config:
     handler_timeout_seconds: float = 300.0  # memory backend per-handler default
     drain_seconds: float = 10.0
     trace_enabled: bool = True
-    # per-pattern sample rate; default 1.0 for anything not listed (03 section 5 "Tracing")
+    # Per-pattern sample rate; default 1.0 for anything not listed (03
+    # section 5 "Tracing"). The zeroed entries are all heartbeats and
+    # periodic broadcasts: they root a trace of their own but cause
+    # nothing, so each one wrote a stream containing exactly one event.
+    #
+    # Measured 2026-09-07 on an idle system: one new trace stream *per
+    # second*, 86,400/day doing nothing at all, and 192,332 on the
+    # creator's real ledger inside a single day. `system.tick.idle` fires
+    # every `idle_tick_cooldown_s` (3s) and `cognition.provider.status` is
+    # a periodic broadcast; between them they were most of it.
+    #
+    # Sampling is deliberately not lowered below 1.0 for anything else:
+    # the draw is per message, so a fractional rate keeps some messages
+    # and drops the ones that caused them, leaving a chain with holes --
+    # worse than no trace at all for the one question a trace answers.
+    # Volume is controlled by excluding whole types and by retention
+    # (`ledger/compaction.py::DEFAULT_RETENTION`), never by thinning.
+    #
+    # A causally interesting message that *follows* an excluded one is
+    # still traced: it carries the same `trace_id`, so the chain survives
+    # minus its heartbeat root, which is inferable anyway.
     trace_sample: Mapping[str, float] = field(default_factory=lambda: {
-        "system.tick.second": 0.0, "system.metrics": 0.0, "_inbox.#": 0.0,
+        "system.tick.second": 0.0, "system.tick.idle": 0.0, "system.tick.sleep": 0.0,
+        "system.metrics": 0.0, "system.health": 0.0, "cognition.provider.status": 0.0,
+        "_inbox.#": 0.0,
     })
     trace_blob_threshold_bytes: int = 4096
     dedupe_window: int = 5000
