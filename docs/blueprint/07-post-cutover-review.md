@@ -219,6 +219,9 @@ in full in `15-interface.md` §12 q5. **Keep:** `status` (absorbs
 does something real, the banner's "where to start" list is a subset.
 This is a product decision that also removes a class of confusion the
 trial hit: Sim itself recited these 38 names as its "tools" (finding 4).
+**Implemented, 2026-09-06** (`15-interface.md` §12 q5 has the follow-up
+notes) -- 12 names total, `mcp` (added the same day, `08-execution.md`
+§12 Q4) joining the eleven above.
 
 ### 3.9 Visibility while thinking (creator's ask; a stated philosophy)
 Raised during the review from real use: a web-chat request ("create a

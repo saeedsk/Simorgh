@@ -91,34 +91,57 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
             await self._pump()
         self.assertNotIn("duplicate candidate", out.getvalue())
 
-    async def test_pause_resume_stop_round_trip(self):
-        """Flow 5: pause -> resume -> stop, all real `system.*` commands
+    async def test_pause_resume_exit_round_trip(self):
+        """Flow 5: pause -> resume -> exit, all real `system.*` commands
         published by Interface (proven against a real bus; the full
         Kernel-lifecycle round trip is proven in
-        tests/simorgh/integration/)."""
+        tests/simorgh/integration/). `exit` absorbs `stop`/`quit`
+        (07-post-cutover-review.md §3.8) -- it's the only command that
+        both requests `system.stop` and leaves the REPL."""
         seen = []
         sub = await self.other.subscribe(topics.SYSTEM_PAUSE, lambda m: seen.append(m.type) or asyncio.sleep(0))
         sub2 = await self.other.subscribe(topics.SYSTEM_RESUME, lambda m: seen.append(m.type) or asyncio.sleep(0))
         sub3 = await self.other.subscribe(topics.SYSTEM_STOP, lambda m: seen.append(m.type) or asyncio.sleep(0))
         await self._line("pause")
         await self._line("resume")
-        await self._line("stop")
+        await self._line("exit")
         await self._pump()
         await sub.unsubscribe(); await sub2.unsubscribe(); await sub3.unsubscribe()
         self.assertEqual(seen, [topics.SYSTEM_PAUSE, topics.SYSTEM_RESUME, topics.SYSTEM_STOP])
 
     async def test_status_renders_a_real_reply(self):
-        async def _responder(message: Message) -> None:
+        """07-post-cutover-review.md §3.8: `status` absorbs `vitals`/
+        `budget`/`skills` into one panel -- health, posture, and tools,
+        each answered by a separate real responder."""
+        async def _status_responder(message: Message) -> None:
             await self.other.reply(message, type=topics.SYSTEM_STATUS_REPLY, payload={
                 "state": "running", "mode": "single", "run_id": "test",
                 "subsystems": [{"name": "kernel", "version": "0.1.0", "status": "ok"}],
                 "uptime_seconds": 12.5,
             })
-        sub = await self.other.subscribe(topics.SYSTEM_STATUS_REQUEST, _responder)
+
+        async def _posture_responder(message: Message) -> None:
+            await self.other.reply(message, type=topics.GUARDIAN_POSTURE_REPLY, payload={
+                "mode": "guarded", "trust_score": 0.9, "tightened_by": [],
+            })
+
+        async def _tools_responder(message: Message) -> None:
+            await self.other.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
+                "facet": "tools", "as_of": 0.0, "tools": [{"name": "read_file"}],
+            })
+
+        subs = [
+            await self.other.subscribe(topics.SYSTEM_STATUS_REQUEST, _status_responder),
+            await self.other.subscribe(topics.GUARDIAN_POSTURE_REQUEST, _posture_responder),
+            await self.other.subscribe(topics.WORLD_ENV_QUERY, _tools_responder),
+        ]
         out = await self._line("status")
-        await sub.unsubscribe()
+        for sub in subs:
+            await sub.unsubscribe()
         self.assertIn("running", out)
         self.assertIn("kernel", out)
+        self.assertIn("posture: guarded", out)
+        self.assertIn("read_file", out)
 
     async def test_unwired_command_gives_an_honest_no_response(self):
         out = await self._line("research nothing will answer this")
@@ -248,13 +271,16 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reply to second", out)
         self.assertNotIn("no response", out)
 
-    async def test_vitals_updates_from_persona_state(self):
+    async def test_status_reflects_recent_persona_state(self):
+        """`vitals` folded into `status` (07-post-cutover-review.md
+        §3.8) -- the vitals panel piece still updates from persona
+        state, now inside the merged panel."""
         await self.bus.publish(self.bus.new(topics.PERSONA_STATE_CHANGED, {
             "valence": 0.4, "arousal": 0.1, "cognitive_load": 0.2, "source": "test",
             "previous": {"valence": 0.0, "arousal": 0.0, "cognitive_load": 0.0},
         }))
         await self._pump()
-        out = await self._line("vitals")
+        out = await self._line("status")  # the other two panel pieces time out honestly with no responder here
         self.assertIn("mood", out)
         self.assertNotIn("no data", out)
 

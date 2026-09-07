@@ -19,9 +19,9 @@ class ParserTestCase(unittest.TestCase):
         self.assertEqual(cmd.name, "status")
 
     def test_autocorrect_announces_the_guess(self):
-        cmd = parse("porpose a unit converter")
-        self.assertEqual(cmd.name, "propose")
-        self.assertEqual(cmd.guessed_from, "porpose")
+        cmd = parse("imporve a unit converter")
+        self.assertEqual(cmd.name, "improve")
+        self.assertEqual(cmd.guessed_from, "imporve")
         self.assertEqual(cmd.args, "a unit converter")
 
     def test_bang_is_shell_passthrough(self):

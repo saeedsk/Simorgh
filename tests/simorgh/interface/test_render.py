@@ -88,7 +88,7 @@ class RenderTestCase(unittest.TestCase):
         out = render.banner(enabled=False)
         self.assertIn("SIMORGH", out)
         self.assertIn("status", out)  # a real, always-working command
-        self.assertIn("propose <topic>", out)
+        self.assertIn("improve <topic>", out)
 
     def test_banner_auto_uses_no_non_latin_script(self):
         # Live-caught: the Persian name rendered as garbage on the
