@@ -17,8 +17,10 @@ from __future__ import annotations
 _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "read_file": ("read_only", False),
     "list_dir": ("read_only", False),
+    "search_code": ("read_only", False),
     "web_fetch": ("read_only", True),
     "run_python_sandboxed": ("reversible", False),
+    "run_tests": ("reversible", False),
     "draft_candidate": ("reversible", False),
     # -- MCP (execution/mcp.py's own module docstring): a human adds an
     # entry here, by the server's registered tool name
@@ -55,8 +57,10 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 _MARKER_ARG_KEY: dict[str, str] = {
     "read_file": "path",
     "list_dir": "path",
+    "search_code": "query",
     "web_fetch": "url",
     "run_python_sandboxed": "code",
+    "run_tests": "target",
     "draft_candidate": "code",
     # ddg_search/ddg_get_answer's own `inputSchema`s each have one
     # required string field, `query` -- see `_TOOL_POLICY`'s comment on

@@ -8,23 +8,24 @@ from __future__ import annotations
 from .api import Profile
 
 CHAT = Profile(
-    name="chat", tools=("read_file", "list_dir", "web_fetch", "run_python_sandboxed", "propose_mcp_server"),
+    name="chat",
+    tools=("read_file", "list_dir", "search_code", "web_fetch", "run_python_sandboxed", "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
 PATCH = Profile(
-    name="patch", tools=("read_file", "list_dir", "draft_candidate"),
+    name="patch", tools=("read_file", "list_dir", "search_code", "run_tests", "draft_candidate"),
     read_only=False, max_steps=6, max_revisions=2, scaffold="patch",
 )
 RESEARCH = Profile(
-    name="research", tools=("read_file", "list_dir", "web_fetch"),
+    name="research", tools=("read_file", "list_dir", "search_code", "web_fetch", "run_tests"),
     read_only=True, max_steps=6, max_revisions=0, scaffold="research", verify=True,
 )
 PLAN = Profile(
-    name="plan", tools=("read_file", "list_dir", "web_fetch"),
+    name="plan", tools=("read_file", "list_dir", "search_code", "web_fetch"),
     read_only=True, max_steps=8, max_revisions=0, scaffold="plan", verify=True,
 )
 SKILL = Profile(
-    name="skill", tools=("read_file", "list_dir", "draft_candidate"),
+    name="skill", tools=("read_file", "list_dir", "search_code", "draft_candidate"),
     read_only=False, max_steps=5, max_revisions=2, scaffold="skill",
 )
 

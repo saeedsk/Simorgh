@@ -3,6 +3,7 @@ each a port of a v1 tool. Uses throwaway temp directories/git repos --
 never the real project repository."""
 
 import json
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -20,6 +21,8 @@ from simorgh.execution.tools import (
     ProposeMcpServerTool,
     ReadFileTool,
     RunPythonSandboxedTool,
+    RunTestsTool,
+    SearchCodeTool,
     SkillTool,
     WebFetchTool,
     builtin_tools,
@@ -70,6 +73,134 @@ class TestListDirTool(unittest.IsolatedAsyncioTestCase):
             result = await ListDirTool(config).run({"path": "src"}, ctx=_ctx(config))
             self.assertTrue(result.ok)
             self.assertIn("a.py", result.output)
+
+
+class TestSearchCodeTool(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "src").mkdir()
+        (self.root / "src" / "a.py").write_text("def needle():\n    pass\n")
+        (self.root / "src" / "b.py").write_text("no match here\n")
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "c.md").write_text("needle mentioned in docs too\n")
+        self.config = Config(repo_root=self.root)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    async def test_finds_matches_across_readable_roots_with_path_and_line(self):
+        result = await SearchCodeTool(self.config).run({"query": "needle"}, ctx=_ctx(self.config))
+        self.assertTrue(result.ok)
+        self.assertIn("src/a.py:1:", result.output)
+        self.assertIn("docs/c.md:1:", result.output)
+        self.assertEqual(result.metadata["matches"], 2)
+
+    async def test_no_matches_is_still_ok(self):
+        result = await SearchCodeTool(self.config).run({"query": "nothing_matches_this"}, ctx=_ctx(self.config))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.output, "(no matches)")
+        self.assertEqual(result.metadata["matches"], 0)
+
+    async def test_an_invalid_regex_is_refused_not_a_crash(self):
+        result = await SearchCodeTool(self.config).run({"query": "("}, ctx=_ctx(self.config))
+        self.assertFalse(result.ok)
+        self.assertIn("not a valid regex", result.error)
+
+    async def test_matches_are_capped(self):
+        config = Config(repo_root=self.root, search_max_matches=1)
+        result = await SearchCodeTool(config).run({"query": "needle"}, ctx=_ctx(config))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.metadata["matches"], 1)
+        self.assertIn("capped", result.output)
+
+    async def test_never_reaches_outside_readable_roots(self):
+        (self.root / "secret.py").write_text("needle outside the readable tree\n")
+        result = await SearchCodeTool(self.config).run({"query": "needle"}, ctx=_ctx(self.config))
+        self.assertNotIn("secret.py", result.output)
+
+    async def test_pure_python_fallback_forced_by_no_ripgrep_on_path(self):
+        result = await SearchCodeTool(self.config, ripgrep_path="").run(
+            {"query": "needle"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.metadata["via"], "python")
+        self.assertIn("src/a.py:1:", result.output)
+
+    @unittest.skipUnless(shutil.which("rg"), "ripgrep not installed on this machine")
+    async def test_ripgrep_path_finds_the_same_matches_as_the_fallback(self):
+        rg = shutil.which("rg")
+        result = await SearchCodeTool(self.config, ripgrep_path=rg).run(
+            {"query": "needle"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.metadata["via"], "ripgrep")
+        self.assertIn("src/a.py:1:", result.output)
+        self.assertIn("docs/c.md:1:", result.output)
+
+    async def test_a_broken_ripgrep_path_degrades_to_the_fallback_not_a_crash(self):
+        result = await SearchCodeTool(self.config, ripgrep_path="/not/a/real/binary").run(
+            {"query": "needle"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.metadata["via"], "python")
+
+
+class TestRunTestsTool(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "tests").mkdir()
+        (self.root / "tests" / "test_sample.py").write_text(
+            "def test_pass():\n    assert 1 + 1 == 2\n"
+        )
+        (self.root / "tests" / "test_fails.py").write_text(
+            "def test_fail():\n    assert False\n"
+        )
+        self.config = Config(repo_root=self.root, test_timeout_s=30.0)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    async def test_a_passing_target_reports_ok(self):
+        result = await RunTestsTool(self.config).run(
+            {"target": "tests/test_sample.py"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok, result.output + result.metadata.get("stderr", ""))
+        self.assertIn("1 passed", result.output)
+
+    async def test_a_failing_target_reports_ok_false_with_exit_code(self):
+        result = await RunTestsTool(self.config).run(
+            {"target": "tests/test_fails.py"}, ctx=_ctx(self.config),
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("exit_code", result.error)
+
+    async def test_never_touches_the_real_working_tree(self):
+        # A run that (hypothetically) tried to write into the repo would
+        # write into the isolated copy, not `self.root` -- prove the
+        # real tree is untouched by asserting no new file lands there.
+        before = set(self.root.rglob("*"))
+        await RunTestsTool(self.config).run({"target": "tests/test_sample.py"}, ctx=_ctx(self.config))
+        after = set(self.root.rglob("*"))
+        self.assertEqual(before, after)
+
+    async def test_refuses_a_traversal_target(self):
+        result = await RunTestsTool(self.config).run({"target": "../outside"}, ctx=_ctx(self.config))
+        self.assertFalse(result.ok)
+        self.assertIn("refused", result.error)
+
+    async def test_refuses_a_target_that_does_not_exist(self):
+        result = await RunTestsTool(self.config).run({"target": "tests/nope"}, ctx=_ctx(self.config))
+        self.assertFalse(result.ok)
+        self.assertIn("refused", result.error)
+
+    async def test_empty_target_defaults_to_the_whole_tests_directory(self):
+        result = await RunTestsTool(self.config).run({"target": ""}, ctx=_ctx(self.config))
+        # both the passing and failing sample run -- overall exit is non-zero
+        self.assertFalse(result.ok)
+        self.assertIn("1 passed", result.output)
+        self.assertIn("1 failed", result.output)
 
 
 class TestRunPythonSandboxedTool(unittest.IsolatedAsyncioTestCase):
@@ -509,7 +640,7 @@ class TestBuiltinTools(unittest.TestCase):
     def test_registers_exactly_the_scoped_set(self):
         names = {tool.name for tool in builtin_tools(Config(repo_root=Path.cwd()))}
         self.assertEqual(names, {
-            "read_file", "list_dir", "run_python_sandboxed",
+            "read_file", "list_dir", "search_code", "run_python_sandboxed", "run_tests",
             "apply_source_patch", "git_commit", "git_revert", "apply_skill", "web_fetch",
             "propose_mcp_server",
         })

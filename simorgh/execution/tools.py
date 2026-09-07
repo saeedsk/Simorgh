@@ -27,6 +27,7 @@ import hashlib
 import ipaddress
 import json
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -80,6 +81,133 @@ class ListDirTool:
         content = pathsafety.safe_list_dir(self._config.repo_root, args.get("path", ""), readable_roots=self._config.readable_roots)
         ok = not content.startswith("[refused:")
         return ToolResult(ok=ok, output=content, error=None if ok else content)
+
+
+class SearchCodeTool:
+    """Regex text search across `readable_roots` (the same path-safety
+    boundary `read_file`/`list_dir` already enforce) -- the one gap
+    those two can't close on their own: finding *where* something lives
+    without already knowing the file or directory to look in. Read-only,
+    with both a files-scanned and a matches-returned cap so one broad
+    query can't turn into an unbounded scan or flood a step's own
+    narration -- the same shape of cap `pathsafety.py`'s own
+    `_MAX_LIST_ENTRIES`/`_MAX_READ_CHARS` already apply per-call.
+
+    Shells out to `ripgrep` (`rg`) when it's on `PATH` -- faster and more
+    correct (real binary-file detection, no Python-level directory walk)
+    than the pure-Python fallback below, same "optional external binary,
+    never a hard dependency" precedent `cognition/providers/
+    claude_code_provider.py` already set for the `claude` CLI:
+    `requirements.txt`'s own header ("Everything else is stdlib-only")
+    is a hard project constraint, not a suggestion, so this can accelerate
+    with `rg` but can never require it -- a fresh install with nothing
+    beyond stdlib still gets a fully working (just slower) tool. `rg` is
+    run with `--no-ignore` deliberately: without it, results would
+    silently differ machine-to-machine depending on whether `.gitignore`
+    processing is available, which the fallback path never respects
+    either -- consistency across both paths matters more here than
+    ignore-file awareness."""
+
+    name = "search_code"
+    description = (
+        "Regex search file contents across the readable tree (path-safety bounded); "
+        "returns path:line:text matches, capped in both files scanned and matches returned."
+    )
+    read_only = True
+    reversibility = "read_only"
+    args_schema = {"type": "object", "required": ["query"], "properties": {"query": {"type": "string"}}}
+
+    def __init__(self, config: Config, *, ripgrep_path: str | None = None) -> None:
+        self._config = config
+        # Resolved once at construction (a tool instance lives for the
+        # whole process, per `execution/service.py::start()` -- same
+        # lifetime WebFetchTool's own rate-limit window already relies
+        # on) rather than re-probing PATH on every call.
+        self._rg = shutil.which("rg") if ripgrep_path is None else ripgrep_path
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        query = args["query"]
+        try:
+            re.compile(query)
+        except re.error as exc:
+            return ToolResult(ok=False, error=f"refused: {query!r} is not a valid regex: {exc!r}")
+
+        root = self._config.repo_root.resolve()
+        if self._rg:
+            return self._run_ripgrep(query, root)
+        return self._run_pure_python(query, root)
+
+    def _run_ripgrep(self, query: str, root: Path) -> ToolResult:
+        roots = [base for base in self._config.readable_roots if (root / base).is_dir()]
+        if not roots:
+            return ToolResult(ok=True, output="(no matches)", metadata={"matches": 0, "files_scanned": 0, "via": "ripgrep"})
+        cmd = [
+            self._rg, "--line-number", "--no-heading", "--with-filename", "--no-ignore",
+            f"--max-filesize={self._config.search_max_file_bytes}",
+            "-e", query, *roots,
+        ]
+        try:
+            completed = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=root, timeout=self._config.sandbox_timeout_s,
+                stdin=subprocess.DEVNULL,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            # Never leaves the model with nothing -- degrade to the
+            # pure-Python path rather than surface an `rg`-specific
+            # failure for what's still a perfectly answerable query.
+            return self._run_pure_python(query, root)
+        if completed.returncode not in (0, 1):  # 1 == "no matches", not an error
+            return self._run_pure_python(query, root)
+
+        lines = [ln for ln in completed.stdout.splitlines() if "__pycache__" not in ln]
+        truncated = len(lines) > self._config.search_max_matches
+        lines = lines[: self._config.search_max_matches]
+        output = "\n".join(lines) if lines else "(no matches)"
+        if truncated:
+            output += "\n...[capped -- narrow the query or the readable_roots searched]"
+        return ToolResult(ok=True, output=output, metadata={"matches": len(lines), "via": "ripgrep"})
+
+    def _run_pure_python(self, query: str, root: Path) -> ToolResult:
+        pattern = re.compile(query)
+        matches: list[str] = []
+        scanned = 0
+        truncated = False
+        for base in self._config.readable_roots:
+            base_path = root / base
+            if not base_path.is_dir():
+                continue
+            for path in sorted(base_path.rglob("*")):
+                if "__pycache__" in path.parts or not path.is_file():
+                    continue
+                try:
+                    if path.stat().st_size > self._config.search_max_file_bytes:
+                        continue
+                except OSError:
+                    continue
+                scanned += 1
+                if scanned > self._config.search_max_files_scanned:
+                    truncated = True
+                    break
+                try:
+                    text = path.read_text(errors="replace")
+                except OSError:
+                    continue
+                rel = path.relative_to(root)
+                for lineno, line in enumerate(text.splitlines(), start=1):
+                    if pattern.search(line):
+                        matches.append(f"{rel}:{lineno}:{line.strip()[:200]}")
+                        if len(matches) >= self._config.search_max_matches:
+                            truncated = True
+                            break
+                if truncated:
+                    break
+            if truncated:
+                break
+
+        output = "\n".join(matches) if matches else "(no matches)"
+        if truncated:
+            output += "\n...[capped -- narrow the query or the readable_roots searched]"
+        return ToolResult(ok=True, output=output, metadata={"matches": len(matches), "files_scanned": scanned, "via": "python"})
 
 
 class FetchRefused(Exception):
@@ -385,6 +513,73 @@ class RunPythonSandboxedTool:
             )
 
 
+class RunTestsTool:
+    """The `isolated_test_suite` gap `execution/README.md`'s "Deliberate
+    scope cuts" names as deferred -- built here as the standalone
+    capability itself (a real pytest run, isolated from the live working
+    tree), not the full read/draft/test Cognition loop that gap was
+    originally scoped for (that loop -- apply a draft to a copy, test it,
+    feed failures back for revision -- is real follow-up work, not this
+    tool's job). Copies the *current* repo state into a throwaway temp
+    dir first and runs there, so a test run can never mutate real files
+    or leave stray state behind, and two concurrent runs never race each
+    other. `target` narrows to one path/pattern (a single test file or
+    directory) -- the whole suite is the honest but slow default (~180s
+    on this repo), so a caller that only touched one area should say so."""
+
+    name = "run_tests"
+    description = (
+        "Run the test suite (or one target within it, e.g. a single test file/directory) "
+        "against an isolated copy of the repo; never touches the real working tree."
+    )
+    read_only = True
+    reversibility = "reversible"
+    args_schema = {"type": "object", "required": ["target"], "properties": {"target": {"type": "string"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        target = (args.get("target") or "").strip() or "tests"
+        if Path(target).is_absolute() or ".." in Path(target).parts:
+            return ToolResult(ok=False, error=f"refused: {target!r} is not a safe relative target")
+
+        timeout = min(ctx.constraints.get("timeout_s", self._config.test_timeout_s), self._config.test_timeout_s)
+        start = time.monotonic()
+        root = self._config.repo_root.resolve()
+        cap = self._config.test_output_max_chars
+        with tempfile.TemporaryDirectory(prefix="simorgh-tests-") as workdir:
+            dest = Path(workdir) / "repo"
+            try:
+                shutil.copytree(root, dest, ignore=shutil.ignore_patterns(
+                    "__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info", ".pytest_cache",
+                ))
+            except OSError as exc:
+                return ToolResult(ok=False, error=f"could not stage an isolated copy: {exc!r}")
+            if not (dest / target).exists():
+                return ToolResult(ok=False, error=f"refused: {target!r} does not exist in the repo")
+            preexec = _apply_rlimits(self._config.test_cpu_seconds, self._config.test_memory_mb * 1024 * 1024) if resource else None
+            try:
+                completed = subprocess.run(
+                    [sys.executable, "-m", "pytest", "-q", target], capture_output=True, text=True,
+                    cwd=dest, timeout=timeout, preexec_fn=preexec, stdin=subprocess.DEVNULL,
+                )
+            except subprocess.TimeoutExpired as exc:
+                return ToolResult(
+                    ok=False, output=(exc.stdout or "")[-cap:], error="timeout",
+                    metadata={"stderr": (exc.stderr or "")[-cap:], "duration_s": time.monotonic() - start},
+                )
+            except OSError as exc:
+                return ToolResult(ok=False, error=f"could not run tests: {exc!r}")
+            ok = completed.returncode == 0
+            return ToolResult(
+                ok=ok, output=completed.stdout[-cap:],
+                error=None if ok else f"exit_code={completed.returncode}",
+                metadata={"stderr": completed.stderr[-cap:], "exit_code": completed.returncode,
+                          "duration_s": time.monotonic() - start},
+            )
+
+
 def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes: tuple[str, ...]) -> ToolResult:
     """Shared body of `apply_source_patch`/`apply_skill`: write `code` to
     `subject`, refusing anything outside `write_scopes` -- a tool-level
@@ -634,7 +829,7 @@ class SkillTool:
 
 def builtin_tools(config: Config) -> list:
     return [
-        ReadFileTool(config), ListDirTool(config), RunPythonSandboxedTool(config),
-        ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
+        ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), RunPythonSandboxedTool(config),
+        RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         ApplySkillTool(config), WebFetchTool(config), ProposeMcpServerTool(),
     ]

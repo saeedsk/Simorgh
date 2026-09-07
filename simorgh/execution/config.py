@@ -28,6 +28,24 @@ class Config:
     sandbox_cpu_seconds: int = 5
     sandbox_memory_mb: int = 256
     sandbox_timeout_s: float = 10.0
+    # -- search_code (grep across `readable_roots`; the gap `read_file`+
+    # `list_dir` alone can't close -- finding *where* something lives
+    # without already knowing the file). Read-only, so these caps exist
+    # to bound one query's own cost, not as a Guardian-relevant limit.
+    search_max_files_scanned: int = 2000
+    search_max_matches: int = 200
+    search_max_file_bytes: int = 1_000_000
+    # -- run_tests (the `isolated_test_suite` gap named deferred in
+    # execution/README.md, built here as its own standalone tool rather
+    # than as part of the full draft/verify Cognition loop that gap was
+    # originally scoped for): pytest against a throwaway copy of the
+    # repo, never the real working tree. Separate limits from the code
+    # sandbox above -- a real test run legitimately needs more time/
+    # memory than a short isolated script.
+    test_timeout_s: float = 120.0
+    test_cpu_seconds: int = 90
+    test_memory_mb: int = 1024
+    test_output_max_chars: int = 8000
     # -- skills (11-learning.md's `skill_dir`; 08-execution.md's
     # `write_scopes.skills`) -- where `apply_skill` writes and
     # `learn.skill.acquired`/on-demand loading reads back from.
