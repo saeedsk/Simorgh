@@ -89,6 +89,12 @@
         "null"
       ]
     },
+    "task_rules": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "tools": {
       "items": {
         "type": "string"

@@ -94,7 +94,8 @@ class Session:
 class Profile:                                         # per task kind
     name: str; tools: tuple[str, ...]; read_only: bool
     max_steps: int; max_revisions: int; phase_budgets: dict[str, int]
-    scaffold: str                                       # prompt scaffold key handed to cognition
+    scaffold: str                                       # prompt scaffold key -> scaffolds.render()
+                                                        # -> cognition.think's `task_rules` block
     last_step_hint: str                                 # the _FINAL_TURN_HINT lesson
 
 class ContextAssembler(Protocol):

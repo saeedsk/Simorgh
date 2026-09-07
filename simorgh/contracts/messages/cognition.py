@@ -15,6 +15,7 @@ CognitionThink = define(t.COGNITION_THINK, [
     F("require_real_provider", Bool),
     O("session_id", Str),
     O("tools", List(Str)),
+    O("task_rules", Str),  # protected prompt block: how this profile finishes its work
     O("expected", Enum("text", "tool_calls", "edit_blocks", "verdict")),
     O("allow_summarize", Bool),
     O("last_step", Bool),

@@ -18,6 +18,7 @@ import uuid
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
 
+from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
 from .tools import marker_hint, to_action_payload
@@ -142,6 +143,13 @@ class SessionRunner:
             payload={
                 "purpose": "chat" if is_chat else "draft",
                 "messages": messages, "tools": list(session.profile.tools),
+                # `Profile.scaffold` reached `assemble()` and was dropped;
+                # Cognition's protected `task_rules` block (04 section 5.4)
+                # was implemented and never filled by anyone. So a patch
+                # session was told what it *could* call and never what
+                # finishing means -- live 2026-09-07, a run applied its
+                # edit and stopped without committing it. See scaffolds.py.
+                "task_rules": scaffolds.render(session.profile),
                 # Live-caught: this request never actually asked Cognition
                 # to parse tool calls -- `expected` was never set, so
                 # `cognition/service.py::_expected_spec` always fell
