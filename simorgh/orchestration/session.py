@@ -22,6 +22,7 @@ from simorgh.contracts.envelope import Event, Message
 from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
+from .claims import unsupported_claims
 from .tools import marker_hint, offered_tools, to_action_payload
 
 ACTION_TIMEOUT_S = 30.0
@@ -34,6 +35,7 @@ VERIFICATION_REASON = "verification failed"
 CANCELLED_REASON = "the task was cancelled"
 # An attempt that says it finished while its edit is still uncommitted.
 UNCOMMITTED_REASON = "finished with uncommitted changes"
+FABRICATED_REASON = "the answer claims work the step log does not show"
 # Ledger-only record type: which uncommitted edits an exhausted attempt
 # left in the tree for the next one.
 EDITS_KEPT = topics.TASK_EDITS_KEPT
@@ -159,6 +161,24 @@ class SessionRunner:
         whichever way the session ended.
         """
         outcome = await self._run(session, user_text=user_text)
+        if outcome.kind == "completed":
+            # `_transcript_echo` catches a fabrication written in our own
+            # bracket syntax. Plain prose walked straight past it: "I've
+            # added the docstring and committed the change as a3f19c2",
+            # with no git_commit step in the log at all (observer,
+            # 2026-09-08). Compare the claim against what ran.
+            claims = unsupported_claims(
+                outcome.result_summary or "", session.steps, offered_tools(session.profile.tools),
+            )
+            if claims:
+                step = Step(session.next_step_no(), "act",
+                            "rejected an unsupported answer: " + "; ".join(claims), ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                outcome = Outcome(
+                    "blocked", reason=f"{FABRICATED_REASON}: {'; '.join(claims)}",
+                    result_summary=outcome.result_summary, verification_ref=outcome.verification_ref,
+                )
         if session.uncommitted and outcome.kind == "completed":
             # "Done" with an edit still uncommitted is wrong by
             # construction, and it became MORE wrong once an attempt
