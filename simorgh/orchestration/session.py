@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 
 from simorgh.contracts import topics
@@ -29,12 +30,29 @@ ACTION_TIMEOUT_S = 30.0
 # the task soon (`planning/service.py::CONTINUATION_REASON`, same text;
 # the packages may not import each other).
 CONTINUATION_REASON = "step budget exhausted"
+VERIFICATION_REASON = "verification failed"
 # Ledger-only record type: which uncommitted edits an exhausted attempt
 # left in the tree for the next one.
 EDITS_KEPT = topics.TASK_EDITS_KEPT
 # Tools that *end* an attempt's work rather than extend it, so the last
 # step may still run one when there is an uncommitted edit waiting.
 FINISHING_TOOLS = ("git_commit", "git_discard")
+# Shapes a reply takes when it is narrating tool calls rather than
+# making them. `[tool_call X]` was our own transcript stand-in; the
+# others are what a model invents around it.
+_ECHO_SHAPES = (
+    (re.compile(r"\[tool_call\s", re.I), "narrates tool calls in brackets instead of making them"),
+    (re.compile(r"\[result message\]", re.I), "invents tool results"),
+    (re.compile(r"^\s*\[result\]", re.I | re.M), "invents tool results"),
+)
+
+
+def _transcript_echo(text: str) -> str:
+    """Why this reply is a fabrication, or "" if it is a real answer."""
+    for pattern, why in _ECHO_SHAPES:
+        if pattern.search(text or ""):
+            return why
+    return ""
 # An attempt below this number may leave its edits for the next; the
 # one at it discards. Planning gives up after nine blocks, so the chain
 # always ends with a clean-up before that.
@@ -154,11 +172,15 @@ class SessionRunner:
         re-applied the same patch and none ever reached the commit. The
         last allowed attempt discards as before, so the "never leave a
         broken change" property still holds for the chain as a whole."""
-        return (
-            outcome.kind == "blocked"
-            and (outcome.reason or "").startswith(CONTINUATION_REASON)
-            and session.attempt < KEEP_EDITS_UNTIL_ATTEMPT
-        )
+        if session.attempt >= KEEP_EDITS_UNTIL_ATTEMPT or outcome.kind != "blocked":
+            return False
+        reason = outcome.reason or ""
+        # Two ways an attempt is unfinished rather than wrong: it ran out
+        # of steps, or verification objected. Discarding on the second
+        # threw away a correct, tested patch that only lacked a commit
+        # (watched trial, 2026-09-08) -- the next attempt inherits the
+        # edit and the objection, and can finish the job.
+        return reason.startswith(CONTINUATION_REASON) or reason.startswith(VERIFICATION_REASON)
 
     async def _keep_uncommitted(self, session: Session) -> None:
         kept = sorted(session.uncommitted)
@@ -280,18 +302,33 @@ class SessionRunner:
                 # as a turn addressed to it, which is the shape every
                 # tool-using model is trained on.
                 tool_name = call.get("tool")
+                # The model's OWN words, not a synthetic `[tool_call X]`
+                # stand-in. Live-caught 2026-09-08: given that stand-in
+                # to imitate, the model produced a "final answer" reading
+                # `[tool_call run_tests]\n[result message]: passed 12
+                # [tool_call git_commit] ... Committed as 5a1c3f2` -- no
+                # such run, no such commit. It was recorded as success,
+                # and `_discard_uncommitted` then deleted the correct
+                # skill it really had written. We taught it the format.
                 session.messages.append({
-                    "role": "assistant", "content": f"[tool_call {tool_name}]",
+                    "role": "assistant",
+                    "content": think_reply.payload.get("text") or f"{tool_name.upper()}:",
                 })
                 # "Continue the task." here was read literally: after a
                 # successful git_commit the model re-read the file, ran the
                 # tests again, re-applied the same content, and burned the
                 # whole step budget without ever answering (watched trial,
                 # 2026-09-07). Say what finishing looks like every time.
+                dropped = int(call.get("dropped_markers") or 0)
+                dropped_note = (
+                    f"\n\nYour reply also contained {dropped} further tool marker"
+                    f"{'s' if dropped != 1 else ''}, which were NOT run: one tool call per message. "
+                    "Ask for the next one now if you still need it."
+                ) if dropped else ""
                 session.messages.append({
                     "role": "user",
                     "content": (
-                        f"Result of {tool_name}:\n{summary}\n\n"
+                        f"Result of {tool_name}:\n{summary}{dropped_note}\n\n"
                         "If the task is now finished, reply with your final answer in plain text, "
                         "with no tool marker. Otherwise take the next step."
                     ),
@@ -312,6 +349,21 @@ class SessionRunner:
                 session.record(step)
                 await self._record_step(session, step)
                 return Outcome("blocked", reason=f"{CONTINUATION_REASON} before the task was finished")
+            echo = _transcript_echo(text)
+            if echo and not is_last:
+                # It claimed results it never got. Do not record that as
+                # an answer -- say so and let it act for real.
+                step = Step(step_no, "act", f"rejected a fabricated answer: {echo}", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                session.messages.append({"role": "assistant", "content": text})
+                session.messages.append({"role": "user", "content": (
+                    f"That reply {echo}. Nothing in it actually ran. Do not describe tool calls or "
+                    "their results in prose: write one real marker line, or give your final answer "
+                    "using only what the results above actually said."
+                )})
+                continue
+
             step = Step(step_no, "gather" if step_no == 1 else "act", "final answer", ok=True)
             session.record(step)
             await self._record_step(session, step)
@@ -572,7 +624,7 @@ class SessionRunner:
                 # The answer travels with the refusal. Otherwise nobody
                 # downstream can tell whether verification rejected
                 # something wrong or something right.
-                return Outcome("blocked", reason="verification failed after max revisions",
+                return Outcome("blocked", reason=f"{VERIFICATION_REASON} after max revisions",
                                result_summary=text, verification_ref=verification_id)
 
             session.budget.revisions_used += 1
@@ -580,6 +632,30 @@ class SessionRunner:
             think_reply = await self._think(session, "", last_step=session.budget.is_last_step)
             if think_reply is None:
                 return Outcome("blocked", reason="no real provider during revision", verification_ref=verification_id)
+            # A revision reply's tool calls used to be dropped on the
+            # floor. Verification would say "this was never committed",
+            # the model would answer `GIT_COMMIT: <path>`, nothing would
+            # run, and it re-issued the same call saying "the previous
+            # commit attempt did not register" -- then the whole correct,
+            # tested patch was discarded (watched trial, 2026-09-08).
+            # Acting on the fix the reviewer just asked for is the point
+            # of having a revision loop at all.
+            for call in (think_reply.payload.get("tool_calls") or ())[:1]:
+                ok, summary, detail = await self._propose_and_await(session, call, session.next_step_no())
+                step = Step(session.next_step_no(), "act", detail, tool=call.get("tool"), ok=ok)
+                session.record(step)
+                await self._record_step(session, step)
+                if ok and call.get("tool") in FINISHING_TOOLS:
+                    session.uncommitted.clear()
+                    session.created.clear()
+                session.messages.append({"role": "assistant", "content": think_reply.payload.get("text") or ""})
+                session.messages.append({"role": "user", "content": (
+                    f"Result of {call.get('tool')}:\n{summary}\n\nNow give your final answer."
+                )})
+                think_reply = await self._think(session, "", last_step=session.budget.is_last_step)
+                if think_reply is None:
+                    return Outcome("blocked", reason="no real provider during revision",
+                                   verification_ref=verification_id)
             text = think_reply.payload.get("text", text)
             session.messages.append({"role": "assistant", "content": text})
 

@@ -218,7 +218,8 @@ class ReadFileInRangesTestCase(unittest.IsolatedAsyncioTestCase):
         result = await self.read.run({"path": "simorgh/big.py:10-12"}, ctx=self.ctx)
         self.assertTrue(result.ok, result.error)
         self.assertEqual(
-            result.output, "[lines 10-12 of 50]\n   10| line10\n   11| line11\n   12| line12",
+            result.output,
+            "[lines 10-12 of 50 in simorgh/big.py]\n   10| line10\n   11| line11\n   12| line12",
         )
 
     async def test_a_range_past_the_end_says_so(self) -> None:
@@ -226,6 +227,25 @@ class ReadFileInRangesTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok)
         self.assertIn("past the end", result.output)
         self.assertIn("50 lines", result.output)
+
+    async def test_a_tail_beyond_the_char_cap_is_reachable(self) -> None:
+        """The whole point: slicing a pre-capped string made 61% of
+        `execution/tools.py` unreachable and reported a false total
+        (observer, 2026-09-08)."""
+        big = self.root / "simorgh" / "huge.py"
+        big.write_text("\n".join(f"x{n} = {'y' * 60}" for n in range(1, 2001)) + "\n")
+        result = await self.read.run({"path": "simorgh/huge.py:1990-2000"}, ctx=self.ctx)
+        self.assertTrue(result.ok, result.error)
+        self.assertIn("of 2000", result.output, "the true total, not the truncated one")
+        self.assertIn("x2000", result.output, "the tail must be reachable")
+
+    async def test_a_whole_file_read_says_how_to_get_the_rest(self) -> None:
+        big = self.root / "simorgh" / "huge.py"
+        big.write_text("\n".join(f"x{n} = {'y' * 60}" for n in range(1, 2001)) + "\n")
+        result = await self.read.run({"path": "simorgh/huge.py"}, ctx=self.ctx)
+        self.assertIn("truncated at", result.output)
+        self.assertIn("of 2000", result.output)
+        self.assertIn("simorgh/huge.py:", result.output, "must name the range that continues it")
 
     async def test_a_bare_path_is_unchanged(self) -> None:
         result = await self.read.run({"path": "simorgh/big.py"}, ctx=self.ctx)

@@ -13,6 +13,9 @@ from pathlib import Path
 _CREDENTIAL_LOOKING_NAMES = (".env", "credentials", "secret", "id_rsa", ".pem")
 _MAX_PATH_CHARS = 4096
 _MAX_READ_CHARS = 20_000
+# A hard stop so a pathological file cannot be slurped into memory. Far
+# above any source file; this is a guard, not a policy.
+_MAX_FILE_BYTES = 8_000_000
 _MAX_LIST_ENTRIES = 300
 
 
@@ -47,19 +50,69 @@ def resolve_safe_path(
     return target, None
 
 
-def safe_read_file(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...]) -> str:
+def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...]) -> tuple[str, str]:
+    """`(text, refusal)` -- the file's WHOLE content, uncapped.
+
+    The capping belongs to the caller, because how much to return
+    depends on whether a line range was asked for. Slicing a
+    pre-capped string was the 2026-09-08 bug: everything past
+    `_MAX_READ_CHARS` became unreachable by any range, so 61% of
+    `execution/tools.py` could not be read at all and `read_file`
+    reported the file as 433 lines instead of 1101."""
     target, refusal = resolve_safe_path(repo_root, raw_path, readable_roots=readable_roots)
     if refusal is not None:
-        return f"[{refusal}]"
+        return "", f"[{refusal}]"
     if not target.is_file():
-        return f"[refused: {raw_path!r} is not a file]"
+        return "", f"[refused: {raw_path!r} is not a file]"
     try:
-        content = target.read_text(errors="replace")
+        if target.stat().st_size > _MAX_FILE_BYTES:
+            return "", f"[refused: {raw_path!r} is larger than {_MAX_FILE_BYTES // 1_000_000} MB]"
+        return target.read_text(errors="replace"), ""
     except OSError as exc:
-        return f"[refused: could not read {raw_path!r}: {exc!r}]"
+        return "", f"[refused: could not read {raw_path!r}: {exc!r}]"
+
+
+def safe_read_file(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...]) -> str:
+    content, refusal = read_source(repo_root, raw_path, readable_roots=readable_roots)
+    if refusal:
+        return refusal
     if len(content) > _MAX_READ_CHARS:
-        return content[:_MAX_READ_CHARS] + f"\n...[truncated, {len(content)} chars total]"
+        # Say how much is left AND how to get it. The old marker gave a
+        # char count with no way to act on it.
+        total_lines = len(content.splitlines())
+        shown = content[:_MAX_READ_CHARS]
+        seen_lines = len(shown.splitlines())
+        return shown + (
+            f"\n...[truncated at {_MAX_READ_CHARS} of {len(content)} chars; "
+            f"you have seen lines 1-{seen_lines} of {total_lines}. "
+            f"Read the rest with {raw_path}:{seen_lines + 1}-{total_lines}]"
+        )
     return content
+
+
+def safe_read_lines(repo_root: Path, raw_path: str, *, start: int, end: int,
+                    readable_roots: tuple[str, ...]) -> str:
+    """Lines `start`..`end` (1-based, inclusive) of a file, numbered.
+
+    Reads the real file and slices BY LINE, so any part of any file is
+    reachable and the reported total is the true one."""
+    content, refusal = read_source(repo_root, raw_path, readable_roots=readable_roots)
+    if refusal:
+        return refusal
+    lines = content.splitlines()
+    total = len(lines)
+    if start > total:
+        return f"[lines {start}-{end} are past the end; {raw_path} has {total} lines]"
+    chunk = lines[start - 1:end]
+    numbered = "\n".join(f"{start + i:5d}| {line}" for i, line in enumerate(chunk))
+    if len(numbered) > _MAX_READ_CHARS:
+        kept = numbered[:_MAX_READ_CHARS].rsplit("\n", 1)[0]
+        last = start + kept.count("\n")
+        return (
+            f"[lines {start}-{last} of {total} in {raw_path}, cut to fit]\n{kept}"
+            f"\n...[ask for {raw_path}:{last + 1}-{end} to continue]"
+        )
+    return f"[lines {start}-{start + len(chunk) - 1} of {total} in {raw_path}]\n{numbered}"
 
 
 def safe_list_dir(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...]) -> str:

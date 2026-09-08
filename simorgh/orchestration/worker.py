@@ -245,7 +245,16 @@ class Worker:
                 topics.TURN_COMPLETED, source=self._bus.source,
                 payload={
                     "session_id": session.task_id, "task_id": session.task_id,
-                    "text": outcome.result_summary, "floor": outcome.floor,
+                    # `result_summary` is empty for a blocked/failed
+                    # outcome and `reason` used to be dropped, so 175s
+                    # and six real model calls surfaced to the human as
+                    # "(no real answer this turn -- floor reply)" --
+                    # indistinguishable from having no provider at all
+                    # (observer, 2026-09-08).
+                    "text": outcome.result_summary or (
+                        f"I could not finish this one: {outcome.reason}" if outcome.reason else ""
+                    ),
+                    "floor": outcome.floor,
                     "tool_steps": len(session.steps), "user_text": session.user_text,
                 },
                 partition_key=f"task:{session.task_id}", clock=self._clock,

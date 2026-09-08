@@ -89,27 +89,38 @@ def suites(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def _in_flight(payload: dict) -> str:
+    progress = payload.get("progress") or {}
+    if not payload.get("running") or not progress:
+        return ""
+    return (
+        f"  in flight: {progress.get('suite')} {progress.get('index', 0)}/{progress.get('total', 0)}"
+        f"  {progress.get('correct', 0)}/{progress.get('attempted', 0)} correct so far"
+    )
+
+
 def latest(payload: dict) -> str:
     records = _records(payload)
     if not records:
-        return "no benchmark runs yet -- `benchmark run bfcl-parallel 5` makes the first one"
+        # A run in flight is not "no runs yet". Both views returned the
+        # empty line before ever looking at `running` (observer,
+        # 2026-09-08), so `benchmark` during a run said nothing was
+        # happening.
+        return _in_flight(payload) or "no benchmark runs yet -- `benchmark run bfcl-parallel 5` makes the first one"
     newest: dict[tuple[str, str], dict] = {}
     for record in sorted(records, key=lambda r: float(r.get("started_at") or 0.0)):
         newest[(record.get("suite", ""), record.get("model", ""))] = record
     lines = [summary(record) for record in newest.values()]
-    progress = payload.get("progress") or {}
-    if payload.get("running") and progress:
-        lines.append(
-            f"  in flight: {progress.get('suite')} {progress.get('index', 0)}/{progress.get('total', 0)}"
-            f"  {progress.get('correct', 0)}/{progress.get('attempted', 0)} correct so far"
-        )
+    flight = _in_flight(payload)
+    if flight:
+        lines.append(flight)
     return "\n".join(lines)
 
 
 def history(payload: dict) -> str:
     records = _records(payload)
     if not records:
-        return "no benchmark runs recorded yet"
+        return _in_flight(payload) or "no benchmark runs recorded yet"
     text = history_chart(records)
     by_suite: dict[str, list[dict]] = {}
     for record in sorted(records, key=lambda r: float(r.get("started_at") or 0.0)):

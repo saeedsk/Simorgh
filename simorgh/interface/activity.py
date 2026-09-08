@@ -188,6 +188,15 @@ _KIND_ICON = {
 _END_ICON = {"completed": "✅", "failed": "❌", "blocked": "⏸", "paused": "⏸"}
 
 
+def _fit_line(line: str, width: int | None = None) -> str:
+    """Cut a whole rendered line to the terminal, measured in display
+    columns. Guessing each line's fixed overhead was wrong at every
+    width (observer, 2026-09-08); measuring the finished line is not."""
+    from .render import fit, terminal_width
+
+    return fit(line, terminal_width() if width is None else width)
+
+
 def started_line(record: TaskRecord, *, unicode: bool = True) -> str:
     """The line that was missing entirely: work beginning, and what it is.
 
@@ -195,7 +204,7 @@ def started_line(record: TaskRecord, *, unicode: bool = True) -> str:
     this" are different events and were indistinguishable before.
     """
     icon = (_KIND_ICON.get(record.kind, "•") + " ") if unicode else ""
-    return f"{icon}{record.kind} · {record.origin} · {record.short_topic()}  [{record.task_id[:8]}]"
+    return _fit_line(f"{icon}{record.kind} · {record.origin} · {record.short_topic()}  [{record.task_id[:8]}]")
 
 
 def step_line(record: TaskRecord, *, tool: str | None, summary: str, ok: bool | None,
@@ -207,7 +216,7 @@ def step_line(record: TaskRecord, *, tool: str | None, summary: str, ok: bool | 
     width = topic_width(overhead=len(mark) + len(outcome) + 2)
     if len(what) > width:
         what = what[: width - 1] + "…"
-    return f"{mark} {what}{outcome}"
+    return _fit_line(f"{mark} {what}{outcome}")
 
 
 def finished_line(record: TaskRecord, *, elapsed: float | None, detail: str = "",
@@ -223,7 +232,7 @@ def finished_line(record: TaskRecord, *, elapsed: float | None, detail: str = ""
     line = f"{head}{record.short_topic(share)}  [{record.task_id[:8]}]"
     if detail:
         line += f" -- {' '.join(detail.split())[:room - share]}"
-    return line
+    return _fit_line(line)
 
 
 def footer(book: TaskBook, *, now: float, extra: str = "") -> str:
@@ -244,7 +253,7 @@ def footer(book: TaskBook, *, now: float, extra: str = "") -> str:
         parts.append(f"{queued} queued")
     if extra:
         parts.append(extra)
-    return "  ·  ".join(parts)
+    return _fit_line("  ·  ".join(parts))
 
 
 __all__ = [

@@ -162,7 +162,7 @@ class Service:
             "cache_path": str(datasets_mod.cache_path(source, self._cache_dir())),
         })
 
-    async def _on_history(self, message: Message) -> None:
+    async def _on_history(self, message: Message) -> None:  # noqa: D401
         payload = message.payload
         run_id = payload.get("run_id") or ""
         if run_id:
@@ -252,8 +252,7 @@ class Service:
 
         runner = Runner(ctx.bus, config=self._config, clock=ctx.clock.now, on_progress=_progress)
         try:
-            finished = await runner.run(suite, model=self._model, note=record.note)
-            finished.run_id = record.run_id
+            finished = await runner.run(suite, model=self._model, note=record.note, record=record)
         except asyncio.CancelledError:
             record.partial = True
             record.finished_at = ctx.clock.now()

@@ -120,11 +120,23 @@ class VitalsCache:
                 }
         return out
 
+    def _memory_records(self) -> int:
+        """Memory publishes `gauges.records` as a per-kind dict; this
+        read `counters["memory.stored"]`, which nothing ever writes, so
+        `status` said "memory records: 0" forever with records on disk
+        (observer, 2026-09-08)."""
+        records = self._gauges.get("memory.records")
+        if isinstance(records, dict):
+            return sum(int(v) for v in records.values() if isinstance(v, (int, float)))
+        if isinstance(records, (int, float)):
+            return int(records)
+        return int(self._counters.get("memory.stored", 0))
+
     def snapshot(self) -> VitalsSnapshot:
         phrase = _MOOD_PHRASES.get((_valence_label(self._mood), _arousal_label(self._energy)), "")
         return VitalsSnapshot(
             mood=self._mood, energy=self._energy, load=self._load,
-            memory_records=self._counters.get("memory.stored", 0),
+            memory_records=self._memory_records(),
             skills=self._counters.get("learning.skills_acquired", 0),
             interests=self._counters.get("curiosity.interests", 0),
             backlog=self._counters.get("planning.backlog", 0),

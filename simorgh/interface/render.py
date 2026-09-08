@@ -33,6 +33,31 @@ _MIN_WIDTH = 60
 _MAX_WIDTH = 200
 
 
+def display_width(text: str) -> int:
+    """Columns `text` occupies. An emoji is two cells wide, not one --
+    every feed line was measured 1-2 cells narrow (observer,
+    2026-09-08)."""
+    import unicodedata
+
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") or ord(ch) > 0x1F000 else 1
+               for ch in text)
+
+
+def fit(text: str, width: int, *, ellipsis: str = "…") -> str:
+    """`text` cut to at most `width` DISPLAY columns."""
+    if display_width(text) <= width:
+        return text
+    room = max(1, width - display_width(ellipsis))
+    out, used = [], 0
+    for ch in text:
+        cell = display_width(ch)
+        if used + cell > room:
+            break
+        out.append(ch)
+        used += cell
+    return "".join(out) + ellipsis
+
+
 def terminal_width(default: int = 100) -> int:
     """Usable columns. Bounded at both ends: a 20-column report of a
     terminal that is really wider (a pipe, a CI log) would clip

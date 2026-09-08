@@ -41,3 +41,25 @@ class VitalsCacheTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemoryRecordsTestCase(unittest.TestCase):
+    """Memory publishes `gauges.records` as a per-kind dict; vitals read
+    a counter nothing writes, so `status` said "memory records: 0"
+    forever while records sat on disk (observer, 2026-09-08)."""
+
+    def test_the_gauge_memory_actually_publishes_is_read(self):
+        cache = VitalsCache()
+        cache.on_system_metrics({
+            "subsystem": "memory", "counters": {},
+            "gauges": {"records": {"episodic": 7, "semantic": 3, "procedural": 0}},
+        })
+        self.assertEqual(cache.snapshot().memory_records, 10)
+
+    def test_a_plain_number_also_works(self):
+        cache = VitalsCache()
+        cache.on_system_metrics({"subsystem": "memory", "counters": {}, "gauges": {"records": 5}})
+        self.assertEqual(cache.snapshot().memory_records, 5)
+
+    def test_nothing_published_is_zero_not_a_crash(self):
+        self.assertEqual(VitalsCache().snapshot().memory_records, 0)

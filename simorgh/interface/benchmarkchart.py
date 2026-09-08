@@ -31,6 +31,14 @@ _DOTS = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
 _LEVEL_NAMES = {"1": "Level 1", "2": "Level 2", "3": "Level 3", "": "all"}
 
 
+def _level_name(level: str) -> str:
+    """"Level 1" for a GAIA tier; the bare word for a BFCL category --
+    "Level live_parallel" was simply wrong (observer, 2026-09-08)."""
+    if level in _LEVEL_NAMES:
+        return _LEVEL_NAMES[level]
+    return f"Level {level}" if level.isdigit() else level
+
+
 def bar(fraction: float, width: int = 24) -> str:
     """A bar with eighth-of-a-cell resolution, so 1/48th still shows."""
     fraction = min(1.0, max(0.0, fraction))
@@ -124,14 +132,14 @@ def summary(record: dict, *, width: int = 24) -> str:
         # A GAIA level is "1"; a BFCL one is "live_parallel". Widen the
         # column to the longest name present rather than to a guess, so
         # the bars still line up (watched, 2026-09-08).
-        names = {level: _LEVEL_NAMES.get(level, f"Level {level}" if level else "all") for level in by_level}
+        names = {level: _level_name(level) for level in by_level}
         column = max((len(n) for n in names.values()), default=9)
         for level, (correct, attempted) in by_level.items():
             lines.append(
                 f"    {names[level]:<{column}} {bar(correct / attempted if attempted else 0, width)}"
                 f"  {_pct(correct, attempted)}  {correct}/{attempted}"
             )
-    column = max((len(_LEVEL_NAMES.get(k, f"Level {k}" if k else "all")) for k in by_level), default=9)
+    column = max((len(_level_name(k)) for k in by_level), default=9)
     cost_usd = float(record.get("cost_usd") or 0.0)
     cost = f"  ·  ${cost_usd:.4f}" if cost_usd else ""
     lines.append(
@@ -153,7 +161,9 @@ def history(records: list[dict], *, width: int = 56, height: int = 4) -> str:
     series = [(model, [_acc(r) for r in runs]) for model, runs in by_model.items()]
     lines = ["  100% ┤" + row if i == 0 else "       │" + row
              for i, row in enumerate(braille_chart(series, width=width, height=height))]
-    lines[-1] = "    0% ┤" + lines[-1][7:]
+    # The prefix "       │" is 8 characters, not 7; slicing at 7 left the
+    # bar in place and shifted the whole row (observer, 2026-09-08).
+    lines[-1] = "    0% ┤" + lines[-1][8:]
     lines.append("       └" + "─" * width)
     span = f"{_ago(float(ordered[0].get('started_at') or 0.0))} → {_ago(float(ordered[-1].get('started_at') or 0.0))}"
     lines.append(f"        {span:<{width}}")

@@ -68,11 +68,19 @@ class ReadFileTool:
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         path, span = _split_line_range(str(args["path"]))
-        content = pathsafety.safe_read_file(self._config.repo_root, path, readable_roots=self._config.readable_roots)
+        if span is None:
+            content = pathsafety.safe_read_file(
+                self._config.repo_root, path, readable_roots=self._config.readable_roots)
+        else:
+            # Slice the REAL file, never a pre-capped string: that was the
+            # bug that made 61% of this very module unreachable.
+            content = pathsafety.safe_read_lines(
+                self._config.repo_root, path, start=span[0], end=span[1],
+                readable_roots=self._config.readable_roots)
         ok = not content.startswith("[refused:")
-        if ok and span is not None:
-            content = _slice_lines(content, *span)
-        return ToolResult(ok=ok, output=content, error=None if ok else content)
+        # A refusal is an error, not output. It used to be BOTH, so the
+        # model was shown the same refusal twice in one result.
+        return ToolResult(ok=ok, output=content if ok else "", error=None if ok else content)
 
 
 _LINE_RANGE = re.compile(r"^(.*?):(\d+)-(\d+)$")
@@ -94,16 +102,6 @@ def _split_line_range(raw: str) -> tuple[str, tuple[int, int] | None]:
     if start < 1 or end < start:
         return raw, None
     return m.group(1), (start, end)
-
-
-def _slice_lines(content: str, start: int, end: int) -> str:
-    lines = content.splitlines()
-    total = len(lines)
-    chunk = lines[start - 1:end]
-    if not chunk:
-        return f"[lines {start}-{end} are past the end; the file has {total} lines]"
-    numbered = "\n".join(f"{start + i:5d}| {line}" for i, line in enumerate(chunk))
-    return f"[lines {start}-{start + len(chunk) - 1} of {total}]\n{numbered}"
 
 
 class ListDirTool:
@@ -787,12 +785,16 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
             # the task, and when it is, saying so costs one more call.
             return ToolResult(ok=False, error=(
                 f"refused: the new content for {subject} drops {lost} -- apply_source_patch replaces the "
-                f"whole file. Read all of it first (READ_FILE: {subject}, no line range) and send it "
-                "complete with your change; if you truly mean to remove that much, say so in the "
-                "commit message and send it again."
+                f"whole file. Read it all first, in ranges if it is long "
+                f"(READ_FILE: {subject}:1-200, then :201-400, and so on -- each result tells you the "
+                "true total), and send it back complete with your change. If you truly mean to remove "
+                "that much, say so and send it again."
             ))
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(code)
+    # A model's reply rarely ends in a newline, and writing it verbatim
+    # left every patched file without its final one (observer,
+    # 2026-09-08) -- a spurious diff line on every edit.
+    target.write_text(code if code.endswith("\n") else code + "\n")
     output = f"wrote {subject}"
     diff_text = ""
     if already_existed and old_text and old_text != code:

@@ -155,7 +155,15 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
     lines = [f"- {name}: {_TOOL_NOTES[name]}" if name in _TOOL_NOTES else f"- {name}" for name in offered]
     if not lines:
         return body
-    tools = "Tools available to you this session:\n" + "\n".join(lines)
+    # The parser runs the FIRST marker in a reply and ignores the rest.
+    # Nothing said so, so the model batched calls and lost most of them
+    # -- three observers independently watched whole halves of a task
+    # disappear this way (2026-09-08).
+    tools = (
+        "One tool call per message: write a single marker line, and wait for its result "
+        "before asking for the next. Anything after the first marker is ignored.\n\n"
+        "Tools available to you this session:\n" + "\n".join(lines)
+    )
     return f"{body}\n\n{tools}" if body else tools
 
 

@@ -100,11 +100,16 @@ class Runner:
             blocked_by=error, error=error,
         )
 
-    async def run(self, suite: Suite, *, model: str = "unknown", note: str = "") -> RunRecord:
-        record = RunRecord(
-            suite=suite.name, suite_version=suite.version, model=model,
-            started_at=self._now(), note=note,
-        )
+    async def run(self, suite: Suite, *, model: str = "unknown", note: str = "",
+                  record: RunRecord | None = None) -> RunRecord:
+        """Run `suite`. A caller may pass the record to fill, so that a
+        run cancelled mid-flight still has its answered cases: the
+        service used to store its own empty placeholder and tell the
+        human "the partial result is recorded" when it was not
+        (observer, 2026-09-08)."""
+        if record is None:
+            record = RunRecord(suite=suite.name, suite_version=suite.version, model=model, note=note)
+        record.started_at = self._now()
         try:
             for index, case in enumerate(suite.cases, start=1):
                 self._on_progress(index=index, total=len(suite), case=case, record=record)
