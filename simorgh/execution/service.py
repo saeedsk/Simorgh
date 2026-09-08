@@ -375,7 +375,18 @@ class Service:
                 # only at the next boot. Until 2026-09-08 nothing ever
                 # registered one, so a skill Sim wrote was a file and
                 # nothing more (audit).
-                subject = str((approved.get("args") or {}).get("subject") or "")
+                # `args`, the arguments this call actually ran with --
+                # NOT `approved["args"]`, which does not exist: the
+                # `action.approved` contract carries `args_sha256` and
+                # no arguments at all (contracts/messages/action.py).
+                # So `subject` was always "", the branch never fired,
+                # and the fix above never worked: after two successful
+                # apply_skill calls the registry still held zero skills
+                # (observer, 2026-09-08). `learn.skill.acquired` has two
+                # publishers and this was one of them, so WorldModel,
+                # Curiosity and Reflection were all subscribed to an
+                # event that could never fire.
+                subject = str((args or {}).get("subject") or "")
                 if subject.endswith(".py"):
                     name = Path(subject).stem
                     await self._load_skill(name, path=subject)

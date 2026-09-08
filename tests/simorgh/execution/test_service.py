@@ -159,7 +159,13 @@ class TestSkillsOnDiskAreAnnouncedAtBoot(_ExecutionServiceTestCase):
         offered = offered_tools(("read_file", "apply_skill"))
         self.assertIn("read_file", offered)
         self.assertIn("skill:earlier", offered)
-        self.assertNotIn("apply_skill", offered)
+        # And `apply_skill` is STILL offered, though nothing announced
+        # it. Registration adds skills to a profile and must never
+        # subtract from it: the registered set is empty at boot, so an
+        # intersection would have stripped every builtin from every
+        # session the moment one skill registered (observer,
+        # 2026-09-08).
+        self.assertIn("apply_skill", offered)
 
 
 class TestSkillAcquiredRegistersOnDemand(_ExecutionServiceTestCase):

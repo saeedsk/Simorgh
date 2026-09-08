@@ -77,10 +77,11 @@ class Worker:
             assemble_timeout_s=assemble_timeout_s, **runner_kwargs,
         )
         self._subs: list = []
-        # Task ids somebody has asked to stop. Bounded, because a cancel
-        # for a task this worker never had (another worker's, or one
-        # already finished) would otherwise accumulate forever.
-        self._cancelled: OrderedDict[str, None] = OrderedDict()
+        # Task ids somebody has asked to stop -> whether that cancel was
+        # a preemption (requeue) rather than a rejection. Entries are
+        # dropped when the session they stopped ends; the cap only
+        # bounds cancels for tasks this worker never had.
+        self._cancelled: OrderedDict[str, bool] = OrderedDict()
 
     async def start(self) -> None:
         # `max_inflight=1` is the whole concurrency policy, and it belongs
@@ -112,6 +113,25 @@ class Worker:
     def _is_cancelled(self, task_id: str) -> bool:
         return task_id in self._cancelled
 
+    def _requeued(self, task_id: str) -> bool:
+        """Whether the cancel that stopped this task was a preemption.
+
+        A preempted task is not failed: Planning has already put it back
+        on the queue, so reporting an outcome for it would overwrite
+        that with a terminal status."""
+        return bool(self._cancelled.get(task_id))
+
+    def _forget_cancel(self, task_id: str) -> None:
+        """A cancel is spent once the session it stopped has ended.
+
+        It used to live until the 256-entry cap evicted it, and with one
+        worker a requeued task always comes back to the SAME worker --
+        so a preempted task was claimed, killed at step 0 in 0.01s, and
+        left terminally failed seven seconds after being requeued.
+        Preemption destroyed exactly the work it was supposed to
+        postpone (observer, 2026-09-08)."""
+        self._cancelled.pop(task_id, None)
+
     async def _on_cancel(self, message: Message) -> None:
         """Remember the id; the session loop notices between steps.
 
@@ -123,7 +143,7 @@ class Worker:
         task_id = message.payload.get("task_id", "")
         if not task_id:
             return
-        self._cancelled[task_id] = None
+        self._cancelled[task_id] = bool(message.payload.get("requeue"))
         while len(self._cancelled) > _CANCEL_MEMORY:
             self._cancelled.popitem(last=False)
 
@@ -156,6 +176,16 @@ class Worker:
         await restore_session(session, self._ledger)
 
         outcome = await self.run(session, user_text=description)
+        requeued = self._requeued(task_id)
+        self._forget_cancel(task_id)
+        if requeued:
+            # Preemption, not rejection. Planning moved the task back to
+            # `available` before we ever stopped; reporting an outcome
+            # here would transition it to a terminal status instead
+            # (and `available -> failed` is not even legal, so it
+            # raised, was swallowed, and the record survived by
+            # accident).
+            return
         await self._report(session, outcome)
 
     async def run(self, session: Session, *, user_text: str = "") -> Outcome:

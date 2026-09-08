@@ -22,6 +22,7 @@ from .intake import Intake
 from .model import (
     AVAILABLE,
     BLOCKED,
+    CLAIMED,
     COMPLETED,
     FAILED,
     IN_PROGRESS,
@@ -383,6 +384,25 @@ class Service:
             # hold and returns it to AVAILABLE.
             await self._store.expire_lease(task_id)
             return
+        if task.status in (IN_PROGRESS, CLAIMED):
+            # A worker has it. Let the worker end it: it stops at its
+            # next step boundary and reports the outcome itself, which
+            # is also when the tree is actually clean again. Ending the
+            # record here announced "failed" up to a step BEFORE the
+            # work had stopped and the edit had been discarded, and the
+            # human then saw two different failure lines for one task
+            # (observer, 2026-09-08). A worker that never reports is
+            # covered by lease expiry, as it always was.
+            return
+        # `available -> failed` and `pending -> failed` are not legal
+        # transitions, so cancelling a task that had not started yet
+        # raised, was swallowed by the bus, and left the task on the
+        # queue -- where a worker then claimed it and killed it at step
+        # zero. BLOCKED is the legal way through, and it is also the
+        # honest description: the task is parked, and cancelling is a
+        # reason for parking it.
+        if task.status in (AVAILABLE, PENDING):
+            await self._store.transition(task_id, BLOCKED, note=reason)
         await self._store.transition(task_id, FAILED, note=reason)
         await self._ctx.bus.publish(Message.new(
             topics.TASK_FAILED, source=self._ctx.source,

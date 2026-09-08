@@ -224,9 +224,16 @@ def offered_tools(profile_tools: tuple[str, ...]) -> tuple[str, ...]:
     after it was registered (audit, 2026-09-08). Skills are the one tool
     class the system creates for itself; they have to arrive this way."""
     known = known_tools()
-    if not known:
-        return tuple(profile_tools)
-    offered = [t for t in profile_tools if t in known]
+    # Intersecting with `known` was a trap waiting to spring. It is
+    # empty at boot (Execution announces before Orchestration is
+    # listening), and the `if not known` guard hid that by offering the
+    # whole profile. The moment ANY single tool registered -- one skill,
+    # one slow MCP server -- the intersection would drop every builtin
+    # from every later session, leaving a patch session with no
+    # read_file (observer, 2026-09-08). A profile names the tools that
+    # session should have; registration adds skills to it, and must
+    # never subtract.
+    offered = list(profile_tools)
     offered.extend(sorted(t for t in known if t.startswith("skill:")))
     return tuple(offered)
 

@@ -54,6 +54,12 @@ from . import pathsafety
 from .config import Config
 from .htmltext import html_to_text, looks_like_html
 from .pdftext import looks_like_pdf, pdf_to_text
+
+# A PDF's bytes are mostly fonts and images, so the cap that bounds how
+# much TEXT a fetch may return is the wrong ceiling for one. What
+# matters is the text that comes out, which `pdf_to_text`'s page limit
+# already bounds.
+_PDF_MAX_BYTES = 60_000_000
 from .shell import RunShellTool
 from .websearch import WebSearchTool
 
@@ -360,7 +366,18 @@ class WebFetchTool:
                 if headers is not None:
                     encoding = (headers.get("Content-Encoding") or "").strip().lower()
                     charset = headers.get_content_charset() or "utf-8" if hasattr(headers, "get_content_charset") else "utf-8"
-                raw = response.read(self._config.web_fetch_max_bytes * 4 + 1 if encoding else self._config.web_fetch_max_bytes + 1)
+                # A PDF has to be read WHOLE or not at all: pypdf reads
+                # the cross-reference table from the end of the file, so
+                # a PDF cut at the text cap parses to nothing. Peek at
+                # the first bytes, and give a PDF its own much larger
+                # ceiling. Before this, every paper in `papers/` (0.57 to
+                # 17 MB) came back as "this PDF could not be parsed ...
+                # it may be encrypted or corrupt" -- a false accusation
+                # against the document, for a cap of ours (observer,
+                # 2026-09-08).
+                head = response.read(1024)
+                budget = _PDF_MAX_BYTES if looks_like_pdf(head) else self._config.web_fetch_max_bytes
+                raw = head + response.read(budget * 4 + 1 if encoding else budget + 1)
         except Exception as exc:  # noqa: BLE001 -- any network failure becomes a ToolResult, never a crash
             return ToolResult(ok=False, error=f"fetch failed: {exc!r}")
 
@@ -380,11 +397,21 @@ class WebFetchTool:
         # (2026-09-08). The whole body is used, not the capped prefix: a
         # PDF cut in half parses as nothing at all.
         if self._config.web_fetch_extract_text and looks_like_pdf(raw):
+            pdf_truncated = len(raw) > _PDF_MAX_BYTES
+            if pdf_truncated:
+                raw = raw[:_PDF_MAX_BYTES]
             text, problem = pdf_to_text(raw, source=url)
+            if pdf_truncated and not text:
+                # Say whose fault it is. "Corrupt or encrypted" about a
+                # perfectly good paper sends the model off to find
+                # another copy of a document that was never the problem.
+                problem = (f"this PDF is larger than the {_PDF_MAX_BYTES // 1_000_000} MB fetch limit, "
+                           "so only part of it arrived and it cannot be parsed. Try a smaller copy, "
+                           "an HTML version, or the abstract page.")
             return ToolResult(
                 ok=not (problem and not text), output=text or "", error=problem,
                 metadata={
-                    "url": url, "status": status_code, "truncated": False, "kind": "pdf",
+                    "url": url, "status": status_code, "truncated": pdf_truncated, "kind": "pdf",
                     "sha256": hashlib.sha256(raw).hexdigest(), "fetched_at": ctx.clock.now(),
                     "raw_chars": len(raw), "text_chars": len(text), "js_shell": False,
                 },
