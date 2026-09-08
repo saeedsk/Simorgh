@@ -27,6 +27,14 @@ succeeded. That shape matters:
   looks for invention, not for success; a model saying it committed
   when the commit was refused is wrong in a way verification already
   handles, and double-punishing it here would cost an attempt.
+- A RETRY is not checked at all. Work spans attempts by design: an
+  attempt that runs out of steps leaves its edit in the tree and the
+  next one inherits it, so the next attempt's log legitimately shows a
+  commit with no edit before it. The first version of this file did not
+  know that and rejected a correct answer in the trial suite -- the
+  session had applied the patch in attempt 1, committed it in attempt 2,
+  and was told "says it changed a file, and no edit was applied". The
+  answer was true and the work was real.
 
 False negatives are fine. A false positive throws away real work, so
 every rule here is one a careful reader would agree with.
@@ -64,7 +72,10 @@ _RULES: tuple[tuple[str, tuple[str, ...], tuple[re.Pattern, ...]], ...] = (
     ),
     (
         "says it changed a file, and no edit was applied",
-        ("apply_source_patch", "apply_skill"),
+        # `git_commit` substantiates it too: committing is itself a
+        # change to the repository, and a session that committed
+        # something did not invent having changed anything.
+        ("apply_source_patch", "apply_skill", "git_commit"),
         (
             re.compile(r"\b(?:i|we)(?:'ve| have)?\s+(?:then\s+)?(?:added|updated|edited|modified|changed|written|wrote|created|implemented|fixed)\b", re.I),
             # No passive form here on purpose. "the docstring was added"
@@ -83,14 +94,20 @@ def _tools_used(steps: Iterable) -> set[str]:
     return {step.tool for step in steps if getattr(step, "tool", None)}
 
 
-def unsupported_claims(text: str, steps: Iterable, offered_tools: Iterable[str]) -> list[str]:
+def unsupported_claims(text: str, steps: Iterable, offered_tools: Iterable[str],
+                       *, complete_log: bool = True) -> list[str]:
     """Claims in `text` that the step log does not support.
 
     `offered_tools` scopes the check to what this session could have
     done -- a profile without `git_commit` cannot be accused of
     inventing one.
+
+    `complete_log=False` says this session's steps are not the whole
+    story: it is a retry that inherited work from an earlier attempt,
+    so an unmatched claim may be perfectly true and simply happened
+    before this attempt started. Nothing is checked in that case.
     """
-    if not (text or "").strip():
+    if not complete_log or not (text or "").strip():
         return []
     used, offered = _tools_used(steps), set(offered_tools or ())
     found: list[str] = []
