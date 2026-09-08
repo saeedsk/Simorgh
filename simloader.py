@@ -515,11 +515,29 @@ def cmd_bless(repo: Path, notes: Path, *, full: bool, timeout_s: float) -> int:
         say("refusing: the working tree has uncommitted changes -- commit or stash them first")
         return 2
     commit = head(repo)
-    for _number, tag in good_tags(repo):
-        if tag_of(repo, tag) == commit:
-            say(f"{commit} is already {tag}")
-            return 0
+    existing = next((tag for _n, tag in good_tags(repo) if tag_of(repo, tag) == commit), None)
+    if existing is not None and not full:
+        say(f"{commit} is already {existing}")
+        return 0
+    if existing is not None:
+        # `--full` on an already-tagged commit used to return 0 here
+        # without running anything, which reads on screen exactly like
+        # the full gate passing. It had not run: the tag came from the
+        # unit suite alone, and the trial suite -- the gate that has
+        # actually caught every real blocker in this project -- was
+        # skipped in silence (2026-09-08).
+        say(f"{commit} is already {existing}, but that tag is from the unit suite alone")
+        say("running the trial suite now; the tag stays as it is either way")
     ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes)
+    if existing is not None:
+        if ok:
+            say(f"trial suite green for {existing}  ({why})")
+            write_note(notes, {"kind": "full_gate_passed", "commit": commit, "tag": existing, "why": why})
+            return 0
+        say(f"the full gate FAILED for {existing}: {why}")
+        say(f"{existing} still stands -- it was earned by the unit suite, which still passes")
+        write_note(notes, {"kind": "full_gate_failed", "commit": commit, "tag": existing, "why": why})
+        return 1
     if not ok:
         say(f"NOT blessed: {why}")
         write_note(notes, {"kind": "bless_refused", "commit": commit, "why": why})
