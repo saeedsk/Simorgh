@@ -786,3 +786,54 @@ class TestWebFetchTool(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWebFetchOnAPdf(unittest.IsolatedAsyncioTestCase):
+    """A fetched PDF used to come back as `%PDF-1.5` plus binary stream
+    data under `ok=True`, and the model was told nothing was wrong."""
+
+    def setUp(self):
+        self.config = Config()
+        self.clock = FakeClock()
+
+    def _ctx(self) -> "ToolContext":
+        from simorgh.contracts.protocols import ToolContext
+        return ToolContext(
+            action_id="a1", task_id=None, scope={}, constraints={},
+            data_dir=self.config.repo_root, clock=self.clock, logger=None, ledger=None,
+        )
+
+    def _tool(self, body: bytes) -> WebFetchTool:
+        return WebFetchTool(
+            self.config, resolver=lambda host, port: [(2, 1, 6, "", ("93.184.216.34", 0))],
+            opener=lambda req, timeout: _FakeFetchResponse(body, status=200),
+        )
+
+    async def test_a_pdf_comes_back_as_readable_text(self):
+        from tests.simorgh.execution.test_pdftext import make_pdf
+
+        tool = self._tool(make_pdf("the answer is in this document"))
+        result = await tool.run({"url": "https://example.com/paper.pdf"}, ctx=self._ctx())
+        self.assertTrue(result.ok)
+        self.assertIn("the answer is in this document", result.output)
+        self.assertNotIn("endobj", result.output)
+        self.assertEqual(result.metadata["kind"], "pdf")
+
+    async def test_a_pdf_served_from_a_url_with_no_extension_is_still_read(self):
+        from tests.simorgh.execution.test_pdftext import make_pdf
+
+        tool = self._tool(make_pdf("served from a bare path"))
+        result = await tool.run({"url": "https://example.com/download?id=7"}, ctx=self._ctx())
+        self.assertIn("served from a bare path", result.output)
+
+    async def test_an_unreadable_pdf_fails_loudly_instead_of_succeeding_empty(self):
+        tool = self._tool(b"%PDF-1.4\ntruncated garbage")
+        result = await tool.run({"url": "https://example.com/broken.pdf"}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertTrue(result.error)
+
+    async def test_an_html_page_is_untouched_by_the_pdf_path(self):
+        tool = self._tool(b"<html><body><p>ordinary page</p></body></html>")
+        result = await tool.run({"url": "https://example.com/"}, ctx=self._ctx())
+        self.assertTrue(result.ok)
+        self.assertNotEqual(result.metadata.get("kind"), "pdf")

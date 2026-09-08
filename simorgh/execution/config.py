@@ -54,7 +54,10 @@ class Config:
     blob_inline_threshold_bytes: int = 4096
     approval_max_age_s: float = 120.0
     repo_root: Path = field(default_factory=lambda: find_repo_root())
-    readable_roots: tuple[str, ...] = ("src", "docs", "tests", "simorgh", "simorgh_skills")
+    # `papers/` is here because the creator put papers on self-learning
+    # AI there for Sim to read (2026-09-08); without the root they were
+    # reachable by no tool at all.
+    readable_roots: tuple[str, ...] = ("src", "docs", "tests", "simorgh", "simorgh_skills", "papers")
     # The creator, 2026-09-07: "give sim file system write access".
     # Every directory of the repository, rather than the two packages
     # it started with -- docs, tests, tools and the rest are all

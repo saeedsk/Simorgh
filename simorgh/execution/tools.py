@@ -53,6 +53,7 @@ from simorgh.contracts.protocols import ToolContext, ToolResult
 from . import pathsafety
 from .config import Config
 from .htmltext import html_to_text, looks_like_html
+from .pdftext import looks_like_pdf, pdf_to_text
 from .shell import RunShellTool
 from .websearch import WebSearchTool
 
@@ -370,6 +371,25 @@ class WebFetchTool:
         # garbage was then stored into Memory as a fetched page.
         raw = _decompress(raw, encoding)
         truncated = len(raw) > self._config.web_fetch_max_bytes
+
+        # A PDF is bytes all the way down, so it has to be handled before
+        # anything decodes it as text. This used to return `%PDF-1.5`
+        # followed by binary stream data with `ok=True` -- the GAIA
+        # observer's top-ranked gap, since a benchmark that attaches
+        # papers cannot be answered by a system that cannot read one
+        # (2026-09-08). The whole body is used, not the capped prefix: a
+        # PDF cut in half parses as nothing at all.
+        if self._config.web_fetch_extract_text and looks_like_pdf(raw):
+            text, problem = pdf_to_text(raw, source=url)
+            return ToolResult(
+                ok=not (problem and not text), output=text or "", error=problem,
+                metadata={
+                    "url": url, "status": status_code, "truncated": False, "kind": "pdf",
+                    "sha256": hashlib.sha256(raw).hexdigest(), "fetched_at": ctx.clock.now(),
+                    "raw_chars": len(raw), "text_chars": len(text), "js_shell": False,
+                },
+            )
+
         content = raw[: self._config.web_fetch_max_bytes].decode(charset, errors="replace")
         # Markup is not content. Measured on real pages: 74% of a docs
         # page, 87% of an arXiv abstract, and 99.5% of a JavaScript app

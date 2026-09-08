@@ -10,12 +10,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .pdftext import looks_like_pdf, pdf_to_text
+
 _CREDENTIAL_LOOKING_NAMES = (".env", "credentials", "secret", "id_rsa", ".pem")
 _MAX_PATH_CHARS = 4096
 _MAX_READ_CHARS = 20_000
 # A hard stop so a pathological file cannot be slurped into memory. Far
 # above any source file; this is a guard, not a policy.
 _MAX_FILE_BYTES = 8_000_000
+# A PDF's bytes are mostly fonts and images, so the cap that protects
+# against a huge *text* file refuses ordinary papers: three in `papers/`
+# are over 8 MB and one is 17 MB. What matters is how much text comes
+# out, and `pdf_to_text`'s page limit already bounds that.
+_MAX_PDF_BYTES = 60_000_000
 _MAX_LIST_ENTRIES = 300
 
 
@@ -65,9 +72,25 @@ def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ..
     if not target.is_file():
         return "", f"[refused: {raw_path!r} is not a file]"
     try:
-        if target.stat().st_size > _MAX_FILE_BYTES:
-            return "", f"[refused: {raw_path!r} is larger than {_MAX_FILE_BYTES // 1_000_000} MB]"
-        return target.read_text(errors="replace"), ""
+        size = target.stat().st_size
+        if size > _MAX_FILE_BYTES:
+            with target.open("rb") as handle:
+                is_pdf = looks_like_pdf(handle.read(1024))
+            cap = _MAX_PDF_BYTES if is_pdf else _MAX_FILE_BYTES
+            if size > cap:
+                return "", f"[refused: {raw_path!r} is larger than {cap // 1_000_000} MB]"
+        data = target.read_bytes()
+        # The creator added `papers/` -- papers on self-learning AI, for
+        # Sim to read -- and `read_file` returned binary noise for every
+        # one of them. A PDF becomes its text here, so the rest of the
+        # read path (capping, line ranges, numbering) works on a PDF
+        # exactly as it works on source (2026-09-08).
+        if looks_like_pdf(data):
+            text, problem = pdf_to_text(data, source=raw_path)
+            if problem and not text:
+                return "", f"[{problem}]"
+            return (f"[{problem}]\n\n{text}" if problem else text), ""
+        return data.decode(errors="replace"), ""
     except OSError as exc:
         return "", f"[refused: could not read {raw_path!r}: {exc!r}]"
 
