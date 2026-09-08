@@ -73,6 +73,27 @@ def first_line_argument(text: str) -> str:
     return stripped.splitlines()[0].strip() if stripped else ""
 
 
+# A model's own tool-call syntax, leaking through the marker convention.
+_NATIVE_TOOL_TAG = re.compile(r"</?(?:tool_call|tool_calls|function_call|arg_key|arg_value|parameter)>")
+
+
+def _unwrap_native_tool_tags(text: str) -> str:
+    """Put a marker back on its own line when the model wrapped it in the
+    tool-call syntax it was trained on.
+
+    Live-caught 2026-09-07, asking Sim for a skill. GLM-5.3-Flash replied
+    "I'll start by checking whether the skill already exists.<tool_call>
+    SEARCH_CODE: word_count</arg_value>..." -- a real call, in the
+    provider's own format, with our marker inside the tag and therefore
+    invisible to a line scan. The session recorded a final answer and the
+    task "completed" having done nothing.
+
+    Turning the tags into line breaks is enough to see the call, and
+    leaves anything that is genuinely prose alone.
+    """
+    return _NATIVE_TOOL_TAG.sub("\n", text)
+
+
 def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
     """Find a tool call in `text`. Returns (marker.lower(), payload), or
     (None, text) meaning "final answer, no tool call".
@@ -93,7 +114,7 @@ def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
 
     A marker must own its line: a mention inside a sentence stays prose.
     """
-    stripped = text.strip()
+    stripped = _unwrap_native_tool_tags(text).strip()
     for marker in markers:
         prefix = f"{marker}:"
         if stripped[: len(prefix)].upper() == prefix.upper():

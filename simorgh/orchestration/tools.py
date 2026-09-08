@@ -11,6 +11,8 @@ See 16 section 12 Q4/Q5 and this package's README "Not done this session".
 
 from __future__ import annotations
 
+import re
+
 # (reversibility, network) per known tool name -- conservative default
 # for anything unlisted: irreversible, so an unrecognized tool never
 # accidentally gets read_only's lighter Guardian scrutiny.
@@ -161,6 +163,31 @@ def marker_hint(tool: str) -> str | None:
     return _MARKER_ARG_HINT.get(tool)
 
 
+_FENCE_OPEN = re.compile(r"^\s*```[A-Za-z0-9_+-]*\s*\n")
+_FENCE_CLOSE = re.compile(r"\n\s*```\s*$")
+
+
+def _strip_code_fence(code: str) -> str:
+    """Take a markdown fence off a file body before it is written.
+
+    Live-caught 2026-09-07, asking Sim for its first skill: it replied
+    with its code wrapped in ```python ... ```, and `apply_skill` wrote
+    the fence into the file, so `simorgh_skills/word_count.py` began with
+    a literal "```python" and was not valid Python at all.
+
+    Models fence code; that is what they are trained to do, and the
+    parser already has `extract_code` for exactly this, used only on the
+    `draft_candidate` path. A file body is the one place a stray fence
+    turns a working answer into a broken file, so it is stripped here,
+    where the body becomes a real write.
+    """
+    stripped = code.strip("\n")
+    if not _FENCE_OPEN.search(stripped):
+        return code
+    stripped = _FENCE_OPEN.sub("", stripped, count=1)
+    return _FENCE_CLOSE.sub("", stripped, count=1)
+
+
 def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: str,
                       proposed_by: str = "orchestration") -> dict:
     tool = call.get("tool", "")
@@ -170,6 +197,8 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
         if tool in _MARKER_SPLIT_FIRST_LINE:
             first, second = _MARKER_SPLIT_FIRST_LINE[tool]
             head, _, rest = str(raw).partition("\n")
+            if second == "code":
+                rest = _strip_code_fence(rest)
             args = {first: head.strip(), second: rest}
         elif tool in _MARKER_NO_ARGS:
             args = {}
