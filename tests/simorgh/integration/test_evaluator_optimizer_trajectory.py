@@ -278,7 +278,7 @@ class TestEvaluatorOptimizerAgainstRealVerification(unittest.IsolatedAsyncioTest
         # content (not a stale/empty subject) when it changed its answer.
         answer_prompts = [
             c["messages"][-1]["content"] for c in toys["cognition"].think_calls
-            if c.get("purpose") == "review" and "Does the result satisfy this?" in c["messages"][-1]["content"]
+            if c.get("purpose") == "review" and "Judge from the evidence and the result above" in c["messages"][-1]["content"]
         ]
         self.assertEqual(len(answer_prompts), 2)
         self.assertIn(DRAFT_1, answer_prompts[0])

@@ -134,7 +134,7 @@ class TestVerificationScenarios(unittest.IsolatedAsyncioTestCase):
             cognition = _Cognition([
                 (lambda p: "Write up to" in p, "1. [required] does it add two numbers?\n2. [required] is the function named add?\n"
                                                 "3. [optional] is it documented?\n4. [required] does it avoid side effects?\n"),
-                (lambda p: "Does the result satisfy this?" in p, "YES, confirmed by inspection."),
+                (lambda p: "Judge from the evidence and the result above" in p, "YES, confirmed by inspection."),
             ])
             guardian = _Guardian(
                 review_reply={"approved": True, "reasons": [], "layers_run": ["static", "adaptive"]},
@@ -235,7 +235,7 @@ class TestVerificationScenarios(unittest.IsolatedAsyncioTestCase):
             service = VerificationService(VerificationConfig())
             cognition = _Cognition([
                 (lambda p: "Write up to" in p, "1. [required] does the summary match the finding?\n"),
-                (lambda p: "Does the result satisfy this?" in p, "I'll need to look at the original finding before I can judge this properly."),
+                (lambda p: "Judge from the evidence and the result above" in p, "I'll need to look at the original finding before I can judge this properly."),
             ])
             guardian = _Guardian(review_reply={"approved": True, "reasons": [], "layers_run": []}, execution_reply={"ok": True})
             await service.start(_ctx(h.client("verification"), h, "verification"))
@@ -266,7 +266,7 @@ class TestVerificationScenarios(unittest.IsolatedAsyncioTestCase):
             service = VerificationService(VerificationConfig())
             cognition = _Cognition([
                 (lambda p: "Write up to" in p, "1. [required] does it match?\n"),
-                (lambda p: "Does the result satisfy this?" in p, "YES, it matches."),
+                (lambda p: "Judge from the evidence and the result above" in p, "YES, it matches."),
             ])
             guardian = _Guardian(review_reply={"approved": True, "reasons": [], "layers_run": []}, execution_reply={"ok": True})
             await service.start(_ctx(h.client("verification"), h, "verification"))

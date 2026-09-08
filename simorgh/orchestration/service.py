@@ -12,7 +12,7 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
 from .config import Config
-from .tools import register_tool_policy
+from .tools import forget_registered, note_registered, register_tool_policy
 from .worker import Worker
 
 NAME = "orchestration"
@@ -65,6 +65,7 @@ class Service:
 
     async def _on_tool_registered(self, message) -> None:
         p = message.payload
+        note_registered(p.get("name", ""))
         register_tool_policy(
             p.get("name", ""), reversibility=p.get("reversibility", "irreversible"),
             provider=p.get("provider", "builtin"),
@@ -74,6 +75,7 @@ class Service:
         if self._tool_sub is not None:
             await self._tool_sub.unsubscribe()
             self._tool_sub = None
+        forget_registered()
         if self._percept_sub is not None:
             await self._percept_sub.unsubscribe()
             self._percept_sub = None

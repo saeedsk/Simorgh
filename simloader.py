@@ -127,7 +127,17 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
         return False, f"unit suite exceeded {timeout_s:.0f}s"
     tail = (tests.stdout.strip().splitlines() or [""])[-1]
     say(f"unit suite: {tail}  ({time.monotonic() - started:.0f}s)")
+    if notes is not None:
+        notes.mkdir(parents=True, exist_ok=True)
+        (notes / "last_unit.txt").write_text(tests.stdout + ("\n[stderr]\n" + tests.stderr if tests.stderr else ""))
     if tests.returncode not in (0, 5):
+        # Name them. "9 failed" alone sent the human off to re-run the
+        # whole suite to learn which nine (2026-09-07).
+        failed = [line.strip() for line in tests.stdout.splitlines() if line.startswith("FAILED ")]
+        for line in failed[:12]:
+            say(line)
+        if len(failed) > 12:
+            say(f"... and {len(failed) - 12} more (full output: {notes / 'last_unit.txt' if notes else 'not kept'})")
         return False, f"unit suite failed: {tail}"
     if not full:
         return True, "unit suite green"
