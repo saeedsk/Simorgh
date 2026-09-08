@@ -69,6 +69,13 @@ TASK_COMPLETED = "task.completed"
 TURN_COMPLETED = "turn.completed"
 TASK_FAILED = "task.failed"
 TASK_BLOCKED = "task.blocked"
+# Ask a running task to stop. Nothing could, before 2026-09-08: a task
+# that timed out on the caller's side kept its worker for as long as it
+# liked, and since the worker takes one task at a time, every later task
+# queued behind a run nobody was waiting for any more. The benchmark
+# runner made it visible -- case 1 timed out, kept the worker, and cases
+# 2..n then timed out in turn against a worker that was never free.
+TASK_CANCEL = "task.cancel"
 TASK_EDITS_KEPT = "task.edits_kept"
 TASK_DEPENDENCY_SATISFIED = "task.dependency.satisfied"
 # --- 4.5 plan / project ---------------------------------------------------

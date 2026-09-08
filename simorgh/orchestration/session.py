@@ -31,6 +31,7 @@ ACTION_TIMEOUT_S = 30.0
 # the packages may not import each other).
 CONTINUATION_REASON = "step budget exhausted"
 VERIFICATION_REASON = "verification failed"
+CANCELLED_REASON = "the task was cancelled"
 # An attempt that says it finished while its edit is still uncommitted.
 UNCOMMITTED_REASON = "finished with uncommitted changes"
 # Ledger-only record type: which uncommitted edits an exhausted attempt
@@ -125,7 +126,7 @@ class _EventWaiter:
 
 class SessionRunner:
     def __init__(
-        self, bus, ledger, *, clock=None, worker_id: str = "w1", is_paused=None,
+        self, bus, ledger, *, clock=None, worker_id: str = "w1", is_paused=None, is_cancelled=None,
         think_timeout_s: float = 5.0, action_timeout_s: float = ACTION_TIMEOUT_S,
         verify_timeout_s: float = VERIFY_TIMEOUT_S, assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
     ) -> None:
@@ -136,6 +137,7 @@ class SessionRunner:
         self._assembler = Assembler(bus, clock=clock, timeout_s=assemble_timeout_s)
         self._waiter = _EventWaiter(bus)
         self._is_paused = is_paused or (lambda: False)
+        self._is_cancelled = is_cancelled or (lambda task_id: False)
         self._think_timeout_s = think_timeout_s
         self._action_timeout_s = action_timeout_s
         self._verify_timeout_s = verify_timeout_s
@@ -244,6 +246,12 @@ class SessionRunner:
         while True:
             if self._paused():
                 return await self._pause(session)
+            # Cooperative, and checked between steps rather than during
+            # one: a cancel must not tear down a provider call or leave a
+            # half-applied edit behind. The cleanup in `run` runs either
+            # way, so an uncommitted change is still discarded.
+            if self._is_cancelled(session.task_id):
+                return Outcome("failed", reason=CANCELLED_REASON)
 
             step_no = session.next_step_no()
             is_last = session.budget.is_last_step

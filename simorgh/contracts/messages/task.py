@@ -120,6 +120,12 @@ TaskBlocked = define(t.TASK_BLOCKED, [
     # own verifier threw away (2026-09-08).
     O("result_summary", Str),
 ])
+TaskCancel = define(t.TASK_CANCEL, [
+    F("task_id", Str),
+    O("reason", Str),
+], doc="Ask a running task to stop. The Worker stops at the next step boundary (never mid-step, "
+       "which would abandon an uncommitted edit) and Planning fails the record so its lease "
+       "cannot expire it back onto the queue.")
 TaskEditsKept = define(t.TASK_EDITS_KEPT, [
     F("task_id", Str),
     F("paths", List(Str)),

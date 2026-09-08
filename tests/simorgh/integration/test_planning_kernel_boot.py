@@ -548,3 +548,73 @@ class TestAProjectProducesChildren(unittest.IsolatedAsyncioTestCase):
         await self.planning._on_plan_worker_result(task, [blob])  # noqa: SLF001
         await _pump(20)
         self.assertEqual((await self.planning._store.get(task.id)).status, "available")  # noqa: SLF001
+
+
+class TestCancellingFreesTheRecord(unittest.IsolatedAsyncioTestCase):
+    """The Worker's half of a cancel frees the worker. This is the other
+    half: a task left `in_progress` keeps its lease, and an expiring
+    lease puts it straight back on the available queue to be run again.
+    That is the resurrection loop of 2026-09-07, and a cancel that only
+    stopped the session would have walked into it.
+    """
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        config = LoadedConfig({"runtime": {"data_dir": self._tmp.name}}, None)
+        self.kernel = Kernel(config, secrets=EnvSecretStore({}))
+        self._patch = mock.patch("simorgh.kernel.service.build_factories", new=_patched_build_factories())
+        self._patch.start()
+        await self.kernel.boot()
+        self.planning = self.kernel._supervisor.services["planning"].service  # noqa: SLF001
+
+    async def asyncTearDown(self) -> None:
+        await self.kernel.shutdown()
+        self._patch.stop()
+        self._tmp.cleanup()
+
+    async def _running_task(self):
+        store = self.planning._store  # noqa: SLF001
+        task = await store.create(kind="research", description="a slow question",
+                                  origin="human", mode="execute", initial_status="available")
+        await store.claim(task.id, "w1", 600.0)
+        await store.transition(task.id, "in_progress")
+        return await store.get(task.id)
+
+    async def _cancel(self, task_id: str, reason: str = "the caller gave up") -> None:
+        await self.kernel.bus.publish(self.kernel.bus.new(
+            topics.TASK_CANCEL, {"task_id": task_id, "reason": reason}))
+        await _pump(40)
+
+    async def test_a_cancelled_task_ends_and_gives_up_its_lease(self) -> None:
+        task = await self._running_task()
+        self.assertIsNotNone(task.lease)
+        await self._cancel(task.id)
+        after = await self.planning._store.get(task.id)  # noqa: SLF001
+        self.assertEqual(after.status, "failed")
+        self.assertIsNone(after.lease, "a leased task comes back through lease expiry")
+
+    async def test_the_cancel_is_announced_as_a_terminal_failure(self) -> None:
+        """Anything waiting on the task -- the benchmark runner, an
+        Interface turn -- is waiting on an outcome topic, so a cancel
+        that published nothing would leave it waiting for the timeout it
+        was trying to avoid."""
+        failed = _Collector()
+        sub = await self.kernel.bus.subscribe(topics.TASK_FAILED, failed)
+        task = await self._running_task()
+        await self._cancel(task.id, "benchmark case gaia-3 gave up")
+        await sub.unsubscribe()
+        self.assertTrue(failed.messages)
+        payload = failed.messages[0].payload
+        self.assertEqual(payload["task_id"], task.id)
+        self.assertTrue(payload["terminal"], "a cancelled task must not be retried")
+        self.assertIn("gaia-3", payload["reason"])
+
+    async def test_cancelling_a_finished_task_changes_nothing(self) -> None:
+        store = self.planning._store  # noqa: SLF001
+        task = await self._running_task()
+        await store.transition(task.id, "completed", note="done")
+        await self._cancel(task.id)
+        self.assertEqual((await store.get(task.id)).status, "completed")
+
+    async def test_cancelling_a_task_that_does_not_exist_is_harmless(self) -> None:
+        await self._cancel("no-such-task")  # must not raise

@@ -83,6 +83,18 @@ class Runner:
                 return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
                                   expected=case.answer, error="planning created no task")
             answer_text, steps, error = await watch.wait(task_id, self._config.case_timeout_s)
+            if not answer_text and error:
+                # A case we gave up on used to keep its worker. The
+                # worker takes one task at a time, so case 1 timing out
+                # meant cases 2..n queued behind a run nobody was waiting
+                # for -- and each of those then timed out in turn. A run
+                # degraded case by case for a reason that never appeared
+                # in the result (observer, 2026-09-08).
+                await self._bus.publish(Message.new(
+                    topics.TASK_CANCEL, source=self._bus.source,
+                    payload={"task_id": task_id, "reason": f"benchmark case {case.id} gave up: {error}"},
+                    partition_key=f"task:{task_id}", clock=self._clock,
+                ))
         finally:
             await watch.stop()
         seconds = time.monotonic() - started

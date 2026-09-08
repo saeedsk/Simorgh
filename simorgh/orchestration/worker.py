@@ -9,10 +9,10 @@ implemented this session (see README).
 
 from __future__ import annotations
 
-import json
-
 import asyncio
+import json
 import uuid
+from collections import OrderedDict
 from dataclasses import replace
 
 from simorgh.contracts import topics
@@ -39,6 +39,9 @@ def step_cap(requested, default: int) -> int:
     except (TypeError, ValueError):
         cap = 0
     return min(MAX_STEP_CAP, cap) if cap > 0 else default
+
+
+_CANCEL_MEMORY = 256
 
 
 class Worker:
@@ -70,9 +73,14 @@ class Worker:
         runner_kwargs = {} if think_timeout_s is None else {"think_timeout_s": think_timeout_s}
         self._runner = SessionRunner(
             bus, ledger, clock=clock, worker_id=self.worker_id, is_paused=lambda: self._paused,
+            is_cancelled=self._is_cancelled,
             assemble_timeout_s=assemble_timeout_s, **runner_kwargs,
         )
         self._subs: list = []
+        # Task ids somebody has asked to stop. Bounded, because a cancel
+        # for a task this worker never had (another worker's, or one
+        # already finished) would otherwise accumulate forever.
+        self._cancelled: OrderedDict[str, None] = OrderedDict()
 
     async def start(self) -> None:
         # `max_inflight=1` is the whole concurrency policy, and it belongs
@@ -94,11 +102,30 @@ class Worker:
             topics.TASK_AVAILABLE, self._on_available, group="workers", max_inflight=1,
         ))
         self._subs.append(await self._bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
+        self._subs.append(await self._bus.subscribe(topics.TASK_CANCEL, self._on_cancel))
 
     async def stop(self) -> None:
         for s in self._subs:
             await s.unsubscribe()
         self._subs.clear()
+
+    def _is_cancelled(self, task_id: str) -> bool:
+        return task_id in self._cancelled
+
+    async def _on_cancel(self, message: Message) -> None:
+        """Remember the id; the session loop notices between steps.
+
+        Not `task.cancel` -> kill the coroutine: cancelling mid-step
+        would abandon an applied-but-uncommitted edit in the tree, which
+        is the exact shape of the 2026-09-07 false completion. Stopping
+        at a step boundary lets `SessionRunner`'s own cleanup run.
+        """
+        task_id = message.payload.get("task_id", "")
+        if not task_id:
+            return
+        self._cancelled[task_id] = None
+        while len(self._cancelled) > _CANCEL_MEMORY:
+            self._cancelled.popitem(last=False)
 
     async def _on_state_changed(self, message: Message) -> None:
         self._paused = message.payload.get("state") == "paused"
