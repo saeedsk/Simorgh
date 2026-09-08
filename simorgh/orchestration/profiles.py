@@ -23,8 +23,11 @@ CHAT = Profile(
 # and `run_tests` is there so it can check itself before committing.
 PATCH = Profile(
     name="patch",
+    # `run_shell` is offered here and only registered by Execution when
+    # `[execution] shell = true`; an unregistered tool is simply refused,
+    # so the offer costs nothing when it is off.
     tools=("read_file", "list_dir", "search_code", "run_tests", "apply_source_patch",
-           "git_commit", "git_revert", "git_discard"),
+           "git_commit", "git_revert", "git_discard", "run_shell"),
     # 8 left no room: read, apply, run_tests, git_commit is already four
     # tool calls before a single wrong turn, and the last step is spent
     # on the forced final answer. Live-caught 2026-09-07.
@@ -36,7 +39,14 @@ RESEARCH = Profile(
 )
 PLAN = Profile(
     name="plan", tools=("read_file", "list_dir", "search_code", "web_fetch"),
-    read_only=True, max_steps=8, max_revisions=0, scaffold="plan", verify=True,
+    # `verify=False`: a plan session's product is a plan, and the task
+    # verifier asks "was the change implemented?" -- to which the honest
+    # answer is always no. With `max_revisions=0` that `fail` blocked the
+    # session before its plan text was ever handed to Planning, so no
+    # child task could exist. Found by a watched trial 2026-09-07. The
+    # plan itself is reviewed downstream (`plan.proposed` -> Verification's
+    # plan review), which is the right gate for it.
+    read_only=True, max_steps=8, max_revisions=0, scaffold="plan", verify=False,
 )
 SKILL = Profile(
     name="skill",

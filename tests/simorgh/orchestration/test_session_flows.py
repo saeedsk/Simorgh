@@ -119,7 +119,9 @@ class TestChatTurnWithOneToolCall(unittest.TestCase):
             cognition = FakeCognition(h.client("cognition"), script=[{"text": "ok"}])
             await cognition.start()
             try:
-                runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+                # No Verification in this harness: the patch run below
+                # would otherwise sit out the real verify wait (300s).
+                runner = SessionRunner(bus, h.ledger, clock=h.clock.now, verify_timeout_s=0.05)
                 chat = Session(task_id="c1", kind="chat", mode="execute", profile=profiles.CHAT)
                 await runner.run(chat, user_text="hello")
                 self.assertTrue(cognition.calls[0].payload["allow_summarize"])
@@ -177,8 +179,9 @@ class TestChatTurnWithOneToolCall(unittest.TestCase):
                 hints = cognition.calls[0].payload["tool_hints"]
                 self.assertIn("propose_mcp_server", hints)
                 self.assertIn("command", hints["propose_mcp_server"])
-                # a self-explanatory tool (read_file) gets no hint at all
-                self.assertNotIn("read_file", hints)
+                # a self-explanatory tool (list_dir) gets no hint at all;
+                # read_file grew a line-range form and so a hint, 2026-09-07
+                self.assertNotIn("list_dir", hints)
             finally:
                 await cognition.stop()
 

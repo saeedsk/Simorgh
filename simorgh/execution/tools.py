@@ -51,6 +51,7 @@ from simorgh.contracts.protocols import ToolContext, ToolResult
 
 from . import pathsafety
 from .config import Config
+from .shell import RunShellTool
 
 
 class ReadFileTool:
@@ -64,9 +65,43 @@ class ReadFileTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        content = pathsafety.safe_read_file(self._config.repo_root, args["path"], readable_roots=self._config.readable_roots)
+        path, span = _split_line_range(str(args["path"]))
+        content = pathsafety.safe_read_file(self._config.repo_root, path, readable_roots=self._config.readable_roots)
         ok = not content.startswith("[refused:")
+        if ok and span is not None:
+            content = _slice_lines(content, *span)
         return ToolResult(ok=ok, output=content, error=None if ok else content)
+
+
+_LINE_RANGE = re.compile(r"^(.*?):(\d+)-(\d+)$")
+
+
+def _split_line_range(raw: str) -> tuple[str, tuple[int, int] | None]:
+    """`path:START-END` -> (`path`, (START, END)); a bare path -> (path, None).
+
+    The model reads files through a one-string marker (`READ_FILE: path`)
+    and its side of a tool result is capped at ~8 KB, so without a way
+    to ask for *part* of a file, anything past the cap was unreachable
+    -- it could see that a 20 KB module was truncated and had no next
+    move (observer agent round, 2026-09-07). Line numbers are 1-based
+    and inclusive, like an editor's."""
+    m = _LINE_RANGE.match(raw.strip())
+    if m is None:
+        return raw, None
+    start, end = int(m.group(2)), int(m.group(3))
+    if start < 1 or end < start:
+        return raw, None
+    return m.group(1), (start, end)
+
+
+def _slice_lines(content: str, start: int, end: int) -> str:
+    lines = content.splitlines()
+    total = len(lines)
+    chunk = lines[start - 1:end]
+    if not chunk:
+        return f"[lines {start}-{end} are past the end; the file has {total} lines]"
+    numbered = "\n".join(f"{start + i:5d}| {line}" for i, line in enumerate(chunk))
+    return f"[lines {start}-{start + len(chunk) - 1} of {total}]\n{numbered}"
 
 
 class ListDirTool:
@@ -218,6 +253,24 @@ class FetchRefused(Exception):
     DNS failure, or an exhausted rate limit."""
 
 
+def _decompress(raw: bytes, encoding: str) -> bytes:
+    """Undo a `Content-Encoding` the server applied, whether or not it
+    was asked to. Unknown or broken encodings return the bytes as they
+    came, which is at worst the previous behaviour."""
+    try:
+        if encoding == "gzip" or raw[:2] == b"\x1f\x8b":
+            import gzip
+
+            return gzip.decompress(raw)
+        if encoding == "deflate":
+            import zlib
+
+            return zlib.decompress(raw)
+    except Exception:  # noqa: BLE001 -- a bad body is still a body
+        pass
+    return raw
+
+
 class WebFetchTool:
     """Port of v1's `src/tools/web_fetch.py` -- the one reviewed path for
     real outbound network access (Guardian's own denylist,
@@ -267,16 +320,33 @@ class WebFetchTool:
         except FetchRefused as exc:
             return ToolResult(ok=False, error=str(exc))
 
-        request = urllib.request.Request(url, headers={"User-Agent": self._config.web_fetch_user_agent})
+        request = urllib.request.Request(url, headers={
+            "User-Agent": self._config.web_fetch_user_agent,
+            # Ask for plain bytes. Some servers compress anyway (python.org
+            # sends gzip unrequested), so the body is checked below too.
+            "Accept-Encoding": "identity",
+        })
         try:
             with self._opener(request, timeout=self._config.web_fetch_timeout_s) as response:
                 status_code = getattr(response, "status", 200)
-                raw = response.read(self._config.web_fetch_max_bytes + 1)
+                encoding = ""
+                charset = "utf-8"
+                headers = getattr(response, "headers", None)
+                if headers is not None:
+                    encoding = (headers.get("Content-Encoding") or "").strip().lower()
+                    charset = headers.get_content_charset() or "utf-8" if hasattr(headers, "get_content_charset") else "utf-8"
+                raw = response.read(self._config.web_fetch_max_bytes * 4 + 1 if encoding else self._config.web_fetch_max_bytes + 1)
         except Exception as exc:  # noqa: BLE001 -- any network failure becomes a ToolResult, never a crash
             return ToolResult(ok=False, error=f"fetch failed: {exc!r}")
 
+        # Found by trial 2026-09-07: python.org answered with
+        # `Content-Encoding: gzip` and this handed the model the raw
+        # compressed bytes as if they were text, `ok=True`. Sim narrated it
+        # itself: "came back as unreadable gzip-compressed bytes". The
+        # garbage was then stored into Memory as a fetched page.
+        raw = _decompress(raw, encoding)
         truncated = len(raw) > self._config.web_fetch_max_bytes
-        content = raw[: self._config.web_fetch_max_bytes].decode("utf-8", errors="replace")
+        content = raw[: self._config.web_fetch_max_bytes].decode(charset, errors="replace")
         return ToolResult(
             ok=True, output=content,
             metadata={
@@ -677,8 +747,12 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
         if diff_lines:
             diff_text = "".join(diff_lines)
             output += "\n\n" + diff_text
+    # `file_create` for a path that did not exist: the session's cleanup
+    # needs to know, because `git_discard` cannot restore an untracked
+    # file and an abandoned new one was being left behind as a dirty tree.
+    effects = (f"file_write:{subject}",) + (() if already_existed else (f"file_create:{subject}",))
     return ToolResult(
-        ok=True, output=output, side_effects=(f"file_write:{subject}",),
+        ok=True, output=output, side_effects=effects,
         metadata={"overwrote_existing": already_existed, "diff": diff_text},
     )
 
@@ -834,6 +908,21 @@ class GitDiscardTool:
         )
         known = run(["git", "ls-files", "--error-unmatch", subject])
         if known.returncode != 0:
+            if args.get("created"):
+                # The caller vouches this session brought the file into
+                # existence. Removing it is then the *only* way to put the
+                # tree back -- there is no committed version to restore.
+                target = (root / subject).resolve()
+                try:
+                    target.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    return ToolResult(ok=False, error=f"could not remove {subject}: {exc}")
+                return ToolResult(
+                    ok=True, output=f"removed {subject}, which this session had created",
+                    side_effects=(f"git_discard:{subject}",),
+                )
             # An untracked file has no committed version to go back to.
             # Deleting it here would be a different, destructive act than
             # the one this tool advertises.
@@ -950,4 +1039,7 @@ def builtin_tools(config: Config) -> list:
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
         ApplySkillTool(config), WebFetchTool(config), ProposeMcpServerTool(),
+        # Off unless `[execution] shell = true`: the one tool whose blast
+        # radius is not bounded by its own arguments (execution/shell.py).
+        *((RunShellTool(config),) if getattr(config, "shell", False) else ()),
     ]

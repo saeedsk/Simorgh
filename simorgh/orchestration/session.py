@@ -30,21 +30,34 @@ ACTION_TIMEOUT_S = 30.0
 # reported "no response (timed out)" twice, and the session -- doing
 # exactly what its scaffold says, not committing on a failing suite --
 # left the edit applied and uncommitted. Execution allows a test run
-# `test_timeout_s` (120s) and every tool `default_timeout_s` (60s),
+# `test_timeout_s` (300s) and every tool `default_timeout_s` (60s),
 # while this caller gave *everything* 5 seconds. A test suite cannot
 # finish in 5s, so `run_tests` could never once have succeeded, and
 # Sim could never verify its own work.
 #
 # Kept a little above Execution's own limits so the tool's timeout is
-# what fires, with its real error, rather than this one guessing.
+# what fires, with its real error, rather than this one guessing. When
+# `test_timeout_s` went 120 -> 300 this stayed at 180, so a suite that
+# ran long under load (a repeat trial with a full pytest in the next
+# process, 2026-09-07) timed out *here* first: the session moved on
+# while the tests were still running, and the task sat in_progress.
 _ACTION_TIMEOUTS: dict[str, float] = {
-    "run_tests": 180.0,
+    "run_tests": 330.0,
     "run_python_sandboxed": 45.0,
     "web_fetch": 45.0,
     "apply_source_patch": 60.0,
     "apply_skill": 60.0,
 }
-VERIFY_TIMEOUT_S = 5.0
+# Found by a watched trial, 2026-09-07, and the third stale 5-second
+# timeout in this file. Verification at LIGHT rigor makes two sequential
+# provider round trips (generate a checklist, then evaluate it) plus the
+# mechanical checks, so 5s could never cover it: in 2 of 2 runs the real
+# verdict landed 14ms to 3s *after* the session had already given up and
+# accepted the task with `verification_ref=None`. Money spent on the
+# review, verdict discarded -- and the `blocked` path for a failing
+# verdict was unreachable, so verification could never stop a bad patch.
+# Matches `learning/config.py::verify_timeout_seconds`.
+VERIFY_TIMEOUT_S = 300.0
 
 
 class _EventWaiter:
@@ -116,7 +129,7 @@ class SessionRunner:
     async def _discard_uncommitted(self, session: Session) -> None:
         left = sorted(session.uncommitted)
         for path in left:
-            call = {"tool": "git_discard", "args": {"path": path}}
+            call = {"tool": "git_discard", "args": {"path": path, "created": path in session.created}}
             ok, summary, _detail = await self._propose_and_await(session, call, session.next_step_no())
             step = Step(
                 session.next_step_no(), "act",
@@ -204,6 +217,17 @@ class SessionRunner:
                 continue
 
             text = think_reply.payload.get("text", "")
+            if tool_calls and is_last:
+                # The budget ran out while the model was still asking for
+                # a tool. That is not a finished task, and recording it as
+                # `completed` -- with the raw tool marker as the answer --
+                # taught Learning that doing nothing is a win, and showed
+                # the human "READ_FILE: simorgh/cognition/parser.py" as a
+                # result. Found by two watched trials 2026-09-07.
+                step = Step(step_no, "act", "step budget exhausted with work still pending", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                return Outcome("blocked", reason="step budget exhausted before the task was finished")
             step = Step(step_no, "gather" if step_no == 1 else "act", "final answer", ok=True)
             session.record(step)
             await self._record_step(session, step)
@@ -333,6 +357,20 @@ class SessionRunner:
     # the only channel the model had for looking at anything.
     _MODEL_RESULT_CHARS = 8000
 
+    @classmethod
+    def _bound_for_model(cls, text: str) -> str:
+        # A silent cut taught the model that the file *ended* there
+        # (observer round, 2026-09-07: it rewrote a module from the
+        # first 8000 chars and lost the rest). Say it was cut, say how
+        # long the whole thing is, and say how to get the remainder.
+        if len(text) <= cls._MODEL_RESULT_CHARS:
+            return text
+        return (
+            text[: cls._MODEL_RESULT_CHARS]
+            + f"\n...[cut at {cls._MODEL_RESULT_CHARS} of {len(text)} chars;"
+            " for a file, READ_FILE: path:START-END returns just those lines]"
+        )
+
     async def _propose_and_await(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
         action_id = uuid.uuid4().hex[:12]
         payload = to_action_payload(
@@ -360,8 +398,17 @@ class SessionRunner:
                     kind, _, path = str(effect).partition(":")
                     if kind == "file_write" and path:
                         session.uncommitted.add(path)
+                    elif kind == "file_create" and path:
+                        # A file this session brought into existence. If it
+                        # is never committed, cleanup removes it outright:
+                        # `git_discard` rightly refuses an untracked path,
+                        # which used to leave every abandoned new file
+                        # behind as a dirty tree (watched trials, 2026-09-07).
+                        session.uncommitted.add(path)
+                        session.created.add(path)
                     elif kind in ("git_commit", "git_discard") and path:
                         session.uncommitted.discard(path)
+                        session.created.discard(path)
             full = result.payload.get("stdout_preview", "")
             error = result.payload.get("error") or ""
             if not ok:
@@ -375,7 +422,7 @@ class SessionRunner:
                 # model to guess. The same silence sat behind every failed
                 # `run_tests` and `git_commit` in the earlier trials.
                 full = f"{error}\n\n{full}".strip() if full else error
-            return ok, full[: self._MODEL_RESULT_CHARS], full[: self._DETAIL_CHARS]
+            return ok, self._bound_for_model(full), full[: self._DETAIL_CHARS]
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
             text = f"denied: {reasons}"
@@ -407,7 +454,14 @@ class SessionRunner:
                 (topics.VERIFY_RESULT,), key="verification_id", value=verification_id, timeout=self._verify_timeout_s,
             )
             if result is None:
-                # No Verification subsystem answered -- accept honestly rather than block forever.
+                # No verdict in time. Accept rather than block forever, but
+                # say so: "verification never answered" used to be
+                # indistinguishable from "verification passed".
+                step = Step(session.next_step_no(), "act",
+                            f"verification did not answer within {self._verify_timeout_s:.0f}s; accepted unverified",
+                            ok=False)
+                session.record(step)
+                await self._record_step(session, step)
                 return Outcome("completed", result_summary=text, floor=floor, verification_ref=None)
 
             verdict = result.payload.get("verdict")

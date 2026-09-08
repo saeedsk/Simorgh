@@ -148,7 +148,7 @@ class WorldModelPersonaInterfaceFlowTestCase(unittest.IsolatedAsyncioTestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             await asyncio.wait_for(interface._handle_line("hello, anyone there?"), timeout=2.0)
-        self.assertIn("no response", out.getvalue())
+        self.assertIn("no reply within", out.getvalue())
 
 
 if __name__ == "__main__":

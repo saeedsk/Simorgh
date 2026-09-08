@@ -26,6 +26,11 @@ class Config:
     stalled_after_seconds: float = 1800.0
     priority_weights: dict = field(default_factory=lambda: {"human": 3, "reflection": 2, "curiosity": 1})
     leader: bool = True
+    # A decomposition or re-grounding is a real model call. This was an
+    # unconfigurable 8.0s in `bridge.py`, and every replan measured at
+    # exactly 8.0s -> None -> no steps (watched trial, 2026-09-07).
+    # Matches the Worker's `think_timeout_s`.
+    think_timeout_s: float = 120.0
 
     @classmethod
     def from_mapping(cls, data: dict | None) -> "Config":

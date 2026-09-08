@@ -291,6 +291,24 @@ class Service:
 
     # -- the pipeline ----------------------------------------------------
 
+    async def _spill_oversized_args(self, proposal: dict) -> dict:
+        """A copy of the proposal safe to record: any string argument the
+        Ledger would refuse inline is stored as a blob and replaced by its
+        ref. Execution resolves the refs back (`_fetch_proposed_args`), so
+        the verifier still hashes the real arguments."""
+        ledger = self._ctx.ledger
+        threshold = getattr(ledger, "inline_threshold", 4096)
+        args = proposal.get("args")
+        if not isinstance(args, dict):
+            return proposal
+        spilled: dict = {}
+        for key, value in args.items():
+            if isinstance(value, str) and len(value) > threshold:
+                spilled[key] = await ledger.put_blob(value.encode("utf-8"), content_type="text/plain")
+            else:
+                spilled[key] = value
+        return {**proposal, "args": spilled}
+
     async def _on_proposed(self, message: Message) -> None:
         p = message.payload
         action_id = p["action_id"]
@@ -323,7 +341,32 @@ class Service:
         )
 
         stream = f"action:{action_id}"
-        await self._ctx.ledger.append(stream, self._event(stream, "received", {"proposal": p}))
+        # Record the proposal with any oversized argument spilled to a
+        # blob first. The Ledger refuses inline strings over its
+        # `inline_threshold` (4096 chars), and this append used to hand it
+        # the whole proposal -- a patch's complete new file body included
+        # -- so for any real-sized file it raised *before* `decide()` ran,
+        # the bus retried and dead-lettered it, and no verdict of any kind
+        # was ever published. The proposer waited out its timeout and was
+        # told "no response". Found independently by four watched trials,
+        # 2026-09-07: Sim structurally could not patch 89 of its 223
+        # source files, and the failure was invisible three ways over
+        # (the dead-letter record hit the same cap).
+        #
+        # A logging failure must never cancel a decision either, so the
+        # append is guarded: if the Ledger still refuses, the proposal is
+        # denied with the real reason rather than dropped.
+        recorded = await self._spill_oversized_args(p)
+        try:
+            await self._ctx.ledger.append(stream, self._event(stream, "received", {"proposal": recorded}))
+        except Exception as exc:  # noqa: BLE001 -- a proposal Guardian cannot record is refused, never lost
+            await self._ctx.bus.publish(message.caused(
+                topics.ACTION_DENIED,
+                {"action_id": action_id, "reasons": [f"could not record the proposal: {exc}"],
+                 "layer": "policy", "tool": proposal.tool},
+                source="guardian",
+            ))
+            return
         verdict = await self._pipeline.decide(proposal, ctx)
         await self._ctx.ledger.append(stream, self._event(
             stream, "decided", {"kind": verdict.kind, "layer": verdict.layer},

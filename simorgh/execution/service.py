@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
 
 from simorgh.contracts import topics
@@ -37,6 +38,10 @@ from simorgh.contracts.protocols import Health, ToolContext
 
 from . import pathsafety
 from .config import Config
+
+# The Ledger's blob-ref shape, matched here by shape rather than by
+# importing the Ledger's helper (the module-boundary rule).
+_BLOB_REF = re.compile(r"^blob:[0-9a-f]{64}$")
 from .external import load_external_tools
 from .mcp import McpClient, McpServerConfig, McpToolProxy
 from .tools import SkillTool, builtin_tools
@@ -214,8 +219,25 @@ class Service:
         events = await self._ctx.ledger.read(f"action:{action_id}")
         for event in events:
             if event.type == "received":
-                return event.payload["proposal"].get("args")
+                return await self._resolve_arg_refs(event.payload["proposal"].get("args"))
         return None
+
+    async def _resolve_arg_refs(self, args: dict | None) -> dict | None:
+        """Guardian records an oversized argument (a patch's whole file
+        body) as a blob ref, since the Ledger refuses it inline. The
+        verifier hashes the real arguments, so they are read back here."""
+        if not isinstance(args, dict):
+            return args
+        resolved: dict = {}
+        for key, value in args.items():
+            # `blob:<sha256>` is the Ledger's ref shape (02 section 4.2).
+            # Matched here by shape rather than by importing the Ledger's
+            # own helper, which the module-boundary rule forbids.
+            if isinstance(value, str) and _BLOB_REF.match(value):
+                resolved[key] = (await self._ctx.ledger.get_blob(value)).decode("utf-8")
+            else:
+                resolved[key] = value
+        return resolved
 
     async def _on_approved(self, message: Message) -> None:
         approved = message.payload
@@ -290,6 +312,7 @@ class Service:
                 message, action_id, ok=result.ok, error=result.error, output_ref=output_ref,
                 stdout_preview=preview[: self._config.max_output_bytes], duration_ms=duration_ms,
                 side_effects=list(result.side_effects),
+                stderr=str((result.metadata or {}).get("stderr") or ""),
             )
             await self._ctx.bus.publish(Message.new(
                 topics.TOOL_INVOKED, source="execution",
@@ -338,13 +361,20 @@ class Service:
 
     async def _publish_result(self, message: Message, action_id: str, *, ok: bool, error: str | None = None,
                                output_ref: str = "", stdout_preview: str = "", duration_ms: int = 0,
-                               side_effects: list | None = None) -> None:
+                               side_effects: list | None = None, stderr: str = "") -> None:
         payload = {
             "action_id": action_id, "ok": ok, "output_ref": output_ref, "stdout_preview": stdout_preview,
             "duration_ms": duration_ms, "side_effects": side_effects or [],
         }
         if error is not None:
-            payload["error"] = error
+            # A failing tool's reason usually lives on stderr, and the
+            # metadata carrying it was dropped here, so the model saw
+            # "exit_code=1" and nothing else. Found by trial 2026-09-07:
+            # the sandbox failed with a real SyntaxError and the model's
+            # entire observation was the string "exit_code=1". It
+            # recovered by luck, not by reading the traceback.
+            tail = (stderr or "").strip()[-1500:]
+            payload["error"] = f"{error}\n{tail}" if tail else error
         await self._ctx.bus.publish(message.caused(topics.ACTION_RESULT, payload, source="execution"))
 
     def _event(self, stream: str, type: str, payload: dict) -> Event:

@@ -288,17 +288,22 @@ class TestDriftDetectedForcesRegroundingOfTheNextSibling(_RegroundFlowTestCase):
 class TestNoCognitionPresentDegradesGracefully(_RegroundFlowTestCase):
     async def test_no_responder_times_out_and_the_child_still_becomes_available(self) -> None:
         # No `COGNITION_THINK` responder at all -- `BusCognitionCaller`'s
-        # bounded timeout (8s) really elapses; a non-answer must never be
+        # bounded timeout really elapses; a non-answer must never be
         # treated as evidence of drift (`01` section 4.5), so the child
         # proceeds to `available` exactly as if re-grounding had never
-        # been wired in, and Planning must not hang or crash.
-        kernel = await self._boot(PlanningConfig(regrounding_age_seconds=-1.0, project_step_count=2))
+        # been wired in, and Planning must not hang or crash. The timeout
+        # is configured short here: the production default is 120s (it
+        # was an unconfigurable 8s until 2026-09-07), and this test is
+        # about the *elapsed* path, not about waiting two minutes.
+        kernel = await self._boot(PlanningConfig(
+            regrounding_age_seconds=-1.0, project_step_count=2, think_timeout_s=2.0,
+        ))
         plan_revised = _Collector()
         await kernel.bus.subscribe(topics.PLAN_REVISED, plan_revised)
 
         _project_id, research, patch = await self._propose_and_approve(kernel)
         await self._complete(kernel, research["task_id"])
-        await asyncio.sleep(8.5)
+        await asyncio.sleep(2.5)
         await _pump(40)
 
         after = await self._task(kernel, patch["task_id"])

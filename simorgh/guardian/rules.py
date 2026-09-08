@@ -70,6 +70,16 @@ class ProtectedRule:
     layer = "protected"
 
     async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
+        # Protection is about *editing* (09 section 5.2: protected
+        # subjects are "never writable by any action"). Reading one is
+        # how Sim learns the contracts it has to honour in the code it
+        # *is* allowed to change. Found by a watched trial, 2026-09-07:
+        # a plain `read_file` of simorgh/kernel/cli.py was denied with
+        # "only the creator may edit it directly" -- nobody had asked to
+        # edit it -- and the same rule was silently keeping every
+        # simorgh/contracts/ schema unreadable.
+        if ctx.tool is not None and ctx.tool.read_only:
+            return Decision("abstain", self.layer)
         for path in _subject_paths(proposal):
             for protected in ctx.config.protected_subjects:
                 if protected in path:

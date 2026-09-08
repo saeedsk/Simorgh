@@ -30,6 +30,23 @@ from .config import Config
 from .metrics import Metrics
 from .policy import AllowAllPolicy
 from .router import INBOX_PREFIX
+
+# Longest string a dead-letter record keeps of the message it could not
+# deliver. Under the Ledger's own inline limit (4096), so the record can
+# always be written.
+_DEAD_LETTER_STRING_CAP = 2000
+
+
+def _bounded(value):
+    """`value` with every long string cut to `_DEAD_LETTER_STRING_CAP`,
+    recursively. The shape survives; only oversized bodies are shortened."""
+    if isinstance(value, str):
+        return value if len(value) <= _DEAD_LETTER_STRING_CAP else value[:_DEAD_LETTER_STRING_CAP] + "…[cut]"
+    if isinstance(value, dict):
+        return {k: _bounded(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_bounded(v) for v in value]
+    return value
 from .trace import TraceWriter
 
 Clock = Callable[[], float]
@@ -273,7 +290,13 @@ class BusClient:
                     f"dead:{m.type}",
                     Event(stream=f"dead:{m.type}", type=m.type, ts=self._clock(), trace_id=m.trace_id,
                           causation_id=m.id, idempotency_key=f"dead:{m.id}:{delivery.attempt}",
-                          payload={"message": m.to_dict(), "reason": reason, "attempts": delivery.attempt,
+                          # Bounded: the message that could not be
+                          # delivered is very often the one whose payload
+                          # the Ledger refuses inline, so recording it
+                          # verbatim failed for exactly the same reason and
+                          # the drop left no trace at all (2026-09-07).
+                          payload={"message": _bounded(m.to_dict()), "reason": reason,
+                                   "attempts": delivery.attempt,
                                    "last_error": last_error, "group": delivery.group}),
                 )
             except Exception as exc:  # noqa: BLE001

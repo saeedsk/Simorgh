@@ -105,7 +105,51 @@ class Service:
             await ctx.bus.subscribe(topics.TASK_FAILED, self._on_task_finished),
             await ctx.bus.subscribe(topics.TASK_BLOCKED, self._on_task_blocked),
         ]
+        await self._ingest_loader_rollback(ctx)
         ctx.logger.info("worldmodel.started", areas=len(self._capability_map.areas()))
+
+    async def _ingest_loader_rollback(self, ctx: Context) -> None:
+        """If the Sim loader rolled this checkout back, make that a fact
+        Sim knows about itself.
+
+        `simloader.py` cannot write to the Ledger (it never imports this
+        package; that independence is the whole point of a bootloader),
+        so it leaves `last_rollback.json` where `SIMORGH_LOADER_NOTES`
+        points and this reads it at boot. A rollback Sim never hears
+        about is a regression it will make again.
+        """
+        import json
+        import os
+        from pathlib import Path
+
+        notes = os.environ.get("SIMORGH_LOADER_NOTES")
+        if not notes:
+            return
+        path = Path(notes).expanduser() / "last_rollback.json"
+        if not path.exists():
+            return
+        try:
+            note = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        seen = Path(notes).expanduser() / ".last_rollback_ingested"
+        stamp = str(note.get("ts", ""))
+        if seen.exists() and seen.read_text() == stamp:
+            return  # already a limitation from a previous boot
+        text = (
+            f"The loader rolled me back from {note.get('from', '?')} to {note.get('to', '?')} "
+            f"because: {note.get('reason', 'unknown')}. Whatever changed between those two "
+            f"commits did not survive the gate; do not repeat it without a test that covers it."
+        )
+        now = ctx.clock.now()
+        await self._apply(
+            lambda m, _now: add_limitation(m, text=text, evidence=[], since=now, updated_at=now),
+            section="limitations", reason="loader.rollback",
+        )
+        try:
+            seen.write_text(stamp)
+        except OSError:
+            pass
 
     async def stop(self) -> None:
         for sub in self._subs:

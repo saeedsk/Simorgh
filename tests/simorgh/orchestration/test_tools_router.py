@@ -82,7 +82,7 @@ class TestToolCallRouter(unittest.TestCase):
 
     def test_marker_hint_is_none_for_a_tool_with_a_self_explanatory_argument(self):
         self.assertIsNone(marker_hint("web_fetch"))
-        self.assertIsNone(marker_hint("read_file"))
+        self.assertIsNone(marker_hint("list_dir"))
 
     def test_marker_hint_is_none_for_an_unknown_tool(self):
         self.assertIsNone(marker_hint("not_a_real_tool"))

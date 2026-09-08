@@ -385,9 +385,18 @@ class Service:
         if budget is not None:
             status = await budget.status()
             exhausted = status.exhausted
+        # The startup broadcast carries the model and the selection too.
+        # It used to send only the name, so the self model had no
+        # "Thinking with:" line until the first 30-second tick -- exactly
+        # the window in which a human asks "what model are you?", and Sim
+        # confabulated a retired v1 path (watched chat trial, 2026-09-07).
+        selected = self._router.selected_name() if self._router is not None else None
         await self._ctx.bus.publish(Message.new(
             topics.COGNITION_PROVIDER_STATUS, source=self._ctx.source,
-            payload={"provider": provider.name, "available": provider.available() and not exhausted, "budget": {}},
+            payload={
+                "provider": provider.name, "available": provider.available() and not exhausted, "budget": {},
+                "model": self._model_of(provider.name), "selected": provider.name == selected,
+            },
         ))
 
     async def _append_call_record(self, purpose: Purpose, response: ProviderResponse, floor: bool, compacted) -> None:

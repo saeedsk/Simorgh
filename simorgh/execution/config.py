@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .external import ExternalToolSpec
+from .shell import DEFAULT_SHELL_REFUSALS
 from .mcp import McpServerConfig
 
 
@@ -25,7 +26,20 @@ class Config:
     approval_max_age_s: float = 120.0
     repo_root: Path = field(default_factory=Path.cwd)
     readable_roots: tuple[str, ...] = ("src", "docs", "tests", "simorgh", "simorgh_skills")
-    write_scopes_source: tuple[str, ...] = ("src/", "simorgh/")
+    # The creator, 2026-09-07: "give sim file system write access".
+    # Every directory of the repository, rather than the two packages
+    # it started with -- docs, tests, tools and the rest are all
+    # things a self-improving system has real reason to edit. Paths
+    # are still repo-relative and `..` is still refused, so this is
+    # "anywhere in the project", not "anywhere on the machine".
+    #
+    # `run_shell` (execution/shell.py) is not bounded by this and
+    # cannot be: a shell writes wherever the user can. Once that tool
+    # is enabled these scopes describe the *file* tools, and Guardian
+    # is what stands behind the shell.
+    write_scopes_source: tuple[str, ...] = (
+        "src/", "simorgh/", "simorgh_skills/", "tests/", "tools/", "docs/",
+    )
     sandbox_cpu_seconds: int = 5
     sandbox_memory_mb: int = 256
     sandbox_timeout_s: float = 10.0
@@ -43,8 +57,12 @@ class Config:
     # repo, never the real working tree. Separate limits from the code
     # sandbox above -- a real test run legitimately needs more time/
     # memory than a short isolated script.
-    test_timeout_s: float = 120.0
-    test_cpu_seconds: int = 90
+    # The full suite takes ~180s on this repo, so 120s sat right on top
+    # of it and flaked under load: one timeout burned half a trial's
+    # budget and the session ran out of steps before it could commit.
+    # Found by the repeat-run trial, 2026-09-07.
+    test_timeout_s: float = 300.0
+    test_cpu_seconds: int = 240
     test_memory_mb: int = 1024
     test_output_max_chars: int = 8000
     # -- skills (11-learning.md's `skill_dir`; 08-execution.md's
@@ -56,6 +74,16 @@ class Config:
     # -- web_fetch (08-execution.md section 5.2/3.5; the one reviewed path
     # for real outbound network access -- see WebFetchTool's own docstring)
     web_fetch_timeout_s: float = 10.0
+    # `run_shell`. Off by default: it is the one tool whose blast
+    # radius is not bounded by its own arguments, so turning it on is
+    # a decision someone makes on purpose, in `[execution] shell = true`.
+    shell: bool = False
+    shell_timeout_s: float = 120.0
+    # Commands refused outright, pattern -> the reason the model is
+    # given. Not a security boundary (a shell has none, and any of
+    # these is trivially rewritten); a guard against the specific
+    # accidents a small model makes.
+    shell_refusals: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_SHELL_REFUSALS))
     web_fetch_max_bytes: int = 200_000
     web_fetch_max_calls: int = 30
     web_fetch_window_s: float = 3600.0

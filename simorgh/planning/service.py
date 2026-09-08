@@ -122,7 +122,9 @@ class Service:
             self._store, ctx.bus, ctx.clock, source=ctx.source,
             priority_weights=self.config.priority_weights, lease_seconds=self.config.lease_seconds,
         )
-        self._cognition = BusCognitionCaller(ctx.bus, ctx.clock, source=ctx.source)
+        self._cognition = BusCognitionCaller(
+            ctx.bus, ctx.clock, source=ctx.source, timeout=self.config.think_timeout_s,
+        )
 
         handlers = {
             topics.INTENT_GOAL_STATED: self._on_goal_stated,
@@ -665,15 +667,44 @@ class Service:
             return
         new_steps = await decompose(self._cognition, state.goal + f"\n\nReviewer feedback: {p.get('feedback', '')}",
                                      [], self.config.project_step_count)
+        state.revisions += 1
         if not new_steps:
+            # This used to `return` silently, leaving the project
+            # `in_progress` on a lease just extended to an hour -- frozen,
+            # and invisible. Found by a watched trial 2026-09-07: every
+            # replan came back empty (the 8s think timeout), and every
+            # project stopped here forever. A failed revision is a real
+            # outcome; count it and say so.
+            await self._notice("warning", f"plan {state.plan_id}: revision {state.revisions} produced no steps")
+            if state.revisions >= self.config.max_plan_revisions:
+                state.status = planmode.REJECTED
+                await self._store.transition(
+                    state.task_id, FAILED, note=f"plan rejected: {state.revisions} revisions produced no steps",
+                )
             return
         diff = planmode.compute_diff(state.steps, new_steps)
         state.steps = new_steps
-        state.revisions += 1
         await self._ctx.bus.publish(Message.new(
             topics.PLAN_REVISED, source=self._ctx.source,
             partition_key=f"plan:{state.plan_id}",
             payload={"plan_id": state.plan_id, "reason": p.get("feedback", "revision requested"), "diff": diff},
+        ))
+        # A revised plan has to go back through the gate, or the revise
+        # path can never terminate: nothing but Reflection listened for
+        # `plan.revised`, so a successful revision produced no children
+        # either. Re-propose it with the new steps.
+        await self._ctx.bus.publish(Message.new(
+            topics.PLAN_PROPOSED, source=self._ctx.source,
+            partition_key=f"plan:{state.plan_id}",
+            payload={
+                "plan_id": state.plan_id, "task_id": state.task_id, "goal": state.goal, "risk": state.risk,
+                "estimated_cost": 0.0,
+                "steps": [
+                    {"step_id": s.step_id, "kind": s.kind, "description": s.description,
+                     "depends_on": list(s.depends_on), "why": s.why, "subject": s.subject}
+                    for s in new_steps
+                ],
+            },
         ))
 
     async def _on_prompt_answered(self, message: Message) -> None:
