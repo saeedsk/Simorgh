@@ -29,12 +29,26 @@ class Service:
     )
 
     def __init__(self, *, config: Config | None = None, keep_per_kind: dict[str, int] | None = None) -> None:
+        self._config_from_caller = config
         self._config = config or Config()
         self._keep_per_kind = keep_per_kind or dict(DEFAULT_KEEP_PER_KIND)
         self._tick_seconds = 0
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
+        # Live-caught as a class 2026-09-08: every service is handed its
+        # own `[section]` from simorgh.toml (`kernel/context.py` builds
+        # `ctx.config` for exactly this) and eleven of them never read
+        # it. The settings existed, were documented, were parsed into a
+        # Config dataclass with a `from_mapping` -- and nothing ever
+        # called it, so changing the file changed nothing. The dominant
+        # bug shape in this codebase: a designed slot with one side
+        # implemented and nobody writing to it.
+        #
+        # A config passed by the caller still wins, so a test that
+        # constructs the service with one is unaffected.
+        if self._config_from_caller is None and ctx.config:
+            self._config = Config.from_mapping(dict(ctx.config))
         self.engine = MemoryEngine(ctx.ledger, self._config, clock=ctx.clock)
         self._sub_retrieve = await ctx.bus.subscribe(topics.MEMORY_RETRIEVE, self._on_retrieve)
         self._sub_store = await ctx.bus.subscribe(topics.MEMORY_STORE, self._on_store)
