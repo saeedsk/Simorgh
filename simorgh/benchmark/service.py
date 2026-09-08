@@ -30,11 +30,12 @@ VERSION = "0.1.0"
 
 _CONSUMES = (
     topics.BENCHMARK_RUN_REQUEST, topics.BENCHMARK_HISTORY_REQUEST,
-    topics.BENCHMARK_SUITES_REQUEST, topics.BENCHMARK_LOAD_REQUEST, topics.COGNITION_PROVIDER_STATUS,
+    topics.BENCHMARK_SUITES_REQUEST, topics.BENCHMARK_LOAD_REQUEST, topics.BENCHMARK_STOP_REQUEST,
+    topics.COGNITION_PROVIDER_STATUS,
 )
 _PRODUCES = (
     topics.BENCHMARK_RUN_REPLY, topics.BENCHMARK_HISTORY_REPLY, topics.BENCHMARK_SUITES_REPLY,
-    topics.BENCHMARK_LOAD_REPLY,
+    topics.BENCHMARK_LOAD_REPLY, topics.BENCHMARK_STOP_REPLY,
     topics.BENCHMARK_PROGRESS, topics.BENCHMARK_RUN_COMPLETED, topics.TASK_CREATE, topics.UI_NOTICE,
 )
 
@@ -68,6 +69,7 @@ class Service:
             topics.BENCHMARK_RUN_REQUEST: self._on_run,
             topics.BENCHMARK_HISTORY_REQUEST: self._on_history,
             topics.BENCHMARK_LOAD_REQUEST: self._on_load,
+            topics.BENCHMARK_STOP_REQUEST: self._on_stop,
             topics.COGNITION_PROVIDER_STATUS: self._on_provider,
         }
         for topic, handler in handlers.items():
@@ -117,6 +119,27 @@ class Service:
             "suites": suites, "model": self._model, "running": bool(self._task and not self._task.done()),
         })
 
+    async def _on_stop(self, message: Message) -> None:
+        """End the run in flight. Its partial result is still recorded --
+        the cases it did answer are real evidence."""
+        if self._task is None or self._task.done():
+            await self._ctx.bus.reply(message, type=topics.BENCHMARK_STOP_REPLY,
+                                      payload={"stopped": False, "detail": "no benchmark run is in flight"})
+            return
+        running = dict(self._running)
+        self._task.cancel()
+        try:
+            await self._task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- the cancel is the point
+            pass
+        await self._ctx.bus.reply(message, type=topics.BENCHMARK_STOP_REPLY, payload={
+            "stopped": True, "run_id": running.get("run_id", ""), "suite": running.get("suite", ""),
+            "detail": (
+                f"stopped after {running.get('index', 0)} of {running.get('total', 0)} cases; "
+                "the partial result is recorded"
+            ),
+        })
+
     async def _on_load(self, message: Message) -> None:
         """Download a suite without running it -- how an operator gets
         the cases onto the machine, and checks their token works, before
@@ -160,10 +183,18 @@ class Service:
     async def _on_run(self, message: Message) -> None:
         payload = message.payload
         if self._task is not None and not self._task.done():
+            # Say what to do about it, not just what is true. The
+            # creator hit this and the message named neither how far
+            # along the run was in time nor how to stop it (2026-09-08).
+            index = self._running.get("index", 0)
+            total = self._running.get("total", 0)
+            elapsed = time.monotonic() - self._running.get("started", time.monotonic())
             await self._ctx.bus.reply(message, type=topics.BENCHMARK_RUN_REPLY,
                                       payload=error_reply_payload("already_running", (
-                                          f"a {self._running.get('suite', '?')} run is in flight "
-                                          f"({self._running.get('index', 0)}/{self._running.get('total', 0)})"
+                                          f"a {self._running.get('suite', '?')} run is on case {index} of "
+                                          f"{total} after {elapsed:.0f}s -- one at a time, or they would "
+                                          f"measure each other's contention. `benchmark` shows its progress; "
+                                          f"`benchmark stop` ends it."
                                       ), retryable=True))
             return
         name = payload.get("suite") or "gaia"
@@ -193,7 +224,8 @@ class Service:
             return
         record = RunRecord(suite=chosen.name, suite_version=chosen.version, model=self._model,
                            note=payload.get("note", ""))
-        self._running = {"run_id": record.run_id, "suite": chosen.name, "index": 0, "total": len(chosen)}
+        self._running = {"run_id": record.run_id, "suite": chosen.name, "index": 0,
+                         "total": len(chosen), "started": time.monotonic()}
         self._task = asyncio.create_task(self._run(chosen, record), name=f"benchmark-{record.run_id}")
         await self._ctx.bus.reply(message, type=topics.BENCHMARK_RUN_REPLY, payload={
             "ok": True, "run_id": record.run_id, "suite": chosen.name, "cases": len(chosen),

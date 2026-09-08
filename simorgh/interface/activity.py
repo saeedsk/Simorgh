@@ -36,7 +36,18 @@ from dataclasses import dataclass, field
 # Kept small on purpose: this is a live view, not a history. The Ledger
 # is the history.
 _MAX_TRACKED = 500
-_TOPIC_WIDTH = 58
+# Room the fixed parts of a line need, so the topic gets the rest.
+# `topic_width` is a function of the real terminal (`render.terminal_width`)
+# rather than a constant for an 80-column screen.
+_LINE_OVERHEAD = 34
+_MIN_TOPIC = 24
+
+
+def topic_width(overhead: int = _LINE_OVERHEAD) -> int:
+    """Columns a line's variable part may use on this terminal."""
+    from .render import terminal_width
+
+    return max(_MIN_TOPIC, terminal_width() - overhead)
 
 
 @dataclass
@@ -68,7 +79,8 @@ class TaskRecord:
             text = f"{self.subject} -- {text}" if text else self.subject
         return text or "(no description)"
 
-    def short_topic(self, width: int = _TOPIC_WIDTH) -> str:
+    def short_topic(self, width: int | None = None) -> str:
+        width = topic_width() if width is None else width
         text = self.topic
         return text if len(text) <= width else text[: width - 1] + "…"
 
@@ -192,8 +204,9 @@ def step_line(record: TaskRecord, *, tool: str | None, summary: str, ok: bool | 
     outcome = "" if ok is None else ("  ok" if ok else "  failed")
     what = f"{tool}: {summary}" if tool else summary
     what = " ".join(what.split())
-    if len(what) > 96:
-        what = what[:95] + "…"
+    width = topic_width(overhead=len(mark) + len(outcome) + 2)
+    if len(what) > width:
+        what = what[: width - 1] + "…"
     return f"{mark} {what}{outcome}"
 
 
@@ -201,8 +214,16 @@ def finished_line(record: TaskRecord, *, elapsed: float | None, detail: str = ""
                   unicode: bool = True) -> str:
     icon = (_END_ICON.get(record.status, "•") + " ") if unicode else ""
     took = f" in {elapsed:.0f}s" if elapsed is not None else ""
-    tail = f" -- {' '.join(detail.split())[:80]}" if detail else ""
-    return f"{icon}{record.status}{took}: {record.short_topic()}  [{record.task_id[:8]}]{tail}"
+    # The outcome carries two variable pieces -- the topic and the
+    # result -- so they share what the terminal has rather than each
+    # taking a full line's worth and overrunning together.
+    head = f"{icon}{record.status}{took}: "
+    room = max(_MIN_TOPIC, topic_width(overhead=len(head) + 12))
+    share = room // 2 if detail else room
+    line = f"{head}{record.short_topic(share)}  [{record.task_id[:8]}]"
+    if detail:
+        line += f" -- {' '.join(detail.split())[:room - share]}"
+    return line
 
 
 def footer(book: TaskBook, *, now: float, extra: str = "") -> str:
@@ -218,7 +239,7 @@ def footer(book: TaskBook, *, now: float, extra: str = "") -> str:
     first = running[0]
     elapsed = now - first.started_at if first.started_at else 0.0
     more = f" (+{len(running) - 1} more)" if len(running) > 1 else ""
-    parts = [f"{first.kind} · {first.short_topic(44)} · {elapsed:.0f}s{more}"]
+    parts = [f"{first.kind} · {first.short_topic(topic_width(overhead=46))} · {elapsed:.0f}s{more}"]
     if queued:
         parts.append(f"{queued} queued")
     if extra:

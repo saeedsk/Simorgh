@@ -66,6 +66,13 @@ BenchmarkLoadReply = define(t.BENCHMARK_LOAD_REPLY, [
     O("scorable", Bool),
     O("cache_path", Str),
 ])
+BenchmarkStopRequest = define(t.BENCHMARK_STOP_REQUEST, [], doc="End the benchmark run in flight.")
+BenchmarkStopReply = define(t.BENCHMARK_STOP_REPLY, [
+    O("stopped", Bool),
+    O("run_id", Str),
+    O("suite", Str),
+    O("detail", Str),
+])
 BenchmarkProgress = define(t.BENCHMARK_PROGRESS, [
     F("run_id", Str),
     F("suite", Str),
@@ -92,7 +99,7 @@ BenchmarkHistoryReply = define(t.BENCHMARK_HISTORY_REPLY, [
 ])
 
 __all__ = [
-    "BenchmarkLoadReply", "BenchmarkLoadRequest",
+    "BenchmarkLoadReply", "BenchmarkLoadRequest", "BenchmarkStopReply", "BenchmarkStopRequest",
     "BenchmarkHistoryReply", "BenchmarkHistoryRequest", "BenchmarkProgress", "BenchmarkRunCompleted",
     "BenchmarkRunReply", "BenchmarkRunRequest", "BenchmarkSuitesReply", "BenchmarkSuitesRequest",
 ]

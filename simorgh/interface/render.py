@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 
 from .vitals import VitalsSnapshot
@@ -21,6 +22,27 @@ _COLORS = {
     "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m", "bold": "\x1b[1m",
 }
 _LEVEL_COLOR = {"info": "cyan", "warn": "yellow", "error": "red", "success": "green"}
+
+
+# The creator, 2026-09-08: "some of the sim agent text on tui are
+# limited and not using the whole cli width". Every narration line used
+# to truncate at a constant chosen for an 80-column terminal, so a wide
+# window showed the same clipped topic with empty space beside it. One
+# helper, so a line is cut to fit the screen someone actually has.
+_MIN_WIDTH = 60
+_MAX_WIDTH = 200
+
+
+def terminal_width(default: int = 100) -> int:
+    """Usable columns. Bounded at both ends: a 20-column report of a
+    terminal that is really wider (a pipe, a CI log) would clip
+    everything, and a 400-column line is unreadable however wide the
+    window is."""
+    try:
+        columns = shutil.get_terminal_size((default, 24)).columns
+    except Exception:  # noqa: BLE001 -- no terminal at all
+        columns = default
+    return max(_MIN_WIDTH, min(_MAX_WIDTH, columns))
 
 
 def color_enabled(mode: str = "auto") -> bool:
@@ -250,6 +272,7 @@ _QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
     ("improve <topic>", "draft a new skill, audited before it lands"),
     ("tasks / tasks work", "see the backlog, advance the next item"),
     ("research <topic>", "investigate a question, no code written"),
+    ("benchmark", "score this system on GAIA or BFCL, and track it"),
     ("plan <goal>", "break a goal into tracked steps"),
     ("auto [on|off|now]", "control the idle self-improvement loop"),
     ("mcp", "review external tools Sim has proposed"),

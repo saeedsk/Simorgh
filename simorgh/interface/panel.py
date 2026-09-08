@@ -66,7 +66,11 @@ BREATH_PERIOD_S = 2.4
 
 MAX_RUNNING_ROWS = 3
 MAX_QUEUED_NAMED = 2
-_TOPIC_WIDTH = 46
+# Room the fixed parts of each row need; the topic takes the rest of the
+# real terminal (`render.terminal_width`).
+_ROW_OVERHEAD = 44
+_QUEUE_OVERHEAD = 60
+_TREE_OVERHEAD = 2
 
 
 # ----------------------------------------------------------------- breathing
@@ -97,6 +101,12 @@ _END_ICON = {"completed": "✅", "failed": "❌", "blocked": "⏸", "paused": "�
 _KIND_ICON = {"research": "🔍", "patch": "🔧", "skill": "🎓", "project": "🗂", "chat": "💬"}
 
 
+def _topic(overhead: int) -> int:
+    from .render import terminal_width
+
+    return max(24, terminal_width() - overhead)
+
+
 def _fit(text: str, width: int) -> str:
     text = " ".join(text.split())
     return text if len(text) <= width else text[: width - 1] + "…"
@@ -120,12 +130,15 @@ def tree_start(record: TaskRecord, *, unicode: bool = True) -> str:
 
 
 def tree_step(*, tool: str | None, head: str, ok: bool | None, took: float | None,
-              width: int = 78, unicode: bool = True) -> str:
+              width: int | None = None, unicode: bool = True) -> str:
     """One tool call as a branch: `├─ tool what  ✓ 0.3s`.
 
     Every step is a `├─` because when it prints nobody knows yet whether
     it is the last; the end line (`tree_end`) closes the tree with `╰─`.
     """
+    from .render import terminal_width
+
+    width = (terminal_width() - _TREE_OVERHEAD) if width is None else width
     branch = "  ├─ " if unicode else "  |- "
     what = f"{tool} {head}" if tool else head
     what = _fit(what, width - len(branch) - 10)
@@ -164,7 +177,7 @@ def running_row(record: TaskRecord, *, now: float, unicode: bool = True) -> list
     steps = f" · {record.steps} step{'s' if record.steps != 1 else ''}" if record.steps else ""
     return [
         (breath_class(now), f"{spark}{word}…"),
-        ("class:sim.footer", f"  {record.kind} · {record.short_topic(_TOPIC_WIDTH)} · {elapsed:.0f}s{steps}"),
+        ("class:sim.footer", f"  {record.kind} · {record.short_topic(_topic(_ROW_OVERHEAD))} · {elapsed:.0f}s{steps}"),
     ]
 
 
@@ -172,7 +185,8 @@ def queued_row(queued: list[TaskRecord], *, unicode: bool = True) -> list[tuple[
     if not queued:
         return None
     arrow = "  ↳ " if unicode else "  -> "
-    named = "; ".join(t.short_topic(28) for t in queued[:MAX_QUEUED_NAMED])
+    named = "; ".join(t.short_topic(max(16, _topic(_QUEUE_OVERHEAD) // MAX_QUEUED_NAMED))
+                      for t in queued[:MAX_QUEUED_NAMED])
     more = f" (+{len(queued) - MAX_QUEUED_NAMED})" if len(queued) > MAX_QUEUED_NAMED else ""
     return [("class:sim.footer", f"{arrow}{len(queued)} queued: {named}{more}")]
 

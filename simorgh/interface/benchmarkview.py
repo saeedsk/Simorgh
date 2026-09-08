@@ -52,6 +52,10 @@ def started(payload: dict) -> str:
     )
 
 
+def stopped(payload: dict) -> str:
+    return payload.get("detail") or ("stopped" if payload.get("stopped") else "nothing to stop")
+
+
 def loaded(payload: dict) -> str:
     lines = [
         f"{payload.get('suite')}: {payload.get('cases')} cases  ·  revision {payload.get('suite_version')}",
@@ -137,4 +141,4 @@ def detail(payload: dict) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["detail", "history", "latest", "loaded", "parse_run", "started", "suites"]
+__all__ = ["detail", "history", "latest", "loaded", "parse_run", "started", "stopped", "suites"]

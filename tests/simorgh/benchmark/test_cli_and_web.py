@@ -158,7 +158,26 @@ class LoadVerbTestCase(unittest.TestCase):
         from simorgh.interface.dispatch import BENCHMARK_VERBS
 
         advertised = {verb for verb, _args, _what in BENCHMARK_VERBS if verb}
-        self.assertEqual(advertised, {"suites", "load", "run", "history", "show"})
+        self.assertEqual(advertised, {"suites", "load", "run", "stop", "history", "show"})
         for verb in advertised:
             self.assertIn(f'verb == "{verb}"', _dispatch_source(), f"{verb} is advertised but not handled")
         self.assertIn("benchmark load <suite>", _BENCHMARK_USAGE)
+
+
+class StopVerbTestCase(unittest.TestCase):
+    """`benchmark stop` ends the run in flight and keeps what it scored.
+
+    The creator hit "already_running" and the message named neither how
+    far along the run was nor how to end it (2026-09-08)."""
+
+    def test_it_reports_the_detail_the_subsystem_gave(self):
+        text = view.stopped({"stopped": True, "run_id": "abc", "suite": "gaia",
+                             "detail": "stopped after 3 of 20 cases; the partial result is recorded"})
+        self.assertIn("3 of 20", text)
+        self.assertIn("partial result is recorded", text)
+
+    def test_nothing_in_flight_says_so(self):
+        self.assertIn("no benchmark run", view.stopped({"stopped": False, "detail": "no benchmark run is in flight"}))
+
+    def test_a_bare_reply_still_renders(self):
+        self.assertEqual(view.stopped({"stopped": False}), "nothing to stop")

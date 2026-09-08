@@ -9,7 +9,8 @@ from .api import Profile
 
 CHAT = Profile(
     name="chat",
-    tools=("read_file", "list_dir", "search_code", "web_fetch", "run_python_sandboxed", "propose_mcp_server"),
+    tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch",
+           "run_python_sandboxed", "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
 # The creator, 2026-09-07: "gives sim more freedom in autonomously
@@ -34,11 +35,11 @@ PATCH = Profile(
     read_only=False, max_steps=20, max_revisions=2, scaffold="patch", max_output_tokens=16_000,
 )
 RESEARCH = Profile(
-    name="research", tools=("read_file", "list_dir", "search_code", "web_fetch", "run_tests"),
+    name="research", tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch", "run_tests"),
     read_only=True, max_steps=6, max_revisions=0, scaffold="research", verify=True,
 )
 PLAN = Profile(
-    name="plan", tools=("read_file", "list_dir", "search_code", "web_fetch"),
+    name="plan", tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch"),
     # `verify=False`: a plan session's product is a plan, and the task
     # verifier asks "was the change implemented?" -- to which the honest
     # answer is always no. With `max_revisions=0` that `fail` blocked the

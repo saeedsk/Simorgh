@@ -103,8 +103,13 @@ class BottomRowsTestCase(unittest.TestCase):
         book.on_created({"task_id": "q1", "kind": "research", "origin": "curiosity", "description": "what does memory export"})
         book.on_created({"task_id": "q2", "kind": "plan", "origin": "human", "description": "web access"})
         book.on_created({"task_id": "q3", "kind": "plan", "origin": "human", "description": "third"})
+        # Widths follow the real terminal now, so assert the shape rather
+        # than an exact string a narrow window would legitimately shorten.
         text = panel.plain(panel.footer_rows(book, now=1.0, auto="on"))
-        self.assertIn("↳ 3 queued: what does memory export; web access (+1)", text)
+        self.assertIn("↳ 3 queued:", text)
+        self.assertIn("web access", text)
+        self.assertIn("(+1)", text)
+        self.assertRegex(text, r"what does memory ex")
 
     def test_flatten_puts_newlines_between_rows_only(self):
         flat = panel.flatten([[("a", "x")], [("b", "y")]])

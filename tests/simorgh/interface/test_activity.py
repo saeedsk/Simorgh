@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import os
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from simorgh.bus.config import Config as BusConfig
@@ -248,3 +250,50 @@ class TestTheServiceNarratesAutonomousWork(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WidthFollowsTheTerminalTestCase(unittest.TestCase):
+    """The creator, 2026-09-08: "some of the sim agent text on tui are
+    limited and not using the whole cli width". Every line truncated at
+    a constant sized for an 80-column screen, so a wide window showed a
+    clipped topic with empty space beside it."""
+
+    LONG = "add a module-level constant DEFAULT_HISTORY_LIMIT = 200 near the top of simorgh/interface/parser.py"
+
+    def _record(self):
+        book = TaskBook()
+        return book.on_created({"task_id": "t1", "kind": "patch", "origin": "human", "description": self.LONG})
+
+    def _at(self, columns: int):
+        return unittest.mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((columns, 24)))
+
+    def test_a_wide_terminal_shows_more_of_the_topic(self):
+        record = self._record()
+        with self._at(80):
+            narrow = started_line(record)
+        with self._at(160):
+            wide = started_line(record)
+        self.assertGreater(len(wide), len(narrow))
+        self.assertIn("parser.py", wide)
+        self.assertNotIn("parser.py", narrow)
+
+    def test_no_line_overruns_the_terminal(self):
+        record = self._record()
+        for columns in (60, 80, 120, 200):
+            with self._at(columns):
+                for line in (started_line(record),
+                             step_line(record, tool="apply_source_patch", summary=self.LONG, ok=True),
+                             finished_line(record, elapsed=12.0, detail=self.LONG)):
+                    self.assertLessEqual(len(line), columns + 2, f"{columns}: {line!r}")
+
+    def test_a_very_wide_terminal_is_still_bounded(self):
+        record = self._record()
+        with self._at(500):
+            self.assertLessEqual(len(started_line(record)), 220)
+
+    def test_a_terminal_that_cannot_be_measured_still_renders(self):
+        record = self._record()
+        with unittest.mock.patch("shutil.get_terminal_size", side_effect=OSError):
+            line = started_line(record)
+        self.assertIn("patch", line)
+        self.assertTrue(line.strip())

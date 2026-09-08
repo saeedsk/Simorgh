@@ -98,6 +98,25 @@ class Config:
     # these is trivially rewritten); a guard against the specific
     # accidents a small model makes.
     shell_refusals: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_SHELL_REFUSALS))
+    # -- web_search (execution/websearch.py). The creator, 2026-09-08:
+    # "add web search engine tool ability to sim". `auto` uses whichever
+    # provider key is actually set, else DuckDuckGo, which needs none;
+    # naming one explicitly means that one or an error, since silently
+    # falling back to a weaker engine would look like a mysterious drop
+    # in benchmark scores rather than a misconfiguration.
+    web_search_provider: str = "auto"
+    web_search_max_results: int = 8
+    web_search_timeout_s: float = 15.0
+    web_search_max_bytes: int = 400_000
+    # Its own budget: a search is one call where a fetch is many, so a
+    # burst of reading must not starve the searching that found it.
+    # The keyless endpoint throttles back-to-back requests by answering
+    # 200 with an empty page, so leave a gap and try again rather than
+    # reporting "no results" for something it refused.
+    web_search_min_interval_s: float = 2.0
+    web_search_attempts: int = 3
+    web_search_max_calls: int = 60
+    web_search_window_s: float = 3600.0
     web_fetch_max_bytes: int = 200_000
     web_fetch_max_calls: int = 30
     web_fetch_window_s: float = 3600.0

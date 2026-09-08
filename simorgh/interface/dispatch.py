@@ -259,6 +259,7 @@ BENCHMARK_VERBS: tuple[tuple[str, str, str], ...] = (
     ("suites", "", "what can be run, and what is cached"),
     ("load", "<suite> [refresh]", "download its cases, without running them"),
     ("run", "<suite> [n] [level=L] [refresh]", "run it, and record the result"),
+    ("stop", "", "end the run in flight, keeping what it scored"),
     ("history", "[suite]", "accuracy over time, per model"),
     ("show", "<run_id>", "one run, case by case"),
 )
@@ -292,6 +293,9 @@ async def _benchmark(bus: BusClient, args: str) -> Outcome:
             return Outcome("usage: benchmark show <run_id>")
         return await _request(bus, topics.BENCHMARK_HISTORY_REQUEST, {"run_id": rest.strip()},
                               timeout=10.0, render=benchmarkview.detail)
+    if verb == "stop":
+        return await _request(bus, topics.BENCHMARK_STOP_REQUEST, {}, timeout=30.0,
+                              render=benchmarkview.stopped)
     if verb == "load":
         if not rest:
             return Outcome("usage: benchmark load <suite> [refresh]")

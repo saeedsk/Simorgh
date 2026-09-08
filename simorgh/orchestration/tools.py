@@ -21,6 +21,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "list_dir": ("read_only", False),
     "search_code": ("read_only", False),
     "web_fetch": ("read_only", True),
+    "web_search": ("read_only", True),
     "run_python_sandboxed": ("reversible", False),
     "run_tests": ("reversible", False),
     "draft_candidate": ("reversible", False),
@@ -74,6 +75,7 @@ _MARKER_ARG_KEY: dict[str, str] = {
     "list_dir": "path",
     "search_code": "query",
     "web_fetch": "url",
+    "web_search": "query",
     "run_python_sandboxed": "code",
     "run_tests": "target",
     "draft_candidate": "code",
@@ -109,6 +111,11 @@ _MARKER_ARG_HINT: dict[str, str] = {
         "a repo path, optionally with an inclusive 1-based line range, e.g. "
         "simorgh/foo.py:120-260. A result is cut at ~8000 chars, so read a "
         "large file in ranges rather than trusting a cut result as the whole file"
+    ),
+    "web_search": (
+        "plain search words, as you would type into a search box -- not a "
+        "sentence and not a URL. It returns titles, URLs and snippets; read "
+        "one with WEB_FETCH to get the page itself"
     ),
     "propose_mcp_server": (
         "key: value lines, one per line -- name (lowercase_snake_case), "
