@@ -294,7 +294,8 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         messages = [{"role": "tool", "name": "search", "content": " ".join(f"w{i}" for i in range(500))}]
         request = Message.new(topics.COGNITION_THINK, source="test", payload={
             "purpose": "chat", "messages": messages,
-            "budget": {"max_tokens": 1_000, "max_cost_usd": 0.1}, "require_real_provider": False,
+            "budget": {"max_tokens_in": 1_000, "max_tokens": 1_000, "max_cost_usd": 0.1},
+            "require_real_provider": False,
         })
         reply = await self.bus.request(request, timeout=5.0)
         self.assertIn(1, [int(n) for n in reply.payload["compaction"]["layers_applied"]])
@@ -305,7 +306,7 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         await self._make(providers=[_FakeProvider()])
         request = Message.new(topics.COGNITION_THINK, source="test", payload={
             "purpose": "chat", "messages": [{"role": "user", "content": "x" * 10_000}],
-            "budget": {"max_tokens": 1, "max_cost_usd": 0.1}, "require_real_provider": False,
+            "budget": {"max_tokens_in": 1, "max_tokens": 1, "max_cost_usd": 0.1}, "require_real_provider": False,
         })
         reply = await self.bus.request(request, timeout=5.0)
         self.assertFalse(reply.payload["ok"])
@@ -326,7 +327,7 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         # sole (therefore always-newest, never-headlined) segment.
         request = Message.new(topics.COGNITION_THINK, source="test", payload={
             "purpose": "chat", "messages": [{"role": "user", "content": "x" * 4_000}],
-            "budget": {"max_tokens": 60, "max_cost_usd": 0.1}, "require_real_provider": False,
+            "budget": {"max_tokens_in": 60, "max_tokens": 60, "max_cost_usd": 0.1}, "require_real_provider": False,
             "allow_summarize": False,
         })
         reply = await self.bus.request(request, timeout=5.0)
@@ -377,7 +378,10 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         messages = older + [{"role": "user", "content": "the newest turn"}]
         request = Message.new(topics.COGNITION_THINK, source="test", payload={
             "purpose": "chat", "messages": messages,
-            "budget": {"max_tokens": 123, "max_cost_usd": 0.1}, "require_real_provider": False,
+            # `max_tokens_in` is what squeezes the context; `max_tokens`
+            # is only how much answer is wanted back.
+            "budget": {"max_tokens_in": 123, "max_tokens": 123, "max_cost_usd": 0.1},
+            "require_real_provider": False,
             "allow_summarize": True, "session_id": "s1",
         })
         reply = await self.bus.request(request, timeout=5.0)

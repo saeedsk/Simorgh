@@ -15,6 +15,12 @@ SystemStarted = define(t.SYSTEM_STARTED, [
 SystemStateChanged = define(t.SYSTEM_STATE_CHANGED, [
     F("state", Enum("running", "paused", "stopping", "stopped")),
     O("reason", Str),
+    # True while self-directed work is held -- either the whole system is
+    # paused, or someone asked for a `scope="autonomous"` pause (`auto
+    # off`). The state machine has computed this since it was written and
+    # nothing ever published or read it, so `auto off` changed nothing at
+    # all: Curiosity saw `state="running"` and kept generating.
+    O("autonomous_paused", Bool),
 ])
 _CONTROL = [
     F("reason", Str),

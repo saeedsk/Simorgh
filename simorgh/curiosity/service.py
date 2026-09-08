@@ -65,6 +65,9 @@ class Service:
 
     def __init__(self, *, config: Config | None = None, seed: int | None = None) -> None:
         self._config_from_caller = config
+        # Self-directed work held? Set by `auto off` / `auto on`, and
+        # seeded from `[curiosity] autonomy_on_boot`.
+        self._autonomy_paused = False
         self._config = config or Config()
         self._engine = DriveEngine(self._config)
         self._sampler = DriveWeightedSampler(self._engine)
@@ -104,6 +107,7 @@ class Service:
         if self._config_from_caller is None and ctx.config:
             self._config = Config.from_mapping(dict(ctx.config))
             self._recent = RecentCandidates(maxlen=self._config.recent_subjects)
+        self._autonomy_paused = not self._config.autonomy_on_boot
         self._bus = ctx.bus
         self._ledger = ctx.ledger
         self._clock = ctx.clock
@@ -151,7 +155,20 @@ class Service:
         return self._clock.now() if self._ctx is not None else time.time()
 
     async def _on_state_changed(self, message) -> None:
-        self._state = message.payload["state"]
+        """Track both the system state and whether self-directed work is
+        held.
+
+        `auto off` publishes a `scope="autonomous"` pause, which leaves
+        the system `running` on purpose -- a human's requests must keep
+        working. The state machine has computed `autonomous_paused` since
+        it was written, and nothing published or read it, so `auto off`
+        changed nothing at all: this handler saw `running` and kept
+        generating projects, research and patches. Live-caught 2026-09-07.
+        """
+        p = message.payload
+        self._state = p["state"]
+        if "autonomous_paused" in p:
+            self._autonomy_paused = bool(p["autonomous_paused"])
 
     async def _on_task_created(self, message) -> None:
         self._backlog.on_created(message.payload["task_id"])
@@ -323,6 +340,11 @@ class Service:
         self._cognition_attempted = False
         if not force and self._state in ("paused", "stopping"):
             await self._record_tick(skipped_reason="paused")
+            return []
+        if not force and self._autonomy_paused:
+            # `auto off`: the system keeps serving the human, and stops
+            # inventing work of its own.
+            await self._record_tick(skipped_reason="autonomy_paused")
             return []
         if not force and self._backlog.effective_count > 0:
             await self._record_tick(skipped_reason="backlog_nonempty")

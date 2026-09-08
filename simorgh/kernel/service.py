@@ -308,7 +308,10 @@ class Kernel:
         await self._append_state(change)
         await self.bus.publish(validate(Message.new(
             topics.SYSTEM_STATE_CHANGED, source="kernel",
-            payload={"state": self.state.state, "reason": change.reason}, clock=self._clock.now,
+            payload={
+                "state": self.state.state, "reason": change.reason,
+                "autonomous_paused": self.state.autonomous_paused,
+            }, clock=self._clock.now,
         )))
 
     async def _on_resume(self, message: Message) -> None:
@@ -319,7 +322,10 @@ class Kernel:
         await self._append_state(change)
         await self.bus.publish(validate(Message.new(
             topics.SYSTEM_STATE_CHANGED, source="kernel",
-            payload={"state": self.state.state, "reason": change.reason}, clock=self._clock.now,
+            payload={
+                "state": self.state.state, "reason": change.reason,
+                "autonomous_paused": self.state.autonomous_paused,
+            }, clock=self._clock.now,
         )))
 
     async def _on_stop(self, message: Message) -> None:

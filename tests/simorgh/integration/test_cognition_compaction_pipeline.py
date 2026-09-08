@@ -178,7 +178,10 @@ class TestCognitionCompactionPipelineBoot(unittest.IsolatedAsyncioTestCase):
         messages = older + [{"role": "user", "content": "the newest turn"}]
         request = Message.new(topics.COGNITION_THINK, source="test", payload={
             "purpose": "chat", "messages": messages,
-            "budget": {"max_tokens": 1_200, "max_cost_usd": 0.1}, "require_real_provider": False,
+            # `max_tokens_in` is the context ceiling this test squeezes;
+            # `max_tokens` only says how much answer is wanted back.
+            "budget": {"max_tokens_in": 1_200, "max_tokens": 1_200, "max_cost_usd": 0.1},
+            "require_real_provider": False,
             "allow_summarize": True, "session_id": "integration-s1",
         })
         reply = await self.kernel.bus.request(request, timeout=5.0)
