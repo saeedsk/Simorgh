@@ -52,6 +52,7 @@ from simorgh.contracts.protocols import ToolContext, ToolResult
 
 from . import pathsafety
 from .config import Config
+from .htmltext import html_to_text, looks_like_html
 from .shell import RunShellTool
 from .websearch import WebSearchTool
 
@@ -370,12 +371,21 @@ class WebFetchTool:
         raw = _decompress(raw, encoding)
         truncated = len(raw) > self._config.web_fetch_max_bytes
         content = raw[: self._config.web_fetch_max_bytes].decode(charset, errors="replace")
+        # Markup is not content. Measured on real pages: 74% of a docs
+        # page, 87% of an arXiv abstract, and 99.5% of a JavaScript app
+        # -- which returned 224 usable characters with `ok=True` and
+        # told the model nothing was wrong (observer, 2026-09-08).
+        js_shell = False
+        raw_chars = len(content)
+        if self._config.web_fetch_extract_text and looks_like_html(content):
+            content, js_shell = html_to_text(content, url=url)
         return ToolResult(
             ok=True, output=content,
             metadata={
                 "url": url, "status": status_code, "truncated": truncated,
                 "sha256": hashlib.sha256(raw[: self._config.web_fetch_max_bytes]).hexdigest(),
                 "fetched_at": ctx.clock.now(),
+                "raw_chars": raw_chars, "text_chars": len(content), "js_shell": js_shell,
             },
         )
 

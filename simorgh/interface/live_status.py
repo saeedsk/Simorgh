@@ -48,6 +48,8 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "run_python_sandboxed"): "Running",
     ("act", "apply_source_patch"): "Patching",
     ("act", "apply_skill"): "Applying",
+    ("act", "run_shell"): "Running",
+    ("act", "web_search"): "Searching",
     ("act", "git_commit"): "Committing",
     ("act", "git_revert"): "Reverting",
     ("act", "propose_mcp_server"): "Proposing",

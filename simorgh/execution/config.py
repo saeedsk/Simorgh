@@ -146,6 +146,11 @@ class Config:
     web_search_attempts: int = 3
     web_search_max_calls: int = 60
     web_search_window_s: float = 3600.0
+    # Turn a fetched HTML page into readable text before the model sees
+    # it. Off would mean handing it 87% markup again; the switch exists
+    # because a caller that genuinely wants the source should be able to
+    # say so.
+    web_fetch_extract_text: bool = True
     web_fetch_max_bytes: int = 200_000
     web_fetch_max_calls: int = 30
     web_fetch_window_s: float = 3600.0

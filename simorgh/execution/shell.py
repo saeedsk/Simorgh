@@ -59,13 +59,31 @@ DEFAULT_SHELL_REFUSALS: dict[str, str] = {
     r"\brm\s+(-[a-zA-Z]*\s+)*(~|\$HOME|\$\{HOME\})(/|\s|$)":
         "recursive delete under the home directory",
     r"\brm\s+(-[a-zA-Z]*\s+)*/\*": "recursive delete of everything under the filesystem root",
+    # One character from `rm -rf .`, and it deletes the parent of the
+    # repository -- the highest damage-per-typo on the list (observer,
+    # 2026-09-08).
+    r"\brm\s+(-[a-zA-Z]*\s+)*\.\.(/\s*)?(\s|$)": "recursive delete of the parent directory",
+    # A model that has just read `pwd` writes the absolute form of the
+    # same accident the `~` rule already covers.
+    r"\brm\s+(-[a-zA-Z]*\s+)*/(Users|home)/[^/\s]+(/[^\s]*)?(\s|$)":
+        "recursive delete inside a home directory",
+    r"\bfind\s+\.[^|]*-delete\b": "deletes every file it matches; name them instead",
+    r"\b(git\s+(checkout|restore))\s+(--\s+)?\.(\s|$)":
+        "discards every uncommitted change; use git_discard for one file",
+    r"\bchmod\s+(-[a-zA-Z]*\s+)*-R\s+[0-7]{3,4}\s+(~|\.|\$HOME)(\s|$|/)":
+        "changes permissions on the whole tree",
+    r"\bcrontab\s+-r\b": "deletes the user's scheduled jobs",
     r"\bfind\s+/\s[^|]*-delete\b": "deletes everything it finds from the filesystem root",
     r"\bfind\s+/\s[^|]*-exec\s+rm\b": "deletes everything it finds from the filesystem root",
     r"\bchmod\s+(-[a-zA-Z]*\s+)*(-R\s+)?[0-7]{3,4}\s+/(\s|$)":
         "changes permissions on the whole filesystem",
     r"\bchown\s+(-[a-zA-Z]*\s+)*(-R\s+)?[^\s]+\s+/(\s|$)":
         "changes ownership of the whole filesystem",
-    r"\bgit\s+clean\b[^|]*-[a-zA-Z]*[xd]": "deletes untracked and ignored files, which git cannot undo",
+    # `-n`/`--dry-run` lists what WOULD go and deletes nothing. Refusing
+    # it punished the model for inspecting before acting, which is
+    # exactly the behaviour we want (observer, 2026-09-08).
+    r"\bgit\s+clean\b(?![^|]*(-[a-zA-Z]*n|--dry-run))[^|]*-[a-zA-Z]*[xd]":
+        "deletes untracked and ignored files, which git cannot undo",
     r"\bgit\s+reset\s+--hard\b": "discards committed work irrecoverably; use git_revert",
     r"\bgit\s+checkout\b[^|]*\s--\s": "discards uncommitted work; use git_discard",
     r"\b(curl|wget)\b[^|]*\|\s*(python|python3|perl|ruby|node)\b":
@@ -100,6 +118,28 @@ def _cap(text: str) -> str:
         f"\n...[cut at {_OUTPUT_CAP} of {len(text)} chars; narrow the command, "
         "or pipe it through head/grep/wc]"
     )
+
+
+# Environment variables a shell command has no business reading. Sim
+# runs `printenv` and `grep -r` for perfectly good reasons -- an
+# observer watched a "find any credentials in this repo" task do exactly
+# that (2026-09-08) -- and the child was being handed every provider key
+# this process holds. Nothing leaked, but the mechanism was live: one
+# `printenv` and the value is in the model's context, the ledger, and
+# possibly a reply. No legitimate command here needs them.
+_SECRET_ENV_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_CREDENTIALS")
+_SECRET_ENV_NAMES = frozenset({"HF_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AWS_SECRET_ACCESS_KEY",
+                               "AWS_SESSION_TOKEN", "GITHUB_TOKEN"})
+
+
+def _is_secret_env(name: str) -> bool:
+    upper = name.upper()
+    return upper in _SECRET_ENV_NAMES or upper.endswith(_SECRET_ENV_SUFFIXES)
+
+
+def _child_env() -> dict:
+    """`os.environ` with the credentials taken out."""
+    return {name: value for name, value in os.environ.items() if not _is_secret_env(name)}
 
 
 def _head(command: str) -> str:
@@ -146,7 +186,7 @@ class RunShellTool:
             return ToolResult(ok=False, error=f"refused: that command {reason}")
 
         timeout = self._config.shell_timeout_s
-        env = dict(os.environ)
+        env = _child_env()
         # A command that stops to ask a question would hang until the
         # timeout and tell nobody why.
         env["GIT_TERMINAL_PROMPT"] = "0"

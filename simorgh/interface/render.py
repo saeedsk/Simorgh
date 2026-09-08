@@ -33,29 +33,59 @@ _MIN_WIDTH = 60
 _MAX_WIDTH = 200
 
 
-def display_width(text: str) -> int:
-    """Columns `text` occupies. An emoji is two cells wide, not one --
-    every feed line was measured 1-2 cells narrow (observer,
-    2026-09-08)."""
+# An ANSI sequence occupies no columns. Measuring it as text made every
+# coloured line look wider than it is, and cutting one could slice
+# through an escape and leave the terminal mid-sequence (caught by the
+# banner's own "no stray escapes" test, 2026-09-08).
+_ANSI = re.compile(r"\x1b\[[0-9;:]*[A-Za-z]")
+
+
+def _cell_width(ch: str) -> int:
     import unicodedata
 
-    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") or ord(ch) > 0x1F000 else 1
-               for ch in text)
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") or ord(ch) > 0x1F000 else 1
+
+
+def display_width(text: str) -> int:
+    """Columns `text` occupies on screen. Escape sequences are free; an
+    emoji is two cells, not one -- every feed line was measured 1-2
+    cells narrow (observer, 2026-09-08)."""
+    return sum(_cell_width(ch) for ch in _ANSI.sub("", text or ""))
 
 
 def fit(text: str, width: int, *, ellipsis: str = "…") -> str:
-    """`text` cut to at most `width` DISPLAY columns."""
+    """`text` cut to at most `width` display columns, escapes intact.
+
+    Cuts between characters, never inside an escape sequence, and
+    carries any sequences from the cut-off tail so a cut line cannot
+    leave the terminal coloured."""
     if display_width(text) <= width:
         return text
     room = max(1, width - display_width(ellipsis))
-    out, used = [], 0
-    for ch in text:
-        cell = display_width(ch)
+    out: list[str] = []
+    used = 0
+    index = 0
+    dropped_escape = False
+    while index < len(text):
+        match = _ANSI.match(text, index)
+        if match:
+            if used < room:
+                out.append(match.group(0))
+            else:
+                dropped_escape = True
+            index = match.end()
+            continue
+        cell = _cell_width(text[index])
         if used + cell > room:
+            dropped_escape = dropped_escape or bool(_ANSI.search(text, index))
             break
-        out.append(ch)
+        out.append(text[index])
         used += cell
-    return "".join(out) + ellipsis
+        index += 1
+    tail = ellipsis + ("\x1b[0m" if dropped_escape else "")
+    return "".join(out) + tail
 
 
 def terminal_width(default: int = 100) -> int:
@@ -217,6 +247,12 @@ def vitals(snapshot: VitalsSnapshot) -> str:
     return "\n".join(lines)
 
 
+# The width the splash art was drawn for. Everything that renders text
+# beside it asks `terminal_width()` instead: at 70 columns eight of
+# twelve splash lines overran, and every task row was 119 columns and
+# wrapped mid-column, destroying the table on the first screen a user
+# sees (observer, 2026-09-08). My earlier width pass covered the feed
+# and the panel and missed this file entirely.
 _RULE_WIDTH = 68
 
 # Brand palette and CLI logo -- from docs/brand/simorgh-brand.json (the
@@ -341,10 +377,11 @@ def banner(*, enabled: bool = True, unicode: str = "auto") -> str:
         rule_ch, mark_plain = "-", "*  SIMORGH  *"
     else:
         rule_ch, mark_plain = "─", "◆  SIMORGH  ◆"
-    rule = style(rule_ch * _RULE_WIDTH, "dim", enabled=enabled)
+    banner_width = min(_RULE_WIDTH, terminal_width())
+    rule = style(rule_ch * banner_width, "dim", enabled=enabled)
     # The wordmark in the brand's own gold (docs/brand/simorgh-brand.json),
     # bold; falls back to plain text when color is off.
-    mark = _rgb(style(mark_plain.center(_RULE_WIDTH), "bold", enabled=enabled), "gold", enabled=enabled)
+    mark = _rgb(style(mark_plain.center(banner_width), "bold", enabled=enabled), "gold", enabled=enabled)
     name = "Simorgh (سیمرغ)" if unicode == "full" else "Simorgh"
     epigraph = style(
         f'"si morgh": thirty birds, one {name} -- Attar\'s Conference of\n'
@@ -369,12 +406,22 @@ def banner(*, enabled: bool = True, unicode: str = "auto") -> str:
         "`help` lists everything; here's where to start:",
         "",
     ]
+    # The name column is as wide as the longest name; the description
+    # gets whatever the terminal has left, and is cut if it does not
+    # fit. At 70 columns eight of these ran past the edge and wrapped
+    # (observer, 2026-09-08).
+    # ASCII mode means ASCII everywhere, including the cut marker.
+    ellipsis = "…" if unicode != "off" else "..."
     width = max(len(name) for name, _ in _QUICK_COMMANDS)
+    room = max(16, banner_width - width - 5)
     for name, desc in _QUICK_COMMANDS:
         label = style(name.ljust(width), "cyan", enabled=enabled)
-        lines.append(f"  {label}   {desc}")
+        lines.append(f"  {label}   {fit(desc, room, ellipsis=ellipsis)}")
     lines.append(rule)
-    return "\n".join(lines)
+    # Last word on width: nothing in the splash may exceed the terminal.
+    # The prose lines are hand-wrapped for 68 and the art has its own
+    # shape, so cut here rather than trying to reflow either.
+    return "\n".join(fit(line, banner_width, ellipsis=ellipsis) for line in lines)
 
 _STATUS_COLOR = {
     "in_progress": "cyan", "available": "yellow", "pending": "dim", "blocked": "magenta",
@@ -476,8 +523,14 @@ def _task_line(task: dict, *, enabled: bool = True) -> str:
     subject = task.get("subject") or ""
     if subject and subject not in description:
         description = f"{subject}: {description}"
-    if len(description) > 68:
-        description = description[:67] + "…"
+    # Measure the prefix rather than guessing its width -- guessing is
+    # exactly how this line came to be 87 columns on an 80-column
+    # terminal (observer, 2026-09-08).
+    prefix = (
+        f"{task.get('task_id', '?')[:12]:12s}  "
+        f"{status:<12s}  {task.get('kind', '?'):<8s}  {origin:<9s}  "
+    )
+    description = fit(description, max(20, terminal_width() - display_width(prefix) - 2))
     return (
         f"{task.get('task_id', '?')[:12]:12s}  "
         f"{style(f'{status:<12s}', _STATUS_COLOR.get(status, 'dim'), enabled=enabled)}  "

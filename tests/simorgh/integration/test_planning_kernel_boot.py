@@ -447,3 +447,104 @@ class TestAContinuationComesBackSoonWithItsOwnCap(unittest.IsolatedAsyncioTestCa
         delays = [m.payload["retry_after"] for m in heard.messages if m.source != "orchestration"]
         self.assertEqual(delays, [planning.config.continuation_delay_seconds, planning.config.blocked_retry_delay_seconds])
         self.assertLess(planning.config.continuation_delay_seconds, 60)
+
+
+class TestAProjectProducesChildren(unittest.IsolatedAsyncioTestCase):
+    """The blocker that survived three hunts.
+
+    `refresh_lease` is the last statement before `plan.proposed` is
+    published, and it passed a stale cursor as a compare-and-swap -- the
+    identical bug fixed in `transition` on 2026-09-07 and never applied
+    to the other four writes. The Worker appends a `task.step` per step,
+    so Planning's cursor is stale by exactly that many, the append raised
+    `ConflictError: expected head 5, actual 10`, the bus swallowed it,
+    and `plan.proposed` was NEVER PUBLISHED. No project had ever produced
+    a child task (observer, 2026-09-08).
+    """
+
+    PLAN = (
+        "1. RESEARCH :: which modules in simorgh/interface/ lack a docstring\n"
+        "2. simorgh/interface/api.py :: add a one-line module docstring\n"
+        "3. simorgh/interface/vitals.py :: add a one-line module docstring\n"
+    )
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        config = LoadedConfig({"runtime": {"data_dir": self._tmp.name}}, None)
+        self.kernel = Kernel(config, secrets=EnvSecretStore({}))
+        self._patch = mock.patch("simorgh.kernel.service.build_factories", new=_patched_build_factories())
+        self._patch.start()
+        await self.kernel.boot()
+        self.planning = self.kernel._supervisor.services["planning"].service  # noqa: SLF001
+
+    async def asyncTearDown(self) -> None:
+        await self.kernel.shutdown()
+        self._patch.stop()
+        self._tmp.cleanup()
+
+    async def _project_with_steps(self):
+        """A project whose stream already carries the Worker's steps --
+        which is what made Planning's cursor stale."""
+        import json
+
+        from simorgh.contracts.envelope import Event
+
+        store = self.planning._store  # noqa: SLF001
+        task = await store.create(kind="project", description="add missing docstrings",
+                                  origin="human", mode="plan", initial_status="available")
+        await store.claim(task.id, "w1", 600.0)
+        await store.transition(task.id, "in_progress")
+        for n in range(5):
+            await self.kernel.ledger.append(f"task:{task.id}", Event(
+                stream=f"task:{task.id}", type=topics.TASK_STEP, ts=0.0, trace_id=task.id,
+                causation_id=None, payload={"task_id": task.id, "step_no": n + 1,
+                                            "phase": "act", "summary": f"step {n + 1}", "ok": True}))
+        blob = await self.kernel.ledger.put_blob(
+            json.dumps({"goal": "g", "steps_text": self.PLAN}).encode(), content_type="application/json")
+        return await store.get(task.id), blob
+
+    async def test_a_stale_cursor_no_longer_stops_the_plan_being_proposed(self) -> None:
+        proposed = _Collector()
+        sub = await self.kernel.bus.subscribe(topics.PLAN_PROPOSED, proposed)
+        task, blob = await self._project_with_steps()
+        await self.planning._on_plan_worker_result(task, [blob])  # noqa: SLF001
+        await _pump(50)
+        await sub.unsubscribe()
+        self.assertEqual(len(proposed.messages), 1, "plan.proposed was never published")
+        self.assertEqual(len(proposed.messages[0].payload["steps"]), 3)
+
+    async def test_an_approved_plan_creates_child_tasks_with_a_parent(self) -> None:
+        proposed = _Collector()
+        sub = await self.kernel.bus.subscribe(topics.PLAN_PROPOSED, proposed)
+        task, blob = await self._project_with_steps()
+        await self.planning._on_plan_worker_result(task, [blob])  # noqa: SLF001
+        await _pump(50)
+        await sub.unsubscribe()
+
+        await self.kernel.bus.publish(self.kernel.bus.new(topics.PLAN_REVIEWED, {
+            "plan_id": proposed.messages[0].payload["plan_id"], "verdict": "approve",
+            "checklist": [], "risks": [], "feedback": "",
+        }))
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            children = [t for t in self.planning._store.index.tasks.values() if t.parent_id == task.id]  # noqa: SLF001
+            if children:
+                break
+
+        children = [t for t in self.planning._store.index.tasks.values() if t.parent_id == task.id]  # noqa: SLF001
+        self.assertEqual(len(children), 3, "a project must decompose into its steps")
+        self.assertEqual({t.kind for t in children}, {"research", "patch"})
+        self.assertTrue(all(t.parent_id == task.id for t in children))
+
+    async def test_a_plan_with_no_usable_steps_frees_the_task_instead_of_freezing_it(self) -> None:
+        """`in_progress -> pending` is not a legal transition, so this
+        raised unconditionally and froze the project silently."""
+        import json
+
+        task, _ = await self._project_with_steps()
+        blob = await self.kernel.ledger.put_blob(
+            json.dumps({"goal": "g", "steps_text": "no steps here at all"}).encode(),
+            content_type="application/json")
+        await self.planning._on_plan_worker_result(task, [blob])  # noqa: SLF001
+        await _pump(20)
+        self.assertEqual((await self.planning._store.get(task.id)).status, "available")  # noqa: SLF001
