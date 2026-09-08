@@ -201,7 +201,19 @@ class TaskStore:
         if not is_legal_transition(current.status, status):
             raise ValueError(f"{task_id}: illegal transition {current.status} -> {status}")
         stream = f"task:{task_id}"
-        exp = expected_seq if expected_seq is not None else self.index.cursors.get(stream, 0)
+        # `None` means "just append". Passing our own cursor made every
+        # status write a compare-and-swap against a stream the *worker*
+        # is also writing to -- it appends a `task.step` per step -- so
+        # Planning's cursor is stale essentially always. Measured on a
+        # fresh task 2026-09-07: the `in_progress` write failed with
+        # "expected head 2, actual 3" every single time, the bus handler
+        # swallowed it, and the task stayed `claimed` forever. All 109 of
+        # the creator's tasks were sitting in exactly that state.
+        #
+        # The legality check above already ran against the current index.
+        # This write records a decision; it is not a bid to win a race. A
+        # caller wanting the optimistic check still passes `expected_seq`.
+        exp = expected_seq
         now = self._clock.now()
         event = Event(
             stream=stream, type="status_changed", ts=now, trace_id=task_id, causation_id=None,

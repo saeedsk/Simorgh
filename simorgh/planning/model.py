@@ -109,7 +109,12 @@ class Step:
 _TRANSITIONS: dict[str, frozenset[str]] = {
     PENDING: frozenset({AVAILABLE, BLOCKED}),
     AVAILABLE: frozenset({CLAIMED, PAUSED, BLOCKED}),
-    CLAIMED: frozenset({IN_PROGRESS, AVAILABLE}),  # AVAILABLE = lease expired before task.started
+    # Terminal states are reachable straight from CLAIMED: `task.started`
+    # is a separate message, and if recording it is lost the work still
+    # really happened. Refusing the completion left the task `claimed`
+    # forever -- which is where 109 of the creator's tasks were sitting
+    # on 2026-09-07, having genuinely finished. AVAILABLE = lease expired.
+    CLAIMED: frozenset({IN_PROGRESS, AVAILABLE, COMPLETED, FAILED, BLOCKED}),
     IN_PROGRESS: frozenset({PAUSED, COMPLETED, FAILED, BLOCKED, AVAILABLE}),  # AVAILABLE = lease expired
     PAUSED: frozenset({AVAILABLE, CLAIMED}),
     BLOCKED: frozenset({AVAILABLE, FAILED}),

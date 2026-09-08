@@ -224,3 +224,58 @@ class TestWhenTheServiceUsesIt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheTaskListRendering(unittest.TestCase):
+    """`tasks` output. Live-caught 2026-09-07: it printed only a count,
+    and once it printed rows, every project read `pending 0/0 steps` while
+    the same ids showed as `claimed` in the task list directly above."""
+
+    def _render(self, tasks, projects=()):
+        from simorgh.interface.render import task_list
+
+        return task_list(list(tasks), list(projects), enabled=False)
+
+    def test_a_project_with_no_steps_shows_its_own_status(self):
+        out = self._render(
+            [{"task_id": "p1", "kind": "project", "status": "claimed",
+              "origin": "curiosity", "description": "design a thing"}],
+            [{"project_id": "p1", "rollup": "pending", "done": 0, "total": 0, "stalled": False}],
+        )
+        project_line = out.splitlines()[-1]
+        self.assertIn("claimed", project_line)
+        self.assertNotIn("0/0", project_line)
+        self.assertIn("not broken down", project_line)
+
+    def test_a_project_with_steps_shows_the_rollup_and_the_count(self):
+        out = self._render(
+            [{"task_id": "p1", "kind": "project", "status": "in_progress",
+              "origin": "human", "description": "a thing"}],
+            [{"project_id": "p1", "rollup": "in_progress", "done": 1, "total": 3, "stalled": False}],
+        )
+        self.assertIn("1/3 steps", out)
+
+    def test_an_empty_backlog_says_so(self):
+        self.assertEqual(self._render([]), "no tasks")
+
+    def test_the_rows_carry_id_status_kind_origin_and_description(self):
+        out = self._render([{"task_id": "abc123def456", "kind": "patch", "status": "available",
+                             "origin": "curiosity", "description": "tighten the retry loop"}])
+        for fragment in ("abc123def456", "available", "patch", "curiosity", "tighten the retry loop"):
+            self.assertIn(fragment, out)
+
+    def test_a_long_backlog_is_truncated_with_a_count_of_the_rest(self):
+        tasks = [{"task_id": f"t{i:012d}", "kind": "patch", "status": "available",
+                  "origin": "curiosity", "description": f"thing {i}"} for i in range(30)]
+        out = self._render(tasks, [])
+        self.assertIn("... 10 more", out)
+        self.assertIn("tasks all", out)
+
+    def test_work_in_flight_is_listed_before_work_that_is_waiting(self):
+        out = self._render([
+            {"task_id": "waiting", "kind": "patch", "status": "available",
+             "origin": "curiosity", "description": "later"},
+            {"task_id": "moving", "kind": "patch", "status": "in_progress",
+             "origin": "human", "description": "now"},
+        ])
+        self.assertLess(out.index("moving"), out.index("waiting"))

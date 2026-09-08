@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 
+import asyncio
 import uuid
 from dataclasses import replace
 
@@ -58,7 +59,24 @@ class Worker:
         self._subs: list = []
 
     async def start(self) -> None:
-        self._subs.append(await self._bus.subscribe(topics.TASK_AVAILABLE, self._on_available, group="workers"))
+        # `max_inflight=1` is the whole concurrency policy, and it belongs
+        # here rather than in a queue of our own.
+        #
+        # Live-caught 2026-09-07: the default is 16, so one worker ran up
+        # to sixteen sessions at once, claiming far more of the backlog
+        # than it could finish. The creator's `tasks` showed all 109 tasks
+        # in `claimed` simultaneously, every session competing for the
+        # same provider, and nothing completing. `current_task_id` being a
+        # single value says one-at-a-time was always the intent.
+        #
+        # Doing it with the subscription rather than an internal queue
+        # keeps the delivery unacknowledged until the session actually
+        # finishes, which is what lets a *crashed* worker's task be
+        # redelivered to the next one
+        # (tests/simorgh/integration/test_local_multi_worker_crash_resume.py).
+        self._subs.append(await self._bus.subscribe(
+            topics.TASK_AVAILABLE, self._on_available, group="workers", max_inflight=1,
+        ))
         self._subs.append(await self._bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
 
     async def stop(self) -> None:
