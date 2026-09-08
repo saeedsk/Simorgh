@@ -381,19 +381,43 @@ def task_list(tasks: list[dict], projects: list[dict], *, limit: int = 20, enabl
         lines.append(style(f"  ... {len(tasks) - shown} more (`tasks all` to see them)", "dim", enabled=enabled))
 
     if projects:
+        by_id = {t.get("task_id"): t for t in tasks}
         lines.append("")
         lines.append(f"{len(projects)} project(s):")
         for project in projects[:limit]:
-            rollup = project.get("rollup", "?")
-            stalled = "  stalled" if project.get("stalled") else ""
-            lines.append(
-                f"  {project.get('project_id', '?')[:12]:12s}  "
-                f"{style(rollup, _STATUS_COLOR.get(rollup, 'dim'), enabled=enabled)}  "
-                f"{project.get('done', 0)}/{project.get('total', 0)} steps{stalled}"
-            )
+            lines.append("  " + _project_line(project, by_id, enabled=enabled))
         if len(projects) > limit:
             lines.append(style(f"  ... {len(projects) - limit} more", "dim", enabled=enabled))
     return "\n".join(lines)
+
+
+def _project_line(project: dict, by_id: dict, *, enabled: bool = True) -> str:
+    """One project row.
+
+    Live-caught (the creator, 2026-09-07): every project read `pending
+    0/0 steps` while the same ids appeared as `claimed` in the task list
+    directly above -- two different answers about one task on one screen.
+    The rollup is computed from a project's children, so with no children
+    it reports `pending` regardless of what the project itself is doing.
+    A project with no steps says so, in its own real status.
+    """
+    project_id = project.get("project_id", "?")
+    task = by_id.get(project_id, {})
+    total = project.get("total", 0)
+    if not total:
+        status = task.get("status", "?")
+        return (
+            f"{project_id[:12]:12s}  "
+            f"{style(f'{status:<12s}', _STATUS_COLOR.get(status, 'dim'), enabled=enabled)}  "
+            + style("not broken down into steps yet", "dim", enabled=enabled)
+        )
+    rollup = project.get("rollup", "?")
+    stalled = "  stalled" if project.get("stalled") else ""
+    return (
+        f"{project_id[:12]:12s}  "
+        f"{style(f'{rollup:<12s}', _STATUS_COLOR.get(rollup, 'dim'), enabled=enabled)}  "
+        f"{project.get('done', 0)}/{total} steps{stalled}"
+    )
 
 
 def _task_line(task: dict, *, enabled: bool = True) -> str:
