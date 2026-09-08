@@ -144,3 +144,19 @@ class CompareTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LongLevelNamesTestCase(unittest.TestCase):
+    """BFCL's levels are words, not digits. The bars must still line up
+    (watched, 2026-09-08: "Level live_parallel ███ ... Llive_parallel")."""
+
+    def test_the_level_column_widens_to_the_longest_name(self):
+        run = _run(by_level={"live_parallel": [1, 1], "parallel": [2, 2]})
+        lines = [line for line in summary(run).splitlines() if "Level" in line]
+        self.assertEqual(len(lines), 2)
+        starts = {line.index("█") for line in lines}
+        self.assertEqual(len(starts), 1, "the bars do not line up")
+
+    def test_a_digit_level_still_renders_compactly(self):
+        text = summary(_run(by_level={"1": [1, 2], "2": [1, 2]}))
+        self.assertIn("Level 1 ", text)

@@ -113,16 +113,21 @@ def summary(record: dict, *, width: int = 24) -> str:
     ]
     by_level = _levels(record)
     if len(by_level) > 1 or (by_level and "" not in by_level):
+        # A GAIA level is "1"; a BFCL one is "live_parallel". Widen the
+        # column to the longest name present rather than to a guess, so
+        # the bars still line up (watched, 2026-09-08).
+        names = {level: _LEVEL_NAMES.get(level, f"Level {level}" if level else "all") for level in by_level}
+        column = max((len(n) for n in names.values()), default=9)
         for level, (correct, attempted) in by_level.items():
-            name = _LEVEL_NAMES.get(level, f"Level {level}" if level else "all")
             lines.append(
-                f"    {name:<9} {bar(correct / attempted if attempted else 0, width)}"
+                f"    {names[level]:<{column}} {bar(correct / attempted if attempted else 0, width)}"
                 f"  {_pct(correct, attempted)}  {correct}/{attempted}"
             )
+    column = max((len(_LEVEL_NAMES.get(k, f"Level {k}" if k else "all")) for k in by_level), default=9)
     cost_usd = float(record.get("cost_usd") or 0.0)
     cost = f"  ·  ${cost_usd:.4f}" if cost_usd else ""
     lines.append(
-        f"    {'':<9} {float(record.get('seconds') or 0.0):.0f}s total{cost}"
+        f"    {'':<{column}} {float(record.get('seconds') or 0.0):.0f}s total{cost}"
         f"  ·  suite {record.get('suite_version', 'unknown')}"
     )
     return "\n".join(lines)

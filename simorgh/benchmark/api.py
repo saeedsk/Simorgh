@@ -126,6 +126,12 @@ class RunRecord:
     # were the same measurement is how a benchmark starts lying.
     partial: bool = False
     note: str = ""
+    # Set only when a record was rebuilt from a summary payload with no
+    # per-case detail: the totals it can no longer recompute. Live-caught
+    # 2026-09-08 -- `benchmark` reported "0s total" for a run that had
+    # really taken 31 seconds, because the round trip through the history
+    # summary dropped everything the synthetic results could not carry.
+    totals: dict = field(default_factory=dict)
 
     # -- scoring -------------------------------------------------------
     @property
@@ -150,11 +156,11 @@ class RunRecord:
 
     @property
     def seconds(self) -> float:
-        return sum(r.seconds for r in self.results)
+        return self.totals.get("seconds", sum(r.seconds for r in self.results))
 
     @property
     def cost_usd(self) -> float:
-        return sum(r.cost_usd for r in self.results)
+        return self.totals.get("cost_usd", sum(r.cost_usd for r in self.results))
 
     def by_level(self) -> dict[str, tuple[int, int]]:
         """level -> (correct, attempted), lowest level first."""
@@ -203,6 +209,10 @@ class RunRecord:
                 skipped=bool(case.get("skipped")), error=case.get("error", ""),
             ))
         if not record.results:
+            record.totals = {
+                "seconds": float(payload.get("seconds") or 0.0),
+                "cost_usd": float(payload.get("cost_usd") or 0.0),
+            }
             # A record stored without its cases (the history endpoint's
             # compact form) still has to report its own numbers, so
             # rebuild enough synthetic results to keep the properties
