@@ -693,6 +693,22 @@ def _python_syntax_problem(subject: str, code: str) -> str | None:
     return None
 
 
+# A rewrite that keeps fewer than this share of a file's non-blank lines
+# is refused as content loss -- once the file is big enough for the loss
+# to be real, not a 3-line stub being replaced.
+_CONTENT_LOSS_KEEP_RATIO = 0.6
+_CONTENT_LOSS_MIN_LINES = 12
+
+
+def _content_loss(old: str, new: str) -> str | None:
+    """`"33 of 48 lines"` when `new` drops too much of `old`, else None."""
+    old_n = sum(1 for line in old.splitlines() if line.strip())
+    new_n = sum(1 for line in new.splitlines() if line.strip())
+    if old_n < _CONTENT_LOSS_MIN_LINES or new_n >= old_n * _CONTENT_LOSS_KEEP_RATIO:
+        return None
+    return f"{old_n - new_n} of {old_n} non-blank lines"
+
+
 def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes: tuple[str, ...]) -> ToolResult:
     """Shared body of `apply_source_patch`/`apply_skill`: write `code` to
     `subject`, refusing anything outside `write_scopes` -- a tool-level
@@ -735,6 +751,21 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
             old_text = target.read_text()
         except (OSError, UnicodeDecodeError):
             old_text = ""  # binary or unreadable -- diff honestly unavailable, not fabricated
+    if already_existed and old_text:
+        lost = _content_loss(old_text, code)
+        if lost is not None:
+            # Watched trial, 2026-09-07: asked to add one constant, the
+            # model read lines 1-15 of a 48-line file and sent those 15
+            # lines plus the constant as the "complete" file. Verification
+            # caught it that time; this catches it before anything is
+            # written. A rewrite that drops most of a file is almost never
+            # the task, and when it is, saying so costs one more call.
+            return ToolResult(ok=False, error=(
+                f"refused: the new content for {subject} drops {lost} -- apply_source_patch replaces the "
+                f"whole file. Read all of it first (READ_FILE: {subject}, no line range) and send it "
+                "complete with your change; if you truly mean to remove that much, say so in the "
+                "commit message and send it again."
+            ))
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(code)
     output = f"wrote {subject}"

@@ -279,3 +279,33 @@ class TestTheTaskListRendering(unittest.TestCase):
              "origin": "human", "description": "now"},
         ])
         self.assertLess(out.index("moving"), out.index("waiting"))
+
+
+class TestThePanelToolbar(unittest.IsolatedAsyncioTestCase):
+    """The bottom panel (`panel.py`) hands the toolbar formatted-text
+    fragments with their own style classes -- the breathing word's
+    shade among them -- and the toolbar must pass them through as-is,
+    while a plain string still becomes one footer fragment."""
+
+    async def test_formatted_rows_pass_through_untouched(self):
+        rows = [("class:sim.breath.3", "✻ Osmosing…"), ("class:sim.footer", "  patch · x · 3s"), ("", "\n"), ("class:sim.status", "auto on")]
+        prompt = Tui(on_line=self._noop_line, footer_text=lambda: rows)
+        session = prompt._build_session()  # noqa: SLF001
+        self.assertEqual(session.bottom_toolbar(), rows)
+
+    async def test_the_input_bar_has_a_rule_above_the_prompt(self):
+        prompt = Tui(on_line=self._noop_line)
+        session = prompt._build_session()  # noqa: SLF001
+        message = session.message() if callable(session.message) else session.message
+        self.assertEqual(message[0][0], "class:sim.rule")
+        self.assertTrue(message[0][1].startswith("─"))
+        self.assertTrue(message[0][1].endswith("\n"))
+        self.assertEqual(message[-1], ("class:sim.prompt", "> "))
+
+    async def test_every_breathing_shade_has_a_colour(self):
+        from simorgh.interface import panel
+        from simorgh.interface.tui import BREATH_COLOURS
+
+        self.assertEqual(len(BREATH_COLOURS), panel.BREATH_SHADES)
+
+    async def _noop_line(self, line: str) -> None: ...

@@ -49,6 +49,14 @@ class TaskRecord:
     status: str = "created"
     started_at: float | None = None
     steps: int = 0
+    # What the task is doing *right now*, for the bottom panel: the
+    # phase of the step in flight and the verb for it ("Reading",
+    # "Patching"; a gather phase breathes a word instead -- `panel.py`).
+    phase: str = ""
+    verb: str = ""
+    # When the last event for this task landed, so a finished step can
+    # say how long it took: the step record itself carries no timing.
+    last_event_at: float | None = None
 
     @property
     def topic(self) -> str:
@@ -122,12 +130,28 @@ class TaskBook:
         record = self.get(task_id)
         record.status = "running"
         record.started_at = now
+        record.last_event_at = now
         return record
 
-    def on_step(self, task_id: str) -> TaskRecord:
+    def on_step(self, task_id: str, *, now: float | None = None, phase: str = "", verb: str = "",
+                in_flight: bool = False) -> TaskRecord:
+        """A step event. An in-flight one (no outcome yet) only updates
+        what the task is doing; a finished one counts."""
         record = self.get(task_id)
+        if in_flight:
+            record.phase, record.verb = phase, verb
+            return record
         record.steps += 1
+        record.phase, record.verb = "", ""
+        if now is not None:
+            record.last_event_at = now
         return record
+
+    def step_took(self, task_id: str, *, now: float) -> float | None:
+        record = self.tasks.get(task_id)
+        if record is None or record.last_event_at is None:
+            return None
+        return max(0.0, now - record.last_event_at)
 
     def on_finished(self, task_id: str, status: str) -> TaskRecord:
         record = self.get(task_id)

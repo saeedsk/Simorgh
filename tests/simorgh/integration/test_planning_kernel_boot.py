@@ -337,3 +337,55 @@ class TestPlanningBootsAsARealKernelService(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestABlockedOutcomeIsHeardOnce(unittest.IsolatedAsyncioTestCase):
+    """Planning answers a Worker's `task.blocked` by parking the task and
+    publishing `task.blocked` itself -- on the same topic. It then heard
+    its own broadcast as a fresh outcome and parked the task again, and
+    again: 466 "blocked" lines on screen from one task before the kernel
+    shut down (watched trial, 2026-09-07). One outcome, one broadcast."""
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        config = LoadedConfig({"runtime": {"data_dir": self._tmp.name}}, None)
+        self.kernel = Kernel(config, secrets=EnvSecretStore({}))
+        self._patch = mock.patch("simorgh.kernel.service.build_factories", new=_patched_build_factories())
+        self._patch.start()
+        await self.kernel.boot()
+
+    async def asyncTearDown(self) -> None:
+        await self.kernel.shutdown()
+        self._patch.stop()
+        self._tmp.cleanup()
+
+    async def test_one_worker_report_yields_one_planning_broadcast(self) -> None:
+        bus = self.kernel.bus
+        create_reply = await bus.request(Message.new(
+            topics.TASK_CREATE, source="tester",
+            payload={"kind": "patch", "description": "do the thing", "origin": "human"},
+        ))
+        task_id = create_reply.payload["task_id"]
+        await bus.request(Message.new(
+            topics.TASK_CLAIM, source="tester", payload={"task_id": task_id, "worker_id": "w1"},
+        ))
+        await bus.publish(Message.new(
+            topics.TASK_STARTED, source="tester", payload={"task_id": task_id, "worker_id": "w1"},
+        ))
+        await _pump()
+
+        heard = _Collector()
+        sub = await bus.subscribe(topics.TASK_BLOCKED, heard)
+        await bus.publish(Message.new(
+            topics.TASK_BLOCKED, source="orchestration",
+            payload={"task_id": task_id, "reason": "step budget exhausted"},
+        ))
+        await _pump(200)
+        await sub.unsubscribe()
+
+        from_planning = [m for m in heard.messages if m.source != "orchestration"]
+        self.assertEqual(len(from_planning), 1, [m.source for m in heard.messages])
+        list_reply = await bus.request(Message.new(topics.TASK_LIST_REQUEST, source="tester", payload={}))
+        [task] = [t for t in list_reply.payload["tasks"] if t["task_id"] == task_id]
+        self.assertEqual(task["status"], "blocked")
+        self.assertEqual(task.get("attempts"), 1)

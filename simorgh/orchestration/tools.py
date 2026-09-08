@@ -131,7 +131,9 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
         "first line: the file path to write (inside src/ or simorgh/); every "
-        "following line: the COMPLETE new content of that file. Example:\n"
+        "following line: the COMPLETE new content of that file -- it replaces "
+        "the whole file, so anything you leave out is deleted. Read the whole "
+        "file (no line range) before rewriting it. Example:\n"
         "APPLY_SOURCE_PATCH: simorgh/foo.py\ndef f():\n    return 1\n"
     ),
     "apply_skill": (
@@ -163,6 +165,26 @@ _MARKER_NO_ARGS = frozenset({"git_revert"})
 # always wins over an announced one, so a human can still pin a stricter
 # policy for any tool.
 _DYNAMIC_TOOLS: dict[str, str] = {}
+
+
+def known_tools() -> frozenset[str]:
+    """Every tool Execution has announced this process. Empty until the
+    first `tool.registered` -- a harness with no Execution -- and then a
+    session offers the model only the intersection of its profile and
+    this: a profile named `run_shell` while Execution had it switched
+    off, and the model was told about a tool that answered "unknown
+    tool" (watched trial, 2026-09-07)."""
+    return frozenset(_DYNAMIC_TOOLS)
+
+
+def offered_tools(profile_tools: tuple[str, ...]) -> tuple[str, ...]:
+    """The profile's tools, minus any Execution has not registered (see
+    `known_tools`). Only filters once something *is* registered, so a
+    harness with no Execution offers the profile as written."""
+    known = known_tools()
+    if not known:
+        return tuple(profile_tools)
+    return tuple(t for t in profile_tools if t in known)
 
 
 def register_tool_policy(name: str, *, reversibility: str, provider: str) -> None:

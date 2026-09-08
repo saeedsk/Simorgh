@@ -188,6 +188,7 @@ class Kernel:
             bus_backend=self._bus_backend, ledger=self.ledger, config=self.config, secrets=self._secrets,
             clock=self._clock, runtime=self.runtime, run_id=self.run_id, hmac_secret=self._hmac_secret,
             needs_hmac_secret=NEEDS_HMAC_SECRET, bus_policy=policy, identity_registry=identities,
+            trace=self.bus.trace,
         )
         self._supervisor = Supervisor(
             clock=self._clock, logger=make_logger("kernel"), backoff_s=self.runtime.supervisor_backoff_s,

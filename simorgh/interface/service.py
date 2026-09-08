@@ -70,6 +70,7 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
 from . import activity as activity_mod
+from . import panel as panel_mod
 from . import render as render_mod
 from . import tui
 from .config import Config
@@ -106,7 +107,7 @@ class Service:
         topics.UI_NOTICE, topics.UI_PROMPT, topics.ACTION_NEEDS_HUMAN, topics.ACTION_DENIED,
         topics.PERSONA_STATE_CHANGED, topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_METRICS,
         topics.SYSTEM_HEALTH, topics.GUARDIAN_POSTURE_CHANGED, topics.TURN_COMPLETED,
-        topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_COMPLETED,
+        topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_COMPLETED, topics.COGNITION_PROVIDER_STATUS,
     )
     produces: tuple[str, ...] = (
         topics.PERCEPT_TEXT_RECEIVED, topics.INTENT_GOAL_STATED, topics.SYSTEM_PAUSE,
@@ -133,6 +134,10 @@ class Service:
         # topic instead of an id (`activity.py`).
         self._book = activity_mod.TaskBook()
         self._seed_task = None
+        # For the bottom panel's status row (`panel.py`): whether the
+        # idle loop may start work, and which model is answering.
+        self._auto = "?"
+        self._model = ""
         # Follows `run_repl` by default: the dashboard is for a human
         # actually watching a `simorgh run` session, so it comes up
         # automatically exactly when the REPL does, and stays off for
@@ -182,6 +187,7 @@ class Service:
             await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed),
             await ctx.bus.subscribe(topics.SYSTEM_METRICS, self._on_metrics),
             await ctx.bus.subscribe(topics.GUARDIAN_POSTURE_CHANGED, self._on_posture),
+            await ctx.bus.subscribe(topics.COGNITION_PROVIDER_STATUS, self._on_provider_status),
             await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed),
             await ctx.bus.subscribe(topics.TASK_CREATED, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_STARTED, self._on_task_event),
@@ -388,7 +394,7 @@ class Service:
         self._tui = tui.Tui(
             on_line=self._handle_line_guarded,
             on_interrupt=self._cancel_current_turn,
-            footer_text=lambda: self._footer,
+            footer_text=self._panel_text,
             history_path=self._history_path(),
             root=Path.cwd(),
         )
@@ -404,12 +410,31 @@ class Service:
 
     def _set_footer(self, text: str) -> None:
         self._footer = text
+        self._invalidate()
+
+    def _invalidate(self) -> None:
         # Nudge the prompt so a footer change shows without waiting for
         # the next keystroke.
         session = getattr(self._tui, "_session", None)
         app = getattr(session, "app", None)
         if app is not None and app.is_running:
             app.invalidate()
+
+    def _panel_text(self) -> list[tuple[str, str]]:
+        """The bottom section for the prompt's toolbar (`panel.py`): a
+        row per running task with its breathing word, the queue, and a
+        status row. The one-line `_footer` that `LiveStatus` redirects
+        here is only shown when the book has nothing running -- a task
+        the book knows renders richer than "Thinking... [4s]"."""
+        snap = self.vitals.snapshot()
+        unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+        rows = panel_mod.footer_rows(
+            self._book, now=time.monotonic(), auto=self._auto, posture=snap.posture, model=self._model,
+            budget=panel_mod.budget_summary(snap.budget), hint="Ctrl-C cancels", unicode=unicode,
+        )
+        if self._footer and not self._book.running():
+            rows.insert(0, [("class:sim.footer", self._footer)])
+        return panel_mod.flatten(rows)
 
     async def _await_boot(self) -> None:
         deadline = time.monotonic() + self.config.boot_wait_s
@@ -588,7 +613,14 @@ class Service:
     def _refresh_activity_footer(self) -> None:
         """Keep the line under the prompt current: what is running, and
         how much is waiting. Only when nothing more urgent owns it -- a
-        turn in flight renders its own "Thinking..." there."""
+        turn in flight renders its own "Thinking..." there.
+
+        With the prompt_toolkit prompt the toolbar composes itself from
+        the book on every redraw (`_panel_text`), so here it only needs
+        a nudge."""
+        if self._tui is not None:
+            self._invalidate()
+            return
         if self._pending_turns:
             return
         self._set_footer(activity_mod.footer(self._book, now=time.monotonic()))
@@ -607,6 +639,10 @@ class Service:
         fut: asyncio.Future = self._loop.create_future()
         self._pending_turns[session_id] = fut
         self._turn_started[session_id] = time.monotonic()
+        # A chat turn's task is its session id and no `task.created`
+        # ever announces it, so the book -- and the panel -- knew it
+        # only as "? · ? · (no description)" (observer round, 2026-09-07).
+        self._book.on_created({"task_id": session_id, "kind": "chat", "origin": "human", "description": text})
         if self._live.enabled:
             self._live.render("⏺ Thinking...  [0s]")
         await self._ctx.bus.publish(self._ctx.bus.new(topics.PERCEPT_TEXT_RECEIVED, {
@@ -733,7 +769,16 @@ class Service:
         state = message.payload.get("state")
         if state == "running":
             self._booted.set()  # releases the REPL thread's splash
+        if "autonomous_paused" in message.payload:
+            self._auto = "off" if message.payload.get("autonomous_paused") else "on"
         self._out(render_mod.notice("info", f"system state: {state}", "kernel", enabled=self._color))
+        self._refresh_activity_footer()
+
+    async def _on_provider_status(self, message: Message) -> None:
+        p = message.payload
+        if p.get("selected") or not self._model:
+            self._model = str(p.get("model") or p.get("provider") or "")
+            self._refresh_activity_footer()
 
     async def _on_metrics(self, message: Message) -> None:
         self.vitals.on_system_metrics(message.payload)
@@ -797,10 +842,18 @@ class Service:
             return
 
         record = self._book.get(task_id)
+        now = time.monotonic()
+        took: float | None = None
         if message.type == topics.TASK_STARTED:
-            self._book.on_started(task_id, now=time.monotonic())
+            self._book.on_started(task_id, now=now)
         elif message.type == topics.TASK_STEP:
-            self._book.on_step(task_id)
+            in_flight = p.get("ok") is None
+            if not in_flight:
+                took = self._book.step_took(task_id, now=now)
+            self._book.on_step(
+                task_id, now=now, phase=p.get("phase", ""), verb=verb_for(p.get("phase", ""), p.get("tool")),
+                in_flight=in_flight,
+            )
         elif message.type in (topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED):
             self._book.on_finished(task_id, {
                 topics.TASK_COMPLETED: "completed",
@@ -841,11 +894,15 @@ class Service:
                     detail = f" {head}" if head else ""
                     self._live.render(f"⏺ {verb}...{detail}  [{elapsed:.0f}s]")
                     return
-                icon = "✅" if ok else "❌"
-                self._out(f"{icon} step {step_no} ({phase}) {what}  [{elapsed:.1f}s]")
+                # One branch of the task's tree (`panel.py`): the tool,
+                # what it touched, ✓/✗, and how long it took.
+                unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+                line = panel_mod.tree_step(tool=tool, head=head, ok=ok, took=took, unicode=unicode)
+                self._out(render_mod.style(line, "green" if ok else "red", enabled=self._color))
                 if sep:
                     lines = (sep[2:] + diff_body).splitlines()
-                    self._out(render_mod.diff_block(lines, label=head, enabled=self._color))
+                    block = render_mod.diff_block(lines, label=head, enabled=self._color).splitlines()
+                    self._out("\n".join(panel_mod.tree_note(block, unicode=unicode)))
                 self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
                 return
 
@@ -861,11 +918,20 @@ class Service:
 
         if message.type == topics.TASK_STARTED:
             if self._live.enabled:
+                unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+                self._out(render_mod.style(panel_mod.tree_start(record, unicode=unicode), "cyan", enabled=self._color))
                 self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
                 return
             text = "thinking..."
         else:  # task.completed
             self._live.clear()
+            if self._live.enabled:
+                unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+                detail = p.get("reason") or "" if message.type != topics.TASK_COMPLETED else ""
+                self._out(render_mod.style(
+                    panel_mod.tree_end(record, elapsed=elapsed, detail=detail, unicode=unicode),
+                    "green" if record.status == "completed" else "yellow", enabled=self._color,
+                ))
             if watched:
                 self._watched_tasks.discard(task_id)
                 self._turn_started.pop(task_id, None)

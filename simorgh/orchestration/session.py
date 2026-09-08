@@ -21,7 +21,7 @@ from simorgh.contracts.envelope import Event, Message
 from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
-from .tools import marker_hint, to_action_payload
+from .tools import marker_hint, offered_tools, to_action_payload
 
 ACTION_TIMEOUT_S = 30.0
 # How long to wait for a given tool, when 30s is not the right answer.
@@ -208,9 +208,18 @@ class SessionRunner:
                 session.messages.append({
                     "role": "assistant", "content": f"[tool_call {tool_name}]",
                 })
+                # "Continue the task." here was read literally: after a
+                # successful git_commit the model re-read the file, ran the
+                # tests again, re-applied the same content, and burned the
+                # whole step budget without ever answering (watched trial,
+                # 2026-09-07). Say what finishing looks like every time.
                 session.messages.append({
                     "role": "user",
-                    "content": f"Result of {tool_name}:\n{summary}\n\nContinue the task.",
+                    "content": (
+                        f"Result of {tool_name}:\n{summary}\n\n"
+                        "If the task is now finished, reply with your final answer in plain text, "
+                        "with no tool marker. Otherwise take the next step."
+                    ),
                 })
                 if self._paused():
                     return await self._pause(session)
@@ -241,13 +250,14 @@ class SessionRunner:
     # -- phases -----------------------------------------------------------------------------
 
     async def _think(self, session: Session, user_text: str, *, last_step: bool) -> Message | None:
+        offered = offered_tools(session.profile.tools)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
         is_chat = session.profile.name == "chat"
         req = Message.new(
             topics.COGNITION_THINK, source=self._bus.source,
             payload={
                 "purpose": "chat" if is_chat else "draft",
-                "messages": messages, "tools": list(session.profile.tools),
+                "messages": messages, "tools": list(offered),
                 # `Profile.scaffold` reached `assemble()` and was dropped;
                 # Cognition's protected `task_rules` block (04 section 5.4)
                 # was implemented and never filled by anyone. So a patch
@@ -270,7 +280,7 @@ class SessionRunner:
                 # an empty list would ask Cognition to scan for zero
                 # markers, indistinguishable from asking for `final`
                 # except for the wasted round-trip.
-                "expected": "tool_calls" if session.profile.tools else "text",
+                "expected": "tool_calls" if offered else "text",
                 # Live-caught: the general "here's the marker syntax"
                 # instruction (cognition/service.py) never told the model
                 # a tool's own argument *shape* -- a model asked to use
@@ -278,7 +288,7 @@ class SessionRunner:
                 # field instead of the real key:value one. Only tools with
                 # real internal structure need an entry (orchestration/
                 # tools.py::_MARKER_ARG_HINT); most don't.
-                "tool_hints": {t: h for t in session.profile.tools if (h := marker_hint(t))},
+                "tool_hints": {t: h for t in offered if (h := marker_hint(t))},
                 "budget": {"max_tokens": session.profile.max_output_tokens, "max_cost_usd": 0.5},
                 "require_real_provider": False, "last_step": last_step,
                 # Live-caught (v2 live trial, 2026-09-06): a chat turn
@@ -468,12 +478,25 @@ class SessionRunner:
             if verdict in ("pass", "insufficient_evidence"):
                 return Outcome("completed", result_summary=text, floor=floor, verification_ref=verification_id)
 
+            # The objection, on the record. A failed verdict used to leave
+            # nothing on the task's own stream or on screen: the trial saw
+            # "blocked: verification failed after max revisions" after a
+            # search, a patch, a green suite and a commit, and nobody could
+            # say what the reviewer had objected to (2026-09-07).
+            feedback = result.payload.get("feedback", {}).get("items", [])
+            note = "; ".join(
+                f"{f.get('what')}" + (f" -- {f.get('why')}" if f.get('why') else "")
+                + (f" (fix: {f.get('suggested_fix')})" if f.get('suggested_fix') else "")
+                for f in feedback
+            ) or "revise and try again"
+            step = Step(session.next_step_no(), "verify", f"verification {verdict}: {note}", ok=False)
+            session.record(step)
+            await self._record_step(session, step)
+
             if session.budget.revisions_used >= session.profile.max_revisions:
                 return Outcome("blocked", reason="verification failed after max revisions", verification_ref=verification_id)
 
             session.budget.revisions_used += 1
-            feedback = result.payload.get("feedback", {}).get("items", [])
-            note = "; ".join(f"{f.get('what')}: {f.get('suggested_fix')}" for f in feedback) or "revise and try again"
             session.messages.append({"role": "user", "content": f"Verification feedback: {note}"})
             think_reply = await self._think(session, "", last_step=session.budget.is_last_step)
             if think_reply is None:
@@ -490,7 +513,23 @@ class SessionRunner:
         silently resolves to an empty subject and the semantic checklist
         loses its signal.
         """
-        payload = json.dumps({"description": session.user_text, "result": text[:2000]}).encode("utf-8")
+        # The steps travel too. The reviewer used to see only the task
+        # and the final answer, generate questions about the change, and
+        # answer them from the answer's *prose* -- so a correct patch with
+        # a green suite and a commit failed on "does the new code have a
+        # test?" it was never asked to write, and a research answer failed
+        # on whatever its two paragraphs did not happen to mention
+        # (watched trials, 2026-09-07). Now it sees what was actually done.
+        steps = [
+            {
+                "tool": step.tool, "ok": step.ok, "phase": step.phase,
+                "summary": (step.summary or "")[: 1500 if step.tool in ("apply_source_patch", "apply_skill") else 300],
+            }
+            for step in session.steps
+        ]
+        payload = json.dumps({
+            "description": session.user_text, "result": text[:2000], "kind": session.kind, "steps": steps,
+        }).encode("utf-8")
         return await self._ledger.put_blob(payload, content_type="application/json")
 
     # -- pause/resume -------------------------------------------------------------------------

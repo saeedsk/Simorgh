@@ -22,6 +22,7 @@ supposed to use it. These texts say so.
 from __future__ import annotations
 
 from .api import Profile
+from .tools import offered_tools
 
 _TOOL_NOTES: dict[str, str] = {
     "read_file": "read a file from the repo",
@@ -50,6 +51,9 @@ You are changing your own source. Work in this order and do not stop early:
 4. Commit with git_commit. An applied but uncommitted edit is an
    unfinished task -- it is left for a human to find and clean up. Commit
    before you write your final answer, every time.
+5. After a successful commit you are done: write your final answer in
+   plain text with no tool marker -- what you changed and why. Do not
+   read the file back, re-run the tests, or apply it again.
 
 If tests still fail after your revisions, put the tree back before you
 finish -- git_discard on the file you changed if you have not committed
@@ -69,6 +73,8 @@ do not stop early:
 3. Run run_tests.
 4. Commit with git_commit. An applied but uncommitted change is an
    unfinished task. Commit before you write your final answer.
+5. After a successful commit you are done: write your final answer in
+   plain text with no tool marker. Do not read it back or apply it again.
 
 Guardian sees every tool call. A denial is an answer, not an error."""
 
@@ -144,7 +150,8 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
             f"The file is `{subject}`. You already have it -- read that file first and "
             f"do not go looking for it.\n\n" + body
         )
-    lines = [f"- {name}: {_TOOL_NOTES[name]}" if name in _TOOL_NOTES else f"- {name}" for name in profile.tools]
+    offered = offered_tools(profile.tools)
+    lines = [f"- {name}: {_TOOL_NOTES[name]}" if name in _TOOL_NOTES else f"- {name}" for name in offered]
     if not lines:
         return body
     tools = "Tools available to you this session:\n" + "\n".join(lines)

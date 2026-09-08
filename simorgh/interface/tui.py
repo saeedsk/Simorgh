@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Awaitable, Callable, Iterable
@@ -241,14 +242,25 @@ def _split_keeping_space(line: str) -> list[str]:
     return out
 
 
+# The breathing word's shades, dimmest to brightest (`panel.breath_shade`
+# picks the index). Six steps of the prompt's own cyan, so the word
+# swells and fades rather than blinking.
+BREATH_COLOURS: tuple[str, ...] = ("#005f87", "#0087af", "#00afd7", "#5fd7ff", "#afefff", "#ffffff")
+PANEL_REFRESH_S = 0.25
+
+
 def _style():
+    shades = {f"sim.breath.{i}": f"{colour} bold" for i, colour in enumerate(BREATH_COLOURS)}
     return _pt()["Style"].from_dict({
         "sim.command": "#00afd7 bold",
         "sim.path": "#5faf5f",
         "sim.string": "#87af87",
         "sim.flag": "#d7af5f",
         "sim.prompt": "#00afd7 bold",
+        "sim.rule": "#3a3a3a",
         "sim.footer": "#6c6c6c",
+        "sim.status": "#8a8a8a",
+        **shades,
         "completion-menu.completion": "bg:#1c1c1c #d0d0d0",
         "completion-menu.completion.current": "bg:#00afd7 #000000 bold",
         "completion-menu.meta.completion": "bg:#1c1c1c #808080",
@@ -259,8 +271,11 @@ def _style():
 # ------------------------------------------------------------------- prompt
 class Tui:
     """Owns the prompt. `run()` reads lines until told to stop and hands
-    each one to `on_line`; `footer_text` is polled for the status line
-    under the prompt.
+    each one to `on_line`; `footer_text` is polled for the panel under
+    the prompt -- a plain string for one line, or formatted-text
+    fragments (`panel.flatten`) for the multi-row activity panel, which
+    the toolbar re-renders every `PANEL_REFRESH_S` so a breathing word
+    breathes.
     """
 
     def __init__(
@@ -332,18 +347,32 @@ class Tui:
 
         history = pt["FileHistory"](str(self._history_path)) if self._history_path else pt["InMemoryHistory"]()
         return pt["PromptSession"](
-            message=[("class:sim.prompt", "> ")],
+            message=self._message,
             history=history,
             completer=_make_completer(self._root),
             lexer=_make_lexer(),
             style=_style(),
-            bottom_toolbar=lambda: [("class:sim.footer", self._footer_text() or "")],
+            bottom_toolbar=self._toolbar,
             complete_while_typing=True,
             key_bindings=bindings,
             multiline=False,          # Enter submits; c-j / M-Enter insert newlines
             mouse_support=False,      # keeps terminal scrollback and copy/paste working
             reserve_space_for_menu=6,
+            refresh_interval=PANEL_REFRESH_S,
         )
+
+    def _message(self):
+        """The input bar: a rule across the terminal, then the prompt.
+        The rule is what separates the transcript above from the line
+        being typed, the way Claude Code boxes its input."""
+        cols = shutil.get_terminal_size((80, 24)).columns
+        return [("class:sim.rule", "─" * max(10, cols - 1) + "\n"), ("class:sim.prompt", "> ")]
+
+    def _toolbar(self):
+        text = self._footer_text()
+        if isinstance(text, str):
+            return [("class:sim.footer", text or "")]
+        return list(text or [("class:sim.footer", "")])
 
     async def run(self) -> None:
         """Read lines until EOF, Ctrl-D, or `stop()`."""

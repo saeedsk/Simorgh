@@ -122,15 +122,16 @@ class ProtectedMeansNotWritableTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 class ShellAccessTestCase(unittest.IsolatedAsyncioTestCase):
-    """run_shell: real, gated, off by default."""
+    """run_shell: real, gated, on by default (and switchable off)."""
 
-    def test_off_by_default(self):
+    def test_on_by_default(self):
+        """The creator asked for shell access; it is on unless turned off."""
         names = {t.name for t in builtin_tools(ExecutionConfig(repo_root=Path.cwd()))}
-        self.assertNotIn("run_shell", names)
-
-    def test_registered_when_turned_on(self):
-        names = {t.name for t in builtin_tools(ExecutionConfig(repo_root=Path.cwd(), shell=True))}
         self.assertIn("run_shell", names)
+
+    def test_can_be_turned_off(self):
+        names = {t.name for t in builtin_tools(ExecutionConfig(repo_root=Path.cwd(), shell=False))}
+        self.assertNotIn("run_shell", names)
 
     def test_it_is_irreversible_so_guardian_gates_it(self):
         self.assertEqual(RunShellTool.reversibility, "irreversible")
@@ -245,3 +246,42 @@ class ReadFileInRangesTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cut.startswith("y" * 8000))
         self.assertIn("cut at 8000 of 9000 chars", cut)
         self.assertIn("READ_FILE: path:START-END", cut)
+
+
+class RewriteMustNotLoseTheFileTestCase(unittest.IsolatedAsyncioTestCase):
+    """Asked to add one constant, the model read lines 1-15 of a 48-line
+    file and sent those lines plus the constant as the "complete" file.
+    `apply_source_patch` replaces the whole file, so that is content
+    loss, and it is refused before anything is written."""
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "simorgh").mkdir()
+        self.original = "\n".join(f"x{n} = {n}" for n in range(1, 41)) + "\n"
+        (self.root / "simorgh" / "big.py").write_text(self.original)
+        config = ExecutionConfig(repo_root=self.root)
+        self.patch = next(t for t in builtin_tools(config) if t.name == "apply_source_patch")
+        self.ctx = ToolContext(action_id="a", task_id=None, scope={}, constraints={},
+                               data_dir=self.root, clock=None, logger=None, ledger=None)
+
+    async def asyncTearDown(self) -> None:
+        self._tmp.cleanup()
+
+    async def test_a_rewrite_that_drops_most_of_the_file_is_refused_and_nothing_is_written(self) -> None:
+        stub = "\n".join(f"x{n} = {n}" for n in range(1, 11)) + "\nNEW = 1\n"
+        result = await self.patch.run({"subject": "simorgh/big.py", "code": stub}, ctx=self.ctx)
+        self.assertFalse(result.ok)
+        self.assertIn("drops 29 of 40 non-blank lines", result.error)
+        self.assertIn("READ_FILE: simorgh/big.py", result.error)
+        self.assertEqual((self.root / "simorgh" / "big.py").read_text(), self.original)
+
+    async def test_a_rewrite_that_keeps_the_file_and_adds_to_it_is_written(self) -> None:
+        result = await self.patch.run({"subject": "simorgh/big.py", "code": self.original + "NEW = 1\n"}, ctx=self.ctx)
+        self.assertTrue(result.ok, result.error)
+        self.assertIn("NEW = 1", (self.root / "simorgh" / "big.py").read_text())
+
+    async def test_a_small_file_may_be_replaced_outright(self) -> None:
+        (self.root / "simorgh" / "stub.py").write_text("a = 1\nb = 2\nc = 3\n")
+        result = await self.patch.run({"subject": "simorgh/stub.py", "code": "z = 0\n"}, ctx=self.ctx)
+        self.assertTrue(result.ok, result.error)

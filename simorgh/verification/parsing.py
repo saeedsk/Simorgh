@@ -18,11 +18,24 @@ import re
 from typing import Literal
 
 _YES_NO_RE = re.compile(r"\b(YES|NO)\b", re.IGNORECASE)
+_UNKNOWN_RE = re.compile(r"^\W*UNKNOWN\b", re.IGNORECASE)
 
 
 def parse_verdict(text: str) -> Literal["yes", "no"] | None:
+    """The one-word verdict the answer prompt asks for first.
+
+    The first line that states a verdict decides, and nothing after it
+    is read. Scanning on let the evidence sentence vote: "UNKNOWN\nno
+    test shows it" parsed as a hard NO (2026-09-07). `UNKNOWN` -- the
+    prompt's own word for "the evidence does not say" -- is None, never
+    a failure. Narration before the verdict is still skipped over."""
     for line in (text or "").strip().splitlines():
-        match = _YES_NO_RE.search(line.strip())
+        line = line.strip()
+        if not line:
+            continue
+        if _UNKNOWN_RE.search(line):
+            return None
+        match = _YES_NO_RE.search(line)
         if match is not None:
             return match.group(1).lower()
     return None

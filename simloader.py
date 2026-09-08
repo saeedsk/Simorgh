@@ -114,7 +114,7 @@ def next_tag(repo: Path) -> str:
 
 
 # ------------------------------------------------------------------ gate
-def run_gate(repo: Path, *, full: bool, timeout_s: float) -> tuple[bool, str]:
+def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = None) -> tuple[bool, str]:
     """Is this checkout fit to run? Returns (ok, why)."""
     started = time.monotonic()
     rule("gate: unit suite")
@@ -144,6 +144,13 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float) -> tuple[bool, str]:
     for line in trials.stdout.splitlines():
         if line.startswith(("  PASS", "  FAIL", "        -")) or "clean" in line:
             say(line.strip())
+    if notes is not None:
+        # The whole narration, so a refused bless can be diagnosed
+        # without re-running the trial: the first real one refused on
+        # three "blocked" trials and this summary alone could not say why.
+        notes.mkdir(parents=True, exist_ok=True)
+        (notes / "last_trials.txt").write_text(trials.stdout + ("\n[stderr]\n" + trials.stderr if trials.stderr else ""))
+        say(f"full trial output: {notes / 'last_trials.txt'}")
     if trials.returncode != 0:
         return False, "trial suite had failures"
     return True, "unit suite and trial suite green"
@@ -195,7 +202,7 @@ def cmd_bless(repo: Path, notes: Path, *, full: bool, timeout_s: float) -> int:
         if tag_of(repo, tag) == commit:
             say(f"{commit} is already {tag}")
             return 0
-    ok, why = run_gate(repo, full=full, timeout_s=timeout_s)
+    ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes)
     if not ok:
         say(f"NOT blessed: {why}")
         write_note(notes, {"kind": "bless_refused", "commit": commit, "why": why})
@@ -234,7 +241,7 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
         say("no known-good tag exists yet; gating HEAD as-is")
     rollbacks = 0
     while True:
-        ok, why = run_gate(repo, full=full, timeout_s=timeout_s)
+        ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes)
         if ok:
             say(f"gate passed: {why}")
             commit = head(repo)

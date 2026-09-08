@@ -69,10 +69,17 @@ class ContextFactory:
         needs_hmac_secret: frozenset[str],
         bus_policy: BusPolicy | None = None,
         identity_registry: Any | None = None,  # simorgh.bus.enforcement.IdentityRegistry, single mode: None
+        trace: Any | None = None,  # simorgh.bus.trace.TraceWriter, shared by every client this builds
     ) -> None:
         from simorgh.bus.factory import make_client
 
         self._make_client = make_client
+        # One trace writer for the process. Each client used to make its
+        # own, with a lazily started drain task that nothing ever
+        # stopped: every kernel shutdown ended in a page of "Task was
+        # destroyed but it is pending! ... bus-trace-writer" (2026-09-07).
+        # The kernel's own client owns the writer and stops it.
+        self._trace = trace
         self._bus_backend = bus_backend
         self._ledger = ledger
         self._config = config
@@ -88,7 +95,7 @@ class ContextFactory:
     def build(self, name: str, *, instance_id: str = "") -> Context:
         source = f"{name}@{instance_id}" if instance_id else name
         bus = self._make_client(self._bus_backend, source=source, ledger=self._ledger,
-                                clock=self._clock.now, policy=self._bus_policy)
+                                clock=self._clock.now, policy=self._bus_policy, trace=self._trace)
         allowed = set(self._config.section(name).get("secrets", []))
         backing: SecretStore = self._secrets
         if name in self._needs_hmac_secret:
