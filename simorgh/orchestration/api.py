@@ -98,6 +98,10 @@ class Session:
     # walked away from it; `SessionRunner` cleans up before it
     # returns.
     uncommitted: set[str] = field(default_factory=set)
+    # The subset of `uncommitted` that did not exist before this session
+    # wrote it. `git_discard` cannot restore an untracked file, so these
+    # are deleted at cleanup instead.
+    created: set[str] = field(default_factory=set)
     state: str = "CLAIMED"
     resumed_from_step: int = 0
 

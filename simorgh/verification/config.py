@@ -55,6 +55,14 @@ class VerificationConfig:
     review_require_real_provider: bool = True
     plan_review_max_steps: int = 8
     action_timeout_seconds: float = 5.0
+    # A real model call, not a Guardian round trip. `action_timeout_seconds`
+    # (5s) was being used for both, so every checklist-generation and
+    # plan-review call timed out just under the wire and came back
+    # `floor=True` -- an empty checklist that then passed vacuously, and a
+    # plan review that could never say `approve`. Found by two watched
+    # trials independently, 2026-09-07. Matches the Worker's own budget
+    # (`orchestration/config.py::think_timeout_s`).
+    think_timeout_seconds: float = 120.0
     isolated_suite_timeout_seconds: float = 120.0
     max_denied_actions: int = 2
     forced_rigor: Rigor | None = None

@@ -35,6 +35,7 @@ _TOOL_NOTES: dict[str, str] = {
     "git_commit": "commit what you have applied, with a message",
     "git_revert": "undo your last commit if it turned out wrong",
     "git_discard": "throw away an uncommitted change you decided against",
+    "run_shell": "run a shell command in the repo when no other tool fits",
     "propose_mcp_server": "propose a new MCP server to the human",
     "draft_candidate": "draft a change without applying it",
 }

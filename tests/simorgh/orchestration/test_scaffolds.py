@@ -111,7 +111,9 @@ class TestTheRulesReachCognition(unittest.TestCase):
             acts = FakeGuardianExecution(h.client("execution"))
             await acts.start()
 
-            runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+            # No Verification here; a verifying profile would otherwise
+            # sit out the real 300s verify wait.
+            runner = SessionRunner(bus, h.ledger, clock=h.clock.now, verify_timeout_s=0.05)
             session = Session(task_id="t-rules", kind=profile.name, mode="execute", profile=profile)
             await runner.run(session, user_text="do the thing")
 

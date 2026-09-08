@@ -65,7 +65,11 @@ class Config:
     # a legitimately-slow real answer and print the same "looks broken"
     # symptom via the TimeoutError branch instead of the empty-floor one
     # -- both were the same root cause wearing different code paths.
-    chat_reply_timeout_s: float = 130.0
+    # And a chat turn is up to `max_steps=6` model calls, not one: a
+    # question that makes Sim read a file first is two thinks. At 130s
+    # the second think alone could exhaust it and the REPL printed
+    # "no response" over an answer that was still coming.
+    chat_reply_timeout_s: float = 420.0
     http_host: str = "127.0.0.1"
     http_port: int = 8765
     http_status_timeout_s: float = 3.0

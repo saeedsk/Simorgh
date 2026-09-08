@@ -41,6 +41,9 @@ class Service:
         self._tool_sub = None
         self._next_worker = 0
         self._metrics_task: asyncio.Task | None = None
+        # Chat sessions in flight, each run off the bus handler so the
+        # handler timeout cannot cancel a long turn (see `_on_percept`).
+        self._chat_tasks: set[asyncio.Task] = set()
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -81,6 +84,14 @@ class Service:
             except asyncio.CancelledError:
                 pass
             self._metrics_task = None
+        for task in list(self._chat_tasks):
+            task.cancel()
+        for task in list(self._chat_tasks):
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise from a chat
+                pass
+        self._chat_tasks.clear()
         for w in self._workers:
             await w.stop()
         self._workers.clear()
@@ -92,7 +103,18 @@ class Service:
         session_id = message.payload.get("session_id") or message.id
         worker = self._workers[self._next_worker % len(self._workers)]
         self._next_worker += 1
-        await worker.run_percept_chat(session_id, text)
+        # Hand off, do not await. This used to run the whole chat session
+        # inside the bus handler, and the memory backend kills a handler
+        # at `handler_timeout_seconds` (300s) -- less than half of what a
+        # 6-step chat with 120s think calls can legitimately take. When
+        # that fired the session was cancelled mid-step with no
+        # `turn.completed`, no failure, no notice: the human's prompt just
+        # never came back. Found by a watched chat trial 2026-09-07.
+        task = asyncio.create_task(
+            worker.run_percept_chat(session_id, text), name=f"chat-{session_id[:8]}",
+        )
+        self._chat_tasks.add(task)
+        task.add_done_callback(self._chat_tasks.discard)
 
     def _workers_snapshot(self) -> list[dict]:
         return [

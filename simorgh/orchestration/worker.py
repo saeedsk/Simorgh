@@ -142,7 +142,17 @@ class Worker:
         )
         session.budget.max_steps = profile.max_steps
         session.budget.max_revisions = profile.max_revisions
-        outcome = await self.run(session, user_text=text)
+        try:
+            outcome = await self.run(session, user_text=text)
+        except asyncio.CancelledError:
+            # A cancelled chat still owes the human an answer, or the
+            # Interface waits on a future that never resolves and the turn
+            # shows as running forever (watched chat trial, 2026-09-07).
+            outcome = Outcome("failed", reason="the turn was cancelled before it finished")
+            await self._report(session, outcome)
+            raise
+        except Exception as exc:  # noqa: BLE001 -- same: never let a turn vanish
+            outcome = Outcome("failed", reason=f"the turn crashed: {exc!r}")
         await self._report(session, outcome)
 
     async def _artifacts_for(self, session: Session, outcome: Outcome) -> list[str]:

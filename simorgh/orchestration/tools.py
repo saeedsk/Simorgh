@@ -34,6 +34,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "git_commit": ("reversible", False),
     "git_revert": ("reversible", False),
     "git_discard": ("reversible", False),
+    # A shell can reach the network and anything else on the machine;
+    # Guardian gates every call on `irreversible` (execution/shell.py).
+    "run_shell": ("irreversible", True),
     # -- MCP (execution/mcp.py's own module docstring): a human adds an
     # entry here, by the server's registered tool name
     # (`mcp_<server>_<tool>`), for every MCP tool they want the model to
@@ -102,6 +105,11 @@ _MARKER_ARG_KEY: dict[str, str] = {
 # has real internal structure need an entry; a bare path/url/code
 # argument is self-explanatory from the tool's own name.
 _MARKER_ARG_HINT: dict[str, str] = {
+    "read_file": (
+        "a repo path, optionally with an inclusive 1-based line range, e.g. "
+        "simorgh/foo.py:120-260. A result is cut at ~8000 chars, so read a "
+        "large file in ranges rather than trusting a cut result as the whole file"
+    ),
     "propose_mcp_server": (
         "key: value lines, one per line -- name (lowercase_snake_case), "
         "command (one of npx/uvx/node/python/python3), args (comma-separated, optional), "
@@ -135,6 +143,15 @@ _MARKER_ARG_HINT.update({
     "git_discard": "the one path whose uncommitted changes to throw away.",
     "run_tests": "a test file or directory to run (e.g. tests/simorgh/guardian), or empty for the whole suite.",
     "search_code": "a regular expression to search for across the readable tree.",
+    "run_shell": "one shell command, run from the repository root; its output comes back to you.",
+    # Code-bearing: the ENTIRE rest of the message is the program. Found
+    # by trial 2026-09-07: with no hint the model wrote its code and then
+    # kept talking, and the prose became part of the program -- a
+    # SyntaxError on the em-dash in its own commentary, every first call.
+    "run_python_sandboxed": (
+        "every line after the marker is the Python program, and nothing else -- "
+        "no explanation before or after it. Example:\nRUN_PYTHON_SANDBOXED:\nprint(2 + 2)\n"
+    ),
 })
 # Tools whose marker takes no argument at all.
 _MARKER_NO_ARGS = frozenset({"git_revert"})
@@ -196,6 +213,12 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
     args = call.get("args", {})
     if isinstance(args, dict) and set(args) == {"argument"}:
         raw = args["argument"]
+        if tool == "run_python_sandboxed":
+            # Same defence the file writers get: a fenced program is still
+            # a program. Found by trial 2026-09-07 -- the fence was kept
+            # here and stripped for apply_source_patch, so the sandbox
+            # failed with a SyntaxError on "```python" every time.
+            raw = _strip_code_fence(str(raw))
         if tool in _MARKER_SPLIT_FIRST_LINE:
             first, second = _MARKER_SPLIT_FIRST_LINE[tool]
             head, _, rest = str(raw).partition("\n")

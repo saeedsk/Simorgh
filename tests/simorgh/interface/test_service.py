@@ -219,7 +219,7 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_plain_chat_times_out_honestly_without_cognition(self):
         out = await self._line("hello there")
-        self.assertIn("no response", out)
+        self.assertIn("no reply within", out)
 
     async def test_pending_turn_is_narrated_live_and_other_tasks_stay_silent_when_asked(self):
         """07-post-cutover-review.md §3.9: while a reply is pending, each
@@ -393,7 +393,7 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         out = buf.getvalue()
         self.assertIn("reply to first", out)
         self.assertIn("reply to second", out)
-        self.assertNotIn("no response", out)
+        self.assertNotIn("no reply within", out)
 
     async def test_status_reflects_recent_persona_state(self):
         """`vitals` folded into `status` (07-post-cutover-review.md

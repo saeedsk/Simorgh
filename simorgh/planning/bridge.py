@@ -14,7 +14,12 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Bus, Clock
 
-DEFAULT_THINK_TIMEOUT_SECONDS = 8.0
+# Was 8.0. A decomposition is a real model call and measured at exactly
+# 8.0s -> None -> zero steps on every single watched run (2026-09-07), so
+# no plan revision ever produced a step. Orchestration learned this lesson
+# (`orchestration/config.py::think_timeout_s` = 120s); Planning never got
+# the fix.
+DEFAULT_THINK_TIMEOUT_SECONDS = 120.0
 
 
 class BusCognitionCaller:

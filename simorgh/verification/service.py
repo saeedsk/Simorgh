@@ -272,7 +272,7 @@ class VerificationService:
         # request_or_error: a timeout (Cognition not built yet, or genuinely
         # down) comes back as the section-9 {ok:false, error:...} shape
         # instead of an exception -- this is the graceful-degradation path.
-        reply = await ctx.bus.request_or_error(request, timeout=self._config.action_timeout_seconds)
+        reply = await ctx.bus.request_or_error(request, timeout=self._config.think_timeout_seconds)
         payload = reply.payload
         if payload.get("ok") is False:
             return ThinkReply(text="", floor=True, ok=False)

@@ -646,7 +646,10 @@ class Service:
                 ))
         except asyncio.TimeoutError:
             self._live.clear()
-            print("no response -- the reasoning subsystem isn't built yet this session")
+            print(render_mod.notice(
+                "warn", f"no reply within {self.config.chat_reply_timeout_s:g}s -- the turn is still running;"
+                " its answer will show up as a notice if it finishes", "interface", enabled=self._color,
+            ))
         finally:
             self._live.clear()
             if beat is not None:
