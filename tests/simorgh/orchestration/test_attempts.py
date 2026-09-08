@@ -14,7 +14,7 @@ import unittest
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event
 from simorgh.orchestration import profiles
-from simorgh.orchestration.api import Session
+from simorgh.orchestration.api import Outcome, Session
 from simorgh.orchestration.context import Assembler
 from simorgh.orchestration.resume import carried_note, restore_session
 from simorgh.orchestration.worker import MAX_STEP_CAP, step_cap
@@ -244,3 +244,83 @@ class LastStepMayStillFinishTestCase(unittest.TestCase):
             finally:
                 await cognition.stop()
                 await gx.stop()
+
+
+class FalseCompletionTestCase(unittest.IsolatedAsyncioTestCase):
+    """"Done" with an uncommitted edit is not done.
+
+    The keep rule made this worse, not better: an attempt inherited its
+    own edit, the model saw the change already in the tree, read that as
+    already committed, and answered with a FABRICATED commit hash. The
+    task was recorded `completed`, and `_discard_uncommitted` then
+    deleted the correct, tested patch. Silent loss plus a false success
+    is worse than a visible failure (observer, 2026-09-08).
+    """
+
+    def _session(self, uncommitted=("simorgh/x.py",), attempt=1):
+        session = Session(task_id="t1", kind="patch", mode="execute", profile=profiles.PATCH)
+        session.attempt = attempt
+        session.uncommitted.update(uncommitted)
+        return session
+
+    async def test_a_completion_with_an_uncommitted_edit_is_downgraded(self):
+        from simorgh.orchestration.session import UNCOMMITTED_REASON, SessionRunner
+
+        async with Harness() as h:
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now)
+            session = self._session()
+
+            async def _fake_run(_session, *, user_text=""):
+                return Outcome("completed", result_summary="Committed as a41f9c2.")
+
+            runner._run = _fake_run  # noqa: SLF001
+            runner._discard_uncommitted = _unreachable  # noqa: SLF001
+            outcome = await runner.run(session, user_text="add a constant")
+
+        self.assertEqual(outcome.kind, "blocked")
+        self.assertIn(UNCOMMITTED_REASON, outcome.reason)
+        self.assertIn("simorgh/x.py", outcome.reason)
+
+    async def test_the_edit_is_kept_for_the_next_attempt_not_discarded(self):
+        from simorgh.orchestration.session import UNCOMMITTED_REASON, SessionRunner
+
+        self.assertTrue(SessionRunner._continues(  # noqa: SLF001
+            self._session(), Outcome("blocked", reason=f"{UNCOMMITTED_REASON}: simorgh/x.py")))
+
+    async def test_a_clean_completion_is_left_alone(self):
+        from simorgh.orchestration.session import SessionRunner
+
+        async with Harness() as h:
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now)
+            session = self._session(uncommitted=())
+
+            async def _fake_run(_session, *, user_text=""):
+                return Outcome("completed", result_summary="done, and committed")
+
+            runner._run = _fake_run  # noqa: SLF001
+            outcome = await runner.run(session, user_text="x")
+
+        self.assertEqual(outcome.kind, "completed")
+
+
+class CrashInheritsKeptEditsTestCase(unittest.IsolatedAsyncioTestCase):
+    """A worker that dies mid-attempt must still own the edits its
+    attempt inherited, or nothing ever cleans them up again."""
+
+    async def test_a_crashed_attempt_owns_the_edits_it_inherited(self):
+        from simorgh.orchestration.session import EDITS_KEPT
+
+        events = _attempt([("apply_source_patch", "wrote simorgh/x.py", True)], "blocked",
+                          "step budget exhausted before the task was finished")
+        events.insert(2, _ev(EDITS_KEPT, task_id="t1", paths=["simorgh/x.py"], created=[]))
+        events += _attempt([("read_file", "x", True)], ended=None)  # this one died
+
+        session = Session(task_id="t1", kind="patch", mode="execute", profile=profiles.PATCH)
+        spent = await restore_session(session, _Ledger(events))
+        self.assertEqual(spent, 1, "a crash continues the same attempt")
+        self.assertIn("simorgh/x.py", session.uncommitted,
+                      "the inherited edit would otherwise be orphaned in the tree forever")
+
+
+async def _unreachable(*_a, **_kw):
+    raise AssertionError("a downgraded completion must not reach the discard path")

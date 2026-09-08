@@ -120,6 +120,17 @@ class VitalsCache:
                 }
         return out
 
+    def _gauge(self, gauge_key: str, counter_key: str) -> int:
+        """A real gauge if one has been published, else the old counter.
+
+        Three of these read counters nothing anywhere publishes, so
+        `status` reported 0 interests, 0 skills and 0 backlog while all
+        three were non-zero (observer, 2026-09-08)."""
+        value = self._gauges.get(gauge_key)
+        if isinstance(value, (int, float)):
+            return int(value)
+        return int(self._counters.get(counter_key, 0))
+
     def _memory_records(self) -> int:
         """Memory publishes `gauges.records` as a per-kind dict; this
         read `counters["memory.stored"]`, which nothing ever writes, so
@@ -137,9 +148,9 @@ class VitalsCache:
         return VitalsSnapshot(
             mood=self._mood, energy=self._energy, load=self._load,
             memory_records=self._memory_records(),
-            skills=self._counters.get("learning.skills_acquired", 0),
-            interests=self._counters.get("curiosity.interests", 0),
-            backlog=self._counters.get("planning.backlog", 0),
+            skills=self._gauge("execution.skills", "learning.skills_acquired"),
+            interests=self._gauge("curiosity.interests", "curiosity.interests"),
+            backlog=self._gauge("planning.backlog", "planning.backlog"),
             posture=self._posture, budget=self._budget(),
             workers_busy=int(self._gauges.get("orchestration.workers.busy", 0) or 0),
             workers_total=int(self._gauges.get("orchestration.workers.total", 0) or 0),

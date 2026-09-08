@@ -111,6 +111,16 @@ async def restore_session(session: Session, ledger) -> int:
         session.resumed_from_step = len(last["steps"])
         if len(attempts) > 1:
             session.carried = carried_note(attempts[:-1])
+            # The edits the DEAD attempt inherited are still in the tree.
+            # Without this the resumed session does not know it owns
+            # them, so neither `_keep_uncommitted` nor
+            # `_discard_uncommitted` ever touches them again and the
+            # edit is orphaned there permanently (observer, 2026-09-08).
+            previous = attempts[-2]
+            session.uncommitted.update(previous.get("kept") or ())
+            session.created.update(previous.get("created") or ())
+        session.uncommitted.update(last["kept"])
+        session.created.update(last["created"])
         return len(last["steps"])
     session.carried = carried_note(attempts)
     session.attempt = len(attempts) + 1

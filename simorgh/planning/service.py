@@ -84,7 +84,8 @@ class Service:
         topics.UI_PROMPT,
         topics.UI_NOTICE,
         topics.SYSTEM_HEALTH,
-    )
+        topics.SYSTEM_METRICS,
+)
 
     def __init__(self, config: Config | None = None) -> None:
         self.config = config or Config()
@@ -551,6 +552,24 @@ class Service:
             await self._scheduler.scan_leases()
         await self._reconsider_blocked()
         await self._reconsider_awaiting_human()
+        # `status` read a counter `planning.backlog` that NOTHING has
+        # ever published, so it reported "backlog: 0" with three tasks
+        # live -- and said so in the same breath as a chat reply that
+        # correctly counted them (observer, 2026-09-08). Same
+        # unconnected wire as `memory.records`. Every 30s, like Memory.
+        if self._tick_n % 30 == 0:
+            await self._publish_backlog()
+
+    async def _publish_backlog(self) -> None:
+        counts: dict[str, int] = {}
+        for task in self._store.index.tasks.values():
+            counts[task.status] = counts.get(task.status, 0) + 1
+        waiting = sum(counts.get(status, 0) for status in (PENDING, AVAILABLE, BLOCKED))
+        await self._ctx.bus.publish(Message.new(
+            topics.SYSTEM_METRICS, source=self._ctx.source,
+            payload={"subsystem": "planning", "counters": {},
+                     "gauges": {"backlog": waiting, "by_status": counts}},
+        ))
 
     async def _reconsider_blocked(self) -> None:
         now = self._ctx.clock.now()
@@ -617,10 +636,17 @@ class Service:
                 text = ""
         steps = parse_steps(text, self.config.project_step_count, self.config.source_roots) if text else []
         if not steps:
+            # `in_progress -> pending` is not a legal transition, so this
+            # raised `ValueError` unconditionally and the bus swallowed
+            # it: a plan whose text yields no steps froze the project
+            # silently, exactly like the lease bug below (observer,
+            # 2026-09-08). `available` is the honest destination -- the
+            # work is not done and something should pick it up again --
+            # and a notice says so rather than leaving it to be guessed.
             await self._store.transition(
-                task.id, PENDING if task.status != PENDING else task.status,
-                note="decomposition produced no real steps -- will retry",
-            ) if task.status != PENDING else None
+                task.id, AVAILABLE, note="decomposition produced no real steps -- will retry",
+            )
+            await self._notice("warning", f"project {task.id}: the plan produced no usable steps; retrying")
             return
         plan_id = uuid.uuid4().hex[:12]
         state = planmode.PlanState(plan_id=plan_id, task_id=task.id, goal=task.description, steps=steps, risk=task.risk)

@@ -42,6 +42,7 @@ _PRODUCES = (
     topics.CURIOSITY_SHARE_PROPOSED, topics.ACTION_PROPOSED, topics.MEMORY_STORE,
     topics.CURIOSITY_DISCOVER_REPLY, topics.CURIOSITY_SHARE_REPLY,
     topics.CURIOSITY_INTEREST_LIST_REPLY, topics.CURIOSITY_INTEREST_FOLLOW_UP_REPLY,
+    topics.SYSTEM_METRICS,
 )
 
 _TICKS_STREAM = "curiosity:ticks"
@@ -116,6 +117,7 @@ class Service:
                 self._interests.note(url, why=f"seeded: {label}")
         handlers = {
             topics.SYSTEM_TICK_IDLE: self._on_tick_idle,
+            topics.SYSTEM_TICK_SECOND: self._on_tick_metrics,
             topics.SYSTEM_TICK_SLEEP: self._on_tick_sleep,
             topics.SYSTEM_STATE_CHANGED: self._on_state_changed,
             topics.TASK_CREATED: self._on_task_created,
@@ -325,6 +327,19 @@ class Service:
         if decision is not None:
             await self._append(_SHARES_STREAM, "proposed", {"kind": decision.kind, "content_ref": decision.content_ref})
             await self._publish(topics.CURIOSITY_SHARE_PROPOSED, {"kind": decision.kind, "content_ref": decision.content_ref})
+
+    async def _on_tick_metrics(self, _message) -> None:
+        """`status` read a counter `curiosity.interests` that nothing has
+        ever published, so it showed "interests: 0" with three followed
+        (observer, 2026-09-08)."""
+        self._metric_ticks = getattr(self, "_metric_ticks", 0) + 1
+        if self._metric_ticks % 30 != 0:
+            return
+        await self._ctx.bus.publish(Message.new(
+            topics.SYSTEM_METRICS, source=self._ctx.source,
+            payload={"subsystem": "curiosity", "counters": {},
+                     "gauges": {"interests": len(self._interests.list_interests())}},
+        ))
 
     async def _on_tick_sleep(self, message) -> None:
         self._interests.decay(self._now(), elapsed_days=message.payload["window_seconds"] / 86400.0)

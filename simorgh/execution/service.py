@@ -56,7 +56,7 @@ class Service:
     name = "execution"
     version = "0.1.0"
     consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED, topics.LEARN_SKILL_ACQUIRED)
-    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED)
+    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS,)
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None) -> None:
         self._config = config or Config()
@@ -200,6 +200,14 @@ class Service:
             announced += 1
         if announced:
             self._ctx.logger.info("skills_announced", count=announced, directory=self._config.skill_dir)
+        # `status` read a counter `learning.skills_acquired` that nothing
+        # ever published, so it showed "skills: 0" forever (observer,
+        # 2026-09-08). Execution is what actually knows.
+        await self._ctx.bus.publish(Message.new(
+            topics.SYSTEM_METRICS, source=self._ctx.source,
+            payload={"subsystem": "execution", "counters": {},
+                     "gauges": {"skills": len(self.skill_files())}},
+        ))
         return announced
 
     async def _load_skill(self, name: str, *, path: str) -> object | None:

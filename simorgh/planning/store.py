@@ -259,14 +259,32 @@ class TaskStore:
             stream=stream, type="lease_refreshed", ts=now, trace_id=task_id, causation_id=None,
             payload={"until": now + lease_seconds},
         )
-        seq = await self._ledger.append(stream, event, expected_seq=self.index.cursors.get(stream, 0))
+        # Same stale-cursor bug the `transition` comment above
+        # describes, never applied here. The Worker appends a
+        # `task.step` per step, so this CAS failed with
+        # "expected head 5, actual 10" and the bus swallowed it.
+        # `refresh_lease` had been dead since the first step --
+        # and because it is the last statement before
+        # `plan.proposed` is published, NO PROJECT HAS EVER
+        # PRODUCED A CHILD TASK (observer, 2026-09-08). This
+        # write records a decision; it is not a bid to win a race.
+        seq = await self._ledger.append(stream, event)
         self.index.apply(stream, replace(event, seq=seq))
 
     async def expire_lease(self, task_id: str) -> None:
         stream = f"task:{task_id}"
         now = self._clock.now()
         event = Event(stream=stream, type="lease_expired", ts=now, trace_id=task_id, causation_id=None, payload={})
-        seq = await self._ledger.append(stream, event, expected_seq=self.index.cursors.get(stream, 0))
+        # Same stale-cursor bug the `transition` comment above
+        # describes, never applied here. The Worker appends a
+        # `task.step` per step, so this CAS failed with
+        # "expected head 5, actual 10" and the bus swallowed it.
+        # `refresh_lease` had been dead since the first step --
+        # and because it is the last statement before
+        # `plan.proposed` is published, NO PROJECT HAS EVER
+        # PRODUCED A CHILD TASK (observer, 2026-09-08). This
+        # write records a decision; it is not a bid to win a race.
+        seq = await self._ledger.append(stream, event)
         self.index.apply(stream, replace(event, seq=seq))
 
     async def record_dependency_event(self, task_id: str, *, satisfied_by: str | None, failed_by: str | None) -> None:
@@ -275,7 +293,16 @@ class TaskStore:
         etype = "dependency_satisfied" if satisfied_by else "dependency_failed"
         payload = {"by": satisfied_by or failed_by}
         event = Event(stream=stream, type=etype, ts=now, trace_id=task_id, causation_id=None, payload=payload)
-        seq = await self._ledger.append(stream, event, expected_seq=self.index.cursors.get(stream, 0))
+        # Same stale-cursor bug the `transition` comment above
+        # describes, never applied here. The Worker appends a
+        # `task.step` per step, so this CAS failed with
+        # "expected head 5, actual 10" and the bus swallowed it.
+        # `refresh_lease` had been dead since the first step --
+        # and because it is the last statement before
+        # `plan.proposed` is published, NO PROJECT HAS EVER
+        # PRODUCED A CHILD TASK (observer, 2026-09-08). This
+        # write records a decision; it is not a bid to win a race.
+        seq = await self._ledger.append(stream, event)
         self.index.apply(stream, replace(event, seq=seq))
 
     async def record_regrounded(self, task_id: str, *, still_valid: bool | None, reason: str) -> None:
@@ -285,7 +312,16 @@ class TaskStore:
             stream=stream, type="regrounded", ts=now, trace_id=task_id, causation_id=None,
             payload={"still_valid": still_valid, "reason": reason},
         )
-        seq = await self._ledger.append(stream, event, expected_seq=self.index.cursors.get(stream, 0))
+        # Same stale-cursor bug the `transition` comment above
+        # describes, never applied here. The Worker appends a
+        # `task.step` per step, so this CAS failed with
+        # "expected head 5, actual 10" and the bus swallowed it.
+        # `refresh_lease` had been dead since the first step --
+        # and because it is the last statement before
+        # `plan.proposed` is published, NO PROJECT HAS EVER
+        # PRODUCED A CHILD TASK (observer, 2026-09-08). This
+        # write records a decision; it is not a bid to win a race.
+        seq = await self._ledger.append(stream, event)
         self.index.apply(stream, replace(event, seq=seq))
 
     def children(self, parent_id: str) -> list[Task]:

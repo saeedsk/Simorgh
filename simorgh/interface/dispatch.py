@@ -210,12 +210,19 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
             }, render_ok="autonomous mode: off")
         if mode == "now":
             return await _publish(bus, topics.SYSTEM_TICK_IDLE, {"idle_seconds": 0.0}, render_ok="idle tick requested")
-        return await _request(bus, topics.SYSTEM_STATUS_REQUEST, {}, timeout=3.0, render=lambda p: f"state: {p['state']}")
+        # Bare `auto` used to print the KERNEL state, so after `auto off`
+        # it still answered "running" -- a true sentence about a
+        # different question (observer, 2026-09-08). The state machine
+        # carries `autonomous_paused`; that is what was asked about.
+        return await _request(bus, topics.SYSTEM_STATUS_REQUEST, {}, timeout=3.0, render=_render_auto)
 
     if name == "interests":
         if not args:
+            # This printed `len()` of a payload that carries every topic
+            # -- the same "it only shows the count" complaint the creator
+            # already made about `tasks` (observer, 2026-09-08).
             return await _request(bus, topics.CURIOSITY_INTEREST_LIST_REQUEST, {}, timeout=3.0,
-                                   render=lambda p: f"{len(p.get('interests', []))} interest(s)")
+                                  render=_render_interests)
         return await _publish(bus, topics.CURIOSITY_INTEREST_ADD, {"topic": args}, render_ok=f"interest added: {args}")
 
     if name == "mcp":
@@ -312,6 +319,32 @@ async def _benchmark(bus: BusClient, args: str) -> Outcome:
         return await _request(bus, topics.BENCHMARK_RUN_REQUEST, payload, timeout=60.0,
                               render=benchmarkview.started)
     return Outcome(_BENCHMARK_USAGE)
+
+
+def _render_auto(payload: dict) -> str:
+    paused = payload.get("autonomous_paused")
+    state = payload.get("state", "?")
+    if paused is None:
+        return f"autonomous mode: unknown (system is {state})"
+    mode = "off" if paused else "on"
+    return (
+        f"autonomous mode: {mode}  ·  system {state}\n"
+        f"  `auto on` / `auto off` to change it, `auto now` to run one idle tick"
+    )
+
+
+def _render_interests(payload: dict) -> str:
+    interests = payload.get("interests") or []
+    if not interests:
+        return "no interests yet -- `interests <topic>` adds one"
+    lines = [f"{len(interests)} interest(s):"]
+    for item in interests[:20]:
+        topic = item.get("topic") if isinstance(item, dict) else str(item)
+        why = (item.get("why") or "") if isinstance(item, dict) else ""
+        lines.append(f"  · {topic}" + (f"  -- {why}" if why else ""))
+    if len(interests) > 20:
+        lines.append(f"  ... and {len(interests) - 20} more")
+    return "\n".join(lines)
 
 
 async def _panel_piece(bus: BusClient, type_: str, payload: dict, *, timeout: float, label: str, render) -> str:

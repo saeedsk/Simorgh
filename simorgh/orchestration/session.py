@@ -31,6 +31,8 @@ ACTION_TIMEOUT_S = 30.0
 # the packages may not import each other).
 CONTINUATION_REASON = "step budget exhausted"
 VERIFICATION_REASON = "verification failed"
+# An attempt that says it finished while its edit is still uncommitted.
+UNCOMMITTED_REASON = "finished with uncommitted changes"
 # Ledger-only record type: which uncommitted edits an exhausted attempt
 # left in the tree for the next one.
 EDITS_KEPT = topics.TASK_EDITS_KEPT
@@ -155,6 +157,29 @@ class SessionRunner:
         whichever way the session ended.
         """
         outcome = await self._run(session, user_text=user_text)
+        if session.uncommitted and outcome.kind == "completed":
+            # "Done" with an edit still uncommitted is wrong by
+            # construction, and it became MORE wrong once an attempt
+            # could inherit an edit: the model saw its change already in
+            # the tree, read that as already committed, and answered with
+            # a fabricated commit hash. The task was recorded COMPLETED
+            # and `_discard_uncommitted` then deleted the correct, tested
+            # patch (observer, 2026-09-08). Silent loss plus a false
+            # success is worse than a visible failure, so this is not a
+            # completion -- it is an unfinished attempt, and the next one
+            # inherits the edit and can commit it.
+            step = Step(
+                session.next_step_no(), "act",
+                f"answered as finished with {len(session.uncommitted)} uncommitted edit(s): "
+                + ", ".join(sorted(session.uncommitted)),
+                ok=False,
+            )
+            session.record(step)
+            await self._record_step(session, step)
+            outcome = Outcome(
+                "blocked", reason=f"{UNCOMMITTED_REASON}: {', '.join(sorted(session.uncommitted))}",
+                result_summary=outcome.result_summary, verification_ref=outcome.verification_ref,
+            )
         if session.uncommitted and outcome.kind != "paused":
             if self._continues(session, outcome):
                 await self._keep_uncommitted(session)
@@ -180,7 +205,7 @@ class SessionRunner:
         # threw away a correct, tested patch that only lacked a commit
         # (watched trial, 2026-09-08) -- the next attempt inherits the
         # edit and the objection, and can finish the job.
-        return reason.startswith(CONTINUATION_REASON) or reason.startswith(VERIFICATION_REASON)
+        return reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON))
 
     async def _keep_uncommitted(self, session: Session) -> None:
         kept = sorted(session.uncommitted)
