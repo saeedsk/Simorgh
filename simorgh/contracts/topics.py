@@ -69,6 +69,7 @@ TASK_COMPLETED = "task.completed"
 TURN_COMPLETED = "turn.completed"
 TASK_FAILED = "task.failed"
 TASK_BLOCKED = "task.blocked"
+TASK_EDITS_KEPT = "task.edits_kept"
 TASK_DEPENDENCY_SATISFIED = "task.dependency.satisfied"
 # --- 4.5 plan / project ---------------------------------------------------
 PLAN_PROPOSED = "plan.proposed"

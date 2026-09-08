@@ -152,30 +152,33 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         return Outcome("commands: " + ", ".join(sorted(COMMAND_NAMES)) + "  (or !<shell>, or plain chat text)")
 
     if name == "improve":
+        args, steps = _pop_steps(args)
         if not args:
-            return Outcome("usage: improve <path> <description>  |  improve <topic>")
+            return Outcome("usage: improve <path> <description> [steps=N]  |  improve <topic> [steps=N]")
         first, _, rest = args.partition(" ")
         if rest and _PATH_HINT.search(first):
-            return await _request(bus, topics.TASK_CREATE, {
+            return await _request(bus, topics.TASK_CREATE, _with_steps({
                 "kind": "patch", "description": rest.strip(), "subject": first, "origin": "human", "mode": "execute",
-            }, timeout=5.0, render=_render_created(), watch=True)
-        return await _request(bus, topics.TASK_CREATE, {
+            }, steps), timeout=5.0, render=_render_created(), watch=True)
+        return await _request(bus, topics.TASK_CREATE, _with_steps({
             "kind": "skill", "description": args, "origin": "human", "mode": "execute",
-        }, timeout=5.0, render=_render_created(), watch=True)
+        }, steps), timeout=5.0, render=_render_created(), watch=True)
 
     if name == "plan":
+        args, steps = _pop_steps(args)
         if not args:
-            return Outcome("usage: plan <goal>")
-        return await _request(bus, topics.TASK_CREATE, {
+            return Outcome("usage: plan <goal> [steps=N]")
+        return await _request(bus, topics.TASK_CREATE, _with_steps({
             "kind": "project", "description": args, "origin": "human", "mode": "plan",
-        }, timeout=5.0, render=_render_created("project task"), watch=True)
+        }, steps), timeout=5.0, render=_render_created("project task"), watch=True)
 
     if name == "research":
+        args, steps = _pop_steps(args)
         if not args:
-            return Outcome("usage: research <topic>")
-        return await _request(bus, topics.TASK_CREATE, {
+            return Outcome("usage: research <topic> [steps=N]")
+        return await _request(bus, topics.TASK_CREATE, _with_steps({
             "kind": "research", "description": args, "origin": "human",
-        }, timeout=5.0, render=_render_created(), watch=True)
+        }, steps), timeout=5.0, render=_render_created(), watch=True)
 
     if name == "tasks":
         if args.strip() == "work":
@@ -223,6 +226,25 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 # extension) means `improve <path> <description>`'s patch shape;
 # anything else is `improve <topic>`'s skill shape.
 _PATH_HINT = re.compile(r"[\\/]|\.[A-Za-z0-9]{1,5}$")
+
+# `steps=N` anywhere in an improve/plan/research line sets the step cap
+# for one attempt at that task (the creator, 2026-09-07: a big task
+# should be able to say it is big). Orchestration clamps it.
+_STEPS_OPT = re.compile(r"(?:^|\s)steps=(\d{1,4})(?=\s|$)")
+
+
+def _pop_steps(args: str) -> tuple[str, int | None]:
+    match = _STEPS_OPT.search(args)
+    if match is None:
+        return args, None
+    cleaned = (args[: match.start()] + " " + args[match.end():]).strip()
+    return " ".join(cleaned.split()), int(match.group(1))
+
+
+def _with_steps(payload: dict, steps: int | None) -> dict:
+    if steps:
+        payload["max_steps"] = steps
+    return payload
 
 
 async def _panel_piece(bus: BusClient, type_: str, payload: dict, *, timeout: float, label: str, render) -> str:

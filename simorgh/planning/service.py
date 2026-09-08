@@ -189,9 +189,10 @@ class Service:
         p = message.payload
         result = await self._intake.on_candidate(
             kind=p["kind"], description=p["description"], subject=p.get("subject"), area="",
-            origin=p.get("origin", "human"), risk=p.get("risk"),
+            origin=p.get("origin", "human"), risk=p.get("risk"), max_steps=p.get("max_steps"),
         ) if p["kind"] != "project" else await self._intake.on_goal_stated(
             goal=p["description"], origin=p.get("origin", "human"), wants_project=True, risk=p.get("risk"),
+            max_steps=p.get("max_steps"),
         )
         if result.task is not None:
             await self._announce_created(result.task)
@@ -223,6 +224,8 @@ class Service:
             "risk": task.risk, "subject": task.subject, "parent_id": task.parent_id,
             "scope": task.scope.to_payload() if task.scope else None,
         }
+        if task.max_steps:
+            payload["max_steps"] = task.max_steps
         await self._ctx.bus.publish(Message.new(
             topics.TASK_CREATED, source=self._ctx.source,
             partition_key=f"task:{task.id}", payload=payload,
@@ -330,8 +333,17 @@ class Service:
         await self._ctx.bus.publish(Message.new(
             topics.TASK_BLOCKED, source=self._ctx.source,
             partition_key=f"task:{task.id}",
-            payload={"task_id": task.id, "reason": reason, "retry_after": self.config.blocked_retry_delay_seconds},
+            payload={"task_id": task.id, "reason": reason, "retry_after": self._retry_delay(reason)},
         ))
+
+    def _retry_delay(self, reason: str) -> float:
+        """A task that ran out of steps mid-work is a continuation, not a
+        task blocked on something outside itself: it comes back in
+        seconds, with a fresh budget and a memory of the attempt
+        (orchestration/resume.py), rather than in five minutes."""
+        if reason.startswith(CONTINUATION_REASON):
+            return self.config.continuation_delay_seconds
+        return self.config.blocked_retry_delay_seconds
 
     async def _propagate_completion(self, task_id: str) -> None:
         for dep_id in dag.dependents_of(task_id, self._store.index.tasks):
@@ -545,7 +557,7 @@ class Service:
         for task in list(self._store.index.tasks.values()):
             if task.status != BLOCKED:
                 continue
-            if (now - task.updated_at) < self.config.blocked_retry_delay_seconds:
+            if (now - task.updated_at) < self._retry_delay(task.note):
                 continue
             if task.attempts >= self.config.max_blocked_retries:
                 await self._store.transition(
@@ -792,12 +804,18 @@ class Service:
         ))
 
 
+# The reason `orchestration/session.py` gives when an attempt spends its
+# whole step budget with a tool call still pending. Matched by prefix
+# here because the two packages may not import each other.
+CONTINUATION_REASON = "step budget exhausted"
+
+
 def _task_payload(task: Task) -> dict:
     return {
         "task_id": task.id, "kind": task.kind, "description": task.description, "subject": task.subject,
         "status": task.status, "mode": task.mode, "risk": task.risk, "origin": task.origin,
         "parent_id": task.parent_id, "depends_on": list(task.depends_on), "attempts": task.attempts,
-        "note": task.note,
+        "note": task.note, "max_steps": task.max_steps,
     }
 
 

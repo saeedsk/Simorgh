@@ -286,7 +286,13 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             await self.service._handle_line("improve web access")
-            await self._pump(20)
+            # Bounded wait, not a fixed number of loop turns: under a
+            # loaded machine (the loader's full gate, 2026-09-07) twenty
+            # turns were not enough for the completion to be delivered.
+            for _ in range(200):
+                if "here is the real answer" in buf.getvalue():
+                    break
+                await asyncio.sleep(0.01)
         await sub.unsubscribe()
         out = buf.getvalue()
         self.assertIn("task created: wt1", out)

@@ -246,6 +246,7 @@ def splash(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
 _QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
     ("status", "health, vitals, posture, and tools in one panel"),
     ("improve <path> <description>", "revise existing code, tested before it lands"),
+    ("... steps=N", "a bigger step cap for a big task"),
     ("improve <topic>", "draft a new skill, audited before it lands"),
     ("tasks / tasks work", "see the backlog, advance the next item"),
     ("research <topic>", "investigate a question, no code written"),

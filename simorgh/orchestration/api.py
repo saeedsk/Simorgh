@@ -104,6 +104,11 @@ class Session:
     created: set[str] = field(default_factory=set)
     state: str = "CLAIMED"
     resumed_from_step: int = 0
+    # A retry's memory of the attempts before it (`resume.py`): what
+    # they did and how they ended, rendered for the model. Empty on a
+    # first attempt.
+    carried: str = ""
+    attempt: int = 1
 
     def next_step_no(self) -> int:
         return len(self.steps) + 1

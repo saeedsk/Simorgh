@@ -24,6 +24,21 @@ from .context import DEFAULT_TIMEOUT_S, Assembler
 from .tools import marker_hint, offered_tools, to_action_payload
 
 ACTION_TIMEOUT_S = 30.0
+# The reason an attempt gives when it spends its whole step budget with
+# a tool call still pending. Planning matches it by prefix to re-offer
+# the task soon (`planning/service.py::CONTINUATION_REASON`, same text;
+# the packages may not import each other).
+CONTINUATION_REASON = "step budget exhausted"
+# Ledger-only record type: which uncommitted edits an exhausted attempt
+# left in the tree for the next one.
+EDITS_KEPT = topics.TASK_EDITS_KEPT
+# Tools that *end* an attempt's work rather than extend it, so the last
+# step may still run one when there is an uncommitted edit waiting.
+FINISHING_TOOLS = ("git_commit", "git_discard")
+# An attempt below this number may leave its edits for the next; the
+# one at it discards. Planning gives up after nine blocks, so the chain
+# always ends with a clean-up before that.
+KEEP_EDITS_UNTIL_ATTEMPT = 6
 # How long to wait for a given tool, when 30s is not the right answer.
 #
 # Live-caught 2026-09-07, watching a real patch task: `run_tests`
@@ -123,8 +138,42 @@ class SessionRunner:
         """
         outcome = await self._run(session, user_text=user_text)
         if session.uncommitted and outcome.kind != "paused":
-            await self._discard_uncommitted(session)
+            if self._continues(session, outcome):
+                await self._keep_uncommitted(session)
+            else:
+                await self._discard_uncommitted(session)
         return outcome
+
+    @staticmethod
+    def _continues(session: Session, outcome: Outcome) -> bool:
+        """Whether this attempt's uncommitted edits stay in the tree for
+        the next one. Only when the attempt ran out of steps mid-work
+        (Planning re-offers such a task within seconds, see
+        `resume.py`) and only for the first few attempts: watched trial,
+        2026-09-07 -- with the edit discarded every time, each attempt
+        re-applied the same patch and none ever reached the commit. The
+        last allowed attempt discards as before, so the "never leave a
+        broken change" property still holds for the chain as a whole."""
+        return (
+            outcome.kind == "blocked"
+            and (outcome.reason or "").startswith(CONTINUATION_REASON)
+            and session.attempt < KEEP_EDITS_UNTIL_ATTEMPT
+        )
+
+    async def _keep_uncommitted(self, session: Session) -> None:
+        kept = sorted(session.uncommitted)
+        created = sorted(p for p in session.created if p in session.uncommitted)
+        step = Step(
+            session.next_step_no(), "act",
+            f"kept {len(kept)} uncommitted edit(s) in the tree for the next attempt: {', '.join(kept)}",
+            ok=True,
+        )
+        session.record(step)
+        await self._record_step(session, step)
+        # Ledger only: the next attempt reads this back (`resume.py`) to
+        # inherit the paths, so *its* end cleans them up if it does not
+        # commit. Nothing on the bus needs it.
+        await self._append(session, EDITS_KEPT, {"task_id": session.task_id, "paths": kept, "created": created})
 
     async def _discard_uncommitted(self, session: Session) -> None:
         left = sorted(session.uncommitted)
@@ -175,6 +224,32 @@ class SessionRunner:
             session.budget.steps_used += 1
             tool_calls = think_reply.payload.get("tool_calls") or []
             floor = think_reply.payload.get("floor", False)
+
+            if tool_calls and is_last and tool_calls[0].get("tool") in FINISHING_TOOLS and session.uncommitted:
+                # The last step may still *finish*: refusing a git_commit
+                # here threw away the whole attempt's work and reported
+                # "step budget exhausted" over an applied, tested change
+                # (watched trial, 2026-09-07). A finishing tool ends the
+                # work rather than extending it, so it costs no further
+                # step -- the model answers straight after.
+                call = tool_calls[0]
+                ok, summary, detail = await self._propose_and_await(session, call, step_no)
+                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok)
+                session.record(step)
+                await self._record_step(session, step)
+                if ok:
+                    # A successful finishing action leaves nothing for
+                    # cleanup to undo. The `file_write`/`git_commit` side
+                    # effects normally say so; clearing here as well means
+                    # a tool that reports success without them can never
+                    # have its own commit discarded a moment later.
+                    session.uncommitted.clear()
+                    session.created.clear()
+                text = f"{'Committed' if ok else 'Could not commit'} the change: {summary}"
+                session.messages.append({"role": "assistant", "content": text})
+                if not session.profile.verify:
+                    return Outcome("completed", result_summary=text, floor=False)
+                return await self._verify_then_finish(session, text, floor=False)
 
             if tool_calls and not is_last:
                 call = tool_calls[0]  # one action per step (section 7)
@@ -236,7 +311,7 @@ class SessionRunner:
                 step = Step(step_no, "act", "step budget exhausted with work still pending", ok=False)
                 session.record(step)
                 await self._record_step(session, step)
-                return Outcome("blocked", reason="step budget exhausted before the task was finished")
+                return Outcome("blocked", reason=f"{CONTINUATION_REASON} before the task was finished")
             step = Step(step_no, "gather" if step_no == 1 else "act", "final answer", ok=True)
             session.record(step)
             await self._record_step(session, step)

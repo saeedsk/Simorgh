@@ -54,6 +54,11 @@ class Trial:
     expect_commit: bool = False
     expect_no_change: bool = False
     expect_file: str | None = None
+    # A per-attempt step cap for this task (`task.create.max_steps`).
+    max_steps: int | None = None
+    # How many attempts the task may take; more than one means the run
+    # is expected to continue across attempts (`orchestration/resume.py`).
+    expect_attempts_at_most: int = 1
 
 
 TRIALS: tuple[Trial, ...] = (
@@ -86,6 +91,16 @@ TRIALS: tuple[Trial, ...] = (
         subject="simorgh/interface/vitals.py", expect_no_change=True,
     ),
     Trial(
+        "continues-across-attempts",
+        "add a module-level constant DEFAULT_HISTORY_LIMIT = 200 near the top of "
+        "simorgh/interface/parser.py, above the COMMAND_NAMES tuple",
+        subject="simorgh/interface/parser.py", expect_commit=True,
+        # Four steps is not enough to search, read, patch, test and commit:
+        # the first attempt must run out and the second must pick up
+        # where it left off instead of starting over.
+        max_steps=4, expect_attempts_at_most=4,
+    ),
+    Trial(
         "breaks-the-suite",
         "remove 'help' from the COMMAND_NAMES tuple in simorgh/interface/parser.py, "
         "since the splash already lists the commands",
@@ -104,6 +119,8 @@ class Result:
     seconds: float = 0.0
     problems: list[str] = field(default_factory=list)
     steps: list[tuple] = field(default_factory=list)
+    task_id: str = ""
+    attempts: list[str] = field(default_factory=list)  # one task_id per task.started seen
 
     @property
     def ok(self) -> bool:
@@ -146,15 +163,26 @@ async def run_one(trial: Trial, root: str, timeout_s: float) -> Result:
     payload = {"kind": trial.kind, "description": trial.task, "origin": "human", "mode": "execute"}
     if trial.subject:
         payload["subject"] = trial.subject
+    if trial.max_steps:
+        payload["max_steps"] = trial.max_steps
+    attempts = result.attempts
+    await kernel.bus.subscribe(topics.TASK_STARTED, lambda m: attempts.append(m.payload.get("task_id")) or asyncio.sleep(0))
     reply = await kernel.bus.request(kernel.bus.new(topics.TASK_CREATE, payload), timeout=10)
     task_id = reply.payload["task_id"]
+    result.task_id = task_id
 
     planning = kernel._supervisor.services["planning"].service  # noqa: SLF001
     started = time.monotonic()
     while time.monotonic() - started < timeout_s:
         await asyncio.sleep(1)
         record = await planning._store.get(task_id)  # noqa: SLF001
-        if record and record.status in ("completed", "failed", "blocked"):
+        if record and record.status in ("completed", "failed"):
+            break
+        # A continuation trial rides through "blocked": Planning re-offers
+        # a task that only ran out of steps a few seconds later.
+        if record and record.status == "blocked" and (
+            trial.expect_attempts_at_most == 1 or record.attempts >= trial.expect_attempts_at_most
+        ):
             break
     record = await planning._store.get(task_id)  # noqa: SLF001
     result.seconds = time.monotonic() - started
@@ -169,6 +197,11 @@ def _judge(result: Result, repo: str) -> None:
     trial = result.trial
     if result.status != "completed":
         result.problems.append(f"task ended {result.status}")
+    started = sum(1 for t in result.attempts if t == result.task_id)
+    if started > trial.expect_attempts_at_most:
+        result.problems.append(f"took {started} attempts, expected at most {trial.expect_attempts_at_most}")
+    if trial.expect_attempts_at_most > 1 and started < 2 and result.status == "completed":
+        result.problems.append("finished in one attempt, so the continuation path was never exercised")
 
     for tool, summary, ok in result.steps:
         if ok is False and any(fault in (summary or "") for fault in _OUR_FAULT):

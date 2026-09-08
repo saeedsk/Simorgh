@@ -23,6 +23,12 @@
       ],
       "type": "string"
     },
+    "max_steps": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "mode": {
       "enum": [
         "plan",

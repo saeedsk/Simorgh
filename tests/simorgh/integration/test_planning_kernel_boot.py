@@ -389,3 +389,61 @@ class TestABlockedOutcomeIsHeardOnce(unittest.IsolatedAsyncioTestCase):
         [task] = [t for t in list_reply.payload["tasks"] if t["task_id"] == task_id]
         self.assertEqual(task["status"], "blocked")
         self.assertEqual(task.get("attempts"), 1)
+
+
+class TestAContinuationComesBackSoonWithItsOwnCap(unittest.IsolatedAsyncioTestCase):
+    """A task that only ran out of steps is offered again after
+    `continuation_delay_seconds`, not the full blocked delay; and a
+    task's own `max_steps` survives create -> store -> claim reply so the
+    worker can honour it."""
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        config = LoadedConfig({"runtime": {"data_dir": self._tmp.name}}, None)
+        self.kernel = Kernel(config, secrets=EnvSecretStore({}))
+        self._patch = mock.patch("simorgh.kernel.service.build_factories", new=_patched_build_factories())
+        self._patch.start()
+        await self.kernel.boot()
+
+    async def asyncTearDown(self) -> None:
+        await self.kernel.shutdown()
+        self._patch.stop()
+        self._tmp.cleanup()
+
+    async def _claimed_task(self, **extra) -> str:
+        bus = self.kernel.bus
+        reply = await bus.request(Message.new(
+            topics.TASK_CREATE, source="tester",
+            payload={"kind": "patch", "description": "a long refactor", "origin": "human", **extra},
+        ))
+        task_id = reply.payload["task_id"]
+        claim = await bus.request(Message.new(
+            topics.TASK_CLAIM, source="tester", payload={"task_id": task_id, "worker_id": "w1"},
+        ))
+        self.claim = claim.payload
+        await bus.publish(Message.new(topics.TASK_STARTED, source="tester", payload={"task_id": task_id, "worker_id": "w1"}))
+        await _pump()
+        return task_id
+
+    async def test_the_step_cap_rides_through_to_the_claim(self) -> None:
+        await self._claimed_task(max_steps=40)
+        self.assertEqual(self.claim["task"]["max_steps"], 40)
+
+    async def test_no_cap_is_absent_not_zero(self) -> None:
+        await self._claimed_task()
+        self.assertIsNone(self.claim["task"].get("max_steps"))
+
+    async def test_running_out_of_steps_is_a_short_retry_and_anything_else_is_long(self) -> None:
+        planning = self.kernel._supervisor.services["planning"].service  # noqa: SLF001
+        heard = _Collector()
+        sub = await self.kernel.bus.subscribe(topics.TASK_BLOCKED, heard)
+        for reason in ("step budget exhausted before the task was finished", "verification failed after max revisions"):
+            task_id = await self._claimed_task()
+            await self.kernel.bus.publish(Message.new(
+                topics.TASK_BLOCKED, source="orchestration", payload={"task_id": task_id, "reason": reason},
+            ))
+            await _pump(100)
+        await sub.unsubscribe()
+        delays = [m.payload["retry_after"] for m in heard.messages if m.source != "orchestration"]
+        self.assertEqual(delays, [planning.config.continuation_delay_seconds, planning.config.blocked_retry_delay_seconds])
+        self.assertLess(planning.config.continuation_delay_seconds, 60)

@@ -21,8 +21,24 @@ from simorgh.contracts.envelope import Event, Message
 from . import profiles
 from .api import Outcome, Session
 from .context import DEFAULT_TIMEOUT_S
-from .resume import restore_step_count
+from .resume import restore_session
 from .session import SessionRunner
+
+
+# The most any one attempt may spend, whatever a task asks for. Nine
+# attempts (`[planning] max_blocked_retries`) of this is the true ceiling.
+MAX_STEP_CAP = 200
+
+
+def step_cap(requested, default: int) -> int:
+    """A task's own step cap if it set one (`task.create.max_steps`),
+    else the profile's. The creator, 2026-09-07: "what if a task
+    requires long and multiple tool access" -- a big task can now say so."""
+    try:
+        cap = int(requested) if requested is not None else 0
+    except (TypeError, ValueError):
+        cap = 0
+    return min(MAX_STEP_CAP, cap) if cap > 0 else default
 
 
 class Worker:
@@ -107,10 +123,10 @@ class Worker:
             task_id=task_id, kind=kind, mode=mode, profile=profile,
             worker_id=self.worker_id, user_text=description, subject=task.get("subject"),
         )
-        session.budget.max_steps = profile.max_steps
+        session.budget.max_steps = step_cap(task.get("max_steps"), profile.max_steps)
         session.budget.max_revisions = profile.max_revisions
 
-        await restore_step_count(session, self._ledger)
+        await restore_session(session, self._ledger)
 
         outcome = await self.run(session, user_text=description)
         await self._report(session, outcome)

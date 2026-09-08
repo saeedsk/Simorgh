@@ -44,6 +44,7 @@ class Intake:
 
     async def on_goal_stated(
         self, *, goal: str, origin: str, wants_project: bool, priority: int = 0, risk: str | None = None,
+        max_steps: int | None = None,
     ) -> IntakeResult:
         dup = self._find_duplicate(goal, origin=origin)
         if dup:
@@ -57,18 +58,19 @@ class Intake:
                 # human approval` branch (07-planning.md section 5.4) would be
                 # unreachable through any real message, not just untested.
                 kind="project", description=goal, origin=origin, mode="plan", risk=risk or "medium",
-                priority=priority, initial_status="available",  # no depends_on -> available, not pending (spec section 5.1's state diagram)
+                priority=priority, initial_status="available", max_steps=max_steps,  # no depends_on -> available, not pending (spec section 5.1's state diagram)
             )
         else:
             task = await self._store.create(
                 kind="chat" if origin == "human" else "patch", description=goal, origin=origin,
                 mode="execute", risk=risk or "low", priority=priority, initial_status="available",
+                max_steps=max_steps,
             )
         return IntakeResult(task)
 
     async def on_candidate(
         self, *, kind: str, description: str, subject: str | None, area: str, origin: str = "curiosity",
-        risk: str | None = None,
+        risk: str | None = None, max_steps: int | None = None,
     ) -> IntakeResult:
         dup = self._find_duplicate(description, origin=origin)
         if dup:
@@ -76,7 +78,7 @@ class Intake:
         scope = Scope(paths=(subject,) if subject else (), network=kind == "research") if (subject or kind == "research") else None
         task = await self._store.create(
             kind=kind, description=description, subject=subject, origin=origin, mode="execute",
-            risk=risk or "low", scope=scope, initial_status="available",
+            risk=risk or "low", scope=scope, initial_status="available", max_steps=max_steps,
         )
         return IntakeResult(task)
 
