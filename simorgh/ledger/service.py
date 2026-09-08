@@ -33,16 +33,31 @@ class Service:
 
     def __init__(self, client: LedgerClient, config: Config | None = None) -> None:
         self.client = client
-        self.config = config or Config()
-        self.policy = RetentionPolicy.parse(self.config.retention, keep_tail=self.config.keep_tail)
+        self._config_from_caller = config
+        self._adopt(config or Config())
         self._ctx: Context | None = None
         self._subscription = None
         self._first_compaction: asyncio.Task | None = None
         self.compactions = 0
         self.last_report: dict | None = None
 
+    def _adopt(self, config: Config) -> None:
+        self.config = config
+        self.policy = RetentionPolicy.parse(config.retention, keep_tail=config.keep_tail)
+
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
+        # `[ledger] retention` was read at boot -- but only into the
+        # mapping that builds the ledger *client*. The Service, which
+        # owns the retention policy that actually deletes things, was
+        # constructed as `LedgerService(ledger_client)` with no config at
+        # all (`kernel/registry.py`), so every retention rule written in
+        # simorgh.toml was silently ignored and the defaults ran instead.
+        # This is the subsystem where that costs the most: unbounded
+        # trace retention is what produced 192,332 trace streams in a
+        # single day (2026-09-07).
+        if self._config_from_caller is None and ctx.config:
+            self._adopt(Config.from_mapping(dict(ctx.config)))
         if not self.client.started:
             await self.client.start()
         self._subscription = await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep)
