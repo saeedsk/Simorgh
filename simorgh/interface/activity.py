@@ -1,0 +1,207 @@
+"""What Sim is doing, right now, in front of you.
+
+The creator, 2026-09-07, after a day of finding serious bugs by reading
+raw ledger files: "these thing were happening behind the scene and I was
+not aware of them, i want full visibility ... these thing should tell me
+what they are doing, what is in queue and what is the topic of research
+or skill."
+
+They could not see it because the narration in `service.py` deliberately
+filters to tasks *this REPL is waiting on* -- a chat turn, or something
+`improve`/`plan`/`research` just fired off -- and stays silent for
+everything else. Every autonomous task, which is nearly all of them, ran
+invisibly. That was the right call when the alternative was an
+unstructured wall of text. It is the wrong call as the only option.
+
+This module keeps the small amount of state that makes the difference
+between a line that says something and a line that does not: what each
+task actually *is*. `task.started` carries an id and a worker; the topic
+lives in `task.created`, which nobody was holding on to. So a start could
+only ever print an id.
+
+Two surfaces, from one book:
+
+- **The feed**: a line when work starts, one per step, one when it ends.
+  Origin, kind, and the actual topic, so "research" is never just
+  "research".
+- **The footer**: one live line under the prompt -- what is running, for
+  how long, and how much is waiting behind it.
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+
+# Kept small on purpose: this is a live view, not a history. The Ledger
+# is the history.
+_MAX_TRACKED = 500
+_TOPIC_WIDTH = 58
+
+
+@dataclass
+class TaskRecord:
+    task_id: str
+    kind: str = "?"
+    origin: str = "?"
+    description: str = ""
+    subject: str | None = None
+    status: str = "created"
+    started_at: float | None = None
+    steps: int = 0
+
+    @property
+    def topic(self) -> str:
+        """What this task is *about*, in one line. The subject leads when
+        there is one -- `research src/memory/__init__.py` says more than
+        the first few words of the question do."""
+        text = " ".join((self.description or "").split())
+        if self.subject and self.subject not in text:
+            text = f"{self.subject} -- {text}" if text else self.subject
+        return text or "(no description)"
+
+    def short_topic(self, width: int = _TOPIC_WIDTH) -> str:
+        text = self.topic
+        return text if len(text) <= width else text[: width - 1] + "…"
+
+
+@dataclass
+class TaskBook:
+    """Every task Sim knows about this session, and what it is doing."""
+
+    tasks: dict[str, TaskRecord] = field(default_factory=dict)
+    _order: list[str] = field(default_factory=list)
+
+    def on_created(self, payload: dict) -> TaskRecord:
+        task_id = payload.get("task_id", "")
+        record = TaskRecord(
+            task_id=task_id,
+            kind=payload.get("kind", "?"),
+            origin=payload.get("origin", "?"),
+            description=payload.get("description", ""),
+            subject=payload.get("subject"),
+        )
+        self.tasks[task_id] = record
+        self._order.append(task_id)
+        self._trim()
+        return record
+
+    def seed(self, tasks: list[dict]) -> int:
+        """Adopt the tasks that already existed before this session.
+
+        Without this the book only knows tasks it watched being created,
+        which on a restart is none of them -- so the first thing the
+        creator saw was a feed of `? · ? · (no description)` for a
+        hundred real tasks whose topics were sitting in Planning the
+        whole time. Live-caught the first time the feed was run against
+        the real ledger, 2026-09-07.
+        """
+        adopted = 0
+        for payload in tasks:
+            task_id = payload.get("task_id")
+            if not task_id or task_id in self.tasks:
+                continue
+            record = self.on_created(payload)
+            record.status = payload.get("status", "created")
+            adopted += 1
+        return adopted
+
+    def get(self, task_id: str) -> TaskRecord:
+        """Never `None`: a task this session did not see created (one
+        carried over from a previous run) still gets a row, so the feed
+        degrades to "an id and what it is doing" rather than silence."""
+        record = self.tasks.get(task_id)
+        if record is None:
+            record = TaskRecord(task_id=task_id)
+            self.tasks[task_id] = record
+            self._order.append(task_id)
+            self._trim()
+        return record
+
+    def on_started(self, task_id: str, *, now: float) -> TaskRecord:
+        record = self.get(task_id)
+        record.status = "running"
+        record.started_at = now
+        return record
+
+    def on_step(self, task_id: str) -> TaskRecord:
+        record = self.get(task_id)
+        record.steps += 1
+        return record
+
+    def on_finished(self, task_id: str, status: str) -> TaskRecord:
+        record = self.get(task_id)
+        record.status = status
+        return record
+
+    def running(self) -> list[TaskRecord]:
+        return [t for t in self.tasks.values() if t.status == "running"]
+
+    def queued(self) -> list[TaskRecord]:
+        return [t for t in self.tasks.values() if t.status in ("created", "available")]
+
+    def _trim(self) -> None:
+        while len(self._order) > _MAX_TRACKED:
+            self.tasks.pop(self._order.pop(0), None)
+
+
+# -- rendering ---------------------------------------------------------------
+_KIND_ICON = {
+    "research": "🔍", "patch": "🔧", "skill": "🎓", "project": "🗂", "chat": "💬",
+}
+_END_ICON = {"completed": "✅", "failed": "❌", "blocked": "⏸", "paused": "⏸"}
+
+
+def started_line(record: TaskRecord, *, unicode: bool = True) -> str:
+    """The line that was missing entirely: work beginning, and what it is.
+
+    `origin` is on it because "Sim decided to do this" and "you asked for
+    this" are different events and were indistinguishable before.
+    """
+    icon = (_KIND_ICON.get(record.kind, "•") + " ") if unicode else ""
+    return f"{icon}{record.kind} · {record.origin} · {record.short_topic()}  [{record.task_id[:8]}]"
+
+
+def step_line(record: TaskRecord, *, tool: str | None, summary: str, ok: bool | None,
+              unicode: bool = True) -> str:
+    mark = "  " + ("→" if unicode else "-")
+    outcome = "" if ok is None else ("  ok" if ok else "  failed")
+    what = f"{tool}: {summary}" if tool else summary
+    what = " ".join(what.split())
+    if len(what) > 96:
+        what = what[:95] + "…"
+    return f"{mark} {what}{outcome}"
+
+
+def finished_line(record: TaskRecord, *, elapsed: float | None, detail: str = "",
+                  unicode: bool = True) -> str:
+    icon = (_END_ICON.get(record.status, "•") + " ") if unicode else ""
+    took = f" in {elapsed:.0f}s" if elapsed is not None else ""
+    tail = f" -- {' '.join(detail.split())[:80]}" if detail else ""
+    return f"{icon}{record.status}{took}: {record.short_topic()}  [{record.task_id[:8]}]{tail}"
+
+
+def footer(book: TaskBook, *, now: float, extra: str = "") -> str:
+    """One live line under the prompt: what is running, and what waits.
+
+    Answers "what is in queue" without anyone having to type `tasks`.
+    """
+    running = book.running()
+    queued = len(book.queued())
+    if not running:
+        base = f"idle · {queued} queued" if queued else "idle"
+        return f"{base}  {extra}".rstrip()
+    first = running[0]
+    elapsed = now - first.started_at if first.started_at else 0.0
+    more = f" (+{len(running) - 1} more)" if len(running) > 1 else ""
+    parts = [f"{first.kind} · {first.short_topic(44)} · {elapsed:.0f}s{more}"]
+    if queued:
+        parts.append(f"{queued} queued")
+    if extra:
+        parts.append(extra)
+    return "  ·  ".join(parts)
+
+
+__all__ = [
+    "TaskBook", "TaskRecord", "finished_line", "footer", "started_line", "step_line",
+]

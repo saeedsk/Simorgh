@@ -47,7 +47,13 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
             bus=self.bus, ledger=self.ledger, config={}, secrets={}, clock=self.clock,
             logger=_Logger(), data_dir=Path(self._tmp.name) / "data",
         )
-        self.service = Service(InterfaceConfig(chat_reply_timeout_s=0.3), run_repl=False)
+        # `narrate_autonomous=False` keeps this case's original
+        # subject: narration of the turn *this* REPL is waiting on.
+        # The new default (autonomous work narrated too) has its own
+        # tests in test_activity.py.
+        self.service = Service(
+            InterfaceConfig(chat_reply_timeout_s=0.3, narrate_autonomous=False), run_repl=False,
+        )
         await self.service.start(self.ctx)
 
         self.other = make_client(self.backend, source="other", ledger=self.ledger, clock=self.clock.now)
@@ -215,7 +221,7 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         out = await self._line("hello there")
         self.assertIn("no response", out)
 
-    async def test_pending_turn_is_narrated_live_and_other_tasks_stay_silent(self):
+    async def test_pending_turn_is_narrated_live_and_other_tasks_stay_silent_when_asked(self):
         """07-post-cutover-review.md §3.9: while a reply is pending, each
         task.started/step/completed for *this* session prints a dim line
         (the creator watched "thinking" for a long time with no sign of
@@ -230,7 +236,10 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
                 "task_id": sid, "step_no": 1, "phase": "act", "summary": "read docs/SOUL.md",
                 "tool": "read_file", "ok": True,
             }))
-            # An unrelated autonomous task -- must NOT be narrated.
+            # An unrelated autonomous task. With `narrate_autonomous`
+            # off (this service's config) it must stay silent; the
+            # creator asked for the opposite default -- see
+            # `test_autonomous_work_is_narrated_by_default`.
             await self.other.publish(self.other.new(topics.TASK_STEP, {
                 "task_id": "autonomous-9", "step_no": 3, "phase": "gather", "summary": "final answer",
             }))

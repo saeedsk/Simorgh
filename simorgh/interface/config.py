@@ -26,6 +26,15 @@ class Config:
     # the reply is pending, plus a "still thinking" heartbeat so silence
     # never lasts longer than `narrate_heartbeat_s`.
     narrate: bool = True
+    # Narrate *every* task, not only the ones this REPL started.
+    # The creator, 2026-09-07: "these thing were happening behind the
+    # scene and I was not aware of them, i want full visibility". Off
+    # restores the previous behaviour, where autonomous work ran
+    # silently and only a watched task ever printed anything.
+    narrate_autonomous: bool = True
+    # Print a line per step for autonomous work too, not just the
+    # start and the outcome. "verbose as hell", their words.
+    narrate_steps: bool = True
     narrate_heartbeat_s: float = 10.0
     # How long the REPL thread holds its splash waiting for the Kernel
     # to reach `running`, so boot progress is not overprinted. Bounded:
