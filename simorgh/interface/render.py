@@ -332,6 +332,7 @@ _QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
     ("... steps=N", "a bigger step cap for a big task"),
     ("improve <topic>", "draft a new skill, audited before it lands"),
     ("tasks / tasks work", "see the backlog, advance the next item"),
+    ("cancel <task_id>", "stop a running task"),
     ("research <topic>", "investigate a question, no code written"),
     ("benchmark", "score this system on GAIA or BFCL, and track it"),
     ("plan <goal>", "break a goal into tracked steps"),

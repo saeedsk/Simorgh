@@ -183,6 +183,17 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "benchmark":
         return await _benchmark(bus, args)
 
+    if name == "cancel":
+        # Until 2026-09-08 there was no way to stop anything. A task that
+        # had stopped being useful ran to its step budget while holding
+        # the single worker, and everything else queued behind it.
+        task_id = args.strip()
+        if not task_id:
+            return Outcome("usage: cancel <task_id>   (`tasks` lists them)")
+        return await _publish(bus, topics.TASK_CANCEL, {
+            "task_id": task_id, "reason": f"cancelled by cli:{session_id}",
+        }, render_ok=f"asked {task_id} to stop; it ends after its current step")
+
     if name == "tasks":
         if args.strip() == "work":
             return await _request(bus, topics.TASK_WORK_NEXT_REQUEST, {}, timeout=5.0, render=lambda p: (

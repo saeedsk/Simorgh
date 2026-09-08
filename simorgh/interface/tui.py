@@ -61,6 +61,7 @@ COMMANDS: tuple[tuple[str, str], ...] = (
     ("status", "health, vitals, posture, and tools in one panel"),
     ("improve", "revise existing code, or draft a new skill"),
     ("tasks", "see the backlog (`tasks work` advances the next item)"),
+    ("cancel", "stop a running task: cancel <task_id>"),
     ("research", "investigate a question, no code written"),
     ("benchmark", "score this system on GAIA or BFCL, and track it"),
     ("plan", "break a goal into tracked steps"),

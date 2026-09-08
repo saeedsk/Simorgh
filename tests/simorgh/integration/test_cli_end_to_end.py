@@ -148,3 +148,29 @@ class CliEndToEndTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheCancelCommand(CliEndToEndTestCase):
+    """`cancel` exists because until 2026-09-08 nothing could stop a
+    running task. The worker takes one at a time, so a task that had
+    stopped being useful held the whole system until its step budget ran
+    out."""
+
+    async def test_cancel_asks_the_named_task_to_stop(self) -> None:
+        seen = []
+        sub = await self.kernel.bus.subscribe(topics.TASK_CANCEL, lambda m: seen.append(m.payload) or _aiodone())
+        out = await self._type("cancel abc123")
+        await self._wait_for(lambda: bool(seen), what="task.cancel on the bus")
+        await sub.unsubscribe()
+        self.assertTrue(seen, f"cancel must actually publish task.cancel; printed: {out!r}")
+        self.assertIn("abc123", out)
+        self.assertEqual(seen[0]["task_id"], "abc123")
+
+    async def test_cancel_with_no_task_says_how_to_use_it(self) -> None:
+        out = await self._type("cancel")
+        self.assertIn("usage", out.lower())
+        self.assertIn("task_id", out)
+
+
+async def _aiodone() -> None:
+    return None

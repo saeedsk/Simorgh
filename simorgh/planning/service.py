@@ -27,6 +27,7 @@ from .model import (
     IN_PROGRESS,
     PAUSED,
     PENDING,
+    TERMINAL_STATUSES,
     Scope,
     Task,
 )
@@ -140,6 +141,7 @@ class Service:
             topics.TASK_COMPLETED: self._on_task_completed,
             topics.TASK_FAILED: self._on_task_failed,
             topics.TASK_BLOCKED: self._on_task_blocked,
+            topics.TASK_CANCEL: self._on_task_cancel,
             topics.PLAN_REVIEWED: self._on_plan_reviewed,
             topics.UI_PROMPT_ANSWERED: self._on_prompt_answered,
             topics.RESEARCH_FINDING_RECORDED: self._on_research_finding,
@@ -300,6 +302,31 @@ class Service:
             await self._maybe_finish_project(task.parent_id)
             return
         await self._retry_or_block(task, p.get("reason", ""))
+
+    async def _on_task_cancel(self, message: Message) -> None:
+        """Stop a task nobody is waiting for any more.
+
+        Both halves are needed. The Worker stops its session at the next
+        step boundary, which frees the worker; this frees the *record*,
+        because a task left in_progress keeps its lease, and an expiring
+        lease puts it straight back on the available queue to be run
+        again -- the resurrection loop of 2026-09-07.
+
+        A worker still finishing its current step will report the same
+        task failed a moment later. That is a duplicate transition, which
+        the store already treats as a no-op.
+        """
+        task_id = message.payload.get("task_id", "")
+        reason = message.payload.get("reason") or "cancelled"
+        task = await self._store.get(task_id) if task_id else None
+        if task is None or task.status in TERMINAL_STATUSES:
+            return
+        await self._store.transition(task_id, FAILED, note=reason)
+        await self._ctx.bus.publish(Message.new(
+            topics.TASK_FAILED, source=self._ctx.source,
+            partition_key=f"task:{task_id}",
+            payload={"task_id": task_id, "reason": reason, "terminal": True, "attempts": task.attempts},
+        ))
 
     async def _on_task_blocked(self, message: Message) -> None:
         # `_retry_or_block` publishes task.blocked itself, on the same

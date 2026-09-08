@@ -1,0 +1,22 @@
+{
+  "$id": "https://simorgh.local/schema/task.cancel.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Ask a running task to stop. The Worker stops at the next step boundary (never mid-step, which would abandon an uncommitted edit) and Planning fails the record so its lease cannot expire it back onto the queue.",
+  "properties": {
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id"
+  ],
+  "title": "task.cancel",
+  "type": "object"
+}

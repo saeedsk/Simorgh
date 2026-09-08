@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 COMMAND_NAMES = (
     "status", "tasks", "improve", "plan", "research", "interests",
-    "auto", "pause", "resume", "exit", "mcp", "help", "benchmark",
+    "auto", "pause", "resume", "exit", "mcp", "help", "benchmark", "cancel",
 )
 
 _AUTOCORRECT_CUTOFF = 0.75
