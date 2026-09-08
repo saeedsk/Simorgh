@@ -167,6 +167,16 @@ _MARKER_NO_ARGS = frozenset({"git_revert"})
 _DYNAMIC_TOOLS: dict[str, str] = {}
 
 
+# Tools Execution has actually announced (`tool.registered`) in the
+# current process, kept apart from `_DYNAMIC_TOOLS` above: that one is
+# the *policy* table, which unit tests fill directly with made-up names,
+# and using it as "what exists" made every later harness test offer the
+# model nothing (full-suite-only failures, 2026-09-07). The Orchestration
+# service fills this on each announcement and empties it when it stops,
+# so one kernel's tools never leak into the next.
+_REGISTERED: set[str] = set()
+
+
 def known_tools() -> frozenset[str]:
     """Every tool Execution has announced this process. Empty until the
     first `tool.registered` -- a harness with no Execution -- and then a
@@ -174,7 +184,16 @@ def known_tools() -> frozenset[str]:
     this: a profile named `run_shell` while Execution had it switched
     off, and the model was told about a tool that answered "unknown
     tool" (watched trial, 2026-09-07)."""
-    return frozenset(_DYNAMIC_TOOLS)
+    return frozenset(_REGISTERED)
+
+
+def note_registered(name: str) -> None:
+    if name:
+        _REGISTERED.add(name)
+
+
+def forget_registered() -> None:
+    _REGISTERED.clear()
 
 
 def offered_tools(profile_tools: tuple[str, ...]) -> tuple[str, ...]:

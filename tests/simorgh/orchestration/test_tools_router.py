@@ -132,3 +132,22 @@ class TestToolCallRouter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOfferedToolsFollowRealRegistrations(unittest.TestCase):
+    """`offered_tools` filters a profile by what Execution announced --
+    never by the policy table, which tests fill with made-up names."""
+
+    def tearDown(self):
+        from simorgh.orchestration.tools import forget_registered
+        forget_registered()
+
+    def test_nothing_announced_means_the_profile_as_written(self):
+        from simorgh.orchestration.tools import offered_tools, register_tool_policy
+        register_tool_policy("made_up", reversibility="read_only", provider="external")
+        self.assertEqual(offered_tools(("read_file", "run_shell")), ("read_file", "run_shell"))
+
+    def test_an_announced_set_filters_the_profile(self):
+        from simorgh.orchestration.tools import note_registered, offered_tools
+        note_registered("read_file")
+        self.assertEqual(offered_tools(("read_file", "run_shell")), ("read_file",))
