@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -213,3 +214,111 @@ class LoaderIsIndependentTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressTestCase(unittest.TestCase):
+    """The gate is minutes of someone else's silence. The creator,
+    watching a real run: "simloader is now not showing any activity for
+    past 60 seconds ... user doesn't understand what is happening"."""
+
+    def test_the_bar_fills_and_is_bounded(self):
+        self.assertEqual(simloader.bar(0.0, width=4), "░░░░")
+        self.assertEqual(simloader.bar(0.5, width=4), "██░░")
+        self.assertEqual(simloader.bar(1.0, width=4), "████")
+        self.assertEqual(simloader.bar(9.0, width=4), "████")
+        self.assertEqual(simloader.bar(-1.0, width=4), "░░░░")
+
+    def test_pytest_progress_reads_the_percentage_and_counts(self):
+        p = simloader.PytestProgress(started=0.0)
+        p.feed("........................ [  8%]\n")
+        self.assertAlmostEqual(p.fraction, 0.08)
+        self.assertEqual(p.tests, 24)
+        self.assertIn("24 tests", p.detail)
+        p.feed("....F... [ 50%]\n")
+        self.assertAlmostEqual(p.fraction, 0.5)
+        self.assertIn("failing", p.detail)
+
+    def test_trial_progress_counts_finished_trials(self):
+        p = simloader.TrialProgress(started=0.0, total=4)
+        p.feed("  → read_file: something  ok\n")
+        self.assertIn("trial 1/4", p.detail)
+        p.feed("  PASS  create-a-file  completed  20s\n")
+        self.assertEqual(p.done, 1)
+        self.assertAlmostEqual(p.fraction, 0.25)
+
+    def test_the_trial_count_is_read_from_the_suite_source(self):
+        repo = Path(__file__).resolve().parents[2]
+        self.assertGreaterEqual(simloader.trial_count(repo), 6)
+        self.assertEqual(simloader.trial_count(Path("/nonexistent")), 6)
+
+    def test_stream_returns_the_childs_output_and_code(self):
+        progress = simloader.PytestProgress(started=0.0)
+        code, out = simloader.stream(
+            [sys.executable, "-c", "print('hello'); raise SystemExit(3)"],
+            cwd=Path.cwd(), timeout_s=30, progress=progress,
+        )
+        self.assertEqual(code, 3)
+        self.assertIn("hello", out)
+
+    def test_stream_kills_a_child_that_overruns(self):
+        with self.assertRaises(subprocess.TimeoutExpired):
+            simloader.stream(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                cwd=Path.cwd(), timeout_s=1, progress=simloader.PytestProgress(started=0.0),
+            )
+
+
+class SkipKeyTestCase(unittest.TestCase):
+    """The creator: "in simloader allow user to bypass the test by
+    pressing key and let sim to load". A skip boots anyway, is
+    announced, and must never produce a known-good tag."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = _Repo(Path(self._tmp.name))
+        self.notes = Path(self._tmp.name) / "notes"
+
+    def test_a_skip_is_not_a_pass_and_tags_nothing(self):
+        with mock.patch.object(simloader, "run_gate", return_value=(True, f"{simloader.SKIP_SENTINEL} during the unit suite")), \
+             mock.patch.object(simloader, "launch_sim", return_value=0):
+            rc = simloader.cmd_run(self.repo.path, self.notes, full=False, timeout_s=10,
+                                   max_rollbacks=1, watchdog_s=1, sim_args=[])
+        self.assertEqual(rc, 0)
+        self.assertEqual(simloader.good_tags(self.repo.path), [])
+        self.assertIn("gate_skipped", (self.notes / "decisions.jsonl").read_text())
+
+    def test_a_real_pass_still_tags(self):
+        with mock.patch.object(simloader, "run_gate", return_value=(True, "unit suite green")), \
+             mock.patch.object(simloader, "launch_sim", return_value=0):
+            simloader.cmd_run(self.repo.path, self.notes, full=False, timeout_s=10,
+                              max_rollbacks=1, watchdog_s=1, sim_args=[])
+        self.assertEqual([t for _n, t in simloader.good_tags(self.repo.path)], ["sim-good-0001"])
+
+    def test_bless_never_offers_a_skip(self):
+        source = _LOADER.read_text()
+        self.assertIn("allow_skip=True", source)
+        self.assertEqual(source.count("allow_skip=True"), 1, "only `run` may allow a skip")
+        self.assertIn("run_gate(repo, full=full, timeout_s=timeout_s, notes=notes)", source)
+
+    def test_the_watch_is_inert_without_a_terminal(self):
+        watch = simloader.SkipWatch(enabled=True)
+        with mock.patch.object(simloader.sys, "stdin", None):
+            self.assertFalse(simloader.SkipWatch(enabled=True).enabled)
+        with watch:
+            pass
+        self.assertFalse(simloader.SkipWatch(enabled=False).enabled)
+
+    def test_a_pressed_key_stops_the_stream(self):
+        class _AlwaysPressed:
+            enabled = True
+
+            def pressed(self):
+                return True
+
+        with self.assertRaises(simloader.GateSkipped):
+            simloader.stream(
+                [sys.executable, "-c", "import time; time.sleep(20)"],
+                cwd=Path.cwd(), timeout_s=30, progress=simloader.PytestProgress(started=0.0),
+                skip=_AlwaysPressed(),
+            )

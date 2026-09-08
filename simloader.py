@@ -47,24 +47,261 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import re
+import select
+import shutil
 import subprocess
 import sys
+import termios
+import threading
+import tty
 import time
 from pathlib import Path
 
 TAG_PREFIX = "sim-good-"
+# Only for the "this will take a while" line; nothing depends on it.
+EXPECTED_UNIT_S = 240
 _TAG = re.compile(rf"^{re.escape(TAG_PREFIX)}(\d+)$")
 DEFAULT_NOTES = Path("~/.simorgh/loader").expanduser()
 
 
 # ---------------------------------------------------------------- output
 def say(line: str) -> None:
+    _live_clear()
     print(f"[simloader] {line}", flush=True)
 
 
 def rule(title: str) -> None:
+    _live_clear()
     print(f"\n[simloader] ── {title} " + "─" * max(0, 60 - len(title)), flush=True)
+
+
+# A gate is minutes of silence otherwise. The creator, 2026-09-07:
+# "simloader is now not showing any activity for past 60 seconds, this
+# is not good, user doesn't understand what is happening". So one line,
+# redrawn in place, that always moves: a bar, a percentage, a count, and
+# the elapsed seconds. Redirected output (a log, a pipe) gets periodic
+# ordinary lines instead -- escape codes in a file help nobody.
+_LIVE = sys.stdout.isatty() and os.environ.get("SIMORGH_LOADER_PLAIN") != "1"
+_live_drawn = False
+_HEARTBEAT_S = 15.0
+
+
+def _live_clear() -> None:
+    global _live_drawn
+    if _LIVE and _live_drawn:
+        sys.stdout.write("\r\x1b[2K")
+        sys.stdout.flush()
+        _live_drawn = False
+
+
+def _live(text: str) -> None:
+    global _live_drawn
+    if not _LIVE:
+        return
+    width = shutil.get_terminal_size((80, 24)).columns
+    sys.stdout.write("\r\x1b[2K" + text[: max(0, width - 1)])
+    sys.stdout.flush()
+    _live_drawn = True
+
+
+def bar(fraction: float, width: int = 24) -> str:
+    fraction = min(1.0, max(0.0, fraction))
+    filled = int(round(fraction * width))
+    return "█" * filled + "░" * (width - filled)
+
+
+def _mmss(seconds: float) -> str:
+    return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
+SKIP_KEYS = ("s", "S")
+SKIP_SENTINEL = "skipped by the operator"
+
+
+class GateSkipped(Exception):
+    """A human pressed the skip key: boot Sim without finishing the gate."""
+
+
+class SkipWatch:
+    """Watches the terminal for the skip key while the gate runs.
+
+    The creator, 2026-09-07: "in simloader allow user to bypass the test
+    by pressing key and let sim to load". The gate is minutes long, and
+    someone who knows this checkout is fine should not have to wait for
+    it or edit a config to say so. A skip is deliberate, announced, and
+    recorded -- and it never produces a known-good tag: only a gate that
+    actually ran can bless a commit."""
+
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled and sys.stdin is not None and sys.stdin.isatty()
+        self._saved = None
+
+    def __enter__(self) -> "SkipWatch":
+        if self.enabled:
+            try:
+                self._saved = termios.tcgetattr(sys.stdin.fileno())
+                tty.setcbreak(sys.stdin.fileno())
+            except Exception:  # noqa: BLE001 -- no controlling terminal: just never skip
+                self.enabled = False
+        return self
+
+    def __exit__(self, *exc) -> None:
+        if self._saved is not None:
+            try:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self._saved)
+            except Exception:  # noqa: BLE001
+                pass
+            self._saved = None
+
+    def pressed(self) -> bool:
+        if not self.enabled:
+            return False
+        try:
+            while select.select([sys.stdin], [], [], 0)[0]:
+                key = sys.stdin.read(1)
+                if not key:
+                    return False
+                if key in SKIP_KEYS:
+                    return True
+        except Exception:  # noqa: BLE001
+            self.enabled = False
+        return False
+
+
+class Progress:
+    """Draws one moving line for a subprocess, and keeps its output.
+
+    `feed(chunk)` is called with whatever the child just wrote; the
+    subclass pulls whatever it can out of it (a pytest percentage, a
+    trial's PASS line) and returns the text to show. `tick()` redraws on
+    a timer so the line moves even while the child is silent."""
+
+    label = "working"
+
+    def __init__(self, started: float) -> None:
+        self.started = started
+        self.detail = ""
+        self.fraction = 0.0
+        self._last_plain = 0.0
+
+    def feed(self, chunk: str) -> None:  # pragma: no cover -- overridden
+        ...
+
+    def render(self) -> None:
+        elapsed = time.monotonic() - self.started
+        line = f"[simloader] {bar(self.fraction)} {self.fraction * 100:3.0f}%  {self.label}  {_mmss(elapsed)}"
+        if self.detail:
+            line += f"  {self.detail}"
+        if _LIVE:
+            _live(line)
+        elif elapsed - self._last_plain >= _HEARTBEAT_S:
+            self._last_plain = elapsed
+            print(line, flush=True)
+
+
+class PytestProgress(Progress):
+    """pytest -q writes dots and a `[ 42%]` at each line's end."""
+
+    label = "unit suite"
+    _PCT = re.compile(r"\[\s*(\d{1,3})%\]")
+    _DOTS = re.compile(r"[.FEsxX]")
+
+    def __init__(self, started: float) -> None:
+        super().__init__(started)
+        self.tests = 0
+        self.failed = 0
+
+    def feed(self, chunk: str) -> None:
+        for match in self._PCT.finditer(chunk):
+            self.fraction = int(match.group(1)) / 100
+        self.tests += len(self._DOTS.findall(self._PCT.sub("", chunk)))
+        self.failed += chunk.count("F") + chunk.count("E")
+        self.detail = f"{self.tests} tests" + (f", {self.failed} failing" if self.failed else "")
+
+
+class TrialProgress(Progress):
+    """The trial suite prints one PASS/FAIL line per trial, and a task's
+    own narration in between -- the most recent step is the detail."""
+
+    label = "trial suite"
+
+    def __init__(self, started: float, total: int) -> None:
+        super().__init__(started)
+        self.total = max(1, total)
+        self.done = 0
+        self._buffer = ""
+
+    def feed(self, chunk: str) -> None:
+        self._buffer += chunk
+        *lines, self._buffer = self._buffer.split("\n")
+        for line in lines:
+            plain = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+            if plain.startswith(("PASS", "FAIL")):
+                self.done += 1
+                self.fraction = self.done / self.total
+                say(f"  {plain}")
+            elif plain.startswith("→"):
+                self.detail = f"trial {self.done + 1}/{self.total}: {plain[1:].strip()[:60]}"
+            elif plain.startswith(("🔧", "🔍", "🎓", "💬", "🗂")):
+                self.detail = f"trial {self.done + 1}/{self.total}: {plain[1:].strip()[:60]}"
+
+
+def stream(argv: list[str], *, cwd: Path, timeout_s: float, progress: Progress,
+           skip: "SkipWatch | None" = None) -> tuple[int, str]:
+    """Run `argv`, drawing `progress` as it goes. Returns (code, output).
+
+    Reads raw bytes rather than lines: pytest's dots arrive without a
+    newline for a whole screen at a time, so a line-based read shows
+    nothing for minutes -- which is exactly the silence being fixed."""
+    child = subprocess.Popen(
+        argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL, text=True, bufsize=0,
+    )
+    # A reader thread, not a read in this loop: a silent child would
+    # otherwise block the read for as long as it stays silent, so
+    # neither the timeout nor the moving line would fire -- which is the
+    # symptom being fixed.
+    chunks: "queue.Queue[str | None]" = queue.Queue()
+
+    def _read() -> None:
+        try:
+            while True:
+                chunk = child.stdout.read(256)  # type: ignore[union-attr]
+                if not chunk:
+                    break
+                chunks.put(chunk)
+        finally:
+            chunks.put(None)
+
+    reader = threading.Thread(target=_read, name="simloader-reader", daemon=True)
+    reader.start()
+    out: list[str] = []
+    deadline = time.monotonic() + timeout_s
+    try:
+        while True:
+            if time.monotonic() > deadline:
+                raise subprocess.TimeoutExpired(argv, timeout_s)
+            if skip is not None and skip.pressed():
+                raise GateSkipped()
+            try:
+                chunk = chunks.get(timeout=0.5)
+            except queue.Empty:
+                progress.render()  # the line moves even while the child is quiet
+                continue
+            if chunk is None:
+                break
+            out.append(chunk)
+            progress.feed(chunk)
+            progress.render()
+        code = child.wait(timeout=30)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=10)
+        _live_clear()
+    return code, "".join(out)
 
 
 # ------------------------------------------------------------------- git
@@ -114,56 +351,86 @@ def next_tag(repo: Path) -> str:
 
 
 # ------------------------------------------------------------------ gate
-def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = None) -> tuple[bool, str]:
-    """Is this checkout fit to run? Returns (ok, why)."""
+def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = None,
+             allow_skip: bool = False) -> tuple[bool, str]:
+    """Is this checkout fit to run? Returns (ok, why).
+
+    With `allow_skip`, pressing `s` at the terminal abandons the gate and
+    boots anyway -- a `run` convenience, never offered to `bless`."""
     started = time.monotonic()
     rule("gate: unit suite")
-    try:
-        tests = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
-            cwd=repo, capture_output=True, text=True, timeout=timeout_s, stdin=subprocess.DEVNULL,
-        )
-    except subprocess.TimeoutExpired:
-        return False, f"unit suite exceeded {timeout_s:.0f}s"
-    tail = (tests.stdout.strip().splitlines() or [""])[-1]
-    say(f"unit suite: {tail}  ({time.monotonic() - started:.0f}s)")
-    if notes is not None:
-        notes.mkdir(parents=True, exist_ok=True)
-        (notes / "last_unit.txt").write_text(tests.stdout + ("\n[stderr]\n" + tests.stderr if tests.stderr else ""))
-    if tests.returncode not in (0, 5):
-        # Name them. "9 failed" alone sent the human off to re-run the
-        # whole suite to learn which nine (2026-09-07).
-        failed = [line.strip() for line in tests.stdout.splitlines() if line.startswith("FAILED ")]
-        for line in failed[:12]:
-            say(line)
-        if len(failed) > 12:
-            say(f"... and {len(failed) - 12} more (full output: {notes / 'last_unit.txt' if notes else 'not kept'})")
-        return False, f"unit suite failed: {tail}"
-    if not full:
-        return True, "unit suite green"
+    say(f"running the whole test suite -- takes about {EXPECTED_UNIT_S // 60} minutes on this machine")
+    with SkipWatch(allow_skip) as skip:
+        if skip.enabled:
+            say("press s to skip the gate and boot anyway (nothing will be tagged known-good)")
+        try:
+            code, unit_out = stream(
+                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
+                cwd=repo, timeout_s=timeout_s, progress=PytestProgress(started), skip=skip,
+            )
+        except GateSkipped:
+            say("skipped the unit suite at your request -- this checkout is UNVERIFIED")
+            return True, f"{SKIP_SENTINEL} during the unit suite"
+        except subprocess.TimeoutExpired:
+            return False, f"unit suite exceeded {timeout_s:.0f}s"
+        tests = subprocess.CompletedProcess(args=[], returncode=code, stdout=unit_out, stderr="")
+        tail = (tests.stdout.strip().splitlines() or [""])[-1]
+        say(f"unit suite: {tail}  ({time.monotonic() - started:.0f}s)")
+        if notes is not None:
+            notes.mkdir(parents=True, exist_ok=True)
+            (notes / "last_unit.txt").write_text(tests.stdout)
+        if tests.returncode not in (0, 5):
+            # Name them. "9 failed" alone sent the human off to re-run the
+            # whole suite to learn which nine (2026-09-07).
+            failed = [line.strip() for line in tests.stdout.splitlines() if line.startswith("FAILED ")]
+            for line in failed[:12]:
+                say(line)
+            if len(failed) > 12:
+                say(f"... and {len(failed) - 12} more (full output: {notes / 'last_unit.txt' if notes else 'not kept'})")
+            return False, f"unit suite failed: {tail}"
+        if not full:
+            return True, "unit suite green"
 
-    rule("gate: scored trial suite")
-    remaining = max(60.0, timeout_s - (time.monotonic() - started))
-    try:
-        trials = subprocess.run(
-            [sys.executable, "-u", "tools/trial_suite.py"],
-            cwd=repo, capture_output=True, text=True, timeout=remaining, stdin=subprocess.DEVNULL,
-        )
-    except subprocess.TimeoutExpired:
-        return False, f"trial suite exceeded {remaining:.0f}s"
+        rule("gate: scored trial suite")
+        total = trial_count(repo)
+        say(f"{total} real tasks against a throwaway copy of the repo, one at a time -- several minutes, and it calls the model")
+        remaining = max(60.0, timeout_s - (time.monotonic() - started))
+        trial_started = time.monotonic()
+        try:
+            code, trial_out = stream(
+                [sys.executable, "-u", "tools/trial_suite.py", "--timeout", f"{min(900.0, remaining):.0f}"],
+                cwd=repo, timeout_s=remaining, progress=TrialProgress(trial_started, total), skip=skip,
+            )
+        except GateSkipped:
+            say("skipped the trial suite at your request -- the unit suite passed, the trials did not run")
+            return True, f"{SKIP_SENTINEL} during the trial suite"
+        except subprocess.TimeoutExpired:
+            return False, f"trial suite exceeded {remaining:.0f}s"
+    trials = subprocess.CompletedProcess(args=[], returncode=code, stdout=trial_out, stderr="")
     for line in trials.stdout.splitlines():
-        if line.startswith(("  PASS", "  FAIL", "        -")) or "clean" in line:
+        if line.strip().startswith("- ") or "clean" in line:
             say(line.strip())
     if notes is not None:
         # The whole narration, so a refused bless can be diagnosed
         # without re-running the trial: the first real one refused on
         # three "blocked" trials and this summary alone could not say why.
         notes.mkdir(parents=True, exist_ok=True)
-        (notes / "last_trials.txt").write_text(trials.stdout + ("\n[stderr]\n" + trials.stderr if trials.stderr else ""))
+        (notes / "last_trials.txt").write_text(trials.stdout)
         say(f"full trial output: {notes / 'last_trials.txt'}")
     if trials.returncode != 0:
         return False, "trial suite had failures"
     return True, "unit suite and trial suite green"
+
+
+def trial_count(repo: Path) -> int:
+    """How many trials the suite will run, read from its source rather
+    than imported -- the loader never imports the package it boots."""
+    try:
+        text = (repo / "tools" / "trial_suite.py").read_text()
+    except OSError:
+        return 6
+    body = text.partition("TRIALS: tuple[Trial, ...] = (")[2].partition("\n)")[0]
+    return body.count("Trial(") or 6
 
 
 # ----------------------------------------------------------------- notes
@@ -251,7 +518,11 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
         say("no known-good tag exists yet; gating HEAD as-is")
     rollbacks = 0
     while True:
-        ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes)
+        ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes, allow_skip=True)
+        if ok and SKIP_SENTINEL in why:
+            say(f"gate {why}; booting unverified, and nothing is being tagged")
+            write_note(notes, {"kind": "gate_skipped", "commit": head(repo), "why": why})
+            break
         if ok:
             say(f"gate passed: {why}")
             commit = head(repo)
@@ -299,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parent))
     parser.add_argument("--notes", default=str(DEFAULT_NOTES), help="where decisions are written for Sim to read")
     parser.add_argument("--full", action="store_true", help="gate with the trial suite too, not just unit tests")
-    parser.add_argument("--timeout", type=float, default=1800.0, help="seconds the whole gate may take")
+    parser.add_argument("--timeout", type=float, default=5400.0, help="seconds the whole gate may take")
     parser.add_argument("--max-rollbacks", type=int, default=3)
     parser.add_argument("--watchdog", type=float, default=60.0, help="a non-zero exit inside this is a bad boot")
     parser.add_argument("--reason", default="requested by operator")
