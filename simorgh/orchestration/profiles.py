@@ -23,7 +23,8 @@ CHAT = Profile(
 # and `run_tests` is there so it can check itself before committing.
 PATCH = Profile(
     name="patch",
-    tools=("read_file", "list_dir", "search_code", "run_tests", "apply_source_patch", "git_commit", "git_revert"),
+    tools=("read_file", "list_dir", "search_code", "run_tests", "apply_source_patch",
+           "git_commit", "git_revert", "git_discard"),
     # 8 left no room: read, apply, run_tests, git_commit is already four
     # tool calls before a single wrong turn, and the last step is spent
     # on the forced final answer. Live-caught 2026-09-07.
@@ -38,7 +39,8 @@ PLAN = Profile(
     read_only=True, max_steps=8, max_revisions=0, scaffold="plan", verify=True,
 )
 SKILL = Profile(
-    name="skill", tools=("read_file", "list_dir", "search_code", "run_tests", "apply_skill", "git_commit"),
+    name="skill",
+    tools=("read_file", "list_dir", "search_code", "run_tests", "apply_skill", "git_commit", "git_discard"),
     read_only=False, max_steps=10, max_revisions=2, scaffold="skill", max_output_tokens=16_000,
 )
 

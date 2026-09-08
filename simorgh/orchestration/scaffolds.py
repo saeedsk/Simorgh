@@ -34,6 +34,7 @@ _TOOL_NOTES: dict[str, str] = {
     "apply_skill": "install or update a skill",
     "git_commit": "commit what you have applied, with a message",
     "git_revert": "undo your last commit if it turned out wrong",
+    "git_discard": "throw away an uncommitted change you decided against",
     "propose_mcp_server": "propose a new MCP server to the human",
     "draft_candidate": "draft a change without applying it",
 }
@@ -49,8 +50,10 @@ You are changing your own source. Work in this order and do not stop early:
    unfinished task -- it is left for a human to find and clean up. Commit
    before you write your final answer, every time.
 
-If tests still fail after your revisions, use git_revert rather than
-leaving the tree broken, and say so in your final answer.
+If tests still fail after your revisions, put the tree back before you
+finish -- git_discard on the file you changed if you have not committed
+it, git_revert if you have -- and say in your final answer what you tried
+and why you undid it. Never leave a broken change sitting in the tree.
 
 Guardian sees every tool call. A denial is an answer, not an error: say
 what you were denied and stop, do not look for another route to the same

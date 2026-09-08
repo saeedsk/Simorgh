@@ -33,6 +33,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "apply_skill": ("reversible", False),
     "git_commit": ("reversible", False),
     "git_revert": ("reversible", False),
+    "git_discard": ("reversible", False),
     # -- MCP (execution/mcp.py's own module docstring): a human adds an
     # entry here, by the server's registered tool name
     # (`mcp_<server>_<tool>`), for every MCP tool they want the model to
@@ -131,6 +132,7 @@ _MARKER_ARG_HINT.update({
     ),
     "git_commit": "first line: the one path to commit; second line: the commit message.",
     "git_revert": "no argument -- write just the marker: GIT_REVERT:",
+    "git_discard": "the one path whose uncommitted changes to throw away.",
     "run_tests": "a test file or directory to run (e.g. tests/simorgh/guardian), or empty for the whole suite.",
     "search_code": "a regular expression to search for across the readable tree.",
 })
