@@ -74,6 +74,17 @@ class Config:
     # -- web_fetch (08-execution.md section 5.2/3.5; the one reviewed path
     # for real outbound network access -- see WebFetchTool's own docstring)
     web_fetch_timeout_s: float = 10.0
+    # (host suffix, environment variable) -- `web_fetch` sends
+    # `Authorization: Bearer <value>` only to these hosts, and only when
+    # the variable is set. Hugging Face is here because the creator put
+    # an HF_TOKEN in the environment on 2026-09-07 and the datasets
+    # worth reading (SWE-bench, BFCL, GAIA) are hosted there; a public
+    # dataset needs no token, a gated one does. Adding a host here is a
+    # decision to trust it with that credential.
+    web_fetch_bearers: tuple[tuple[str, str], ...] = (
+        ("huggingface.co", "HF_TOKEN"),
+        ("cdn-lfs.huggingface.co", "HF_TOKEN"),
+    )
     # `run_shell`. On by default since 2026-09-07 -- the creator: "give
     # sim file system write access and shell access". It is the one tool
     # whose blast radius is not bounded by its own arguments, so it is
