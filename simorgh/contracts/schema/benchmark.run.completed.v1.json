@@ -1,0 +1,106 @@
+{
+  "$id": "https://simorgh.local/schema/benchmark.run.completed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `benchmark.run.completed` (catalog v1).",
+  "properties": {
+    "accuracy": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "attempted": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "by_level": {},
+    "cases": {
+      "items": {},
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "correct": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "cost_usd": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "detail_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "finished_at": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "partial": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "skipped": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "started_at": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "suite": {
+      "type": "string"
+    },
+    "suite_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "run_id",
+    "suite"
+  ],
+  "title": "benchmark.run.completed",
+  "type": "object"
+}

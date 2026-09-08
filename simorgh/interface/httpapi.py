@@ -219,6 +219,9 @@ class HttpApi:
         elif method == "GET" and route == "/api/streams":
             body = await self._streams_json()
             await self._try_respond(writer, 200, body, "application/json")
+        elif method == "GET" and route == "/api/benchmarks":
+            body = await self._benchmarks_json(query)
+            await self._try_respond(writer, 200, body, "application/json")
         elif method == "GET" and route == "/api/activity":
             body = await self._activity_json(query)
             await self._try_respond(writer, 200, body, "application/json")
@@ -228,6 +231,19 @@ class HttpApi:
             await self._try_respond(writer, 405, b"method not allowed", "text/plain; charset=utf-8")
         else:
             await self._try_respond(writer, 404, b"not found", "text/plain; charset=utf-8")
+
+    async def _benchmarks_json(self, query: dict) -> bytes:
+        """Benchmark runs for the dashboard's accuracy-over-time chart --
+        the same records `benchmark history` draws in braille."""
+        payload = {"suite": self._q1(query, "suite", "") or "", "limit": 200}
+        req = Message.new(topics.BENCHMARK_HISTORY_REQUEST, source="interface", payload=payload,
+                          clock=self._clock)
+        try:
+            reply = await self._bus.request_or_error(req, timeout=self._timeout)
+            body = reply.payload
+        except Exception as exc:  # noqa: BLE001 -- an absent subsystem is an empty chart, not a 500
+            body = {"runs": [], "error": {"code": "benchmarks_unavailable", "detail": str(exc)}}
+        return json.dumps(body, default=str).encode("utf-8")
 
     async def _status_json(self) -> bytes:
         req = Message.new(topics.SYSTEM_STATUS_REQUEST, source="interface", payload={}, clock=self._clock)

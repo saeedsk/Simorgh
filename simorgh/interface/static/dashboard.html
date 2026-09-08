@@ -198,6 +198,15 @@
   .spark-card svg { display: block; width: 100%; height: 34px; margin-top: 4px; }
   .spark-empty { color: var(--text-dim); font-size: 11.5px; font-style: italic; padding: 10px 0; }
 
+  /* -- benchmarks ---------------------------------------------------- */
+  #bench-svg { display: block; width: 100%; height: 190px; }
+  .bench-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 12px; }
+  .bench-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  .bench-levels { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin-top: 12px; }
+  .bench-level { font-size: 12px; }
+  .bench-track { background: var(--panel-border); border-radius: 3px; height: 8px; margin-top: 3px; overflow: hidden; }
+  .bench-fill { background: var(--accent, #4ea8de); height: 100%; }
+
   /* -- process panel --------------------------------------------------- */
   #process-panel .card-detail { min-height: 0; }
 
@@ -318,6 +327,18 @@
           <thead><tr><th>Gauge</th><th class="num">Value</th></tr></thead>
           <tbody id="process-rows"><tr class="empty-row"><td colspan="2">waiting for data…</td></tr></tbody>
         </table>
+      </div>
+    </section>
+    <section>
+      <h2>Benchmarks</h2>
+      <div class="spark-card">
+        <div class="spark-top">
+          <span class="spark-label">accuracy over time, per model</span>
+          <span class="spark-value" id="bench-headline">—</span>
+        </div>
+        <svg id="bench-svg" viewBox="0 0 640 190" preserveAspectRatio="none"></svg>
+        <div class="bench-legend" id="bench-legend"></div>
+        <div class="bench-levels" id="bench-levels"></div>
       </div>
     </section>
     <section>
@@ -637,6 +658,95 @@
     });
   }
 
+  // -- benchmarks: accuracy over time, one line per model -------------
+  // The same numbers `benchmark history` draws in braille on the CLI
+  // (`simorgh/benchmark/render.py`); an SVG polyline here because a
+  // browser has the pixels for it.
+  const BENCH_COLOURS = ["#4ea8de", "#f4a261", "#8ecae6", "#e76f51", "#a3c9a8", "#c77dff"];
+  const BENCH_POLL_MS = 15000;
+  function escB(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+  function benchPoints(values, width, height, pad) {
+    if (!values.length) return "";
+    const span = Math.max(1, values.length - 1);
+    return values.map((v, i) => {
+      const x = pad + (i / span) * (width - pad * 2);
+      const y = height - pad - Math.max(0, Math.min(1, v)) * (height - pad * 2);
+      return x.toFixed(1) + "," + y.toFixed(1);
+    }).join(" ");
+  }
+
+  function renderBenchmarks(runs) {
+    const svg = document.getElementById("bench-svg");
+    const legend = document.getElementById("bench-legend");
+    const levels = document.getElementById("bench-levels");
+    const headline = document.getElementById("bench-headline");
+    if (!svg) return;
+    if (!runs.length) {
+      svg.innerHTML = "";
+      legend.innerHTML = "";
+      levels.innerHTML = "";
+      headline.textContent = "no runs yet";
+      return;
+    }
+    runs.sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
+    const byModel = new Map();
+    runs.forEach(run => {
+      const key = (run.model || "unknown") + " · " + (run.suite || "?");
+      if (!byModel.has(key)) byModel.set(key, []);
+      byModel.get(key).push(run);
+    });
+    const W = 640, H = 190, PAD = 18;
+    const parts = [];
+    for (let g = 0; g <= 4; g++) {
+      const y = (PAD + (g / 4) * (H - PAD * 2)).toFixed(1);
+      parts.push('<line x1="' + PAD + '" y1="' + y + '" x2="' + (W - PAD) + '" y2="' + y +
+                 '" stroke="var(--panel-border)" stroke-width="1"/>');
+      parts.push('<text x="2" y="' + (Number(y) + 4).toFixed(1) + '" font-size="10" fill="var(--text-dim)">' +
+                 (100 - g * 25) + '%</text>');
+    }
+    const keys = [];
+    let index = 0;
+    byModel.forEach((modelRuns, key) => {
+      const colour = BENCH_COLOURS[index % BENCH_COLOURS.length];
+      const pts = benchPoints(modelRuns.map(r => r.accuracy || 0), W, H, PAD);
+      parts.push('<polyline points="' + pts + '" fill="none" stroke="' + colour + '" stroke-width="2"/>');
+      modelRuns.forEach((run, i) => {
+        const span = Math.max(1, modelRuns.length - 1);
+        const x = PAD + (i / span) * (W - PAD * 2);
+        const y = H - PAD - Math.max(0, Math.min(1, run.accuracy || 0)) * (H - PAD * 2);
+        parts.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3" fill="' + colour +
+                   '"><title>' + escB(key) + " — " + (run.correct || 0) + "/" + (run.attempted || 0) +
+                   " on " + escB(run.suite_version || "?") + '</title></circle>');
+      });
+      keys.push('<span><span class="bench-key" style="background:' + colour + '"></span>' + escB(key) +
+                "  " + ((modelRuns[modelRuns.length - 1].accuracy || 0) * 100).toFixed(1) + "%</span>");
+      index += 1;
+    });
+    svg.innerHTML = parts.join("");
+    legend.innerHTML = keys.join("");
+    const newest = runs[runs.length - 1];
+    headline.textContent = ((newest.accuracy || 0) * 100).toFixed(1) + "%  " +
+      (newest.correct || 0) + "/" + (newest.attempted || 0) + "  " + escB(newest.suite || "");
+    const byLevel = newest.by_level || {};
+    levels.innerHTML = Object.keys(byLevel).sort().map(level => {
+      const pair = byLevel[level] || [0, 0];
+      const pct = pair[1] ? (pair[0] / pair[1]) * 100 : 0;
+      return '<div class="bench-level">' + escB(level ? "Level " + level : "all") + "  " +
+        pct.toFixed(0) + "%  (" + pair[0] + "/" + pair[1] + ')' +
+        '<div class="bench-track"><div class="bench-fill" style="width:' + pct.toFixed(1) + '%"></div></div></div>';
+    }).join("");
+  }
+
+  async function refreshBenchmarks() {
+    try {
+      const res = await fetch("/api/benchmarks", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      renderBenchmarks(data.runs || []);
+    } catch (err) { /* best-effort, like every other panel here */ }
+  }
+
   // -- metrics history: sparklines over `/api/history` (section 6.2's ---
   // "value over time," a separate, slower poll from the 1s live status
   // one above -- a history window doesn't need per-second refreshing.
@@ -781,6 +891,8 @@
   setupChat();
   poll();
   pollHistory();
+  refreshBenchmarks();
+  setInterval(refreshBenchmarks, BENCH_POLL_MS);
   loadStreams().then(pollLogs);
   setInterval(loadStreams, STREAMS_POLL_MS);
 

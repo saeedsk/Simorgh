@@ -1,0 +1,58 @@
+{
+  "$id": "https://simorgh.local/schema/benchmark.progress.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `benchmark.progress` (catalog v1).",
+  "properties": {
+    "attempted": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "case_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "correct": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "elapsed_s": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "index": {
+      "type": "integer"
+    },
+    "level": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "suite": {
+      "type": "string"
+    },
+    "total": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "run_id",
+    "suite",
+    "index",
+    "total"
+  ],
+  "title": "benchmark.progress",
+  "type": "object"
+}

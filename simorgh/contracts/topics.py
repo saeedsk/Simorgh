@@ -17,13 +17,13 @@ from __future__ import annotations
 DOMAINS: tuple[str, ...] = (
     "system", "percept", "intent", "plan", "project", "task", "turn", "action",
     "guardian", "tool", "verify", "memory", "world", "self", "learn", "reflect",
-    "curiosity", "persona", "ui", "cognition", "research",
+    "curiosity", "persona", "ui", "cognition", "research", "benchmark",
 )
 
 SUBSYSTEMS: tuple[str, ...] = (
     "bus", "ledger", "kernel", "cognition", "memory", "worldmodel", "planning",
     "execution", "guardian", "verification", "learning", "reflection", "curiosity",
-    "persona", "interface", "orchestration",
+    "persona", "interface", "orchestration", "benchmark",
 )
 
 # --- section 4.1 system ---------------------------------------------------
@@ -146,6 +146,18 @@ CURIOSITY_INTEREST_FOLLOW_UP_REPLY = "curiosity.interest.follow_up.reply"
 PERSONA_STATE_CHANGED = "persona.state.changed"
 PERSONA_VOICE = "persona.voice"
 PERSONA_VOICE_REPLY = "persona.voice.reply"
+
+# -- benchmark (simorgh/benchmark): standard benchmark suites, run
+# through the same task path a human's `research` takes, with the
+# results kept per model so movement is visible.
+BENCHMARK_RUN_REQUEST = "benchmark.run.request"
+BENCHMARK_RUN_REPLY = "benchmark.run.reply"
+BENCHMARK_PROGRESS = "benchmark.progress"
+BENCHMARK_RUN_COMPLETED = "benchmark.run.completed"
+BENCHMARK_HISTORY_REQUEST = "benchmark.history.request"
+BENCHMARK_HISTORY_REPLY = "benchmark.history.reply"
+BENCHMARK_SUITES_REQUEST = "benchmark.suites.request"
+BENCHMARK_SUITES_REPLY = "benchmark.suites.reply"
 PERSONA_USER_MODEL_UPDATED = "persona.user_model.updated"
 # --- 4.15 ui / cognition / guardian / research ----------------------------
 UI_NOTICE = "ui.notice"
