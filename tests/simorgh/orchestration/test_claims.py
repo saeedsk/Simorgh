@@ -146,3 +146,60 @@ class TestTheSessionRejectsAnUnsupportedCompletion(unittest.IsolatedAsyncioTestC
             outcome = await runner.run(session, user_text="add a docstring")
 
         self.assertEqual(outcome.kind, "completed")
+
+
+class TestARetryIsNotAccusedOfInventingEarlierWork(unittest.TestCase):
+    """Work spans attempts by design. An attempt that runs out of steps
+    leaves its edit in the tree and the next one inherits it, so a
+    retry's log legitimately shows a commit with no edit before it.
+
+    Caught by the trial suite on 2026-09-08, by this checker's own first
+    version: a session applied the patch in attempt 1, ran the tests and
+    committed it in attempt 2, answered "Done. I added a module-level
+    constant...", and was told "says it changed a file, and no edit was
+    applied". Every word of the answer was true.
+    """
+
+    def test_an_incomplete_log_is_not_checked(self) -> None:
+        self.assertEqual(
+            unsupported_claims("I added the constant and committed it.", [_Step("read_file")],
+                               PATCH_TOOLS, complete_log=False),
+            [])
+
+    def test_a_commit_substantiates_an_edit_claim(self) -> None:
+        """Committing is itself a change to the repository. A session
+        that committed something did not invent having changed
+        anything."""
+        self.assertEqual(
+            unsupported_claims("I added the constant.", [_Step("git_commit")], PATCH_TOOLS), [])
+
+    def test_a_first_attempt_is_still_checked(self) -> None:
+        self.assertTrue(
+            unsupported_claims("I added the constant and committed it.", [_Step("read_file")],
+                               PATCH_TOOLS, complete_log=True))
+
+
+class TestTheSessionSkipsTheCheckOnARetry(unittest.IsolatedAsyncioTestCase):
+    async def test_a_second_attempt_finishing_earlier_work_still_completes(self) -> None:
+        """The trial-suite failure, end to end: attempt 2 commits what
+        attempt 1 applied, and says so."""
+        from simorgh.orchestration import profiles
+        from simorgh.orchestration.api import Outcome, Session, Step
+        from simorgh.orchestration.session import SessionRunner
+        from tests.simorgh.orchestration.harness import Harness
+
+        async with Harness() as h:
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now)
+            session = Session(task_id="t1", kind="patch", mode="execute", profile=profiles.PATCH)
+            session.attempt = 2
+            session.carried = "attempt 1 applied simorgh/interface/parser.py and ran out of steps"
+
+            async def _fake_run(_session, *, user_text=""):
+                _session.record(Step(1, "act", "ran the tests", tool="run_tests", ok=True))
+                _session.record(Step(2, "act", "committed", tool="git_commit", ok=True))
+                return Outcome("completed", result_summary="Done. I added a module-level constant and committed it.")
+
+            runner._run = _fake_run  # noqa: SLF001
+            outcome = await runner.run(session, user_text="add a constant")
+
+        self.assertEqual(outcome.kind, "completed")

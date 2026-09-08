@@ -169,6 +169,13 @@ class SessionRunner:
             # 2026-09-08). Compare the claim against what ran.
             claims = unsupported_claims(
                 outcome.result_summary or "", session.steps, offered_tools(session.profile.tools),
+                # A retry's step log is not the whole story: the work it
+                # is finishing happened in an earlier attempt, whose
+                # steps are not in `session.steps`. Caught by the trial
+                # suite 2026-09-08 -- a session applied its patch in
+                # attempt 1, committed it in attempt 2, and was told
+                # "says it changed a file, and no edit was applied".
+                complete_log=session.attempt <= 1 and not session.carried,
             )
             if claims:
                 step = Step(session.next_step_no(), "act",
