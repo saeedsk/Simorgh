@@ -28,6 +28,7 @@ import difflib
 import hashlib
 import ipaddress
 import json
+import os
 import re
 import shutil
 import socket
@@ -271,6 +272,25 @@ def _decompress(raw: bytes, encoding: str) -> bytes:
     return raw
 
 
+def _bearer_for(url: str, bearers: "tuple[tuple[str, str], ...]", env) -> str:
+    """The bearer token for `url`, if one is configured for its host.
+
+    Host-scoped on purpose, and matched on the exact host or a subdomain
+    of it -- never a substring. A token belongs to one service; sending
+    Hugging Face's to whatever host a model happened to name would hand
+    a credential to an attacker who can get a URL in front of Sim (a
+    page it fetched, a repo it read). An unset variable simply means no
+    header, so a fetch that does not need one is unchanged."""
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return ""
+    for suffix, var in bearers:
+        suffix = suffix.lower()
+        if host == suffix or host.endswith("." + suffix):
+            return (env.get(var) or "").strip()
+    return ""
+
+
 class WebFetchTool:
     """Port of v1's `src/tools/web_fetch.py` -- the one reviewed path for
     real outbound network access (Guardian's own denylist,
@@ -320,12 +340,16 @@ class WebFetchTool:
         except FetchRefused as exc:
             return ToolResult(ok=False, error=str(exc))
 
-        request = urllib.request.Request(url, headers={
+        headers_out = {
             "User-Agent": self._config.web_fetch_user_agent,
             # Ask for plain bytes. Some servers compress anyway (python.org
             # sends gzip unrequested), so the body is checked below too.
             "Accept-Encoding": "identity",
-        })
+        }
+        token = _bearer_for(url, self._config.web_fetch_bearers, os.environ)
+        if token:
+            headers_out["Authorization"] = f"Bearer {token}"
+        request = urllib.request.Request(url, headers=headers_out)
         try:
             with self._opener(request, timeout=self._config.web_fetch_timeout_s) as response:
                 status_code = getattr(response, "status", 200)

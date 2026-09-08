@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from simorgh.bus.client import _bounded
@@ -285,3 +286,81 @@ class RewriteMustNotLoseTheFileTestCase(unittest.IsolatedAsyncioTestCase):
         (self.root / "simorgh" / "stub.py").write_text("a = 1\nb = 2\nc = 3\n")
         result = await self.patch.run({"subject": "simorgh/stub.py", "code": "z = 0\n"}, ctx=self.ctx)
         self.assertTrue(result.ok, result.error)
+
+
+class HostScopedBearerTestCase(unittest.TestCase):
+    """The creator put an HF_TOKEN in the environment, 2026-09-07, so
+    `web_fetch` can read gated Hugging Face datasets. A token belongs to
+    one service: it must reach that host and no other, or an attacker
+    who can get a URL in front of Sim (a page it fetched, a repo it
+    read) is handed a live credential."""
+
+    BEARERS = (("huggingface.co", "HF_TOKEN"),)
+    ENV = {"HF_TOKEN": "hf_secret"}
+
+    def test_the_exact_host_and_its_subdomains_get_it(self):
+        from simorgh.execution.tools import _bearer_for
+
+        for url in ("https://huggingface.co/api/datasets/gaia-benchmark/GAIA",
+                    "https://cdn-lfs.huggingface.co/repos/x/y.parquet",
+                    "https://HUGGINGFACE.CO/x"):
+            self.assertEqual(_bearer_for(url, self.BEARERS, self.ENV), "hf_secret", url)
+
+    def test_no_other_host_ever_gets_it(self):
+        from simorgh.execution.tools import _bearer_for
+
+        for url in ("https://evil.com/huggingface.co",
+                    "https://huggingface.co.evil.com/x",
+                    "https://nothuggingface.co/x",
+                    "https://example.com/",
+                    "not a url"):
+            self.assertEqual(_bearer_for(url, self.BEARERS, self.ENV), "", url)
+
+    def test_an_unset_variable_means_no_header(self):
+        from simorgh.execution.tools import _bearer_for
+
+        self.assertEqual(_bearer_for("https://huggingface.co/x", self.BEARERS, {}), "")
+
+    def test_the_header_is_actually_sent_and_only_there(self):
+        from simorgh.execution.config import Config as ExecConfig
+        from simorgh.execution.tools import WebFetchTool
+
+        seen = {}
+
+        class _Response:
+            status = 200
+            headers = None
+
+            def read(self, *_a):
+                return b"ok"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_a):
+                return False
+
+        def _opener(request, timeout=None):
+            seen[request.full_url] = dict(request.headers)
+            return _Response()
+
+        config = ExecConfig(repo_root=Path.cwd(), web_fetch_allow_private_networks=True)
+        tool = WebFetchTool(config, opener=_opener)
+        ctx = ToolContext(action_id="a", task_id=None, scope={}, constraints={},
+                          data_dir=Path.cwd(), clock=_Clock(), logger=None, ledger=None)
+        with unittest.mock.patch.dict("os.environ", {"HF_TOKEN": "hf_secret"}, clear=False):
+            asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+                self._both(tool, ctx))
+        hf = seen["https://huggingface.co/api/datasets/x"]
+        other = seen["https://example.com/x"]
+        self.assertEqual(hf.get("Authorization"), "Bearer hf_secret")
+        self.assertNotIn("Authorization", other)
+
+    async def _both(self, tool, ctx):
+        await tool.run({"url": "https://huggingface.co/api/datasets/x"}, ctx=ctx)
+        await tool.run({"url": "https://example.com/x"}, ctx=ctx)
+
+
+class _Clock:
+    def now(self) -> float:
+        return 0.0
