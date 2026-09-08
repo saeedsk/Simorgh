@@ -113,6 +113,12 @@ TaskBlocked = define(t.TASK_BLOCKED, [
     F("task_id", Str),
     F("reason", Str),
     O("retry_after", Float),
+    # What the session would have answered, when it had an answer and
+    # something else stopped it -- verification objecting, the step
+    # budget running out. Without this a blocked task is a black box:
+    # the benchmark could not tell a wrong answer from a right one our
+    # own verifier threw away (2026-09-08).
+    O("result_summary", Str),
 ])
 TaskEditsKept = define(t.TASK_EDITS_KEPT, [
     F("task_id", Str),

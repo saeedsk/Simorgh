@@ -160,3 +160,25 @@ class LongLevelNamesTestCase(unittest.TestCase):
     def test_a_digit_level_still_renders_compactly(self):
         text = summary(_run(by_level={"1": [1, 2], "2": [1, 2]}))
         self.assertIn("Level 1 ", text)
+
+
+class BlockedAnswersTestCase(unittest.TestCase):
+    """A run must say when our own pipeline stopped answers, and how
+    many of those were right -- otherwise "the model is wrong" and "our
+    verifier is too strict" look identical (2026-09-08)."""
+
+    def test_blocked_answers_are_counted_in_the_summary(self):
+        text = summary(_run(blocked=3, blocked_but_correct=2))
+        self.assertIn("3 answers our own pipeline stopped", text)
+        self.assertIn("2 of them right", text)
+
+    def test_none_blocked_says_nothing_about_it(self):
+        self.assertNotIn("pipeline stopped", summary(_run()))
+
+    def test_blocked_but_all_wrong_does_not_claim_any_were_right(self):
+        text = summary(_run(blocked=2, blocked_but_correct=0))
+        self.assertIn("2 answers our own pipeline stopped", text)
+        self.assertNotIn("of them right", text)
+
+    def test_one_blocked_reads_as_singular(self):
+        self.assertIn("1 answer our own pipeline stopped", summary(_run(blocked=1)))

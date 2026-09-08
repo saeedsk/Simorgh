@@ -333,3 +333,60 @@ class StopAndBusyTestCase(unittest.IsolatedAsyncioTestCase):
         reply = await self.kernel.bus.request(self.kernel.bus.new(
             topics.BENCHMARK_RUN_REQUEST, {"suite": "toy", "limit": 2}), timeout=15)
         self.assertTrue(reply.payload["ok"], reply.payload)
+
+
+class BlockedAnswersAreStillScoredTestCase(unittest.IsolatedAsyncioTestCase):
+    """A task our own pipeline blocked still carries the answer it had.
+    Scoring it is what tells us whether our verifier is throwing away
+    right answers -- three of seven GAIA cases were blocked, and the
+    harness recorded nothing about what they said (2026-09-08)."""
+
+    async def _run_with_block(self, text: str, reason: str = "verification failed after max revisions"):
+        async with Harness() as h:
+            other = h.client("orchestration")
+            sub = None
+
+            async def _on_create(message: Message) -> None:
+                await other.reply(message, type=topics.TASK_CREATE_REPLY, payload={"task_id": "tb"})
+                payload = {"task_id": "tb", "reason": reason}
+                if text:
+                    payload["result_summary"] = text
+                await other.publish(other.new(topics.TASK_BLOCKED, payload))
+
+            sub = await other.subscribe(topics.TASK_CREATE, _on_create)
+            try:
+                runner = Runner(h.client("benchmark"), config=Config(case_timeout_s=5.0), clock=h.clock.now)
+                one = Suite(name="toy", version="v1", cases=(
+                    Case(id="c1", question="capital of France", answer="Paris", level="1", suite="toy"),
+                ))
+                return await runner.run(one, model="m")
+            finally:
+                await sub.unsubscribe()
+
+    async def test_a_right_answer_our_verifier_rejected_is_scored_and_flagged(self):
+        record = await self._run_with_block("FINAL ANSWER: Paris")
+        [result] = record.results
+        self.assertTrue(result.correct, "the answer was right; the verifier was not")
+        self.assertIn("verification failed", result.blocked_by)
+        self.assertEqual(record.blocked, 1)
+        self.assertEqual(record.blocked_but_correct, 1)
+        self.assertEqual(record.correct, 1)
+
+    async def test_a_wrong_blocked_answer_is_blocked_but_not_counted_right(self):
+        record = await self._run_with_block("FINAL ANSWER: Berlin")
+        self.assertEqual((record.correct, record.blocked, record.blocked_but_correct), (0, 1, 0))
+        self.assertEqual(record.results[0].answer, "Berlin")
+
+    async def test_a_block_with_no_answer_at_all_is_just_a_miss(self):
+        record = await self._run_with_block("", reason="step budget exhausted before the task was finished")
+        [result] = record.results
+        self.assertFalse(result.correct)
+        self.assertEqual(result.blocked_by, "")
+        self.assertIn("step budget", result.error)
+        self.assertEqual(record.blocked, 0)
+
+    async def test_the_counts_reach_the_payload(self):
+        record = await self._run_with_block("FINAL ANSWER: Paris")
+        payload = record.to_payload(with_cases=False)
+        self.assertEqual(payload["blocked"], 1)
+        self.assertEqual(payload["blocked_but_correct"], 1)

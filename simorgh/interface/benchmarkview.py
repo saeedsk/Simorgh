@@ -129,6 +129,9 @@ def detail(payload: dict) -> str:
     for result in record.get("cases") or []:
         skipped, correct = bool(result.get("skipped")), bool(result.get("correct"))
         mark = "·" if skipped else ("✓" if correct else "✗")
+        if result.get("blocked_by"):
+            # Right answer, stopped by us: neither a pass nor a plain miss.
+            mark = "⊘" if correct else mark
         note = result.get("error") or (
             f"answered {str(result.get('answer', ''))[:60]!r}, expected {str(result.get('expected', ''))[:60]!r}"
             if not correct and not skipped else ""

@@ -7,6 +7,12 @@
     "reason": {
       "type": "string"
     },
+    "result_summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "retry_after": {
       "type": [
         "number",
