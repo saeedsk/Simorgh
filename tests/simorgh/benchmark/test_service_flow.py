@@ -194,6 +194,11 @@ class SubsystemWiringTestCase(unittest.IsolatedAsyncioTestCase):
             LoadedConfig({
                 "runtime": {"data_dir": str(Path(self._tmp.name) / "data")},
                 "curiosity": {"autonomy_on_boot": False},
+                # An empty cache, so the gated path is really exercised:
+                # a suite already downloaded needs no token, which is
+                # correct behaviour and made this test pass vacuously
+                # once GAIA had been fetched for real (2026-09-08).
+                "benchmark": {"cache_dir": str(Path(self._tmp.name) / "cache")},
             }, None),
             secrets=EnvSecretStore({}),
         )
@@ -202,6 +207,21 @@ class SubsystemWiringTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_subsystem_boots(self) -> None:
         self.assertEqual(self.kernel._supervisor.services["benchmark"].status, "ok")  # noqa: SLF001
+
+    async def test_a_cached_gated_suite_needs_no_token(self) -> None:
+        """Downloading is what needs the token; running from a cache the
+        operator already has does not."""
+        from simorgh.benchmark.api import Case, Suite
+
+        cache = Path(self._tmp.name) / "cache"
+        source = datasets_mod.SOURCES["gaia"]
+        rows = [{"task_id": "g1", "Question": "q", "Final answer": "a", "Level": "1"}]
+        datasets_mod.save(datasets_mod.to_suite(source, rows, version="v1"), source, rows, cache)
+        with mock.patch.dict("os.environ", {"HF_TOKEN": ""}, clear=False):
+            suite = datasets_mod.load("gaia", cache_dir=cache)
+        self.assertEqual(len(suite), 1)
+        self.assertIsInstance(suite, Suite)
+        self.assertIsInstance(suite.cases[0], Case)
 
     async def test_suites_are_listed_with_their_gating_and_scorability(self) -> None:
         reply = await self.kernel.bus.request(

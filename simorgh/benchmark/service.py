@@ -89,6 +89,11 @@ class Service:
             return Health.ok(f"running {self._running.get('suite', '?')}")
         return Health.ok("idle")
 
+    def _cache_dir(self):
+        from pathlib import Path
+
+        return Path(self._config.cache_dir).expanduser() if self._config.cache_dir else None
+
     # -- handlers ------------------------------------------------------
     async def _on_provider(self, message: Message) -> None:
         payload = message.payload
@@ -98,7 +103,7 @@ class Service:
     async def _on_suites(self, message: Message) -> None:
         suites = []
         for source in datasets_mod.known():
-            cached = datasets_mod.load_cached(source)
+            cached = datasets_mod.load_cached(source, self._cache_dir())
             suites.append({
                 "name": source.name, "dataset": source.dataset, "description": source.description,
                 "gated": source.gated, "scorable": source.scorable,
@@ -143,7 +148,7 @@ class Service:
         try:
             suite = await asyncio.to_thread(
                 datasets_mod.load, name, refresh=bool(payload.get("refresh")),
-                timeout=self._config.fetch_timeout_s,
+                timeout=self._config.fetch_timeout_s, cache_dir=self._cache_dir(),
             )
         except datasets_mod.DatasetUnavailable as exc:
             await self._ctx.bus.reply(message, type=topics.BENCHMARK_RUN_REPLY,

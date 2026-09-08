@@ -24,6 +24,11 @@ class Config:
     # rather than capability.
     concurrency: int = 1
     fetch_timeout_s: float = 30.0
+    # Where downloaded suites are cached. Empty means
+    # `datasets.DEFAULT_CACHE` (~/.simorgh/benchmarks). Deliberately
+    # outside the repository: GAIA's terms forbid resharing the set, and
+    # a cache inside a git tree is one `git add -A` from being published.
+    cache_dir: str = ""
     history_limit: int = 200
 
     @classmethod
