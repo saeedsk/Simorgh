@@ -86,7 +86,8 @@ def make_lab(root: str) -> str:
     return repo
 
 
-async def run_trial(task: str, *, kind: str, subject: str | None, root: str, timeout_s: float) -> int:
+async def run_trial(task: str, *, kind: str, subject: str | None, root: str, timeout_s: float,
+                    max_steps: int = 0, attempts: int = 1) -> int:
     repo = make_lab(root)
     os.chdir(repo)
     kernel = Kernel(
@@ -107,6 +108,8 @@ async def run_trial(task: str, *, kind: str, subject: str | None, root: str, tim
     payload = {"kind": kind, "description": task, "origin": "human", "mode": "execute"}
     if subject:
         payload["subject"] = subject
+    if max_steps:
+        payload["max_steps"] = max_steps
     reply = await kernel.bus.request(kernel.bus.new(topics.TASK_CREATE, payload), timeout=10)
     task_id = reply.payload["task_id"]
 
@@ -115,7 +118,15 @@ async def run_trial(task: str, *, kind: str, subject: str | None, root: str, tim
     while time.monotonic() - started < timeout_s:
         await asyncio.sleep(1)
         record = await planning._store.get(task_id)  # noqa: SLF001
-        if record and record.status in ("completed", "failed", "blocked"):
+        if not record:
+            continue
+        if record.status in ("completed", "failed"):
+            break
+        # A task that only ran out of steps is a continuation, not an
+        # ending: Planning re-offers it within seconds with a fresh
+        # budget and a memory of the attempt. `--attempts` says how many
+        # of those to sit through before calling it.
+        if record.status == "blocked" and record.attempts >= attempts:
             break
     record = await planning._store.get(task_id)  # noqa: SLF001
 
@@ -150,12 +161,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--subject", default=None, help="the file the task is about, when it has one")
     parser.add_argument("--timeout", type=float, default=240.0)
     parser.add_argument("--keep", action="store_true", help="leave the lab repo behind for inspection")
+    parser.add_argument("--max-steps", type=int, default=0,
+                        help="per-attempt step cap for this task; a small one exercises the "
+                             "continuation path, where the work spans attempts")
+    parser.add_argument("--attempts", type=int, default=1,
+                        help="how many attempts to watch before giving up on a task that keeps "
+                             "running out of steps")
     args = parser.parse_args(argv)
 
     root = tempfile.mkdtemp(prefix="simorgh-trial-")
     try:
         return asyncio.run(run_trial(
             args.task, kind=args.kind, subject=args.subject, root=root, timeout_s=args.timeout,
+            max_steps=args.max_steps, attempts=args.attempts,
         ))
     finally:
         if args.keep:
