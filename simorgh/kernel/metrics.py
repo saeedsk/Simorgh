@@ -121,6 +121,15 @@ class StatusServer:
             "run_id": self._run_id,
             "mode": self._mode,
             "state": self._state.state,
+            # `system.status.reply` is the only answer to "is autonomy
+            # on?", and this field -- read by `interface/dispatch.py` to
+            # answer bare `auto` -- was written by nobody. It is set on
+            # `system.state.changed` and nowhere else, so a status
+            # request always came back without it and the CLI printed
+            # "autonomous mode: unknown (system is running)" nine times
+            # across four sessions, before and after `auto on`, and
+            # after `auto off` (observer, 2026-09-08).
+            "autonomous_paused": self._state.autonomous_paused,
             "uptime_seconds": self._clock.now() - self._boot_time,
             "subsystems": subsystems,
             "metrics": self._metrics.per_subsystem,

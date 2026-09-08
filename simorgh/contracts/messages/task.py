@@ -9,7 +9,7 @@ from .. import topics as t
 
 TASK_KIND = Enum("chat", "patch", "skill", "research", "project")
 TASK_MODE = Enum("plan", "execute")
-TASK_ORIGIN = Enum("human", "curiosity", "reflection", "research", "project")
+TASK_ORIGIN = Enum("human", "curiosity", "reflection", "research", "project", "benchmark")
 TASK_RISK = Enum("low", "medium", "high")
 SCOPE = Obj(F("paths", List(Str)), F("network", Bool))
 

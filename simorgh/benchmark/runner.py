@@ -70,7 +70,15 @@ class Runner:
             try:
                 reply = await self._bus.request(
                     Message.new(topics.TASK_CREATE, source=self._bus.source, payload={
-                        "kind": "research", "description": self.prompt(case), "origin": "human",
+                        "kind": "research", "description": self.prompt(case),
+                        # NOT "human". A benchmark case is not something
+                        # the human typed, and claiming it was had two
+                        # costs: every case landed permanently in their
+                        # `tasks` list as if they had asked for it, and
+                        # each one preempted -- and, before the cancel
+                        # fixes, killed -- real autonomous work
+                        # (observer, 2026-09-08).
+                        "origin": "benchmark",
                         "mode": "execute", "max_steps": self._config.case_max_steps,
                     }, clock=self._clock),
                     timeout=15.0,

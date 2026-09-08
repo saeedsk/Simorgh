@@ -160,6 +160,9 @@ class Service:
         # their `task.completed` prints the real `result_summary` instead
         # of resolving an awaited future (nothing's awaiting these).
         self._watched_tasks: set[str] = set()
+        # What the Kernel last said its state was. A chat typed while
+        # paused has nothing to wait for (`_handle_chat`).
+        self._system_state = "running"
         self._pending_prompts: dict[str, dict] = {}  # prompt_id -> payload, oldest-first (dict preserves insertion order)
         self._prompt_timeouts: dict[str, asyncio.Task] = {}  # prompt_id -> its own timeout watchdog
         self._color = render_mod.color_enabled(self.config.color)
@@ -628,6 +631,21 @@ class Service:
         self._set_footer(activity_mod.footer(self._book, now=time.monotonic()))
 
     async def _handle_chat(self, text: str) -> None:
+        # A paused system runs no sessions, so no answer is coming. This
+        # used to publish the percept and then wait `chat_reply_timeout_s`
+        # (420s) for a reply that could not arrive -- and because the REPL
+        # thread blocks on the turn, the whole prompt was frozen for seven
+        # minutes with the one command that would fix it, `resume`, queued
+        # behind the block. An observer typed `resume` and `auto now` and
+        # got nothing but the echo; only Ctrl-C escaped, which stops the
+        # system (2026-09-08).
+        if self._system_state in ("paused", "stopping"):
+            self._out(render_mod.notice(
+                "warn", f"the system is {self._system_state} -- nothing will answer until you type `resume`",
+                "interface", enabled=self._color,
+            ))
+            return
+
         # A fresh id per turn, not `self.session_id` (the REPL's own
         # stable per-instance identity, still used elsewhere e.g.
         # `dispatch()`'s session_id= for plan/batch commands): reusing one
@@ -769,6 +787,7 @@ class Service:
 
     async def _on_state_changed(self, message: Message) -> None:
         state = message.payload.get("state")
+        self._system_state = str(state or self._system_state)
         if state == "running":
             self._booted.set()  # releases the REPL thread's splash
         if "autonomous_paused" in message.payload:
@@ -937,8 +956,31 @@ class Service:
             if watched:
                 self._watched_tasks.discard(task_id)
                 self._turn_started.pop(task_id, None)
-                reply_text = p.get("result_summary", "")
-                header = render_mod.notice("info", f"task {task_id} finished", "orchestration", enabled=self._color)
+                # Only a COMPLETED task has an answer. A blocked or
+                # failed one has a `result_summary` too -- and when the
+                # claims guard rejects a fabrication, that summary IS
+                # the fabrication, which this printed under the word
+                # "finished" as though it were the reply.
+                #
+                # Observed 2026-09-08, and the observer called it the
+                # worst moment in their session and a trust event: the
+                # system caught the model claiming a commit it never
+                # made, discarded the edit, marked the task blocked --
+                # and then read the lie out to the human as the answer.
+                # They only learned the truth by running `git log`.
+                # `record.status` was on the line above, used to pick a
+                # colour.
+                finished = record.status == "completed"
+                reply_text = p.get("result_summary", "") if finished else ""
+                what = "finished" if finished else f"ended {record.status}"
+                header = render_mod.notice(
+                    "info" if finished else "warn", f"task {task_id} {what}", "orchestration",
+                    enabled=self._color,
+                )
+                if not finished:
+                    why = " ".join((p.get("reason") or "").split())
+                    if why:
+                        header = f"{header}\n  {render_mod.style(why, 'yellow', enabled=self._color)}"
                 self._out(f"{header}\n{render_mod.markdown(reply_text, enabled=self._color)}" if reply_text else header)
                 return
             if self._live.enabled:  # the reply itself prints from _handle_chat
