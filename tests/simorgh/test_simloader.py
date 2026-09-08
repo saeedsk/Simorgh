@@ -90,7 +90,7 @@ class LoaderTestCase(unittest.TestCase):
     def test_bless_refuses_a_dirty_tree(self):
         """Sim commits and the loader tags: a tag must name a commit, so
         an uncommitted change can never be blessed by accident."""
-        (self.repo.path / "wip.txt").write_text("uncommitted")
+        (self.repo.path / "one.txt").write_text("edited, not committed")
         with self._gate([(True, "green")]):
             rc = simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
         self.assertEqual(rc, 2)
@@ -115,13 +115,27 @@ class LoaderTestCase(unittest.TestCase):
         self.assertEqual(last["to"], "sim-good-0001")
         self.assertEqual(last["reason"], "tests red")
 
+    def test_an_untracked_file_does_not_block_a_bless(self):
+        """Dirty means tracked changes. A paper the creator dropped in
+        `papers/`, or a scratch script, is nothing a rollback can lose
+        and nothing Sim committed (live: the first real bless was
+        refused for exactly such a PDF, 2026-09-07)."""
+        (self.repo.path / "papers").mkdir()
+        (self.repo.path / "papers" / "a.pdf").write_bytes(b"%PDF")
+        self.assertFalse(simloader.is_dirty(self.repo.path))
+        self.assertEqual(simloader.untracked(self.repo.path), ["papers/a.pdf"])
+        with self._gate([(True, "green")]):
+            rc = simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
+        self.assertEqual(rc, 0)
+        self.assertEqual([t for _n, t in simloader.good_tags(self.repo.path)], ["sim-good-0001"])
+
     def test_rollback_refuses_a_dirty_tree(self):
         """A rollback checks out another commit; it must never discard a
         human's uncommitted work to do it."""
         _git(self.repo.path, "tag", "sim-good-0001")
         self.repo.commit("two")
         _git(self.repo.path, "tag", "sim-good-0002")
-        (self.repo.path / "wip.txt").write_text("uncommitted")
+        (self.repo.path / "one.txt").write_text("edited, not committed")
         self.assertEqual(simloader.cmd_rollback(self.repo.path, self.notes, reason="x"), 2)
 
     def test_rollback_with_nothing_older_says_so(self):
