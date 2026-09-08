@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +36,9 @@ DEFAULT_CACHE = Path("~/.simorgh/benchmarks").expanduser()
 # The server caps a page; ask for its maximum and page through.
 PAGE = 100
 USER_AGENT = "Simorgh/2.0 (benchmark harness)"
+# Statuses worth trying again: a gateway hiccup, a rate limit, a restart.
+RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+RETRY_BACKOFF_S = 1.0
 
 
 class DatasetUnavailable(RuntimeError):
@@ -86,23 +90,38 @@ SOURCES: dict[str, Source] = {
 }
 
 
-def _request(url: str, *, token: str = "", timeout: float = 30.0) -> dict:
+def _request(url: str, *, token: str = "", timeout: float = 30.0, attempts: int = 4) -> dict:
+    """One datasets-server call, retried through transient failures.
+
+    A full suite is several pages, and the server answered 502 once
+    mid-download (2026-09-08); losing the whole set to one gateway blip
+    is not acceptable for something that then costs model calls to run.
+    Only the transient statuses are retried -- a 401 or a 404 is an
+    answer, and retrying it just wastes the operator's time."""
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- fixed https endpoints
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = ""
+    last = ""
+    for attempt in range(attempts):
         try:
-            body = exc.read().decode("utf-8", errors="replace")[:300]
-        except Exception:  # noqa: BLE001
-            pass
-        raise DatasetUnavailable(_explain(exc.code, body)) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise DatasetUnavailable(f"could not reach Hugging Face: {exc!r}") from exc
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- fixed https endpoints
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")[:300]
+            except Exception:  # noqa: BLE001
+                pass
+            if exc.code not in RETRY_STATUS or attempt == attempts - 1:
+                raise DatasetUnavailable(_explain(exc.code, body)) from exc
+            last = f"HTTP {exc.code}"
+        except Exception as exc:  # noqa: BLE001 -- a dropped connection is worth one more try
+            if attempt == attempts - 1:
+                raise DatasetUnavailable(f"could not reach Hugging Face: {exc!r}") from exc
+            last = repr(exc)
+        time.sleep(RETRY_BACKOFF_S * (2 ** attempt))
+    raise DatasetUnavailable(f"Hugging Face kept failing after {attempts} tries: {last}")
 
 
 def _explain(code: int, body: str) -> str:
