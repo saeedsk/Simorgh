@@ -22,6 +22,8 @@ with no trace of why.
 
 from __future__ import annotations
 
+import ast
+
 import difflib
 import hashlib
 import ipaddress
@@ -504,13 +506,28 @@ class RunPythonSandboxedTool:
                     ok=False, output=(exc.stdout or ""), error="timeout",
                     metadata={"stderr": exc.stderr or "", "duration_s": time.monotonic() - start},
                 )
-            ok = completed.returncode == 0
+            # pytest exit 5 is "no tests were collected", which is not a
+            # failing suite -- it means the target has no tests yet.
+            #
+            # Live-caught 2026-09-07: asked for a brand-new skill, Sim
+            # wrote it, ran the tests, got `no tests ran in 0.00s` and an
+            # exit code of 5, read that as a failing suite, and then did
+            # exactly what its instructions say -- refused to commit on a
+            # red suite. The skill was left uncommitted on every attempt.
+            # Reporting an honest "nothing to run" lets it proceed and
+            # say so.
+            no_tests = completed.returncode == _PYTEST_NO_TESTS_COLLECTED
+            ok = completed.returncode == 0 or no_tests
             return ToolResult(
                 ok=ok, output=completed.stdout,
                 error=None if ok else f"exit_code={completed.returncode}",
                 metadata={"stderr": completed.stderr, "exit_code": completed.returncode,
                           "duration_s": time.monotonic() - start},
             )
+
+
+# pytest's own exit code for "no tests were collected". Not a failure.
+_PYTEST_NO_TESTS_COLLECTED = 5
 
 
 class RunTestsTool:
@@ -571,13 +588,39 @@ class RunTestsTool:
                 )
             except OSError as exc:
                 return ToolResult(ok=False, error=f"could not run tests: {exc!r}")
-            ok = completed.returncode == 0
+            # Same reading as the isolated suite above: exit 5 is "no
+            # tests were collected", which is not a failing suite. This is
+            # the one the model itself calls, and reporting a new file's
+            # missing tests as a failure is what stopped Sim committing
+            # its first skill (live-caught 2026-09-07).
+            no_tests = completed.returncode == _PYTEST_NO_TESTS_COLLECTED
+            ok = completed.returncode == 0 or no_tests
+            output = completed.stdout[-cap:]
+            if no_tests:
+                output = (output + "\n\n[no tests cover this target yet -- nothing was run]").strip()
             return ToolResult(
-                ok=ok, output=completed.stdout[-cap:],
+                ok=ok, output=output,
                 error=None if ok else f"exit_code={completed.returncode}",
                 metadata={"stderr": completed.stderr[-cap:], "exit_code": completed.returncode,
+                          "no_tests_collected": no_tests,
                           "duration_s": time.monotonic() - start},
             )
+
+
+def _python_syntax_problem(subject: str, code: str) -> str | None:
+    """`None` if this is safe to write, else why it is not.
+
+    Only `.py` files: a skill or a source patch has to import, and a file
+    that does not parse is never what was wanted.
+    """
+    if not subject.endswith(".py"):
+        return None
+    try:
+        ast.parse(code)
+    except SyntaxError as exc:
+        line = f" at line {exc.lineno}" if exc.lineno else ""
+        return f"{exc.msg}{line}. Send only the file's code, nothing else."
+    return None
 
 
 def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes: tuple[str, ...]) -> ToolResult:
@@ -593,6 +636,19 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
                     for s in write_scopes)
     if not scope_ok:
         return ToolResult(ok=False, error=f"refused: {subject!r} resolves outside the writable scope")
+    problem = _python_syntax_problem(subject, code)
+    if problem is not None:
+        # Refusing beats writing a broken file, and the model gets a real
+        # error it can act on rather than a silent success.
+        #
+        # Live-caught 2026-09-07, Sim's first skill: everything after the
+        # first line of the marker payload becomes the file body, and the
+        # model kept talking after its code -- so
+        # `simorgh_skills/word_count.py` was written with a hallucinated
+        # "[test results: 42 passed]" and a stray "You are Simorgh,
+        # continue." pasted into it. The function above them was perfect;
+        # the file would not import.
+        return ToolResult(ok=False, error=f"refused: {subject} would not be valid Python -- {problem}")
     already_existed = target.exists()
     # Live-caught (the creator: "I'd like ... code diffs ... similar UI
     # experience as claude code cli" -- 07-post-cutover-review.md §3.11):
