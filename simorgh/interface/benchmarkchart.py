@@ -111,6 +111,14 @@ def summary(record: dict, *, width: int = 24) -> str:
         f"  {correct}/{attempted} correct"
         + (f", {skipped} skipped" if skipped else ""),
     ]
+    blocked = int(record.get("blocked") or 0)
+    if blocked:
+        # The line that says whether our own pipeline is the problem.
+        kept = int(record.get("blocked_but_correct") or 0)
+        lines.append(
+            f"  {'':<{24}}  {blocked} answer{'s' if blocked != 1 else ''} our own pipeline stopped"
+            + (f", {kept} of them right" if kept else "")
+        )
     by_level = _levels(record)
     if len(by_level) > 1 or (by_level and "" not in by_level):
         # A GAIA level is "1"; a BFCL one is "live_parallel". Widen the

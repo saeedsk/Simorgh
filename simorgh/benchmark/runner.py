@@ -86,13 +86,18 @@ class Runner:
         finally:
             await watch.stop()
         seconds = time.monotonic() - started
-        if error:
+        if error and not answer_text:
             return CaseResult(case_id=case.id, level=case.level, correct=False, expected=case.answer,
-                              answer=answer_text, seconds=seconds, steps=steps, error=error)
+                              seconds=seconds, steps=steps, error=error)
+        # There is an answer even though something of ours stopped it.
+        # Score it: GAIA scores the answer, and our verifier is not part
+        # of GAIA. Record the block, so "our verifier rejected a right
+        # answer" is visible rather than indistinguishable from "wrong".
         correct, extracted = score_case(answer_text, case.answer, mode=case.mode)
         return CaseResult(
             case_id=case.id, level=case.level, correct=correct, answer=extracted,
             expected=case.answer, seconds=seconds, steps=steps,
+            blocked_by=error, error=error,
         )
 
     async def run(self, suite: Suite, *, model: str = "unknown", note: str = "") -> RunRecord:
@@ -172,9 +177,10 @@ class _AnswerWatch:
                 self._waiters.pop(task_id, None)
         kind, payload = self._outcomes[task_id]
         steps = self._steps.get(task_id, 0)
+        text = str(payload.get("result_summary") or "")
         if kind != "completed":
-            return "", steps, str(payload.get("reason") or f"the task was {kind}")
-        return str(payload.get("result_summary") or ""), steps, ""
+            return text, steps, str(payload.get("reason") or f"the task was {kind}")
+        return text, steps, ""
 
 
 __all__ = ["Runner"]

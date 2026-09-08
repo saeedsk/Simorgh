@@ -223,6 +223,8 @@ class Worker:
             payload = {"task_id": session.task_id, "reason": outcome.reason, "terminal": True, "attempts": 1}
         else:
             payload = {"task_id": session.task_id, "reason": outcome.reason}
+            if outcome.result_summary:
+                payload["result_summary"] = outcome.result_summary
 
         msg = Message.new(type_, source=self._bus.source, payload=payload,
                           partition_key=f"task:{session.task_id}", clock=self._clock)

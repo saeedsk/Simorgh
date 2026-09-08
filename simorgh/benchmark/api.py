@@ -107,6 +107,13 @@ class CaseResult:
     # rather than counted wrong.
     skipped: bool = False
     error: str = ""
+    # The system had this answer and something of ours stopped it
+    # delivering: verification objected, the step budget ran out. It is
+    # still scored -- GAIA scores the answer, and our verifier is not
+    # part of GAIA -- but the fact is recorded, because "our own
+    # verifier threw away a right answer" and "the model was wrong" are
+    # different problems with different fixes (2026-09-08).
+    blocked_by: str = ""
 
 
 @dataclass
@@ -162,6 +169,16 @@ class RunRecord:
     def cost_usd(self) -> float:
         return self.totals.get("cost_usd", sum(r.cost_usd for r in self.results))
 
+    @property
+    def blocked(self) -> int:
+        """Answers our own pipeline stopped, right or wrong."""
+        return sum(1 for r in self.scored if r.blocked_by)
+
+    @property
+    def blocked_but_correct(self) -> int:
+        """The number that says whether our verifier is costing us."""
+        return sum(1 for r in self.scored if r.blocked_by and r.correct)
+
     def by_level(self) -> dict[str, tuple[int, int]]:
         """level -> (correct, attempted), lowest level first."""
         out: dict[str, tuple[int, int]] = {}
@@ -178,6 +195,7 @@ class RunRecord:
             "attempted": self.attempted, "correct": self.correct, "skipped": self.skipped,
             "accuracy": round(self.accuracy, 4), "seconds": round(self.seconds, 2),
             "cost_usd": round(self.cost_usd, 6), "partial": self.partial, "note": self.note,
+            "blocked": self.blocked, "blocked_but_correct": self.blocked_but_correct,
             "by_level": {level: list(pair) for level, pair in self.by_level().items()},
         }
         if with_cases:
@@ -187,6 +205,7 @@ class RunRecord:
                     "answer": r.answer[:500], "expected": r.expected[:500],
                     "seconds": round(r.seconds, 2), "steps": r.steps,
                     "cost_usd": round(r.cost_usd, 6), "skipped": r.skipped, "error": r.error[:300],
+                    "blocked_by": r.blocked_by[:200],
                 }
                 for r in self.results
             ]
@@ -207,6 +226,7 @@ class RunRecord:
                 expected=case.get("expected", ""), seconds=float(case.get("seconds", 0.0)),
                 steps=int(case.get("steps", 0)), cost_usd=float(case.get("cost_usd", 0.0)),
                 skipped=bool(case.get("skipped")), error=case.get("error", ""),
+                blocked_by=case.get("blocked_by", ""),
             ))
         if not record.results:
             record.totals = {

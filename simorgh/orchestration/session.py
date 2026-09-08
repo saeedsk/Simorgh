@@ -569,7 +569,11 @@ class SessionRunner:
             await self._record_step(session, step)
 
             if session.budget.revisions_used >= session.profile.max_revisions:
-                return Outcome("blocked", reason="verification failed after max revisions", verification_ref=verification_id)
+                # The answer travels with the refusal. Otherwise nobody
+                # downstream can tell whether verification rejected
+                # something wrong or something right.
+                return Outcome("blocked", reason="verification failed after max revisions",
+                               result_summary=text, verification_ref=verification_id)
 
             session.budget.revisions_used += 1
             session.messages.append({"role": "user", "content": f"Verification feedback: {note}"})
