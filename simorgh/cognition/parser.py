@@ -94,6 +94,17 @@ def _unwrap_native_tool_tags(text: str) -> str:
     return _NATIVE_TOOL_TAG.sub("\n", text)
 
 
+def count_markers(text: str, markers: tuple[str, ...]) -> int:
+    """How many lines in `text` are tool markers.
+
+    Only the first is ever executed (one action per step, 16 section 7).
+    Knowing there were others is what lets the session say so instead of
+    dropping them in silence."""
+    stripped = _unwrap_native_tool_tags(text).strip()
+    prefixes = tuple(f"{m}:".upper() for m in markers)
+    return sum(1 for line in stripped.splitlines() if line.strip().upper().startswith(prefixes))
+
+
 def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
     """Find a tool call in `text`. Returns (marker.lower(), payload), or
     (None, text) meaning "final answer, no tool call".
@@ -198,7 +209,19 @@ class OutputParser:
         # so every code-bearing call silently lost everything past its
         # first line.
         arg = payload if marker.upper() in _CODE_BEARING_MARKERS else first_line_argument(payload)
-        return ParsedOutput(kind="tool_calls", text=text.strip(), tool_calls=({"tool": marker, "args": {"argument": arg}},))
+        # One action per step is deliberate (16 section 7), but the extra
+        # markers used to vanish without trace: a reply carrying
+        # SEARCH_CODE + WEB_SEARCH ran only the first, so a whole half of
+        # a task never happened and nothing said so. Count them, so the
+        # session can tell the model what it dropped (observer round,
+        # 2026-09-08 -- three observers hit this independently).
+        call = {"tool": marker, "args": {"argument": arg}}
+        extra = count_markers(text, markers) - 1
+        if extra > 0:
+            # Only when it means something, so an ordinary call keeps its
+            # minimal shape on the wire.
+            call["dropped_markers"] = extra
+        return ParsedOutput(kind="tool_calls", text=text.strip(), tool_calls=(call,))
 
     def _parse_edit_blocks(self, text: str) -> ParsedOutput:
         blocks = parse_search_replace_blocks(text)

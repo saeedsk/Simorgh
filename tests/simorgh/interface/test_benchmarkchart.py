@@ -152,8 +152,12 @@ class LongLevelNamesTestCase(unittest.TestCase):
 
     def test_the_level_column_widens_to_the_longest_name(self):
         run = _run(by_level={"live_parallel": [1, 1], "parallel": [2, 2]})
-        lines = [line for line in summary(run).splitlines() if "Level" in line]
+        # A BFCL category is a word, so it prints bare -- "Level
+        # live_parallel" was wrong. Match on the bar instead.
+        lines = [line for line in summary(run).splitlines()
+                 if "parallel" in line and "█" in line]
         self.assertEqual(len(lines), 2)
+        self.assertNotIn("Level live_parallel", summary(run))
         starts = {line.index("█") for line in lines}
         self.assertEqual(len(starts), 1, "the bars do not line up")
 

@@ -78,6 +78,11 @@ _MARKER_ARG_KEY: dict[str, str] = {
     "web_search": "query",
     "run_python_sandboxed": "code",
     "run_tests": "target",
+    # Absent until 2026-09-08, so every `RUN_SHELL:` marker arrived as
+    # `{"argument": ...}` while the tool reads `command`, and answered
+    # "refused: no command given". The tool had never once run from the
+    # model's side; two observers found it independently.
+    "run_shell": "command",
     "draft_candidate": "code",
     # ddg_search/ddg_get_answer's own `inputSchema`s each have one
     # required string field, `query` -- see `_TOOL_POLICY`'s comment on

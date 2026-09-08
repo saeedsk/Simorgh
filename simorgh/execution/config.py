@@ -17,6 +17,35 @@ from .shell import DEFAULT_SHELL_REFUSALS
 from .mcp import McpServerConfig
 
 
+def _looks_like_the_repo(candidate: Path) -> bool:
+    """A deep path, so a case-insensitive filesystem cannot match a
+    parent directory that merely shares the package's name."""
+    return (candidate / "simorgh" / "kernel" / "service.py").is_file()
+
+
+def find_repo_root(start: Path | None = None) -> Path:
+    """Where Sim's own source lives.
+
+    Was `Path.cwd()` alone. Launched from anywhere else, every readable
+    root pointed at nothing, and Sim answered questions about itself
+    from imagination: it invented five subsystems, denied having a
+    Guardian while `status` printed `guardian ok`, and denied having a
+    step budget it was actively enforcing -- with no error, ever
+    (observer, 2026-09-08).
+
+    The running package's own location is checked first and is right by
+    construction; `start` (normally the cwd) only wins when it is a
+    different, genuine checkout -- which is what a sandboxed trial or a
+    rolled-back loader boot actually is.
+    """
+    here = Path(__file__).resolve().parents[2]
+    base = (start or Path.cwd()).resolve()
+    for candidate in (base, *base.parents):
+        if _looks_like_the_repo(candidate):
+            return candidate
+    return here if _looks_like_the_repo(here) else base
+
+
 @dataclass(frozen=True)
 class Config:
     max_concurrent_actions: int = 4
@@ -24,7 +53,7 @@ class Config:
     max_output_bytes: int = 65536
     blob_inline_threshold_bytes: int = 4096
     approval_max_age_s: float = 120.0
-    repo_root: Path = field(default_factory=Path.cwd)
+    repo_root: Path = field(default_factory=lambda: find_repo_root())
     readable_roots: tuple[str, ...] = ("src", "docs", "tests", "simorgh", "simorgh_skills")
     # The creator, 2026-09-07: "give sim file system write access".
     # Every directory of the repository, rather than the two packages

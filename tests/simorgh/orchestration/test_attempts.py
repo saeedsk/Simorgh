@@ -169,7 +169,11 @@ class KeptEditsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(SessionRunner._continues(session(1), exhausted))
         self.assertTrue(SessionRunner._continues(session(KEEP_EDITS_UNTIL_ATTEMPT - 1), exhausted))
         self.assertFalse(SessionRunner._continues(session(KEEP_EDITS_UNTIL_ATTEMPT), exhausted))
-        self.assertFalse(SessionRunner._continues(session(1), Outcome("blocked", reason="verification failed after max revisions")))
+        # A verification objection is also an unfinished attempt, not a
+        # wrong one: discarding there threw away a correct tested patch
+        # that only lacked its commit (watched trial, 2026-09-08).
+        self.assertTrue(SessionRunner._continues(session(1), Outcome("blocked", reason="verification failed after max revisions")))
+        self.assertFalse(SessionRunner._continues(session(1), Outcome("blocked", reason="no real provider")))
         self.assertFalse(SessionRunner._continues(session(1), Outcome("completed", result_summary="done")))
 
     @run

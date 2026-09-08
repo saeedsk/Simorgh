@@ -61,7 +61,7 @@ from pathlib import Path
 
 TAG_PREFIX = "sim-good-"
 # Only for the "this will take a while" line; nothing depends on it.
-EXPECTED_UNIT_S = 240
+EXPECTED_UNIT_S = 720
 _TAG = re.compile(rf"^{re.escape(TAG_PREFIX)}(\d+)$")
 DEFAULT_NOTES = Path("~/.simorgh/loader").expanduser()
 
@@ -206,18 +206,36 @@ class PytestProgress(Progress):
 
     label = "unit suite"
     _PCT = re.compile(r"\[\s*(\d{1,3})%\]")
-    _DOTS = re.compile(r"[.FEsxX]")
+    # Only a run of progress characters at the start of a line is a
+    # result row. Matching bare `[.FEsxX]` anywhere counted ordinary
+    # prose: the pytest-asyncio deprecation warning alone reported
+    # "33 tests, 1 failing" before a single test had run, and a real run
+    # claimed 2996 tests / 23 failing against an actual 2865 / 2
+    # (observer, 2026-09-08). A progress line that invents numbers is
+    # worse than no progress line.
+    _ROW = re.compile(r"^[.FEsxX]{2,}", re.M)
 
     def __init__(self, started: float) -> None:
         super().__init__(started)
         self.tests = 0
         self.failed = 0
+        self._buffer = ""
+
+    def __init_subclass__(cls) -> None:  # pragma: no cover -- documentation
+        ...
 
     def feed(self, chunk: str) -> None:
-        for match in self._PCT.finditer(chunk):
-            self.fraction = int(match.group(1)) / 100
-        self.tests += len(self._DOTS.findall(self._PCT.sub("", chunk)))
-        self.failed += chunk.count("F") + chunk.count("E")
+        self._buffer += chunk
+        *lines, self._buffer = self._buffer.split("\n")
+        for line in lines:
+            for match in self._PCT.finditer(line):
+                self.fraction = int(match.group(1)) / 100
+            row = self._ROW.match(line)
+            if not row:
+                continue
+            marks = row.group(0)
+            self.tests += len(marks)
+            self.failed += marks.count("F") + marks.count("E")
         self.detail = f"{self.tests} tests" + (f", {self.failed} failing" if self.failed else "")
 
 
@@ -491,6 +509,33 @@ def cmd_bless(repo: Path, notes: Path, *, full: bool, timeout_s: float) -> int:
     return 0
 
 
+def previous_tag(repo: Path, tags: list[tuple[int, str]], current: str) -> str | None:
+    """The known-good tag strictly BELOW where we are now.
+
+    The old rule was "any tag whose commit is not HEAD, take the last" --
+    which is the NEWEST such tag. From the oldest tag it therefore rolled
+    *forward*, straight back into the image the gate had just rejected,
+    and `cmd_run` ping-ponged between two tags until it burned
+    `--max-rollbacks` (found by an observer, 2026-09-08). This is the one
+    mechanism whose whole job is stepping back to safety; it must never
+    step forward.
+    """
+    if not tags:
+        return None
+    here = next((n for n, tag in tags if tag_of(repo, tag) == current), None)
+    if here is None:
+        # Not sitting on a tag: fall back to the newest tag that is an
+        # ancestor of HEAD, else the newest tag at all.
+        ancestors = [(n, tag) for n, tag in tags if is_ancestor(repo, tag, current)]
+        return (ancestors or tags)[-1][1]
+    below = [tag for n, tag in tags if n < here]
+    return below[-1] if below else None
+
+
+def is_ancestor(repo: Path, tag: str, commit: str) -> bool:
+    return git("merge-base", "--is-ancestor", f"{tag}^{{commit}}", commit, cwd=repo).returncode == 0
+
+
 def cmd_rollback(repo: Path, notes: Path, *, reason: str) -> int:
     rule("rollback")
     tags = good_tags(repo)
@@ -498,11 +543,10 @@ def cmd_rollback(repo: Path, notes: Path, *, reason: str) -> int:
         say("refusing: the working tree has uncommitted changes; a rollback would discard them")
         return 2
     current = head(repo)
-    older = [tag for _n, tag in tags if tag_of(repo, tag) != current]
-    if not older:
+    target = previous_tag(repo, tags, current)
+    if target is None:
         say("nothing older to roll back to")
         return 1
-    target = older[-1]
     git("checkout", "-q", target, cwd=repo, check=True)
     say(f"rolled back {current} -> {target} ({tag_of(repo, target)}): {reason}")
     write_note(notes, {"kind": "rollback", "from": current, "to": target, "reason": reason})

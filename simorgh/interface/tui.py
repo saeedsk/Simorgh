@@ -62,6 +62,7 @@ COMMANDS: tuple[tuple[str, str], ...] = (
     ("improve", "revise existing code, or draft a new skill"),
     ("tasks", "see the backlog (`tasks work` advances the next item)"),
     ("research", "investigate a question, no code written"),
+    ("benchmark", "score this system on GAIA or BFCL, and track it"),
     ("plan", "break a goal into tracked steps"),
     ("interests", "topics Sim is following"),
     ("auto", "control the idle self-improvement loop: on | off | now"),

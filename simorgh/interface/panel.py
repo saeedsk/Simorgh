@@ -108,8 +108,16 @@ def _topic(overhead: int) -> int:
 
 
 def _fit(text: str, width: int) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= width else text[: width - 1] + "…"
+    from .render import fit
+
+    return fit(" ".join(text.split()), width)
+
+
+def _line(text: str) -> str:
+    """A finished row, cut to the real terminal in display columns."""
+    from .render import fit, terminal_width
+
+    return fit(text, terminal_width())
 
 
 def _took(seconds: float | None) -> str:
@@ -126,7 +134,7 @@ def tree_start(record: TaskRecord, *, unicode: bool = True) -> str:
     """The root of a task's tree: kind, who asked, and what it is about."""
     icon = _KIND_ICON.get(record.kind, "•") if unicode else "*"
     head = "⏺" if unicode else "*"
-    return f"{head} {icon} {record.kind} · {record.origin} · {record.short_topic()}  [{record.task_id[:8]}]"
+    return _line(f"{head} {icon} {record.kind} · {record.origin} · {record.short_topic()}  [{record.task_id[:8]}]")
 
 
 def tree_step(*, tool: str | None, head: str, ok: bool | None, took: float | None,
@@ -141,26 +149,32 @@ def tree_step(*, tool: str | None, head: str, ok: bool | None, took: float | Non
     width = (terminal_width() - _TREE_OVERHEAD) if width is None else width
     branch = "  ├─ " if unicode else "  |- "
     what = f"{tool} {head}" if tool else head
-    what = _fit(what, width - len(branch) - 10)
+    from .render import display_width as _dw
+
+    what = _fit(what, width - _dw(branch) - _dw(f"{_OK.get(ok, '…')} {_took(took)}") - 2)
     mark = _OK.get(ok, "…") if unicode else {True: "ok", False: "FAILED"}.get(ok, "..")
     tail = f"{mark} {_took(took)}".rstrip()
-    pad = max(1, width - len(branch) - len(what) - len(tail))
-    return f"{branch}{what}{' ' * pad}{tail}"
+    from .render import display_width
+
+    pad = max(1, width - display_width(branch) - display_width(what) - display_width(tail))
+    return _line(f"{branch}{what}{' ' * pad}{tail}")
 
 
 def tree_note(lines: list[str], *, unicode: bool = True) -> list[str]:
     """Lines that belong *under* a branch -- a diff, a test summary --
     kept inside the tree's rail so the eye can follow it."""
+    # A long diff line used to run past the terminal and wrap, breaking
+    # the tree's own rail (observer, 2026-09-08).
     rail = "  │  " if unicode else "  |  "
-    return [f"{rail}{line}" for line in lines]
+    return [_line(f"{rail}{line}") for line in lines]
 
 
 def tree_end(record: TaskRecord, *, elapsed: float | None, detail: str = "", unicode: bool = True) -> str:
     icon = _END_ICON.get(record.status, "•") if unicode else ""
     corner = "  ╰─ " if unicode else "  `- "
     took = f" in {_took(elapsed)}" if elapsed is not None else ""
-    tail = f" -- {_fit(detail, 80)}" if detail else ""
-    return f"{corner}{icon} {record.status}{took}{tail}".replace("  ", " ", 0)
+    tail = f" -- {detail}" if detail else ""
+    return _line(f"{corner}{icon} {record.status}{took}{tail}")
 
 
 # ---------------------------------------------------------------- bottom rows
@@ -177,7 +191,7 @@ def running_row(record: TaskRecord, *, now: float, unicode: bool = True) -> list
     steps = f" · {record.steps} step{'s' if record.steps != 1 else ''}" if record.steps else ""
     return [
         (breath_class(now), f"{spark}{word}…"),
-        ("class:sim.footer", f"  {record.kind} · {record.short_topic(_topic(_ROW_OVERHEAD))} · {elapsed:.0f}s{steps}"),
+        ("class:sim.footer", _line(f"  {record.kind} · {record.short_topic(_topic(_ROW_OVERHEAD))} · {elapsed:.0f}s{steps}")),
     ]
 
 
@@ -188,12 +202,19 @@ def queued_row(queued: list[TaskRecord], *, unicode: bool = True) -> list[tuple[
     named = "; ".join(t.short_topic(max(16, _topic(_QUEUE_OVERHEAD) // MAX_QUEUED_NAMED))
                       for t in queued[:MAX_QUEUED_NAMED])
     more = f" (+{len(queued) - MAX_QUEUED_NAMED})" if len(queued) > MAX_QUEUED_NAMED else ""
-    return [("class:sim.footer", f"{arrow}{len(queued)} queued: {named}{more}")]
+    return [("class:sim.footer", _line(f"{arrow}{len(queued)} queued: {named}{more}"))]
 
 
 def status_row(*, auto: str, posture: str, model: str, budget: str, hint: str = "") -> list[tuple[str, str]]:
     """The always-there last line: is auto mode on, how guarded is
-    Guardian, what model is answering, and how much budget is left."""
+    Guardian, what model is answering, and how much budget is left.
+
+    Drops the least important parts rather than overrunning a narrow
+    terminal -- `auto` is what someone actually scans for, the hint is
+    what they already know. Caught by the width assertion, 2026-09-08;
+    eleven observers had missed it."""
+    from .render import display_width, terminal_width
+
     parts = [f"auto {auto}"]
     if posture and posture != "unknown":
         parts.append(posture)
@@ -203,7 +224,10 @@ def status_row(*, auto: str, posture: str, model: str, budget: str, hint: str = 
         parts.append(budget)
     if hint:
         parts.append(hint)
-    return [("class:sim.status", " · ".join(parts))]
+    width = terminal_width()
+    while len(parts) > 1 and display_width(" · ".join(parts)) > width:
+        parts.pop()  # least important first: hint, budget, model, posture
+    return [("class:sim.status", _line(" · ".join(parts)))]
 
 
 def footer_rows(book: TaskBook, *, now: float, auto: str, posture: str = "", model: str = "",

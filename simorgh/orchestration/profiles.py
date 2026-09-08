@@ -35,8 +35,16 @@ PATCH = Profile(
     read_only=False, max_steps=20, max_revisions=2, scaffold="patch", max_output_tokens=16_000,
 )
 RESEARCH = Profile(
-    name="research", tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch", "run_tests"),
-    read_only=True, max_steps=6, max_revisions=0, scaffold="research", verify=True,
+    # `run_shell` is here because "go and find out X" is exactly the
+    # kind that needs it, and it had no way to count, sort or aggregate
+    # anything -- a trial burned its whole budget substituting list_dir
+    # (observer, 2026-09-08). Guardian gates it the same as anywhere.
+    name="research",
+    tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch", "run_tests", "run_shell"),
+    # 6 predates web_search/web_fetch. A question with a repo half and a
+    # web half needs search + fetch + two repo steps + an answer, and
+    # died on step 6 every time (observer, 2026-09-08).
+    read_only=False, max_steps=14, max_revisions=0, scaffold="research", verify=True,
 )
 PLAN = Profile(
     name="plan", tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch"),

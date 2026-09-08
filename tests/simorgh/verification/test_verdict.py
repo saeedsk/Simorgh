@@ -82,3 +82,55 @@ class TestFeedbackToWire(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefusalIsNotFailureTestCase(unittest.TestCase):
+    """A correct refusal must not be scored as defective work.
+
+    The scaffold tells the model "a denial is an answer, not an error";
+    the verifier then failed exactly that answer, pushed the task into
+    the revision loop, and made a refusal cost more provider budget than
+    a success. Four observers hit this on 2026-09-08.
+    """
+
+    def _combined(self, items):
+        from simorgh.verification.config import VerificationConfig
+        from simorgh.verification.trajectory import TrajectoryMetrics
+
+        return combine([], items, TrajectoryMetrics(available=False), VerificationConfig())
+
+    def _item(self, answer, evidence, required=True):
+        return AnsweredItem(question="q?", required=required, answer=answer, evidence=evidence)
+
+    def test_a_required_no_whose_evidence_is_a_denial_does_not_fail(self):
+        result = self._combined([
+            self._item("no", "Guardian denied the apply_source_patch, so no change was applied"),
+        ])
+        self.assertNotEqual(result.verdict, "fail")
+
+    def test_a_required_no_on_the_merits_still_fails(self):
+        result = self._combined([self._item("no", "the constant is simply not in the file")])
+        self.assertEqual(result.verdict, "fail")
+
+    def test_a_denial_alongside_a_real_defect_still_fails(self):
+        result = self._combined([
+            self._item("no", "Guardian denied the write"),
+            self._item("no", "the summary omits three of the rules"),
+        ])
+        self.assertEqual(result.verdict, "fail")
+
+    def test_denied_action_count_is_forgiven_when_every_no_is_a_refusal(self):
+        from simorgh.verification.config import VerificationConfig
+        from simorgh.verification.trajectory import TrajectoryMetrics
+
+        items = [self._item("no", "the action was denied by ProtectedRule")]
+        result = combine([], items, TrajectoryMetrics(available=True, denied_actions=5), VerificationConfig())
+        self.assertNotEqual(result.verdict, "fail")
+
+    def test_denied_action_count_still_fails_a_task_that_also_failed(self):
+        from simorgh.verification.config import VerificationConfig
+        from simorgh.verification.trajectory import TrajectoryMetrics
+
+        items = [self._item("no", "the file was never written")]
+        result = combine([], items, TrajectoryMetrics(available=True, denied_actions=5), VerificationConfig())
+        self.assertEqual(result.verdict, "fail")

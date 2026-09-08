@@ -53,11 +53,31 @@ if TYPE_CHECKING:  # `config` imports the refusal table from here
 DEFAULT_SHELL_REFUSALS: dict[str, str] = {
     r"\brm\s+(-[a-zA-Z]*\s+)*(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\s+/(\s|$)":
         "recursive delete of the filesystem root",
-    r"\brm\s+(-[a-zA-Z]*\s+)*~(/\s*)?(\s|$)": "recursive delete of the home directory",
+    # `rm -rf ~` was covered; `rm -rf ~/ws`, `rm -rf $HOME` and
+    # `rm -rf /*` were not -- the same accident one character apart
+    # (observer, 2026-09-08).
+    r"\brm\s+(-[a-zA-Z]*\s+)*(~|\$HOME|\$\{HOME\})(/|\s|$)":
+        "recursive delete under the home directory",
+    r"\brm\s+(-[a-zA-Z]*\s+)*/\*": "recursive delete of everything under the filesystem root",
+    r"\bfind\s+/\s[^|]*-delete\b": "deletes everything it finds from the filesystem root",
+    r"\bfind\s+/\s[^|]*-exec\s+rm\b": "deletes everything it finds from the filesystem root",
+    r"\bchmod\s+(-[a-zA-Z]*\s+)*(-R\s+)?[0-7]{3,4}\s+/(\s|$)":
+        "changes permissions on the whole filesystem",
+    r"\bchown\s+(-[a-zA-Z]*\s+)*(-R\s+)?[^\s]+\s+/(\s|$)":
+        "changes ownership of the whole filesystem",
+    r"\bgit\s+clean\b[^|]*-[a-zA-Z]*[xd]": "deletes untracked and ignored files, which git cannot undo",
+    r"\bgit\s+reset\s+--hard\b": "discards committed work irrecoverably; use git_revert",
+    r"\bgit\s+checkout\b[^|]*\s--\s": "discards uncommitted work; use git_discard",
+    r"\b(curl|wget)\b[^|]*\|\s*(python|python3|perl|ruby|node)\b":
+        "pipes a download straight into an interpreter",
+    r"\bdiskutil\s+(erase|reformat)": "erases a disk",
+    r"\bkill\s+-9\s+-1\b": "kills every process the user owns",
     r"\bmkfs(\.|\s)": "formats a filesystem",
     r"\bdd\s+[^|]*\bof=/dev/": "writes directly to a block device",
     r">\s*/dev/(sd|nvme|disk)": "writes directly to a block device",
-    r"\bsudo\b": "asks for elevated privileges; run it yourself if you mean it",
+    # Anchored, so the word inside a quoted string is not a refusal
+    # (`echo 'contains sudo'` used to be refused -- observer, 2026-09-08).
+    r"(^|[;&|]\s*)sudo\s": "asks for elevated privileges; run it yourself if you mean it",
     r"\b(curl|wget)\b[^|]*\|\s*(ba|z|k|)sh\b": "pipes a download straight into a shell",
     r"\bgit\s+push\b.*(--force|-f)\b": "force-pushes, which can destroy someone else's history",
     r"\bgit\s+push\b": "pushes to a remote; publishing is the creator's call",
@@ -68,6 +88,29 @@ DEFAULT_SHELL_REFUSALS: dict[str, str] = {
 # What a command may print back. Enough to be useful, bounded so one
 # runaway command cannot fill the context.
 _OUTPUT_CAP = 8_000
+
+
+def _cap(text: str) -> str:
+    """Keep the HEAD and say so. It used to keep the tail in silence, so
+    a truncated listing looked complete to the model -- and every other
+    tool here marks its cut (observer, 2026-09-08)."""
+    if len(text) <= _OUTPUT_CAP:
+        return text
+    return text[:_OUTPUT_CAP] + (
+        f"\n...[cut at {_OUTPUT_CAP} of {len(text)} chars; narrow the command, "
+        "or pipe it through head/grep/wc]"
+    )
+
+
+def _head(command: str) -> str:
+    """The program name, for the side effect. `shlex.split` raises on an
+    unbalanced quote, which escaped `run()` as a ValueError instead of a
+    ToolResult (observer, 2026-09-08)."""
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    return parts[0] if parts else ""
 
 
 def refusal_for(command: str, refusals: dict[str, str] | None = None) -> str | None:
@@ -124,16 +167,21 @@ class RunShellTool:
             return ToolResult(ok=False, error=f"could not run it: {exc!r}")
 
         ok = completed.returncode == 0
-        output = (completed.stdout or "")[-_OUTPUT_CAP:]
+        output = _cap(completed.stdout or "")
+        # stderr matters on success too: a command can exit 0 and warn,
+        # and dropping that made the warning invisible (observer,
+        # 2026-09-08).
+        stderr = _cap(completed.stderr or "")
         if not ok:
             # The reason a command failed is usually on stderr, and a
             # result with an empty body teaches the model nothing.
-            stderr = (completed.stderr or "")[-_OUTPUT_CAP:]
             output = f"{output}\n{stderr}".strip() or f"exited {completed.returncode} with no output"
+        elif stderr:
+            output = f"{output}\n[stderr]\n{stderr}".strip()
         return ToolResult(
             ok=ok, output=output,
             error=None if ok else f"exit_code={completed.returncode}",
-            side_effects=(f"run_shell:{shlex.split(command)[0] if command else ''}",),
+            side_effects=(f"run_shell:{_head(command)}",),
             metadata={
                 "command": command, "exit_code": completed.returncode,
                 "duration_s": time.monotonic() - started,

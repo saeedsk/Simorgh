@@ -242,3 +242,32 @@ class WiringTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RepoRootTestCase(unittest.TestCase):
+    """Self-knowledge must not depend silently on the launch directory.
+
+    `repo_root` was `Path.cwd()` alone. Started from anywhere else, every
+    readable root pointed at nothing and Sim answered questions about
+    itself from imagination -- it invented five subsystems and denied
+    having a Guardian while `status` printed `guardian ok`, with no error
+    ever (observer, 2026-09-08).
+    """
+
+    def test_it_finds_the_repo_from_a_subdirectory(self):
+        from simorgh.execution.config import find_repo_root
+
+        here = Path(__file__).resolve()
+        root = find_repo_root(here.parent)
+        self.assertTrue((root / "simorgh" / "kernel" / "service.py").is_file())
+
+    def test_it_finds_the_repo_from_outside_it(self):
+        from simorgh.execution.config import find_repo_root
+
+        root = find_repo_root(Path("/tmp"))
+        self.assertTrue((root / "simorgh" / "kernel" / "service.py").is_file(),
+                        "must fall back to the package's own location")
+
+    def test_the_default_config_points_at_a_real_repo(self):
+        config = Config()
+        self.assertTrue((config.repo_root / "simorgh" / "kernel" / "service.py").is_file())

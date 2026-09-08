@@ -55,6 +55,25 @@ class CombinedResult:
     mechanical: dict
 
 
+# Phrases that mean "this did not happen because the system correctly
+# refused", as opposed to "this did not happen because the work is bad".
+_REFUSAL_EVIDENCE = (
+    "guardian denied", "was denied", "denied by", "denied (policy)",
+    "is protected", "only the creator", "refused to", "declined to",
+    "no workaround",
+)
+
+
+def _refused_rather_than_failed(evidence: str) -> bool:
+    lowered = (evidence or "").lower()
+    return any(phrase in lowered for phrase in _REFUSAL_EVIDENCE)
+
+
+def _all_refusals(answered_items) -> bool:
+    negatives = [a for a in answered_items if a.answer == "no"]
+    return bool(negatives) and all(_refused_rather_than_failed(a.evidence) for a in negatives)
+
+
 def combine(
     mechanical_results: list[tuple[str, CheckResult]],
     answered_items: list[AnsweredItem],
@@ -75,7 +94,15 @@ def combine(
 
     checklist_payload = [_checklist_item_payload(a) for a in answered_items]
 
-    required_no = [a for a in answered_items if a.required and a.answer == "no"]
+    # An item whose evidence is "Guardian denied it" is not a defect in
+    # the work: the scaffold tells the model "a denial is an answer, not
+    # an error", and the system then scored that answer as a failure and
+    # paid for revisions. A refusal cost MORE provider budget than a
+    # success (observer, 2026-09-08).
+    required_no = [
+        a for a in answered_items
+        if a.required and a.answer == "no" and not _refused_rather_than_failed(a.evidence)
+    ]
     if required_no:
         failed_items = tuple(
             FailedItem(question=a.question, evidence=a.evidence, suggestion=f"address: {a.question}")
@@ -88,7 +115,10 @@ def combine(
         )
         return CombinedResult("fail", checklist_payload, feedback, mechanical_payload)
 
-    if trajectory.denied_actions >= config.max_denied_actions:
+    # Proposing something and being denied, then stopping, is the
+    # behaviour we ask for. Only count it against the task when the work
+    # itself also failed on its merits.
+    if trajectory.denied_actions >= config.max_denied_actions and not _all_refusals(answered_items):
         reason = f"the task proposed {trajectory.denied_actions} disallowed action(s) -- it did not understand its constraints"
         feedback = Feedback(mechanical_errors=(reason,), revise_hint=reason, retryable=True)
         return CombinedResult("fail", checklist_payload, feedback, mechanical_payload)
