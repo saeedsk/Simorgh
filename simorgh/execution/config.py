@@ -69,8 +69,14 @@ class Config:
     # cannot be: a shell writes wherever the user can. Once that tool
     # is enabled these scopes describe the *file* tools, and Guardian
     # is what stands behind the shell.
+    # `src/` is READABLE but not writable. It is the retired v1 tree
+    # (docs/architecture.md: "retired but not yet deleted -- that's the
+    # plan's Stage C"), so anything written there is work scheduled for
+    # deletion. Found 2026-09-08: a Sim run had left an uncommitted
+    # docstring in `src/cognition/__init__.py` in the real repo, which
+    # is effort spent on a tree nobody will ever run again.
     write_scopes_source: tuple[str, ...] = (
-        "src/", "simorgh/", "simorgh_skills/", "tests/", "tools/", "docs/",
+        "simorgh/", "simorgh_skills/", "tests/", "tools/", "docs/",
     )
     sandbox_cpu_seconds: int = 5
     sandbox_memory_mb: int = 256
