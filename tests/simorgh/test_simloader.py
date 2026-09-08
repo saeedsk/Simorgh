@@ -103,6 +103,58 @@ class LoaderTestCase(unittest.TestCase):
             simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
         self.assertEqual(len(simloader.good_tags(self.repo.path)), 1)
 
+    def test_full_still_runs_the_gate_on_an_already_tagged_commit(self):
+        """`bless --full` used to return 0 immediately for a commit that
+        already carried a tag, printing "is already sim-good-0003" and
+        exiting green. On screen that is indistinguishable from the full
+        gate passing -- and it had not run. The tag came from the unit
+        suite alone, so the trial suite, the gate that has caught every
+        real blocker in this project, was skipped in silence
+        (2026-09-08)."""
+        calls = []
+
+        def _gate(*a, **k):
+            calls.append(k.get("full"))
+            return True, "unit suite green; trials 3/3"
+
+        with mock.patch.object(simloader, "run_gate", side_effect=_gate):
+            simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
+            rc = simloader.cmd_bless(self.repo.path, self.notes, full=True, timeout_s=10)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, [False, True], "the second bless must actually run the full gate")
+        self.assertEqual(len(simloader.good_tags(self.repo.path)), 1, "and must not add a second tag")
+        self.assertIn("full_gate_passed", (self.notes / "decisions.jsonl").read_text())
+
+    def test_a_failed_full_gate_reports_but_leaves_the_tag_standing(self):
+        """The tag was earned by the unit suite and the unit suite still
+        passes. Removing it would roll the system back for a failure in
+        a gate it was never granted for; saying nothing would hide a
+        real failure. So: exit 1, and say both things."""
+        with self._gate([(True, "green"), (False, "trial 2/3 failed")]):
+            simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
+            rc = simloader.cmd_bless(self.repo.path, self.notes, full=True, timeout_s=10)
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(simloader.good_tags(self.repo.path)), 1)
+        self.assertIn("full_gate_failed", (self.notes / "decisions.jsonl").read_text())
+
+    def test_a_plain_bless_of_a_tagged_commit_is_still_a_no_op(self):
+        """The cheap path must stay cheap: `bless` with no flag on an
+        already-good commit still runs nothing."""
+        calls = []
+
+        def _gate(*a, **k):
+            calls.append(k.get("full"))
+            return True, "green"
+
+        with mock.patch.object(simloader, "run_gate", side_effect=_gate):
+            simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
+            rc = simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, [False], "a plain re-bless must not run the gate again")
+
     # -- rollback -----------------------------------------------------------
     def test_rollback_steps_to_the_previous_good_tag(self):
         first = self.repo.commit("two")
