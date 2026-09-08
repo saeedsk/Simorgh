@@ -93,6 +93,41 @@ class SessionRunner:
         self._verify_timeout_s = verify_timeout_s
 
     async def run(self, session: Session, *, user_text: str = "") -> Outcome:
+        """Run the session, and never leave a change behind that nobody
+        committed.
+
+        Live-caught 2026-09-07 by a trial designed to fail: asked to make
+        a change that breaks the suite, Sim applied it, ran the tests, saw
+        red, and correctly refused to commit -- and then left the modified
+        file sitting in the working tree. Its instructions do say to put
+        the tree back, and it had `git_discard` to do it with, but it
+        spent its remaining steps investigating the failure instead.
+
+        Which is a reasonable thing for it to do. "Never leave a broken
+        change in the tree" is a property the system should hold, not a
+        request the model has to remember, so the cleanup happens here
+        whichever way the session ended.
+        """
+        outcome = await self._run(session, user_text=user_text)
+        if session.uncommitted and outcome.kind != "paused":
+            await self._discard_uncommitted(session)
+        return outcome
+
+    async def _discard_uncommitted(self, session: Session) -> None:
+        left = sorted(session.uncommitted)
+        for path in left:
+            call = {"tool": "git_discard", "args": {"path": path}}
+            ok, summary, _detail = await self._propose_and_await(session, call, session.next_step_no())
+            step = Step(
+                session.next_step_no(), "act",
+                f"put {path} back: {summary}" if ok else f"could not put {path} back: {summary}",
+                tool="git_discard", ok=ok,
+            )
+            session.record(step)
+            await self._record_step(session, step)
+        session.uncommitted.clear()
+
+    async def _run(self, session: Session, *, user_text: str = "") -> Outcome:
         await self._append(session, topics.TASK_STARTED, {"task_id": session.task_id, "worker_id": self._worker_id})
         await self._publish(session, topics.TASK_STARTED, {"task_id": session.task_id, "worker_id": self._worker_id})
 
@@ -319,8 +354,28 @@ class SessionRunner:
             text = f"{call.get('tool')}: no response (timed out)"
             return False, text, text
         if result.type == topics.ACTION_RESULT:
+            ok = result.payload.get("ok", False)
+            if ok:
+                for effect in result.payload.get("side_effects") or ():
+                    kind, _, path = str(effect).partition(":")
+                    if kind == "file_write" and path:
+                        session.uncommitted.add(path)
+                    elif kind in ("git_commit", "git_discard") and path:
+                        session.uncommitted.discard(path)
             full = result.payload.get("stdout_preview", "")
-            return result.payload.get("ok", False), full[: self._MODEL_RESULT_CHARS], full[: self._DETAIL_CHARS]
+            error = result.payload.get("error") or ""
+            if not ok:
+                # A failing tool puts its reason in `error`, not in
+                # `stdout_preview`, and only the preview was ever read --
+                # so a refusal reached the model as an *empty* result. It
+                # was told "that failed" and nothing else.
+                #
+                # Live-caught 2026-09-07: `apply_source_patch` was refused
+                # and the step recorded an empty summary, leaving the
+                # model to guess. The same silence sat behind every failed
+                # `run_tests` and `git_commit` in the earlier trials.
+                full = f"{error}\n\n{full}".strip() if full else error
+            return ok, full[: self._MODEL_RESULT_CHARS], full[: self._DETAIL_CHARS]
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
             text = f"denied: {reasons}"

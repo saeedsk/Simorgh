@@ -641,8 +641,8 @@ class TestBuiltinTools(unittest.TestCase):
         names = {tool.name for tool in builtin_tools(Config(repo_root=Path.cwd()))}
         self.assertEqual(names, {
             "read_file", "list_dir", "search_code", "run_python_sandboxed", "run_tests",
-            "apply_source_patch", "git_commit", "git_revert", "apply_skill", "web_fetch",
-            "propose_mcp_server",
+            "apply_source_patch", "git_commit", "git_revert", "git_discard", "apply_skill",
+            "web_fetch", "propose_mcp_server",
         })
 
 

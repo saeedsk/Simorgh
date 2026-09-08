@@ -789,6 +789,67 @@ class GitCommitTool:
         )
 
 
+class GitDiscardTool:
+    """Throw away uncommitted changes to one path, back to HEAD.
+
+    Live-caught 2026-09-07 by a trial designed to fail: asked to make a
+    change that breaks the suite, Sim applied it, ran the tests, saw them
+    fail, and correctly refused to commit -- exactly as instructed. Then
+    it had nowhere to go. Its instructions say to use `git_revert`
+    instead of leaving the tree broken, but `git_revert` undoes a
+    *commit*, and there was no commit; the change was sitting
+    uncommitted. It had been told to use a tool that could not do the
+    job, so it left a broken working tree behind.
+
+    This is the missing half of `apply_source_patch`: the way back from
+    an applied change that turned out to be wrong.
+    """
+
+    name = "git_discard"
+    description = "Discard uncommitted changes to one path, restoring it to the last commit."
+    read_only = False
+    # Reversible in the sense Guardian cares about: it only ever moves a
+    # file back to something already committed, and it refuses outright
+    # to touch a path git has no committed version of.
+    reversibility = "reversible"
+    args_schema = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+    }
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        subject = str(args.get("path", "")).strip().replace("\\", "/")
+        if not subject:
+            return ToolResult(ok=False, error="refused: name the path to discard")
+        scopes = self._config.write_scopes_source + self._config.write_scopes_skills
+        if ".." in Path(subject).parts or not pathsafety.in_write_scope(subject, write_scopes=scopes):
+            return ToolResult(ok=False, error=f"refused: {subject!r} is outside the writable scope")
+        root = self._config.repo_root
+        run = lambda cmd: subprocess.run(  # noqa: E731
+            cmd, cwd=root, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+        )
+        known = run(["git", "ls-files", "--error-unmatch", subject])
+        if known.returncode != 0:
+            # An untracked file has no committed version to go back to.
+            # Deleting it here would be a different, destructive act than
+            # the one this tool advertises.
+            return ToolResult(
+                ok=False,
+                error=f"refused: {subject} is not tracked by git, so there is nothing to restore it to",
+            )
+        result = run(["git", "checkout", "--", subject])
+        if result.returncode != 0:
+            return ToolResult(ok=False, error=(result.stderr or result.stdout).strip()[:400])
+        return ToolResult(
+            ok=True, output=f"discarded uncommitted changes to {subject}",
+            side_effects=(f"git_discard:{subject}",),
+        )
+
+
 class GitRevertTool:
     """Port of revert_last_commit: `git revert --no-edit HEAD`,
     attributed to Simorgh, never rewrites history."""
@@ -887,5 +948,6 @@ def builtin_tools(config: Config) -> list:
     return [
         ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), RunPythonSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
+        GitDiscardTool(config),
         ApplySkillTool(config), WebFetchTool(config), ProposeMcpServerTool(),
     ]

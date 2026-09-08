@@ -93,6 +93,11 @@ class Session:
     steps: list[Step] = field(default_factory=list)
     budget: Budget = field(default_factory=lambda: Budget(max_steps=6))
     messages: list[dict] = field(default_factory=list)  # the running cognition.think transcript
+    # Files this session wrote and has not committed. A session that
+    # ends with anything left here put a change in the tree and
+    # walked away from it; `SessionRunner` cleans up before it
+    # returns.
+    uncommitted: set[str] = field(default_factory=set)
     state: str = "CLAIMED"
     resumed_from_step: int = 0
 
