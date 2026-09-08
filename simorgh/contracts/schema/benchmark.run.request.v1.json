@@ -1,0 +1,41 @@
+{
+  "$id": "https://simorgh.local/schema/benchmark.run.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Start a benchmark run. One at a time: two runs would measure each other's contention.",
+  "properties": {
+    "level": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limit": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "refresh": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "suite": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "benchmark.run.request",
+  "type": "object"
+}

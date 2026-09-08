@@ -41,7 +41,7 @@ LAYERS: tuple[tuple[str, ...], ...] = (
     ("cognition", "memory", "worldmodel"),
     ("guardian", "execution", "verification", "planning"),
     ("learning", "reflection", "curiosity"),
-    ("persona", "interface"),
+    ("persona", "benchmark", "interface"),
     ("orchestration",),
 )
 
@@ -86,6 +86,7 @@ def build_factories(
     (via `Kernel(..., interactive=True)`); every other caller (`status`,
     `trace`, `migrate-v1`, every test, self-check) leaves the default.
     """
+    from simorgh.benchmark.service import Service as BenchmarkService
     from simorgh.bus.service import Service as BusService
     from simorgh.cognition.service import Service as CognitionService
     from simorgh.curiosity.service import Service as CuriosityService
@@ -116,6 +117,7 @@ def build_factories(
         "reflection": lambda: ReflectionService(),
         "curiosity": lambda: CuriosityService(),
         "persona": lambda: PersonaService(),
+        "benchmark": lambda: BenchmarkService(),
         "interface": lambda: InterfaceService(run_repl=run_repl, wait_for_boot=run_repl),
         "orchestration": lambda: OrchestrationService(),
     }

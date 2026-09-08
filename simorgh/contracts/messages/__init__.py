@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from . import (  # noqa: F401 -- side effect: registration
     action,
+    benchmark,
     cognition,
     curiosity,
     guardian,

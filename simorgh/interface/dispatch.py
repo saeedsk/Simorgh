@@ -180,6 +180,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
             "kind": "research", "description": args, "origin": "human",
         }, steps), timeout=5.0, render=_render_created(), watch=True)
 
+    if name == "benchmark":
+        return await _benchmark(bus, args)
+
     if name == "tasks":
         if args.strip() == "work":
             return await _request(bus, topics.TASK_WORK_NEXT_REQUEST, {}, timeout=5.0, render=lambda p: (
@@ -245,6 +248,49 @@ def _with_steps(payload: dict, steps: int | None) -> dict:
     if steps:
         payload["max_steps"] = steps
     return payload
+
+
+_BENCHMARK_USAGE = (
+    "benchmark                     the latest result for each suite\n"
+    "benchmark suites              what can be run, and what is cached\n"
+    "benchmark run <suite> [n] [level=L] [refresh]\n"
+    "benchmark history [suite]     accuracy over time, per model\n"
+    "benchmark show <run_id>       one run, case by case"
+)
+
+
+def _benchmark_word(args: str) -> tuple[str, str]:
+    first, _, rest = args.strip().partition(" ")
+    return first.lower(), rest.strip()
+
+
+async def _benchmark(bus: BusClient, args: str) -> Outcome:
+    from . import benchmarkview
+
+    verb, rest = _benchmark_word(args)
+    if verb in ("", "latest"):
+        return await _request(bus, topics.BENCHMARK_HISTORY_REQUEST, {}, timeout=10.0,
+                              render=benchmarkview.latest)
+    if verb == "suites":
+        return await _request(bus, topics.BENCHMARK_SUITES_REQUEST, {}, timeout=10.0,
+                              render=benchmarkview.suites)
+    if verb == "history":
+        return await _request(bus, topics.BENCHMARK_HISTORY_REQUEST, {"suite": rest.strip()},
+                              timeout=10.0, render=benchmarkview.history)
+    if verb == "show":
+        if not rest:
+            return Outcome("usage: benchmark show <run_id>")
+        return await _request(bus, topics.BENCHMARK_HISTORY_REQUEST, {"run_id": rest.strip()},
+                              timeout=10.0, render=benchmarkview.detail)
+    if verb == "run":
+        payload, problem = benchmarkview.parse_run(rest)
+        if problem:
+            return Outcome(problem)
+        # A run is minutes to hours; the reply says it started and the
+        # progress narrates itself, the same shape as `improve`.
+        return await _request(bus, topics.BENCHMARK_RUN_REQUEST, payload, timeout=60.0,
+                              render=benchmarkview.started)
+    return Outcome(_BENCHMARK_USAGE)
 
 
 async def _panel_piece(bus: BusClient, type_: str, payload: dict, *, timeout: float, label: str, render) -> str:

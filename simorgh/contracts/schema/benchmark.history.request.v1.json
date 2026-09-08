@@ -1,0 +1,35 @@
+{
+  "$id": "https://simorgh.local/schema/benchmark.history.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `benchmark.history.request` (catalog v1).",
+  "properties": {
+    "limit": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "suite": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "benchmark.history.request",
+  "type": "object"
+}

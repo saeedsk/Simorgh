@@ -34,10 +34,13 @@ ALL_SIXTEEN = frozenset(name for layer in LAYERS for name in layer)
 
 class TestKernelBootsAllSixteenSubsystems(unittest.IsolatedAsyncioTestCase):
     async def test_every_real_subsystem_boots_healthy_and_shuts_down_cleanly(self):
-        # 15, not 16: the Kernel itself is the sixteenth blueprint
+        # The Kernel itself is not in LAYERS -- it is what starts them.
         # subsystem, but it is the composition root that boots the other
         # fifteen -- it does not appear as an entry in its own LAYERS.
-        self.assertEqual(len(ALL_SIXTEEN), 15, "LAYERS should still name exactly the fifteen non-kernel subsystems")
+        self.assertEqual(
+            len(ALL_SIXTEEN), 16,
+            "LAYERS should name every non-kernel subsystem: the original fifteen plus `benchmark` (2026-09-08)",
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             config = LoadedConfig({"runtime": {"data_dir": tmp}}, None)

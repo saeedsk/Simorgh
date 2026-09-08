@@ -1,0 +1,180 @@
+"""Asking the real system a benchmark's questions.
+
+Deliberately the same path a human's `research <question>` takes: a
+`task.create` on the bus, then wait for `task.completed`. A harness that
+called Cognition directly would measure the model, not Sim -- and the
+whole reason to have this is that the model is not the part that has
+been failing. Guardian, Planning, the tool loop and the step budget are
+all in the measurement, which is the point.
+
+Cases run one at a time (`[benchmark] concurrency`), each with its own
+step cap, and the run is recorded whether it finishes or is interrupted.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+
+from simorgh.contracts import topics
+from simorgh.contracts.envelope import Message
+
+from .api import Case, CaseResult, RunRecord, Suite
+from .config import Config
+from .scoring import answer_format, score_case
+
+
+class Runner:
+    def __init__(self, bus, *, config: Config | None = None, clock=None,
+                 on_progress=None) -> None:
+        self._bus = bus
+        self._config = config or Config()
+        self._clock = clock
+        self._on_progress = on_progress or (lambda **_: None)
+
+    def _now(self) -> float:
+        if self._clock is None:
+            return time.time()
+        return self._clock() if callable(self._clock) else self._clock.now()
+
+    def prompt(self, case: Case) -> str:
+        """The question as the system is asked it.
+
+        The answer-format instruction is part of GAIA, not our
+        invention: the benchmark scores a specific answer shape and its
+        own prompt asks for it. Asking without it and then scoring
+        strictly would measure formatting, not capability."""
+        parts = [case.question]
+        if case.functions:
+            parts.append(f"Functions you may call:\n{case.functions}")
+        parts.append(answer_format(case.mode))
+        return "\n\n".join(parts)
+
+    async def run_case(self, case: Case) -> CaseResult:
+        if case.needs_attachment:
+            # Honest rather than convenient: a question about a
+            # spreadsheet we never downloaded is unanswerable, and
+            # scoring it wrong would flatter nothing and mislead us.
+            return CaseResult(
+                case_id=case.id, level=case.level, correct=False, skipped=True,
+                expected=case.answer, error=f"needs the attached file {case.attachment!r}",
+            )
+        started = time.monotonic()
+        # Listen *before* asking. A fast pipeline can complete the task
+        # between the create reply and a later subscribe, and the answer
+        # would land on nobody -- the case would then time out and score
+        # zero for a right answer (caught by the flow test, 2026-09-07).
+        watch = _AnswerWatch(self._bus)
+        await watch.start()
+        try:
+            try:
+                reply = await self._bus.request(
+                    Message.new(topics.TASK_CREATE, source=self._bus.source, payload={
+                        "kind": "research", "description": self.prompt(case), "origin": "human",
+                        "mode": "execute", "max_steps": self._config.case_max_steps,
+                    }, clock=self._clock),
+                    timeout=15.0,
+                )
+            except Exception as exc:  # noqa: BLE001 -- a harness failure is not a wrong answer
+                return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
+                                  expected=case.answer, error=f"could not create the task: {exc!r}")
+            task_id = reply.payload.get("task_id", "")
+            if not task_id:
+                return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
+                                  expected=case.answer, error="planning created no task")
+            answer_text, steps, error = await watch.wait(task_id, self._config.case_timeout_s)
+        finally:
+            await watch.stop()
+        seconds = time.monotonic() - started
+        if error:
+            return CaseResult(case_id=case.id, level=case.level, correct=False, expected=case.answer,
+                              answer=answer_text, seconds=seconds, steps=steps, error=error)
+        correct, extracted = score_case(answer_text, case.answer, mode=case.mode)
+        return CaseResult(
+            case_id=case.id, level=case.level, correct=correct, answer=extracted,
+            expected=case.answer, seconds=seconds, steps=steps,
+        )
+
+    async def run(self, suite: Suite, *, model: str = "unknown", note: str = "") -> RunRecord:
+        record = RunRecord(
+            suite=suite.name, suite_version=suite.version, model=model,
+            started_at=self._now(), note=note,
+        )
+        try:
+            for index, case in enumerate(suite.cases, start=1):
+                self._on_progress(index=index, total=len(suite), case=case, record=record)
+                record.results.append(await self.run_case(case))
+        except asyncio.CancelledError:
+            # An interrupted run is real evidence and is kept -- labelled,
+            # so nobody compares five cases against fifty as equals.
+            record.partial = True
+            record.finished_at = self._now()
+            raise
+        finally:
+            if not record.finished_at:
+                record.finished_at = self._now()
+        record.partial = record.partial or len(record.results) < len(suite)
+        return record
+
+
+class _AnswerWatch:
+    """Subscribes to task outcomes before a case's task exists.
+
+    Buffers by task_id, because the subscription is necessarily older
+    than the id it is waiting for."""
+
+    def __init__(self, bus) -> None:
+        self._bus = bus
+        self._subs: list = []
+        self._steps: dict[str, int] = {}
+        self._outcomes: dict[str, tuple[str, dict]] = {}
+        self._waiters: dict[str, asyncio.Future] = {}
+
+    async def start(self) -> None:
+        async def _on_step(message: Message) -> None:
+            payload = message.payload
+            if payload.get("ok") is not None:
+                task_id = payload.get("task_id", "")
+                self._steps[task_id] = self._steps.get(task_id, 0) + 1
+
+        def _finisher(kind: str):
+            async def _on(message: Message) -> None:
+                task_id = message.payload.get("task_id", "")
+                if not task_id or task_id in self._outcomes:
+                    return
+                self._outcomes[task_id] = (kind, message.payload)
+                waiter = self._waiters.get(task_id)
+                if waiter is not None and not waiter.done():
+                    waiter.set_result(None)
+            return _on
+
+        self._subs = [
+            await self._bus.subscribe(topics.TASK_STEP, _on_step),
+            await self._bus.subscribe(topics.TASK_COMPLETED, _finisher("completed")),
+            await self._bus.subscribe(topics.TASK_FAILED, _finisher("failed")),
+            await self._bus.subscribe(topics.TASK_BLOCKED, _finisher("blocked")),
+        ]
+
+    async def stop(self) -> None:
+        for sub in self._subs:
+            await sub.unsubscribe()
+        self._subs = []
+
+    async def wait(self, task_id: str, timeout_s: float) -> tuple[str, int, str]:
+        if task_id not in self._outcomes:
+            waiter: asyncio.Future = asyncio.get_running_loop().create_future()
+            self._waiters[task_id] = waiter
+            try:
+                await asyncio.wait_for(waiter, timeout=timeout_s)
+            except asyncio.TimeoutError:
+                return "", self._steps.get(task_id, 0), f"no answer within {timeout_s:.0f}s"
+            finally:
+                self._waiters.pop(task_id, None)
+        kind, payload = self._outcomes[task_id]
+        steps = self._steps.get(task_id, 0)
+        if kind != "completed":
+            return "", steps, str(payload.get("reason") or f"the task was {kind}")
+        return str(payload.get("result_summary") or ""), steps, ""
+
+
+__all__ = ["Runner"]
