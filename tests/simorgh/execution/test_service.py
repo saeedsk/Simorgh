@@ -92,11 +92,84 @@ class _ExecutionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(sub.unsubscribe)
 
 
+class TestSkillsOnDiskAreAnnouncedAtBoot(_ExecutionServiceTestCase):
+    """A skill Sim wrote in an earlier session must be REACHABLE in this
+    one. Loading stays on demand by design; the gap was that nothing
+    ever told the model such a skill existed, so it could never name
+    one, so the lazy load could never fire -- the skill was a committed
+    file and nothing else (audit, 2026-09-08)."""
+
+    async def _announced(self) -> set[str]:
+        seen: set[str] = set()
+
+        async def _on(message):
+            if message.payload.get("provider") == "skill":
+                seen.add(message.payload["name"])
+
+        await self.bus.subscribe(topics.TOOL_REGISTERED, _on)
+        return seen
+
+    async def test_a_skill_already_on_disk_is_announced_at_boot(self):
+        (self.root / "simorgh_skills" / "earlier.py").write_text(_SKILL_SOURCE)
+        seen = await self._announced()
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        for _ in range(50):
+            if seen:
+                break
+            await asyncio.sleep(0.01)
+        self.assertIn("skill:earlier", seen)
+
+    async def test_announcing_does_not_read_or_load_the_source(self):
+        """The documented property: no boot-time directory scan that
+        loads every skill ever acquired."""
+        (self.root / "simorgh_skills" / "earlier.py").write_text(_SKILL_SOURCE)
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        self.assertNotIn("skill:earlier", self.service._registry)  # noqa: SLF001
+
+    async def test_several_are_announced_and_dunder_files_are_skipped(self):
+        for name in ("alpha", "beta"):
+            (self.root / "simorgh_skills" / f"{name}.py").write_text(_SKILL_SOURCE)
+        (self.root / "simorgh_skills" / "__init__.py").write_text("")
+        seen = await self._announced()
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        for _ in range(50):
+            if len(seen) >= 2:
+                break
+            await asyncio.sleep(0.01)
+        self.assertIn("skill:alpha", seen)
+        self.assertIn("skill:beta", seen)
+        self.assertNotIn("skill:__init__", seen)
+
+    async def test_no_skill_directory_is_not_an_error(self):
+        import shutil
+
+        shutil.rmtree(self.root / "simorgh_skills")
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        self.assertTrue(self.service._registry)  # noqa: SLF001 -- the builtins are still there
+
+    async def test_a_registered_skill_is_offered_to_a_session(self):
+        """A profile is a static tuple, so a `skill:` name could never
+        appear in one; `offered_tools` has to add them."""
+        from simorgh.orchestration.tools import forget_registered, note_registered, offered_tools
+
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        self.addCleanup(forget_registered)
+        note_registered("read_file")
+        note_registered("skill:earlier")
+        offered = offered_tools(("read_file", "apply_skill"))
+        self.assertIn("read_file", offered)
+        self.assertIn("skill:earlier", offered)
+        self.assertNotIn("apply_skill", offered)
+
+
 class TestSkillAcquiredRegistersOnDemand(_ExecutionServiceTestCase):
     async def test_registers_a_skill_tool_and_publishes_tool_registered(self):
-        (self.root / "simorgh_skills" / "greet.py").write_text(_SKILL_SOURCE)
+        # Written AFTER boot: this class is about the on-demand path.
+        # A file that exists at boot is now loaded by the boot scan
+        # instead (see TestSkillsOnDiskAreLoadedAtBoot).
         await self._answer_memory_retrieve_once("Greets someone by name.")
         await self._start()
+        (self.root / "simorgh_skills" / "greet.py").write_text(_SKILL_SOURCE)
 
         registered_fut = asyncio.ensure_future(self._wait_for(
             topics.TOOL_REGISTERED, predicate=lambda p: p.get("name") == "skill:greet",
@@ -113,8 +186,8 @@ class TestSkillAcquiredRegistersOnDemand(_ExecutionServiceTestCase):
         self.assertIn("skill:greet", self.service._registry)  # noqa: SLF001 -- the only handle a test has on the live registry
 
     async def test_no_memory_responder_falls_back_to_a_synthesized_description(self):
-        (self.root / "simorgh_skills" / "lonely.py").write_text(_SKILL_SOURCE)
         await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        (self.root / "simorgh_skills" / "lonely.py").write_text(_SKILL_SOURCE)
 
         registered_fut = asyncio.ensure_future(self._wait_for(
             topics.TOOL_REGISTERED, predicate=lambda p: p.get("name") == "skill:lonely",
@@ -143,8 +216,8 @@ class TestSkillAcquiredRegistersOnDemand(_ExecutionServiceTestCase):
         self.assertNotIn("skill:sneaky", self.service._registry)  # noqa: SLF001
 
     async def test_a_second_acquisition_of_the_same_name_does_not_re_register(self):
-        (self.root / "simorgh_skills" / "twice.py").write_text(_SKILL_SOURCE)
         await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        (self.root / "simorgh_skills" / "twice.py").write_text(_SKILL_SOURCE)
 
         seen: list[Message] = []
 

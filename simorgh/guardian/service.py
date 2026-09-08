@@ -7,6 +7,8 @@ approval, and records the full decision on `action:<action_id>` plus
 
 from __future__ import annotations
 
+import re
+
 import asyncio
 from dataclasses import dataclass
 
@@ -48,6 +50,7 @@ class Service:
     version = "0.1.0"
     consumes = (
         topics.ACTION_PROPOSED,
+        topics.GUARDIAN_REVIEW,
         topics.SYSTEM_STATE_CHANGED,
         topics.TASK_CREATED,
         topics.TASK_COMPLETED,
@@ -61,6 +64,7 @@ class Service:
     )
     produces = (
         topics.ACTION_APPROVED,
+        topics.GUARDIAN_REVIEW_REPLY,
         topics.ACTION_DENIED,
         topics.ACTION_NEEDS_HUMAN,
         topics.UI_PROMPT,
@@ -94,6 +98,12 @@ class Service:
         await self._rebuild_rejected_index()
 
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_PROPOSED, self._on_proposed, group="guardian"))
+        # `guardian.review` had a caller and no listener: Verification
+        # asks for one on every self-patch and skill review
+        # (verification/service.py::_review), waited out the full action
+        # timeout, and silently degraded to `approved=False, ok=False`.
+        # A gate that has never run is not a gate (audit, 2026-09-08).
+        self._subs.append(await ctx.bus.subscribe(topics.GUARDIAN_REVIEW, self._on_review))
         self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
         self._subs.append(await ctx.bus.subscribe(topics.TASK_CREATED, self._on_task_created))
         self._subs.append(await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_outcome))
@@ -123,6 +133,37 @@ class Service:
     async def _rebuild_rejected_index(self) -> None:
         events = await self._ctx.ledger.read(REJECTED_STREAM)
         self._rejected_excerpts = [e.payload["code_excerpt"] for e in events if e.type == "rejected"]
+
+    async def _on_review(self, message: Message) -> None:
+        """Review a body of code before it is applied.
+
+        The same denylist that guards a live `apply_source_patch`, run
+        over the candidate ahead of time. Deliberately narrow: this
+        answers "does this code do something we forbid outright", not
+        "is this code good" -- judging quality is Verification's job and
+        it is the one asking.
+        """
+        payload = message.payload
+        code = ""
+        ref = payload.get("code_ref") or ""
+        if ref:
+            try:
+                code = (await self._ctx.ledger.get_blob(ref)).decode("utf-8", errors="replace")
+            except Exception:  # noqa: BLE001 -- an unreadable body is reviewable as "no evidence"
+                code = ""
+        if not code:
+            await self._ctx.bus.reply(message, type=topics.GUARDIAN_REVIEW_REPLY, payload={
+                "approved": False, "reasons": ["no code to review"], "layers_run": ["denylist"],
+            })
+            return
+        reasons = [
+            f"denied: {explanation}"
+            for pattern, explanation in self._config.denylist.items()
+            if re.search(pattern, code)
+        ]
+        await self._ctx.bus.reply(message, type=topics.GUARDIAN_REVIEW_REPLY, payload={
+            "approved": not reasons, "reasons": reasons, "layers_run": ["denylist"],
+        })
 
     async def _on_state_changed(self, message: Message) -> None:
         self._system_state = message.payload["state"]
