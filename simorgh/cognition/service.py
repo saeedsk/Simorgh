@@ -176,8 +176,26 @@ class Service:
 
         budget_cfg = self._config.purposes.get(purpose.value)
         req_budget = payload.get("budget") or {}
+        # `max_tokens` is how much the caller wants *back*. It used to set
+        # the input ceiling as well, so asking for a 2000-token answer also
+        # said "and you may only be given 2000 tokens of context" -- one
+        # field standing for two unrelated things.
+        #
+        # Live-caught 2026-09-07: a research session searched the code,
+        # got one real result, and died on its next step with
+        # `context_too_large -- context still exceeds budget after all
+        # compaction layers`. The protected blocks alone are most of 2000
+        # tokens; there was never room for anything the session actually
+        # went and found. That error is all over the historical ledger.
+        #
+        # The input ceiling belongs to the purpose (`[cognition.purposes]`,
+        # e.g. research 24k, draft 40k), which is exactly what those
+        # numbers were written for. A caller can still set it explicitly
+        # with `max_tokens_in`.
         budget = Budget(
-            max_tokens_in=req_budget.get("max_tokens", budget_cfg.max_tokens_in if budget_cfg else 12_000),
+            max_tokens_in=req_budget.get(
+                "max_tokens_in", budget_cfg.max_tokens_in if budget_cfg else 12_000,
+            ),
             max_tokens_out=req_budget.get("max_tokens", budget_cfg.max_tokens_out if budget_cfg else 1_000),
             max_cost_usd=req_budget.get("max_cost_usd", budget_cfg.max_cost_usd if budget_cfg else 0.05),
             require_real=payload.get("require_real_provider", False),

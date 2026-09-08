@@ -23,7 +23,27 @@ from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
 from .tools import marker_hint, to_action_payload
 
-ACTION_TIMEOUT_S = 5.0
+ACTION_TIMEOUT_S = 30.0
+# How long to wait for a given tool, when 30s is not the right answer.
+#
+# Live-caught 2026-09-07, watching a real patch task: `run_tests`
+# reported "no response (timed out)" twice, and the session -- doing
+# exactly what its scaffold says, not committing on a failing suite --
+# left the edit applied and uncommitted. Execution allows a test run
+# `test_timeout_s` (120s) and every tool `default_timeout_s` (60s),
+# while this caller gave *everything* 5 seconds. A test suite cannot
+# finish in 5s, so `run_tests` could never once have succeeded, and
+# Sim could never verify its own work.
+#
+# Kept a little above Execution's own limits so the tool's timeout is
+# what fires, with its real error, rather than this one guessing.
+_ACTION_TIMEOUTS: dict[str, float] = {
+    "run_tests": 180.0,
+    "run_python_sandboxed": 45.0,
+    "web_fetch": 45.0,
+    "apply_source_patch": 60.0,
+    "apply_skill": 60.0,
+}
 VERIFY_TIMEOUT_S = 5.0
 
 
@@ -292,7 +312,8 @@ class SessionRunner:
         await self._bus.publish(msg)
         result = await self._waiter.wait(
             (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.ACTION_NEEDS_HUMAN),
-            key="action_id", value=action_id, timeout=self._action_timeout_s,
+            key="action_id", value=action_id,
+            timeout=_ACTION_TIMEOUTS.get(call.get("tool"), self._action_timeout_s),
         )
         if result is None:
             text = f"{call.get('tool')}: no response (timed out)"

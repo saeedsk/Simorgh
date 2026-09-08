@@ -31,6 +31,13 @@ class Config:
     # hours (live, 2026-09-07). Exploration runs on this clock instead;
     # 0 disables the throttle, and a human's `discover` always bypasses it.
     min_explore_interval_seconds: float = 300.0
+    # Start with self-directed work held. `auto on` releases it for the
+    # session; this is the setting that decides where a fresh boot
+    # begins. The creator, 2026-09-07: "stop sim's auto revolution and
+    # prevent it from autonomously starting new projects, researchs and
+    # tasks" -- while each kind of task is put through a watched trial
+    # one at a time.
+    autonomy_on_boot: bool = True
     staleness_horizon_seconds: float = 7 * 86400.0
     budget_backoff_below_remaining: float = 0.2
     budget_stop_below_remaining: float = 0.05
