@@ -113,6 +113,7 @@ class Service:
         topics.PERCEPT_TEXT_RECEIVED, topics.INTENT_GOAL_STATED, topics.SYSTEM_PAUSE,
         topics.SYSTEM_RESUME, topics.SYSTEM_STOP, topics.UI_PROMPT_ANSWERED, topics.SYSTEM_HEALTH,
         topics.BENCHMARK_RUN_REQUEST, topics.BENCHMARK_HISTORY_REQUEST, topics.BENCHMARK_SUITES_REQUEST,
+        topics.BENCHMARK_LOAD_REQUEST,
     )
 
     def __init__(self, config: Config | None = None, *, run_repl: bool = True,

@@ -53,6 +53,19 @@ BenchmarkRunReply = define(t.BENCHMARK_RUN_REPLY, [
     O("cases", Int),
     O("model", Str),
 ])
+BenchmarkLoadRequest = define(t.BENCHMARK_LOAD_REQUEST, [
+    F("suite", Str),
+    O("refresh", Bool),
+], doc="Download a suite's cases without running them.")
+BenchmarkLoadReply = define(t.BENCHMARK_LOAD_REPLY, [
+    O("suite", Str),
+    O("suite_version", Str),
+    O("cases", Int),
+    O("levels", List(Str)),
+    O("needs_attachment", Int),
+    O("scorable", Bool),
+    O("cache_path", Str),
+])
 BenchmarkProgress = define(t.BENCHMARK_PROGRESS, [
     F("run_id", Str),
     F("suite", Str),
@@ -79,6 +92,7 @@ BenchmarkHistoryReply = define(t.BENCHMARK_HISTORY_REPLY, [
 ])
 
 __all__ = [
+    "BenchmarkLoadReply", "BenchmarkLoadRequest",
     "BenchmarkHistoryReply", "BenchmarkHistoryRequest", "BenchmarkProgress", "BenchmarkRunCompleted",
     "BenchmarkRunReply", "BenchmarkRunRequest", "BenchmarkSuitesReply", "BenchmarkSuitesRequest",
 ]

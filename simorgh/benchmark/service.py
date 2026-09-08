@@ -30,10 +30,11 @@ VERSION = "0.1.0"
 
 _CONSUMES = (
     topics.BENCHMARK_RUN_REQUEST, topics.BENCHMARK_HISTORY_REQUEST,
-    topics.BENCHMARK_SUITES_REQUEST, topics.COGNITION_PROVIDER_STATUS,
+    topics.BENCHMARK_SUITES_REQUEST, topics.BENCHMARK_LOAD_REQUEST, topics.COGNITION_PROVIDER_STATUS,
 )
 _PRODUCES = (
     topics.BENCHMARK_RUN_REPLY, topics.BENCHMARK_HISTORY_REPLY, topics.BENCHMARK_SUITES_REPLY,
+    topics.BENCHMARK_LOAD_REPLY,
     topics.BENCHMARK_PROGRESS, topics.BENCHMARK_RUN_COMPLETED, topics.TASK_CREATE, topics.UI_NOTICE,
 )
 
@@ -66,6 +67,7 @@ class Service:
             topics.BENCHMARK_SUITES_REQUEST: self._on_suites,
             topics.BENCHMARK_RUN_REQUEST: self._on_run,
             topics.BENCHMARK_HISTORY_REQUEST: self._on_history,
+            topics.BENCHMARK_LOAD_REQUEST: self._on_load,
             topics.COGNITION_PROVIDER_STATUS: self._on_provider,
         }
         for topic, handler in handlers.items():
@@ -113,6 +115,28 @@ class Service:
             })
         await self._ctx.bus.reply(message, type=topics.BENCHMARK_SUITES_REPLY, payload={
             "suites": suites, "model": self._model, "running": bool(self._task and not self._task.done()),
+        })
+
+    async def _on_load(self, message: Message) -> None:
+        """Download a suite without running it -- how an operator gets
+        the cases onto the machine, and checks their token works, before
+        spending model calls on them."""
+        name = message.payload.get("suite") or ""
+        try:
+            suite = await asyncio.to_thread(
+                datasets_mod.load, name, refresh=bool(message.payload.get("refresh")),
+                timeout=self._config.fetch_timeout_s, cache_dir=self._cache_dir(),
+            )
+        except datasets_mod.DatasetUnavailable as exc:
+            await self._ctx.bus.reply(message, type=topics.BENCHMARK_LOAD_REPLY,
+                                      payload=error_reply_payload("dataset_unavailable", str(exc)))
+            return
+        source = datasets_mod.SOURCES[name]
+        await self._ctx.bus.reply(message, type=topics.BENCHMARK_LOAD_REPLY, payload={
+            "suite": suite.name, "suite_version": suite.version, "cases": len(suite),
+            "levels": list(suite.levels()), "scorable": source.scorable,
+            "needs_attachment": sum(1 for c in suite.cases if c.needs_attachment),
+            "cache_path": str(datasets_mod.cache_path(source, self._cache_dir())),
         })
 
     async def _on_history(self, message: Message) -> None:

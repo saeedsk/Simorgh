@@ -52,6 +52,20 @@ def started(payload: dict) -> str:
     )
 
 
+def loaded(payload: dict) -> str:
+    lines = [
+        f"{payload.get('suite')}: {payload.get('cases')} cases  ·  revision {payload.get('suite_version')}",
+        f"  levels: {', '.join(payload.get('levels') or []) or 'none'}",
+    ]
+    needs = int(payload.get("needs_attachment") or 0)
+    if needs:
+        lines.append(f"  {needs} need a file we do not fetch yet -- those are skipped, never scored wrong")
+    if not payload.get("scorable", True):
+        lines.append("  load-only: this suite has no honest scorer here yet, so `run` will refuse it")
+    lines.append(f"  cached at {payload.get('cache_path')}")
+    return "\n".join(lines)
+
+
 def suites(payload: dict) -> str:
     lines = [f"benchmarks available  (answering as {payload.get('model', 'unknown')})"]
     for suite in payload.get("suites") or []:
@@ -123,4 +137,4 @@ def detail(payload: dict) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["detail", "history", "latest", "parse_run", "started", "suites"]
+__all__ = ["detail", "history", "latest", "loaded", "parse_run", "started", "suites"]

@@ -250,12 +250,22 @@ def _with_steps(payload: dict, steps: int | None) -> dict:
     return payload
 
 
-_BENCHMARK_USAGE = (
-    "benchmark                     the latest result for each suite\n"
-    "benchmark suites              what can be run, and what is cached\n"
-    "benchmark run <suite> [n] [level=L] [refresh]\n"
-    "benchmark history [suite]     accuracy over time, per model\n"
-    "benchmark show <run_id>       one run, case by case"
+# (verb, argument sketch, what it does). One list, so the usage text and
+# the dispatcher below cannot disagree -- the suites listing advertised a
+# `load` verb that did not exist until a test compared the two
+# (2026-09-08).
+BENCHMARK_VERBS: tuple[tuple[str, str, str], ...] = (
+    ("", "", "the latest result for each suite"),
+    ("suites", "", "what can be run, and what is cached"),
+    ("load", "<suite> [refresh]", "download its cases, without running them"),
+    ("run", "<suite> [n] [level=L] [refresh]", "run it, and record the result"),
+    ("history", "[suite]", "accuracy over time, per model"),
+    ("show", "<run_id>", "one run, case by case"),
+)
+_BENCHMARK_COLUMN = max(len(f"{verb} {args}".strip()) for verb, args, _w in BENCHMARK_VERBS) + 2
+_BENCHMARK_USAGE = "\n".join(
+    f"  benchmark {f'{verb} {args}'.strip():<{_BENCHMARK_COLUMN}}{what}"
+    for verb, args, what in BENCHMARK_VERBS
 )
 
 
@@ -282,6 +292,13 @@ async def _benchmark(bus: BusClient, args: str) -> Outcome:
             return Outcome("usage: benchmark show <run_id>")
         return await _request(bus, topics.BENCHMARK_HISTORY_REQUEST, {"run_id": rest.strip()},
                               timeout=10.0, render=benchmarkview.detail)
+    if verb == "load":
+        if not rest:
+            return Outcome("usage: benchmark load <suite> [refresh]")
+        words = rest.split()
+        return await _request(bus, topics.BENCHMARK_LOAD_REQUEST, {
+            "suite": words[0], "refresh": "refresh" in words[1:],
+        }, timeout=180.0, render=benchmarkview.loaded)
     if verb == "run":
         payload, problem = benchmarkview.parse_run(rest)
         if problem:
