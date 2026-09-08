@@ -1,0 +1,32 @@
+{
+  "$id": "https://simorgh.local/schema/task.edits_kept.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Ledger-only: uncommitted edits an attempt that ran out of steps left for the next attempt.",
+  "properties": {
+    "created": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "paths"
+  ],
+  "title": "task.edits_kept",
+  "type": "object"
+}

@@ -63,6 +63,21 @@ class Assembler:
         # then stopped had, by then, genuinely lost the instruction.
         if task:
             blocks.append({"role": "user", "content": task})
+        if session.carried:
+            # A retry continues; it does not start over. Without this the
+            # model re-did the first N steps every attempt (2026-09-07).
+            if session.uncommitted:
+                tree = (
+                    "Their uncommitted edits to " + ", ".join(sorted(session.uncommitted))
+                    + " are STILL IN THE TREE: do not re-apply them -- run the tests and commit them."
+                )
+            else:
+                tree = "Edits they left uncommitted were discarded; anything they committed is in the tree."
+            blocks.append({"role": "user", "content": (
+                f"This is attempt {session.attempt} at the task. Earlier attempts ran out of steps or "
+                f"were blocked; here is what they did, so you continue rather than repeat it. {tree}\n\n"
+                + session.carried
+            )})
 
         blocks.extend(session.messages)
         return blocks

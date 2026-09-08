@@ -12,6 +12,11 @@ class Config:
     max_task_attempts: int = 3
     max_blocked_retries: int = 9
     blocked_retry_delay_seconds: float = 300.0
+    # A task that only ran out of steps comes back this soon, with a
+    # fresh budget and a memory of the attempt (see service.py's
+    # `_retry_delay`). Its tool results are still fresh; waiting the
+    # full blocked delay just made a long task slower.
+    continuation_delay_seconds: float = 10.0
     dedupe_similarity_threshold: float = 0.45
     project_step_count: int = 4
     # Path prefixes a decomposed patch step may target. `simorgh/` is

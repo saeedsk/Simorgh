@@ -23,6 +23,7 @@ TaskCreate = define(t.TASK_CREATE, [
     O("mode", TASK_MODE),
     O("risk", TASK_RISK),
     O("scope", SCOPE),
+    O("max_steps", Int),
 ], doc="Request form used by Interface commands and sub-agent delegation; Planning dedupes and emits task.created.")
 TaskCreateReply = define(t.TASK_CREATE_REPLY, [
     F("task_id", Str),
@@ -39,6 +40,7 @@ TaskCreated = define(t.TASK_CREATED, [
     O("subject", Str),
     O("parent_id", Str),
     O("scope", SCOPE),
+    O("max_steps", Int),
 ])
 TaskAvailable = define(t.TASK_AVAILABLE, [
     F("task_id", Str),
@@ -112,6 +114,11 @@ TaskBlocked = define(t.TASK_BLOCKED, [
     F("reason", Str),
     O("retry_after", Float),
 ])
+TaskEditsKept = define(t.TASK_EDITS_KEPT, [
+    F("task_id", Str),
+    F("paths", List(Str)),
+    O("created", List(Str)),
+], doc="Ledger-only: uncommitted edits an attempt that ran out of steps left for the next attempt.")
 TaskDependencySatisfied = define(t.TASK_DEPENDENCY_SATISFIED, [
     F("task_id", Str),
     F("satisfied_by", Str),

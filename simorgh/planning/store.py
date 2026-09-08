@@ -65,7 +65,7 @@ class TaskIndex:
                 parent_id=p.get("parent_id"), depends_on=tuple(p.get("depends_on") or ()),
                 status=p.get("status", PENDING), created_at=event.ts, updated_at=event.ts,
                 priority=p.get("priority", 0), scope=Scope.from_payload(p.get("scope")),
-                plan_id=p.get("plan_id"),
+                plan_id=p.get("plan_id"), max_steps=p.get("max_steps"),
             )
         elif event.type == "status_changed":
             current = self.tasks.get(task_id)
@@ -119,7 +119,7 @@ def _task_to_dict(t: Task) -> dict:
         "attempts": t.attempts, "note": t.note,
         "lease": {"worker_id": t.lease.worker_id, "until": t.lease.until} if t.lease else None,
         "created_at": t.created_at, "updated_at": t.updated_at, "priority": t.priority,
-        "scope": t.scope.to_payload() if t.scope else None, "plan_id": t.plan_id,
+        "scope": t.scope.to_payload() if t.scope else None, "plan_id": t.plan_id, "max_steps": t.max_steps,
     }
 
 
@@ -132,6 +132,7 @@ def _task_from_dict(task_id: str, d: dict) -> Task:
         attempts=d.get("attempts", 0), note=d.get("note", ""), lease=lease,
         created_at=d.get("created_at", 0.0), updated_at=d.get("updated_at", 0.0),
         priority=d.get("priority", 0), scope=Scope.from_payload(d.get("scope")), plan_id=d.get("plan_id"),
+        max_steps=d.get("max_steps"),
     )
 
 
@@ -170,6 +171,7 @@ class TaskStore:
         parent_id: str | None = None, depends_on: Iterable[str] = (), mode: str = "execute",
         risk: str = "low", scope: Scope | None = None, plan_id: str | None = None,
         priority: int = 0, initial_status: str = PENDING, task_id: str | None = None,
+        max_steps: int | None = None,
     ) -> Task:
         tid = task_id or uuid.uuid4().hex[:12]
         now = self._clock.now()
@@ -178,7 +180,7 @@ class TaskStore:
             "kind": kind, "description": description, "subject": subject, "mode": mode, "risk": risk,
             "origin": origin, "parent_id": parent_id, "depends_on": list(depends_on),
             "status": initial_status, "priority": priority,
-            "scope": scope.to_payload() if scope else None, "plan_id": plan_id,
+            "scope": scope.to_payload() if scope else None, "plan_id": plan_id, "max_steps": max_steps,
         }
         event = Event(stream=stream, type="created", ts=now, trace_id=tid, causation_id=None, payload=payload)
         seq = await self._ledger.append(stream, event)

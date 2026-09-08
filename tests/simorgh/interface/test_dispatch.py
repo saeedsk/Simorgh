@@ -172,3 +172,22 @@ class TestMcpReject(_McpDispatchTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StepsOptionTestCase(unittest.TestCase):
+    """`steps=N` anywhere in an improve/plan/research line becomes the
+    task's own step cap; the rest of the line is the description."""
+
+    def test_pops_the_option_wherever_it_is(self):
+        pop = dispatch_module._pop_steps  # noqa: SLF001
+        self.assertEqual(pop("simorgh/x.py add a constant steps=40"), ("simorgh/x.py add a constant", 40))
+        self.assertEqual(pop("steps=12 web access"), ("web access", 12))
+        self.assertEqual(pop("what does memory export"), ("what does memory export", None))
+
+    def test_a_lookalike_inside_a_word_is_left_alone(self):
+        pop = dispatch_module._pop_steps  # noqa: SLF001
+        self.assertEqual(pop("count footsteps=3 things"), ("count footsteps=3 things", None))
+
+    def test_it_lands_in_the_payload_only_when_given(self):
+        self.assertEqual(dispatch_module._with_steps({"kind": "patch"}, 40), {"kind": "patch", "max_steps": 40})  # noqa: SLF001
+        self.assertEqual(dispatch_module._with_steps({"kind": "patch"}, None), {"kind": "patch"})  # noqa: SLF001

@@ -72,6 +72,9 @@ class Task:
     priority: int = 0
     scope: Scope | None = None
     plan_id: str | None = None
+    # Steps one attempt may spend, when the task says; else the
+    # profile's default (orchestration decides).
+    max_steps: int | None = None
 
     def with_status(self, status: str, *, note: str = "", updated_at: float, attempt: bool = False) -> "Task":
         # A finished task keeps no lease. It used to: completion left the
