@@ -213,6 +213,7 @@ class Service:
         )
         if result.task is not None:
             await self._announce_created(result.task)
+            await self._preempt_for(result.task)
             payload = {"task_id": result.task.id}
         else:
             payload = {"task_id": result.duplicate_of, "deduplicated_against": result.duplicate_of}
@@ -317,6 +318,46 @@ class Service:
             return
         await self._retry_or_block(task, p.get("reason", ""))
 
+    async def _preempt_for(self, task: Task) -> None:
+        """Give a human's task the worker, if a lesser one is holding it.
+
+        `select_ready` ranks the QUEUE (`human: 3, reflection: 2,
+        curiosity: 1`), which decides nothing at all once the single
+        worker is already busy: there is no preemption, so a curiosity
+        task that claimed the worker keeps it to the end of its budget
+        and a human task created a second later simply waits.
+
+        Live-caught by an observer judging the CLI as a user
+        (2026-09-08), and it was the worst moment in their session:
+        they typed `improve <file> <description>`, got a task id, and
+        never saw that id again for three and a half minutes while the
+        screen filled with a curiosity task editing a different file
+        that they had not asked for.
+
+        The autonomous task is REQUEUED, not failed. It was real work,
+        nobody rejected it, and it goes back to the queue to be picked
+        up when the human's task is done. Only one is displaced per
+        arrival, and only ever by a human.
+        """
+        if task.origin != "human":
+            return
+        weight = self._scheduler._priority_weights  # noqa: SLF001
+        mine = weight.get("human", 3)
+        running = [
+            t for t in self._store.index.tasks.values()
+            if t.status == IN_PROGRESS and weight.get(t.origin, 0) < mine
+        ]
+        if not running:
+            return
+        # The least important, and among equals the one that has been
+        # running longest -- it has had the most of the worker already.
+        victim = min(running, key=lambda t: (weight.get(t.origin, 0), t.updated_at))
+        reason = f"preempted by a human task ({task.id[:8]})"
+        await self._ctx.bus.publish(Message.new(
+            topics.TASK_CANCEL, source=self._ctx.source, partition_key=f"task:{victim.id}",
+            payload={"task_id": victim.id, "reason": reason, "requeue": True},
+        ))
+
     async def _on_task_cancel(self, message: Message) -> None:
         """Stop a task nobody is waiting for any more.
 
@@ -334,6 +375,13 @@ class Service:
         reason = message.payload.get("reason") or "cancelled"
         task = await self._store.get(task_id) if task_id else None
         if task is None or task.status in TERMINAL_STATUSES:
+            return
+        if message.payload.get("requeue"):
+            # Preemption, not rejection: the work was real and nobody
+            # judged it, so it goes back to the queue rather than into a
+            # terminal state. `expire_lease` is what frees the worker's
+            # hold and returns it to AVAILABLE.
+            await self._store.expire_lease(task_id)
             return
         await self._store.transition(task_id, FAILED, note=reason)
         await self._ctx.bus.publish(Message.new(

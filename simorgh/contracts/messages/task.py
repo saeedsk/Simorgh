@@ -123,6 +123,9 @@ TaskBlocked = define(t.TASK_BLOCKED, [
 TaskCancel = define(t.TASK_CANCEL, [
     F("task_id", Str),
     O("reason", Str),
+    # Preemption rather than rejection: put the task back on the queue
+    # instead of failing it. The work was real and nobody judged it.
+    O("requeue", Bool),
 ], doc="Ask a running task to stop. The Worker stops at the next step boundary (never mid-step, "
        "which would abandon an uncommitted edit) and Planning fails the record so its lease "
        "cannot expire it back onto the queue.")
