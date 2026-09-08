@@ -229,20 +229,68 @@ class RunRecord:
                 blocked_by=case.get("blocked_by", ""),
             ))
         if not record.results:
-            record.totals = {
-                "seconds": float(payload.get("seconds") or 0.0),
-                "cost_usd": float(payload.get("cost_usd") or 0.0),
-            }
-            # A record stored without its cases (the history endpoint's
-            # compact form) still has to report its own numbers, so
-            # rebuild enough synthetic results to keep the properties
-            # honest rather than silently reporting zero.
-            for level, pair in (payload.get("by_level") or {}).items():
-                correct, attempted = int(pair[0]), int(pair[1])
-                record.results.extend(
-                    CaseResult(case_id="", level=level, correct=i < correct) for i in range(attempted)
-                )
+            record._rebuild_from_summary(payload)
         return record
+
+    def _rebuild_from_summary(self, payload: dict) -> None:
+        """Rebuild synthetic results from a summary that kept no cases.
+
+        The compact form (the history endpoint's) carries totals only, so
+        every property here has to be recomputed from them. Two of them
+        used to come back wrong, and both understated a problem rather
+        than overstating it -- the direction that lets a benchmark
+        flatter itself (2026-09-08):
+
+        - `skipped` and `blocked` returned 0 for every stored run,
+          because a synthetic case defaulted to `skipped=False` and an
+          empty `blocked_by`. A run that skipped 8 of 20 cases displayed
+          as a clean 12-case run, and the count that says "our own
+          verifier threw away a right answer" read zero forever.
+        - a payload with no `by_level` produced no results at all, so
+          `accuracy` was 0.0 no matter what `correct`/`attempted` said.
+          Only GAIA writes per-level data; BFCL runs read as total
+          failures.
+        """
+        self.totals = {
+            "seconds": float(payload.get("seconds") or 0.0),
+            "cost_usd": float(payload.get("cost_usd") or 0.0),
+        }
+        by_level = payload.get("by_level") or {}
+        if by_level:
+            pairs = [(level, int(p[0]), int(p[1])) for level, p in by_level.items()]
+        else:
+            # No per-level detail: one unnamed bucket carrying the totals,
+            # which is still the truth, just less of it.
+            pairs = [("", int(payload.get("correct") or 0), int(payload.get("attempted") or 0))]
+
+        scored: list[CaseResult] = []
+        for level, correct, attempted in pairs:
+            scored.extend(
+                CaseResult(case_id="", level=level, correct=i < correct) for i in range(attempted)
+            )
+
+        # Spread the blocked cases over the scored ones, correct-first, so
+        # both `blocked` and `blocked_but_correct` come back as recorded.
+        note = "(recorded in summary; per-case detail not stored)"
+        blocked = int(payload.get("blocked") or 0)
+        blocked_correct = min(int(payload.get("blocked_but_correct") or 0), blocked)
+        blocked_wrong = blocked - blocked_correct
+        marked: list[CaseResult] = []
+        for result in scored:
+            if result.correct and blocked_correct:
+                blocked_correct -= 1
+                marked.append(replace(result, blocked_by=note))
+            elif not result.correct and blocked_wrong:
+                blocked_wrong -= 1
+                marked.append(replace(result, blocked_by=note))
+            else:
+                marked.append(result)
+        scored = marked
+
+        self.results = scored + [
+            CaseResult(case_id="", level="", correct=False, skipped=True, error=note)
+            for _ in range(int(payload.get("skipped") or 0))
+        ]
 
 
 __all__ = ["Case", "CaseResult", "RunRecord", "Suite"]

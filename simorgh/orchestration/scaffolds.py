@@ -25,11 +25,11 @@ from .api import Profile
 from .tools import offered_tools
 
 _TOOL_NOTES: dict[str, str] = {
-    "read_file": "read a file from the repo",
+    "read_file": "read a file from the repo, including a PDF (papers/ holds papers)",
     "list_dir": "list a directory",
     "search_code": "grep the repo; cheaper than reading whole files to find something",
     "run_tests": "run the test suite (or a subset) and get the result back",
-    "web_fetch": "fetch a URL",
+    "web_fetch": "fetch a URL; HTML comes back as text and a PDF as its text",
     "run_python_sandboxed": "run a short Python snippet in a sandbox; no repo access",
     "apply_source_patch": "write a change to a source file",
     "apply_skill": "install or update a skill",

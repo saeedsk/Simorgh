@@ -18,3 +18,9 @@ google-genai
 # falls back to its readline REPL, which is still the path used whenever
 # stdout is not a terminal.
 prompt-toolkit>=3.0
+
+# PDF text extraction for `read_file` and `web_fetch`. Optional: both
+# tools fall back to pdfminer.six and then to an explicit refusal, so
+# nothing here is required to boot -- but GAIA attaches documents, and
+# the creator's papers/ directory is PDFs.
+pypdf>=6.0
