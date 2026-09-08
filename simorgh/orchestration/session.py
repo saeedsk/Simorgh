@@ -117,7 +117,33 @@ class SessionRunner:
                 step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok)
                 session.record(step)
                 await self._record_step(session, step)
-                session.messages.append({"role": "assistant", "content": f"[tool_call {call.get('tool')}] -> {summary}"})
+                # Two turns, not one. This used to append a single
+                # *assistant* message reading "[tool_call read_file] ->
+                # <the file>", so the model was asked to continue a
+                # conversation whose last turn was its own, with the tool
+                # output attributed to itself rather than returned to it.
+                #
+                # Live-caught 2026-09-07, monitoring whether Sim ever
+                # edits its own source: it never has -- 246 tool runs,
+                # every one read-only, zero `apply_source_patch`. Asked to
+                # add a docstring, it searched, read the exact file, and
+                # then answered "It looks like your message came through
+                # as just a step marker with no actual content." It was
+                # looking for a turn addressed to it and finding a
+                # fragment it thought it had written, so it lost the
+                # thread and wrote prose instead of applying anything.
+                #
+                # The request stays the assistant's; the result comes back
+                # as a turn addressed to it, which is the shape every
+                # tool-using model is trained on.
+                tool_name = call.get("tool")
+                session.messages.append({
+                    "role": "assistant", "content": f"[tool_call {tool_name}]",
+                })
+                session.messages.append({
+                    "role": "user",
+                    "content": f"Result of {tool_name}:\n{summary}\n\nContinue the task.",
+                })
                 if self._paused():
                     return await self._pause(session)
                 continue
@@ -149,7 +175,9 @@ class SessionRunner:
                 # session was told what it *could* call and never what
                 # finishing means -- live 2026-09-07, a run applied its
                 # edit and stopped without committing it. See scaffolds.py.
-                "task_rules": scaffolds.render(session.profile),
+                "task_rules": scaffolds.render(
+                    session.profile, subject=session.subject, task=session.user_text,
+                ),
                 # Live-caught: this request never actually asked Cognition
                 # to parse tool calls -- `expected` was never set, so
                 # `cognition/service.py::_expected_spec` always fell
@@ -172,7 +200,7 @@ class SessionRunner:
                 # real internal structure need an entry (orchestration/
                 # tools.py::_MARKER_ARG_HINT); most don't.
                 "tool_hints": {t: h for t in session.profile.tools if (h := marker_hint(t))},
-                "budget": {"max_tokens": 2000, "max_cost_usd": 0.5},
+                "budget": {"max_tokens": session.profile.max_output_tokens, "max_cost_usd": 0.5},
                 "require_real_provider": False, "last_step": last_step,
                 # Live-caught (v2 live trial, 2026-09-06): a chat turn
                 # whose assembled memory-retrieval block happens to be
@@ -230,6 +258,25 @@ class SessionRunner:
     # `task.step` -- the Ledger, the CLI narration, the dashboard feed --
     # never back into the model's own context).
     _DETAIL_CHARS = 2000
+    # What the *model* is shown of a tool result.
+    #
+    # This was 200 characters. Live-caught 2026-09-07, tracing why
+    # Sim had never once edited its own source across 246 tool runs:
+    # asked to add a docstring to a 5,457-character file, it read the
+    # file, was handed the first 200 characters of it, and read it
+    # again -- eight times in a row, replying with nothing but
+    # "READ_FILE: simorgh/interface/vitals.py" each time. It could not
+    # patch a file it had never been allowed to see, and `list_dir` of
+    # the repo root came back so clipped that it concluded it was
+    # working in "an empty temp directory".
+    #
+    # 8000 characters is about 2000 tokens, which is exactly the size
+    # Cognition already budgets per tool result
+    # (`cognition/config.py::tool_result_max_tokens`) and compacts
+    # from layer 1 onward. Bounding it to a fiftieth of that here,
+    # before compaction ever saw it, was not caution -- it removed
+    # the only channel the model had for looking at anything.
+    _MODEL_RESULT_CHARS = 8000
 
     async def _propose_and_await(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
         action_id = uuid.uuid4().hex[:12]
@@ -252,7 +299,7 @@ class SessionRunner:
             return False, text, text
         if result.type == topics.ACTION_RESULT:
             full = result.payload.get("stdout_preview", "")
-            return result.payload.get("ok", False), full[:200], full[: self._DETAIL_CHARS]
+            return result.payload.get("ok", False), full[: self._MODEL_RESULT_CHARS], full[: self._DETAIL_CHARS]
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
             text = f"denied: {reasons}"
