@@ -53,6 +53,7 @@ from simorgh.contracts.protocols import ToolContext, ToolResult
 from . import pathsafety
 from .config import Config
 from .shell import RunShellTool
+from .websearch import WebSearchTool
 
 
 class ReadFileTool:
@@ -1093,7 +1094,7 @@ def builtin_tools(config: Config) -> list:
         ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), RunPythonSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
-        ApplySkillTool(config), WebFetchTool(config), ProposeMcpServerTool(),
+        ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), ProposeMcpServerTool(),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

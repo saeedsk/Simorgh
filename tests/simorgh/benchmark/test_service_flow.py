@@ -261,3 +261,75 @@ class SubsystemWiringTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StopAndBusyTestCase(unittest.IsolatedAsyncioTestCase):
+    """One run at a time, and a way out of it."""
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.kernel = Kernel(
+            LoadedConfig({
+                "runtime": {"data_dir": str(Path(self._tmp.name) / "data")},
+                "curiosity": {"autonomy_on_boot": False},
+                "benchmark": {"cache_dir": str(Path(self._tmp.name) / "cache"), "case_timeout_s": 30.0},
+            }, None),
+            secrets=EnvSecretStore({}),
+        )
+        await self.kernel.boot()
+        self.addAsyncCleanup(self.kernel.shutdown)
+        self._service = self.kernel._supervisor.services["benchmark"].service  # noqa: SLF001
+
+    async def _start_a_run(self) -> dict:
+        """A suite whose cases never get answered, so the run stays in
+        flight for the test to act on."""
+        slow = Suite(name="toy", version="v1", cases=tuple(
+            Case(id=f"c{i}", question=f"question {i}", answer="x", level="1", suite="toy") for i in range(5)
+        ))
+        self._patch = mock.patch.object(datasets_mod, "load", return_value=slow)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+        mock.patch.dict(datasets_mod.SOURCES, {"toy": datasets_mod.Source(
+            name="toy", dataset="local/toy", config="default", split="test")}).start()
+        reply = await self.kernel.bus.request(self.kernel.bus.new(
+            topics.BENCHMARK_RUN_REQUEST, {"suite": "toy", "limit": 5}), timeout=15)
+        for _ in range(200):
+            if self._service._running.get("index"):  # noqa: SLF001
+                break
+            await asyncio.sleep(0.01)
+        return reply.payload
+
+    async def test_a_second_run_is_refused_with_progress_and_a_way_out(self) -> None:
+        await self._start_a_run()
+        reply = await self.kernel.bus.request(self.kernel.bus.new(
+            topics.BENCHMARK_RUN_REQUEST, {"suite": "toy", "limit": 5}), timeout=15)
+        self.assertFalse(reply.payload["ok"])
+        detail = reply.payload["error"]["detail"]
+        self.assertEqual(reply.payload["error"]["code"], "already_running")
+        self.assertIn("of 5", detail)
+        self.assertIn("benchmark stop", detail)
+
+    async def test_stop_ends_it_and_keeps_the_partial_result(self) -> None:
+        await self._start_a_run()
+        reply = await self.kernel.bus.request(self.kernel.bus.new(
+            topics.BENCHMARK_STOP_REQUEST, {}), timeout=30)
+        self.assertTrue(reply.payload["stopped"])
+        self.assertIn("partial result is recorded", reply.payload["detail"])
+        store = RunStore(self.kernel.ledger, clock=self.kernel._clock.now)  # noqa: SLF001
+        record = await store.latest(suite="toy")
+        self.assertIsNotNone(record, "a stopped run must still be recorded")
+        self.assertTrue(record.partial)
+
+    async def test_stopping_nothing_says_so(self) -> None:
+        reply = await self.kernel.bus.request(self.kernel.bus.new(
+            topics.BENCHMARK_STOP_REQUEST, {}), timeout=15)
+        self.assertFalse(reply.payload["stopped"])
+        self.assertIn("no benchmark run", reply.payload["detail"])
+
+    async def test_a_run_may_start_again_after_a_stop(self) -> None:
+        await self._start_a_run()
+        await self.kernel.bus.request(self.kernel.bus.new(topics.BENCHMARK_STOP_REQUEST, {}), timeout=30)
+        reply = await self.kernel.bus.request(self.kernel.bus.new(
+            topics.BENCHMARK_RUN_REQUEST, {"suite": "toy", "limit": 2}), timeout=15)
+        self.assertTrue(reply.payload["ok"], reply.payload)
