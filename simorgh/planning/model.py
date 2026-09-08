@@ -28,7 +28,7 @@ TERMINAL_STATUSES = frozenset({COMPLETED, FAILED})
 KINDS = ("chat", "patch", "skill", "research", "project")
 MODES = ("plan", "execute")
 RISKS = ("low", "medium", "high")
-ORIGINS = ("human", "curiosity", "reflection", "research", "project", "planner")
+ORIGINS = ("human", "curiosity", "reflection", "research", "project", "planner", "benchmark")
 
 
 @dataclass(frozen=True)

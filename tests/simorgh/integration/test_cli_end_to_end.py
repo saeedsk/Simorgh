@@ -174,3 +174,71 @@ class TestTheCancelCommand(CliEndToEndTestCase):
 
 async def _aiodone() -> None:
     return None
+
+
+class TestABlockedTaskIsNotAnnouncedAsFinished(CliEndToEndTestCase):
+    """The worst moment an observer has recorded, and they called it a
+    trust event rather than a bug (2026-09-08).
+
+    The claims guard caught the model claiming a commit it never made,
+    the edit was discarded, the task was marked blocked -- and the CLI
+    then printed "task <id> finished" followed by the fabrication itself,
+    rendered as the answer. The human only learned the truth by running
+    `git log`. `record.status` was on the line above, used to pick a
+    colour.
+    """
+
+    async def _finish(self, task_id: str, topic: str, payload: dict) -> str:
+        self.interface._watched_tasks.add(task_id)  # noqa: SLF001
+        before = len(self.printed)
+        await self.kernel.bus.publish(self.kernel.bus.new(topic, payload))
+        await self._wait_for(lambda: len(self.printed) > before, what="the outcome line")
+        return "\n".join(self.printed[before:])
+
+    async def test_a_rejected_answer_is_never_printed_as_the_reply(self) -> None:
+        out = await self._finish("b88dc4d73e08", topics.TASK_BLOCKED, {
+            "task_id": "b88dc4d73e08",
+            "reason": "the answer claims work the step log does not show: says it committed",
+            "result_summary": "The docstring now explains the leading slash, and the change was "
+                              "committed with the message 'docs(parser): note the leading slash'.",
+        })
+        self.assertNotIn("finished", out)
+        self.assertNotIn("committed with the message", out,
+                         "the fabrication must never be rendered as the answer")
+
+    async def test_it_says_how_the_task_really_ended_and_why(self) -> None:
+        out = await self._finish("b88dc4d73e08", topics.TASK_BLOCKED, {
+            "task_id": "b88dc4d73e08", "reason": "the answer claims work the step log does not show",
+            "result_summary": "all done!",
+        })
+        self.assertIn("blocked", out)
+        self.assertIn("claims work the step log does not show", out)
+
+    async def test_a_real_completion_still_prints_its_answer(self) -> None:
+        out = await self._finish("aaaa11112222", topics.TASK_COMPLETED, {
+            "task_id": "aaaa11112222", "result_summary": "The answer is 42.",
+            "artifacts": [], "verification_ref": "",
+        })
+        self.assertIn("finished", out)
+        self.assertIn("42", out)
+
+
+class TestChatWhileTheSystemIsPaused(CliEndToEndTestCase):
+    """A paused system runs no sessions, so no answer is coming. This
+    used to publish the percept and wait 420 seconds for a reply that
+    could not arrive -- and the REPL thread blocks on the turn, so the
+    prompt froze for seven minutes with `resume`, the one command that
+    would fix it, queued behind the block. Only Ctrl-C escaped, and that
+    stops the system."""
+
+    async def test_it_says_so_at_once_instead_of_waiting(self) -> None:
+        await self.kernel.bus.publish(self.kernel.bus.new(
+            topics.SYSTEM_STATE_CHANGED, {"state": "paused", "autonomous_paused": True}))
+        await self._wait_for(lambda: self.interface._system_state == "paused",  # noqa: SLF001
+                             what="the interface to see the pause")
+        out = await self._type("are you paused right now?")
+        self.assertIn("paused", out)
+        self.assertIn("resume", out)
+
+    async def test_a_running_system_still_takes_chat(self) -> None:
+        self.assertEqual(self.interface._system_state, "running")  # noqa: SLF001

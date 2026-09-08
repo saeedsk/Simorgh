@@ -17,7 +17,10 @@ from simorgh.contracts.protocols import Bus, Clock
 from .model import TERMINAL_STATUSES, Task
 from .store import TaskStore
 
-DEFAULT_PRIORITY_WEIGHTS = {"human": 3, "reflection": 2, "curiosity": 1}
+# A benchmark case sits below a human's own request and above the
+# system's self-directed work: it was asked for, but the human is not
+# waiting on this particular case.
+DEFAULT_PRIORITY_WEIGHTS = {"human": 3, "benchmark": 2, "reflection": 2, "curiosity": 1}
 
 
 def select_ready(store: TaskStore, *, priority_weights: dict[str, int], limit: int = 1) -> list[Task]:

@@ -350,9 +350,19 @@ class Service:
         ]
         if not running:
             return
-        # The least important, and among equals the one that has been
-        # running longest -- it has had the most of the worker already.
-        victim = min(running, key=lambda t: (weight.get(t.origin, 0), t.updated_at))
+        # The least important, and among equals the one that is ACTUALLY
+        # RUNNING -- the most recently active, since a session writes a
+        # `task.step` per step and that moves `updated_at`.
+        #
+        # This used to take the oldest instead, reasoning that it had
+        # had the most of the worker already. That is exactly backwards:
+        # the oldest `in_progress` record is the one that STOPPED being
+        # worked, a stale row left by a crash or an expiry. An observer
+        # watched it free such a record while the task genuinely holding
+        # the worker ran on for another 92 seconds, with the human's own
+        # task sitting `available` the whole time (2026-09-08). It
+        # preempted a record, not a worker.
+        victim = max(running, key=lambda t: (-weight.get(t.origin, 0), t.updated_at))
         reason = f"preempted by a human task ({task.id[:8]})"
         await self._ctx.bus.publish(Message.new(
             topics.TASK_CANCEL, source=self._ctx.source, partition_key=f"task:{victim.id}",

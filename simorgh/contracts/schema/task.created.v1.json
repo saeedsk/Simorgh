@@ -42,7 +42,8 @@
         "curiosity",
         "reflection",
         "research",
-        "project"
+        "project",
+        "benchmark"
       ],
       "type": "string"
     },
