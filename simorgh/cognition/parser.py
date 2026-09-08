@@ -53,6 +53,19 @@ _CODE_BEARING_MARKERS = {
     # its first real file and then fail to commit it three times running,
     # each with `args={'message': '', 'path': 'simorgh/greeting.py'}`.
     "GIT_COMMIT",
+    # `propose_mcp_server` is told, in its own marker hint, to write
+    # `key: value` lines one per line -- and then had everything but the
+    # first line thrown away, so `command` was always empty and every
+    # call answered "'command' must be one of [...], got ''". The model
+    # wrote the documented form six times in a row and burned a whole
+    # chat budget on it.
+    "PROPOSE_MCP_SERVER",
+    # A shell command is routinely multi-line: a heredoc, or two
+    # commands joined by a newline. Truncating to the first line turned
+    # `python3 - <<'EOF' ...` into a program with empty stdin, which
+    # exits 0 with no output -- so the model was told its edit had been
+    # applied when nothing had run at all.
+    "RUN_SHELL",
 }
 
 

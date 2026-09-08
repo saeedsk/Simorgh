@@ -29,6 +29,15 @@ DEFAULT_PROTECTED_SUBJECTS: tuple[str, ...] = (
     "simorgh/contracts/",
     "simorgh/kernel/",
     "simorgh.toml",
+    # The bootloader and its launcher. They are the mechanism that gates
+    # a change and undoes a bad one, and an observer showed on
+    # 2026-09-08 that one auto-approved commit could remove it:
+    # `run_python_sandboxed` rewrote simloader.py, `git_commit` (which
+    # has no write-scope check) committed it, and the neutered loader
+    # then printed "gate passed (totally)" and booted. Corrigibility
+    # means the undo mechanism is not the system's to edit.
+    "simloader.py",
+    "sim.sh",
 )
 
 # Ported verbatim from src/orchestrator/audit.py's _DENYLIST_PATTERNS --

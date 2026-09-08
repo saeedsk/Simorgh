@@ -147,7 +147,24 @@ class TestOfferedToolsFollowRealRegistrations(unittest.TestCase):
         register_tool_policy("made_up", reversibility="read_only", provider="external")
         self.assertEqual(offered_tools(("read_file", "run_shell")), ("read_file", "run_shell"))
 
-    def test_an_announced_set_filters_the_profile(self):
+    def test_a_registration_never_takes_a_tool_away_from_a_profile(self):
+        """This used to intersect the profile with what had registered,
+        which was a trap primed to spring. The registered set is empty at
+        boot -- Execution announces on layer 3, Orchestration subscribes
+        on layer 6 -- and an `if not known` guard hid that by offering
+        the whole profile anyway. The moment ANY single tool registered,
+        one skill or one slow MCP server, the intersection would drop
+        every builtin from every later session, leaving a patch session
+        with no read_file (observer, 2026-09-08).
+
+        A profile names the tools that session should have. Registration
+        adds skills to it, and must never subtract."""
+        from simorgh.orchestration.tools import note_registered, offered_tools
+        note_registered("skill:word_count")
+        self.assertEqual(
+            offered_tools(("read_file", "run_shell")), ("read_file", "run_shell", "skill:word_count"))
+
+    def test_one_registration_does_not_strip_the_builtins(self):
         from simorgh.orchestration.tools import note_registered, offered_tools
         note_registered("read_file")
-        self.assertEqual(offered_tools(("read_file", "run_shell")), ("read_file",))
+        self.assertEqual(offered_tools(("read_file", "run_shell")), ("read_file", "run_shell"))

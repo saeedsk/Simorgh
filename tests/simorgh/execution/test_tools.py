@@ -647,12 +647,25 @@ class TestBuiltinTools(unittest.TestCase):
 
 
 class _FakeFetchResponse:
+    """A stand-in for an HTTP response, and it CONSUMES what it hands
+    out.
+
+    It used to return the same bytes from the start on every `read(n)`,
+    which no real stream does. The moment `web_fetch` read a header and
+    then the body -- which it must, to tell a PDF from a web page before
+    choosing how much to read -- the fake handed back the body twice and
+    the test failed on code that was correct (2026-09-08). A double that
+    is more forgiving than the real thing tests nothing."""
+
     def __init__(self, data: bytes, status: int = 200) -> None:
         self._data = data
+        self._pos = 0
         self.status = status
 
     def read(self, n: int = -1) -> bytes:
-        return self._data if n is None or n < 0 else self._data[:n]
+        chunk = self._data[self._pos:] if n is None or n < 0 else self._data[self._pos:self._pos + n]
+        self._pos += len(chunk)
+        return chunk
 
     def __enter__(self) -> "_FakeFetchResponse":
         return self

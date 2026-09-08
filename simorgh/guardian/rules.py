@@ -19,12 +19,45 @@ from .api import Decision, DecisionContext, Proposal
 _SUBJECT_ARG_KEYS = ("subject", "path")
 
 
+# Arguments that are a program rather than a path: whatever they name,
+# they name it INSIDE their text. A rule that only reads `path`/`subject`
+# abstains on these and every other rule then waves them through.
+_CODE_ARG_KEYS = ("code", "command")
+# A protected subject mentioned anywhere in such a program. Deliberately
+# crude -- it looks for the literal name, so it over-matches a mention in
+# a comment and under-matches a path assembled from pieces. Over-matching
+# costs a denial the model can explain around; under-matching costs the
+# whole protection model, which is the trade this makes.
+_PATHISH = re.compile(r"[\w./-]+")
+
+
+def _mentioned_paths(text: str) -> list[str]:
+    # `tests/simorgh/execution/test_tools.py` contains the protected
+    # string `simorgh/execution/` and is not a protected file: the test
+    # tree is a write scope. Without this, `run_shell: pytest
+    # tests/simorgh/execution/...` -- an ordinary, encouraged command --
+    # would be denied as an attempt on Execution's source.
+    return [t for t in _PATHISH.findall(text or "") if not t.startswith("tests/")]
+
+
 def _subject_paths(proposal: Proposal) -> list[str]:
     paths = list(proposal.scope.get("paths") or [])
     for key in _SUBJECT_ARG_KEYS:
         value = proposal.args.get(key)
         if isinstance(value, str) and value not in paths:
             paths.append(value)
+    # `run_python_sandboxed` and `run_shell` carry no path argument at
+    # all, so `ProtectedRule` abstained on them, `reversibility` said
+    # "reversible", and the guarded posture auto-allowed it. An observer
+    # proved the consequence on 2026-09-08: a single approved
+    # `run_python_sandboxed` call rewrote docs/SOUL.md, simorgh/guardian/
+    # rules.py and simloader.py. The sandbox has rlimits and a temp cwd
+    # and NO filesystem confinement, so "deliberately no repo access"
+    # was never true. Until it is, Guardian has to read the program.
+    for key in _CODE_ARG_KEYS:
+        value = proposal.args.get(key)
+        if isinstance(value, str) and value:
+            paths.extend(t for t in _mentioned_paths(value) if t not in paths)
     return paths
 
 

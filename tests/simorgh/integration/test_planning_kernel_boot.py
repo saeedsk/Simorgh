@@ -585,13 +585,32 @@ class TestCancellingFreesTheRecord(unittest.IsolatedAsyncioTestCase):
             topics.TASK_CANCEL, {"task_id": task_id, "reason": reason}))
         await _pump(40)
 
-    async def test_a_cancelled_task_ends_and_gives_up_its_lease(self) -> None:
+    async def test_a_running_task_is_left_for_its_worker_to_end(self) -> None:
+        """The worker stops at its next step boundary and reports the
+        outcome itself, which is also the moment the tree is clean
+        again. Ending the record here announced "failed" a step BEFORE
+        the work stopped and the edit was discarded, and the human then
+        saw two different failure lines for one task (observer,
+        2026-09-08). A worker that never reports is covered by lease
+        expiry, as it always was."""
         task = await self._running_task()
-        self.assertIsNotNone(task.lease)
         await self._cancel(task.id)
         after = await self.planning._store.get(task.id)  # noqa: SLF001
+        self.assertEqual(after.status, "in_progress")
+        self.assertIsNotNone(after.lease)
+
+    async def test_a_queued_task_is_ended_here_because_no_worker_will(self) -> None:
+        """`available -> failed` is not a legal transition, so this used
+        to raise, be swallowed by the bus, and leave the task on the
+        queue -- where a worker then claimed it and killed it at step
+        zero."""
+        store = self.planning._store  # noqa: SLF001
+        task = await store.create(kind="research", description="not started yet", origin="human",
+                                  mode="execute", initial_status="available")
+        await self._cancel(task.id)
+        after = await store.get(task.id)
         self.assertEqual(after.status, "failed")
-        self.assertIsNone(after.lease, "a leased task comes back through lease expiry")
+        self.assertIsNone(after.lease)
 
     async def test_the_cancel_is_announced_as_a_terminal_failure(self) -> None:
         """Anything waiting on the task -- the benchmark runner, an
@@ -600,7 +619,9 @@ class TestCancellingFreesTheRecord(unittest.IsolatedAsyncioTestCase):
         was trying to avoid."""
         failed = _Collector()
         sub = await self.kernel.bus.subscribe(topics.TASK_FAILED, failed)
-        task = await self._running_task()
+        store = self.planning._store  # noqa: SLF001
+        task = await store.create(kind="research", description="queued", origin="human",
+                                  mode="execute", initial_status="available")
         await self._cancel(task.id, "benchmark case gaia-3 gave up")
         await sub.unsubscribe()
         self.assertTrue(failed.messages)

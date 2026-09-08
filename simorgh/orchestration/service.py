@@ -13,6 +13,12 @@ from simorgh.contracts.protocols import Context, Health
 
 from .config import Config
 from .tools import forget_registered, note_registered, register_tool_policy
+
+# Execution's own stream name, duplicated rather than imported: a
+# subsystem may not import another subsystem
+# (tests/simorgh/test_module_boundaries.py).
+_TOOLS_STREAM = "execution:tools"
+
 from .worker import Worker
 
 NAME = "orchestration"
@@ -59,9 +65,41 @@ class Service:
         # learns them here, so a newly wired open-source tool is callable
         # without anyone editing orchestration.
         self._tool_sub = await ctx.bus.subscribe(topics.TOOL_REGISTERED, self._on_tool_registered)
+        await self._replay_registrations(ctx)
         if self.config.metrics_interval_s > 0:
             self._metrics_task = asyncio.create_task(self._metrics_loop(), name="orchestration-metrics")
         ctx.logger.info("orchestration.started", workers=len(self._workers))
+
+    async def _replay_registrations(self, ctx) -> None:
+        """Catch up on the announcements made before we were listening.
+
+        Execution registers its tools on boot layer 3 and this subsystem
+        subscribes on layer 6, the last one. The bus does not replay, so
+        every `tool.registered` from boot landed on nobody and
+        `known_tools()` stayed empty for the life of the process.
+
+        For builtins that was invisible, because a profile names them
+        anyway. Skills are the one tool class that can ONLY arrive
+        through this set, so a skill announced at boot was never offered
+        to any session -- most of why a skill Sim wrote was unreachable
+        by Sim afterwards (observer, 2026-09-08).
+
+        Execution records each registration in its own ledger stream, so
+        the durable record already existed and nothing read it. A
+        failure here is not fatal: the subscription above still carries
+        everything registered from now on.
+        """
+        try:
+            events = await ctx.ledger.read(_TOOLS_STREAM)
+        except Exception as exc:  # noqa: BLE001 -- no such stream on a fresh install is normal
+            ctx.logger.info("orchestration.tool_replay_skipped", error=repr(exc))
+            return
+        names = [str((e.payload or {}).get("name") or "") for e in events]
+        for name in names:
+            if name:
+                note_registered(name)
+        if names:
+            ctx.logger.info("orchestration.tools_replayed", count=len(names))
 
     async def _on_tool_registered(self, message) -> None:
         p = message.payload

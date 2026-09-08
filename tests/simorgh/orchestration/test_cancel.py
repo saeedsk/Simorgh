@@ -110,3 +110,49 @@ async def _noop() -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAPreemptedTaskSurvives(unittest.IsolatedAsyncioTestCase):
+    """Preemption must postpone work, not destroy it.
+
+    Observed 2026-09-08, hours after preemption shipped: a curiosity
+    task ran 14 real steps, was preempted, was correctly requeued, was
+    claimed again 7 seconds later -- and died at step zero in 0.01s,
+    terminally failed. `Worker._on_cancel` remembered the id and nothing
+    ever removed it, so with a single worker the requeued task always
+    came back to the same worker and its own stale cancel killed it.
+    Preemption destroyed exactly the work it was meant to postpone.
+    """
+
+    async def _worker(self, h: Harness) -> Worker:
+        return Worker(h.client("orchestration"), h.ledger, clock=h.clock.now, worker_id="w1")
+
+    async def _cancel(self, h: Harness, worker: Worker, task_id: str, *, requeue: bool) -> None:
+        await worker._on_cancel(Message.new(  # noqa: SLF001
+            topics.TASK_CANCEL, source="planning",
+            payload={"task_id": task_id, "reason": "preempted", "requeue": requeue},
+            clock=h.clock.now))
+
+    async def test_a_spent_cancel_is_forgotten_so_the_task_can_run_again(self) -> None:
+        async with Harness() as h:
+            worker = await self._worker(h)
+            await self._cancel(h, worker, "t1", requeue=True)
+            self.assertTrue(worker._is_cancelled("t1"))  # noqa: SLF001
+
+            worker._forget_cancel("t1")  # noqa: SLF001 -- what `_on_available` does when the session ends
+            self.assertFalse(worker._is_cancelled("t1"),
+                             "a requeued task comes back to this same worker and must be allowed to run")
+
+    async def test_a_preemption_is_distinguished_from_a_rejection(self) -> None:
+        """Planning has already moved a preempted task back to
+        `available`. Reporting an outcome for it would transition it to
+        a terminal status instead -- and `available -> failed` is not
+        even legal, so it raised, was swallowed, and the record survived
+        by accident."""
+        async with Harness() as h:
+            worker = await self._worker(h)
+            await self._cancel(h, worker, "preempted", requeue=True)
+            await self._cancel(h, worker, "rejected", requeue=False)
+            self.assertTrue(worker._requeued("preempted"))  # noqa: SLF001
+            self.assertFalse(worker._requeued("rejected"))  # noqa: SLF001
+            self.assertFalse(worker._requeued("never-cancelled"))  # noqa: SLF001
