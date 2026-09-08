@@ -10,6 +10,12 @@
         "null"
       ]
     },
+    "requeue": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "task_id": {
       "type": "string"
     }

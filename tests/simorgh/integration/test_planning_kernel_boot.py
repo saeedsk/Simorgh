@@ -618,3 +618,83 @@ class TestCancellingFreesTheRecord(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancelling_a_task_that_does_not_exist_is_harmless(self) -> None:
         await self._cancel("no-such-task")  # must not raise
+
+
+class TestAHumanTaskTakesTheWorker(unittest.IsolatedAsyncioTestCase):
+    """The worst moment in an observer's CLI session, 2026-09-08: they
+    typed `improve <file> <description>`, got a task id, and never saw
+    that id again for three and a half minutes while the screen filled
+    with a curiosity task editing a different file they had not asked
+    for.
+
+    `select_ready` ranks the QUEUE (`human: 3, reflection: 2,
+    curiosity: 1`), which decides nothing once the single worker is
+    already busy. There was no preemption, so whatever claimed the
+    worker first kept it to the end of its budget.
+    """
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        config = LoadedConfig({"runtime": {"data_dir": self._tmp.name}}, None)
+        self.kernel = Kernel(config, secrets=EnvSecretStore({}))
+        self._patch = mock.patch("simorgh.kernel.service.build_factories", new=_patched_build_factories())
+        self._patch.start()
+        await self.kernel.boot()
+        self.planning = self.kernel._supervisor.services["planning"].service  # noqa: SLF001
+
+    async def asyncTearDown(self) -> None:
+        await self.kernel.shutdown()
+        self._patch.stop()
+        self._tmp.cleanup()
+
+    async def _running(self, origin: str):
+        store = self.planning._store  # noqa: SLF001
+        task = await store.create(kind="patch", description=f"a {origin} task", origin=origin,
+                                  mode="execute", initial_status="available")
+        await store.claim(task.id, "w1", 600.0)
+        await store.transition(task.id, "in_progress")
+        return await store.get(task.id)
+
+    async def _create_human_task(self) -> None:
+        await self.kernel.bus.request(self.kernel.bus.new(topics.TASK_CREATE, {
+            "kind": "patch", "description": "add a comment above COMMAND_NAMES",
+            "subject": "simorgh/interface/parser.py", "origin": "human", "mode": "execute",
+        }), timeout=10)
+        await _pump(40)
+
+    async def test_a_curiosity_task_is_asked_to_step_aside(self) -> None:
+        cancels = _Collector()
+        sub = await self.kernel.bus.subscribe(topics.TASK_CANCEL, cancels)
+        victim = await self._running("curiosity")
+        await self._create_human_task()
+        await sub.unsubscribe()
+
+        self.assertTrue(cancels.messages, "a human task must not queue behind curiosity work")
+        payload = cancels.messages[0].payload
+        self.assertEqual(payload["task_id"], victim.id)
+        self.assertTrue(payload["requeue"], "the displaced work goes back on the queue, it is not rejected")
+
+    async def test_the_displaced_task_is_requeued_not_failed(self) -> None:
+        """It was real work and nobody judged it. Failing it would throw
+        away an attempt for the crime of being second in line."""
+        victim = await self._running("curiosity")
+        await self._create_human_task()
+        after = await self.planning._store.get(victim.id)  # noqa: SLF001
+        self.assertEqual(after.status, "available")
+        self.assertIsNone(after.lease)
+
+    async def test_another_humans_task_is_left_alone(self) -> None:
+        """Priority displaces lesser work, never an equal. Two humans'
+        tasks queue in the order they arrived."""
+        first = await self._running("human")
+        await self._create_human_task()
+        self.assertEqual((await self.planning._store.get(first.id)).status, "in_progress")  # noqa: SLF001
+
+    async def test_an_autonomous_task_displaces_nobody(self) -> None:
+        running = await self._running("curiosity")
+        await self.kernel.bus.request(self.kernel.bus.new(topics.TASK_CREATE, {
+            "kind": "research", "description": "a second curiosity question", "origin": "curiosity",
+            "mode": "execute",
+        }), timeout=10)
+        await _pump(40)
+        self.assertEqual((await self.planning._store.get(running.id)).status, "in_progress")  # noqa: SLF001
