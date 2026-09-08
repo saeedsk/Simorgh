@@ -1,0 +1,22 @@
+{
+  "$id": "https://simorgh.local/schema/benchmark.load.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Download a suite's cases without running them.",
+  "properties": {
+    "refresh": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "suite": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "suite"
+  ],
+  "title": "benchmark.load.request",
+  "type": "object"
+}

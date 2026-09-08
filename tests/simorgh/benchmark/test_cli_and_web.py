@@ -7,6 +7,7 @@ import unittest
 
 from simorgh.benchmark.api import CaseResult, RunRecord
 from simorgh.interface import benchmarkview as view
+from simorgh.interface.dispatch import _BENCHMARK_USAGE
 from simorgh.interface.parser import parse
 
 
@@ -117,3 +118,47 @@ class DashboardTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _dispatch_source() -> str:
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parents[3] / "simorgh" / "interface" / "dispatch.py").read_text()
+
+
+class LoadVerbTestCase(unittest.TestCase):
+    """`benchmark load` downloads a suite without running it. It exists
+    because the suites listing advertised it before it did (2026-09-08),
+    and because checking a token works should not cost model calls."""
+
+    def test_it_reports_the_shape_of_what_it_downloaded(self):
+        text = view.loaded({
+            "suite": "gaia", "suite_version": "abc", "cases": 165,
+            "levels": ["1", "2", "3"], "needs_attachment": 38, "scorable": True,
+            "cache_path": "/home/x/.simorgh/benchmarks/gaia.json",
+        })
+        self.assertIn("165 cases", text)
+        self.assertIn("revision abc", text)
+        self.assertIn("1, 2, 3", text)
+        self.assertIn("38 need a file", text)
+        self.assertIn("/home/x/.simorgh/benchmarks/gaia.json", text)
+
+    def test_a_load_only_suite_says_run_will_refuse_it(self):
+        text = view.loaded({"suite": "swebench-verified", "cases": 500, "levels": [],
+                            "needs_attachment": 0, "scorable": False, "cache_path": "/tmp/x"})
+        self.assertIn("load-only", text)
+        self.assertIn("refuse", text)
+
+    def test_a_suite_with_no_missing_files_does_not_mention_them(self):
+        text = view.loaded({"suite": "bfcl-parallel", "cases": 3, "levels": ["parallel"],
+                            "needs_attachment": 0, "scorable": True, "cache_path": "/tmp/x"})
+        self.assertNotIn("need a file", text)
+
+    def test_the_usage_line_advertises_only_verbs_that_exist(self):
+        from simorgh.interface.dispatch import BENCHMARK_VERBS
+
+        advertised = {verb for verb, _args, _what in BENCHMARK_VERBS if verb}
+        self.assertEqual(advertised, {"suites", "load", "run", "history", "show"})
+        for verb in advertised:
+            self.assertIn(f'verb == "{verb}"', _dispatch_source(), f"{verb} is advertised but not handled")
+        self.assertIn("benchmark load <suite>", _BENCHMARK_USAGE)
