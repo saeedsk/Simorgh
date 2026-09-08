@@ -32,6 +32,7 @@ from simorgh.ledger.factory import make_ledger
 from .bootprogress import make_boot_progress
 from .api import RuntimeConfig
 from .config import ConfigError, LoadedConfig
+from . import configcheck
 from .context import ContextFactory, make_logger
 from .metrics import MetricsHistoryWriter, MetricsTable, ProcessMetricsPublisher, StatusServer
 from .registry import NEEDS_HMAC_SECRET, build_factories, known_layers
@@ -179,6 +180,11 @@ class Kernel:
         # would otherwise be an "escalate" into an "allow".
         guardian_section = self.config.section("guardian")
         guardian_section.setdefault("irreversible_requires_human", False)
+        # Every from_mapping ignores a key it does not recognise, which
+        # makes a typo in simorgh.toml indistinguishable from a setting
+        # that works: the file changes, the system does not, and nothing
+        # says so. Report it once, at boot, and never refuse to start.
+        configcheck.report(self.config, make_logger("kernel"))
         factories = build_factories(
             bus_client=self.bus, ledger_client=self.ledger, run_repl=self._interactive,
             execution_config=ExecutionConfig.from_mapping(self.config.section("execution")),
