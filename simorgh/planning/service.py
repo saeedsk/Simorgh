@@ -298,9 +298,17 @@ class Service:
         await self._retry_or_block(task, p.get("reason", ""))
 
     async def _on_task_blocked(self, message: Message) -> None:
+        # `_retry_or_block` publishes task.blocked itself, on the same
+        # topic a Worker reports a blocked outcome on, and this handler
+        # heard that echo as a fresh outcome: block -> publish -> hear
+        # -> block ..., 466 "blocked" lines on screen from one task
+        # before the kernel shut down (watched trial, 2026-09-07). An
+        # echo of our own, or a task already parked, is not an outcome.
+        if message.source == self._ctx.source:
+            return
         p = message.payload
         task = await self._store.get(p["task_id"])
-        if task is None:
+        if task is None or task.status in (BLOCKED, FAILED):
             return
         await self._retry_or_block(task, p.get("reason", ""))
 

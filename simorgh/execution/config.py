@@ -74,10 +74,13 @@ class Config:
     # -- web_fetch (08-execution.md section 5.2/3.5; the one reviewed path
     # for real outbound network access -- see WebFetchTool's own docstring)
     web_fetch_timeout_s: float = 10.0
-    # `run_shell`. Off by default: it is the one tool whose blast
-    # radius is not bounded by its own arguments, so turning it on is
-    # a decision someone makes on purpose, in `[execution] shell = true`.
-    shell: bool = False
+    # `run_shell`. On by default since 2026-09-07 -- the creator: "give
+    # sim file system write access and shell access". It is the one tool
+    # whose blast radius is not bounded by its own arguments, so it is
+    # declared irreversible (Guardian's ReversibilityRule sees every
+    # call), refuses the catastrophic outright (`shell_refusals`), and
+    # `[execution] shell = false` turns it off.
+    shell: bool = True
     shell_timeout_s: float = 120.0
     # Commands refused outright, pattern -> the reason the model is
     # given. Not a security boundary (a shell has none, and any of

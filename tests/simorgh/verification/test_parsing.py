@@ -34,3 +34,18 @@ class TestParseVerdict(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUnknownAndFirstVerdictWins(unittest.TestCase):
+    """The reviewer may say UNKNOWN when the evidence does not speak to
+    the question; that is a non-answer, never a failure. And the first
+    stated verdict decides -- the evidence sentence after it must not
+    get a vote (it used to: "UNKNOWN\\nno test shows it" was a hard NO)."""
+
+    def test_unknown_is_none(self):
+        self.assertIsNone(parse_verdict("UNKNOWN\nno test shows it either way."))
+        self.assertIsNone(parse_verdict("**UNKNOWN** -- the evidence has no such line"))
+
+    def test_the_evidence_line_does_not_overrule_the_verdict(self):
+        self.assertEqual(parse_verdict("YES\nthere is no separate test, but the constant is there."), "yes")
+        self.assertEqual(parse_verdict("NO\nyes it compiles, but the task asked for more."), "no")
