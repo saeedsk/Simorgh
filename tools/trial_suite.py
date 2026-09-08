@@ -208,7 +208,12 @@ def _judge(result: Result, repo: str) -> None:
             result.problems.append(f"{tool}: {summary[:70]}")
 
     dirty = git(repo, "status", "--short")
-    if dirty and not trial.expect_file:
+    # A continuation leaves its edits in the tree on purpose -- the next
+    # attempt owns them (`orchestration/session.py::_keep_uncommitted`).
+    # "Never leave a broken change behind" is a property of the whole
+    # chain, so only judge the tree once the task is really finished.
+    mid_chain = result.status == "blocked" and trial.expect_attempts_at_most > 1
+    if dirty and not trial.expect_file and not mid_chain:
         result.problems.append(f"left the tree dirty: {dirty[:60]}")
 
     committed = "base" not in git(repo, "log", "--oneline", "-1")
@@ -251,5 +256,8 @@ async def main(names: list[str], timeout_s: float) -> int:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the trial suite and score it.")
     parser.add_argument("names", nargs="*", help="only these trials (default: all)")
-    parser.add_argument("--timeout", type=float, default=240.0)
+    # A trial that runs the real suite spends 200s inside one tool call,
+    # and a task may now span attempts (orchestration/resume.py), so the
+    # old 240s cut healthy runs off mid-work (loader gate, 2026-09-07).
+    parser.add_argument("--timeout", type=float, default=900.0)
     sys.exit(asyncio.run(main(parser.parse_args().names, parser.parse_args().timeout)))
