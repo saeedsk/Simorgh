@@ -69,6 +69,7 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
+from . import activity as activity_mod
 from . import render as render_mod
 from . import tui
 from .config import Config
@@ -128,6 +129,10 @@ class Service:
         self._tui = None            # the prompt_toolkit prompt, when available
         self._tui_task = None
         self._footer = ""           # what the sticky footer under the prompt shows
+        # What every task actually is, so a narration line can name the
+        # topic instead of an id (`activity.py`).
+        self._book = activity_mod.TaskBook()
+        self._seed_task = None
         # Follows `run_repl` by default: the dashboard is for a human
         # actually watching a `simorgh run` session, so it comes up
         # automatically exactly when the REPL does, and stays off for
@@ -178,9 +183,12 @@ class Service:
             await ctx.bus.subscribe(topics.SYSTEM_METRICS, self._on_metrics),
             await ctx.bus.subscribe(topics.GUARDIAN_POSTURE_CHANGED, self._on_posture),
             await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed),
+            await ctx.bus.subscribe(topics.TASK_CREATED, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_STARTED, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_STEP, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_event),
+            await ctx.bus.subscribe(topics.TASK_FAILED, self._on_task_event),
+            await ctx.bus.subscribe(topics.TASK_BLOCKED, self._on_task_event),
         ]
         self._live.start()
         if self._run_repl:
@@ -218,10 +226,21 @@ class Service:
             except OSError as exc:
                 print(f"dashboard: could not bind {self.config.http_host}:{self.config.http_port} ({exc})")
                 self._http = None
+        # Fired, not awaited: a missing Planning would otherwise hold
+        # every start() for the full request timeout, and the feed is
+        # perfectly usable while this is still in flight.
+        self._seed_task = asyncio.ensure_future(self._seed_activity())
         ctx.logger.info("interface.started", session_id=self.session_id)
 
     async def stop(self) -> None:
         self._stop_repl.set()
+        if self._seed_task is not None:
+            self._seed_task.cancel()
+            try:
+                await self._seed_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise
+                pass
+            self._seed_task = None
         if self._tui is not None:
             self._tui.stop()
             self._tui = None
@@ -505,6 +524,75 @@ class Service:
         except Exception as exc:  # noqa: BLE001 -- the REPL must survive a handler crash (spec section 8)
             self._out(render_mod.notice("error", f"[render error] {exc!r}", "interface", enabled=self._color))
 
+    async def _seed_activity(self) -> None:
+        """Ask Planning what already exists, so the feed can name it.
+
+        A restart inherits the whole backlog, and none of it was created
+        while this session was listening -- so without this the first
+        thing on screen is `? · ? · (no description)` for tasks whose
+        topics Planning has had all along. Never fatal: no Planning, or a
+        slow one, just means the feed names ids until each task next
+        moves."""
+        if self._ctx is None:
+            return
+        try:
+            reply = await self._ctx.bus.request(
+                self._ctx.bus.new(topics.TASK_LIST_REQUEST, {}), timeout=3.0,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 -- Planning absent or slow: not this REPL's problem
+            return
+        adopted = self._book.seed(reply.payload.get("tasks") or [])
+        if adopted:
+            self._refresh_activity_footer()
+
+    def _narrating(self, task_id: str, *, origin: str | None) -> bool:
+        """Whether work this REPL did not start should still be spoken.
+
+        The creator, 2026-09-07: "i want full visibility ... these thing
+        should tell me what they are doing, what is in queue and what is
+        the topic of research or skill". Before this, `_on_task_event`
+        returned early for anything not in `_pending_turns` or
+        `_watched_tasks`, so every autonomous task -- nearly all of them
+        -- ran completely silently."""
+        if task_id in self._pending_turns or task_id in self._watched_tasks:
+            return True
+        return bool(self.config.narrate_autonomous)
+
+    def _narrate_autonomous(self, message: Message, record) -> None:
+        unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+        if message.type == topics.TASK_STARTED:
+            self._out(render_mod.style(
+                activity_mod.started_line(record, unicode=unicode), "cyan", enabled=self._color,
+            ))
+            return
+        if message.type == topics.TASK_STEP:
+            if not self.config.narrate_steps:
+                return
+            p = message.payload
+            self._out(render_mod.style(activity_mod.step_line(
+                record, tool=p.get("tool"), summary=p.get("summary", ""), ok=p.get("ok"),
+                unicode=unicode,
+            ), "dim", enabled=self._color))
+            return
+        elapsed = None
+        if record.started_at is not None:
+            elapsed = time.monotonic() - record.started_at
+        detail = message.payload.get("result_summary") or message.payload.get("reason") or ""
+        colour = "green" if record.status == "completed" else "yellow"
+        self._out(render_mod.style(activity_mod.finished_line(
+            record, elapsed=elapsed, detail=detail, unicode=unicode,
+        ), colour, enabled=self._color))
+
+    def _refresh_activity_footer(self) -> None:
+        """Keep the line under the prompt current: what is running, and
+        how much is waiting. Only when nothing more urgent owns it -- a
+        turn in flight renders its own "Thinking..." there."""
+        if self._pending_turns:
+            return
+        self._set_footer(activity_mod.footer(self._book, now=time.monotonic()))
+
     async def _handle_chat(self, text: str) -> None:
         # A fresh id per turn, not `self.session_id` (the REPL's own
         # stable per-instance identity, still used elsewhere e.g.
@@ -691,8 +779,42 @@ class Service:
             return
         p = message.payload
         task_id = p.get("task_id", "")
+
+        # The book is kept for *every* task regardless of what is printed:
+        # the footer's "what is running / what is queued" needs the whole
+        # picture, and a task only names its topic if `task.created` was
+        # recorded when it went past.
+        if message.type == topics.TASK_CREATED:
+            self._book.on_created(p)
+            self._refresh_activity_footer()
+            if self._narrating(task_id, origin=p.get("origin")):
+                self._out(render_mod.style(
+                    "  queued  " + self._book.get(task_id).short_topic(), "dim", enabled=self._color,
+                ))
+            return
+
+        record = self._book.get(task_id)
+        if message.type == topics.TASK_STARTED:
+            self._book.on_started(task_id, now=time.monotonic())
+        elif message.type == topics.TASK_STEP:
+            self._book.on_step(task_id)
+        elif message.type in (topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED):
+            self._book.on_finished(task_id, {
+                topics.TASK_COMPLETED: "completed",
+                topics.TASK_FAILED: "failed",
+                topics.TASK_BLOCKED: "blocked",
+            }[message.type])
+        self._refresh_activity_footer()
+
         watched = task_id in self._watched_tasks
-        if task_id not in self._pending_turns and not watched:
+        mine = task_id in self._pending_turns or watched
+        if not mine and not self._narrating(task_id, origin=record.origin):
+            return
+        if not mine:
+            # Autonomous work: a start and an outcome always, steps only
+            # when asked for. Told as a short, complete story rather than
+            # folded into the footer, which only ever shows one thing.
+            self._narrate_autonomous(message, record)
             return
         elapsed = time.monotonic() - self._turn_started.get(task_id, time.monotonic())
 
