@@ -80,7 +80,17 @@ def head(repo: Path) -> str:
 
 
 def is_dirty(repo: Path) -> bool:
-    return bool(git("status", "--porcelain", cwd=repo).stdout.strip())
+    """Tracked changes only. An untracked file (a paper the creator
+    dropped in `papers/`, a scratch script) is neither something a
+    rollback can lose -- `git checkout <tag>` leaves untracked paths
+    alone -- nor something Sim committed, so it must not block a bless
+    or a rollback."""
+    return bool(git("status", "--porcelain", "--untracked-files=no", cwd=repo).stdout.strip())
+
+
+def untracked(repo: Path) -> list[str]:
+    out = git("status", "--porcelain", "--untracked-files=all", cwd=repo).stdout
+    return [line[3:] for line in out.splitlines() if line.startswith("?? ")]
 
 
 def good_tags(repo: Path) -> list[tuple[int, str]]:
@@ -158,6 +168,9 @@ def cmd_status(repo: Path, notes: Path) -> int:
     tags = good_tags(repo)
     say(f"repo: {repo}")
     say(f"HEAD: {head(repo)}{'  (dirty)' if is_dirty(repo) else ''}")
+    stray = untracked(repo)
+    if stray:
+        say(f"untracked (ignored by the gate's dirty check): {', '.join(stray[:5])}{' ...' if len(stray) > 5 else ''}")
     if not tags:
         say("known-good tags: none yet -- run `bless` after a green gate")
         return 0
