@@ -105,7 +105,7 @@ class Worker:
         profile = profiles.for_task(kind, mode)
         session = Session(
             task_id=task_id, kind=kind, mode=mode, profile=profile,
-            worker_id=self.worker_id, user_text=description,
+            worker_id=self.worker_id, user_text=description, subject=task.get("subject"),
         )
         session.budget.max_steps = profile.max_steps
         session.budget.max_revisions = profile.max_revisions

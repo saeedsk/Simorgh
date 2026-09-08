@@ -113,12 +113,33 @@ _BY_SCAFFOLD: dict[str, str] = {
 }
 
 
-def render(profile: Profile) -> str:
+def render(profile: Profile, *, subject: str | None = None, task: str | None = None) -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
     the prompt just because this table has not caught up."""
     body = _BY_SCAFFOLD.get(profile.scaffold, "")
+    if task:
+        # The task belongs in `task_rules` because that block is
+        # *protected* -- never compacted (04 section 4.6). As a plain user
+        # turn it lived in the elastic conversation, so a large tool
+        # result could push it out. Live-caught 2026-09-07: once the model
+        # was finally shown a whole file, its very next reply was "I have
+        # the full file in hand, but the change itself was never
+        # specified" -- it had read the file it was asked to edit and no
+        # longer knew what it had been asked to do.
+        body = f"Your task: {' '.join(task.split())}\n\n{body}" if body else f"Your task: {task}"
+    if subject and profile.scaffold in ("patch", "skill"):
+        # Live-caught 2026-09-07: handed a task that named the exact file,
+        # the model spent all eight of its steps searching the repo --
+        # including the retired v1 tree and the docs -- and was then forced
+        # to give a final answer having applied nothing. It had the path
+        # the whole time. Step 1 of the workflow is "find the code"; when
+        # the task already says where it is, that step is a trap.
+        body = (
+            f"The file is `{subject}`. You already have it -- read that file first and "
+            f"do not go looking for it.\n\n" + body
+        )
     lines = [f"- {name}: {_TOOL_NOTES[name]}" if name in _TOOL_NOTES else f"- {name}" for name in profile.tools]
     if not lines:
         return body

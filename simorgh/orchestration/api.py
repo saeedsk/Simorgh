@@ -23,6 +23,14 @@ class Profile:
     max_steps: int
     max_revisions: int
     scaffold: str
+    # Output tokens one step may use. `apply_source_patch` takes the
+    # COMPLETE new content of a file, so a patch session that cannot
+    # emit a whole file cannot apply anything -- and this is shared
+    # with the model's reasoning tokens, which a reasoning model
+    # spends first. Live-caught 2026-09-07: at 2000, asked to edit a
+    # 1,365-token file, the model read it eight times and applied
+    # nothing, because the patch would not have fit in the reply.
+    max_output_tokens: int = 2_000
     last_step_hint: str = (
         "This is your last step -- no more tool calls will be honored. "
         "Answer now with what you have, even if incomplete."
@@ -76,6 +84,10 @@ class Session:
     profile: Profile
     worker_id: str = ""
     user_text: str = ""
+    # The file this task is already about, when the task named one.
+    # Without it a patch session is told to go and find the code it
+    # was handed the path to (see `scaffolds.render`).
+    subject: str | None = None
     depth: int = 0
     parent_id: str | None = None
     steps: list[Step] = field(default_factory=list)

@@ -47,6 +47,12 @@ _CODE_BEARING_MARKERS = {
     # Multi-line payloads whose first line is a path and the rest is the
     # complete file body (`orchestration/tools.py::_MARKER_SPLIT_FIRST_LINE`).
     "APPLY_SOURCE_PATCH", "APPLY_SKILL",
+    # `git_commit` is the same shape: first line the path, the rest the
+    # commit message. Without it here the message was cut off and the
+    # commit went out empty -- live-caught 2026-09-07, watching Sim write
+    # its first real file and then fail to commit it three times running,
+    # each with `args={'message': '', 'path': 'simorgh/greeting.py'}`.
+    "GIT_COMMIT",
 }
 
 
@@ -68,16 +74,41 @@ def first_line_argument(text: str) -> str:
 
 
 def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
-    """If `text` (stripped) starts with one of `markers` (case-
-    insensitive, followed by ':'), returns (marker.lower(), payload).
-    Otherwise (None, text) -- the whole stripped text, meaning "final
-    answer, no tool call."
+    """Find a tool call in `text`. Returns (marker.lower(), payload), or
+    (None, text) meaning "final answer, no tool call".
+
+    A marker at the very start is the documented form and is preferred.
+    Failing that, the first line that *begins* with a marker counts too.
+
+    That fallback is not laxity, it is the difference between Sim editing
+    its own source and not. Live-caught 2026-09-07: asked to add a
+    docstring, the model read the right file and then replied "Let me get
+    my bearings before continuing.\nSEARCH_CODE: ...". One sentence of
+    preamble, and the call was invisible -- the reply was filed as a
+    final answer, the task "completed", and nothing was written. Across
+    the whole ledger that pattern accounts for 246 tool runs without a
+    single `apply_source_patch`. The instruction does say "nothing before
+    it"; a model that adds a polite line first is still unambiguously
+    asking for a tool, and refusing to hear it helps nobody.
+
+    A marker must own its line: a mention inside a sentence stays prose.
     """
     stripped = text.strip()
     for marker in markers:
         prefix = f"{marker}:"
         if stripped[: len(prefix)].upper() == prefix.upper():
             return marker.lower(), stripped[len(prefix):].strip()
+
+    lines = stripped.splitlines()
+    for index, line in enumerate(lines):
+        candidate = line.strip()
+        for marker in markers:
+            prefix = f"{marker}:"
+            if candidate[: len(prefix)].upper() != prefix.upper():
+                continue
+            rest = candidate[len(prefix):].strip()
+            tail = "\n".join(lines[index + 1:]).strip()
+            return marker.lower(), f"{rest}\n{tail}".strip() if tail else rest
     return None, stripped
 
 
