@@ -151,12 +151,21 @@ class Service:
         self._sub_compact = await ctx.bus.subscribe(topics.COGNITION_COMPACT_REQUEST, self._on_compact_request)
         self._sub_state = await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed)
         self._sub_tick = await ctx.bus.subscribe(topics.SYSTEM_TICK_SECOND, self._on_tick)
+        # Cognition boots in layer 2 and broadcasts its provider there,
+        # which is before layers 3-6 exist to hear it: the benchmark
+        # subsystem recorded its first real run against model "unknown"
+        # (watched, 2026-09-08). `system.started` fires once every layer
+        # is up, so repeating the broadcast there reaches all of them.
+        self._sub_started = await ctx.bus.subscribe(topics.SYSTEM_STARTED, self._on_system_started)
+        self._real_providers = list(real_providers)
         for provider in real_providers:
             await self._emit_status(provider)
 
     async def stop(self) -> None:
-        for sub in (self._sub_think, self._sub_compact, self._sub_state, self._sub_tick):
-            await sub.unsubscribe()
+        for sub in (self._sub_think, self._sub_compact, self._sub_state, self._sub_tick,
+                    getattr(self, "_sub_started", None)):
+            if sub is not None:
+                await sub.unsubscribe()
 
     async def health(self) -> Health:
         if self._no_real_provider_since is not None:
@@ -378,6 +387,10 @@ class Service:
                 ]},
             },
         ))
+
+    async def _on_system_started(self, _message) -> None:
+        for provider in getattr(self, "_real_providers", ()):
+            await self._emit_status(provider)
 
     async def _emit_status(self, provider) -> None:
         exhausted = False

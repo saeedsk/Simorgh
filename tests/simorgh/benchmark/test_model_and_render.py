@@ -80,3 +80,26 @@ class RunRecordTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SummaryRoundTripTestCase(unittest.TestCase):
+    """A run read back from the history summary must still report its
+    own totals. Live-caught 2026-09-08: `benchmark` said "0s total" for
+    a run that had really taken 31 seconds, because the round trip kept
+    only what synthetic per-case results could carry."""
+
+    def test_seconds_and_cost_survive_a_summary_round_trip(self):
+        record = _record()
+        for result in record.results:
+            object.__setattr__(result, "seconds", 8.0)
+            object.__setattr__(result, "cost_usd", 0.001)
+        self.assertEqual(record.seconds, 32.0)
+        back = RunRecord.from_payload(record.to_payload(with_cases=False))
+        self.assertEqual(back.seconds, 32.0)
+        self.assertAlmostEqual(back.cost_usd, 0.004)
+
+    def test_a_full_payload_still_computes_from_its_cases(self):
+        record = _record()
+        back = RunRecord.from_payload(record.to_payload(with_cases=True))
+        self.assertEqual(back.totals, {})
+        self.assertEqual(back.seconds, record.seconds)

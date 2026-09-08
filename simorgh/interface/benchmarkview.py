@@ -115,9 +115,9 @@ def detail(payload: dict) -> str:
             f"answered {str(result.get('answer', ''))[:60]!r}, expected {str(result.get('expected', ''))[:60]!r}"
             if not correct and not skipped else ""
         )
-        level = f"L{result['level']}" if result.get("level") else ""
+        level = str(result.get("level") or "")
         lines.append(
-            f"  {mark} {str(result.get('case_id', '')):<34} {level:<6} "
+            f"  {mark} {str(result.get('case_id', '')):<34} {level:<14.14} "
             f"{float(result.get('seconds') or 0.0):5.0f}s  {note}"
         )
     return "\n".join(lines)
