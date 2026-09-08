@@ -31,6 +31,7 @@ import asyncio
 import contextlib
 import re
 import time
+from pathlib import Path
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
@@ -92,6 +93,17 @@ class Service:
                          "schema_ref": "", "provider": getattr(tool, "provider", "builtin")},
             ))
             await ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name}))
+
+        # Skills already on disk get ANNOUNCED, not loaded. Loading stays
+        # on demand by design (see
+        # tests/simorgh/integration/test_skill_acquisition_procedural_memory.py:
+        # "never a directory scan of every skill ever acquired at boot").
+        # The gap the audit found was different: nothing ever told the
+        # model a skill existed, so it could never name one, so the lazy
+        # load in `_on_approved` could never fire. A skill Sim wrote was
+        # a committed file and nothing else (2026-09-08). Announcing the
+        # name costs a directory listing and no source read.
+        await self._announce_skills_on_disk()
 
         for server in self._config.mcp_servers:
             await self._start_mcp_server(server)
@@ -157,6 +169,38 @@ class Service:
         name, path = message.payload.get("name", ""), message.payload.get("path", "")
         if name and path:
             await self._load_skill(name, path=path)
+
+    def skill_files(self) -> list[Path]:
+        directory = self._config.repo_root / self._config.skill_dir
+        if not directory.is_dir():
+            return []
+        return [p for p in sorted(directory.glob("*.py")) if not p.name.startswith("_")]
+
+    async def _announce_skills_on_disk(self) -> int:
+        """Say which skills exist, without reading or loading any.
+
+        `tool.registered` is how Orchestration learns a tool's name, and
+        a name is all the model needs to ask for one; the source and the
+        real description are read by `_load_skill` when an approved
+        action first names it. A skill already in the registry (acquired
+        this process) is left alone -- its announcement was the real one.
+        """
+        announced = 0
+        for path in self.skill_files():
+            name = f"skill:{path.stem}"
+            if name in self._registry:
+                continue
+            await self._ctx.bus.publish(Message.new(
+                topics.TOOL_REGISTERED, source="execution",
+                payload={"name": name, "version": "1",
+                         "description": f"skill {path.stem!r} from an earlier session (loaded on first use)",
+                         "read_only": False, "reversibility": "reversible",
+                         "schema_ref": "", "provider": "skill"},
+            ))
+            announced += 1
+        if announced:
+            self._ctx.logger.info("skills_announced", count=announced, directory=self._config.skill_dir)
+        return announced
 
     async def _load_skill(self, name: str, *, path: str) -> object | None:
         """Register the one named skill as a `skill:<name>` tool, reading
@@ -318,6 +362,20 @@ class Service:
                 topics.TOOL_INVOKED, source="execution",
                 payload={"name": tool.name, "action_id": action_id, "duration_ms": duration_ms, "ok": result.ok},
             ))
+            if tool.name == "apply_skill" and result.ok:
+                # A skill becomes callable the moment it is written, not
+                # only at the next boot. Until 2026-09-08 nothing ever
+                # registered one, so a skill Sim wrote was a file and
+                # nothing more (audit).
+                subject = str((approved.get("args") or {}).get("subject") or "")
+                if subject.endswith(".py"):
+                    name = Path(subject).stem
+                    await self._load_skill(name, path=subject)
+                    await self._ctx.bus.publish(Message.new(
+                        topics.LEARN_SKILL_ACQUIRED, source="execution",
+                        payload={"name": name, "path": subject, "tests_passed": 0,
+                                 "description": f"skill {name!r} written by a skill task"},
+                    ))
             if tool.name == "web_fetch" and result.ok:
                 # 08-execution.md section 4.2's `percept.web.fetched` row
                 # ("after web_fetch -- memory, curiosity"): the contract

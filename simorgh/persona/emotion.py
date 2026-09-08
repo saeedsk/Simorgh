@@ -20,6 +20,8 @@ _NEGATIVE_WORDS = {
 }
 _HIGH_AROUSAL_WORDS = {"urgent", "now", "asap", "emergency", "wow", "amazing", "help"}
 
+_NEGATORS = {"not", "no", "never", "don't", "dont", "n't"}
+
 _REACTIONS = {
     ("positive", "high"): "That's exciting!",
     ("positive", "moderate"): "That sounds nice.",
@@ -40,9 +42,15 @@ class MoodDelta:
 
 
 def react(text: str, *, lexicon_weight: float = 0.15, exclamation_arousal: float = 0.10) -> MoodDelta:
-    words = set(re.findall(r"[a-z']+", text.lower()))
-    valence_delta = lexicon_weight * len(words & _POSITIVE_WORDS) - lexicon_weight * len(words & _NEGATIVE_WORDS)
-    arousal_delta = lexicon_weight * len(words & _HIGH_AROUSAL_WORDS)
+    tokens = re.findall(r"[a-z']+", text.lower())
+    valence_delta = 0.0
+    arousal_delta = lexicon_weight * sum(1 for t in tokens if t in _HIGH_AROUSAL_WORDS)
+    for i, token in enumerate(tokens):
+        negated = i > 0 and tokens[i - 1] in _NEGATORS
+        if token in _POSITIVE_WORDS:
+            valence_delta += -lexicon_weight if negated else lexicon_weight
+        elif token in _NEGATIVE_WORDS:
+            valence_delta += lexicon_weight if negated else -lexicon_weight
     if "!" in text:
         arousal_delta += exclamation_arousal
     return MoodDelta(valence=valence_delta, arousal=arousal_delta)

@@ -83,6 +83,13 @@ _MARKER_ARG_KEY: dict[str, str] = {
     # "refused: no command given". The tool had never once run from the
     # model's side; two observers found it independently.
     "run_shell": "command",
+    # Same defect as run_shell, found by the audit the same day:
+    # `GIT_DISCARD: path` arrived as `{"argument": ...}` while the tool
+    # reads `path`, so it answered "refused: name the path to discard".
+    # It is the tool that backs out a bad uncommitted edit -- the
+    # "never leave a broken change in the tree" net -- and it had never
+    # once worked from the model's side.
+    "git_discard": "path",
     "draft_candidate": "code",
     # ddg_search/ddg_get_answer's own `inputSchema`s each have one
     # required string field, `query` -- see `_TOOL_POLICY`'s comment on
@@ -209,13 +216,19 @@ def forget_registered() -> None:
 
 
 def offered_tools(profile_tools: tuple[str, ...]) -> tuple[str, ...]:
-    """The profile's tools, minus any Execution has not registered (see
-    `known_tools`). Only filters once something *is* registered, so a
-    harness with no Execution offers the profile as written."""
+    """The profile's tools, minus any Execution has not registered, plus
+    every skill it HAS registered.
+
+    A profile is a static tuple, so a `skill:<name>` could never appear
+    in one -- which meant a skill Sim wrote could not be offered even
+    after it was registered (audit, 2026-09-08). Skills are the one tool
+    class the system creates for itself; they have to arrive this way."""
     known = known_tools()
     if not known:
         return tuple(profile_tools)
-    return tuple(t for t in profile_tools if t in known)
+    offered = [t for t in profile_tools if t in known]
+    offered.extend(sorted(t for t in known if t.startswith("skill:")))
+    return tuple(offered)
 
 
 def register_tool_policy(name: str, *, reversibility: str, provider: str) -> None:
@@ -224,6 +237,12 @@ def register_tool_policy(name: str, *, reversibility: str, provider: str) -> Non
     _DYNAMIC_TOOLS[name] = provider
     if name not in _TOOL_POLICY:
         _TOOL_POLICY[name] = (reversibility, provider in ("mcp", "external"))
+    if name not in _MARKER_ARG_KEY and provider == "skill":
+        # `SkillTool.run(**args)` takes the skill's own `run()` keyword;
+        # the convention across every skill written so far is one string
+        # argument named `text`. Without an entry the marker's argument
+        # arrives as `argument=` and the call is a TypeError.
+        _MARKER_ARG_KEY[name] = "text"
     if name not in _MARKER_ARG_KEY and provider == "external":
         # `execution/external.py` wraps every adapter behind one string
         # argument named `input` -- the shape LangChain's own `run(tool_input)`

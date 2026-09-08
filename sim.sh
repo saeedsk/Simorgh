@@ -17,4 +17,30 @@ PYTHON_BIN="${SIMORGH_PYTHON:-python3}"
 if [[ "${SIMORGH_NO_LOADER:-0}" == "1" ]]; then
   exec "$PYTHON_BIN" -m simorgh run "$@"
 fi
+
+# The loader gates every file except itself, and it lives in the same
+# commit as the code it judges -- so Sim could, in one commit, destroy
+# the only mechanism that would undo that commit. An observer proved it:
+# a syntax error in simloader.py bricked the system completely, with no
+# gate, no rollback, no note and no message on screen (2026-09-08).
+#
+# This script is the one file Sim has no reason to rewrite, so the check
+# belongs here. If the loader will not compile, put back the copy from
+# the newest known-good tag and say so.
+if ! "$PYTHON_BIN" -c "import sys; compile(open('simloader.py').read(), 'simloader.py', 'exec')" 2>/dev/null; then
+  LAST_GOOD="$(git tag --list 'sim-good-*' --sort=-v:refname 2>/dev/null | head -1)"
+  if [[ -n "$LAST_GOOD" ]]; then
+    echo "[sim.sh] simloader.py does not compile -- restoring it from $LAST_GOOD" >&2
+    git checkout "$LAST_GOOD" -- simloader.py
+    if ! "$PYTHON_BIN" -c "compile(open('simloader.py').read(), 'simloader.py', 'exec')" 2>/dev/null; then
+      echo "[sim.sh] the restored loader does not compile either; running without it" >&2
+      exec "$PYTHON_BIN" -m simorgh run "$@"
+    fi
+  else
+    echo "[sim.sh] simloader.py does not compile and there is no known-good tag to restore from." >&2
+    echo "[sim.sh] running Sim directly; fix simloader.py, then run \`python simloader.py bless\`." >&2
+    exec "$PYTHON_BIN" -m simorgh run "$@"
+  fi
+fi
+
 exec "$PYTHON_BIN" simloader.py run "$@"

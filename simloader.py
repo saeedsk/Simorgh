@@ -360,7 +360,13 @@ def good_tags(repo: Path) -> list[tuple[int, str]]:
 
 
 def tag_of(repo: Path, tag: str) -> str:
-    return git("rev-parse", "--short", f"{tag}^{{commit}}", cwd=repo, check=True).stdout.strip()
+    """The commit a tag names, or "" if the tag has gone.
+
+    Was `check=True`, so a tag deleted between listing and resolving
+    raised `RuntimeError: Needed a single revision` out of the rollback
+    path (observer, 2026-09-08)."""
+    done = git("rev-parse", "--short", f"{tag}^{{commit}}", cwd=repo)
+    return done.stdout.strip() if done.returncode == 0 else ""
 
 
 def next_tag(repo: Path) -> str:
@@ -398,9 +404,13 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
             notes.mkdir(parents=True, exist_ok=True)
             (notes / "last_unit.txt").write_text(tests.stdout)
         if tests.returncode not in (0, 5):
-            # Name them. "9 failed" alone sent the human off to re-run the
-            # whole suite to learn which nine (2026-09-07).
-            failed = [line.strip() for line in tests.stdout.splitlines() if line.startswith("FAILED ")]
+            # Name them. "9 failed" alone sent the human off to re-run
+            # the whole suite to learn which nine (2026-09-07). `ERROR `
+            # is what a collection failure looks like -- exactly the
+            # import-broken case, which was the one printing no file
+            # name at all (observer, 2026-09-08).
+            failed = [line.strip() for line in tests.stdout.splitlines()
+                      if line.startswith(("FAILED ", "ERROR "))]
             for line in failed[:12]:
                 say(line)
             if len(failed) > 12:
@@ -454,7 +464,19 @@ def trial_count(repo: Path) -> int:
 # ----------------------------------------------------------------- notes
 def write_note(notes: Path, note: dict) -> None:
     """Where Sim reads what the loader did on its behalf. Append-only
-    JSONL, one decision per line."""
+    JSONL, one decision per line.
+
+    Never fatal. An unwritable notes directory used to raise
+    `PermissionError` and kill a boot whose gate had already PASSED
+    (observer, 2026-09-08) -- losing the system to a bookkeeping failure
+    is exactly backwards."""
+    try:
+        _write_note(notes, note)
+    except OSError as exc:
+        say(f"could not write the note ({exc!r}); continuing")
+
+
+def _write_note(notes: Path, note: dict) -> None:
     notes.mkdir(parents=True, exist_ok=True)
     note = {"ts": time.time(), **note}
     with open(notes / "decisions.jsonl", "a", encoding="utf-8") as fh:
@@ -579,7 +601,16 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
         say(f"gate FAILED: {why}")
         write_note(notes, {"kind": "gate_failed", "commit": head(repo), "why": why})
         if rollbacks >= max_rollbacks:
-            say(f"giving up after {rollbacks} rollback(s); a human needs to look at this")
+            rule("giving up")
+            say(f"the gate failed after {rollbacks} rollback(s), and I am not going to keep trying.")
+            say(f"HEAD is {head(repo)}, which did NOT pass. Nothing here is blessed.")
+            tags = good_tags(repo)
+            if tags:
+                say(f"last known-good tag: {tags[-1][1]} ({tag_of(repo, tags[-1][1])})")
+                say(f"  git checkout {tags[-1][1]}     # go back to it by hand")
+            say(f"  {notes / 'last_unit.txt'}   # what the suite actually said")
+            say("  SIMORGH_NO_LOADER=1 ./sim.sh    # boot without the gate, to debug")
+            write_note(notes, {"kind": "gave_up", "commit": head(repo), "rollbacks": rollbacks, "why": why})
             return 3
         if cmd_rollback(repo, notes, reason=why) != 0:
             say("could not roll back; stopping")

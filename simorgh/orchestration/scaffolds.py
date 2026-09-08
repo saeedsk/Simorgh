@@ -69,9 +69,13 @@ _SKILL = """\
 You are adding or changing one of your own skills. Work in this order and
 do not stop early:
 
-1. Read the existing skill, if there is one, before rewriting it.
+1. Read the existing skill, if there is one, before rewriting it. For a
+   brand-new skill, skip this -- the read will only be refused.
 2. Apply it with apply_skill. A described skill is not a skill.
-3. Run run_tests.
+3. Run it once with run_python_sandboxed and check the answer is right:
+   import it and call it with a real argument. run_tests reports "no
+   tests cover this target" for a new file, which proves nothing, and a
+   skill asserted to work rather than seen to work is not finished.
 4. Commit with git_commit. An applied but uncommitted change is an
    unfinished task. Commit before you write your final answer.
 5. After a successful commit you are done: write your final answer in

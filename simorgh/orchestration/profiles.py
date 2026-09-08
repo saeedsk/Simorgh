@@ -59,7 +59,12 @@ PLAN = Profile(
 )
 SKILL = Profile(
     name="skill",
-    tools=("read_file", "list_dir", "search_code", "run_tests", "apply_skill", "git_commit", "git_discard"),
+    # `run_python_sandboxed` because `run_tests` on a brand-new skill
+    # reports "no tests cover this target" -- so Sim never executed the
+    # skill it had just written, and verification correctly called it
+    # asserted-not-verified (observer, 2026-09-08).
+    tools=("read_file", "list_dir", "search_code", "run_tests", "run_python_sandboxed",
+           "apply_skill", "git_commit", "git_discard"),
     read_only=False, max_steps=20, max_revisions=2, scaffold="skill", max_output_tokens=16_000,
 )
 
