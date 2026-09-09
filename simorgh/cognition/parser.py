@@ -66,6 +66,31 @@ _CODE_BEARING_MARKERS = {
     # exits 0 with no output -- so the model was told its edit had been
     # applied when nothing had run at all.
     "RUN_SHELL",
+    # Same defect, live-caught by an observer trial 2026-09-09 running
+    # the brand-new resourcefulness toolset for the first time: each of
+    # these four is a two-field marker split by
+    # `orchestration/tools.py::_MARKER_SPLIT_FIRST_LINE` (image/command,
+    # location/filters, target/actions, manager/spec) -- but none of them
+    # were listed here, so `first_line_argument` threw away everything
+    # after line 1 before that split ever ran. Every `RUN_CONTAINER:
+    # <image>\n<command>` call arrived with `command` silently missing,
+    # no matter how the model formatted it; a trial burned its entire
+    # step budget on `run_container` for exactly this reason, never once
+    # discovering that the tool was reachable, and only stumbled onto
+    # a working call when a single JSON line happened to keep both
+    # fields on one line by accident. `search_listings`, `browse_page`
+    # and `install_package` have the identical shape and the identical
+    # defect.
+    "RUN_CONTAINER", "SEARCH_LISTINGS", "BROWSE_PAGE", "INSTALL_PACKAGE",
+    # Same shape again (kind/spec), on the grants branch. Listed here
+    # so that branch does not inherit the identical defect the moment
+    # it merges -- an unregistered marker costs nothing.
+    "GRANT_CAPABILITY",
+    # Same class of tool as `run_python_sandboxed` just above (the whole
+    # payload after the marker is the program) but added on a different
+    # day and left off this set -- same live-caught defect: only the
+    # first line of the script ever reached the tool.
+    "RUN_SCRIPT",
 }
 
 

@@ -98,6 +98,33 @@ def _steps(req: VerifyRequest) -> list[dict]:
     )
 
 
+# KNOWN GAP, deliberately not closed here (wave-21 observer W21-08,
+# 2026-09-09). A session whose FIRST reply is a bare final with no tool
+# call records one step, and `session.py` tags a step_no==1 final
+# `"gather"`, not `"act"` -- so a `patch` task that did literally
+# nothing has zero act steps, `applies` below says no, and it completes
+# unverified. Confirmed live: a weather-chart task "completed" in 30s
+# having written no file.
+#
+# The obvious fix -- also judge a session whose only steps are `gather`
+# -- was tried and reverted the same day, because it reintroduces the
+# 2026-09-08 bug `TestABookkeepingStepIsNotAnAction` below records: a
+# legitimate scripted session in the evaluator-optimizer revision loop
+# produces exactly the same step shape (tool_calls: [], one gather
+# step), so this check failed BOTH its verdicts, exhausted
+# max_revisions, and hung a task the test expected to complete. The two
+# cases are indistinguishable from the step log alone; trading a missed
+# no-op for a hung revision loop is the worse bug.
+#
+# A real fix lives elsewhere and is a design decision, not a patch
+# here: either `session.py` stops tagging a lone final `"gather"` (it
+# is not gathering -- it is finishing), or the phase gains a value that
+# says "answered without acting". `unsupported_claims` already catches
+# the dangerous half of this whenever the answer claims work it did not
+# do, which is how the 2026-09-09 acceptance trial was correctly
+# blocked.
+
+
 class DidAnythingCheck:
     name = "did_anything"
     cost = "free"

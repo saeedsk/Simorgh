@@ -143,6 +143,32 @@ class TestOutputParser(unittest.TestCase):
         result = self.parser.parse(text, {"kind": "markers", "markers": ("READ_FILE", "RUN_PYTHON_SANDBOXED")})
         self.assertEqual(result.tool_calls, ({"tool": "read_file", "args": {"argument": "docs/SOUL.md"}},))
 
+    def test_markers_two_field_toolset_markers_keep_full_payload(self):
+        """Live-caught by an observer trial 2026-09-09: RUN_CONTAINER,
+        BROWSE_PAGE, INSTALL_PACKAGE, SEARCH_LISTINGS and RUN_SCRIPT are
+        all two-field or code-bearing markers split downstream by
+        `orchestration/tools.py::_MARKER_SPLIT_FIRST_LINE` -- but none of
+        them were in `_CODE_BEARING_MARKERS`, so `first_line_argument`
+        silently dropped the second field (the command/filters/actions/
+        spec/program) before that split ever ran. No formatting the
+        model tried could ever make these tools work. A trial burned an
+        entire task's step budget on `run_container` for exactly this
+        reason and never once succeeded through the documented format."""
+        for marker, tool in (
+            ("RUN_CONTAINER", "run_container"),
+            ("BROWSE_PAGE", "browse_page"),
+            ("INSTALL_PACKAGE", "install_package"),
+            ("SEARCH_LISTINGS", "search_listings"),
+            ("RUN_SCRIPT", "run_script"),
+        ):
+            text = f"{marker}: first_field\nsecond_field\nthird_field"
+            result = self.parser.parse(text, {"kind": "markers", "markers": (marker,)})
+            self.assertEqual(
+                result.tool_calls,
+                ({"tool": tool, "args": {"argument": "first_field\nsecond_field\nthird_field"}},),
+                msg=f"{marker} lost its payload past the first line",
+            )
+
     def test_markers_no_marker_present_is_a_final_answer(self):
         result = self.parser.parse("just answering directly", {"kind": "markers", "markers": ("DRAFT",)})
         self.assertEqual(result.kind, "final")
