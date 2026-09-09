@@ -621,9 +621,55 @@ remaining workstreams.
   coordinates, source disclosed in the page. Trailing narration still
   present in that run -- which is what exposed finding 1.
 
-## Still open
+## Status: everything in this document is implemented
 
-Phase order from D6 stands for the rest: D4 capability self-test, then
-D1/D2 (grants + MCP catalogue, **the D1 diff wants review on an
-expensive model before merge**), then WS11, D3, WS4, WS8, D5. WS7's
-source book is not started.
+On `main`:
+
+| commit | what |
+|---|---|
+| `9e2499a` | WS9 + the two trial-2 findings |
+| `2b96b07` | WS10 / 0.2 + the ZIP fix |
+| `3328c36` | WS1, WS2, and the `session.wrote` fix |
+| `03b1324` | D4 capability probes, WS7 sourcebook |
+| `d9b15f9` | WS11 Guardian rules, WS8 documents and media |
+| `31a426d` | D3 `run_container`, WS4 `browse_page` |
+| `10fa5d3` | D5 skill distillation |
+
+On branch `grants-d1`, **awaiting review before merge** (it is the one
+change that widens what Sim can do to itself):
+
+| commit | what |
+|---|---|
+| `4a00582` | D1 self-granted capabilities |
+| `141a3dc` | D2 MCP catalogue and adoption |
+
+## Further corrections to this document
+
+4. **A new topic needs a declared domain.** `capability.probed` failed
+   the catalog test; it is tool telemetry, so it became `tool.probed`
+   beside `tool.registered` rather than inventing a `capability`
+   domain for one message.
+5. **The probe table belongs in `execution/`, not `kernel/`.** Every
+   capability it probes belongs to a tool in that package, and the
+   module-boundary test caught the first attempt.
+6. **A rule that abstains should abstain cheaply.** `ShellcheckRule`
+   originally paid a thread hop on every shell proposal just to find
+   out shellcheck was not installed; the extra scheduling point made a
+   timing-sensitive integration test flake under parallel load. Check
+   availability before the hop.
+7. **`grants.toml` is read by two subsystems and written by one.**
+   Orchestration reads `docs/mcp-catalog.toml` directly rather than
+   receiving it over the bus -- a human-maintained config file is not
+   a message.
+
+## What is genuinely still open
+
+- The known flaky interface test (`test_a_dispatch_created_task_prints_
+  its_real_completion`), unrelated to any of this and deselected
+  throughout. Its cause and fix are in the memory note.
+- `capability promote` / `capabilities` / `packages` Interface commands
+  (design 0.5). The tools and the file exist; the human-facing CLI
+  surface for them does not, so a human reviews `grants.toml` and
+  `simorgh_packages.txt` by reading them.
+- OCR is wired but needs a `tesseract` binary nobody has installed
+  here; audio transcription was specified and deliberately not built.
