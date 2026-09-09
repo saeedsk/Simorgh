@@ -9,7 +9,12 @@ from .api import Profile
 
 CHAT = Profile(
     name="chat",
-    tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch",
+    # `self_map` first: a self-knowledge question ("where does your code
+    # live", "what subsystems make you up") has a direct, correct answer
+    # through it (world.env.query's capability_map facet) -- without it
+    # the model fell back to list_dir and could wander into src/, the
+    # retired v1 tree left readable for reference (observer, 2026-09-08).
+    tools=("self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch",
            "run_python_sandboxed", "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
@@ -40,7 +45,7 @@ RESEARCH = Profile(
     # anything -- a trial burned its whole budget substituting list_dir
     # (observer, 2026-09-08). Guardian gates it the same as anywhere.
     name="research",
-    tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch", "run_tests", "run_shell"),
+    tools=("self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch", "run_tests", "run_shell"),
     # 6 predates web_search/web_fetch. A question with a repo half and a
     # web half needs search + fetch + two repo steps + an answer, and
     # died on step 6 every time (observer, 2026-09-08).

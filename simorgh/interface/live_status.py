@@ -44,6 +44,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("gather", None): "Thinking",
     ("act", "read_file"): "Reading",
     ("act", "list_dir"): "Listing",
+    ("act", "self_map"): "Checking",
     ("act", "web_fetch"): "Fetching",
     ("act", "run_python_sandboxed"): "Running",
     ("act", "apply_source_patch"): "Patching",

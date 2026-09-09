@@ -132,8 +132,16 @@ class Runner:
         record.started_at = self._now()
         try:
             for index, case in enumerate(suite.cases, start=1):
+                result = await self.run_case(case)
+                record.results.append(result)
+                # Fire progress only after the case is scored and
+                # appended, so a cancellation mid-case (or `benchmark
+                # stop`) never counts a case that never made it into
+                # `record.results` -- `index` here is always the number
+                # of cases actually recorded so far (observer,
+                # 2026-09-08: "stopped after 2 of 4" when only 1 case
+                # was stored).
                 self._on_progress(index=index, total=len(suite), case=case, record=record)
-                record.results.append(await self.run_case(case))
         except asyncio.CancelledError:
             # An interrupted run is real evidence and is kept -- labelled,
             # so nobody compares five cases against fifty as equals.
