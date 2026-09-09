@@ -178,11 +178,43 @@ def parse_serper(payload: dict, limit: int) -> list[Result]:
                    snippet=_text(i.get("snippet"))[:_SNIPPET_CHARS]) for i in items if i.get("link")]
 
 
-def render(results: list[Result], query: str, provider: str) -> str:
+_STOPWORDS = {
+    "what", "when", "where", "which", "while", "about", "with", "from", "this",
+    "that", "there", "their", "would", "could", "should", "does", "did",
+}
+
+
+def _significant_tokens(query: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9]+", query.lower()) if len(t) >= 4 and t not in _STOPWORDS}
+
+
+def results_look_unrelated(query: str, results: list[Result]) -> bool:
+    """True when none of the query's significant words appear anywhere in the
+    results -- DuckDuckGo's keyless endpoint answers gibberish/unmatched
+    queries with generic filler (YouTube, Wikipedia, google.com) on a real
+    HTTP 200 page instead of a genuine empty-result page, so `duckduckgo_
+    problem` sees real `result__a` blocks and reports a confident match.
+    Live-caught 2026-09-09 (wave-18 observer W18-02): a nonsense query got
+    "8 results" back, none topically related.
+    """
+    tokens = _significant_tokens(query)
+    if not tokens or not results:
+        return False
+    haystack = " ".join(f"{r.title} {r.snippet}" for r in results).lower()
+    return not any(token in haystack for token in tokens)
+
+
+def render(results: list[Result], query: str, provider: str, *, low_confidence: bool = False) -> str:
     if not results:
         return f"no results for {query!r} (via {provider})"
     body = "\n".join(result.render(index) for index, result in enumerate(results, start=1))
-    return f"{len(results)} results for {query!r} (via {provider}):\n{body}"
+    header = f"{len(results)} results for {query!r} (via {provider})"
+    if low_confidence:
+        header += (
+            " -- results may be unrelated to the query "
+            "(no significant search term appears in any title or snippet)"
+        )
+    return f"{header}:\n{body}"
 
 
 # ------------------------------------------------------------ the tool
@@ -216,10 +248,11 @@ class WebSearchTool:
             return ToolResult(ok=False, error=f"refused: {exc}")
         except Exception as exc:  # noqa: BLE001 -- a network failure is a result, never a crash
             return ToolResult(ok=False, error=f"search failed via {provider}: {exc!r}")
+        low_confidence = provider == "duckduckgo" and results_look_unrelated(query, results)
         return ToolResult(
-            ok=True, output=render(results, query, provider),
+            ok=True, output=render(results, query, provider, low_confidence=low_confidence),
             metadata={"provider": provider, "query": query, "count": len(results),
-                      "urls": [r.url for r in results]},
+                      "urls": [r.url for r in results], "low_confidence": low_confidence},
         )
 
     async def _search(self, provider: str, query: str, limit: int) -> list[Result]:

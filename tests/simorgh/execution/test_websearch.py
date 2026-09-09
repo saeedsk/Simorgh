@@ -16,6 +16,7 @@ from simorgh.execution.config import Config
 from simorgh.execution.websearch import (
     DEFAULT_PROVIDER, Result, SearchUnavailable, WebSearchTool, choose_provider,
     duckduckgo_problem, parse_brave, parse_duckduckgo, parse_serper, parse_tavily, render,
+    results_look_unrelated,
 )
 
 DDG_PAGE = """
@@ -149,6 +150,19 @@ class ToolTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["count"], 2)
         self.assertEqual(result.metadata["urls"][1], "https://example.org/page")
 
+    async def test_a_query_unrelated_to_the_results_is_flagged_low_confidence(self):
+        result = await self._tool().run(
+            {"query": "asdkjqhwoieuqhwoiuehqoiwuehwqoiuehasdkjfhalksjdfh zzqqxxvv123456"}, ctx=_ctx())
+        self.assertTrue(result.ok, result.error)
+        self.assertTrue(result.metadata["low_confidence"])
+        self.assertIn("may be unrelated to the query", result.output)
+
+    async def test_a_matching_query_is_not_flagged_low_confidence(self):
+        result = await self._tool().run({"query": "gaia benchmark"}, ctx=_ctx())
+        self.assertTrue(result.ok, result.error)
+        self.assertFalse(result.metadata["low_confidence"])
+        self.assertNotIn("may be unrelated", result.output)
+
     async def test_an_empty_query_is_refused(self):
         result = await self._tool().run({"query": "   "}, ctx=_ctx())
         self.assertFalse(result.ok)
@@ -216,6 +230,41 @@ class RenderTestCase(unittest.TestCase):
 
     def test_nothing_found_says_so_with_the_provider(self):
         self.assertIn("no results for 'q' (via brave)", render([], "q", "brave"))
+
+    def test_low_confidence_flag_adds_a_caveat_to_the_header(self):
+        text = render([Result("T", "https://x", "s")], "q", "duckduckgo", low_confidence=True)
+        self.assertIn("may be unrelated to the query", text)
+
+    def test_no_caveat_by_default(self):
+        text = render([Result("T", "https://x", "s")], "q", "duckduckgo")
+        self.assertNotIn("may be unrelated", text)
+
+
+class ResultsLookUnrelatedTestCase(unittest.TestCase):
+    def test_gibberish_query_with_off_topic_filler_is_flagged(self):
+        # Live-caught, wave-18 observer W18-02: DuckDuckGo's keyless endpoint
+        # answered a nonsense query with real result__a blocks pointing at
+        # YouTube/Wikipedia/Google -- a genuine HTTP 200 "match" that has
+        # nothing to do with the query.
+        results = [
+            Result("YouTube", "https://youtube.com", "Enjoy the videos"),
+            Result("Phonics Song | ABC", "https://youtube.com/x", "Official Video"),
+            Result("Wordle", "https://nytimes.com/wordle", "Play today's Wordle"),
+        ]
+        self.assertTrue(results_look_unrelated(
+            "asdkjqhwoieuqhwoiuehqoiwuehwqoiuehasdkjfhalksjdfhqwoiuehqasdkjfh zzqqxxvv123456",
+            results,
+        ))
+
+    def test_a_real_match_is_not_flagged(self):
+        results = [Result("GAIA benchmark", "https://arxiv.org/x", "a benchmark for general AI assistants")]
+        self.assertFalse(results_look_unrelated("GAIA benchmark", results))
+
+    def test_no_results_is_not_flagged_here_render_handles_that_case(self):
+        self.assertFalse(results_look_unrelated("anything", []))
+
+    def test_a_query_with_only_short_or_stopword_tokens_is_never_flagged(self):
+        self.assertFalse(results_look_unrelated("what is it", [Result("T", "u", "s")]))
 
 
 class WiringTestCase(unittest.TestCase):
