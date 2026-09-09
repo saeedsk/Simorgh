@@ -118,6 +118,20 @@ class Config:
     static_analysis_enabled: bool = True
     static_analysis_min_severity: str = "HIGH"  # LOW | MEDIUM | HIGH
     static_analysis_timeout_s: float = 20.0
+    # shellcheck over `run_shell`/`run_script` commands, for the few
+    # findings that mean "this destroys something you did not mean
+    # to". Optional: not installed means abstain, never deny.
+    shellcheck_enabled: bool = True
+    shellcheck_timeout_s: float = 10.0
+    # Mirrors execution/config.py's own lists so Guardian enforces
+    # the boundary the tools also check for usability.
+    package_denylist: tuple[str, ...] = (r"(?i)^sudo", r"(?i)^pip$", r"(?i)^setuptools$")
+    grant_import_denylist: tuple[str, ...] = (
+        "os", "sys", "subprocess", "shutil", "socket", "ctypes", "importlib",
+        "builtins", "pickle", "marshal", "code", "codeop", "pty", "signal",
+        "multiprocessing", "http", "urllib", "requests", "pathlib", "glob",
+        "tempfile", "webbrowser",
+    )
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":
