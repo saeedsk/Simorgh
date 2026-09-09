@@ -258,3 +258,48 @@ class TestOfferedToolsFollowRealRegistrations(unittest.TestCase):
         from simorgh.orchestration.tools import note_registered, offered_tools
         note_registered("read_file")
         self.assertEqual(offered_tools(("read_file", "run_shell")), ("read_file", "run_shell"))
+
+
+class TestJsonRestMarkers(unittest.TestCase):
+    """A single-string marker can only carry one value, so a tool with
+    real options had nowhere to put them. Live-caught 2026-09-09: the
+    model wrote `SEARCH_LISTINGS: San Jose, CA 95120 for sale, price
+    filter 1000000 to 4000000, single family` -- the whole sentence
+    became `location`, the source matched nothing, two steps wasted."""
+
+    def _payload(self, argument: str) -> dict:
+        return to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": "search_listings", "args": {"argument": argument}}, rationale="r",
+        )["args"]
+
+    def test_a_json_second_part_becomes_real_arguments(self):
+        args = self._payload('San Jose, CA 95120\n{"zip_code": "95120", "max_price": 2500000}')
+        self.assertEqual(args["location"], "San Jose, CA 95120")
+        self.assertEqual(args["zip_code"], "95120")
+        self.assertEqual(args["max_price"], 2500000)
+
+    def test_a_bare_one_line_marker_still_works(self):
+        args = self._payload("San Jose, CA 95120")
+        self.assertEqual(args["location"], "San Jose, CA 95120")
+        self.assertEqual(set(args), {"location"})
+
+    def test_a_non_json_second_part_is_kept_as_the_plain_string(self):
+        # The tool's own schema then rejects it honestly, rather than
+        # this layer silently dropping what the model wrote.
+        args = self._payload("San Jose\nunder 2 million please")
+        self.assertEqual(args["location"], "San Jose")
+        self.assertEqual(args["filters"], "under 2 million please")
+
+    def test_malformed_json_does_not_crash_the_router(self):
+        args = self._payload('San Jose\n{"zip_code": ')
+        self.assertEqual(args["location"], "San Jose")
+        self.assertIn("filters", args)
+
+    def test_the_tool_still_declares_read_only_network_policy(self):
+        payload = to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": "search_listings", "args": {"argument": "San Jose"}}, rationale="r",
+        )
+        self.assertEqual(payload["reversibility"], "read_only")
+        self.assertTrue(payload["scope"]["network"])

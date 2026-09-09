@@ -30,6 +30,7 @@ the WHOLE suite (not a subdirectory or file) and passed.
 from __future__ import annotations
 
 from ..api import CheckContext, CheckResult, Feedback, VerifyRequest
+from ._files import written_paths
 from .didanything import WRITE_TOOLS
 
 # Kinds whose product is a change to real source. `skill` is excluded --
@@ -83,6 +84,28 @@ def _ran_whole_suite_and_passed(steps: list[dict]) -> bool:
     return False
 
 
+def _touched_python(req: VerifyRequest) -> bool:
+    """Whether this task wrote any Python at all.
+
+    The whole point of this check is "your change might have broken
+    something else, and only the suite can tell you". A task whose only
+    product is a `.html` page cannot break the Python suite, and there
+    is nothing for the suite to say about it -- `js_syntax`, `render`
+    and `trailing_narration` are its real gates. Demanding a suite run
+    anyway is how the second 95120 trial blocked with a correct page
+    uncommitted (live, 2026-09-09).
+
+    Unknown is Python: when the request carries no `written_paths` at
+    all (an older producer, a blocked session), this stays true and the
+    check behaves exactly as it did before -- the conservative reading,
+    since a missed suite run is the bug this check exists to catch.
+    """
+    paths = written_paths(req)
+    if not paths:
+        return True
+    return any(p.lower().endswith(".py") for p in paths)
+
+
 class FullSuiteRanCheck:
     name = "full_suite_ran"
     cost = "free"
@@ -107,6 +130,7 @@ class FullSuiteRanCheck:
             and bool(steps)
             and req.subject.get("complete_log", True)
             and any(s.get("tool") in WRITE_TOOLS for s in steps)
+            and _touched_python(req)
         )
 
     async def run(self, req: VerifyRequest, ctx: CheckContext) -> CheckResult:

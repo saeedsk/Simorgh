@@ -73,6 +73,49 @@ class TestPutVerifySubjectKeepsTheFullFigure(unittest.TestCase):
             self.assertIn("temperature 0.7 with top_p 0.9.", kept)
 
 
+class TestWrittenPathsTravelWithTheVerifyRequest(unittest.TestCase):
+    """The non-Python checks (`js_syntax`, `render`,
+    `trailing_narration`) have to open the artifact to say anything true
+    about it, and the request carried only prose -- so a generated page
+    with an unclosed brace or the model's own commentary appended passed
+    every mechanical gate (both happened, 2026-09-09). The session knows
+    exactly which paths it wrote; now it says so."""
+
+    @run
+    async def test_the_paths_the_session_wrote_are_in_the_blobbed_subject(self):
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+            session = Session(
+                task_id="t-paths", kind="patch", mode="execute", profile=profiles.PATCH,
+                user_text="build the page", subject="docs/games/x.html",
+            )
+            session.steps.append(Step(1, "act", "wrote it", tool="apply_source_patch", ok=True))
+            session.uncommitted.add("docs/games/x.html")
+            session.created.add("docs/games/x.html")
+
+            ref = await runner._put_verify_subject(session, "done")
+            payload = json.loads(await h.ledger.get_blob(ref))
+
+            self.assertEqual(payload["written_paths"], ["docs/games/x.html"])
+            self.assertEqual(payload["subject"], "docs/games/x.html")
+
+    @run
+    async def test_a_session_that_wrote_nothing_reports_an_empty_list(self):
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+            session = Session(
+                task_id="t-none", kind="research", mode="execute", profile=profiles.RESEARCH,
+                user_text="what is x?",
+            )
+            session.steps.append(Step(1, "act", "read", tool="read_file", ok=True))
+
+            payload = json.loads(await h.ledger.get_blob(await runner._put_verify_subject(session, "x")))
+            self.assertEqual(payload["written_paths"], [])
+            self.assertEqual(payload["subject"], "")
+
+
 class TestRunTestsTargetMarkerReflectsWhatActuallyRan(unittest.TestCase):
     """`_propose_and_await` prefixes a `run_tests` step's recorded detail
     with `[ran target='...']`, which `FullSuiteRanCheck`

@@ -915,9 +915,18 @@ class SessionRunner:
         # know when they are looking at a partial log, the same way
         # `unsupported_claims` already does.
         complete_log = session.attempt <= 1 and not session.carried
+        # The paths this session actually wrote, so a mechanical check can
+        # open the real file instead of inferring it from a step summary.
+        # Added 2026-09-09 for the non-Python checks (js_syntax, render,
+        # trailing_narration): every one of them has to read the artifact
+        # to say anything true about it, and the request carried only
+        # prose. `subject` travels too -- a patch task names its file up
+        # front, and a session that was blocked before its write still
+        # tells the checks what it was aiming at.
+        written = sorted(session.uncommitted | session.created)
         payload = json.dumps({
             "description": session.user_text, "result": text[:2000], "kind": session.kind, "steps": steps,
-            "complete_log": complete_log,
+            "complete_log": complete_log, "subject": session.subject or "", "written_paths": written,
         }).encode("utf-8")
         return await self._ledger.put_blob(payload, content_type="application/json")
 

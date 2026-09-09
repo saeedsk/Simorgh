@@ -919,6 +919,11 @@ class RunJsSandboxedTool:
 
 # pytest's own exit code for "no tests were collected". Not a failure.
 _PYTEST_NO_TESTS_COLLECTED = 5
+# pytest's exit code for a usage error -- what a non-Python target
+# produces ("file or directory not found"). Only ever read as "nothing
+# to run" when the target really is not Python; a genuine usage error on
+# a Python target (a bad flag, an unreadable conftest) stays a failure.
+_PYTEST_USAGE_ERROR = 4
 
 
 class RunTestsTool:
@@ -992,11 +997,28 @@ class RunTestsTool:
             # the one the model itself calls, and reporting a new file's
             # missing tests as a failure is what stopped Sim committing
             # its first skill (live-caught 2026-09-07).
-            no_tests = completed.returncode == _PYTEST_NO_TESTS_COLLECTED
+            # Exit 4 is pytest's *usage* error, which is what a
+            # non-Python target produces ("file or directory not found"
+            # is exit 4, not 5). Live-caught 2026-09-09, second 95120
+            # trial: told to run its tests, Sim called `run_tests
+            # docs/games/real_estate_95120_live.html`, got exit 4, read
+            # it as a failing suite, and the task blocked with a
+            # correct, real-data page sitting uncommitted. A target that
+            # is not Python has no tests *by construction* -- that is the
+            # same honest "nothing was run" as exit 5, not a failure. The
+            # hint names the call that would actually check the change.
+            not_python = not (target == "tests" or target.endswith(".py") or (dest / target).is_dir())
+            usage_error = completed.returncode == _PYTEST_USAGE_ERROR and not_python
+            no_tests = completed.returncode == _PYTEST_NO_TESTS_COLLECTED or usage_error
             ok = completed.returncode == 0 or no_tests
             output = completed.stdout[-cap:]
             if no_tests:
                 output = (output + "\n\n[no tests cover this target yet -- nothing was run]").strip()
+            if usage_error:
+                output += (
+                    "\n[pytest only collects Python tests, and this target is not Python. "
+                    "To check a change like this against the suite, call run_tests with no target.]"
+                )
             return ToolResult(
                 ok=ok, output=output,
                 error=None if ok else f"exit_code={completed.returncode}",
