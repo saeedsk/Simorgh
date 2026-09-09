@@ -242,6 +242,43 @@ class TestStaticAnalysisRule(unittest.IsolatedAsyncioTestCase):
         self.assertIn("line 3", decision.reasons[0])
 
 
+class TestRunScriptIsStillGuarded(unittest.IsolatedAsyncioTestCase):
+    """`run_script` (2026-09-09) runs real Python with the repo
+    importable and the network reachable. It is only a safe thing to add
+    because its payload arrives as `code`, which is exactly what
+    DenylistRule and StaticAnalysisRule read -- so the rule that makes
+    the resourcefulness story work ("use an installed library, do not
+    hand-roll a socket") is enforced, not merely requested in a prompt.
+    """
+
+    async def test_hand_written_network_code_is_denied_here_too(self):
+        decision = await _evaluate(
+            DenylistRule(),
+            _proposal(tool="run_script", args={"code": "import requests\nrequests.get('http://x')"}),
+            _ctx(),
+        )
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_importing_an_installed_library_is_allowed(self):
+        # The whole point: the library does the networking, and the
+        # library is a reviewed dependency rather than a raw socket.
+        decision = await _evaluate(
+            DenylistRule(),
+            _proposal(tool="run_script",
+                      args={"code": "from homeharvest import scrape_property\nprint(scrape_property(location='San Jose, CA'))"}),
+            _ctx(),
+        )
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_a_subprocess_escape_is_denied(self):
+        decision = await _evaluate(
+            DenylistRule(),
+            _proposal(tool="run_script", args={"code": "import subprocess\nsubprocess.run(['sh'])"}),
+            _ctx(),
+        )
+        self.assertEqual(decision.kind, "deny")
+
+
 class TestChangedLineNumbers(unittest.TestCase):
     def test_inserted_and_replaced_lines_are_reported_one_based(self):
         old = "a\nb\nc\n"

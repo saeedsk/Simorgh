@@ -126,6 +126,9 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "web_fetch": 45.0,
     "render_page": 30.0,
     "search_listings": 45.0,
+    "find_package": 30.0,
+    "install_package": 330.0,
+    "run_script": 200.0,
     "geocode": 15.0,
     "apply_source_patch": 60.0,
     "apply_skill": 60.0,
@@ -703,6 +706,7 @@ class SessionRunner:
                     kind, _, path = str(effect).partition(":")
                     if kind == "file_write" and path:
                         session.uncommitted.add(path)
+                        session.wrote.add(path)
                     elif kind == "file_create" and path:
                         # A file this session brought into existence. If it
                         # is never committed, cleanup removes it outright:
@@ -711,6 +715,7 @@ class SessionRunner:
                         # behind as a dirty tree (watched trials, 2026-09-07).
                         session.uncommitted.add(path)
                         session.created.add(path)
+                        session.wrote.add(path)
                     elif kind in ("git_commit", "git_discard") and path:
                         session.uncommitted.discard(path)
                         session.created.discard(path)
@@ -923,7 +928,7 @@ class SessionRunner:
         # prose. `subject` travels too -- a patch task names its file up
         # front, and a session that was blocked before its write still
         # tells the checks what it was aiming at.
-        written = sorted(session.uncommitted | session.created)
+        written = sorted(session.wrote)
         payload = json.dumps({
             "description": session.user_text, "result": text[:2000], "kind": session.kind, "steps": steps,
             "complete_log": complete_log, "subject": session.subject or "", "written_paths": written,

@@ -102,6 +102,16 @@ class Session:
     # wrote it. `git_discard` cannot restore an untracked file, so these
     # are deleted at cleanup instead.
     created: set[str] = field(default_factory=set)
+    # Every path this session wrote, ever. Distinct from the two sets
+    # above, which are cleanup bookkeeping: both are DISCARDED on a
+    # successful `git_commit`, so a task that did the right thing ends
+    # with both empty. Verification's file-reading checks (js_syntax,
+    # render, trailing_narration) need "what did this session produce",
+    # which is exactly the question those sets stop answering the moment
+    # the work succeeds -- live-caught 2026-09-09, when a page with the
+    # model's own `GIT_COMMIT:` marker appended after `</html>` passed
+    # verification because the checks saw no paths at all. Only grows.
+    wrote: set[str] = field(default_factory=set)
     state: str = "CLAIMED"
     resumed_from_step: int = 0
     # A retry's memory of the attempts before it (`resume.py`): what

@@ -38,7 +38,9 @@ PATCH = Profile(
            # A task that builds something data-backed needs the data; both
            # are read-only and Guardian-gated, and run_shell (already here)
            # is far broader than either.
-           "web_search", "web_fetch", "search_listings", "geocode"),
+           "web_search", "web_fetch", "search_listings", "geocode",
+           # A missing capability is not a denial: find a library, install it, use it.
+           "find_package", "install_package", "run_script"),
     # 8 left no room: read, apply, run_tests, git_commit is already four
     # tool calls before a single wrong turn, and the last step is spent
     # on the forced final answer. Live-caught 2026-09-07.
@@ -51,7 +53,7 @@ RESEARCH = Profile(
     # (observer, 2026-09-08). Guardian gates it the same as anywhere.
     name="research",
     tools=("self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch",
-           "search_listings", "geocode", "run_tests", "run_shell"),
+           "search_listings", "geocode", "find_package", "run_tests", "run_shell"),
     # 6 predates web_search/web_fetch. A question with a repo half and a
     # web half needs search + fetch + two repo steps + an answer, and
     # died on step 6 every time (observer, 2026-09-08).

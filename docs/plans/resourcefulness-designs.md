@@ -563,3 +563,67 @@ quota; dedupe on a repeat.
 
 Run the acceptance trial from the plan's section 5 after step 2 and
 after step 4.
+
+---
+
+# Implementation log (2026-09-09, Opus session)
+
+What actually landed, what the acceptance trials found, and where a
+design in this file turned out to be wrong. Kept here rather than in a
+commit message because the corrections matter to whoever picks up the
+remaining workstreams.
+
+## Landed
+
+| step | commit | what |
+|---|---|---|
+| 2 | `9e2499a` | WS9: `js_syntax`, `render`, `trailing_narration` checks; `written_paths`/`subject` on the verify request; `run_tests` non-Python target; `FullSuiteRanCheck` Python-only gate; `search_listings` two-part marker |
+| 3a | `2b96b07` | 0.2: `metadata_ref` on `action.result`; rows hand-back to `results/`; the ZIP-in-location fix |
+| 3b | (this) | WS1 `find_package`/`install_package`, WS2 `run_script`, and the `session.wrote` fix |
+
+## Corrections to this document
+
+1. **`written_paths` cannot be `uncommitted | created`** (design 0.3).
+   Both sets are *cleanup bookkeeping* and are discarded when
+   `git_commit` succeeds, so a task that did the right thing reports
+   writing nothing -- and every file-reading check skips. The first
+   version shipped with this hole and the acceptance trial walked
+   straight through it: a page with the model's own `GIT_COMMIT:`
+   marker appended after `</html>` passed verification because the
+   check saw no paths. Fixed with `Session.wrote`, a set that only
+   grows. **Any future check that asks "what did this session
+   produce" must use `wrote`.**
+
+2. **No absolute-path exception in `pathsafety`** (design 0.2). The
+   design proposed letting `read_file` accept an absolute path under
+   `data_dir` so it could reach the results file. `read_file` has
+   never accepted an absolute path; widening that to save one config
+   entry weakens a real boundary. Instead `results/` is a readable
+   root and deliberately not a write scope -- Sim reads back what it
+   fetched and cannot commit it.
+
+3. **A tool must not silently ignore an argument written the human
+   way.** `search_listings` accepted `location="San Jose, CA 95120"`
+   and ignored the ZIP, because the ZIP had its own parameter.
+   homeharvest matches metro-wide, so the page Sim built was titled
+   95120 and listed properties in five other ZIPs -- every mechanical
+   check passing, because the *page* was fine. A ZIP in the location
+   is now the filter unless `zip_code` overrides it. Worth generalising
+   when adding any tool with a "structured" and a "natural" way to say
+   the same thing: accept both, and say which one you used.
+
+## What the trials proved
+
+- Before: the same task blocked, leaving a correct page uncommitted.
+- After `9e2499a`: completed in 105s, real data, honest disclosure --
+  but the data was the wrong ZIP (finding 3).
+- After `2b96b07`: completed in 56s, 5 real 95120 listings, correct
+  coordinates, source disclosed in the page. Trailing narration still
+  present in that run -- which is what exposed finding 1.
+
+## Still open
+
+Phase order from D6 stands for the rest: D4 capability self-test, then
+D1/D2 (grants + MCP catalogue, **the D1 diff wants review on an
+expensive model before merge**), then WS11, D3, WS4, WS8, D5. WS7's
+source book is not started.

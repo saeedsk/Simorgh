@@ -761,6 +761,7 @@ class TestBuiltinTools(unittest.TestCase):
             "run_js_sandboxed", "run_tests",
             "apply_source_patch", "git_commit", "git_revert", "git_discard", "apply_skill",
             "web_fetch", "web_search", "render_page", "search_listings", "geocode",
+            "find_package", "install_package", "run_script",
             "propose_mcp_server", "run_shell",
         })
 
