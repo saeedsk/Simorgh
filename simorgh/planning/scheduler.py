@@ -40,19 +40,36 @@ def select_ready(store: TaskStore, *, priority_weights: dict[str, int], limit: i
 
 class Scheduler:
     def __init__(self, store: TaskStore, bus: Bus, clock: Clock, *, source: str,
-                 priority_weights: dict[str, int] | None = None, lease_seconds: float = 600.0) -> None:
+                 priority_weights: dict[str, int] | None = None, lease_seconds: float = 600.0,
+                 autonomous_origins: tuple[str, ...] = ()) -> None:
         self._store = store
         self._bus = bus
         self._clock = clock
         self._source = source
         self._priority_weights = priority_weights or DEFAULT_PRIORITY_WEIGHTS
         self._lease_seconds = lease_seconds
+        self._autonomous_origins = frozenset(autonomous_origins)
         self.paused = False
+        # `auto off` is a `scope="autonomous"` pause: the system stays
+        # RUNNING, so `paused` above stays False and every consumer that
+        # keys off the whole-system state carries on. Live-caught
+        # 2026-09-09 -- the creator typed `auto off` and watched
+        # curiosity-origin patch tasks keep being offered, claimed and
+        # run. Curiosity had stopped GENERATING candidates (it is the one
+        # subsystem that reads `autonomous_paused`), but the backlog
+        # already in the store kept executing, which is not what anyone
+        # means by "off".
+        self.autonomous_paused = False
+
+    def _offerable(self, task: Task) -> bool:
+        return not (self.autonomous_paused and task.origin in self._autonomous_origins)
 
     async def dispatch_ready(self) -> None:
         if self.paused:
             return
         for task in select_ready(self._store, priority_weights=self._priority_weights, limit=5):
+            if not self._offerable(task):
+                continue
             message = Message.new(
                 topics.TASK_AVAILABLE, source=self._source,
                 partition_key=f"task:{task.id}",

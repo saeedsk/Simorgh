@@ -50,7 +50,7 @@ class RenderingTestCase(unittest.TestCase):
         text = view.latest({"runs": [_run(model="glm"), _run(model="other", started=2.0)]})
         self.assertIn("glm", text)
         self.assertIn("other", text)
-        self.assertIn("2/3 correct", text)
+        self.assertIn("2/3", text)
 
     def test_latest_with_nothing_tells_you_how_to_start(self):
         self.assertIn("benchmark run", view.latest({"runs": []}))

@@ -45,6 +45,13 @@ class Config:
     # was supposed to establish. `scheduler.py` now imports this dict
     # rather than keeping its own copy, so there is one default to get
     # right, not two to keep in sync by hand.
+    # Origins that `auto off` (a `scope="autonomous"` pause) stops.
+    # Matches guardian/config.py::autonomous_origins, duplicated rather
+    # than imported for the same reason Guardian duplicates the repo
+    # root: a subsystem may not import another's internals. "human" is
+    # deliberately absent -- pausing autonomy must never stop the work
+    # a person just asked for.
+    autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project")
     priority_weights: dict = field(
         default_factory=lambda: {"human": 3, "benchmark": 2, "reflection": 2, "curiosity": 1}
     )

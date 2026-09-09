@@ -79,7 +79,7 @@ class SummaryTestCase(unittest.TestCase):
         self.assertIn("gaia", text)
         self.assertIn("glm", text)
         self.assertIn("Level 1", text)
-        self.assertIn("2/4 correct", text)
+        self.assertIn("2/4", text)
         self.assertIn("abc123", text)
 
     def test_a_partial_run_says_so(self):
@@ -186,3 +186,60 @@ class BlockedAnswersTestCase(unittest.TestCase):
 
     def test_one_blocked_reads_as_singular(self):
         self.assertIn("1 answer our own pipeline stopped", summary(_run(blocked=1)))
+
+
+class SummaryLayoutTestCase(unittest.TestCase):
+    """The creator, 2026-09-09: the benchmark view was "not clean ...
+    prefer proper tabling and formatting".
+
+    What was wrong was not decoration: the overall row and the per-level
+    rows were built by different format strings with different padding,
+    so the headline accuracy floated far right of the level accuracies
+    beneath it and the counts sat at a third position. A 0% run drew no
+    bar at all, so the result you most want to see looked like a
+    rendering glitch.
+    """
+
+    def _run(self, **over):
+        base = {"suite": "bfcl-parallel", "model": "glm", "run_id": "8d37a547333c",
+                "correct": 0, "attempted": 3, "seconds": 1800, "suite_version": "13fe055aed8e",
+                "by_level": {"live_parallel": (0, 1), "parallel": (0, 2)}}
+        base.update(over)
+        return base
+
+    def _rows(self, text):
+        return [l for l in text.splitlines() if "%" in l]
+
+    def test_every_row_shares_one_column_grid(self):
+        rows = self._rows(summary(self._run(), enabled=False))
+        self.assertEqual(len(rows), 3)  # overall + two levels
+        starts = {r.index("%") for r in rows}
+        self.assertEqual(len(starts), 1, f"percent column not aligned: {rows}")
+
+    def test_a_zero_percent_run_still_draws_a_full_width_bar(self):
+        # The bfcl-parallel case that started this: 0.0% rendered as
+        # nothing, so the row looked broken rather than bad.
+        row = self._rows(summary(self._run(), enabled=False))[0]
+        self.assertIn("░", row)
+        self.assertIn("0.0%", row)
+
+    def test_the_overall_row_is_just_the_first_row_of_the_grid(self):
+        text = summary(self._run(), enabled=False)
+        self.assertIn("overall", text)
+        rows = self._rows(text)
+        self.assertTrue(rows[0].strip().startswith("overall"))
+
+    def test_every_detail_survives_the_reformat(self):
+        text = summary(self._run(
+            correct=1, attempted=5, partial=True, skipped=2, cost_usd=0.1234,
+            blocked=1, blocked_but_correct=1, by_level={"1": (1, 5)}), enabled=False)
+        for detail in ("bfcl-parallel", "glm", "8d37a547333c", "13fe055aed8e",
+                       "1800s", "$0.1234", "2 skipped", "[partial]",
+                       "1/5", "20.0%", "our own pipeline stopped"):
+            self.assertIn(detail, text, f"{detail!r} was lost in the reformat")
+
+    def test_no_escape_codes_when_colour_is_off(self):
+        self.assertNotIn("\x1b", summary(self._run(), enabled=False))
+
+    def test_a_bar_is_drawn_in_colour_when_colour_is_on(self):
+        self.assertIn("\x1b", summary(self._run(), enabled=True))

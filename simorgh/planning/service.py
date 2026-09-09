@@ -139,6 +139,7 @@ class Service:
         self._scheduler = Scheduler(
             self._store, ctx.bus, ctx.clock, source=ctx.source,
             priority_weights=self.config.priority_weights, lease_seconds=self.config.lease_seconds,
+            autonomous_origins=self.config.autonomous_origins,
         )
         self._cognition = BusCognitionCaller(
             ctx.bus, ctx.clock, source=ctx.source, timeout=self.config.think_timeout_s,
@@ -794,6 +795,11 @@ class Service:
         state = message.payload.get("state")
         if self._scheduler is not None:
             self._scheduler.paused = state in ("paused", "stopping", "stopped")
+            # `system.state.changed` has always carried this; nothing
+            # read it. A scoped autonomous pause leaves `state` at
+            # "running", so without this the scheduler kept offering
+            # curiosity/reflection work after `auto off`.
+            self._scheduler.autonomous_paused = bool(message.payload.get("autonomous_paused"))
 
     # -- reads ----------------------------------------------------------------------
 

@@ -50,6 +50,32 @@ def bar(fraction: float, width: int = 24) -> str:
     return (out + " " * width)[:width]
 
 
+_TRACK = "░"
+
+
+def track_bar(fraction: float, width: int = 24) -> str:
+    """`bar`, but the unfilled remainder is drawn rather than left blank.
+
+    A blank remainder means 0% renders as nothing at all: a suite that
+    scored zero showed an empty gap where every other row had a bar, so
+    the one result you most want to see was the one that looked like a
+    rendering glitch. A track makes the scale visible and every row the
+    same shape (creator, 2026-09-09: "not clean ... prefer proper
+    tabling")."""
+    filled = bar(fraction, width).rstrip()
+    return filled + _TRACK * (width - len(filled))
+
+
+def accuracy_color(fraction: float) -> str:
+    """Green/amber/red by accuracy. Deliberately coarse -- the number is
+    right there; the colour is for finding the bad row at a glance."""
+    if fraction >= 0.7:
+        return "green"
+    if fraction >= 0.4:
+        return "yellow"
+    return "red"
+
+
 def sparkline(values: list[float], *, lo: float = 0.0, hi: float = 1.0) -> str:
     """One row of block characters -- a trend at a glance, in a footer."""
     if not values:
@@ -107,45 +133,83 @@ def _ago(when: float, *, now: float | None = None) -> str:
     return "just now"
 
 
-def summary(record: dict, *, width: int = 24) -> str:
-    """One run, in full: the headline, then a bar per level."""
+def summary(record: dict, *, width: int = 24, enabled: bool | None = None) -> str:
+    """One run, in full, as a table.
+
+    Every number the old layout showed is still here; what changed is
+    that they line up. Before (creator, 2026-09-09), the overall row and
+    the per-level rows were built by different format strings with
+    different padding, so nothing shared a column: the headline accuracy
+    floated far right of the level accuracies beneath it, the counts sat
+    at a third position, and a 0% run drew no bar at all. Now the
+    overall row is simply the first row of the same grid, and the
+    metadata that used to crowd the title has its own dim line.
+    """
+    import sys
+
+    from .render import color_enabled, style
+
+    # `color_enabled()` answers the NO_COLOR question only -- it is
+    # deliberately not tty-aware, because most callers already know
+    # whether they are writing to a terminal. This one does not: the
+    # benchmark views are pure `payload -> str` functions several layers
+    # below the REPL that holds that flag. Ask the terminal directly, so
+    # `benchmark > file` and a piped CI log get clean text rather than
+    # escape codes, the same rule `live_status_enabled` follows.
+    on = (color_enabled() and sys.stdout.isatty()) if enabled is None else enabled
     correct, attempted = int(record.get("correct") or 0), int(record.get("attempted") or 0)
     skipped = int(record.get("skipped") or 0)
-    lines = [
-        f"{record.get('suite', '?')} · {record.get('model', '?')} · {record.get('run_id', '')}"
-        + (f"  ({record['note']})" if record.get("note") else "")
-        + ("  [partial]" if record.get("partial") else ""),
-        f"  {bar(_acc(record), width)}  {_pct(correct, attempted)}"
-        f"  {correct}/{attempted} correct"
-        + (f", {skipped} skipped" if skipped else ""),
-    ]
-    blocked = int(record.get("blocked") or 0)
-    if blocked:
-        # The line that says whether our own pipeline is the problem.
-        kept = int(record.get("blocked_but_correct") or 0)
-        lines.append(
-            f"  {'':<{24}}  {blocked} answer{'s' if blocked != 1 else ''} our own pipeline stopped"
-            + (f", {kept} of them right" if kept else "")
-        )
+
+    rows: list[tuple[str, int, int]] = [("overall", correct, attempted)]
     by_level = _levels(record)
     if len(by_level) > 1 or (by_level and "" not in by_level):
-        # A GAIA level is "1"; a BFCL one is "live_parallel". Widen the
-        # column to the longest name present rather than to a guess, so
-        # the bars still line up (watched, 2026-09-08).
-        names = {level: _level_name(level) for level in by_level}
-        column = max((len(n) for n in names.values()), default=9)
-        for level, (correct, attempted) in by_level.items():
-            lines.append(
-                f"    {names[level]:<{column}} {bar(correct / attempted if attempted else 0, width)}"
-                f"  {_pct(correct, attempted)}  {correct}/{attempted}"
-            )
-    column = max((len(_level_name(k)) for k in by_level), default=9)
+        # A GAIA level is "1"; a BFCL one is "live_parallel".
+        rows.extend((_level_name(level), c, a) for level, (c, a) in by_level.items())
+
+    label_w = max(len(name) for name, _, _ in rows)
+    correct_w = max(len(str(c)) for _, c, _ in rows)
+    attempted_w = max(len(str(a)) for _, _, a in rows)
+
+    title = f"{record.get('suite', '?')} · {record.get('model', '?')}"
+    head = style(title, "bold", enabled=on)
+    if record.get("partial"):
+        head += "  " + style("[partial]", "yellow", enabled=on)
+    if record.get("note"):
+        head += "  " + style(f"({record['note']})", "dim", enabled=on)
+    lines = [head]
+
+    # Everything that identifies the run, on one dim line instead of
+    # scattered across the title and a trailing row.
+    meta = [str(record.get("run_id") or "")]
+    meta.append(f"suite {record.get('suite_version', 'unknown')}")
+    meta.append(f"{float(record.get('seconds') or 0.0):.0f}s")
     cost_usd = float(record.get("cost_usd") or 0.0)
-    cost = f"  ·  ${cost_usd:.4f}" if cost_usd else ""
-    lines.append(
-        f"    {'':<{column}} {float(record.get('seconds') or 0.0):.0f}s total{cost}"
-        f"  ·  suite {record.get('suite_version', 'unknown')}"
-    )
+    if cost_usd:
+        meta.append(f"${cost_usd:.4f}")
+    if skipped:
+        meta.append(f"{skipped} skipped")
+    lines.append("  " + style(" · ".join(m for m in meta if m), "dim", enabled=on))
+    lines.append("")
+
+    for name, row_correct, row_attempted in rows:
+        fraction = (row_correct / row_attempted) if row_attempted else 0.0
+        colour = accuracy_color(fraction)
+        lines.append(
+            f"  {name:<{label_w}}  "
+            + style(track_bar(fraction, width), colour, enabled=on)
+            + "  " + style(_pct(row_correct, row_attempted), colour, enabled=on)
+            + f"  {row_correct:>{correct_w}}/{row_attempted:<{attempted_w}}"
+        )
+
+    blocked = int(record.get("blocked") or 0)
+    if blocked:
+        # The line that says whether our own pipeline is the problem,
+        # rather than the model.
+        kept = int(record.get("blocked_but_correct") or 0)
+        text = f"{blocked} answer{'s' if blocked != 1 else ''} our own pipeline stopped"
+        if kept:
+            text += f", {kept} of them right"
+        lines.append("  " + style(f"⚠ {text}", "yellow", enabled=on))
     return "\n".join(lines)
 
 
