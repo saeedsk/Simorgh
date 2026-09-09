@@ -25,6 +25,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "web_fetch": ("read_only", True),
     "web_search": ("read_only", True),
     "render_page": ("read_only", True),
+    "browse_page": ("reversible", True),
     "install_package": (
         "first line: `pip` or `npm`. Second line: the package name alone (optionally pinned, "
         'e.g. `homeharvest==0.8.18`), or a JSON object like {"spec": "homeharvest", '
@@ -35,6 +36,18 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
         "repo importable and the network reachable, so `import <an installed library>` works -- "
         "but writing your own network calls (requests, urllib, socket) is still refused: install "
         "a library and call it instead."
+    ),
+    "browse_page": (
+        "first line: the URL or repo path. Second line: a JSON array of actions, e.g. "
+        '[{"type": ["#q", "hello"]}, {"click": "#go"}, {"wait": "#results"}, '
+        '{"screenshot": "after"}]. Allowed: click, type, press, wait, scroll, screenshot. '
+        "There is deliberately no way to run your own JavaScript here."
+    ),
+    "run_container": (
+        "first line: the image (e.g. `python:3.12-slim`). Second line: a JSON object like "
+        '{"command": ["python", "-c", "print(1)"], "network": false, '
+        '"input_files": ["docs/data.csv"]}. The repo is NOT visible inside -- name files in '
+        "input_files and they are copied to /work."
     ),
     "search_listings": ("read_only", True),
     "geocode": ("read_only", True),
@@ -59,6 +72,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # Each changes this machine and reaches the network: gated like run_shell.
     "install_package": ("irreversible", True),
     "run_script": ("irreversible", True),
+    "run_container": ("irreversible", True),
     # -- MCP (execution/mcp.py's own module docstring): a human adds an
     # entry here, by the server's registered tool name
     # (`mcp_<server>_<tool>`), for every MCP tool they want the model to
@@ -182,6 +196,8 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "apply_skill": ("subject", "code"),
     "git_commit": ("path", "message"),
     "search_listings": ("location", "filters"),
+    "browse_page": ("target", "actions"),
+    "run_container": ("image", "command"),
     "install_package": ("manager", "spec"),
 }
 _MARKER_ARG_HINT.update({
