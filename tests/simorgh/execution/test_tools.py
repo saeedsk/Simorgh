@@ -734,7 +734,8 @@ class TestBuiltinTools(unittest.TestCase):
             "read_file", "list_dir", "search_code", "self_map", "run_python_sandboxed",
             "run_js_sandboxed", "run_tests",
             "apply_source_patch", "git_commit", "git_revert", "git_discard", "apply_skill",
-            "web_fetch", "web_search", "propose_mcp_server", "run_shell",
+            "web_fetch", "web_search", "render_page", "search_listings", "geocode",
+            "propose_mcp_server", "run_shell",
         })
 
 

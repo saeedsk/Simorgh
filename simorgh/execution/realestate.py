@@ -1,0 +1,219 @@
+"""`search_listings`: real, current for-sale (or for-rent) property data
+via the `homeharvest` package (github.com/Bunsly/HomeHarvest) -- an
+actively-maintained open-source library that reads Realtor.com's own
+site backend the way a browser does. This is deliberately NOT a
+hand-rolled scraper: the creator, 2026-09-07, wants external toolset
+libraries reused rather than reinvented, with Guardian seeing every
+call and the dependency staying optional -- exactly the shape this
+fills.
+
+This closes the gap the 2026-09-09 real-estate-app experiment
+surfaced: asked to build a San Jose 95120 listings browser with data
+matching Zillow/Realtor.com, Sim correctly refused to fabricate data
+and built the UI against clearly-labeled sample data instead, since no
+listings source was configured. Live-tested here the same day: a real
+query for "San Jose, CA 95120" returned real Almaden Valley street
+addresses, prices, and coordinates.
+
+Two things worth saying plainly, and said in every result's own text
+(not just in this docstring):
+
+- **Unofficial.** `homeharvest` reads Realtor.com's internal endpoints,
+  not a published/licensed data API -- it can break or get rate-limited
+  with no warning, the same caveat that applies to any scraper, however
+  well-maintained. It is NOT Zillow-sourced (Zillow's backend is far
+  more defended); a caller who needs Zillow-parity should say so and
+  verify manually, not assume this tool covers it.
+- **Broad by default.** `location="San Jose, CA 95120"` alone returns
+  listings across many San Jose ZIP codes, not just 95120 (live-tested:
+  1104 rows for the metro query, 50 of them actually in 95120) --
+  `zip_code` here filters the results client-side after fetching, since
+  homeharvest's own location matching doesn't narrow that precisely.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from collections import deque
+from dataclasses import dataclass
+
+from simorgh.contracts.protocols import ToolContext, ToolResult
+
+from .config import Config
+
+_DISCLAIMER = (
+    "via homeharvest (reads Realtor.com's own site backend -- an unofficial, actively-maintained "
+    "open-source scraper, NOT a licensed data API and NOT Zillow-sourced; can break or rate-limit "
+    "without warning; verify anything important directly against Realtor.com/Zillow)"
+)
+
+
+class ListingsUnavailable(Exception):
+    """No search was run: the dependency is missing, the request was
+    malformed, or the rate limit was already spent."""
+
+
+@dataclass(frozen=True)
+class Listing:
+    address: str
+    city: str
+    zip_code: str
+    price: float | None
+    sqft: float | None
+    price_per_sqft: float | None
+    beds: float | None
+    baths: float | None
+    latitude: float | None
+    longitude: float | None
+    url: str
+
+    def render(self, index: int) -> str:
+        money = f"${self.price:,.0f}" if self.price is not None else "price unknown"
+        size = f"{self.sqft:,.0f} sqft" if self.sqft is not None else "sqft unknown"
+        ppsf = f"${self.price_per_sqft:,.0f}/sqft" if self.price_per_sqft is not None else ""
+        beds_baths = ""
+        if self.beds is not None or self.baths is not None:
+            beds_baths = f"{self.beds or '?'}bd/{self.baths or '?'}ba"
+        detail = " · ".join(p for p in (size, ppsf, beds_baths) if p)
+        loc = f" ({self.latitude:.5f}, {self.longitude:.5f})" if self.latitude is not None and self.longitude is not None else ""
+        return f"{index}. {money} -- {self.address}, {self.city} {self.zip_code}\n   {detail}{loc}"
+
+
+def _num(row, key):
+    value = row.get(key)
+    try:
+        return float(value) if value is not None and value == value else None  # NaN != NaN
+    except (TypeError, ValueError):
+        return None
+
+
+def rows_to_listings(rows: list[dict]) -> list[Listing]:
+    listings = []
+    for row in rows:
+        price = _num(row, "list_price")
+        sqft = _num(row, "sqft")
+        ppsf = _num(row, "price_per_sqft")
+        if ppsf is None and price is not None and sqft:
+            ppsf = round(price / sqft, 2)
+        listings.append(Listing(
+            address=str(row.get("full_street_line") or row.get("street") or "unknown address"),
+            city=str(row.get("city") or ""),
+            zip_code=str(row.get("zip_code") or ""),
+            price=price, sqft=sqft, price_per_sqft=ppsf,
+            beds=_num(row, "beds"), baths=_num(row, "full_baths"),
+            latitude=_num(row, "latitude"), longitude=_num(row, "longitude"),
+            url=str(row.get("property_url") or ""),
+        ))
+    return listings
+
+
+def render(listings: list[Listing], location: str, matched: int, total: int) -> str:
+    header = f"{matched} listing(s) for {location!r}"
+    if matched != total:
+        header += f" (of {total} fetched before filtering)"
+    header += f" -- {_DISCLAIMER}"
+    if not listings:
+        return header
+    body = "\n".join(listing.render(index) for index, listing in enumerate(listings, start=1))
+    return f"{header}:\n{body}"
+
+
+class RealEstateListingsTool:
+    name = "search_listings"
+    description = (
+        "Search real, current for-sale property listings by location (city/ZIP), with optional "
+        "price/sqft/bed filters. Unofficial data source -- see the tool's output disclaimer."
+    )
+    read_only = True
+    reversibility = "read_only"
+    args_schema = {
+        "type": "object", "required": ["location"],
+        "properties": {
+            "location": {"type": "string"},
+            "zip_code": {"type": "string"},
+            "min_price": {"type": "number"}, "max_price": {"type": "number"},
+            "min_sqft": {"type": "number"}, "max_sqft": {"type": "number"},
+            "min_price_per_sqft": {"type": "number"}, "max_price_per_sqft": {"type": "number"},
+        },
+    }
+
+    def __init__(self, config: Config, *, scraper=None) -> None:
+        self._config = config
+        self._scraper = scraper
+        self._recent_calls: deque[float] = deque()
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        location = str(args.get("location") or "").strip()
+        if not location:
+            return ToolResult(ok=False, error="refused: an empty location")
+        try:
+            self._enforce_rate_limit(ctx)
+        except ListingsUnavailable as exc:
+            return ToolResult(ok=False, error=str(exc))
+
+        scraper = self._scraper
+        if scraper is None:
+            try:
+                from homeharvest import scrape_property as scraper
+            except ImportError:
+                return ToolResult(
+                    ok=False,
+                    error="refused: the `homeharvest` package is not installed (pip install homeharvest)",
+                )
+
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(scraper, location=location, listing_type="for_sale", past_days=60,
+                                   limit=max(self._config.real_estate_max_results * 10, 200)),
+                timeout=self._config.real_estate_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            return ToolResult(ok=False, error="timeout")
+        except Exception as exc:  # noqa: BLE001 -- a scraper failure is a result, never a crash
+            return ToolResult(ok=False, error=f"search failed: {exc!r}")
+
+        rows = df.to_dict("records") if hasattr(df, "to_dict") else list(df or [])
+        total = len(rows)
+        listings = rows_to_listings(rows)
+        zip_code = str(args.get("zip_code") or "").strip()
+        if zip_code:
+            listings = [l for l in listings if l.zip_code == zip_code]
+        listings = _apply_numeric_filters(listings, args)
+        matched = len(listings)
+        listings = listings[: self._config.real_estate_max_results]
+
+        return ToolResult(
+            ok=True, output=render(listings, location, len(listings), total),
+            metadata={
+                "location": location, "total_fetched": total, "matched": matched,
+                "returned": len(listings), "source": "homeharvest (unofficial, Realtor.com-derived)",
+            },
+        )
+
+    def _enforce_rate_limit(self, ctx: ToolContext) -> None:
+        now = ctx.clock.now() if ctx.clock else time.monotonic()
+        cutoff = now - self._config.real_estate_window_s
+        while self._recent_calls and self._recent_calls[0] < cutoff:
+            self._recent_calls.popleft()
+        if len(self._recent_calls) >= self._config.real_estate_max_calls:
+            raise ListingsUnavailable(
+                f"rate limit exceeded: {len(self._recent_calls)}/{self._config.real_estate_max_calls} "
+                f"listing searches in the last {self._config.real_estate_window_s:.0f}s"
+            )
+        self._recent_calls.append(now)
+
+
+def _apply_numeric_filters(listings: list[Listing], args: dict) -> list[Listing]:
+    bounds = (
+        ("min_price", "price", lambda v, b: v >= b), ("max_price", "price", lambda v, b: v <= b),
+        ("min_sqft", "sqft", lambda v, b: v >= b), ("max_sqft", "sqft", lambda v, b: v <= b),
+        ("min_price_per_sqft", "price_per_sqft", lambda v, b: v >= b),
+        ("max_price_per_sqft", "price_per_sqft", lambda v, b: v <= b),
+    )
+    for arg_key, field, cmp in bounds:
+        bound = args.get(arg_key)
+        if bound is None:
+            continue
+        listings = [l for l in listings if getattr(l, field) is not None and cmp(getattr(l, field), bound)]
+    return listings

@@ -32,6 +32,11 @@ _TOOL_NOTES: dict[str, str] = {
     "search_code": "grep the repo; cheaper than reading whole files to find something",
     "run_tests": "run the test suite (or a subset) and get the result back",
     "web_fetch": "fetch a URL; HTML comes back as text and a PDF as its text",
+    "render_page": "load a URL or repo-local file in a real headless browser; "
+                    "reports title, visible text, JS errors, and failed network requests",
+    "search_listings": "search real, current for-sale property listings by location, with price/sqft filters "
+                        "(unofficial data source -- see the tool's own disclaimer)",
+    "geocode": "turn a free-text address into latitude/longitude",
     "run_python_sandboxed": "run a short Python snippet in a sandbox; no repo access",
     "run_js_sandboxed": "run a short JavaScript snippet with Node in a sandbox; no repo access",
     "apply_source_patch": "write a change to a source file",

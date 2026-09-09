@@ -55,7 +55,11 @@ from simorgh.contracts.protocols import ToolContext, ToolResult
 from . import pathsafety
 from .config import Config
 from .htmltext import html_to_text, looks_like_html
+from .netsafety import FetchRefused, validate_public_http_url
+from .geocode import GeocodeTool
 from .pdftext import looks_like_pdf, pdf_to_text
+from .realestate import RealEstateListingsTool
+from .render import RenderPageTool
 
 # A PDF's bytes are mostly fonts and images, so the cap that bounds how
 # much TEXT a fetch may return is the wrong ceiling for one. What
@@ -394,10 +398,11 @@ class SearchCodeTool:
         return ToolResult(ok=True, output=output, metadata={"matches": len(matches), "files_scanned": scanned, "via": "python"})
 
 
-class FetchRefused(Exception):
-    """No request was made (or its result is discarded): a disallowed
-    scheme, a hostname that resolves to a private/internal address, a
-    DNS failure, or an exhausted rate limit."""
+# `FetchRefused`/`validate_public_http_url` live in `netsafety.py` now
+# (imported at module top) -- `render_page` needs the exact same SSRF
+# guard for its own remote-URL case, and importing it back from here
+# would be circular since this module imports `.render` transitively
+# via `builtin_tools`.
 
 
 def _decompress(raw: bytes, encoding: str) -> bytes:
@@ -611,21 +616,8 @@ class WebFetchTool:
         )
 
     def _validate_url(self, url: str) -> None:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            raise FetchRefused(f"refusing {url!r}: only http/https URLs are allowed")
-        if not parsed.hostname:
-            raise FetchRefused(f"refusing {url!r}: no hostname")
-        if self._config.web_fetch_allow_private_networks:
-            return
-        try:
-            addrinfo = self._resolver(parsed.hostname, None)
-        except socket.gaierror as exc:
-            raise FetchRefused(f"refusing {url!r}: could not resolve host: {exc!r}") from exc
-        for entry in addrinfo:
-            ip = ipaddress.ip_address(entry[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
-                raise FetchRefused(f"refusing {url!r}: resolves to a private/internal address ({ip}) -- SSRF protection")
+        validate_public_http_url(
+            url, allow_private=self._config.web_fetch_allow_private_networks, resolver=self._resolver)
 
     def _enforce_rate_limit(self, ctx: ToolContext) -> None:
         now = ctx.clock.now()
@@ -1473,7 +1465,8 @@ def builtin_tools(config: Config) -> list:
         RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
-        ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), ProposeMcpServerTool(),
+        ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
+        RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

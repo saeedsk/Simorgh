@@ -30,3 +30,11 @@ pypdf>=6.0
 # pass/fail result. Not needed to boot Simorgh itself -- only to run
 # its own test suite faster (2026-09-08).
 pytest-xdist>=3.6
+
+# `search_listings` (simorgh/execution/realestate.py): real, current
+# for-sale property data via Realtor.com's own site backend -- an
+# actively-maintained open-source library, not a licensed data API, so
+# it can break or get rate-limited without warning. Optional: imported
+# lazily, only when the tool is actually called, so nothing here is
+# required to boot.
+homeharvest>=0.4
