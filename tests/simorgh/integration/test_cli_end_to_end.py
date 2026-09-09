@@ -242,6 +242,65 @@ class TestABlockedTaskIsNotAnnouncedAsFinished(CliEndToEndTestCase):
         self.assertIn("42", out)
 
 
+class TestABlockedTaskThatRetriesStaysWatched(CliEndToEndTestCase):
+    """Live-caught (observer, 2026-09-08): `planning/service.py::
+    _retry_or_block` publishes `task.blocked` for every attempt it is
+    about to retry with a fresh budget on the SAME task_id -- the
+    terminal give-up case is a different topic, `task.failed` with
+    `terminal: true`. But `_on_task_event` said "task <id> ended
+    blocked" (final-sounding) and unconditionally dropped the task_id
+    from `_watched_tasks`, so once the retry actually completed, its
+    real answer fell through to the generic autonomous one-line
+    narration -- truncated to fit the terminal width -- instead of the
+    personalised "task <id> finished" block with the full answer a
+    human who typed `improve ...` should see for their own request."""
+
+    async def test_blocked_wording_says_retrying_not_ended(self) -> None:
+        task_id = "retryid123456"
+        self.interface._watched_tasks.add(task_id)  # noqa: SLF001
+        before = len(self.printed)
+        await self.kernel.bus.publish(self.kernel.bus.new(topics.TASK_BLOCKED, {
+            "task_id": task_id, "reason": "step budget exhausted with work still pending",
+            "retry_after": 5.0,
+        }))
+        await self._wait_for(lambda: len(self.printed) > before, what="the blocked notice")
+        out = "\n".join(self.printed[before:])
+        self.assertNotIn("ended blocked", out)
+        self.assertIn("retrying", out)
+
+    async def test_the_task_stays_watched_across_the_retry(self) -> None:
+        task_id = "retryid123456"
+        self.interface._watched_tasks.add(task_id)  # noqa: SLF001
+        await self.kernel.bus.publish(self.kernel.bus.new(topics.TASK_BLOCKED, {
+            "task_id": task_id, "reason": "step budget exhausted with work still pending",
+            "retry_after": 5.0,
+        }))
+        await self._wait_for(lambda: len(self.printed) > 0, what="the blocked notice")
+        self.assertIn(task_id, self.interface._watched_tasks)  # noqa: SLF001
+
+    async def test_the_retrys_own_completion_still_prints_the_full_answer(self) -> None:
+        """The regression itself: a retry that succeeds must still print
+        through the personalised "finished" path with the model's real,
+        untruncated answer -- not a truncated autonomous one-liner that
+        reads like unrelated background work."""
+        task_id = "retryid123456"
+        long_answer = "The real fix was applied and verified. " * 5
+        self.interface._watched_tasks.add(task_id)  # noqa: SLF001
+        await self.kernel.bus.publish(self.kernel.bus.new(topics.TASK_BLOCKED, {
+            "task_id": task_id, "reason": "step budget exhausted with work still pending",
+            "retry_after": 5.0,
+        }))
+        await self._wait_for(lambda: len(self.printed) > 0, what="the blocked notice")
+        before = len(self.printed)
+        await self.kernel.bus.publish(self.kernel.bus.new(topics.TASK_COMPLETED, {
+            "task_id": task_id, "result_summary": long_answer, "artifacts": [], "verification_ref": "",
+        }))
+        await self._wait_for(lambda: len(self.printed) > before, what="the completion notice")
+        out = "\n".join(self.printed[before:])
+        self.assertIn("finished", out)
+        self.assertIn(long_answer.strip(), out)
+
+
 class TestChatWhileTheSystemIsPaused(CliEndToEndTestCase):
     """A paused system runs no sessions, so no answer is coming. This
     used to publish the percept and wait 420 seconds for a reply that

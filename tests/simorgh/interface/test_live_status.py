@@ -2,9 +2,12 @@ import contextlib
 import io
 import os
 import unittest
+from pathlib import Path
 from unittest import mock
 
-from simorgh.interface.live_status import LiveStatus, live_status_enabled, verb_for
+from simorgh.execution.config import Config
+from simorgh.execution.tools import builtin_tools
+from simorgh.interface.live_status import _VERBS, LiveStatus, live_status_enabled, verb_for
 
 _HIDE_CURSOR = "\x1b[?25l"
 _SHOW_CURSOR = "\x1b[?25h"
@@ -186,6 +189,9 @@ class VerbForTestCase(unittest.TestCase):
         self.assertEqual(verb_for("act", "apply_skill"), "Applying")
         self.assertEqual(verb_for("act", "git_commit"), "Committing")
         self.assertEqual(verb_for("act", "git_revert"), "Reverting")
+        self.assertEqual(verb_for("act", "git_discard"), "Discarding")
+        self.assertEqual(verb_for("act", "run_tests"), "Testing")
+        self.assertEqual(verb_for("act", "search_code"), "Searching")
         self.assertEqual(verb_for("act", "propose_mcp_server"), "Proposing")
         self.assertEqual(verb_for("verify", None), "Verifying")
 
@@ -211,6 +217,22 @@ class VerbForTestCase(unittest.TestCase):
         # Wins even under "gather", the general-purpose fallback phase --
         # an mcp_ tool name is a strong enough signal to override it.
         self.assertEqual(verb_for("gather", "mcp_brave_search_brave_web_search"), "Calling")
+
+    def test_every_builtin_tool_has_a_breathing_verb(self):
+        """Observer, 2026-09-08: `search_code`, `run_tests`, and
+        `git_discard` shipped with no `("act", <name>)` entry, so their
+        in-flight narration silently fell back to the generic "Working"
+        instead of a verb naming what they actually do. Not dishonest --
+        "Working" is still true -- but it is the exact "does an unmapped
+        tool go blank / generic / show its raw name" question this
+        module's `_VERBS` mapping exists to answer well, and a real
+        built-in tool going unnamed is worth catching by name rather than
+        leaving to whoever next reads the fallback and shrugs. `shell`
+        is forced on so `RunShellTool` is always in the list this checks,
+        regardless of the runtime's own `[execution] shell` default."""
+        config = Config(repo_root=Path.cwd(), shell=True)
+        for tool in builtin_tools(config):
+            self.assertIn(("act", tool.name), _VERBS, f"builtin tool {tool.name!r} has no _VERBS entry")
 
 
 if __name__ == "__main__":
