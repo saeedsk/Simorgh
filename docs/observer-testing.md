@@ -17,6 +17,15 @@ model:
 3. Findings came back as prose, and four observers independently
    finding the same bug read as four essays, not one confirmed line.
 
+A fourth cost was introduced by the fix for the first three, and caught
+the same day. Findings and sandboxes originally shared one parent
+directory. A 20-agent wave's sandboxes used 10 GB; deleting them to
+reclaim disk was the obvious next step once the wave finished, and that
+`rm -rf` took the whole findings file with it. Findings now live under
+`~/.cache/simorgh-observer-findings`, a directory nothing else has a
+reason to delete; sandboxes still live under a system temp directory,
+which is exactly where wave-scale disposable data belongs.
+
 `tools/observer_kit.py` closes the second and third for real, and helps
 the first without being the dramatic win it might sound like -- see
 **What actually got faster** below before assuming this makes a wave
