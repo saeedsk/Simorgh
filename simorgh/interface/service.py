@@ -137,6 +137,7 @@ class Service:
         # topic instead of an id (`activity.py`).
         self._book = activity_mod.TaskBook()
         self._seed_task = None
+        self._posture_seed_task = None
         # For the bottom panel's status row (`panel.py`): whether the
         # idle loop may start work, and which model is answering.
         self._auto = "?"
@@ -249,6 +250,9 @@ class Service:
         # every start() for the full request timeout, and the feed is
         # perfectly usable while this is still in flight.
         self._seed_task = asyncio.ensure_future(self._seed_activity())
+        # Same reasoning: a missing/not-yet-started Guardian would
+        # otherwise hold start() for the full request timeout.
+        self._posture_seed_task = asyncio.ensure_future(self._seed_posture(ctx))
         ctx.logger.info("interface.started", session_id=self.session_id)
 
     async def stop(self) -> None:
@@ -260,6 +264,13 @@ class Service:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise
                 pass
             self._seed_task = None
+        if self._posture_seed_task is not None:
+            self._posture_seed_task.cancel()
+            try:
+                await self._posture_seed_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise
+                pass
+            self._posture_seed_task = None
         if self._tui is not None:
             self._tui.stop()
             self._tui = None
@@ -814,6 +825,25 @@ class Service:
 
     async def _on_posture(self, message: Message) -> None:
         self.vitals.on_guardian_posture(message.payload)
+
+    async def _seed_posture(self, ctx: Context) -> None:
+        """`VitalsCache.on_guardian_posture` only ever runs off
+        `guardian.posture.changed`, which Guardian publishes only when a
+        rule actually tightens/loosens (`guardian/service.py`) -- never
+        once at boot. So a fresh boot's `status`/`vitals` panel showed
+        `posture: unknown` all session even on a perfectly healthy,
+        untightened Guardian, while `guardian.posture.request/reply`
+        (wired for the `budget` command) answered the real posture the
+        whole time (observer, 2026-09-08). One best-effort query here
+        seeds the cache with that same real answer; a timeout or missing
+        Guardian just leaves it "unknown", same as today, honestly."""
+        try:
+            reply = await ctx.bus.request(
+                Message.new(topics.GUARDIAN_POSTURE_REQUEST, source=ctx.source, payload={}), timeout=2.0,
+            )
+        except Exception:  # noqa: BLE001 -- BusTimeout or "nobody answers this yet": leave posture unknown
+            return
+        self.vitals.on_guardian_posture(reply.payload)
 
     async def _on_task_event(self, message: Message) -> None:
         """Live narration (07-post-cutover-review.md §3.9): the creator
