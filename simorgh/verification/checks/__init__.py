@@ -1,4 +1,5 @@
 from .denylist_immunity import DenylistImmunityCheck
+from .didanything import DidAnythingCheck
 from .docstring import DocstringCheck, docstring_regression_reason
 from .invariants import InvariantsCheck, invariant_violations
 from .isolated_suite import IsolatedSuiteCheck
@@ -6,6 +7,7 @@ from .sandbox_smoke import SandboxSmokeCheck
 from .syntax import SyntaxCheck
 
 ALL_CHECKS = [
+    DidAnythingCheck(),
     SyntaxCheck(),
     DenylistImmunityCheck(),
     DocstringCheck(),
@@ -17,6 +19,7 @@ ALL_CHECKS = [
 __all__ = [
     "ALL_CHECKS",
     "DenylistImmunityCheck",
+    "DidAnythingCheck",
     "DocstringCheck",
     "InvariantsCheck",
     "IsolatedSuiteCheck",

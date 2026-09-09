@@ -28,6 +28,22 @@ from typing import Any, Callable, Iterable
 # is not reported against them.
 KERNEL_SECTIONS = frozenset({"runtime", "bus", "ledger", "logging", "telemetry"})
 
+# Defaults the Kernel applies to a section before the subsystem sees it
+# (`kernel/service.py`), so the probe compares against the baseline that
+# will really be in force.
+#
+# Without this the check was INVERTED on the one switch that matters
+# most. `sim.sh` auto-approves by default, so the Kernel sets
+# `irreversible_requires_human = False`; the dataclass default is True.
+# Writing `true` -- which an observer proved flips a real proposal from
+# approved to needs_human -- was reported as "changed nothing", and
+# writing `false`, which genuinely changes nothing, was reported as
+# working. Anyone trusting the warning would have disabled their own
+# safety gate (observer, 2026-09-08).
+EFFECTIVE_DEFAULTS: dict[str, dict] = {
+    "guardian": {"irreversible_requires_human": False},
+}
+
 
 def _config_classes() -> dict[str, Callable[..., Any]]:
     """Imported here, not at module scope: this runs once at boot and
@@ -75,8 +91,10 @@ def dead_sections(config, *, names: Iterable[str] | None = None) -> list[str]:
         section = config.section(name)
         if not section:
             continue
+        baseline = dict(EFFECTIVE_DEFAULTS.get(name, {}))
+        written = baseline | dict(section)
         try:
-            if cls.from_mapping(dict(section)) == cls.from_mapping({}):
+            if cls.from_mapping(written) == cls.from_mapping(baseline):
                 dead.append(name)
         except Exception:  # noqa: BLE001 -- a section that cannot parse is the subsystem's to report
             continue

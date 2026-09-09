@@ -324,3 +324,43 @@ class CrashInheritsKeptEditsTestCase(unittest.IsolatedAsyncioTestCase):
 
 async def _unreachable(*_a, **_kw):
     raise AssertionError("a downgraded completion must not reach the discard path")
+
+
+class TestALastStepPatchIsNotThrownAway(unittest.IsolatedAsyncioTestCase):
+    """The main way work vanishes between attempts.
+
+    A tool call arriving on the last step was discarded and recorded
+    only as "step budget exhausted with work still pending". An observer
+    measured the cost on 2026-09-08: a task with a 2-step budget over 8
+    attempts drafted SEVEN complete whole-file patches, one per attempt,
+    every one discarded, attempts 2 through 8 byte-identical. Nothing in
+    the step log, the ledger or the CLI ever mentioned a discarded
+    patch, so the task could never finish and the reason was invisible.
+
+    A patch is durable: it leaves the edit in the tree, `resume.py`
+    carries it to the next attempt, and that attempt starts from a
+    written file instead of redrafting it from nothing.
+    """
+
+    def test_a_patch_is_allowed_to_land_on_the_last_step(self) -> None:
+        from simorgh.orchestration.session import DURABLE_TOOLS
+
+        self.assertIn("apply_source_patch", DURABLE_TOOLS)
+        self.assertIn("apply_skill", DURABLE_TOOLS)
+
+    def test_a_read_is_not_durable_and_still_ends_the_attempt(self) -> None:
+        """Only tools that leave something behind earn the last step.
+        A read on the last step buys the next attempt nothing, and
+        running it would just spend the budget twice."""
+        from simorgh.orchestration.session import DURABLE_TOOLS
+
+        for tool in ("read_file", "search_code", "list_dir", "web_fetch", "run_tests"):
+            self.assertNotIn(tool, DURABLE_TOOLS)
+
+    def test_the_continuation_says_the_edit_is_waiting(self) -> None:
+        """The next attempt is told what it inherited, rather than being
+        handed a bare "budget exhausted"."""
+        from simorgh.orchestration.session import CONTINUATION_REASON
+
+        reason = f"{CONTINUATION_REASON}; the edit is applied and waiting to be committed"
+        self.assertIn("committed", reason)

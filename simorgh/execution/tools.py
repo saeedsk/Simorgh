@@ -128,6 +128,41 @@ class ListDirTool:
         return ToolResult(ok=ok, output=content, error=None if ok else content)
 
 
+_NO_MATCHES = "(no matches)"
+
+
+def _no_match_note(config) -> str:
+    """"(no matches)" reads as "the term is not there". For a repo whose
+    readable roots include a directory of PDFs, that is not what it
+    means: a text search cannot see inside a PDF at all.
+
+    An observer watched the consequence on 2026-09-08. Three searches
+    for terms that are unmistakably in `papers/` all came back
+    `(no matches)` with `ok=True`; the session spent 11 of 28 steps
+    circling, and then FABRICATED a quotation from a paper it had never
+    read, inventing both the line numbers and the figure. The scaffold
+    points the model here first ("cheaper than reading whole files"), so
+    an empty answer from this tool is unusually persuasive.
+    """
+    roots = getattr(config, "readable_roots", ())
+    repo_root = getattr(config, "repo_root", None)
+    if repo_root is None:
+        return _NO_MATCHES
+    holding: list[str] = []
+    for root in roots:
+        try:
+            found = sorted((repo_root / root).glob("*.pdf"))
+        except OSError:
+            continue
+        if found:
+            holding.append(f"{root}/ ({len(found)} PDFs)")
+    if not holding:
+        return _NO_MATCHES
+    return (f"{_NO_MATCHES} -- note that this search reads text files only, and "
+            f"{', '.join(holding)} cannot be searched this way. Use READ_FILE on a "
+            f"specific document, or LIST_DIR to see what is there.")
+
+
 class SearchCodeTool:
     """Regex text search across `readable_roots` (the same path-safety
     boundary `read_file`/`list_dir` already enforce) -- the one gap
@@ -185,7 +220,8 @@ class SearchCodeTool:
     def _run_ripgrep(self, query: str, root: Path) -> ToolResult:
         roots = [base for base in self._config.readable_roots if (root / base).is_dir()]
         if not roots:
-            return ToolResult(ok=True, output="(no matches)", metadata={"matches": 0, "files_scanned": 0, "via": "ripgrep"})
+            return ToolResult(ok=True, output=_no_match_note(self._config),
+                              metadata={"matches": 0, "files_scanned": 0, "via": "ripgrep"})
         cmd = [
             self._rg, "--line-number", "--no-heading", "--with-filename", "--no-ignore",
             f"--max-filesize={self._config.search_max_file_bytes}",
@@ -207,7 +243,7 @@ class SearchCodeTool:
         lines = [ln for ln in completed.stdout.splitlines() if "__pycache__" not in ln]
         truncated = len(lines) > self._config.search_max_matches
         lines = lines[: self._config.search_max_matches]
-        output = "\n".join(lines) if lines else "(no matches)"
+        output = "\n".join(lines) if lines else _no_match_note(self._config)
         if truncated:
             output += "\n...[capped -- narrow the query or the readable_roots searched]"
         return ToolResult(ok=True, output=output, metadata={"matches": len(lines), "via": "ripgrep"})
@@ -249,7 +285,7 @@ class SearchCodeTool:
             if truncated:
                 break
 
-        output = "\n".join(matches) if matches else "(no matches)"
+        output = "\n".join(matches) if matches else _no_match_note(self._config)
         if truncated:
             output += "\n...[capped -- narrow the query or the readable_roots searched]"
         return ToolResult(ok=True, output=output, metadata={"matches": len(matches), "files_scanned": scanned, "via": "python"})

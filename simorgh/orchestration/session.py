@@ -42,6 +42,18 @@ EDITS_KEPT = topics.TASK_EDITS_KEPT
 # Tools that *end* an attempt's work rather than extend it, so the last
 # step may still run one when there is an uncommitted edit waiting.
 FINISHING_TOOLS = ("git_commit", "git_discard")
+# Tools that leave something DURABLE behind, which the next attempt
+# inherits (`resume.py` carries uncommitted edits forward). On the last
+# step these are worth running for the same reason a finishing tool is:
+# the alternative is throwing the model's most expensive output away.
+#
+# Measured by an observer 2026-09-08, on a task with a 2-step budget
+# over 8 attempts: SEVEN complete whole-file patches were drafted and
+# silently discarded, one per attempt, because each arrived on the last
+# step. Attempts 2 through 8 were byte-identical and nothing in the step
+# log, the ledger or the CLI ever mentioned a discarded patch. The task
+# could never have finished, and the reason was invisible.
+DURABLE_TOOLS = ("apply_source_patch", "apply_skill")
 # Shapes a reply takes when it is narrating tool calls rather than
 # making them. `[tool_call X]` was our own transcript stand-in; the
 # others are what a model invents around it.
@@ -306,6 +318,21 @@ class SessionRunner:
             session.budget.steps_used += 1
             tool_calls = think_reply.payload.get("tool_calls") or []
             floor = think_reply.payload.get("floor", False)
+
+            if tool_calls and is_last and tool_calls[0].get("tool") in DURABLE_TOOLS:
+                # Run it, then end the attempt as a continuation. The
+                # edit stays in the tree and the next attempt starts
+                # from a file that is already written instead of
+                # redrafting it from nothing.
+                call = tool_calls[0]
+                ok, summary, detail = await self._propose_and_await(session, call, step_no)
+                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok)
+                session.record(step)
+                await self._record_step(session, step)
+                return Outcome(
+                    "blocked",
+                    reason=f"{CONTINUATION_REASON}; the edit is applied and waiting to be committed",
+                )
 
             if tool_calls and is_last and tool_calls[0].get("tool") in FINISHING_TOOLS and session.uncommitted:
                 # The last step may still *finish*: refusing a git_commit

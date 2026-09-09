@@ -57,7 +57,23 @@ class Config:
     # `papers/` is here because the creator put papers on self-learning
     # AI there for Sim to read (2026-09-08); without the root they were
     # reachable by no tool at all.
-    readable_roots: tuple[str, ...] = ("src", "docs", "tests", "simorgh", "simorgh_skills", "papers")
+    # `tools` is here because it was WRITABLE and not readable: Sim
+    # could patch a file it was forbidden to open, and a task to fix a
+    # bug in tools/trial.py spent 464 seconds failing on
+    # "[refused: outside the readable areas]" before giving up
+    # (observer, 2026-09-08).
+    readable_roots: tuple[str, ...] = (
+        "src", "docs", "tests", "simorgh", "simorgh_skills", "papers", "tools",
+    )
+    # Files at the repo root. `readable_roots` holds directories only, so
+    # README.md, requirements.txt, simloader.py and sim.sh were readable
+    # by nothing -- Sim could not read its own bootloader, and a chat
+    # session burned its whole budget hunting for a README it was
+    # standing on. Reading them is safe; writing them is a separate
+    # question that `write_scopes_source` and Guardian answer.
+    readable_root_files: tuple[str, ...] = (
+        "README.md", "CLAUDE.md", "requirements.txt", "simorgh.toml", "simloader.py", "sim.sh",
+    )
     # The creator, 2026-09-07: "give sim file system write access".
     # Every directory of the repository, rather than the two packages
     # it started with -- docs, tests, tools and the rest are all
