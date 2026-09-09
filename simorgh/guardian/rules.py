@@ -8,9 +8,17 @@ override it.
 
 from __future__ import annotations
 
+import ast
+import asyncio
 import difflib
+import hashlib
+import importlib.util
+import json
 import posixpath
 import re
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 from .api import Decision, DecisionContext, Proposal
@@ -327,6 +335,122 @@ class DenylistRule:
         return Decision("abstain", self.layer)
 
 
+_SEVERITY_RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3}
+# Per-payload memo: Guardian evaluates the same code text more than once
+# in a normal flow (a proposal, its retry, a verification re-check), and
+# bandit is a ~0.5s interpreter start each time.
+_bandit_cache: dict[str, list[dict] | None] = {}
+_BANDIT_CACHE_MAX = 256
+
+
+def bandit_available() -> bool:
+    return importlib.util.find_spec("bandit") is not None
+
+
+def _changed_line_numbers(old: str, new: str) -> set[int]:
+    """1-based line numbers in `new` that this patch inserts or rewrites
+    -- the line-number twin of `_added_or_changed_lines`, for a scanner
+    that reports by line rather than by text."""
+    matcher = difflib.SequenceMatcher(None, old.splitlines(), new.splitlines())
+    lines: set[int] = set()
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("replace", "insert"):
+            lines.update(range(j1 + 1, j2 + 1))
+    return lines
+
+
+def run_bandit(code: str, timeout_s: float) -> list[dict] | None:
+    """bandit's findings for `code` as plain dicts (severity, confidence,
+    line, test_id, text), or None when it could not run at all -- not
+    installed, timed out, or produced no JSON. None is "no opinion", never
+    "clean": the caller must abstain on it, not allow."""
+    key = hashlib.sha256(code.encode("utf-8", "replace")).hexdigest()
+    if key in _bandit_cache:
+        return _bandit_cache[key]
+    findings: list[dict] | None = None
+    if bandit_available():
+        with tempfile.TemporaryDirectory(prefix="simorgh-bandit-") as workdir:
+            target = Path(workdir) / "payload.py"
+            target.write_text(code)
+            try:
+                completed = subprocess.run(
+                    [sys.executable, "-m", "bandit", "-f", "json", "-q", str(target)],
+                    capture_output=True, text=True, timeout=timeout_s, stdin=subprocess.DEVNULL,
+                )
+                findings = [
+                    {
+                        "severity": str(r.get("issue_severity") or "").upper(),
+                        "confidence": str(r.get("issue_confidence") or "").upper(),
+                        "line": int(r.get("line_number") or 0),
+                        "test_id": str(r.get("test_id") or ""),
+                        "text": str(r.get("issue_text") or ""),
+                    }
+                    for r in json.loads(completed.stdout).get("results", [])
+                ]
+            except (subprocess.TimeoutExpired, OSError, ValueError, json.JSONDecodeError):
+                findings = None
+    if len(_bandit_cache) >= _BANDIT_CACHE_MAX:
+        _bandit_cache.clear()
+    _bandit_cache[key] = findings
+    return findings
+
+
+class StaticAnalysisRule:
+    """bandit (PyCQA's Python security linter) over every Python code
+    payload -- toolset #3 of the 2026-09-09 post-mortem. `DenylistRule`'s
+    regexes are hand-maintained and catch only what someone already
+    thought to write down (bare `exec(` and the `os.setuid` family were
+    both missing until an observer found them the same day); bandit
+    brings a maintained catalogue of ~70 checks with severities.
+
+    Scope, deliberately narrow: only the `code` argument (a Python
+    program), only when it parses as Python -- a shell `command` or a JS
+    payload is not bandit's domain and abstains; a syntax error is
+    `SyntaxCheck`'s to report, not this rule's. Same diff-scoping as
+    `DenylistRule`: for a whole-file tool that names a `subject`, only
+    findings on lines this patch inserts or rewrites count, so an
+    already-reviewed `subprocess.run` elsewhere in tools/trial.py does
+    not deny an unrelated docstring edit. bandit not installed, or
+    failing to run, is an abstain with no reason recorded on the
+    decision -- a missing optional linter must never deny, and must
+    never be mistaken for a clean scan either (`run_bandit` returns
+    None, not [], for exactly that distinction)."""
+
+    name = "static_analysis"
+    layer = "static_analysis"
+
+    async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
+        if not ctx.config.static_analysis_enabled:
+            return Decision("abstain", self.layer)
+        code = proposal.args.get("code")
+        if not isinstance(code, str) or not code.strip():
+            return Decision("abstain", self.layer)
+        try:
+            ast.parse(code)
+        except (SyntaxError, ValueError):
+            return Decision("abstain", self.layer)
+        findings = await asyncio.to_thread(run_bandit, code, ctx.config.static_analysis_timeout_s)
+        if findings is None:
+            return Decision("abstain", self.layer)
+        changed: set[int] | None = None
+        for key in _SUBJECT_ARG_KEYS:
+            subject = proposal.args.get(key)
+            if isinstance(subject, str) and subject:
+                old_text = _existing_text(subject)
+                if old_text is not None:
+                    changed = _changed_line_numbers(old_text, code)
+                break
+        floor = _SEVERITY_RANK.get(str(ctx.config.static_analysis_min_severity).upper(), 3)
+        reasons = tuple(
+            f"denied: bandit {f['test_id']} ({f['severity'].lower()} severity, line {f['line']}): {f['text']}"
+            for f in findings
+            if _SEVERITY_RANK.get(f["severity"], 0) >= floor and (changed is None or f["line"] in changed)
+        )
+        if reasons:
+            return Decision("deny", self.layer, reasons)
+        return Decision("abstain", self.layer)
+
+
 class ImmunityRule:
     name = "immunity"
     layer = "immunity"
@@ -410,6 +534,7 @@ DEFAULT_PIPELINE: tuple = (
     ProtectedRule(),
     ScopeRule(),
     DenylistRule(),
+    StaticAnalysisRule(),
     ImmunityRule(),
     BudgetRule(),
     ReversibilityRule(),

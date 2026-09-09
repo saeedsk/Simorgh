@@ -16,6 +16,9 @@ from simorgh.guardian.rules import (
     ProtectedRule,
     ReversibilityRule,
     ScopeRule,
+    StaticAnalysisRule,
+    _changed_line_numbers,
+    bandit_available,
     similarity,
 )
 
@@ -145,6 +148,108 @@ class TestScopeRule(unittest.IsolatedAsyncioTestCase):
     async def test_always_abstains(self):
         decision = await _evaluate(ScopeRule(), _proposal(), _ctx())
         self.assertEqual(decision.kind, "abstain")
+
+
+_SHELL_TRUE_WITH_INPUT = 'import subprocess\nsubprocess.call("ls " + input(), shell=True)\n'
+_PICKLE_LOADS = "import pickle\npickle.loads(b'')\n"
+
+
+@unittest.skipUnless(bandit_available(), "bandit not installed")
+class TestStaticAnalysisRule(unittest.IsolatedAsyncioTestCase):
+    """bandit over Python code payloads (toolset #3, 2026-09-09). These
+    run the real linter; the class skips itself where it isn't
+    installed, and the one 'not installed' case below is simulated."""
+
+    async def test_denies_a_high_severity_finding_and_names_it(self):
+        decision = await _evaluate(
+            StaticAnalysisRule(), _proposal(args={"code": _SHELL_TRUE_WITH_INPUT}), _ctx(),
+        )
+        self.assertEqual(decision.kind, "deny")
+        self.assertIn("bandit B602", decision.reasons[0])
+        self.assertIn("shell=True", decision.reasons[0])
+
+    async def test_abstains_on_clean_python(self):
+        decision = await _evaluate(StaticAnalysisRule(), _proposal(args={"code": "print(1)\n"}), _ctx())
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_abstains_on_a_payload_that_is_not_python(self):
+        decision = await _evaluate(
+            StaticAnalysisRule(), _proposal(args={"code": "console.log(1);\nconst x = () => {};"}), _ctx(),
+        )
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_a_shell_command_is_not_its_domain(self):
+        decision = await _evaluate(
+            StaticAnalysisRule(), _proposal(args={"command": "rm -rf / --no-preserve-root"}), _ctx(),
+        )
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_abstains_when_disabled(self):
+        decision = await _evaluate(
+            StaticAnalysisRule(), _proposal(args={"code": _SHELL_TRUE_WITH_INPUT}),
+            _ctx(config=Config(static_analysis_enabled=False)),
+        )
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_medium_findings_pass_at_the_high_floor_and_deny_at_medium(self):
+        # pickle.loads of arbitrary bytes is B301, MEDIUM: the denylist
+        # already names it by hand, so at the default HIGH floor this
+        # rule stays out of its way; lowering the floor is a real switch.
+        at_high = await _evaluate(StaticAnalysisRule(), _proposal(args={"code": _PICKLE_LOADS}), _ctx())
+        self.assertEqual(at_high.kind, "abstain")
+        at_medium = await _evaluate(
+            StaticAnalysisRule(), _proposal(args={"code": _PICKLE_LOADS}),
+            _ctx(config=Config(static_analysis_min_severity="MEDIUM")),
+        )
+        self.assertEqual(at_medium.kind, "deny")
+        self.assertIn("B301", at_medium.reasons[0])
+
+    async def test_bandit_missing_is_an_abstain_not_a_clean_pass(self):
+        import unittest.mock
+
+        from simorgh.guardian import rules
+
+        rules._bandit_cache.clear()
+        with unittest.mock.patch.object(rules, "bandit_available", return_value=False):
+            decision = await _evaluate(
+                StaticAnalysisRule(), _proposal(args={"code": _SHELL_TRUE_WITH_INPUT + "# variant\n"}), _ctx(),
+            )
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_only_lines_this_patch_changes_count_for_a_whole_file_tool(self):
+        import unittest.mock
+
+        from simorgh.guardian import rules
+
+        old = _SHELL_TRUE_WITH_INPUT  # the finding already exists on disk, reviewed
+        new = old + "x = 1\n"  # this patch only appends a harmless line
+        with unittest.mock.patch.object(rules, "_existing_text", return_value=old):
+            decision = await _evaluate(
+                StaticAnalysisRule(),
+                _proposal(tool="apply_source_patch", args={"subject": "tools/x.py", "code": new}),
+                _ctx(),
+            )
+        self.assertEqual(decision.kind, "abstain")
+        # ...but a NEW high-severity line in the same patch is still caught.
+        new_bad = old + "subprocess.call(input(), shell=True)\n"
+        with unittest.mock.patch.object(rules, "_existing_text", return_value=old):
+            decision = await _evaluate(
+                StaticAnalysisRule(),
+                _proposal(tool="apply_source_patch", args={"subject": "tools/x.py", "code": new_bad}),
+                _ctx(),
+            )
+        self.assertEqual(decision.kind, "deny")
+        self.assertIn("line 3", decision.reasons[0])
+
+
+class TestChangedLineNumbers(unittest.TestCase):
+    def test_inserted_and_replaced_lines_are_reported_one_based(self):
+        old = "a\nb\nc\n"
+        new = "a\nB\nc\nd\n"
+        self.assertEqual(_changed_line_numbers(old, new), {2, 4})
+
+    def test_an_unchanged_file_reports_nothing(self):
+        self.assertEqual(_changed_line_numbers("a\nb\n", "a\nb\n"), set())
 
 
 class TestDenylistRule(unittest.IsolatedAsyncioTestCase):

@@ -34,7 +34,11 @@ PATCH = Profile(
     # `[execution] shell = true`; an unregistered tool is simply refused,
     # so the offer costs nothing when it is off.
     tools=("read_file", "list_dir", "search_code", "run_tests", "apply_source_patch",
-           "git_commit", "git_revert", "git_discard", "run_shell", "render_page"),
+           "git_commit", "git_revert", "git_discard", "run_shell", "render_page",
+           # A task that builds something data-backed needs the data; both
+           # are read-only and Guardian-gated, and run_shell (already here)
+           # is far broader than either.
+           "web_search", "web_fetch", "search_listings", "geocode"),
     # 8 left no room: read, apply, run_tests, git_commit is already four
     # tool calls before a single wrong turn, and the last step is spent
     # on the forced final answer. Live-caught 2026-09-07.
