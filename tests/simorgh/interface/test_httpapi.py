@@ -210,12 +210,15 @@ class HttpApiTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.status, 200)
         self.assertEqual(second.status, 200)
 
-    async def _post(self, api: HttpApi, path: str, body: dict | bytes) -> tuple[int, bytes]:
+    async def _post(self, api: HttpApi, path: str, body: dict | bytes, *, headers: dict | None = None
+                     ) -> tuple[int, bytes]:
         payload = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
+        req_headers = {"Content-Type": "application/json"}
+        req_headers.update(headers or {})
 
         def _do():
             conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=10)
-            conn.request("POST", path, body=payload, headers={"Content-Type": "application/json"})
+            conn.request("POST", path, body=payload, headers=req_headers)
             resp = conn.getresponse()
             data = resp.read()
             conn.close()
@@ -236,6 +239,35 @@ class HttpApiTestCase(unittest.IsolatedAsyncioTestCase):
         percept = bus.published[0]
         self.assertEqual(percept.payload["text"], "hi there")
         self.assertEqual(percept.payload["channel"], "api")
+
+    async def test_chat_rejects_a_cross_origin_request(self):
+        """A malicious page open in another tab can fire a same-origin-
+        free "simple request" (no CORS preflight) at this local,
+        unauthenticated dashboard -- e.g. Content-Type: text/plain with
+        a JSON body, which this server parses identically to a real
+        dashboard click. Confirmed live against a real running server:
+        such a request was accepted and produced a real chat turn before
+        this guard existed. A present, mismatching `Origin` header is
+        the CSRF tell -- browsers always attach it cross-site, including
+        under `no-cors`."""
+        bus = _FakeBus({})
+        bus.respond_to_chat = {"text": "should never run", "floor": False}
+        api = await self._start(bus)
+
+        status, data = await self._post(api, "/api/chat", {"text": "attacker text"},
+                                         headers={"Origin": "http://evil.example"})
+        self.assertEqual(status, 403)
+        self.assertEqual(bus.published, [])
+
+    async def test_chat_accepts_a_same_origin_request(self):
+        bus = _FakeBus({})
+        bus.respond_to_chat = {"text": "hello back", "floor": False}
+        api = await self._start(bus)
+
+        status, data = await self._post(api, "/api/chat", {"text": "hi there"},
+                                         headers={"Origin": f"http://127.0.0.1:{api.port}"})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(data), {"text": "hello back", "floor": False})
 
     async def test_chat_reports_a_floor_reply_honestly_not_as_a_success(self):
         bus = _FakeBus({})
