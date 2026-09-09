@@ -49,6 +49,13 @@ from .mcp import McpClient, McpServerConfig, McpToolProxy, mcp_single_arg_key
 from .tools import SkillTool, builtin_tools
 from .verifier import ApprovalVerifier
 
+from .capabilities import CAPABILITIES_STREAM, PROBES, degraded_detail, run_probes
+
+
+def _probe_tools(name: str) -> tuple[str, ...]:
+    probe = next((p for p in PROBES if p.name == name), None)
+    return probe.tools if probe else ()
+
 INFLIGHT_STREAM = "execution:inflight"
 TOOLS_STREAM = "execution:tools"
 
@@ -57,7 +64,7 @@ class Service:
     name = "execution"
     version = "0.1.0"
     consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED, topics.LEARN_SKILL_ACQUIRED)
-    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS,)
+    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS, topics.TOOL_PROBED,)
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None) -> None:
         self._config = config or Config()
@@ -69,6 +76,8 @@ class Service:
         self._degraded_detail = ""
         self._mcp_clients: list[McpClient] = []
         self._mcp_errors: list[str] = []
+        self._capability_detail = ""
+        self._probe_task: asyncio.Task | None = None
 
     async def start(self, ctx) -> None:
         self._ctx = ctx
@@ -117,8 +126,35 @@ class Service:
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_APPROVED, self._on_approved, group="execution"))
         self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
         self._subs.append(await ctx.bus.subscribe(topics.LEARN_SKILL_ACQUIRED, self._on_skill_acquired))
+        # Half the toolset stands on something outside this repo (Node,
+        # a bundled Chromium, an optional pip package). Each is allowed
+        # to be absent -- every tool refuses cleanly -- but "absent" was
+        # invisible until a task tried and failed. In the background:
+        # boot must not wait on a `docker info` that hangs.
+        self._probe_task = asyncio.create_task(self._probe_capabilities())
+
+    async def _probe_capabilities(self) -> None:
+        try:
+            results = await run_probes()
+        except Exception as exc:  # noqa: BLE001 -- diagnostics must never break the boot they diagnose
+            self._ctx.logger.warning("capability_probe_failed", error=repr(exc))
+            return
+        self._capability_detail = degraded_detail(results)
+        for result in results:
+            payload = {"name": result.name, "ok": result.ok, "detail": result.detail,
+                       "cost": result.cost, "tools": list(_probe_tools(result.name))}
+            with contextlib.suppress(Exception):
+                await self._ctx.bus.publish(Message.new(
+                    topics.TOOL_PROBED, source="execution", payload=payload))
+            with contextlib.suppress(Exception):
+                await self._ctx.ledger.append(
+                    CAPABILITIES_STREAM, self._event(CAPABILITIES_STREAM, "probed", payload))
 
     async def stop(self) -> None:
+        if self._probe_task is not None and not self._probe_task.done():
+            self._probe_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._probe_task
         for sub in self._subs:
             await sub.unsubscribe()
         self._subs.clear()
@@ -131,6 +167,8 @@ class Service:
             return Health.degraded(self._degraded_detail)
         if self._mcp_errors:
             return Health.degraded("; ".join(self._mcp_errors))
+        if self._capability_detail:
+            return Health.degraded(self._capability_detail)
         return Health.ok(f"{len(self._registry)} tools registered")
 
     # -- MCP servers (mcp.py's own module docstring: a human-configured,

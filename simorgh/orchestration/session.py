@@ -546,6 +546,7 @@ class SessionRunner:
                 # edit and stopped without committing it. See scaffolds.py.
                 "task_rules": scaffolds.render(
                     session.profile, subject=session.subject, task=session.user_text,
+                    unavailable=scaffolds.unavailable_note(offered),
                 ),
                 # Live-caught: this request never actually asked Cognition
                 # to parse tool calls -- `expected` was never set, so

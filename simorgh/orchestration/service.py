@@ -11,6 +11,7 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
+from . import scaffolds
 from .config import Config
 from .tools import forget_registered, note_registered, register_tool_policy
 
@@ -46,6 +47,7 @@ class Service:
         self._ctx: Context | None = None
         self._percept_sub = None
         self._tool_sub = None
+        self._capability_sub = None
         self._next_worker = 0
         self._metrics_task: asyncio.Task | None = None
         # Chat sessions in flight, each run off the bus handler so the
@@ -87,10 +89,21 @@ class Service:
         # learns them here, so a newly wired open-source tool is callable
         # without anyone editing orchestration.
         self._tool_sub = await ctx.bus.subscribe(topics.TOOL_REGISTERED, self._on_tool_registered)
+        # A tool that is offered but known to be down right now gets
+        # said so in the prompt, once, instead of costing a task three
+        # steps to discover by failing (execution/capabilities.py).
+        self._capability_sub = await ctx.bus.subscribe(topics.TOOL_PROBED, self._on_capability_probed)
         await self._replay_registrations(ctx)
         if self.config.metrics_interval_s > 0:
             self._metrics_task = asyncio.create_task(self._metrics_loop(), name="orchestration-metrics")
         ctx.logger.info("orchestration.started", workers=len(self._workers))
+
+    async def _on_capability_probed(self, message) -> None:
+        payload = message.payload
+        scaffolds.note_capability(
+            payload.get("name", ""), ok=bool(payload.get("ok")),
+            detail=str(payload.get("detail") or ""), tools=payload.get("tools") or [],
+        )
 
     async def _replay_registrations(self, ctx) -> None:
         """Catch up on the announcements made before we were listening.
@@ -162,6 +175,9 @@ class Service:
         if self._tool_sub is not None:
             await self._tool_sub.unsubscribe()
             self._tool_sub = None
+        if self._capability_sub is not None:
+            await self._capability_sub.unsubscribe()
+            self._capability_sub = None
         forget_registered()
         if self._percept_sub is not None:
             await self._percept_sub.unsubscribe()

@@ -1,0 +1,37 @@
+{
+  "$id": "https://simorgh.local/schema/tool.probed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `tool.probed` (catalog v1).",
+  "properties": {
+    "cost": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name",
+    "ok",
+    "detail",
+    "cost"
+  ],
+  "title": "tool.probed",
+  "type": "object"
+}
