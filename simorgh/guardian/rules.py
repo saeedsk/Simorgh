@@ -9,6 +9,7 @@ override it.
 from __future__ import annotations
 
 import difflib
+import posixpath
 import re
 from pathlib import Path
 
@@ -89,6 +90,29 @@ def _mentioned_paths(text: str) -> list[str]:
     return [t for t in _PATHISH.findall(text or "") if not t.startswith("tests/")]
 
 
+# A crude sign that a `code`/`command` payload writes SOMEWHERE, not
+# necessarily to the path being checked -- corroborating evidence, not
+# proof, in keeping with this whole scan's "over-match rather than
+# under-match" trade. Required before a mere MENTION of a protected path
+# in free-form code denies the call: without this, fixing "the read_only
+# early-return made the whole scan a no-op" (2026-09-08) reintroduced
+# the ORIGINAL 2026-09-07 bug this rule exists to prevent -- a plain
+# `cat docs/SOUL.md` (a read) was denied as if it were a write, because
+# the text-match cannot otherwise tell `cat path` from `echo x > path`.
+# `subject`/`path` arguments (`apply_source_patch`, `apply_skill`) need
+# no such check: naming a file there always means writing it.
+_WRITE_SIGNS = re.compile(
+    r">>?(?!=)|\btee\b|\bcp\b|\bmv\b|\brm\b|\bsed\b.*-i\b|\bdd\b|\btruncate\b"
+    r"|open\([^)]*['\"][waxWAX][+b]?['\"]"
+    r"|\.write\(|\.writelines\(|\.unlink\(|\.remove\(|shutil\.(move|copy|rmtree)"
+    r"|os\.(remove|unlink|rename|replace)",
+)
+
+
+def _looks_like_a_write(text: str) -> bool:
+    return bool(_WRITE_SIGNS.search(text or ""))
+
+
 def _subject_paths(proposal: Proposal) -> list[str]:
     paths = list(proposal.scope.get("paths") or [])
     for key in _SUBJECT_ARG_KEYS:
@@ -102,10 +126,12 @@ def _subject_paths(proposal: Proposal) -> list[str]:
     # `run_python_sandboxed` call rewrote docs/SOUL.md, simorgh/guardian/
     # rules.py and simloader.py. The sandbox has rlimits and a temp cwd
     # and NO filesystem confinement, so "deliberately no repo access"
-    # was never true. Until it is, Guardian has to read the program.
+    # was never true. Until it is, Guardian has to read the program --
+    # but only a program that ALSO looks like it writes something,
+    # so a plain `cat`/`open(path)` read is never denied by this.
     for key in _CODE_ARG_KEYS:
         value = proposal.args.get(key)
-        if isinstance(value, str) and value:
+        if isinstance(value, str) and value and _looks_like_a_write(value):
             paths.extend(t for t in _mentioned_paths(value) if t not in paths)
     return paths
 
@@ -160,11 +186,36 @@ class ProtectedRule:
         # "only the creator may edit it directly" -- nobody had asked to
         # edit it -- and the same rule was silently keeping every
         # simorgh/contracts/ schema unreadable.
-        if ctx.tool is not None and ctx.tool.read_only:
+        #
+        # But `read_only` describes whether EXECUTION tracks a write
+        # side-effect for this tool's normal outputs -- not whether its
+        # payload can write to disk. `run_python_sandboxed` is declared
+        # `read_only=True` and runs an arbitrary subprocess with no
+        # chroot; an observer proved this exact early return made
+        # today's code-payload scan (below) a COMPLETE no-op for it --
+        # the tool this fix was written for, in the fix's own comment.
+        # A proposal carrying a `code`/`command` argument is never
+        # exempted by `read_only`, whatever the tool's own classification
+        # says, because that argument is a program, and the program's
+        # actions are what this rule exists to see (2026-09-08).
+        if (
+            ctx.tool is not None and ctx.tool.read_only
+            and not any(isinstance(proposal.args.get(k), str) and proposal.args.get(k) for k in _CODE_ARG_KEYS)
+        ):
             return Decision("abstain", self.layer)
         for path in _subject_paths(proposal):
+            # Canonicalized before comparison: `"simorgh//guardian/rules.py"`
+            # and `"simorgh/./guardian/rules.py"` resolve to the identical
+            # protected file (`pathsafety`'s own `.resolve()` collapses
+            # both the same way at write time) but neither literal-
+            # matches `"simorgh/guardian/"` in a plain substring check.
+            # A path assembled from pieces already defeats the scan
+            # above; a disguised but otherwise-plain path should not
+            # ALSO defeat the one check that never needed obfuscation
+            # to begin with (2026-09-08).
+            canonical = posixpath.normpath(path)
             for protected in ctx.config.protected_subjects:
-                if protected in path:
+                if protected in path or protected in canonical:
                     return Decision(
                         "deny", self.layer,
                         (f"{path!r} is protected ({protected!r}); only the creator may edit it directly",),
