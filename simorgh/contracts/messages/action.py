@@ -38,6 +38,12 @@ ActionDenied = define(t.ACTION_DENIED, [
     # *something* was denied, which is not enough to raise a useful task
     # about it (reflection/denials.py).
     O("tool", Str),
+    # Which task this proposal belonged to, when it belonged to one at
+    # all (an Interface command has none). Without it a consumer that
+    # tracks per-task state (reflection/drift.py's DriftTracker) cannot
+    # attribute a denial to the task it happened on -- reflection/service.py
+    # needs this to feed a layer="scope" denial into that task's tracker.
+    O("task_id", Str),
 ], doc="layer=classifier omits detailed reasons; execution may publish only layer=token.")
 ActionNeedsHuman = define(t.ACTION_NEEDS_HUMAN, [
     F("action_id", Str),

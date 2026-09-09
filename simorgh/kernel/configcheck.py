@@ -53,8 +53,10 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
     from simorgh.curiosity.config import Config as CuriosityConfig
     from simorgh.execution.config import Config as ExecutionConfig
     from simorgh.guardian.config import Config as GuardianConfig
+    from simorgh.interface.config import Config as InterfaceConfig
     from simorgh.learning.config import Config as LearningConfig
     from simorgh.memory.config import Config as MemoryConfig
+    from simorgh.orchestration.config import Config as OrchestrationConfig
     from simorgh.persona.config import Config as PersonaConfig
     from simorgh.planning.config import Config as PlanningConfig
     from simorgh.reflection.config import Config as ReflectionConfig
@@ -66,8 +68,10 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
         "curiosity": CuriosityConfig,
         "execution": ExecutionConfig,
         "guardian": GuardianConfig,
+        "interface": InterfaceConfig,
         "learning": LearningConfig,
         "memory": MemoryConfig,
+        "orchestration": OrchestrationConfig,
         "persona": PersonaConfig,
         "planning": PlanningConfig,
         "reflection": ReflectionConfig,

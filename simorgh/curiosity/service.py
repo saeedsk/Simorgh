@@ -92,6 +92,7 @@ class Service:
         self._mood = {"valence": 0.0, "arousal": 0.0}
         self._budget = _BudgetState()
         self._pending_web_fetches: dict[str, str] = {}  # action_id -> topic
+        self._task_subjects: dict[str, str] = {}  # task_id -> subject, for staleness touch on completion
         self._areas_cache: tuple[Area, ...] = ()
         self._subs: list = []
         self._ctx: Context | None = None
@@ -197,15 +198,27 @@ class Service:
             self._autonomy_paused = bool(p["autonomous_paused"])
 
     async def _on_task_created(self, message) -> None:
-        self._backlog.on_created(message.payload["task_id"])
+        task_id = message.payload["task_id"]
+        self._backlog.on_created(task_id)
+        subject = message.payload.get("subject")
+        if subject:
+            self._task_subjects[task_id] = subject
         if message.payload.get("kind") == "project":
             self._active_project.confirm()
 
     async def _on_task_completed(self, message) -> None:
-        self._backlog.on_completed(message.payload["task_id"])
+        task_id = message.payload["task_id"]
+        self._backlog.on_completed(task_id)
+        subject = self._task_subjects.pop(task_id, None)
+        if subject:
+            self._staleness.touch(subject, self._now())
 
     async def _on_task_failed(self, message) -> None:
-        self._backlog.on_failed(message.payload["task_id"], terminal=message.payload.get("terminal", True))
+        task_id = message.payload["task_id"]
+        terminal = message.payload.get("terminal", True)
+        self._backlog.on_failed(task_id, terminal=terminal)
+        if terminal:
+            self._task_subjects.pop(task_id, None)
 
     async def _on_task_blocked(self, message) -> None:
         self._backlog.on_blocked(
@@ -263,8 +276,11 @@ class Service:
 
     async def _on_growth_event(self, message) -> None:
         ref = f"{message.type}:{message.id}"
-        summary = message.payload.get("subject") or message.payload.get("name") or message.type
+        subject = message.payload.get("subject")
+        summary = subject or message.payload.get("name") or message.type
         self._sharing.offer_growth(ref=ref, summary=str(summary), at=self._now())
+        if message.type == topics.LEARN_SELF_PATCH_APPLIED and subject:
+            self._staleness.touch(subject, self._now())
 
     async def _on_percept(self, message) -> None:
         if message.payload.get("channel") != "command":

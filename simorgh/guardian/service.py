@@ -418,9 +418,16 @@ class Service:
                 await self._remember_rejection(proposal, verdict.reasons, verdict.layer, source="action")
             reasons = () if verdict.layer == "classifier" else verdict.reasons
             wire_layer = _WIRE_DENY_LAYER.get(verdict.layer, verdict.layer)
+            payload = {"action_id": action_id, "reasons": list(reasons), "layer": wire_layer, "tool": proposal.tool}
+            # Carry the task_id through so a consumer that tracks
+            # per-task state (Reflection's DriftTracker) can attribute
+            # this denial to the task it happened on -- needed for
+            # layer="scope" denials to ever reach observe_scope_denial().
+            if proposal.task_id:
+                payload["task_id"] = proposal.task_id
             await self._ctx.bus.publish(message.caused(
                 topics.ACTION_DENIED,
-                {"action_id": action_id, "reasons": list(reasons), "layer": wire_layer, "tool": proposal.tool},
+                payload,
                 source="guardian",
             ))
             return

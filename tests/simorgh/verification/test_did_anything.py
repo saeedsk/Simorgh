@@ -88,6 +88,69 @@ class TestWhereItDoesNotApply(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(DidAnythingCheck().applies(req))
 
 
+class TestAnIncompleteRetryLogIsNotJudgedAlone(unittest.IsolatedAsyncioTestCase):
+    """`session.py` sets `complete_log=False` on the verify subject for a
+    retry that carried an uncommitted edit forward from an earlier
+    attempt (`session.attempt <= 1 and not session.carried`) -- the same
+    signal it already sends to `unsupported_claims`. That attempt's own
+    `steps` are not the whole session: attempt 1 can apply the patch and
+    run out of steps, and attempt 2 may legitimately show no write tool
+    at all (e.g. it only re-runs the tests and reports, with the edit
+    already committed by a later step or another attempt). This check
+    must not fail that continuation on mechanical grounds it cannot
+    support from a partial log.
+    """
+
+    async def _run(self, req: VerifyRequest):
+        ctx = CheckContext(act=None, think=None, review=None, clock=None, config=VerificationConfig())
+        return await DidAnythingCheck().run(req, ctx)
+
+    def test_an_incomplete_log_with_no_write_tool_does_not_apply(self) -> None:
+        req = VerifyRequest(
+            verification_id="v1", task_id="t1", kind="task",
+            subject={
+                "kind": "patch", "description": "d", "result": "the tests pass", "complete_log": False,
+                "steps": [{"tool": "run_tests", "ok": True, "phase": "act", "summary": ""}],
+            },
+        )
+        self.assertFalse(DidAnythingCheck().applies(req))
+
+    def test_a_complete_log_with_no_write_tool_still_applies(self) -> None:
+        req = VerifyRequest(
+            verification_id="v1", task_id="t1", kind="task",
+            subject={
+                "kind": "patch", "description": "d", "result": "the tests pass", "complete_log": True,
+                "steps": [{"tool": "run_tests", "ok": True, "phase": "act", "summary": ""}],
+            },
+        )
+        self.assertTrue(DidAnythingCheck().applies(req))
+
+    def test_a_missing_complete_log_field_defaults_to_complete(self) -> None:
+        """Older producers, and the tests above, never set the field at
+        all -- that must keep meaning "this is the whole story", not
+        silently start exempting every caller that has not been updated."""
+        req = _request("patch", ["read_file", "search_code"])
+        self.assertNotIn("complete_log", req.subject)
+        self.assertTrue(DidAnythingCheck().applies(req))
+
+    def test_an_incomplete_log_does_not_apply_even_when_this_attempt_did_write(self) -> None:
+        """`applies()` gates on completeness alone, the same way
+        `unsupported_claims` skips itself wholesale on `complete_log=False`
+        rather than trying to partially trust an incomplete log. A write
+        in this attempt's own steps is real evidence and would pass
+        anyway (see `test_a_session_that_wrote_passes`); the point of the
+        gate is the other direction -- no need to run a check whose only
+        way to fail is unsound against a log we know is partial."""
+        req = VerifyRequest(
+            verification_id="v1", task_id="t1", kind="task",
+            subject={
+                "kind": "patch", "description": "d", "result": "done", "complete_log": False,
+                "steps": [{"tool": "apply_source_patch", "ok": True, "phase": "act", "summary": ""}],
+            },
+        )
+        self.assertFalse(DidAnythingCheck().applies(req))
+
+
 class TestABookkeepingStepIsNotAnAction(unittest.IsolatedAsyncioTestCase):
     """A "verify" phase entry -- the record `session.py` writes for a
     rejected verdict, before a revision -- has no tool and is not an

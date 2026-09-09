@@ -21,6 +21,26 @@ that turned out to need no change) says so in its answer and is
 failed here; that is the known cost, and `verdict.combine` already
 treats a refusal as an answer rather than a defect, so the shape of the
 remedy exists.
+
+Also narrow the other way: `req.subject.get("steps")` is only ever the
+CURRENT attempt's steps. `session.py` already knew this about a sibling
+check -- `unsupported_claims` (`orchestration/claims.py`) takes a
+`complete_log` flag and skips itself entirely when the step log is a
+retry's own partial view, because a claim unsupported by *this*
+attempt's steps may have been made true by a *previous* one. This check
+had the identical blind spot with a worse failure mode: attempt 1 can
+apply a patch and run out of steps before committing; attempt 2 inherits
+the uncommitted edit, and if it just runs the tests and reports (no
+`apply_source_patch`, no explicit "already applied" in the answer, and
+-- unlike the trial that surfaced this -- no `git_commit` call either,
+say because the edit was committed by a still-later attempt or by a
+human), this check would fail a legitimate continuation for a write
+that genuinely happened, just not in the steps it can see. `session.py`
+now sends the same `complete_log` signal it computes for
+`unsupported_claims` (`session.attempt <= 1 and not session.carried`)
+on the verify subject, and `applies()` returns False when it is False,
+handing the question to the semantic checklist instead of failing on
+mechanical grounds it cannot actually support (2026-09-08, observer).
 """
 
 from __future__ import annotations
@@ -28,6 +48,23 @@ from __future__ import annotations
 from ..api import CheckContext, CheckResult, Feedback, VerifyRequest
 
 # The tools that leave something behind.
+#
+# `run_shell` is unconditionally in here, and that is broader than it
+# should be in principle: a session whose only `run_shell` calls were
+# `git status` and `grep` did not write anything, and this check would
+# still pass it. Left as a known limitation rather than "fixed" with a
+# command-line heuristic (`sed -i`, `>`, `rm`, ...), because the data
+# this check can see does not support one reliably: `session.py` never
+# threads the actual command text into a step's summary (it holds the
+# tool's *output*, e.g. stdout, not its input), and the one piece of
+# the command that does survive to here -- `run_shell`'s side effect is
+# `f"run_shell:{program_name}"`, e.g. "run_shell:git" -- is just the
+# program, not the arguments. "git" alone cannot distinguish `git
+# status` from `git commit`. Building a real heuristic means plumbing
+# the full command line through `execution/service.py` and
+# `session.py` into the step record, which is more surface than this
+# fix warrants; a false "no write ran" from an over-eager pattern would
+# fail a legitimate session, which is the more expensive mistake.
 WRITE_TOOLS = frozenset({"apply_source_patch", "apply_skill", "git_commit", "git_revert", "run_shell"})
 # Task kinds whose entire product is a change to a file.
 _CHANGE_KINDS = frozenset({"patch", "skill", "self_patch"})
@@ -69,7 +106,25 @@ class DidAnythingCheck:
         # Only where a change is the product, and only when we can see
         # the steps -- an empty step list means we were not told, not
         # that nothing happened.
-        return req.subject.get("kind") in _CHANGE_KINDS and bool(_steps(req))
+        #
+        # And only when the log we can see is the WHOLE session, not
+        # just this attempt's. `session.py` sends `complete_log=False`
+        # (the same flag it already passes to `unsupported_claims`,
+        # `session.attempt <= 1 and not session.carried`) on a retry
+        # that carried an edit forward from an earlier attempt: attempt
+        # 1 can apply the patch and run out of steps, and attempt 2's
+        # own step list -- the only one this check ever sees -- may
+        # legitimately have no write tool in it at all (e.g. it just
+        # re-runs the tests and reports, with the patch already
+        # committed by attempt 1). Judging that attempt in isolation
+        # would fail a legitimate continuation. Default to True (a
+        # complete log) so producers that do not send the field --
+        # tests, other callers -- keep today's behaviour.
+        return (
+            req.subject.get("kind") in _CHANGE_KINDS
+            and bool(_steps(req))
+            and req.subject.get("complete_log", True)
+        )
 
     async def run(self, req: VerifyRequest, ctx: CheckContext) -> CheckResult:
         used = {str(s.get("tool") or "") for s in _steps(req)}

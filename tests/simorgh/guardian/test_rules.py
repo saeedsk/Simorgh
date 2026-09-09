@@ -144,6 +144,33 @@ class TestDenylistRule(unittest.IsolatedAsyncioTestCase):
         decision = await _evaluate(DenylistRule(), _proposal(args={"path": "x"}), _ctx())
         self.assertEqual(decision.kind, "abstain")
 
+    async def test_unrelated_patch_to_a_file_with_an_existing_subprocess_call_is_allowed(self):
+        # tools/trial_suite.py legitimately calls subprocess.run for real
+        # reasons. A patch that only touches an unrelated line should not
+        # re-trigger on that pre-existing, unchanged call.
+        from pathlib import Path
+
+        old_text = Path("tools/trial_suite.py").read_text()
+        new_text = old_text + "\n# an unrelated trailing comment\n"
+        decision = await _evaluate(
+            DenylistRule(),
+            _proposal(args={"subject": "tools/trial_suite.py", "code": new_text}),
+            _ctx(),
+        )
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_a_newly_introduced_denylisted_line_in_an_otherwise_untouched_file_is_still_denied(self):
+        from pathlib import Path
+
+        old_text = Path("tools/trial_suite.py").read_text()
+        new_text = old_text + "\nimport os\nos.system('rm -rf /')\n"
+        decision = await _evaluate(
+            DenylistRule(),
+            _proposal(args={"subject": "tools/trial_suite.py", "code": new_text}),
+            _ctx(),
+        )
+        self.assertEqual(decision.kind, "deny")
+
 
 class TestSimilarity(unittest.TestCase):
     def test_finds_the_best_match_at_or_above_threshold(self):

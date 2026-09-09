@@ -90,6 +90,26 @@ word first -- YES, NO, or UNKNOWN if neither shows it either way -- then,
 on a new line, one short sentence of evidence."""
 
 _STEP_LIMIT = 12
+# `session.py::_put_verify_subject` already cuts each step's summary to
+# a few thousand chars before it ever reaches this blob. This used to
+# re-cut to 400 -- a second, tighter truncation on top of the first --
+# and a bare `[:400]` sliced mid-word/mid-number besides: "...sampling
+# 21 CoT trajectories... temperature 0.7" came through as "...temperature
+# 0.", which reads as the source itself saying "0." rather than as text
+# that got cut, so a reviewer failed a correct answer as unsupported
+# (two independent observers, 2026-09-08). Raised to match what
+# `_put_verify_subject` already keeps, and cut at a word boundary.
+_EVIDENCE_CHARS = 2000
+
+
+def _trim(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    last_space = cut.rfind(" ")
+    if last_space > limit * 0.5:
+        cut = cut[:last_space]
+    return cut + " ...[cut]"
 
 
 def _evidence(subject: dict) -> str:
@@ -105,7 +125,7 @@ def _evidence(subject: dict) -> str:
         tool = step.get("tool") or step.get("phase") or "step"
         mark = {True: "ok", False: "FAILED"}.get(step.get("ok"), "")
         summary = " ".join(str(step.get("summary") or "").split())
-        lines.append(f"- {tool}: {summary[:400]}  {mark}".rstrip())
+        lines.append(f"- {tool}: {_trim(summary, _EVIDENCE_CHARS)}  {mark}".rstrip())
     return "\nWhat was actually done, in order:\n" + "\n".join(lines) + "\n"
 
 

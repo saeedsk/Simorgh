@@ -5,7 +5,7 @@ are unit tests of the parsing/aggregation logic, not the bus."""
 import unittest
 
 from simorgh.verification.api import ThinkReply, VerifyRequest
-from simorgh.verification.checklist import AnsweredItem, ChecklistItem, evaluate_checklist, generate_checklist
+from simorgh.verification.checklist import AnsweredItem, ChecklistItem, _evidence, _trim, evaluate_checklist, generate_checklist
 from simorgh.verification.config import VerificationConfig
 
 
@@ -138,3 +138,70 @@ class TestTheReviewerSeesWhatWasDone(unittest.IsolatedAsyncioTestCase):
 
         await generate_checklist(think, _req(), VerificationConfig())
         self.assertNotIn("What was actually done", seen[0])
+
+
+class TestTrim(unittest.TestCase):
+    """`_trim` is what stands between a real, complete quote and a
+    reviewer being handed a fragment that reads as a different fact."""
+
+    def test_short_text_is_unchanged(self):
+        self.assertEqual(_trim("all good", 400), "all good")
+
+    def test_cuts_at_a_word_boundary_not_mid_word(self):
+        text = "sampling 21 CoT trajectories at temperature 0.7 with top_p 0.9"
+        # A bare text[:48] lands mid-number: "...temperature 0."
+        trimmed = _trim(text, 48)
+        self.assertFalse(trimmed.startswith("sampling 21 CoT trajectories at temperature 0.7"[:48]) and trimmed[-1] == ".")
+        # It must not silently end on a bare "0." that looks like a
+        # complete (and different) fact.
+        self.assertNotEqual(trimmed, text[:48])
+        self.assertIn("...[cut]", trimmed)
+
+
+class TestEvidenceReproducesAndFixesTheTruncationBug(unittest.TestCase):
+    """Reproduces the exact shape two independent observers hit
+    2026-09-08: an early step's tool-output summary is truncated
+    mid-number ("temperature 0."), and a later step in the SAME run
+    already has the complete, correct figure ("temperature 0.7"). The
+    old `summary[:400]` (checklist.py) stacked on top of the old
+    `[:300]` (session.py::_put_verify_subject) could turn a real,
+    complete quote into a fragment indistinguishable from a source that
+    only ever said "0." -- and a reviewer failed a correct answer on
+    that basis. Both cuts are now word-boundary-aware and wide enough
+    that the complete figure survives.
+    """
+
+    def test_a_later_step_with_the_complete_figure_is_not_swallowed(self):
+        # Step 1: as if `_put_verify_subject` had already cut a long PDF
+        # excerpt at a naive boundary, landing mid-number.
+        early_truncated = (
+            "read pages 4-5 of the paper: the study describes "
+            "sampling 21 CoT trajectories per problem at temperature 0."
+        )
+        # Step 2: the full re-read later in the same run.
+        later_complete = (
+            "read pages 4-5 again in full: the study describes sampling "
+            "21 CoT trajectories per problem at temperature 0.7 with top_p 0.9."
+        )
+        subject = {
+            "steps": [
+                {"tool": "read_file", "ok": True, "phase": "act", "summary": early_truncated},
+                {"tool": "read_file", "ok": True, "phase": "act", "summary": later_complete},
+            ],
+        }
+        rendered = _evidence(subject)
+        # The complete figure from the later step must appear verbatim,
+        # not itself re-truncated by the evidence formatter.
+        self.assertIn("temperature 0.7 with top_p 0.9.", rendered)
+
+    def test_a_long_single_step_summary_is_not_cut_mid_number(self):
+        # One long step whose relevant fact lands right at the old
+        # 400-char boundary -- reproduces the bug even without a second
+        # step, since checklist._evidence used to re-truncate to 400
+        # regardless of what session.py had already kept.
+        padding = "x" * 380
+        summary = f"{padding} the reported temperature was 0.7 exactly"
+        subject = {"steps": [{"tool": "read_file", "ok": True, "phase": "act", "summary": summary}]}
+        rendered = _evidence(subject)
+        self.assertIn("temperature was 0.7 exactly", rendered)
+        self.assertNotIn("temperature was 0.  ", rendered)

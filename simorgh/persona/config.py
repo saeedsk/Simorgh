@@ -19,6 +19,18 @@ class Config:
     exclamation_arousal: float = 0.10
     outcome_nudge_success: float = 0.08
     outcome_nudge_failure: float = -0.10
+    # `task.blocked` is not terminal -- Planning retries a blocked task
+    # up to `max_blocked_retries` times (default 9, some as fast as every
+    # `continuation_delay_seconds` = 10s for a step-budget continuation)
+    # before it ever becomes `task.failed`. A single failure-sized nudge
+    # per retry would let one struggling task swing mood harder than an
+    # outright failure; a much smaller nudge here still gives Persona a
+    # real reaction to "things aren't going smoothly" on each attempt,
+    # while a task that resolves after one or two blocks barely moves
+    # mood at all -- and a task that blocks many times before giving up
+    # still ends up worse off than a quick clean failure, which is the
+    # right shape for a protracted struggle.
+    outcome_nudge_blocked: float = -0.03
     growth_cooldown_s: float = 900.0
     news_cooldown_s: float = 1800.0
     quiet_when_active_s: float = 20.0
@@ -49,6 +61,7 @@ class Config:
             exclamation_arousal=float(data.get("exclamation_arousal", 0.10)),
             outcome_nudge_success=float(data.get("outcome_nudge", {}).get("success", 0.08)) if isinstance(data.get("outcome_nudge"), dict) else 0.08,
             outcome_nudge_failure=float(data.get("outcome_nudge", {}).get("failure", -0.10)) if isinstance(data.get("outcome_nudge"), dict) else -0.10,
+            outcome_nudge_blocked=float(data.get("outcome_nudge", {}).get("blocked", -0.03)) if isinstance(data.get("outcome_nudge"), dict) else -0.03,
             growth_cooldown_s=float(share.get("growth_cooldown_s", 900.0)),
             news_cooldown_s=float(share.get("news_cooldown_s", 1800.0)),
             quiet_when_active_s=float(share.get("quiet_when_active_s", 20.0)),

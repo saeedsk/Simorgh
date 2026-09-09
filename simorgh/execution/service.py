@@ -230,7 +230,7 @@ class Service:
             topics.TOOL_REGISTERED, source="execution",
             payload={"name": tool.name, "version": "1", "description": tool.description,
                      "read_only": tool.read_only, "reversibility": tool.reversibility,
-                     "schema_ref": "", "provider": "skill"},
+                     "schema_ref": "", "provider": "skill", "marker_arg_key": tool.marker_arg_key},
         ))
         await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name, "provider": "skill"}))
         return tool

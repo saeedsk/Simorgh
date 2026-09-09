@@ -329,10 +329,29 @@ class Service:
         """
         p = message.payload
         reasons = p.get("reasons") or []
+        layer = p.get("layer", "")
         now = self._ctx.clock.now() if self._ctx is not None else message.ts
+
+        # A layer="scope" denial is exactly the "scope crossing" the
+        # drift heuristic's largest term (weight 0.5, DriftTracker.
+        # heuristic_score) is meant to count. Nothing ever called
+        # observe_scope_denial() before this -- scope_crossings sat at 0
+        # forever, capping the heuristic-only score below
+        # drift_emit_threshold even in a genuinely drifting task
+        # (confirmed finding). Attribute the denial to the task's own
+        # tracker when both a task_id and that task are known; an
+        # untracked proposal (no task_id, or a task Reflection never saw
+        # task.created for) is silently skipped, same as every other
+        # per-task observation in this file.
+        if layer == "scope":
+            task_id = p.get("task_id")
+            meta = self._tasks.get(task_id) if task_id else None
+            if meta is not None and meta.tracker is not None:
+                meta.tracker.observe_scope_denial()
+
         pattern = self._denials.add(
             tool=p.get("tool", ""), reason=reasons[0] if reasons else "",
-            layer=p.get("layer", ""), now=now,
+            layer=layer, now=now,
         )
         if pattern is None:
             return

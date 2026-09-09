@@ -49,7 +49,7 @@ class Service:
     name = "persona"
     version = VERSION
     consumes: tuple[str, ...] = (
-        topics.PERCEPT_TEXT_RECEIVED, topics.TASK_COMPLETED, topics.TASK_FAILED,
+        topics.PERCEPT_TEXT_RECEIVED, topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
         topics.REFLECT_HEALTH_FINDING, topics.SYSTEM_TICK_SECOND, topics.SYSTEM_STATE_CHANGED,
         topics.PERSONA_VOICE, topics.UI_PROMPT_ANSWERED, topics.CURIOSITY_SHARE_PROPOSED,
     )
@@ -95,6 +95,7 @@ class Service:
             await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept_text),
             await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_completed),
             await ctx.bus.subscribe(topics.TASK_FAILED, self._on_task_failed),
+            await ctx.bus.subscribe(topics.TASK_BLOCKED, self._on_task_blocked),
             await ctx.bus.subscribe(topics.REFLECT_HEALTH_FINDING, self._on_health_finding),
             await ctx.bus.subscribe(topics.SYSTEM_TICK_SECOND, self._on_tick_second),
             await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed),
@@ -160,6 +161,22 @@ class Service:
 
     async def _on_task_failed(self, message: Message) -> None:
         await self._apply_and_announce(valence=self.config.outcome_nudge_failure, source="task.failed")
+
+    async def _on_task_blocked(self, message: Message) -> None:
+        # `task.blocked` is Planning's actual common "it went wrong"
+        # outcome (verification failure, step-budget exhaustion, no
+        # provider, uncommitted edits, fabricated claims all land here,
+        # not on task.failed) -- but it is not terminal: the task may be
+        # retried up to `max_blocked_retries` times and still end in
+        # task.completed or task.failed. A blocked task that later
+        # resolves will therefore emit more than one mood nudge across
+        # its lifecycle (blocked, then completed/failed); that is left
+        # undamped on purpose -- it is a real "struggled, then
+        # succeeded/failed" arc, not double-counting the same outcome.
+        # What is damped is the *size* of each blocked nudge (see
+        # `outcome_nudge_blocked`'s docstring in config.py) so that many
+        # retries of one task don't outweigh a single clean failure.
+        await self._apply_and_announce(valence=self.config.outcome_nudge_blocked, source="task.blocked")
 
     async def _on_health_finding(self, message: Message) -> None:
         if message.payload.get("severity") != "critical" or message.payload.get("action_taken") != "request_reset":

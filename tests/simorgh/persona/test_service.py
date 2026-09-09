@@ -93,6 +93,43 @@ class PersonaTestCase(unittest.IsolatedAsyncioTestCase):
         await self._pump()
         self.assertLess(self.service._mood.current().valence, before)
 
+    async def test_task_blocked_lowers_valence_less_than_failure(self):
+        before = self.service._mood.current().valence
+        await self.bus.publish(self.bus.new(topics.TASK_BLOCKED, {
+            "task_id": "t2", "reason": "step budget exhausted", "retry_after": 10.0,
+        }))
+        await self._pump()
+        blocked_valence = self.service._mood.current().valence
+        self.assertLess(blocked_valence, before)
+        blocked_delta = before - blocked_valence
+
+        self.service._mood.set_state(valence=before, arousal=0.0, cognitive_load=0.0, source="test-reset")
+        await self.bus.publish(self.bus.new(topics.TASK_FAILED, {
+            "task_id": "t3", "reason": "boom", "terminal": True, "attempts": 1,
+        }))
+        await self._pump()
+        failed_delta = before - self.service._mood.current().valence
+
+        self.assertLess(blocked_delta, failed_delta)
+
+    async def test_task_blocked_then_completed_both_nudge_mood(self):
+        """A task that blocks and later resolves emits two nudges -- a
+        real struggle-then-success arc, not double-counting."""
+        before = self.service._mood.current().valence
+        await self.bus.publish(self.bus.new(topics.TASK_BLOCKED, {
+            "task_id": "t4", "reason": "step budget exhausted", "retry_after": 10.0,
+        }))
+        await self._pump()
+        after_blocked = self.service._mood.current().valence
+        self.assertLess(after_blocked, before)
+
+        await self.bus.publish(self.bus.new(topics.TASK_COMPLETED, {
+            "task_id": "t4", "result_summary": "done", "artifacts": [], "verification_ref": None,
+        }))
+        await self._pump()
+        after_completed = self.service._mood.current().valence
+        self.assertGreater(after_completed, after_blocked)
+
     async def test_critical_health_finding_resets_mood(self):
         await self.service._apply_and_announce(valence=0.5, arousal=0.5, source="test-setup")
         self.assertNotEqual(self.service._mood.current().valence, 0.0)

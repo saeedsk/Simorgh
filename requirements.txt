@@ -24,3 +24,9 @@ prompt-toolkit>=3.0
 # nothing here is required to boot -- but GAIA attaches documents, and
 # the creator's papers/ directory is PDFs.
 pypdf>=6.0
+
+# Test-only. `pytest -n auto` runs the suite across every core instead
+# of one: 3066 tests went from 250s to 57s on a 12-core machine, same
+# pass/fail result. Not needed to boot Simorgh itself -- only to run
+# its own test suite faster (2026-09-08).
+pytest-xdist>=3.6

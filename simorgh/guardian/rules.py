@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from pathlib import Path
 
 from .api import Decision, DecisionContext, Proposal
 
@@ -17,6 +18,54 @@ from .api import Decision, DecisionContext, Proposal
 # used by the protected/scope rules to find "the path" in an otherwise
 # tool-specific args dict without hardcoding every tool's exact schema.
 _SUBJECT_ARG_KEYS = ("subject", "path")
+
+# Guardian's own location is fixed within the checkout regardless of
+# process cwd (mirrors execution/config.py's find_repo_root fallback,
+# duplicated here rather than imported -- guardian deliberately depends
+# on nothing but its own siblings + simorgh.contracts + stdlib, and
+# execution/ is itself one of the protected subjects this package
+# polices).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _existing_text(subject: str) -> str | None:
+    """The on-disk content of `subject`, or None if it doesn't exist yet
+    (a new file -- everything in it is "new") or can't be read as text
+    (binary, unreadable, escapes the repo -- scan the whole body rather
+    than silently trust a diff we can't compute)."""
+    if not subject or ".." in Path(subject).parts:
+        return None
+    target = (_REPO_ROOT / subject).resolve()
+    try:
+        target.relative_to(_REPO_ROOT)
+    except ValueError:
+        return None
+    if not target.is_file():
+        return None
+    try:
+        return target.read_text()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _added_or_changed_lines(old: str, new: str) -> str:
+    """Lines this patch introduces or rewrites, newline-joined. Ported
+    files like tools/trial.py legitimately call `subprocess.run` for
+    real reasons; scanning the whole new-file body on every patch to
+    such a file meant DenylistRule denied even a one-line, unrelated
+    docstring add with "spawns its own subprocess" -- the pattern was
+    already there, untouched, and the diff never looked. Scanning only
+    what changed lets an existing, already-reviewed line stay allowed
+    while a genuinely new denylisted line -- inserted or edited into
+    existence by this very patch -- still gets caught."""
+    old_lines = old.splitlines()
+    new_lines = new.splitlines()
+    matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
+    changed: list[str] = []
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("replace", "insert"):
+            changed.extend(new_lines[j1:j2])
+    return "\n".join(changed)
 
 
 # Arguments that are a program rather than a path: whatever they name,
@@ -146,10 +195,25 @@ class DenylistRule:
         code = proposal.args.get("code")
         if not isinstance(code, str):
             return Decision("abstain", self.layer)
+        scan_text = code
+        # `run_shell`/`run_python_sandboxed` also carry `code`, but name
+        # no `subject`/`path` -- there is no "existing file" to diff
+        # against, so they keep scanning the whole program (as before).
+        # Only a whole-file-replace tool (`apply_source_patch`,
+        # `apply_skill`) both names a subject and hands over a complete
+        # new body, which is what makes a same-file, unrelated-line diff
+        # meaningful here.
+        for key in _SUBJECT_ARG_KEYS:
+            subject = proposal.args.get(key)
+            if isinstance(subject, str) and subject:
+                old_text = _existing_text(subject)
+                if old_text is not None:
+                    scan_text = _added_or_changed_lines(old_text, code)
+                break
         reasons = tuple(
             f"denied: {explanation}"
             for pattern, explanation in ctx.config.denylist.items()
-            if re.search(pattern, code)
+            if re.search(pattern, scan_text)
         )
         if reasons:
             return Decision("deny", self.layer, reasons)

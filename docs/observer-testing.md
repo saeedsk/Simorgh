@@ -98,6 +98,18 @@ make the exact slow-to-trigger bugs (a multi-attempt continuation, a
 300-second retry delay, a full test suite run) untestable instead of
 faster to test.
 
+**One genuine, safe speedup for the full suite itself:** `pytest -n
+auto` (pytest-xdist, in requirements.txt) runs the suite across every
+CPU core instead of one. Measured on this machine: 3066 tests, 250s
+serial vs 57s across 12 cores, same pass/fail result -- a real 4.4x,
+not a marginal one, and unlike shortening a timeout it changes nothing
+about what gets tested. Several observers in this project's own waves
+stalled for minutes waiting on a serial `pytest tests -q`; use
+`pytest tests -q -n auto` instead when running the full suite in a
+sandbox, and keep the anti-stall protocol's background-and-poll
+discipline for it regardless, since even 57s exceeds a foreground
+call's comfort margin.
+
 ## Anti-stall protocol (unchanged, still required)
 
 A previous round lost 7 of 11 observers to a 600-second watchdog by
