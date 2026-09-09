@@ -57,6 +57,18 @@ from typing import Awaitable, Callable, Iterable
 DOUBLE_INTERRUPT_S = 2.0
 _MAX_PATH_COMPLETIONS = 40
 
+# No real command name or repo-relative path is anywhere near this long, so
+# once a line crosses it -- pasted prose, a giant unbracketed paste, a stray
+# long word -- it is never a completion or highlighting candidate. Bailing
+# out at this length caps the per-keystroke cost of `_SimCompleter` and
+# `_lex_line` at a constant instead of it scaling with line length; every
+# other character insertion still re-triggers the completer and lexer
+# (`complete_while_typing=True`, prompt_toolkit's own per-keystroke redraw),
+# so a long line still costs O(length) total work across all its keystrokes
+# -- this only removes the *extra* per-keystroke multiplier this module
+# itself would otherwise add on top of that.
+_MAX_LINE_FOR_COMPLETION_AND_LEXING = 4000
+
 # What the completion menu offers after `/`. The description is the
 # right-hand column, the same text `render.py` shows in the splash.
 COMMANDS: tuple[tuple[str, str], ...] = (
@@ -165,6 +177,8 @@ def _make_completer(root: Path):
         get help would be inconsistent."""
 
         def get_completions(self, document, complete_event) -> Iterable[Completion]:
+            if len(document.text_before_cursor) > _MAX_LINE_FOR_COMPLETION_AND_LEXING:
+                return  # a line this long is never a command or a path
             word = document.get_word_before_cursor(WORD=True)
             if word.startswith("@"):
                 for path in path_matches(word, root=root):
@@ -202,6 +216,8 @@ def _make_lexer():
 def _lex_line(line: str, *, first_line: bool) -> list[tuple[str, str]]:
     """One line as (style, text) pairs. Exported for tests -- the styles
     are the contract, not the colours they resolve to."""
+    if len(line) > _MAX_LINE_FOR_COMPLETION_AND_LEXING:
+        return [("", line)]  # too long to be a command/path/quoted token anyway
     out: list[tuple[str, str]] = []
     known = {name for name, _ in COMMANDS}
     index = 0
