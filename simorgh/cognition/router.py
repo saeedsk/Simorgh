@@ -12,7 +12,7 @@ work is additive, not a redesign.
 
 from __future__ import annotations
 
-from simorgh.contracts.protocols import Clock, Provider, ProviderResponse
+from simorgh.contracts.protocols import Clock, Logger, Provider, ProviderResponse
 
 from .api import Budget, BudgetExceeded, NoRealProvider, Purpose
 from .budget import RollingWindowBudget
@@ -23,13 +23,14 @@ from .tokens import estimate_tokens
 class Router:
     def __init__(
         self, providers: list[Provider], budgets: dict[str, RollingWindowBudget],
-        floor: FloorProvider, *, order: tuple[str, ...], clock: Clock,
+        floor: FloorProvider, *, order: tuple[str, ...], clock: Clock, logger: Logger | None = None,
     ) -> None:
         self._by_name = {p.name: p for p in providers}
         self._budgets = budgets
         self._floor = floor
         self._order = order
         self._clock = clock
+        self._logger = logger
 
     def candidate_names(self) -> list[str]:
         return [name for name in self._order if name in self._by_name] + [self._floor.name]
@@ -82,6 +83,27 @@ class Router:
                 )
             except Exception as exc:  # noqa: BLE001 -- ProviderUnavailable or anything else: try the next candidate
                 last_error = exc
+                # Live-caught, 2026-09-08: a failover used to be
+                # completely silent -- nothing on the Ledger, nothing in
+                # any log, not even a debug line -- so the only trace of
+                # a real primary-provider failure was an absence (the
+                # successful candidate's name in `cognition:calls`,
+                # never saying who was tried first and why they were
+                # skipped). Visible even when this is the last candidate
+                # and the exception is about to surface as `last_error`.
+                if self._logger is not None:
+                    self._logger.warning(
+                        "cognition.provider_failed", provider=name, purpose=purpose.value, error=str(exc),
+                    )
+                # Some failures reach here *after* the remote call already
+                # happened and was billed (Together's reasoning-only
+                # truncation, Claude Code CLI's `is_error` exit both
+                # attach `billable` for exactly this) -- record that real
+                # spend against this provider's own budget before moving
+                # on, so a failed-but-billed call is never silently free.
+                billable = getattr(exc, "billable", None)
+                if billable is not None and provider_budget is not None:
+                    await provider_budget.record(billable)
                 continue
             if provider_budget is not None:
                 await provider_budget.record(response)

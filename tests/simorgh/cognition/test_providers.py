@@ -85,6 +85,35 @@ class TestClaudeCodeProvider(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ProviderUnavailable):
             await provider.complete([{"role": "user", "content": "q"}], tools=None, max_tokens=100)
 
+    async def test_is_error_with_nonzero_cost_still_carries_it_as_billable(self):
+        # Live-caught, 2026-09-08: the CLI can burn real subscription
+        # cost before hitting an error mid-run (e.g. a context limit), and
+        # `is_error` raising bare dropped that spend on the floor -- the
+        # Router only ever records cost on the success path. `billable`
+        # carries the real `total_cost_usd` so it still reaches this
+        # provider's budget even though the call is a failure.
+        def runner(argv, **kwargs):
+            return _fake_completed(json.dumps(
+                {"result": "ran out of context mid-task", "is_error": True, "total_cost_usd": 0.03},
+            ))
+
+        provider = ClaudeCodeProvider(runner=runner)
+        with self.assertRaises(ProviderUnavailable) as ctx:
+            await provider.complete([{"role": "user", "content": "q"}], tools=None, max_tokens=100)
+        billable = ctx.exception.billable
+        self.assertIsNotNone(billable)
+        self.assertAlmostEqual(billable.cost_usd, 0.03)
+        self.assertEqual(billable.text, "")
+
+    async def test_is_error_with_no_cost_carries_no_billable(self):
+        def runner(argv, **kwargs):
+            return _fake_completed(json.dumps({"result": "Not logged in", "is_error": True}))
+
+        provider = ClaudeCodeProvider(runner=runner)
+        with self.assertRaises(ProviderUnavailable) as ctx:
+            await provider.complete([{"role": "user", "content": "q"}], tools=None, max_tokens=100)
+        self.assertIsNone(ctx.exception.billable)
+
     async def test_nonzero_exit_raises_provider_unavailable(self):
         def runner(argv, **kwargs):
             return _fake_completed("", returncode=1, stderr="boom")
