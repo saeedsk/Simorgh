@@ -103,6 +103,38 @@ async def _publish(bus: BusClient, type_: str, payload: dict, *, render_ok: str)
     return Outcome(render_ok)
 
 
+# Statuses `_on_task_cancel` (planning/service.py) already treats as
+# done -- a plain string agreement rather than an import, since
+# `interface` may not import `planning` (`test_module_boundaries.py`).
+_TERMINAL_STATUSES = frozenset({"completed", "failed"})
+
+
+async def _cancel(bus: BusClient, task_id: str, *, session_id: str) -> Outcome:
+    """`TASK_CANCEL` is fire-and-forget, and Planning's own handler
+    silently no-ops on an unknown or already-finished task_id (there is
+    nothing left to stop). Publishing it and then unconditionally
+    saying "asked X to stop" was true only when the id turned out to
+    name a live task -- for a typo, a stale id copied from an old
+    `tasks` listing, or a task that had already finished, the human was
+    told a cancellation was in flight that never actually happened
+    (observer, 2026-09-08). Look the task up first so the message
+    matches what will actually happen."""
+    try:
+        reply = await bus.request(bus.new(topics.TASK_LIST_REQUEST, {}), timeout=3.0)
+    except TimeoutError:
+        return Outcome(_NO_RESPONSE)
+    except Exception as exc:  # noqa: BLE001 -- a lookup failure is a rendered error, never a crash
+        return Outcome(f"error: {exc!r}")
+    task = next((t for t in reply.payload.get("tasks", []) if t.get("task_id") == task_id), None)
+    if task is None:
+        return Outcome(f"no such task {task_id!r} -- `tasks` lists them")
+    if task.get("status") in _TERMINAL_STATUSES:
+        return Outcome(f"{task_id} is already {task['status']} -- nothing to stop")
+    return await _publish(bus, topics.TASK_CANCEL, {
+        "task_id": task_id, "reason": f"cancelled by cli:{session_id}",
+    }, render_ok=f"asked {task_id} to stop; it ends after its current step")
+
+
 async def run_shell(command: str, *, timeout: float) -> str:
     if not command:
         return "usage: !<shell command>"
@@ -190,9 +222,7 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         task_id = args.strip()
         if not task_id:
             return Outcome("usage: cancel <task_id>   (`tasks` lists them)")
-        return await _publish(bus, topics.TASK_CANCEL, {
-            "task_id": task_id, "reason": f"cancelled by cli:{session_id}",
-        }, render_ok=f"asked {task_id} to stop; it ends after its current step")
+        return await _cancel(bus, task_id, session_id=session_id)
 
     if name == "tasks":
         if args.strip() == "work":
