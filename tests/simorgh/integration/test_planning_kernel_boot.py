@@ -433,11 +433,21 @@ class TestAContinuationComesBackSoonWithItsOwnCap(unittest.IsolatedAsyncioTestCa
         await self._claimed_task()
         self.assertIsNone(self.claim["task"].get("max_steps"))
 
-    async def test_running_out_of_steps_is_a_short_retry_and_anything_else_is_long(self) -> None:
+    async def test_running_out_of_steps_or_a_verification_objection_is_a_short_retry(self) -> None:
+        """A checklist rejection keeps the edit and the objection for the
+        next attempt (`orchestration/session.py::_continues`) exactly
+        like a continuation does -- so it comes back just as fast, not
+        after the full five-minute blocked delay. Only a reason outside
+        that set (e.g. a genuine external block) pays the long delay."""
         planning = self.kernel._supervisor.services["planning"].service  # noqa: SLF001
         heard = _Collector()
         sub = await self.kernel.bus.subscribe(topics.TASK_BLOCKED, heard)
-        for reason in ("step budget exhausted before the task was finished", "verification failed after max revisions"):
+        for reason in (
+            "step budget exhausted before the task was finished",
+            "verification failed after max revisions",
+            "finished with uncommitted changes",
+            "some other reason entirely",
+        ):
             task_id = await self._claimed_task()
             await self.kernel.bus.publish(Message.new(
                 topics.TASK_BLOCKED, source="orchestration", payload={"task_id": task_id, "reason": reason},
@@ -445,7 +455,10 @@ class TestAContinuationComesBackSoonWithItsOwnCap(unittest.IsolatedAsyncioTestCa
             await _pump(100)
         await sub.unsubscribe()
         delays = [m.payload["retry_after"] for m in heard.messages if m.source != "orchestration"]
-        self.assertEqual(delays, [planning.config.continuation_delay_seconds, planning.config.blocked_retry_delay_seconds])
+        self.assertEqual(delays, [
+            planning.config.continuation_delay_seconds, planning.config.continuation_delay_seconds,
+            planning.config.continuation_delay_seconds, planning.config.blocked_retry_delay_seconds,
+        ])
         self.assertLess(planning.config.continuation_delay_seconds, 60)
 
 

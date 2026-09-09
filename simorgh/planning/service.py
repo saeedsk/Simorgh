@@ -457,11 +457,18 @@ class Service:
         ))
 
     def _retry_delay(self, reason: str) -> float:
-        """A task that ran out of steps mid-work is a continuation, not a
-        task blocked on something outside itself: it comes back in
-        seconds, with a fresh budget and a memory of the attempt
-        (orchestration/resume.py), rather than in five minutes."""
-        if reason.startswith(CONTINUATION_REASON):
+        """A task that ran out of steps mid-work, or that a verification
+        check objected to (edit and objection both kept for the next
+        attempt, `orchestration/session.py::_continues`), is a
+        continuation, not a task blocked on something outside itself: it
+        comes back in seconds, with a fresh budget and a memory of the
+        attempt (orchestration/resume.py), rather than in five minutes.
+        Before this, a checklist rejection over a trivial, one-attempt
+        fixable slip (e.g. a self-consistency mistake in the model's own
+        answer) still paid the full five-minute delay every time --
+        dominating a project's wall-clock time far more than any amount
+        of test-suite speedup could (observer, 2026-09-08)."""
+        if reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON)):
             return self.config.continuation_delay_seconds
         return self.config.blocked_retry_delay_seconds
 
@@ -949,10 +956,15 @@ class Service:
         ))
 
 
-# The reason `orchestration/session.py` gives when an attempt spends its
-# whole step budget with a tool call still pending. Matched by prefix
-# here because the two packages may not import each other.
+# The reasons `orchestration/session.py` gives for an attempt that is
+# unfinished rather than wrong -- it ran out of steps, or verification
+# objected to something worth another try with the edit and the
+# objection still in hand (`Session._continues`, same three prefixes).
+# Matched by prefix here because the two packages may not import each
+# other.
 CONTINUATION_REASON = "step budget exhausted"
+VERIFICATION_REASON = "verification failed"
+UNCOMMITTED_REASON = "finished with uncommitted changes"
 
 
 def _task_payload(task: Task) -> dict:
