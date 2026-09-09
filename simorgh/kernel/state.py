@@ -38,6 +38,12 @@ class StateChange:
     reason: str
     requested_by: str
     scope: str | None = None  # "all" | "autonomous" | None
+    # What the autonomous pause is AFTER this change. A scoped pause and
+    # a scoped resume both leave `state == previous` (the system keeps
+    # running either way), so without this the Ledger record of the two
+    # is byte-identical and the flag cannot be restored on restart --
+    # which is how `auto off` came back on by itself (live, 2026-09-09).
+    autonomous_paused: bool = False
 
 
 class SystemStateMachine:
@@ -46,6 +52,19 @@ class SystemStateMachine:
             raise ValueError(initial)
         self._state = initial
         self._autonomous_paused = False
+
+    def restore_autonomous_paused(self, paused: bool) -> None:
+        """Put back a scoped pause a previous process recorded.
+
+        `auto off` is a decision a person made about what this system may
+        do on its own. It lived only in memory, so any restart -- a
+        loader reboot, a crash, a hot swap -- silently turned autonomy
+        back on, and nothing announced it. A human who says "off" and
+        finds it on again a few minutes later has been overruled by a
+        detail of process lifetime, which is the opposite of
+        corrigibility. Live-caught 2026-09-09.
+        """
+        self._autonomous_paused = bool(paused)
 
     @property
     def state(self) -> str:
@@ -74,24 +93,28 @@ class SystemStateMachine:
             self._autonomous_paused = True
             if already:
                 return None  # idempotent: no new event for a repeat scoped pause
-            return StateChange(self._state, self._state, reason, requested_by, scope="autonomous")
+            return StateChange(self._state, self._state, reason, requested_by,
+                               scope="autonomous", autonomous_paused=True)
         if self._state == PAUSED:
             return None  # idempotent
         if self._state not in (RUNNING,):
             raise InvalidTransition(f"pause from {self._state!r}")
         previous, self._state = self._state, PAUSED
-        return StateChange(PAUSED, previous, reason, requested_by, scope="all")
+        return StateChange(PAUSED, previous, reason, requested_by, scope="all",
+                           autonomous_paused=self.autonomous_paused)
 
     def resume(self, *, reason: str, requested_by: str, scope: str | None = None) -> StateChange | None:
         if scope == "autonomous":
             if not self._autonomous_paused:
                 return None
             self._autonomous_paused = False
-            return StateChange(self._state, self._state, reason, requested_by, scope="autonomous")
+            return StateChange(self._state, self._state, reason, requested_by,
+                               scope="autonomous", autonomous_paused=False)
         if self._state != PAUSED:
             return None  # idempotent (resume while already running)
         previous, self._state = self._state, RUNNING
-        return StateChange(RUNNING, previous, reason, requested_by, scope="all")
+        return StateChange(RUNNING, previous, reason, requested_by, scope="all",
+                           autonomous_paused=self.autonomous_paused)
 
     def stop(self, *, reason: str, requested_by: str) -> StateChange:
         if self._state == STOPPED:

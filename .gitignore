@@ -22,3 +22,4 @@ secrets/
 # Structured data a tool fetched, written by execution/service.py so
 # `read_file` and a script can load it. Real data, not source.
 results/
+.sim-quarantine/

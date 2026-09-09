@@ -114,3 +114,47 @@ class TestStop(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AutoOffSurvivesARestartTestCase(unittest.TestCase):
+    """`auto off` is a decision a person made about what this system may
+    do on its own -- and it lived only in memory.
+
+    Live-caught 2026-09-09: the creator ran `auto off`, autonomy stopped,
+    and a few minutes later curiosity-origin tasks were running again.
+    `_autonomous_paused` initialises to False on every boot and nothing
+    read the history back, so any restart -- a loader reboot, a crash, a
+    hot swap -- silently re-enabled autonomy, and nothing announced it.
+    Being overruled by a detail of process lifetime is the opposite of
+    corrigibility.
+    """
+
+    def test_a_scoped_pause_and_resume_are_distinguishable_on_the_wire(self):
+        # Both leave `state == previous` (the system keeps running
+        # either way), so before `autonomous_paused` was carried the two
+        # ledger records were byte-identical and the flag could not be
+        # restored at all.
+        machine = SystemStateMachine("running")
+        paused = machine.pause(reason="off", requested_by="cli", scope="autonomous")
+        resumed = machine.resume(reason="on", requested_by="cli", scope="autonomous")
+        self.assertEqual((paused.state, paused.previous), (resumed.state, resumed.previous))
+        self.assertTrue(paused.autonomous_paused)
+        self.assertFalse(resumed.autonomous_paused)
+
+    def test_a_fresh_machine_can_be_told_autonomy_was_already_off(self):
+        machine = SystemStateMachine("running")
+        self.assertFalse(machine.autonomous_paused)
+        machine.restore_autonomous_paused(True)
+        self.assertTrue(machine.autonomous_paused)
+
+    def test_restoring_does_not_pause_the_whole_system(self):
+        # The point of a scoped pause: human work still runs.
+        machine = SystemStateMachine("running")
+        machine.restore_autonomous_paused(True)
+        self.assertEqual(machine.state, "running")
+
+    def test_a_full_pause_records_the_autonomous_flag_too(self):
+        machine = SystemStateMachine("running")
+        machine.pause(reason="off", requested_by="cli", scope="autonomous")
+        change = machine.pause(reason="all stop", requested_by="cli", scope="all")
+        self.assertTrue(change.autonomous_paused)

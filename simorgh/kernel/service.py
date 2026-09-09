@@ -277,8 +277,24 @@ class Kernel:
                      "data_dir": str(self.runtime.data_dir)},
             clock=self._clock.now,
         )))
+        # A scoped pause outlives the process that was told about it.
+        # Restored BEFORE the boot state event so the payload below
+        # carries the real answer -- subscribers keep their own copy of
+        # this flag and this is the only event most of them will see.
+        await self._restore_autonomous_pause()
+        # Only ever ASSERT a hold here, never a release. Absence of the
+        # key means "no opinion, keep your own default", and Curiosity
+        # relies on that: it seeds itself from `[curiosity]
+        # autonomy_on_boot`, so publishing `autonomous_paused: False`
+        # unconditionally silently overruled a config that says start
+        # held. Found by that feature's own integration test within
+        # minutes of the change.
+        boot_state: dict = {"state": RUNNING}
+        if self.state.autonomous_paused:
+            boot_state["autonomous_paused"] = True
         await self.bus.publish(validate(Message.new(
-            topics.SYSTEM_STATE_CHANGED, source="kernel", payload={"state": RUNNING}, clock=self._clock.now,
+            topics.SYSTEM_STATE_CHANGED, source="kernel", payload=boot_state,
+            clock=self._clock.now,
         )))
         self.progress.finish(f"{len(self._supervisor.services)} subsystems, run {self.run_id}")
 
@@ -319,6 +335,28 @@ class Kernel:
     def _ledger_mapping(self) -> dict:
         return _ledger_mapping_for(self.config, self.runtime)
 
+    async def _restore_autonomous_pause(self) -> None:
+        """Read back the last scoped pause/resume this system recorded.
+
+        Never fatal: a ledger that cannot be read leaves autonomy at its
+        default, which is the same behaviour as before this existed.
+        """
+        try:
+            events = await self.ledger.read("system")
+        except Exception as exc:  # noqa: BLE001 -- a boot must not die on its own history
+            make_logger("kernel").warning("autonomous_pause_restore_failed", error=repr(exc))
+            return
+        paused = False
+        for event in events:
+            payload = getattr(event, "payload", None) or {}
+            if payload.get("scope") in ("autonomous", "all") and "autonomous_paused" in payload:
+                paused = bool(payload["autonomous_paused"])
+        if paused:
+            self.state.restore_autonomous_paused(True)
+            make_logger("kernel").info(
+                "autonomous_pause_restored",
+                detail="autonomy stays off -- a human turned it off before the last restart")
+
     async def _append_state(self, change) -> None:
         from simorgh.contracts.envelope import Event
 
@@ -326,7 +364,8 @@ class Kernel:
             stream="system", type="system.state", ts=self._clock.now(), trace_id=str(uuid.uuid4()),
             causation_id=None, payload={"state": change.state, "previous": change.previous,
                                         "reason": change.reason, "requested_by": change.requested_by,
-                                        "scope": change.scope},
+                                        "scope": change.scope,
+                                        "autonomous_paused": change.autonomous_paused},
         ))
 
     async def _on_pause(self, message: Message) -> None:
