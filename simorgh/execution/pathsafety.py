@@ -9,6 +9,7 @@ refusal string instead.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Iterable
 
 from .pdftext import looks_like_pdf, pdf_to_text
 
@@ -35,6 +36,25 @@ _MAX_PDF_BYTES = 60_000_000
 _MAX_LIST_ENTRIES = 300
 
 
+def looks_like_credential_path(parts: Iterable[str]) -> bool:
+    """True if any path segment looks like a credentials file/dir name.
+
+    Shared by `resolve_safe_path` (so `read_file`/`list_dir` refuse these
+    outright) and `search_code`'s own file walk (both the `rg` and
+    pure-Python backends) -- without this second use, `search_code`
+    could grep the contents of a `.env` or `credentials.json` sitting
+    anywhere under `readable_roots` even though `read_file` refuses the
+    very same path by name. Found live, 2026-09-08: a `tools/.env` and a
+    `tools/credentials.json` were both unreadable via `read_file` but
+    their secret contents came back verbatim from `search_code`, via
+    ripgrep AND the pure-Python fallback."""
+    return any(
+        name in part.lower() or part.lower().endswith(".key")
+        for part in parts
+        for name in _CREDENTIAL_LOOKING_NAMES
+    )
+
+
 def resolve_safe_path(
     repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...], max_path_chars: int = _MAX_PATH_CHARS
 ) -> tuple[Path | None, str | None]:
@@ -58,11 +78,7 @@ def resolve_safe_path(
     elif not rel.parts or rel.parts[0] not in readable_roots:
         return None, (f"refused: {raw_path!r} is outside the readable areas "
                       f"({', '.join(readable_roots)}, and these files at the root: {', '.join(ROOT_FILES)})")
-    if any(
-        name in part.lower() or part.lower().endswith(".key")
-        for part in rel.parts
-        for name in _CREDENTIAL_LOOKING_NAMES
-    ):
+    if looks_like_credential_path(rel.parts):
         return None, f"refused: {raw_path!r} looks like a credentials path"
 
     try:
