@@ -15,6 +15,8 @@ run.
 
 from __future__ import annotations
 
+import asyncio
+import time
 import unittest
 
 from simorgh.contracts import topics
@@ -24,6 +26,30 @@ from simorgh.orchestration.worker import Worker, _CANCEL_MEMORY
 
 from tests.simorgh.orchestration.fakes import FakeCognition, FakePlanning
 from tests.simorgh.orchestration.harness import Harness
+
+
+class _SlowExecution:
+    """A real bus subscriber that only answers `action.proposed` after a
+    real wall-clock delay -- standing in for a `web_fetch`/
+    `run_python_sandboxed` call that is genuinely still running when a
+    cancel arrives, unlike `FakeGuardianExecution`'s instant reply."""
+
+    def __init__(self, bus, delay_s: float) -> None:
+        self._bus = bus
+        self._delay = delay_s
+        self._sub = None
+
+    async def start(self) -> None:
+        self._sub = await self._bus.subscribe(topics.ACTION_PROPOSED, self._on)
+
+    async def _on(self, message: Message) -> None:
+        await asyncio.sleep(self._delay)
+        result = message.caused(topics.ACTION_RESULT, {
+            "action_id": message.payload["action_id"], "ok": True,
+            "output_ref": "", "stdout_preview": "done", "duration_ms": int(self._delay * 1000),
+            "side_effects": [],
+        }, source="execution")
+        await self._bus.publish(result)
 
 
 class TestCancellingARunningTask(unittest.IsolatedAsyncioTestCase):
@@ -102,6 +128,64 @@ class TestTheWorkersCancelMemory(unittest.IsolatedAsyncioTestCase):
             self.assertLessEqual(len(worker._cancelled), _CANCEL_MEMORY)  # noqa: SLF001
             self.assertTrue(worker._is_cancelled(f"t{_CANCEL_MEMORY + 49}"), "the newest survives")  # noqa: SLF001
             self.assertFalse(worker._is_cancelled("t0"), "the oldest is forgotten first")  # noqa: SLF001
+
+
+class TestCancelDuringAReadOnlyToolCall(unittest.IsolatedAsyncioTestCase):
+    """A cancel arriving mid-`web_fetch` (or any `read_only`-tagged tool)
+    must not sit unnoticed for the tool's whole remaining timeout.
+
+    Live-measured, 2026-09-08: `_EventWaiter.wait` only ever looked at
+    the bus, never at the cancel flag, while a single `asyncio.wait_for`
+    ran -- so a cancel sent 0.3s into a 3s `web_fetch` was not noticed
+    until the full 3s elapsed (a real `web_fetch`'s own timeout is 45s,
+    `run_tests`'s is 330s). `apply_source_patch`/`git_commit` and other
+    non-`read_only` tools still ride out the real result, since only
+    the arrival of `action.result` tells the session what side effect
+    (if any) `session.uncommitted` needs to track for cleanup.
+    """
+
+    async def test_a_cancel_is_noticed_well_before_a_slow_web_fetch_returns(self) -> None:
+        async with Harness() as h:
+            planning = FakePlanning(h.client("planning"))
+            planning.add_task("t1", kind="chat", mode="execute", description="fetch a slow page")
+            cognition = FakeCognition(h.client("cognition"), script=[
+                {"tool_calls": [{"tool": "web_fetch", "args": {"url": "http://example.com"}}]},
+                {"text": "done"},
+            ])
+            slow_exec = _SlowExecution(h.client("execution"), delay_s=3.0)
+            await planning.start()
+            await cognition.start()
+            await slow_exec.start()
+
+            worker = Worker(h.client("orchestration"), h.ledger, clock=h.clock.now, worker_id="w1",
+                            assemble_timeout_s=0.01)
+            await worker.start()
+
+            failed: list[Message] = []
+            await h.client("watcher").subscribe(topics.TASK_FAILED, lambda m: failed.append(m) or _noop())
+            await h.client("planning").publish(Message.new(
+                topics.TASK_AVAILABLE, source="planning",
+                payload={"task_id": "t1", "kind": "chat", "lease_seconds": 60.0}, clock=h.clock.now))
+
+            # Let the session actually reach the tool call (action.proposed
+            # published, `_SlowExecution` now sitting in its 3s sleep).
+            await asyncio.sleep(0.3)
+            cancel_sent = time.monotonic()
+            await worker._on_cancel(Message.new(  # noqa: SLF001
+                topics.TASK_CANCEL, source="benchmark", payload={"task_id": "t1", "reason": "gave up"},
+                clock=h.clock.now))
+
+            for _ in range(200):
+                if failed:
+                    break
+                await asyncio.sleep(0.01)
+            delay = time.monotonic() - cancel_sent
+
+            self.assertTrue(failed, "a cancelled task must still report an outcome")
+            self.assertEqual(failed[0].payload["reason"], CANCELLED_REASON)
+            self.assertLess(delay, 1.0,
+                            f"cancel took {delay:.2f}s to take effect against a 3s tool call -- "
+                            "it must not wait out the tool's own timeout")
 
 
 async def _noop() -> None:

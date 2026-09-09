@@ -206,6 +206,17 @@ _DYNAMIC_TOOLS: dict[str, str] = {}
 _REGISTERED: set[str] = set()
 
 
+def is_read_only(tool: str) -> bool:
+    """Whether `tool` is tagged `read_only` in the policy table --
+    `web_fetch`/`web_search`/`read_file`/... never report a
+    `file_write`/`file_create` side effect, so a session waiting on one
+    has nothing in `session.uncommitted` at stake and can safely stop
+    waiting the moment a cancel arrives, rather than riding out the
+    tool's own (up to 330s) timeout regardless. An unrecognized name
+    defaults to `irreversible` here too, same as `to_action_payload`."""
+    return _TOOL_POLICY.get(tool, ("irreversible", False))[0] == "read_only"
+
+
 def known_tools() -> frozenset[str]:
     """Every tool Execution has announced this process. Empty until the
     first `tool.registered` -- a harness with no Execution -- and then a
