@@ -26,7 +26,10 @@ class Intake:
         self._store = store
         self._threshold = dedupe_threshold
 
-    def _find_duplicate(self, description: str, *, origin: str = "curiosity", distinguish: str | None = None) -> str | None:
+    def _find_duplicate(
+        self, description: str, *, origin: str = "curiosity", distinguish: str | None = None,
+        subject: str | None = None,
+    ) -> str | None:
         """Live-caught (the creator, 2026-09-07): three different `improve`
         requests -- different paths, different wording -- each came back
         as the *first* one's id, and the later two never ran. The 45%
@@ -57,11 +60,30 @@ class Intake:
         collapsed into the first's task and was never surfaced
         (observer, 2026-09-08, w8-04, reproduced against a real Kernel).
         Passing the pattern's own `task_type` here keeps the fuzzy match
-        but requires it actually be about the same task_type."""
+        but requires it actually be about the same task_type.
+
+        `subject`, when given, narrows the same way but by exact field
+        equality rather than substring: Curiosity's own `TargetedIdeaProposer`
+        prompt (`curiosity/idea.py`) forces the model to reply with ONLY a
+        one-line `PATCH ::`/`RESEARCH ::` description and explicitly forbids
+        it from stating the file path in that line ("not even the file
+        path, that part is already decided") -- so the description the
+        model returns for two *genuinely different* target files is often
+        near-identical common phrasing ("Add type hints to the public
+        functions in this file/module for a clearer interface."), which
+        measured ~0.96 similarity here for two different real files, well
+        past this threshold, and `on_candidate` never passed the sampled
+        `Target`'s own subject to distinguish them -- so the second
+        candidate silently collapsed into the first's task (observer,
+        2026-09-08, w8-06, reproduced against a real TaskStore/Ledger).
+        `subject` requires the matched existing task's own subject to be
+        exactly the same file for the match to count."""
         if origin in ("human", "benchmark"):
             return None
-        for tid, desc in self._store.descriptions():
+        for tid, desc, existing_subject in self._store.descriptions():
             if distinguish is not None and distinguish not in desc:
+                continue
+            if subject is not None and existing_subject != subject:
                 continue
             if difflib.SequenceMatcher(None, description, desc).ratio() >= self._threshold:
                 return tid
@@ -97,7 +119,7 @@ class Intake:
         self, *, kind: str, description: str, subject: str | None, area: str, origin: str = "curiosity",
         risk: str | None = None, max_steps: int | None = None,
     ) -> IntakeResult:
-        dup = self._find_duplicate(description, origin=origin)
+        dup = self._find_duplicate(description, origin=origin, subject=subject)
         if dup:
             return IntakeResult(None, duplicate_of=dup)
         scope = Scope(paths=(subject,) if subject else (), network=kind == "research") if (subject or kind == "research") else None
@@ -125,7 +147,7 @@ class Intake:
         return created
 
     async def on_research_follow_up(self, *, research_task_id: str, subject: str, description: str) -> Task | None:
-        if self._find_duplicate(description):
+        if self._find_duplicate(description, subject=subject):
             return None
         return await self._store.create(
             kind="patch", description=description, subject=subject, origin="research",

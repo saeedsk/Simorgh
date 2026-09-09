@@ -123,6 +123,60 @@ class TestPatternsFoundDedupeUsesTaskType(unittest.TestCase):
         self.assertEqual(second, [], "the same task_type's repeated pattern should still dedupe")
 
 
+class TestCandidateDedupeUsesSubject(unittest.TestCase):
+    """2026-09-08, observer w8-06: `TargetedIdeaProposer`'s prompt
+    (`curiosity/idea.py`) forces the model to reply with ONLY a one-line
+    `PATCH ::`/`RESEARCH ::` description that explicitly must not name
+    the file ("not even the file path, that part is already decided").
+    For two genuinely different target files the model's common phrasing
+    ("Add type hints to the public functions in this file/module for a
+    clearer interface.") measured ~0.96 SequenceMatcher similarity, well
+    past the 0.45 dedupe threshold, and `on_candidate` never passed the
+    sampled `Target`'s own subject to distinguish them -- so the second
+    file's candidate silently collapsed into the first file's task and
+    was never surfaced (reproduced against a real TaskStore/Ledger, no
+    mocks). `on_candidate` now passes the candidate's own `subject` to
+    `_find_duplicate`, which requires an exact subject match before the
+    fuzzy text comparison counts."""
+
+    @run
+    async def test_two_different_files_both_become_tasks_despite_near_identical_wording(self):
+        intake, _store = await _intake()
+        first = await intake.on_candidate(
+            kind="patch",
+            description="Add type hints to the public functions in this file for a clearer interface.",
+            subject="simorgh/curiosity/idea.py", area="curiosity",
+        )
+        second = await intake.on_candidate(
+            kind="patch",
+            description="Add type hints to the public functions in this module for a clearer interface.",
+            subject="simorgh/planning/intake.py", area="planning",
+        )
+        self.assertIsNotNone(first.task)
+        self.assertIsNotNone(second.task, "a genuinely different target file was dropped as a false duplicate")
+        self.assertNotEqual(second.task.id, first.task.id)
+
+    @run
+    async def test_the_same_file_with_similar_wording_still_dedupes(self):
+        """The fix must not defeat dedupe entirely -- the same file
+        proposed again with near-identical wording is still the same
+        idea."""
+        intake, _store = await _intake()
+        first = await intake.on_candidate(
+            kind="patch",
+            description="Add type hints to the public functions in this file for a clearer interface.",
+            subject="simorgh/curiosity/idea.py", area="curiosity",
+        )
+        second = await intake.on_candidate(
+            kind="patch",
+            description="Add type hints to the public functions in this file for a clearer interface, please.",
+            subject="simorgh/curiosity/idea.py", area="curiosity",
+        )
+        self.assertIsNotNone(first.task)
+        self.assertIsNone(second.task)
+        self.assertEqual(second.duplicate_of, first.task.id)
+
+
 class TestGoalStatedRiskOverride(unittest.TestCase):
     @run
     async def test_project_risk_defaults_to_medium_when_omitted(self):

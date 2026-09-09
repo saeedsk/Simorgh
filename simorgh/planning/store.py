@@ -344,8 +344,8 @@ class TaskStore:
                 break
         return out
 
-    def descriptions(self) -> list[tuple[str, str]]:
-        return [(t.id, t.description) for t in self.index.tasks.values()]
+    def descriptions(self) -> list[tuple[str, str, str | None]]:
+        return [(t.id, t.description, t.subject) for t in self.index.tasks.values()]
 
 
 __all__ = ["TASK_SNAPSHOT_EVERY", "ClaimResult", "TaskIndex", "TaskStore"]
