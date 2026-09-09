@@ -176,6 +176,71 @@ class TestTheWholeConfigAudit(unittest.TestCase):
             [("reflection", "stall_idle_seconds")],
         )
 
+
+class TestANestedFieldThatParsesButNoOneReads(unittest.TestCase):
+    """`KNOWN_DEAD_NESTED_FIELDS`: four fields the 2026-09-08 whole-config
+    audit found genuinely dead but couldn't add to `KNOWN_DEAD_FIELDS`
+    because their `simorgh.toml` key is nested one level inside its
+    `[section]` (`[persona.user_model] min_confidence_to_use`, not a
+    flat `[persona] min_confidence_to_use`) -- `dead_fields`'s bare
+    `known & set(section)` check can never see a key that isn't at the
+    section's top level."""
+
+    def test_persona_user_model_min_confidence_to_use_is_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"persona": {"user_model": {"min_confidence_to_use": 0.9}}})),
+            [("persona", "user_model.min_confidence_to_use")],
+        )
+
+    def test_verification_trajectory_and_review_fields_are_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({
+                "verification": {
+                    "trajectory": {"wasted_step_ratio_warn": 0.1},
+                    "review": {"require_real_provider": False},
+                },
+            })),
+            [
+                ("verification", "review.require_real_provider"),
+                ("verification", "trajectory.wasted_step_ratio_warn"),
+            ],
+        )
+
+    def test_worldmodel_git_refresh_seconds_is_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"worldmodel": {"git": {"refresh_seconds": 5.0}}})),
+            [("worldmodel", "git.refresh_seconds")],
+        )
+
+    def test_worldmodel_file_index_max_files_a_live_nested_field_is_not_flagged(self) -> None:
+        """`[worldmodel.file_index] max_files` is genuinely wired
+        (`worldmodel/service.py` reads `self.config.file_index_max_
+        files`) -- a sanity check that nesting support doesn't flag
+        every nested field, only the ones actually listed as dead."""
+        self.assertEqual(dead_fields(_Config({"worldmodel": {"file_index": {"max_files": 42}}})), [])
+
+    def test_leaving_a_nested_field_at_its_default_is_not_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"persona": {"user_model": {"min_confidence_to_use": 0.5}}})),
+            [],
+        )
+
+    def test_a_section_already_wholly_dead_is_not_double_reported_for_nested_fields(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"persona": {"nonsense": True}})),
+            [],
+        )
+
+    def test_the_warning_names_the_section_and_dotted_field(self) -> None:
+        logger = _Logger()
+        report(_Config({"worldmodel": {"git": {"refresh_seconds": 5.0}}}), logger)
+        self.assertEqual(len(logger.warnings), 1)
+        event, payload = logger.warnings[0]
+        self.assertEqual(event, "config.field_had_no_effect")
+        self.assertEqual(payload["section"], "worldmodel")
+        self.assertEqual(payload["field"], "git.refresh_seconds")
+
+
 class TestTheWarning(unittest.TestCase):
     def test_it_names_the_section_and_where_to_look(self) -> None:
         logger = _Logger()
