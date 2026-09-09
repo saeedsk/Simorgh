@@ -44,6 +44,17 @@ class DriveWeightedSampler:
     def __init__(self, engine: DriveEngine) -> None:
         self._engine = engine
 
+    def _focus_multiplier(self, area_name: str) -> float:
+        """`[curiosity.focus]` (`Config.focus`, area -> multiplier) was
+        parsed but never read by either caller of `score_area` -- both
+        left its `focus_multiplier` keyword at its default of 1.0, so
+        writing e.g. `[curiosity.focus] kernel = 5.0` changed the parsed
+        `Config` object but left every score, and therefore every pick,
+        identical to leaving it unset (confirmed live, 2026-09-08: same
+        `score_table()` output with and without the section). This is
+        the field's only real consumer."""
+        return self._engine.config.focus.get(area_name, 1.0)
+
     def pick(
         self, ctx: DriveContext, recent_subjects: list[str], *, rng: random.Random, temperature: float
     ) -> Target | None:
@@ -60,7 +71,10 @@ class DriveWeightedSampler:
         candidate_areas = with_fresh or [a for a in ctx.areas if a.modules]
         if not candidate_areas:
             return None
-        scores = {a.name: self._engine.score_area(a.name, ctx)["total"] for a in candidate_areas}
+        scores = {
+            a.name: self._engine.score_area(a.name, ctx, self._focus_multiplier(a.name))["total"]
+            for a in candidate_areas
+        }
         area_name = softmax_sample(scores, rng=rng, temperature=temperature)
         area = next(a for a in candidate_areas if a.name == area_name)
         fresh = [m for m in area.modules if m not in recent_subjects]
@@ -72,4 +86,4 @@ class DriveWeightedSampler:
         """The full per-area breakdown, for the `curiosity:ticks` audit
         record (spec section 5.2: "every pick, with the full score
         table, is appended")."""
-        return {a.name: self._engine.score_area(a.name, ctx) for a in ctx.areas}
+        return {a.name: self._engine.score_area(a.name, ctx, self._focus_multiplier(a.name)) for a in ctx.areas}
