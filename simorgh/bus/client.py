@@ -167,7 +167,21 @@ class BusClient:
     # -- publish -----------------------------------------------------------------------
     async def publish(self, message: Message) -> None:
         validate(message)
-        self._policy.check_publish(message.source, message.type, message.payload)
+        # Policy must be checked against THIS client's own identity, fixed at
+        # construction by the Kernel, never against `message.source` -- that
+        # field is just data inside an envelope this same call is about to
+        # write, and any caller can put any string there. Checking the
+        # envelope's own claim let one subsystem publish a *restricted* type
+        # (e.g. `action.denied`, guardian/execution-only) under another
+        # already-authenticated subsystem's name and sail straight through
+        # `ReservedTopologyPolicy` as if that subsystem had published it --
+        # found live 2026-09-08. Unrestricted types are open to any source by
+        # definition, so this alone is enough: it does not also reject every
+        # source/client mismatch outright, because plenty of legitimate
+        # single-process call sites (tests included) publish unrestricted
+        # synthetic messages through a shared trusted client under a
+        # different nominal `source` on purpose.
+        self._policy.check_publish(self._source, message.type, message.payload)
         if self._state == "stopping" and not message.type.startswith("system."):
             raise BusClosed(f"bus is stopping; refusing {message.type}")
         if message.priority < self._config.priority_preempt_threshold:

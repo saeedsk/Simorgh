@@ -15,13 +15,18 @@ from tests.simorgh.helpers import make_message
 from .harness import Harness, for_each_backend
 
 
-def _task_msg(i: int, key: str, priority: int = 5, ttl: float | None = None, clock=None):
+def _task_msg(i: int, key: str, priority: int = 5, ttl: float | None = None, clock=None, source: str = "orchestration"):
     # `clock` matters only for TTL: `ts` must come from the same clock the
     # backend compares against (the harness's FakeClock), or `now > ts +
     # ttl` never fires -- real `time.time()` is a much later epoch than
     # FakeClock's fixed start, so an unset clock silently makes TTL never
     # expire regardless of how far the fake clock is advanced.
-    return make_message(topics.TASK_STEP, source="orchestration", partition_key=key, priority=priority, ttl_seconds=ttl,
+    # `source` must match the publishing client's own identity: `BusClient.publish`
+    # now refuses a message whose `source` names a different subsystem than
+    # the client itself (2026-09-08 fix for a publish-identity-spoofing bug),
+    # so a caller here must pass the source of the `bus`/`a`/`evt` client it
+    # will actually publish through.
+    return make_message(topics.TASK_STEP, source=source, partition_key=key, priority=priority, ttl_seconds=ttl,
                         clock=clock, payload={"task_id": key.split(":")[1], "step_no": i, "phase": "act", "summary": f"s{i}"})
 
 
@@ -40,7 +45,7 @@ class TestParity(unittest.TestCase):
         for i in range(30):
             key = "task:a" if i % 2 == 0 else "task:b"
             order.append((key, i))
-            await bus.publish(_task_msg(i, key))
+            await bus.publish(_task_msg(i, key, source="verification"))
         await h.settle(0.6 if h.name == "sqlite" else 0.3)
         for key in seen:
             expected = [i for k, i in order if k == key]
@@ -62,7 +67,7 @@ class TestParity(unittest.TestCase):
         await w1.subscribe("task.*", make("w1"), group="workers")
         await w2.subscribe("task.*", make("w2"), group="workers")
         for i in range(10):
-            await a.publish(_task_msg(i, f"task:t{i}"))
+            await a.publish(_task_msg(i, f"task:t{i}", source="memory"))
         await h.settle(0.3)
         self.assertEqual(counts["a"], 10)
         self.assertEqual(counts["b"], 10)
@@ -98,7 +103,7 @@ class TestParity(unittest.TestCase):
 
         await bus.subscribe("#", handler, group="all", max_inflight=1)
         for i in range(5):
-            await bus.publish(_task_msg(i, f"task:t{i}"))
+            await bus.publish(_task_msg(i, f"task:t{i}", source="interface"))
         await h.settle(0.05)
         await bus.publish(make_message(topics.SYSTEM_PAUSE, source="interface"))
         gate.set()
@@ -116,7 +121,7 @@ class TestParity(unittest.TestCase):
 
         await bus.subscribe("task.*", handler, group="workers")
         bus.set_state("paused")  # hold dequeue so the message can age
-        await bus.publish(_task_msg(1, "task:t1", ttl=1.0, clock=h.clock))
+        await bus.publish(_task_msg(1, "task:t1", ttl=1.0, clock=h.clock, source="planning"))
         h.clock.advance(2.0)
         bus.set_state("running")
         await h.settle(0.2)
@@ -157,7 +162,7 @@ class TestParity(unittest.TestCase):
             raise RuntimeError("boom")
 
         await bus.subscribe("task.*", handler)
-        await bus.publish(_task_msg(1, "task:t1"))
+        await bus.publish(_task_msg(1, "task:t1", source="reflection"))
         await h.settle(0.1)
         h.clock.advance(5.0)
         await h.settle(0.15)
@@ -180,7 +185,7 @@ class TestParity(unittest.TestCase):
         await evt.subscribe("task.*", on_evt)
         cmd.set_state("paused")
         await cmd.publish(make_message(topics.ACTION_APPROVED, source="execution"))
-        await evt.publish(_task_msg(1, "task:t1"))
+        await evt.publish(_task_msg(1, "task:t1", source="reflection"))
         await h.settle(0.15)
         self.assertEqual(len(commands), 0)
         self.assertEqual(len(events), 1)
@@ -208,7 +213,7 @@ class TestParity(unittest.TestCase):
     async def test_trace_records_every_message_with_sampling(self, h: Harness):
         bus = h.client("planning")
         await bus.subscribe("#", lambda m: asyncio.sleep(0))
-        m = _task_msg(1, "task:t1")
+        m = _task_msg(1, "task:t1", source="planning")
         await bus.publish(m)
         await bus.publish(make_message(topics.SYSTEM_TICK_SECOND, source="planning"))  # sampled to 0
         await bus.trace.flush()

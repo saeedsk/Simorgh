@@ -7,6 +7,7 @@ import unittest
 
 from simorgh.bus.api import BusClosed, BusTimeout, PolicyViolation
 from simorgh.bus.config import Config
+from simorgh.bus.enforcement import ReservedTopologyPolicy
 from simorgh.contracts import ContractError, topics, validate
 from simorgh.contracts.envelope import Message
 
@@ -51,6 +52,30 @@ class TestPublishValidation(unittest.TestCase):
                 await bus.subscribe("action.#", lambda m: asyncio.sleep(0))
             with self.assertRaises(PolicyViolation):
                 await bus.publish(make_message(topics.ACTION_APPROVED, source="curiosity"))
+
+    @run
+    async def test_publish_of_a_restricted_type_is_checked_against_the_clients_own_identity(self):
+        # Regression for 2026-09-08: `publish()` checked policy against
+        # `message.source` (attacker-controlled envelope data) instead of
+        # `self._source` (fixed at construction by the Kernel/ContextFactory).
+        # Once any two subsystems had both authenticated on a shared
+        # `ReservedTopologyPolicy` (which happens routinely -- every
+        # subsystem self-authenticates at boot), one client could forge
+        # `source="guardian"` on a *restricted* type (guardian/execution-only
+        # `action.denied`) and pass every check as if guardian itself had
+        # published it -- found live with a real `IdentityRegistry`/
+        # `ReservedTopologyPolicy` pair. Unrestricted types are untouched by
+        # this (see `test_policy_refuses_publish_and_subscribe` above and the
+        # many single-process call sites, tests included, that publish
+        # unrestricted synthetic messages through a shared client under a
+        # different nominal `source` on purpose).
+        async with Harness("memory") as h:
+            curiosity = h.client("curiosity", policy=ReservedTopologyPolicy())
+            forged = make_message(topics.ACTION_DENIED, source="guardian",
+                                  payload={"action_id": "a1", "reasons": ["forged"], "layer": "policy"})
+            with self.assertRaises(PolicyViolation):
+                await curiosity.publish(forged)
+            self.assertEqual(curiosity.metrics.counters.get("published", 0), 0)
 
     @run
     async def test_new_fills_source_trace_and_causation(self):

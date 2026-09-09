@@ -47,6 +47,7 @@ class AwsBackend:
         max_deliveries: int = 5,
         wait_time_seconds: int = 1,
         session: Any | None = None,
+        on_handler_error: Callable[[Message, BaseException], None] | None = None,
     ) -> None:
         if session is None:
             if boto3 is None:
@@ -59,6 +60,7 @@ class AwsBackend:
         self._queue_prefix = queue_prefix
         self._max_deliveries = max_deliveries
         self._wait = wait_time_seconds
+        self._on_handler_error = on_handler_error
         self._topics: dict[str, str] = {}  # domain -> topic arn
         self._registered: dict[str, Registered] = {}
         self._queues: dict[str, str] = {}  # sub id or group -> queue url
@@ -226,6 +228,17 @@ class AwsBackend:
         except asyncio.CancelledError:
             raise
         except BaseException as exc:  # noqa: BLE001
+            # A handler that raises must never vanish in silence: memory and
+            # sqlite backends have always called `on_handler_error` here;
+            # this backend never accepted the hook at all, so an AWS-backed
+            # subscriber crashing was invisible until (if ever) it finally
+            # dead-lettered after `max_deliveries` retries -- and never
+            # visible at all for a broadcast subscription, whose failing
+            # delivery is just dropped below (2026-09-08). `_ExplicitNack`
+            # is a deliberate `bus.nack()`, not a crash, so it is excluded
+            # exactly as the other backends exclude explicit nacks.
+            if self._on_handler_error is not None and not isinstance(exc, _ExplicitNack):
+                self._on_handler_error(d.message, exc)
             if d.group is None:
                 self._sqs.delete_message(QueueUrl=url, ReceiptHandle=receipt)  # broadcast: dropped, not retried
             elif d.attempt < self._max_deliveries:
