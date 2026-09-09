@@ -1,4 +1,4 @@
-"""Level 1/2 of the capability map -- a direct port of v1's
+"""Level 1/2 of the capability map -- ported from v1's
 `src/orchestrator/capability_map.py` (`list_capability_areas`,
 `list_capability_modules`). Pure filesystem listings, no LLM: the
 codebase's own directory structure already is a capability taxonomy, so
@@ -6,6 +6,17 @@ this can never hallucinate a target or drift from the real tree. The
 random *choice* half of v1's `pick_diverse_target` moves to Curiosity
 (Phase 3, docs/blueprint/subsystems/13-curiosity.md); this facet is the
 *inventory* Curiosity's sampler will read via `world.env.query`.
+
+The port kept v1's own tree, `src/`, as what it scans -- retired but
+not deleted (docs/architecture.md, Stage C) -- rather than switching to
+`simorgh/`, the live v2 tree this whole system actually runs. An
+observer caught the consequence directly, 2026-09-08: asked what
+subsystems make it up, Sim answered "agents, cognition, memory,
+orchestrator, sandboxing, tools" -- v1's six directories -- instead of
+the real sixteen. Worse, Curiosity's self-directed exploration and
+self-improvement project proposals read this same facet to choose what
+to look at, so Sim's own autonomous work was aimed at code nobody runs
+any more. Now scans `simorgh/`.
 """
 
 from __future__ import annotations
@@ -16,7 +27,7 @@ EXCLUDED_AREA_PATH_PARTS = ("skills",)
 
 
 def list_capability_areas(repo_root: Path) -> list[str]:
-    src = repo_root / "src"
+    src = repo_root / "simorgh"
     if not src.is_dir():
         return []
     areas = []
@@ -29,7 +40,7 @@ def list_capability_areas(repo_root: Path) -> list[str]:
 
 
 def list_capability_modules(repo_root: Path, area: str) -> list[str]:
-    area_root = repo_root / "src" / area
+    area_root = repo_root / "simorgh" / area
     if not area_root.is_dir():
         return []
     modules = []

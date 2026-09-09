@@ -297,26 +297,39 @@ class Worker:
         await self._ledger.append(f"task:{session.task_id}", event)
         await self._bus.publish(msg)
 
-        if session.kind == "chat":
-            turn = Message.new(
-                topics.TURN_COMPLETED, source=self._bus.source,
-                payload={
-                    "session_id": session.task_id, "task_id": session.task_id,
-                    # `result_summary` is empty for a blocked/failed
-                    # outcome and `reason` used to be dropped, so 175s
-                    # and six real model calls surfaced to the human as
-                    # "(no real answer this turn -- floor reply)" --
-                    # indistinguishable from having no provider at all
-                    # (observer, 2026-09-08).
-                    "text": outcome.result_summary or (
-                        f"I could not finish this one: {outcome.reason}" if outcome.reason else ""
-                    ),
-                    "floor": outcome.floor,
-                    "tool_steps": len(session.steps), "user_text": session.user_text,
-                },
-                partition_key=f"task:{session.task_id}", clock=self._clock,
-            )
-            await self._bus.publish(turn)
+        # `turn.completed` was published for `session.kind == "chat"`
+        # only -- but Memory's `_on_turn_completed` is the ONLY thing
+        # in the whole system that ever writes episodic memory, so
+        # every research/patch/skill/project outcome went unrecorded.
+        # An observer proved it live 2026-09-08: a real research task
+        # ran real web searches, answered, completed -- and a follow-up
+        # task asking "what did you find out before, don't research
+        # again" got nothing back and re-did the whole search from
+        # scratch. Publishing this for every kind, not just chat, is
+        # the fix. It is safe for Interface too: `_on_turn_completed`
+        # there only resolves a future keyed by `session_id` in its own
+        # `_pending_turns` map, which nothing but a live chat prompt
+        # ever populates -- a non-chat task_id simply finds no waiter
+        # and the message is a no-op there, exactly as before.
+        turn = Message.new(
+            topics.TURN_COMPLETED, source=self._bus.source,
+            payload={
+                "session_id": session.task_id, "task_id": session.task_id,
+                # `result_summary` is empty for a blocked/failed
+                # outcome and `reason` used to be dropped, so 175s
+                # and six real model calls surfaced to the human as
+                # "(no real answer this turn -- floor reply)" --
+                # indistinguishable from having no provider at all
+                # (observer, 2026-09-08).
+                "text": outcome.result_summary or (
+                    f"I could not finish this one: {outcome.reason}" if outcome.reason else ""
+                ),
+                "floor": outcome.floor,
+                "tool_steps": len(session.steps), "user_text": session.user_text,
+            },
+            partition_key=f"task:{session.task_id}", clock=self._clock,
+        )
+        await self._bus.publish(turn)
 
     async def _deoversize_for_ledger(self, event: Event, fields: tuple[str, ...]) -> Event:
         """Same convention as `kernel/migrate_v1.py`'s `_deoversize` and

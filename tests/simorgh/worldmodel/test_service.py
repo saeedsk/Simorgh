@@ -30,8 +30,10 @@ class WorldModelTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.repo_root = Path(self._tmp.name) / "repo"
-        (self.repo_root / "src" / "memory").mkdir(parents=True)
-        (self.repo_root / "src" / "memory" / "long_term.py").write_text("X = 1\n")
+        # `simorgh/`, not `src/`: the capability map scans the live v2
+        # tree, not v1's retired one (fixed 2026-09-08).
+        (self.repo_root / "simorgh" / "memory").mkdir(parents=True)
+        (self.repo_root / "simorgh" / "memory" / "long_term.py").write_text("X = 1\n")
         (self.repo_root / "docs").mkdir()
         (self.repo_root / "docs" / "SOUL.md").write_text("## Identity\n\nSimorgh is a test persona.\n")
 
