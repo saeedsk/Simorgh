@@ -8,7 +8,9 @@ is a mixin, not a `TestCase` itself, so it is never collected on its own
 from __future__ import annotations
 
 import asyncio
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -228,6 +230,91 @@ class TestJsonlBackend(_Invariants, unittest.IsolatedAsyncioTestCase):
         from simorgh.ledger.backends.jsonl import JsonlBackend
 
         return JsonlBackend(Path(self._tmp.name))
+
+
+class TestJsonlBackendBlobSweep(unittest.IsolatedAsyncioTestCase):
+    """Live-caught by observer audit `w8b-20260908-210626-62a022`:
+    `run_compaction` deletes/truncates *streams* per retention but never
+    touched the blob store, so a `trace:` stream's oversized payload
+    outlived the stream that referenced it -- forever, unbounded, in
+    every real run (content addressing means several streams may share
+    one blob, so a naive "delete on stream delete" would break that
+    sharing). `sweep_unreferenced_blobs` fixes that; these are the
+    regression tests."""
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        from simorgh.ledger.backends.jsonl import JsonlBackend
+
+        self.backend = JsonlBackend(Path(self._tmp.name))
+        await self.backend.start()
+
+    async def asyncTearDown(self) -> None:
+        await self.backend.stop()
+        self._tmp.cleanup()
+
+    async def _put_blob(self, data: bytes) -> str:
+        return await self.backend.put_blob(data, content_type="text/plain")
+
+    def _blob_path(self, ref: str) -> Path:
+        digest = ref.split(":")[-1]
+        return Path(self._tmp.name) / "blobs" / digest[:2] / digest
+
+    async def test_orphaned_blob_is_removed_once_its_stream_is_gone(self) -> None:
+        ref = await self._put_blob(b"x" * 10_000)
+        blob_path = self._blob_path(ref)
+        self.assertTrue(blob_path.exists())
+
+        # Age the blob past the grace window without any stream ever
+        # referencing it -- the "stream that pointed to it already expired" case.
+        old = time.time() - 7200
+        os.utime(blob_path, (old, old))
+
+        removed = await self.backend.sweep_unreferenced_blobs(grace_seconds=3600.0)
+        self.assertEqual(removed, 1)
+        self.assertFalse(blob_path.exists())
+
+    async def test_blob_still_referenced_by_a_live_stream_survives(self) -> None:
+        ref = await self._put_blob(b"y" * 10_000)
+        blob_path = self._blob_path(ref)
+        old = time.time() - 7200
+        os.utime(blob_path, (old, old))
+
+        await self.backend.append(make_event("task:keep", type_="tool.result", payload={"output_ref": ref}), expected_seq=None)
+
+        removed = await self.backend.sweep_unreferenced_blobs(grace_seconds=3600.0)
+        self.assertEqual(removed, 0)
+        self.assertTrue(blob_path.exists())
+
+    async def test_recently_written_blob_is_not_swept_before_its_grace_period(self) -> None:
+        """The race this exists for: a producer calls `put_blob` before
+        appending the event that will reference it, so a blob can briefly
+        exist with nothing pointing at it yet -- that must not make it
+        eligible for deletion."""
+        ref = await self._put_blob(b"z" * 10_000)
+        blob_path = self._blob_path(ref)
+
+        removed = await self.backend.sweep_unreferenced_blobs(grace_seconds=3600.0)
+        self.assertEqual(removed, 0)
+        self.assertTrue(blob_path.exists())
+
+    async def test_compaction_via_the_service_sweeps_orphaned_blobs(self) -> None:
+        """The end-to-end path: `Service._compact` calls the sweep after
+        every retention pass, for any backend that implements it."""
+        from simorgh.ledger.service import Service
+
+        client = LedgerClient(self.backend)
+        await client.start()
+        ref = await client.put_blob(b"w" * 10_000, content_type="text/plain")
+        blob_path = self._blob_path(ref)
+        old = time.time() - 7200
+        os.utime(blob_path, (old, old))
+
+        service = Service(client)
+        await service._compact("test")  # noqa: SLF001
+        self.assertFalse(blob_path.exists())
+        self.assertEqual(service.last_report.get("blobs_swept"), 1)
+        await client.stop()
 
 
 class TestSqliteBackend(_Invariants, unittest.IsolatedAsyncioTestCase):

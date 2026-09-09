@@ -120,5 +120,40 @@ class LocalBlobStore:
                 count += 1
         return {"blobs": count, "blob_bytes": total}
 
+    # ---------------------------------------------------------------- sweep
+    def list_digests(self) -> list[tuple[str, float]]:
+        """Every stored blob's digest and mtime -- for the compaction
+        sweep, which needs to know both what exists and how recently it
+        was written. A blob just `put()` may not yet be referenced by the
+        event that will reference it (`TraceWriter.write_blob_body` runs
+        before `write()`, and other callers have the same shape), so a
+        blob only sweeps as orphaned once it is older than the grace
+        period."""
+        out: list[tuple[str, float]] = []
+        for dirpath, _dirnames, filenames in os.walk(self.root):
+            for name in filenames:
+                if name.endswith((".meta", ".tmp")):
+                    continue
+                path = os.path.join(dirpath, name)
+                try:
+                    mtime = os.stat(path).st_mtime
+                except OSError:
+                    continue
+                out.append((name, mtime))
+        return out
+
+    def delete(self, digest: str) -> bool:
+        """Remove a blob and its `.meta` sidecar. Best-effort: a blob
+        that vanished between listing and delete is not an error."""
+        path = self._path(digest)
+        removed = False
+        for candidate in (path, path.with_name(path.name + ".meta")):
+            try:
+                candidate.unlink()
+                removed = True
+            except FileNotFoundError:
+                pass
+        return removed
+
 
 __all__ = ["InMemoryBlobStore", "LocalBlobStore", "is_ref", "parse_ref", "ref_for", "sha256_hex"]
