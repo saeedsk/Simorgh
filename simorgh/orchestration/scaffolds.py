@@ -21,6 +21,8 @@ supposed to use it. These texts say so.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .api import Profile
 from .tools import offered_tools
 
@@ -33,6 +35,53 @@ from .tools import offered_tools
 # worth. Empty in every test that does not set it, so nothing is
 # said unless a probe actually failed.
 _UNAVAILABLE: dict[str, tuple[str, tuple[str, ...]]] = {}
+
+
+# The MCP servers a human has approved for adoption
+# (docs/mcp-catalog.toml). Read straight from the file rather than
+# messaged across from Execution: it is a human-maintained config file,
+# both subsystems are entitled to read it, and passing it over the bus
+# would be three layers of plumbing to deliver a constant. Cached after
+# the first read; a missing or malformed file simply means nothing is
+# offered, which is the safe direction.
+_MCP_CATALOG_PATH = Path(__file__).resolve().parents[2] / "docs" / "mcp-catalog.toml"
+_mcp_note: str | None = None
+
+
+def mcp_catalog_note(env=None) -> str:
+    """One line per adoptable server, naming any credential it needs and
+    does not have -- so "I could do this if you set BRAVE_API_KEY" is
+    sayable rather than silently unavailable."""
+    global _mcp_note
+    if _mcp_note is not None:
+        return _mcp_note
+    import os
+
+    environ = os.environ if env is None else env
+    try:
+        import tomllib
+
+        data = tomllib.loads(_MCP_CATALOG_PATH.read_text())
+    except (OSError, ValueError, ImportError):
+        _mcp_note = ""
+        return _mcp_note
+    lines = []
+    for row in data.get("servers") or []:
+        if not isinstance(row, dict) or not row.get("package"):
+            continue
+        missing = [k for k in row.get("needs_env") or [] if not (environ.get(str(k)) or "").strip()]
+        note = f" (needs {', '.join(missing)} -- not set)" if missing else ""
+        lines.append(f"- {row['package']}: {row.get('why', '')}{note}")
+    _mcp_note = (
+        "MCP servers a human has approved, which you may adopt with grant_capability "
+        "(kind=mcp, naming the package):\n" + "\n".join(lines)
+    ) if lines else ""
+    return _mcp_note
+
+
+def reset_mcp_catalog_cache() -> None:
+    global _mcp_note
+    _mcp_note = None
 
 
 def note_capability(name: str, *, ok: bool, detail: str, tools: tuple[str, ...] | list[str]) -> None:
@@ -292,6 +341,12 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
     # common case (kernel/capabilities.py).
     if unavailable:
         tools = f"{tools}\n\n{unavailable}"
+    # Only where granting is actually offered: naming servers a session
+    # cannot adopt would be noise.
+    if "grant_capability" in offered:
+        catalog = mcp_catalog_note()
+        if catalog:
+            tools = f"{tools}\n\n{catalog}"
     return f"{body}\n\n{tools}" if body else tools
 
 

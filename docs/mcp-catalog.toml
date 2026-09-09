@@ -1,0 +1,80 @@
+# MCP servers Sim may adopt without asking a human first.
+#
+# Human-maintained. Sim reads this file and never writes it -- adding a
+# row is a deliberate decision that this server is safe to start, and
+# that decision belongs to a person. An uncatalogued server can still be
+# proposed (`propose_mcp_server`); it just waits for someone to say yes.
+#
+# `read_only_tools` names the tools the server itself declares as
+# side-effect-free. The MCP protocol carries no such field, so anything
+# NOT named here registers as `irreversible` and Guardian gates every
+# call -- the same conservative default `McpServerConfig` already takes.
+# Listing a tool here is a claim a human is making on its behalf.
+#
+# `needs_env` names environment variables the server requires. Sim never
+# stores their values; a grant records only the names, and a server
+# whose variables are absent is refused rather than started broken.
+
+[[servers]]
+package = "@modelcontextprotocol/server-time"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-time"]
+read_only_tools = ["get_current_time", "convert_time"]
+needs_env = []
+why = "the clock, and timezone conversion -- Sim otherwise has to guess or shell out"
+
+[[servers]]
+package = "mcp-server-fetch"
+command = "uvx"
+args = ["mcp-server-fetch"]
+read_only_tools = ["fetch"]
+needs_env = []
+why = "a second opinion on fetching a URL; web_fetch remains the primary path"
+
+[[servers]]
+package = "@modelcontextprotocol/server-sequential-thinking"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+read_only_tools = ["sequentialthinking"]
+needs_env = []
+why = "structured scratch reasoning for a long problem"
+
+[[servers]]
+package = "@modelcontextprotocol/server-memory"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-memory"]
+read_only_tools = ["read_graph", "search_nodes", "open_nodes"]
+needs_env = []
+why = "a knowledge graph; the write tools stay irreversible and gated"
+
+[[servers]]
+package = "@modelcontextprotocol/server-sqlite"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-sqlite"]
+read_only_tools = ["read_query", "list_tables", "describe_table"]
+needs_env = []
+why = "query a SQLite file; write_query is deliberately not read-only"
+
+[[servers]]
+package = "@modelcontextprotocol/server-github"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+read_only_tools = ["search_repositories", "get_file_contents", "list_issues", "search_code"]
+needs_env = ["GITHUB_PERSONAL_ACCESS_TOKEN"]
+why = "read GitHub beyond the 60/h anonymous limit; issue/PR writes stay gated"
+
+[[servers]]
+package = "@modelcontextprotocol/server-brave-search"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-brave-search"]
+read_only_tools = ["brave_web_search", "brave_local_search"]
+needs_env = ["BRAVE_API_KEY"]
+why = "a real search API when the keyless endpoint is throttled or vague"
+
+[[servers]]
+package = "@modelcontextprotocol/server-google-maps"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-google-maps"]
+read_only_tools = ["maps_geocode", "maps_search_places", "maps_distance_matrix"]
+needs_env = ["GOOGLE_MAPS_API_KEY"]
+why = "routing and places, which Nominatim/Overpass do not cover well"

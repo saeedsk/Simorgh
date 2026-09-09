@@ -269,6 +269,15 @@ def validate_mcp(spec: dict) -> str | None:
     return None
 
 
+def _server_name_for(package: str) -> str:
+    """`@modelcontextprotocol/server-time` -> `time`. The registered
+    tools become `mcp_time_<tool>`, which is what the model types."""
+    tail = package.rsplit("/", 1)[-1]
+    tail = re.sub(r"^mcp[-_]?server[-_]?|^server[-_]?", "", tail)
+    tail = re.sub(r"[-_]?mcp[-_]?server$|[-_]?server$", "", tail)
+    return re.sub(r"[^a-z0-9_]+", "_", tail.lower()).strip("_") or "server"
+
+
 def grant_id(clock=None) -> str:
     import uuid
 
@@ -313,9 +322,11 @@ class GrantCapabilityTool:
     }
 
     def __init__(self, config: Config, *, store: GrantStore | None = None,
-                 register=None, start_mcp=None, clock=None, env=None) -> None:
+                 register=None, start_mcp=None, clock=None, env=None,
+                 catalog: list["CatalogEntry"] | None = None) -> None:
         self._config = config
         self._store = store or GrantStore(config.grants_file)
+        self._catalog = catalog if catalog is not None else load_catalog(config.mcp_catalog_file)
         # Injected by Execution so this module never imports the Service.
         self._register = register
         self._start_mcp = start_mcp
@@ -354,6 +365,18 @@ class GrantCapabilityTool:
                           import_path=import_path, adapter=str(args.get("adapter") or "callable"))
             return await self._grant_external(grant)
 
+        # A catalogued server can be adopted by package name alone: a
+        # human already decided it is safe to start and said which of
+        # its tools are read-only. Naming a package fills in the rest.
+        args, entry = self._apply_catalog(args)
+        if entry is None and not self._config.allow_uncatalogued_mcp_grants:
+            catalogued = ", ".join(e.package for e in self._catalog) or "(the catalogue is empty)"
+            return ToolResult(
+                ok=False,
+                error=("refused: that server is not in docs/mcp-catalog.toml, which is the list a "
+                       "human has approved. Use propose_mcp_server to ask for it, or pick one of: "
+                       + catalogued),
+            )
         refusal = validate_mcp(args)
         if refusal:
             return ToolResult(ok=False, error=refusal)
@@ -370,6 +393,31 @@ class GrantCapabilityTool:
             env_keys=tuple(str(a) for a in args.get("env_keys") or ()),
         )
         return await self._grant_mcp(grant, env)
+
+    def _apply_catalog(self, args: dict) -> tuple[dict, "CatalogEntry | None"]:
+        """Fill an MCP request in from the catalogue, when it names a
+        catalogued package. The catalogue always wins on `command`,
+        `args` and `read_only_tools`: those are the human's decision,
+        and letting a caller override them would make the catalogue
+        decorative."""
+        package = str(args.get("package") or "").strip()
+        if not package:
+            # A caller may also name the package in `args`, which is
+            # where it really lives for npx/uvx.
+            for candidate in args.get("args") or ():
+                if find_in_catalog(str(candidate), self._catalog):
+                    package = str(candidate)
+                    break
+        entry = find_in_catalog(package, self._catalog) if package else None
+        if entry is None:
+            return args, None
+        filled = dict(args)
+        filled["command"] = entry.command
+        filled["args"] = list(entry.args)
+        filled["read_only_tools"] = list(entry.read_only_tools)
+        filled["env_keys"] = list(entry.needs_env)
+        filled.setdefault("name", _server_name_for(entry.package))
+        return filled, entry
 
     async def _grant_external(self, grant: Grant) -> ToolResult:
         from .external import adapt
@@ -460,3 +508,65 @@ class RevokeCapabilityTool:
                    f"{len(removed)} tool(s) unregistered now, and it will not load at the next boot",
             metadata={"grant_id": match.id, "tools": list(match.tools), "unregistered": removed},
         )
+
+
+# -- the catalogue (D2) -------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CatalogEntry:
+    package: str
+    command: str
+    args: tuple[str, ...]
+    read_only_tools: tuple[str, ...] = ()
+    needs_env: tuple[str, ...] = ()
+    why: str = ""
+
+
+def load_catalog(path: Path) -> list[CatalogEntry]:
+    """The MCP servers a human has said are safe to adopt.
+
+    Human-maintained and Sim-readable only. A malformed file yields
+    nothing, which degrades to "nothing may be auto-adopted" -- the
+    safe direction.
+    """
+    if tomllib is None or not Path(path).is_file():
+        return []
+    try:
+        data = tomllib.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return []
+    entries = []
+    for row in data.get("servers") or []:
+        if not isinstance(row, dict) or not row.get("package") or not row.get("command"):
+            continue
+        entries.append(CatalogEntry(
+            package=str(row["package"]), command=str(row["command"]),
+            args=tuple(str(a) for a in row.get("args", ())),
+            read_only_tools=tuple(str(a) for a in row.get("read_only_tools", ())),
+            needs_env=tuple(str(a) for a in row.get("needs_env", ())),
+            why=str(row.get("why", "")),
+        ))
+    return entries
+
+
+def find_in_catalog(package: str, entries: list[CatalogEntry]) -> CatalogEntry | None:
+    wanted = (package or "").strip().lower()
+    return next((e for e in entries if e.package.lower() == wanted), None)
+
+
+def catalog_summary(entries: list[CatalogEntry], env) -> str:
+    """What to tell the model about servers it could ask for. Names the
+    missing credential rather than hiding a keyed server, so "I could do
+    this if you set BRAVE_API_KEY" is sayable."""
+    if not entries:
+        return ""
+    lines = []
+    for entry in entries:
+        missing = [k for k in entry.needs_env if not (env.get(k) or "").strip()]
+        note = f" (needs {', '.join(missing)} -- not set)" if missing else ""
+        lines.append(f"- {entry.package}: {entry.why or 'no description'}{note}")
+    return (
+        "MCP servers you may adopt with grant_capability (kind=mcp), by package name:\n"
+        + "\n".join(lines)
+    )

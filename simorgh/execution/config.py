@@ -280,6 +280,11 @@ class Config:
     # simorgh.toml), always the strictest Guardian tier, a module
     # denylist for the obvious, and a daily cap.
     grants_path: str = "grants.toml"
+    # The MCP servers a human has approved for adoption without
+    # being asked each time (docs/mcp-catalog.toml). Sim reads it
+    # and never writes it.
+    mcp_catalog_path: str = "docs/mcp-catalog.toml"
+    allow_uncatalogued_mcp_grants: bool = False
     max_grants_per_day: int = 10
     # Granting a tool over any of these hands out the machine rather
     # than a library. Crude and deliberate -- see grants.py's docstring
@@ -300,6 +305,11 @@ class Config:
     # each an optional import, wrapped behind the Tool protocol so
     # Guardian still gates every call.
     external_tools: tuple[ExternalToolSpec, ...] = ()
+
+    @property
+    def mcp_catalog_file(self) -> Path:
+        candidate = Path(self.mcp_catalog_path).expanduser()
+        return candidate if candidate.is_absolute() else self.repo_root / candidate
 
     @property
     def grants_file(self) -> Path:
