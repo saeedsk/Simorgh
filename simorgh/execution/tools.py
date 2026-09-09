@@ -23,6 +23,7 @@ with no trace of why.
 from __future__ import annotations
 
 import ast
+import asyncio
 
 import difflib
 import hashlib
@@ -99,13 +100,26 @@ class ReadFileTool:
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         path, span = _split_line_range(str(args["path"]))
+        # In a thread, not inline. Reading a file used to be cheap enough
+        # that a synchronous call in an `async def` was harmless; since
+        # doctext.py, a `.docx`/`.xlsx`/PDF read runs a real parser with
+        # NO await points inside it. An observer proved the consequence
+        # on 2026-09-09: a zip bomb under the size cap pushed RSS past
+        # 5.7GB while a sibling task never got a single tick, and
+        # Execution's own `asyncio.wait_for` timeout could not fire --
+        # cancellation only lands at an await point, so the whole
+        # service froze for as long as the parse ran, not just this
+        # action. `doctext` now refuses the bomb itself; this makes the
+        # timeout real for every other slow file.
         if span is None:
-            content = pathsafety.safe_read_file(
+            content = await asyncio.to_thread(
+                pathsafety.safe_read_file,
                 self._config.repo_root, path, readable_roots=self._config.readable_roots)
         else:
             # Slice the REAL file, never a pre-capped string: that was the
             # bug that made 61% of this very module unreachable.
-            content = pathsafety.safe_read_lines(
+            content = await asyncio.to_thread(
+                pathsafety.safe_read_lines,
                 self._config.repo_root, path, start=span[0], end=span[1],
                 readable_roots=self._config.readable_roots)
         ok = not content.startswith("[refused:")

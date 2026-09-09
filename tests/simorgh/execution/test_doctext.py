@@ -149,6 +149,71 @@ class ContentTestCase(unittest.TestCase):
         self.assertIn("python-docx", problem)
 
 
+class ZipBombTestCase(unittest.TestCase):
+    """A .docx/.xlsx is a zip, and neither python-docx nor openpyxl
+    checks how much a member expands before decompressing and parsing
+    it fully into memory. Confirmed live (observer, 2026-09-09): a 4.9
+    MB crafted .docx decompressed to 2 GB and was still climbing past
+    5.7 GB of RSS after 20 seconds; a 5.4 MB crafted .xlsx decompressed
+    to 1.6 GB and had not returned after 120 seconds despite
+    `max_rows=200` (openpyxl's read_only iteration does not actually
+    stop cheap work at the row cap). Both ran synchronously inside an
+    `async def tool.run()` with no await point, so Execution's
+    `asyncio.wait_for` timeout could never fire either -- the whole
+    event loop was starved for as long as the parse ran. These tests
+    build a MUCH smaller bomb (well under 1 MB compressed, over the 50
+    MB uncompressed guard) so the suite stays fast, and assert the
+    refusal is instant and never invokes the real parser."""
+
+    @staticmethod
+    def _zip_with_bomb_member(member_name: str, real_members: dict, bomb_size: int) -> bytes:
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+            for name, data in real_members.items():
+                if name == member_name:
+                    archive.writestr(name, b"A" * bomb_size)
+                else:
+                    archive.writestr(name, data)
+        return buffer.getvalue()
+
+    @unittest.skipUnless(_HAS_DOCX, "python-docx not installed")
+    def test_a_docx_decompression_bomb_is_refused_before_parsing(self):
+        import zipfile
+
+        real = _docx_bytes(["seed"])
+        with zipfile.ZipFile(io.BytesIO(real)) as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        bomb = self._zip_with_bomb_member("word/document.xml", members, bomb_size=200_000_000)
+        self.assertLess(len(bomb), 1_000_000, "the compressed bomb itself should stay tiny")
+
+        text, problem = docx_to_text(bomb, max_chars=2000)
+        self.assertEqual(text, "")
+        self.assertIn("decompression bomb", problem)
+
+    @unittest.skipUnless(_HAS_XLSX, "openpyxl not installed")
+    def test_an_xlsx_decompression_bomb_is_refused_before_parsing(self):
+        import zipfile
+
+        real = _xlsx_bytes([["a"]])
+        with zipfile.ZipFile(io.BytesIO(real)) as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        bomb = self._zip_with_bomb_member("xl/worksheets/sheet1.xml", members, bomb_size=200_000_000)
+        self.assertLess(len(bomb), 1_000_000, "the compressed bomb itself should stay tiny")
+
+        text, problem = xlsx_to_text(bomb, max_rows=200, max_chars=2000)
+        self.assertEqual(text, "")
+        self.assertIn("decompression bomb", problem)
+
+    @unittest.skipUnless(_HAS_DOCX, "python-docx not installed")
+    def test_an_ordinary_docx_under_the_guard_still_parses(self):
+        data = _docx_bytes(["ordinary paragraph, nothing to see here"])
+        text, problem = docx_to_text(data, max_chars=2000)
+        self.assertEqual(problem, "")
+        self.assertIn("ordinary paragraph", text)
+
+
 class ReadFileIntegrationTestCase(unittest.TestCase):
     """Through the real `read_file` path, not the helpers directly."""
 

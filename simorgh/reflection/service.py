@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
@@ -34,6 +35,37 @@ from .patterns import PatternMiner
 
 NAME = "reflection"
 VERSION = "0.1.0"
+
+
+def _looks_like_the_repo(candidate: Path) -> bool:
+    return (candidate / "simorgh" / "kernel" / "service.py").is_file()
+
+
+def _repo_root() -> Path:
+    """Where Sim's own source lives -- duplicated from
+    `execution/config.py::find_repo_root` rather than imported (a
+    subsystem may not import another's internals,
+    tests/simorgh/test_module_boundaries.py).
+
+    `Config.skill_dir` (default `"simorgh_skills"`) is a bare relative
+    path, and `_existing_skills` used to resolve it against
+    `Path.cwd()` directly. `apply_source_patch` -- the tool that
+    actually writes a distilled skill to disk -- resolves the very
+    same `subject` path against `execution.Config.repo_root`, which is
+    `find_repo_root()`, not the cwd. Booted from anywhere but the repo
+    root (a sandboxed trial, the sim loader, a service manager with its
+    own working directory -- exactly the cases `find_repo_root`'s own
+    docstring exists to cover, observer 2026-09-08), `_existing_skills`
+    silently saw an empty directory forever while skills piled up at
+    the real path, defeating the slug-collision check `distillation.
+    slug_for` depends on it for (observer, W21-09, 2026-09-09).
+    """
+    here = Path(__file__).resolve().parents[2]
+    base = Path.cwd().resolve()
+    for candidate in (base, *base.parents):
+        if _looks_like_the_repo(candidate):
+            return candidate
+    return here if _looks_like_the_repo(here) else base
 
 HEALTH_STREAM = "reflect:health"
 DRIFT_STREAM_PREFIX = "reflect:drift:"
@@ -86,7 +118,17 @@ class Service:
         self.config = config or Config()
         self._ctx: Context | None = None
         self._subs: list = []
+        # `_maybe_distil`'s daily cap. Despite the name, this used to be
+        # a counter that only ever went up: nothing ever set it back to
+        # 0, so on a process that runs for more than a day (the normal
+        # case -- Sim is meant to run continuously) the cap was really
+        # "at most `max_distillations_per_day` skills, ever, until the
+        # process restarts", not per day at all (observer, W21-09,
+        # 2026-09-09). `_distilled_day` below is the UTC day bucket the
+        # count was last reset for; `_maybe_distil` resets the counter
+        # whenever the bucket changes.
         self._distilled_today = 0
+        self._distilled_day: int | None = None
         self._health = HealthMonitor(self.config)
         self._last_health_severity: str | None = None
         self._patterns = PatternMiner(self.config)
@@ -298,6 +340,10 @@ class Service:
         )
         if candidate is None:
             return
+        today = int((self._ctx.clock.now() if self._ctx is not None else message.ts) // 86400)
+        if today != self._distilled_day:
+            self._distilled_day = today
+            self._distilled_today = 0
         if self._distilled_today >= self.config.max_distillations_per_day:
             return
         self._distilled_today += 1
@@ -312,10 +358,8 @@ class Service:
         })
 
     def _existing_skills(self) -> set[str]:
-        from pathlib import Path as _Path
-
         try:
-            return {p.stem for p in _Path(self.config.skill_dir).glob("*.py")}
+            return {p.stem for p in (_repo_root() / self.config.skill_dir).glob("*.py")}
         except OSError:
             return set()
 

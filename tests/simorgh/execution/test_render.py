@@ -198,6 +198,83 @@ class RealBrowserSmokeTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("hi", result.output)
 
 
+class RequestGuardRealTestCase(unittest.IsolatedAsyncioTestCase):
+    """Found live, 2026-09-09: `validate_public_http_url` only ever
+    checks the URL/hostname it is first handed, in Python, once.
+    Puppeteer then does its own, completely independent DNS resolution
+    for the real connection AND for every redirect hop, neither of
+    which is ever re-validated. A URL that validates as public and then
+    302s straight to `http://127.0.0.1:<port>/` used to sail through
+    with the internal page's title/body reported back verbatim. The
+    fix re-runs the SSRF check inside the Node driver itself, on every
+    request (main navigation, every redirect, every subresource), via
+    `page.setRequestInterception` -- this proves that actually holds
+    against a real redirect, with a real browser."""
+
+    def _skip_unless_available(self):
+        if not shutil.which("node") or not shutil.which("npm"):
+            self.skipTest("node/npm not installed on this machine")
+        import subprocess
+
+        root = subprocess.run(["npm", "root", "-g"], capture_output=True, text=True, timeout=10)
+        if root.returncode != 0 or not root.stdout.strip():
+            self.skipTest("no global npm root")
+        if not (Path(root.stdout.strip()) / "puppeteer").exists():
+            self.skipTest("puppeteer not installed globally on this machine")
+
+    async def test_a_redirect_to_a_loopback_address_is_blocked_not_followed(self):
+        self._skip_unless_available()
+        import http.server
+        import threading
+
+        front_port, internal_port = 9391, 9392
+
+        class Front(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{internal_port}/secret")
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        class Internal(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = b"<html><title>internal</title><body>SHOULD-NEVER-BE-SEEN</body></html>"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        front_srv = http.server.HTTPServer(("127.0.0.1", front_port), Front)
+        internal_srv = http.server.HTTPServer(("127.0.0.1", internal_port), Internal)
+        threading.Thread(target=front_srv.serve_forever, daemon=True).start()
+        threading.Thread(target=internal_srv.serve_forever, daemon=True).start()
+        self.addCleanup(front_srv.shutdown)
+        self.addCleanup(internal_srv.shutdown)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # `localhost` really does resolve to 127.0.0.1, so with the
+            # tool's normal resolver the front server itself would
+            # already be refused by the one-time Python-level check --
+            # that's `test_a_private_resolving_url_is_refused` above.
+            # This test isolates the thing that check structurally
+            # cannot catch: a URL that is (or appears) public at
+            # check-time, then redirects somewhere private. `_public_resolver`
+            # stands in for a real public host / a rebinding DNS answer
+            # at check-time; the redirect step itself is real HTTP,
+            # against a real local server, through the real driver.
+            config = Config(repo_root=root, render_page_timeout_s=10.0)
+            tool = RenderPageTool(config, resolver=_public_resolver)
+            result = await tool.run({"target": f"http://localhost:{front_port}/"}, ctx=_ctx(config))
+        self.assertFalse(result.ok)
+        self.assertNotIn("SHOULD-NEVER-BE-SEEN", result.output)
+
+
 class ClassifyActionsTestCase(unittest.TestCase):
     """`browse_page`'s action list, before any browser is launched."""
 
@@ -225,6 +302,27 @@ class ClassifyActionsTestCase(unittest.TestCase):
             with self.subTest(selector=selector):
                 refusal = classify_actions([{"type": [selector, "hunter2"]}])
                 self.assertIn("credential", refusal)
+
+    def test_common_credential_abbreviations_are_also_refused(self):
+        # Found live, 2026-09-09: the original _SECRET_SELECTOR regex
+        # (pass|secret|token|otp|cvv|card|ssn) let every one of these
+        # ordinary field names straight through -- none of them are
+        # adversarial tricks, they're just how real login/payment forms
+        # name their fields.
+        from simorgh.execution.render import classify_actions
+
+        for selector in ("#pwd", "#pw", "input[name=pw]", "#login_pwd", "#apikey",
+                          "#api_key", "#pin", "#bank_account", "#iban", "#security_code"):
+            with self.subTest(selector=selector):
+                refusal = classify_actions([{"type": [selector, "hunter2"]}])
+                self.assertIn("credential", refusal)
+
+    def test_ordinary_words_containing_pw_or_pin_are_not_falsely_refused(self):
+        from simorgh.execution.render import classify_actions
+
+        for selector in ("#spawn_area", "#spinner", "#upward_arrow"):
+            with self.subTest(selector=selector):
+                self.assertEqual(classify_actions([{"type": [selector, "hello"]}]), "")
 
     def test_a_javascript_url_selector_is_refused(self):
         from simorgh.execution.render import classify_actions

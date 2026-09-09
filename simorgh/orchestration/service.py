@@ -15,10 +15,11 @@ from . import scaffolds
 from .config import Config
 from .tools import forget_registered, note_registered, register_tool_policy
 
-# Execution's own stream name, duplicated rather than imported: a
+# Execution's own stream names, duplicated rather than imported: a
 # subsystem may not import another subsystem
 # (tests/simorgh/test_module_boundaries.py).
 _TOOLS_STREAM = "execution:tools"
+_CAPABILITIES_STREAM = "capabilities"
 
 from .worker import Worker
 
@@ -94,6 +95,7 @@ class Service:
         # steps to discover by failing (execution/capabilities.py).
         self._capability_sub = await ctx.bus.subscribe(topics.TOOL_PROBED, self._on_capability_probed)
         await self._replay_registrations(ctx)
+        await self._replay_capabilities(ctx)
         if self.config.metrics_interval_s > 0:
             self._metrics_task = asyncio.create_task(self._metrics_loop(), name="orchestration-metrics")
         ctx.logger.info("orchestration.started", workers=len(self._workers))
@@ -161,6 +163,51 @@ class Service:
                 )
         if names:
             ctx.logger.info("orchestration.tools_replayed", count=len(names))
+
+    async def _replay_capabilities(self, ctx) -> None:
+        """Same seam, same fix, for the other stream Execution announces
+        before we are listening.
+
+        Execution's capability probes (execution/capabilities.py) run in
+        the background at boot layer 3 and publish `tool.probed` as each
+        one finishes. Every *free* and *cheap* probe here completes
+        synchronously or near it (a `shutil.which`, a failed `npm`/
+        `docker` subprocess that errors out instantly) -- fast enough
+        that on an ordinary boot every probe has already published and
+        gone before Orchestration's layer-6 `_capability_sub` exists to
+        hear it. The bus does not replay, so `scaffolds._UNAVAILABLE`
+        stayed empty for the life of the process and a task offered a
+        broken tool was never told so -- the entire point of the
+        feature, silently defeated by boot ordering (observer, W21-09,
+        2026-09-09: reproduced live, not just in a unit test, by booting
+        a real Kernel with `node` probed missing and finding no warning
+        ever reached a `cognition.think` request's `task_rules`).
+
+        Execution records the same payload in its own ledger stream
+        (`CAPABILITIES_STREAM` in execution/capabilities.py, duplicated
+        above as `_CAPABILITIES_STREAM` for the same module-boundary
+        reason `_TOOLS_STREAM` is), so replaying it the way
+        `_replay_registrations` replays tool registrations closes the
+        same race the same way.
+        """
+        try:
+            events = await ctx.ledger.read(_CAPABILITIES_STREAM)
+        except Exception as exc:  # noqa: BLE001 -- no such stream on a fresh install is normal
+            ctx.logger.info("orchestration.capability_replay_skipped", error=repr(exc))
+            return
+        names = []
+        for event in events:
+            payload = event.payload or {}
+            name = str(payload.get("name") or "")
+            if not name:
+                continue
+            names.append(name)
+            scaffolds.note_capability(
+                name, ok=bool(payload.get("ok")),
+                detail=str(payload.get("detail") or ""), tools=payload.get("tools") or [],
+            )
+        if names:
+            ctx.logger.info("orchestration.capabilities_replayed", count=len(names))
 
     async def _on_tool_registered(self, message) -> None:
         p = message.payload

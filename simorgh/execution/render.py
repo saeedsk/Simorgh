@@ -43,12 +43,84 @@ from . import pathsafety
 from .config import Config
 from .netsafety import FetchRefused, validate_public_http_url
 
-_DRIVER = r"""
+# Shared by both drivers: `_resolve_target`/`validate_public_http_url`
+# only ever check the URL/hostname they were FIRST given, in Python,
+# once. Puppeteer/Chromium then does its OWN, completely independent
+# DNS resolution for the real TCP connection -- and for every redirect
+# hop, which is never re-validated at all. An attacker who controls DNS
+# (a rebinding server answering differently to the two resolutions) or
+# who simply 302s a validated URL to `http://127.0.0.1:<port>/` sails
+# straight through: confirmed live, both ways, 2026-09-09. This guard
+# re-runs the SSRF check inside the driver itself, on every single
+# network request (main navigation, every redirect, every subresource),
+# immediately before Chromium is allowed to make it -- closing the
+# redirect bypass completely and shrinking the DNS-rebinding window from
+# "never re-checked" to "re-checked a moment before the real connect".
+_REQUEST_GUARD = r"""
+const dns = require('dns');
+
+function isPrivateAddress(ip) {
+  if (ip.includes(':')) {
+    const low = ip.toLowerCase();
+    if (low === '::1' || low === '::') return true;
+    if (low.startsWith('fe80:')) return true;       // link-local
+    if (low.startsWith('fc') || low.startsWith('fd')) return true;  // unique local fc00::/7
+    return false;
+  }
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some(n => Number.isNaN(n))) return true;  // fail closed
+  const [a, b] = parts;
+  if (a === 127) return true;                        // loopback
+  if (a === 10) return true;                          // RFC1918
+  if (a === 172 && b >= 16 && b <= 31) return true;    // RFC1918
+  if (a === 192 && b === 168) return true;             // RFC1918
+  if (a === 169 && b === 254) return true;             // link-local
+  if (a === 100 && b >= 64 && b <= 127) return true;    // CGNAT
+  if (a === 0) return true;                             // "this network" / unspecified
+  if (a >= 224) return true;                            // multicast + reserved
+  return false;
+}
+
+async function isAllowedUrl(rawUrl, allowPrivate) {
+  let u;
+  try { u = new URL(rawUrl); } catch (e) { return false; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return true;  // not a network fetch
+  if (allowPrivate) return true;
+  let addrs;
+  try {
+    addrs = await dns.promises.lookup(u.hostname, {all: true});
+  } catch (e) {
+    return false;  // unresolvable -- fail closed, same as any other DNS failure
+  }
+  return addrs.length > 0 && addrs.every(a => !isPrivateAddress(a.address));
+}
+
+function installRequestGuard(page, allowPrivate, failedRequests) {
+  page.on('request', async (request) => {
+    let allowed;
+    try {
+      allowed = await isAllowedUrl(request.url(), allowPrivate);
+    } catch (e) {
+      allowed = false;
+    }
+    if (allowed) {
+      request.continue().catch(() => {});
+    } else {
+      failedRequests.push(`${request.url()} -- blocked: resolves to a private/internal address (SSRF guard)`);
+      request.abort('blockedbyclient').catch(() => {});
+    }
+  });
+  return page.setRequestInterception(true);
+}
+"""
+
+_DRIVER = _REQUEST_GUARD + r"""
 const puppeteer = require('puppeteer');
 
 async function main() {
-  const [, , url, timeoutMsStr] = process.argv;
+  const [, , url, timeoutMsStr, allowPrivateStr] = process.argv;
   const timeoutMs = parseInt(timeoutMsStr, 10);
+  const allowPrivate = allowPrivateStr === '1';
   const browser = await puppeteer.launch({headless: 'new', args: ['--no-sandbox']});
   try {
     const page = await browser.newPage();
@@ -58,6 +130,7 @@ async function main() {
     page.on('console', m => consoleMessages.push(`${m.type()}: ${m.text()}`));
     page.on('pageerror', e => pageErrors.push(String(e)));
     page.on('requestfailed', r => failedRequests.push(`${r.url()} -- ${r.failure() && r.failure().errorText}`));
+    await installRequestGuard(page, allowPrivate, failedRequests);
     let navError = null;
     try {
       await page.goto(url, {waitUntil: 'networkidle0', timeout: timeoutMs});
@@ -136,9 +209,10 @@ class RenderPageTool:
         with tempfile.TemporaryDirectory(prefix="simorgh-render-") as workdir:
             driver = Path(workdir) / "render_driver.js"
             driver.write_text(_DRIVER)
+            allow_private = "1" if self._config.render_page_allow_private_networks else "0"
             try:
                 completed = subprocess.run(
-                    [self._node, str(driver), url, str(int(timeout * 1000))],
+                    [self._node, str(driver), url, str(int(timeout * 1000)), allow_private],
                     capture_output=True, text=True, cwd=workdir,
                     env={"NODE_PATH": self._node_module_path}, timeout=timeout + 5.0,
                     stdin=subprocess.DEVNULL,
@@ -207,12 +281,13 @@ def render_summary(target: str, payload: dict, text: str) -> str:
     return "\n".join(lines)
 
 
-_BROWSE_DRIVER = r"""
+_BROWSE_DRIVER = _REQUEST_GUARD + r"""
 const puppeteer = require('puppeteer');
 
 async function main() {
-  const [, , url, timeoutMsStr, actionsJson, shotDir] = process.argv;
+  const [, , url, timeoutMsStr, actionsJson, shotDir, allowPrivateStr] = process.argv;
   const timeoutMs = parseInt(timeoutMsStr, 10);
+  const allowPrivate = allowPrivateStr === '1';
   const actions = JSON.parse(actionsJson);
   const browser = await puppeteer.launch({headless: 'new', args: ['--no-sandbox']});
   const consoleMessages = [], pageErrors = [], failedRequests = [], screenshots = [];
@@ -222,6 +297,7 @@ async function main() {
     page.on('console', m => consoleMessages.push(`${m.type()}: ${m.text()}`));
     page.on('pageerror', e => pageErrors.push(String(e)));
     page.on('requestfailed', r => failedRequests.push(`${r.url()} -- ${r.failure() && r.failure().errorText}`));
+    await installRequestGuard(page, allowPrivate, failedRequests);
     try {
       await page.goto(url, {waitUntil: 'networkidle0', timeout: timeoutMs});
     } catch (e) { navError = String(e && e.message || e); }
@@ -265,7 +341,22 @@ main().catch(e => {
 """
 
 _MUTATING_ACTIONS = ("click", "type", "press")
-_SECRET_SELECTOR = re.compile(r"pass|secret|token|otp|cvv|card|ssn", re.I)
+# Found live, 2026-09-09: this list originally read
+# `pass|secret|token|otp|cvv|card|ssn` and every one of these ordinary,
+# real-world field names slipped straight through with no refusal at
+# all -- `#pwd`, `#pw`, `input[name=pw]`, `#login_pwd`, `#apikey`,
+# `#api_key`, `#pin`, `#bank_account`, `#iban`, `#security_code`. None
+# of those are adversarial tricks; they're just how real login and
+# payment forms name their fields. This can never be a complete list --
+# that's inherent to a name-based heuristic -- but it should at least
+# catch the common abbreviations it was clearly trying to.
+_SECRET_SELECTOR = re.compile(
+    r"pass|pwd|pw\b|secret|token|api[_-]?key|otp|pin\b|cvv|cvc|card|ssn|iban|"
+    r"account|routing|security[_-]?code",
+    re.I,
+)
+# ("pw\b"/"pin\b" so we do not also refuse ordinary words like "spawn"
+# or "spinner" that merely contain "pw"/"pin" as a substring.)
 _MAX_ACTIONS = 20
 
 
@@ -359,11 +450,12 @@ class BrowsePageTool(RenderPageTool):
         with tempfile.TemporaryDirectory(prefix="simorgh-browse-") as workdir:
             driver = Path(workdir) / "browse_driver.js"
             driver.write_text(_BROWSE_DRIVER)
+            allow_private = "1" if self._config.render_page_allow_private_networks else "0"
             try:
                 completed = await asyncio.to_thread(
                     subprocess.run,
                     [self._node, str(driver), url, str(int(timeout * 1000)),
-                     json.dumps(actions), str(shots)],
+                     json.dumps(actions), str(shots), allow_private],
                     capture_output=True, text=True, cwd=workdir,
                     env={"NODE_PATH": self._node_module_path}, timeout=timeout + 15.0,
                     stdin=subprocess.DEVNULL,

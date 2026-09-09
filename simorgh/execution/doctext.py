@@ -31,6 +31,42 @@ _WEBP_PREFIX, _WEBP_TAG = b"RIFF", b"WEBP"
 _DOCX_MEMBER = "word/document.xml"
 _XLSX_MEMBER = "xl/workbook.xml"
 
+# A .docx/.xlsx is a zip, and neither python-docx nor openpyxl checks
+# how much a member expands before decompressing and parsing it fully
+# into memory (openpyxl's `max_rows` cap in `xlsx_to_text` below does
+# NOT save it: read_only mode still parses the underlying XML stream
+# past the row cap, so the cap bounds the OUTPUT, never the work). A
+# tiny, well-formed zip can decompress to gigabytes (classic zip-bomb
+# ratios exceed 1000:1 even with a single, non-nested DEFLATE stream),
+# and the central directory's `file_size` gives the uncompressed size
+# for free -- no decompression needed to read it. Confirmed live
+# (observer, 2026-09-09): a 4.9 MB crafted .docx (well under
+# `pathsafety._MAX_FILE_BYTES`'s 8 MB cap) decompressed to 2 GB and was
+# still growing past 5.7 GB of RSS after 20 seconds; a 5.4 MB crafted
+# .xlsx decompressed to 1.6 GB and still had not returned after 120
+# seconds despite `max_rows=200`. Both ran on the asyncio event loop
+# with no cooperative yield point, so this isn't only that one action's
+# problem: Execution's `asyncio.wait_for` timeout can only fire at an
+# await point, and a synchronous parse like this never yields one, so
+# the whole service is starved for as long as the parse runs.
+_MAX_ZIP_UNCOMPRESSED_BYTES = 50_000_000
+
+
+def _zip_bomb_problem(data: bytes, *, kind: str) -> str | None:
+    """None if this zip's total uncompressed size is sane, else a
+    refusal message. Reads only the central directory -- no member is
+    decompressed."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            total = sum(info.file_size for info in archive.infolist())
+    except (zipfile.BadZipFile, OSError):
+        return None  # let the real parser produce the honest "could not be parsed" error
+    if total > _MAX_ZIP_UNCOMPRESSED_BYTES:
+        return (f"this {kind} claims {total:,} bytes uncompressed, over the "
+                f"{_MAX_ZIP_UNCOMPRESSED_BYTES // 1_000_000} MB limit -- refused before "
+                "parsing it (looks like a decompression bomb)")
+    return None
+
 
 def looks_like_docx(data: bytes) -> bool:
     return _zip_has(data, _DOCX_MEMBER)
@@ -61,6 +97,9 @@ def _zip_has(data: bytes, member: str) -> bool:
 
 
 def docx_to_text(data: bytes, *, max_chars: int) -> tuple[str, str]:
+    problem = _zip_bomb_problem(data, kind=".docx")
+    if problem:
+        return "", problem
     try:
         import docx  # type: ignore
     except ImportError:
@@ -80,6 +119,9 @@ def docx_to_text(data: bytes, *, max_chars: int) -> tuple[str, str]:
 
 
 def xlsx_to_text(data: bytes, *, max_rows: int, max_chars: int) -> tuple[str, str]:
+    problem = _zip_bomb_problem(data, kind=".xlsx")
+    if problem:
+        return "", problem
     try:
         from openpyxl import load_workbook  # type: ignore
     except ImportError:
