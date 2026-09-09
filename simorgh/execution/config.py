@@ -64,6 +64,11 @@ class Config:
     # (observer, 2026-09-08).
     readable_roots: tuple[str, ...] = (
         "src", "docs", "tests", "simorgh", "simorgh_skills", "papers", "tools",
+        # Where a large tool result is written (`results_dir` below).
+        # Readable, never writable by a patch: `write_scopes_source` does
+        # not list it, so Sim can read the data it fetched and cannot
+        # commit it.
+        "results",
     )
     # Files at the repo root. `readable_roots` holds directories only, so
     # README.md, requirements.txt, simloader.py and sim.sh were readable
@@ -181,6 +186,19 @@ class Config:
     web_fetch_window_s: float = 3600.0
     web_fetch_allow_private_networks: bool = False
     web_fetch_user_agent: str = "Simorgh/2.0 (personal AI assistant; +https://github.com/saeedsk/Simorgh)"
+    # -- large tool results (service.py::_store_rows). A data tool can
+    # return far more than a model should read inline -- one
+    # `search_listings` call fetches hundreds of rows -- and the useful
+    # thing to do with them is analysis, not reading. Rows are written
+    # to a real file under `results/` (a readable root, gitignored) and
+    # the tool's own output names the path, so `read_file` can open it
+    # and a script with repo access can load it with pandas. Live-driven
+    # (2026-09-09): the KNN-comparables analysis another agent ran on
+    # 95120 listings needs the rows, not a rendered summary.
+    results_dir: str = "results"
+    results_max_rows: int = 500
+    results_keep_files: int = 50
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a

@@ -34,9 +34,10 @@ Two things worth saying plainly, and said in every result's own text
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
@@ -108,8 +109,33 @@ def rows_to_listings(rows: list[dict]) -> list[Listing]:
     return listings
 
 
-def render(listings: list[Listing], location: str, matched: int, total: int) -> str:
+_ZIP_RE = re.compile(r"\b(\d{5})(?:-\d{4})?\b")
+
+
+def zip_in(location: str) -> str:
+    """The 5-digit ZIP written into a location string, or "".
+
+    Live-caught 2026-09-09, the acceptance trial: asked for ZIP 95120,
+    the model called `search_listings` with `location="San Jose, CA
+    95120"` and no `zip_code` filter. homeharvest's own location match
+    is metro-wide, so the page it built was titled 95120 and listed
+    properties in 95123, 95116, 95111, 95139 and 95122 -- wrong data,
+    presented confidently, with every mechanical check passing because
+    the *page* was fine. Writing the ZIP where a human would write it
+    must not silently mean "ignore it": it is now the filter unless the
+    caller says otherwise.
+    """
+    match = _ZIP_RE.search(location or "")
+    return match.group(1) if match else ""
+
+
+def render(listings: list[Listing], location: str, matched: int, total: int,
+           *, zip_code: str = "", implied_zip: bool = False) -> str:
     header = f"{matched} listing(s) for {location!r}"
+    if zip_code:
+        header += f", filtered to ZIP {zip_code}"
+        if implied_zip:
+            header += " (taken from the location -- pass zip_code to override)"
     if matched != total:
         header += f" (of {total} fetched before filtering)"
     header += f" -- {_DISCLAIMER}"
@@ -176,18 +202,33 @@ class RealEstateListingsTool:
         rows = df.to_dict("records") if hasattr(df, "to_dict") else list(df or [])
         total = len(rows)
         listings = rows_to_listings(rows)
+        # An explicit filter wins; otherwise a ZIP written into the
+        # location is the filter (see `zip_in`).
         zip_code = str(args.get("zip_code") or "").strip()
+        implied_zip = False
+        if not zip_code:
+            zip_code = zip_in(location)
+            implied_zip = bool(zip_code)
         if zip_code:
             listings = [l for l in listings if l.zip_code == zip_code]
         listings = _apply_numeric_filters(listings, args)
+        matched_listings = listings
         matched = len(listings)
         listings = listings[: self._config.real_estate_max_results]
 
         return ToolResult(
-            ok=True, output=render(listings, location, len(listings), total),
+            ok=True, output=render(listings, location, len(listings), total,
+                                   zip_code=zip_code, implied_zip=implied_zip),
             metadata={
                 "location": location, "total_fetched": total, "matched": matched,
                 "returned": len(listings), "source": "homeharvest (unofficial, Realtor.com-derived)",
+                "zip_code": zip_code, "zip_from_location": implied_zip,
+                # Every match, not just the rendered page of them:
+                # Execution writes these to a file under `results/` and
+                # names the path in the output, so the data can actually
+                # be analysed (comparables, price distributions) instead
+                # of being summarised away. See `service.py::_store_rows`.
+                "rows": [asdict(listing) for listing in matched_listings],
             },
         )
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import re
 import time
 from pathlib import Path
@@ -407,16 +408,37 @@ class Service:
             await self._finish(action_id)
             duration_ms = int((time.monotonic() - start) * 1000)
             output = result.output if isinstance(result.output, str) else result.output.decode("utf-8", "replace")
+            # A tool that fetched real data hands the rows back as a
+            # file, and says so in its own output. Before this, the
+            # rows existed only inside the tool's process: the model saw
+            # a rendered summary of the first N and there was no way to
+            # analyse the rest, which is the whole point of fetching
+            # them (2026-09-09 -- the comparables analysis another agent
+            # ran on 95120 listings needs the data, not a summary).
+            output = self._store_rows(action_id, result, output)
             output_ref = ""
             preview = output
             if len(output.encode("utf-8")) > self._config.blob_inline_threshold_bytes:
                 output_ref = await self._ctx.ledger.put_blob(output.encode("utf-8"))
                 preview = output[: self._config.max_output_bytes]
+            # Everything a tool reported ABOUT its result, kept whole.
+            # `_publish_result` only ever forwarded a hand-picked few
+            # fields (web_fetch's url/sha, propose_mcp_server's name), so
+            # a caller downstream could not see, say, whether a search
+            # was flagged low-confidence, and the Ledger recorded none of
+            # it.
+            metadata_ref = ""
+            if result.metadata:
+                metadata_ref = await self._ctx.ledger.put_blob(
+                    json.dumps(result.metadata, default=str).encode("utf-8"),
+                    content_type="application/json",
+                )
             await self._publish_result(
                 message, action_id, ok=result.ok, error=result.error, output_ref=output_ref,
                 stdout_preview=preview[: self._config.max_output_bytes], duration_ms=duration_ms,
                 side_effects=list(result.side_effects),
                 stderr=str((result.metadata or {}).get("stderr") or ""),
+                metadata_ref=metadata_ref,
             )
             await self._ctx.bus.publish(Message.new(
                 topics.TOOL_INVOKED, source="execution",
@@ -501,12 +523,49 @@ class Service:
     async def _finish(self, action_id: str) -> None:
         await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "finished", {"action_id": action_id}))
 
+    def _store_rows(self, action_id: str, result, output: str) -> str:
+        """Write a tool's structured rows to a real file and name it in
+        the output. Returns the output, unchanged when there is nothing
+        to store.
+
+        The file lands under `results/` -- a readable root that is NOT a
+        write scope, so Sim can read back what it fetched and cannot
+        commit it. Failure to write is never fatal: the rendered output
+        is still a real answer, and a data tool must not fail because a
+        directory was not writable.
+        """
+        rows = (result.metadata or {}).get("rows")
+        if not isinstance(rows, list) or not rows:
+            return output
+        capped = rows[: self._config.results_max_rows]
+        directory = self._config.repo_root / self._config.results_dir
+        path = directory / f"{action_id}.json"
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(capped, default=str, indent=1))
+            self._prune_results(directory)
+        except OSError as exc:
+            self._ctx.logger.warning("results_write_failed", action_id=action_id, error=repr(exc))
+            return output
+        rel = f"{self._config.results_dir}/{path.name}"
+        note = f"\n\nfull data: {rel} ({len(capped)} of {len(rows)} rows)"
+        if len(capped) == len(rows):
+            note = f"\n\nfull data: {rel} ({len(rows)} rows)"
+        return output + note
+
+    def _prune_results(self, directory: Path) -> None:
+        files = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for stale in files[self._config.results_keep_files:]:
+            with contextlib.suppress(OSError):
+                stale.unlink()
+
     async def _publish_result(self, message: Message, action_id: str, *, ok: bool, error: str | None = None,
                                output_ref: str = "", stdout_preview: str = "", duration_ms: int = 0,
-                               side_effects: list | None = None, stderr: str = "") -> None:
+                               side_effects: list | None = None, stderr: str = "",
+                               metadata_ref: str = "") -> None:
         payload = {
             "action_id": action_id, "ok": ok, "output_ref": output_ref, "stdout_preview": stdout_preview,
-            "duration_ms": duration_ms, "side_effects": side_effects or [],
+            "duration_ms": duration_ms, "side_effects": side_effects or [], "metadata_ref": metadata_ref,
         }
         if error is not None:
             # A failing tool's reason usually lives on stderr, and the

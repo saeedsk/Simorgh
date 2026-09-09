@@ -96,12 +96,42 @@ class ToolTestCase(unittest.IsolatedAsyncioTestCase):
         return RealEstateListingsTool(Config(**settings), scraper=scraper or _scraper())
 
     async def test_it_returns_listings_and_honest_metadata(self):
-        result = await self._tool().run({"location": "San Jose, CA 95120"}, ctx=_ctx())
+        result = await self._tool().run({"location": "San Jose, CA"}, ctx=_ctx())
         self.assertTrue(result.ok, result.error)
         self.assertEqual(result.metadata["total_fetched"], 3)
         self.assertEqual(result.metadata["returned"], 3)
         self.assertIn("unofficial", result.metadata["source"])
         self.assertIn("20791 Via Corta", result.output)
+
+    async def test_a_zip_written_into_the_location_is_the_filter(self):
+        """Live-caught by the 2026-09-09 acceptance trial: asked for ZIP
+        95120, the model called `search_listings` with the ZIP inside
+        `location` and no separate filter. homeharvest matches
+        metro-wide, so the page it built was titled 95120 and listed
+        properties in 95123, 95116, 95111, 95139 and 95122 -- confident,
+        wrong, and mechanically unimpeachable because the *page* was
+        fine."""
+        result = await self._tool().run({"location": "San Jose, CA 95120"}, ctx=_ctx())
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(result.metadata["zip_code"], "95120")
+        self.assertTrue(result.metadata["zip_from_location"])
+        self.assertEqual(result.metadata["matched"], 2)
+        self.assertNotIn("Phinney", result.output)  # 95139, correctly excluded
+        self.assertIn("filtered to ZIP 95120", result.output)
+        self.assertIn("taken from the location", result.output)
+
+    async def test_an_explicit_zip_code_beats_the_one_in_the_location(self):
+        result = await self._tool().run(
+            {"location": "San Jose, CA 95120", "zip_code": "95139"}, ctx=_ctx())
+        self.assertEqual(result.metadata["zip_code"], "95139")
+        self.assertFalse(result.metadata["zip_from_location"])
+        self.assertIn("Phinney", result.output)
+
+    async def test_a_location_with_no_zip_is_not_narrowed(self):
+        result = await self._tool().run({"location": "San Jose, CA"}, ctx=_ctx())
+        self.assertEqual(result.metadata["zip_code"], "")
+        self.assertEqual(result.metadata["matched"], 3)
+        self.assertNotIn("filtered to ZIP", result.output)
 
     async def test_a_zip_code_filters_client_side(self):
         # Live-caught: homeharvest's own location match for "San Jose, CA
