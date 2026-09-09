@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>3D Maze</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:sans-serif}
+  #hud{position:fixed;top:12px;left:12px;color:#fff;background:rgba(0,0,0,.55);padding:8px 12px;border-radius:6px;font-size:16px;z-index:10}
+  #win{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,.7);color:#fff;z-index:20;text-align:center}
+  #win h1{font-size:64px;margin:0 0 12px;color:#4f4}
+  #help{position:fixed;bottom:12px;left:12px;color:#ccc;font-size:13px;z-index:10}
+</style>
+</head>
+<body>
+<div id="hud">Time: 0.0s</div>
+<div id="help">WASD / arrows: move &amp; turn &nbsp;|&nbsp; Mouse: look (click to lock)</div>
+<div id="win"><h1>You Win!</h1><div id="wintime"></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---- Maze generation (recursive backtracker on a grid) ----
+const COLS=15, ROWS=15, CELL=4, WALL_H=4, WALL_T=0.5;
+const grid = Array.from({length:ROWS},()=>Array(COLS).fill(1)); // 1 = wall
+function carve(cx,cy){
+  grid[cy][cx]=0;
+  const dirs=[[0,-1],[0,1],[-1,0],[1,0]].sort(()=>Math.random()-0.5);
+  for(const[dx,dy]of dirs){
+    const nx=cx+dx*2, ny=cy+dy*2;
+    if(nx>0&&nx<COLS-1&&ny>0&&ny<ROWS-1&&grid[ny][nx]===1){
+      grid[cy+dy][cx+dx]=0; carve(nx,ny);
+    }
+  }
+}
+carve(1,1);
+grid[ROWS-2][COLS-2]=0; // goal cell
+
+// ---- Scene ----
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0a0a12);
+scene.fog=new THREE.Fog(0x0a0a12,1,30);
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.1,100);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+document.body.appendChild(renderer.domElement);
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+
+scene.add(new THREE.AmbientLight(0x404050));
+const dirLight=new THREE.DirectionalLight(0xffffff,0.35);
+dirLight.position.set(10,20,10); scene.add(dirLight);
+const torch=new THREE.PointLight(0xffeecc,1.1,14); scene.add(torch); // follows player
+
+// Floor
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(COLS*CELL,ROWS*CELL),
+  new THREE.MeshLambertMaterial({color:0x39445a}));
+floor.rotation.x=-Math.PI/2;
+floor.position.set(COLS*CELL/2-CELL/2,0,ROWS*CELL/2-CELL/2);
+scene.add(floor);
+
+// Walls (only around open cells; merge by scanning grid)
+const wallMat=new THREE.MeshLambertMaterial({color:0x8a5a3a});
+for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+  if(grid[y][x]!==1)continue;
+  const wx=x*CELL, wz=y*CELL;
+  const wall=new THREE.Mesh(new THREE.BoxGeometry(CELL,WALL_H,CELL),wallMat);
+  wall.position.set(wx+CELL/2,WALL_H/2,wz+CELL/2);
+  scene.add(wall);
+}
+
+// Goal: glowing sphere
+const goalPos=new THREE.Vector3((COLS-2)*CELL+CELL/2,1.2,(ROWS-2)*CELL+CELL/2);
+const goal=new THREE.Mesh(new THREE.SphereGeometry(0.6,24,24),
+  new THREE.MeshBasicMaterial({color:0x33ff66}));
+goal.position.copy(goalPos); scene.add(goal);
+const goalLight=new THREE.PointLight(0x33ff66,1.2,10);
+goalLight.position.copy(goalPos).y=2; scene.add(goalLight);
+
+// ---- Player ----
+const player={pos:new THREE.Vector3(CELL/2,1.7,CELL/2),yaw:0,pitch:0};
+const keys={};
+addEventListener('keydown',e=>keys[e.code]=true);
+addEventListener('keyup',e=>keys[e.code]=false);
+document.body.addEventListener('click',()=>renderer.domElement.requestPointerLock());
+addEventListener('mousemove',e=>{
+  if(document.pointerLockElement===renderer.domElement){
+    player.yaw-=e.movementX*0.0025;
+    player.pitch=Math.max(-1.4,Math.min(1.4,player.pitch-e.movementY*0.0025));
+  }
+});
+
+// Collision: check grid cells around target position with radius
+const R=0.45;
+function collides(x,z){
+  for(const[ox,oz]of[[R,0],[-R,0],[0,R],[0,-R],[R,R],[-R,-R],[R,-R],[-R,R]]){
+    const gx=Math.floor((x+ox)/CELL), gz=Math.floor((z+oz)/CELL);
+    if(gx<0||gz<0||gx>=COLS||gz>=ROWS||grid[gz][gx]===1)return true;
+  }
+  return false;
+}
+
+// ---- Game loop ----
+let startTime=performance.now(), won=false;
+const hud=document.getElementById('hud');
+function animate(){
+  requestAnimationFrame(animate);
+  const t=performance.now();
+  if(!won){
+    hud.textContent='Time: '+((t-startTime)/1000).toFixed(1)+'s';
+  }
+  const speed=5.5*0.016;
+  const sin=Math.sin(player.yaw),cos=Math.cos(player.yaw);
+  let mx=0,mz=0;
+  if(keys.KeyW||keys.ArrowUp)mz-=1;
+  if(keys.KeyS||keys.ArrowDown)mz+=1;
+  if(keys.KeyA)mx-=1;
+  if(keys.KeyD)mx+=1;
+  if(keys.ArrowLeft)player.yaw+=1.8*0.016;
+  if(keys.ArrowRight)player.yaw-=1.8*0.016;
+  // move in facing frame
+  const nx=player.pos.x+(mx*cos+mz*sin)*speed;
+  const nz=player.pos.z+(-mx*sin+mz*cos)*speed;
+  if(!collides(nx,player.pos.z))player.pos.x=nx;
+  if(!collides(player.pos.x,nz))player.pos.z=nz;
+
+  camera.position.set(player.pos.x,1.7,player.pos.z);
+  camera.rotation.set(player.pitch,player.yaw,0,'YXZ');
+  torch.position.set(player.pos.x,2.4,player.pos.z);
+
+  goal.scale.setScalar(1+0.15*Math.sin(t*0.005));
+  if(!won && camera.position.distanceTo(goalPos)<1.2){
+    won=true;
+    const secs=((t-startTime)/1000).toFixed(1);
+    document.getElementById('wintime').textContent='Completed in '+secs+' seconds';
+    document.getElementById('win').style.display='flex';
+    document.exitPointerLock();
+  }
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>
