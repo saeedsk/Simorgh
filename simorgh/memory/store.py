@@ -35,7 +35,29 @@ def stream_for(kind: str) -> str:
 
 class WorkingMemory:
     """Per-session bounded rolling window -- the working-memory kind,
-    kept in-process (never durable), ported from v1 `ShortTermMemory`."""
+    kept in-process (never durable), ported from v1 `ShortTermMemory`.
+
+    Both sides Memory owns are done: `Service._on_store` special-cases
+    `kind="working"` to call `.add` instead of appending to a Ledger
+    stream, and `MemoryEngine.retrieve` answers `kinds=["working"]`
+    from here. What is still missing is a producer -- 2026-09-08
+    observer audit found nothing in the codebase publishes
+    `memory.store{kind:"working"}` outside tests, so `working_max_turns`
+    /`working_max_chars` bound a window that never receives real data.
+
+    The plausible producer -- the current task's own scratch state, so
+    a multi-step attempt does not repeat itself -- is deliberately not
+    wired here. `orchestration/api.py`'s `Session` already carries that
+    exact state in-process (`session.steps`, `session.messages`, and
+    `carried` for what a *retry* already tried) and hands it straight
+    to `cognition.think`; routing the same data through a
+    publish/subscribe round trip into this class would duplicate it,
+    not connect a missing wire. Making within-task scratch state
+    durable/shared (e.g. visible to Guardian or Reflection via
+    `memory.retrieve`) is a real product decision -- whether the
+    Session's private state should become cross-subsystem-visible, and
+    at what per-step publish-volume cost -- not a low-risk wiring fix,
+    so it is left to whoever owns that call."""
 
     def __init__(self, *, max_turns: int, max_chars: int) -> None:
         self._max_turns = max_turns

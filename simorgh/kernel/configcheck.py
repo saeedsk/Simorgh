@@ -44,6 +44,29 @@ EFFECTIVE_DEFAULTS: dict[str, dict] = {
     "guardian": {"irreversible_requires_human": False},
 }
 
+# Fields that parse into a real (non-default) value on the Config
+# dataclass -- so the whole-section comparison below never flags
+# them -- but that no code path ever reads. `[memory] default_k`
+# is the first of these (2026-09-08 observer audit): both real
+# publishers of `memory.retrieve` (execution/service.py's skill
+# lookup, orchestration/context.py's context build) pass `k`
+# explicitly, and the wire contract (`contracts/messages/memory.py`)
+# declares `k` as a required field, so `Service._on_retrieve`'s
+# `payload.get("k", self._config.default_k)` fallback can never
+# fire from a real caller. Writing `default_k = 10` changes the
+# parsed Config (10 != 5) and would sail through `dead_sections`
+# silently -- this list exists so it does not.
+#
+# Unlike `EFFECTIVE_DEFAULTS`, this is a statement about *data flow*
+# (nothing downstream reads the field), which the section-equality
+# probe cannot discover on its own -- it has to be told. Add to this
+# only when you can point at the specific reason the field is
+# unreachable, the way the comment above does; it is not a place to
+# park "seems unused."
+KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
+    "memory": frozenset({"default_k"}),
+}
+
 
 def _config_classes() -> dict[str, Callable[..., Any]]:
     """Imported here, not at module scope: this runs once at boot and
@@ -105,9 +128,46 @@ def dead_sections(config, *, names: Iterable[str] | None = None) -> list[str]:
     return dead
 
 
+def dead_fields(config, *, names: Iterable[str] | None = None) -> list[tuple[str, str]]:
+    """`(section, field)` pairs that were explicitly set to something
+    other than their default, and parsed cleanly, but that no code
+    path reads (`KNOWN_DEAD_FIELDS`). A section already caught by
+    `dead_sections` (an unrecognised key) is skipped here -- it is
+    already reported, and this check only adds value for a field that
+    genuinely parses into a different, live-looking Config value."""
+    classes = _config_classes()
+    already_dead = set(dead_sections(config, names=names))
+    dead: list[tuple[str, str]] = []
+    for name in sorted(names if names is not None else KNOWN_DEAD_FIELDS):
+        known = KNOWN_DEAD_FIELDS.get(name)
+        if not known or name in already_dead:
+            continue
+        cls = classes.get(name)
+        if cls is None:
+            continue
+        section = config.section(name)
+        if not section:
+            continue
+        present = known & set(section)
+        if not present:
+            continue
+        baseline = dict(EFFECTIVE_DEFAULTS.get(name, {}))
+        try:
+            written_cfg = cls.from_mapping(baseline | dict(section))
+            baseline_cfg = cls.from_mapping(baseline)
+        except Exception:  # noqa: BLE001 -- an unparseable section is the subsystem's to report
+            continue
+        for field in sorted(present):
+            if getattr(written_cfg, field) != getattr(baseline_cfg, field):
+                dead.append((name, field))
+    return dead
+
+
 def report(config, logger) -> list[str]:
-    """Log one warning per dead section. Returns them, for the caller
-    and for tests."""
+    """Log one warning per dead section, and one per known-dead field
+    in an otherwise-live section. Returns the dead section names, for
+    the caller and for tests -- the same contract as before this
+    function also checked fields."""
     dead = dead_sections(config)
     for name in dead:
         logger.warning(
@@ -115,7 +175,13 @@ def report(config, logger) -> list[str]:
             detail=f"[{name}] in simorgh.toml changed nothing -- check the key names against "
                    f"simorgh/{name}/config.py",
         )
+    for name, field in dead_fields(config):
+        logger.warning(
+            "config.field_had_no_effect", section=name, field=field,
+            detail=f"[{name}] {field} in simorgh.toml parses but nothing reads it -- see "
+                   f"simorgh/kernel/configcheck.py KNOWN_DEAD_FIELDS for why.",
+        )
     return dead
 
 
-__all__ = ["dead_sections", "report"]
+__all__ = ["dead_sections", "dead_fields", "report"]

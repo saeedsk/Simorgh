@@ -39,7 +39,20 @@ Respond with ONLY one line, in exactly one of these two formats:
 PATCH :: <one-line description of the patch>
 RESEARCH :: <question or topic to investigate about this file>
 No other text before or after that one line -- not even the file path,
-that part is already decided."""
+that part is already decided.{research_bias_section}"""
+
+# Appended to the prompt when `DriveEngine.research_prior_multiplier`
+# (spec section 5.2: low valence -> introspective mood -> investigate
+# rather than change) says the current mood should favor RESEARCH over
+# PATCH. The parser still only recognizes the two fixed keywords above,
+# so this can only ever nudge which one the model picks -- it cannot
+# introduce a third outcome or bypass the parser.
+_RESEARCH_BIAS_SECTION = """
+
+You're in a low, introspective mood right now -- when it's a close
+call between the two, lean toward RESEARCH (understand before you
+touch it) rather than PATCH. Still choose PATCH outright if the fix
+is genuinely obvious."""
 
 _LINE = re.compile(r"^\s*(PATCH|RESEARCH)\s*::\s*(.+)$", re.IGNORECASE)
 
@@ -54,9 +67,14 @@ def parse_targeted_idea(text: str) -> Idea | None:
 
 
 class TargetedIdeaProposer:
-    async def propose(self, target: Target, content_preview: str, think: ThinkFn) -> Idea | None:
+    async def propose(
+        self, target: Target, content_preview: str, think: ThinkFn, research_bias: float = 1.0
+    ) -> Idea | None:
         content_section = f"\nCurrent content (preview):\n---\n{content_preview}\n---" if content_preview else ""
-        prompt = PROMPT.format(path=target.subject, content_section=content_section)
+        research_bias_section = _RESEARCH_BIAS_SECTION if research_bias > 1.0 else ""
+        prompt = PROMPT.format(
+            path=target.subject, content_section=content_section, research_bias_section=research_bias_section
+        )
         text, floor, _provider = await think("draft", prompt, expected="text")
         if floor or not text:
             return None

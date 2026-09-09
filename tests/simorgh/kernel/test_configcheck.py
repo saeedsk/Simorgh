@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import unittest
 
-from simorgh.kernel.configcheck import dead_sections, report
+from simorgh.kernel.configcheck import dead_fields, dead_sections, report
 
 
 class _Config:
@@ -67,6 +67,46 @@ class TestSpottingASectionThatDoesNothing(unittest.TestCase):
         raise at its own boot. This must not turn it into a warning
         about a typo, and must not crash the boot it is checking."""
         self.assertEqual(dead_sections(_Config({"planning": {"lease_seconds": object()}})), [])
+
+
+class TestAFieldThatParsesButNoOneReads(unittest.TestCase):
+    """`[memory] default_k` parses into a real, different Config value
+    (so `dead_sections` alone would call it live) but nothing in the
+    codebase ever reads it -- `KNOWN_DEAD_FIELDS` exists to catch
+    exactly that gap."""
+
+    def test_setting_default_k_alone_is_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"memory": {"default_k": 10}})),
+            [("memory", "default_k")],
+        )
+
+    def test_setting_a_live_field_alongside_it_still_flags_default_k(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"memory": {"default_k": 10, "recency_weight": 0.9}})),
+            [("memory", "default_k")],
+        )
+
+    def test_leaving_default_k_at_its_default_is_not_flagged(self) -> None:
+        self.assertEqual(dead_fields(_Config({"memory": {"recency_weight": 0.9}})), [])
+
+    def test_an_absent_section_is_not_flagged(self) -> None:
+        self.assertEqual(dead_fields(_Config({})), [])
+
+    def test_a_section_already_wholly_dead_is_not_double_reported(self) -> None:
+        """A misspelled key already gets `config.section_had_no_effect`
+        from `dead_sections`; this check only adds value on top of a
+        section that otherwise looks live."""
+        self.assertEqual(dead_fields(_Config({"memory": {"nonsense": True}})), [])
+
+    def test_the_warning_names_the_section_and_field(self) -> None:
+        logger = _Logger()
+        report(_Config({"memory": {"default_k": 10}}), logger)
+        self.assertEqual(len(logger.warnings), 1)
+        event, payload = logger.warnings[0]
+        self.assertEqual(event, "config.field_had_no_effect")
+        self.assertEqual(payload["section"], "memory")
+        self.assertEqual(payload["field"], "default_k")
 
 
 class TestTheWarning(unittest.TestCase):
