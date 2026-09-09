@@ -44,6 +44,17 @@ _TARGET_MARKER = "[ran target="
 # leading "tests/" is still the whole tree if nothing narrower follows
 # -- but "tests/simorgh/guardian" or "tests/x/test_y.py" is a slice.
 _WHOLE_SUITE_TARGETS = frozenset({"tests", "tests/", "'tests'", "'tests/'"})
+# `execution/tools.py::RunTestsTool` deliberately reports `ok=True` when
+# pytest's own exit code is 5 ("no tests collected") -- added
+# 2026-09-07 so a brand-new file with no tests yet does not block a
+# commit -- and appends this exact string to its output whenever that
+# happens. Live-probed 2026-09-09: a `run_tests` call whose target
+# textually matches `_WHOLE_SUITE_TARGETS` can still report `ok=True`
+# with this marker present if the whole `tests/` tree happens to
+# collect zero test items (e.g. a self_patch that guts every test
+# file) -- "ran and passed" would otherwise be true of a run that
+# checked nothing at all.
+_NO_TESTS_COLLECTED_MARKER = "no tests cover this target yet -- nothing was run"
 
 
 def _steps(req: VerifyRequest) -> list[dict]:
@@ -67,7 +78,7 @@ def _ran_whole_suite_and_passed(steps: list[dict]) -> bool:
             # regression through silently.
             continue
         target = summary[len(_TARGET_MARKER):].split("]", 1)[0].strip()
-        if target in _WHOLE_SUITE_TARGETS:
+        if target in _WHOLE_SUITE_TARGETS and _NO_TESTS_COLLECTED_MARKER not in summary:
             return True
     return False
 
