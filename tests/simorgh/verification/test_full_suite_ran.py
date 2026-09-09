@@ -75,6 +75,29 @@ class TestTheObservedFailures(unittest.IsolatedAsyncioTestCase):
         result = await self._run(req)
         self.assertEqual(result.status, "failed")
 
+    async def test_a_whole_suite_target_that_collected_zero_tests_does_not_pass(self) -> None:
+        """`RunTestsTool` reports `ok=True` on pytest exit code 5 ("no
+        tests collected"), by design, so a brand-new file with no tests
+        yet does not block a commit -- but that means a `run_tests`
+        call whose target textually matches the whole suite can still
+        report `ok=True` while zero tests actually ran (e.g. a
+        self_patch that guts every test file). Live-probed 2026-09-09:
+        `RunTestsTool` appends the exact "no tests cover this target
+        yet -- nothing was run" string to its output in that case, and
+        this must not be accepted as "the whole suite ran and passed."
+        """
+        req = _request("self_patch", [
+            _step("apply_source_patch"),
+            _step(
+                "run_tests", ok=True,
+                summary="[ran target='tests']\n\n"
+                        "[no tests cover this target yet -- nothing was run]",
+            ),
+            _step("git_commit"),
+        ])
+        result = await self._run(req)
+        self.assertEqual(result.status, "failed")
+
     async def test_a_run_tests_step_recorded_before_the_marker_existed_is_not_trusted(self) -> None:
         """No `[ran target=...]` prefix at all -- an old ledger record,
         or one truncated past the marker. Cannot tell what it ran, so
