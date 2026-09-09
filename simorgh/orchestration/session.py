@@ -23,7 +23,7 @@ from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
 from .claims import unsupported_claims
-from .tools import marker_hint, offered_tools, to_action_payload
+from .tools import is_read_only, marker_hint, offered_tools, to_action_payload
 
 ACTION_TIMEOUT_S = 30.0
 # The reason an attempt gives when it spends its whole step budget with
@@ -138,6 +138,17 @@ _ACTION_TIMEOUTS: dict[str, float] = {
 VERIFY_TIMEOUT_S = 300.0
 
 
+# How often a cancel-aware wait re-checks `cancel_check` while a real
+# `action.result` is still outstanding. Live-measured, 2026-09-08: a
+# `TASK_CANCEL` arriving 0.3s into a 3s `web_fetch` used to sit unnoticed
+# for the whole remaining 2.7s (up to a tool's full `_ACTION_TIMEOUTS`
+# ceiling -- 330s for `run_tests`, 45s for `web_fetch`/
+# `run_python_sandboxed` -- since `_EventWaiter.wait` only ever looked at
+# the bus, never at the cancel flag, while it awaited a single
+# `asyncio.wait_for`). This bounds that to one poll interval.
+_CANCEL_POLL_INTERVAL_S = 0.2
+
+
 class _EventWaiter:
     """Waits for the first event of any of `types` whose payload[`key`]
     equals `value` -- the action.proposed -> {result|denied|needs_human}
@@ -149,7 +160,10 @@ class _EventWaiter:
     def __init__(self, bus) -> None:
         self._bus = bus
 
-    async def wait(self, types: tuple[str, ...], *, key: str, value: str, timeout: float) -> Message | None:
+    async def wait(
+        self, types: tuple[str, ...], *, key: str, value: str, timeout: float,
+        cancel_check=None, poll_interval: float = _CANCEL_POLL_INTERVAL_S,
+    ) -> Message | None:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
 
         async def _on(message: Message) -> None:
@@ -158,7 +172,24 @@ class _EventWaiter:
 
         subs = [await self._bus.subscribe(t, _on) for t in types]
         try:
-            return await asyncio.wait_for(fut, timeout=timeout)
+            if cancel_check is None:
+                return await asyncio.wait_for(fut, timeout=timeout)
+            # `asyncio.shield` keeps a per-poll `wait_for` timeout from
+            # cancelling the underlying future itself, so the next poll
+            # can keep waiting on the very same delivery rather than
+            # missing it. Only used when the caller can prove there is
+            # nothing at stake in giving up early (a read-only tool has
+            # no side effect for cleanup to lose).
+            remaining = timeout
+            while remaining > 0:
+                step = min(poll_interval, remaining)
+                try:
+                    return await asyncio.wait_for(asyncio.shield(fut), timeout=step)
+                except asyncio.TimeoutError:
+                    remaining -= step
+                    if cancel_check():
+                        return None
+            return None
         except asyncio.TimeoutError:
             return None
         finally:
@@ -635,13 +666,30 @@ class SessionRunner:
             payload=payload, partition_key=f"task:{session.task_id}", clock=self._clock,
         )
         await self._bus.publish(msg)
+        tool_name = call.get("tool")
+        # A read-only tool (`web_fetch`, `run_python_sandboxed`, ...)
+        # never reports a `file_write`/`file_create` side effect, so
+        # `session.uncommitted` has nothing at stake in giving up on it
+        # early -- unlike `apply_source_patch`/`git_commit`, where the
+        # side effect only becomes known (and trackable for cleanup)
+        # once the real `action.result` arrives, so those must still
+        # ride out the full timeout. Without this, a cancel arriving
+        # mid-call sat unnoticed for the tool's whole remaining timeout
+        # (up to 330s for `run_tests`, 45s for `web_fetch`) even though
+        # `_run`'s own loop is ready to act on it the instant this
+        # returns (live-measured, 2026-09-08).
+        cancel_check = (lambda: self._is_cancelled(session.task_id)) if is_read_only(tool_name) else None
         result = await self._waiter.wait(
             (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.ACTION_NEEDS_HUMAN),
             key="action_id", value=action_id,
-            timeout=_ACTION_TIMEOUTS.get(call.get("tool"), self._action_timeout_s),
+            timeout=_ACTION_TIMEOUTS.get(tool_name, self._action_timeout_s),
+            cancel_check=cancel_check,
         )
         if result is None:
-            text = f"{call.get('tool')}: no response (timed out)"
+            if cancel_check is not None and cancel_check():
+                text = f"{tool_name}: cancelled while waiting for a response"
+            else:
+                text = f"{tool_name}: no response (timed out)"
             return False, text, text
         if result.type == topics.ACTION_RESULT:
             ok = result.payload.get("ok", False)
