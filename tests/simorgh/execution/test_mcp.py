@@ -6,6 +6,7 @@ fake stdin, so no test here launches a real subprocess."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 
@@ -26,18 +27,22 @@ class _FakeMcpProcess:
     the "stdout" side's `readline()` to hand back."""
 
     def __init__(self, *, tools: list[dict] | None = None, call_result: dict | None = None,
-                 error_on: str | None = None, silent_after: int | None = None) -> None:
+                 error_on: str | None = None, silent_after: int | None = None,
+                 hang_after: int | None = None) -> None:
         self._tools = tools or []
         self._call_result = call_result if call_result is not None else {
             "content": [{"type": "text", "text": "ok"}], "isError": False,
         }
         self._error_on = error_on
         self._silent_after = silent_after
+        self._hang_after = hang_after
         self._pending: list[bytes] = []
         self._calls = 0
+        self._hanging = False
         self.stdin = self
         self.stdout = self
         self.terminated = False
+        self.killed = False
         self.waited = False
         self.stdin_closed = False
 
@@ -46,6 +51,9 @@ class _FakeMcpProcess:
         self._calls += 1
         if self._silent_after is not None and self._calls > self._silent_after:
             return  # simulate a crashed/hung process: never answers again
+        if self._hang_after is not None and self._calls > self._hang_after:
+            self._hanging = True
+            return  # the server accepts the request but never replies at all
         request = json.loads(data)
         method, req_id = request.get("method"), request.get("id")
         if req_id is None:
@@ -70,10 +78,21 @@ class _FakeMcpProcess:
 
     # -- stdout side ------------------------------------------------------
     async def readline(self) -> bytes:
-        return self._pending.pop(0) if self._pending else b""
+        if self._pending:
+            return self._pending.pop(0)
+        if self._hanging:
+            # A real hung server's stream never closes and never delivers
+            # a line -- block forever so the only way out is the caller's
+            # own `asyncio.wait_for(..., timeout=...)` cancelling us.
+            await asyncio.Event().wait()
+        return b""
 
     def terminate(self) -> None:
         self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+        self.terminated = True  # a killed process is also, trivially, gone
 
     async def wait(self) -> None:
         self.waited = True
@@ -132,6 +151,35 @@ class TestMcpClientHandshake(unittest.IsolatedAsyncioTestCase):
         await client.start()
         tools = await client.list_tools()
         self.assertEqual(tools, [])
+
+    async def test_a_hung_server_times_out_and_the_process_is_killed_not_left_running(self):
+        # Live-caught, 2026-09-08: against a real subprocess that accepted
+        # a `tools/call` and then never answered, the client's own
+        # `asyncio.wait_for` timeout fired and `call_tool()` reported it
+        # cleanly -- but the server subprocess itself was left running,
+        # unmonitored, until the whole Kernel later shut down and
+        # `close()` finally reaped it. A stuck server that didn't answer
+        # this request won't usefully answer the next one either, so the
+        # timeout path must kill it immediately rather than leak it.
+        process = _FakeMcpProcess(hang_after=1)  # answers initialize, hangs on tools/call
+        client = McpClient(_config(timeout_s=0.05), spawn=_spawn(process))
+        await client.start()
+        with self.assertRaises(asyncio.TimeoutError):
+            await client.call_tool("web_search", {"query": "x"})
+        self.assertTrue(process.killed, "the hung subprocess must be killed as soon as the timeout fires")
+        self.assertTrue(process.waited, "the killed subprocess must be reaped, not left as a zombie")
+
+    async def test_a_hung_server_surfaces_as_a_clean_tool_failure(self):
+        process = _FakeMcpProcess(hang_after=1)
+        client = McpClient(_config(timeout_s=0.05), spawn=_spawn(process))
+        await client.start()
+        proxy = McpToolProxy(client, _config(), {"name": "web_search"})
+        result = await proxy.run({"query": "x"}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("mcp call failed", result.error)
+
+    def _ctx(self) -> ToolContext:
+        return ToolContext(action_id="a1", task_id=None, scope={}, constraints={}, data_dir=None, clock=None, logger=None, ledger=None)
 
     async def test_close_terminates_and_waits_on_the_process(self):
         process = _FakeMcpProcess()
