@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tic-Tac-Toe</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #f0f2f5;
+    color: #333;
+  }
+  .card {
+    background: #fff;
+    padding: 32px;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+    text-align: center;
+  }
+  h1 { margin: 0 0 16px; font-size: 24px; }
+  #status { margin: 0 0 16px; font-size: 18px; min-height: 24px; }
+  #board {
+    display: grid;
+    grid-template-columns: repeat(3, 90px);
+    grid-template-rows: repeat(3, 90px);
+    gap: 6px;
+    margin: 0 auto 20px;
+  }
+  .cell {
+    background: #e8ebf0;
+    border: none;
+    border-radius: 8px;
+    font-size: 40px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .cell:hover { background: #d6dce4; }
+  .cell.x { color: #2b6cb0; }
+  .cell.o { color: #c53030; }
+  .cell.win { background: #c6f6d5; }
+  .cell:disabled { cursor: default; }
+  #newGame {
+    background: #2b6cb0;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 24px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  #newGame:hover { background: #2c5282; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Tic-Tac-Toe</h1>
+  <p id="status">X's turn</p>
+  <div id="board"></div>
+  <button id="newGame">New Game</button>
+</div>
+<script>
+(function () {
+  var board = document.getElementById('board');
+  var status = document.getElementById('status');
+  var cells = [];
+  var current, gameOver, moves;
+
+  var LINES = [
+    [0,1,2],[3,4,5],[6,7,8],
+    [0,3,6],[1,4,7],[2,5,8],
+    [0,4,8],[2,4,6]
+  ];
+
+  for (var i = 0; i < 9; i++) {
+    var btn = document.createElement('button');
+    btn.className = 'cell';
+    btn.dataset.index = i;
+    btn.addEventListener('click', onCellClick);
+    board.appendChild(btn);
+    cells.push(btn);
+  }
+
+  document.getElementById('newGame').addEventListener('click', newGame);
+
+  function newGame() {
+    current = 'X';
+    gameOver = false;
+    moves = 0;
+    cells.forEach(function (c) {
+      c.textContent = '';
+      c.disabled = false;
+      c.classList.remove('x', 'o', 'win');
+    });
+    status.textContent = "X's turn";
+  }
+
+  function onCellClick(e) {
+    if (gameOver) return;
+    var btn = e.currentTarget;
+    if (btn.textContent) return;
+    btn.textContent = current;
+    btn.classList.add(current.toLowerCase());
+    btn.disabled = true;
+    moves++;
+
+    var winner = checkWin();
+    if (winner) {
+      gameOver = true;
+      status.textContent = winner.player + ' wins!';
+      winner.line.forEach(function (i) { cells[i].classList.add('win'); });
+    } else if (moves === 9) {
+      gameOver = true;
+      status.textContent = "It's a draw!";
+    } else {
+      current = current === 'X' ? 'O' : 'X';
+      status.textContent = current + "'s turn";
+    }
+  }
+
+  function checkWin() {
+    for (var j = 0; j < LINES.length; j++) {
+      var line = LINES[j];
+      var a = cells[line[0]].textContent;
+      if (a && a === cells[line[1]].textContent && a === cells[line[2]].textContent) {
+        return { player: a, line: line };
+      }
+    }
+    return null;
+  }
+
+  newGame();
+})();
+</script>
+</body>
+</html>
