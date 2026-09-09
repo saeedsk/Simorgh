@@ -53,8 +53,29 @@ DEFAULT_DENYLIST: dict[str, str] = {
     r"\bftplib\b": "opens FTP connections (Directive 1, Directive 5)",
     r"\bsmtplib\b": "sends email (Directive 1, Directive 5)",
     r"\beval\s*\(": "uses eval on dynamic input (Directive 1)",
+    # `eval(` was covered but its sibling was not: `exec(` runs a whole
+    # dynamically-built statement (not just an expression), and unlike
+    # every "os.system-in-a-string" case above that only got caught
+    # because the string payload happened to still mention `os.system(`
+    # or `os.` literally, a payload built from concatenation/chr() codes
+    # (e.g. `exec("__im"+"port__('o'+'s').sy"+"stem('id')")`) has no such
+    # literal substring anywhere and sailed straight through -- an
+    # observer confirmed this 2026-09-08 (an obfuscated `exec(...)`
+    # payload with no denylisted substring in it was approved outright).
+    # This is a distinct, fixable gap from the documented
+    # over-match/under-match trade of the scan itself (which still
+    # applies to a fully-obfuscated `eval`/`getattr(...)` call): a bare,
+    # unobfuscated `exec(` had literally zero coverage.
+    r"\bexec\s*\(": "uses exec on dynamic input (Directive 1)",
     r"\b__import__\s*\(\s*['\"]os['\"]": "dynamically imports os to route around static checks (Directive 1)",
     r"\bctypes\b": "loads ctypes, a common sandbox-escape vector (Directive 1)",
+    # `os.system` was covered but the rest of the privilege-escalation
+    # family in the `os` module was not: `os.setuid`/`os.seteuid`/etc.
+    # drop or change the process's privileges outright, with no
+    # subprocess or shell involved for the earlier patterns to catch. An
+    # observer confirmed 2026-09-08 that `os.setuid(0)` submitted through
+    # `run_python_sandboxed` was approved outright.
+    r"\bos\.set(?:u|eu|reu|resu|g|eg|reg|resg)id\b": "changes process privileges via os.setuid/seteuid/setreuid/setresuid or the setgid family (Directive 1)",
 }
 
 
