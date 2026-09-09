@@ -216,14 +216,30 @@ class Service:
         its source from `path` (readable-roots bounded) and its
         description from Memory's procedural record if one answers in
         time. Never raises; a load that cannot complete just leaves the
-        tool unregistered for the caller to report as `unknown tool`."""
+        tool unregistered for the caller to report as `unknown tool`.
+
+        Always re-reads the file rather than trusting an already-registered
+        tool's captured source: `apply_skill` rewrites a skill's file in
+        place and then calls right back in here (`_on_approved`'s
+        `LEARN_SKILL_ACQUIRED` re-publish, same process, same registry) to
+        make the fix live immediately. An early return here used to hand
+        back the pre-fix `SkillTool` -- whose `_source` was captured once
+        at construction and never looked at the file again -- so a
+        self-applied bugfix was silently invisible until the next kernel
+        restart (live-caught, 2026-09-08: a skill fixed via `apply_skill`
+        kept running its old, broken code in the very same process that
+        just "fixed" it). Only the no-op case -- source on disk is
+        unchanged from what is already registered -- is still short-
+        circuited, so a genuinely repeated acquisition does not spam a
+        second `tool.registered`/ledger entry (see
+        `test_a_second_acquisition_of_the_same_name_does_not_re_register`)."""
         existing = self._registry.get(f"skill:{name}")
-        if existing is not None:
-            return existing
         source = pathsafety.safe_read_file(self._config.repo_root, path, readable_roots=self._config.readable_roots)
         if source.startswith("[refused"):
             self._ctx.logger.warning("skill_load_refused", name=name, path=path, detail=source)
-            return None
+            return existing
+        if existing is not None and getattr(existing, "_source", None) == source:
+            return existing
         description = await self._skill_description(name) or f"On-demand skill {name!r} acquired at {path}"
         tool = SkillTool(self._config, skill_name=name, source=source, description=description)
         self._registry[tool.name] = tool

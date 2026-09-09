@@ -246,6 +246,45 @@ class TestSkillAcquiredRegistersOnDemand(_ExecutionServiceTestCase):
 
         self.assertEqual(len(seen), 1)
 
+    async def test_a_changed_source_on_reacquisition_replaces_the_stale_tool(self):
+        # Live-caught (observer, 2026-09-08): `_load_skill` used to
+        # early-return the already-registered `SkillTool` unconditionally
+        # -- `apply_skill` writes a fixed skill's source to the SAME
+        # `simorgh_skills/<name>.py` path and then re-publishes
+        # `learn.skill.acquired` for it in the very same process
+        # (`Service._on_approved`), expecting the fix to go live
+        # immediately. Because `SkillTool` captures its `_source` string
+        # once at construction and never re-reads the file, the stale
+        # object kept running the pre-fix code until the next kernel
+        # restart -- a self-applied bugfix was invisible in-process.
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        path = self.root / "simorgh_skills" / "fixme.py"
+        path.write_text('def run(name="world"):\n    return f"v1 {name}"\n')
+
+        from simorgh.contracts.protocols import ToolContext
+        tool_ctx = ToolContext(
+            action_id="a1", task_id=None, scope={}, constraints={},
+            data_dir=self.root, clock=self.clock, logger=None, ledger=None,
+        )
+
+        tool_v1 = await self.service._load_skill("fixme", path="simorgh_skills/fixme.py")  # noqa: SLF001
+        self.assertIsNotNone(tool_v1)
+        result_v1 = await tool_v1.run({"name": "sim"}, ctx=tool_ctx)
+        self.assertIn("v1 sim", result_v1.output)
+
+        # The file changes on disk (what `apply_skill` does), then the
+        # SAME name is "acquired" again in this same process.
+        path.write_text('def run(name="world"):\n    return f"v2 {name}"\n')
+        tool_v2 = await self.service._load_skill("fixme", path="simorgh_skills/fixme.py")  # noqa: SLF001
+        self.assertIsNotNone(tool_v2)
+        result_v2 = await tool_v2.run({"name": "sim"}, ctx=tool_ctx)
+        self.assertIn("v2 sim", result_v2.output, "STALE CACHE: still running the pre-fix skill source")
+
+        # And the registry itself was actually replaced, not just the
+        # local variable above -- the next real invocation through
+        # `_on_approved` must also see v2.
+        self.assertIs(self.service._registry["skill:fixme"], tool_v2)  # noqa: SLF001
+
 
 class _FakeMcpClient:
     """Stands in for `mcp.McpClient` at the `Service._start_mcp_server`
