@@ -171,7 +171,26 @@ class McpClient:
         # matching response; skip those rather than misreading one as
         # the answer.
         while True:
-            raw = await asyncio.wait_for(self._process.stdout.readline(), timeout=self._config.timeout_s)
+            try:
+                raw = await asyncio.wait_for(self._process.stdout.readline(), timeout=self._config.timeout_s)
+            except asyncio.TimeoutError:
+                # Live-caught, 2026-09-08: a server that never answers
+                # (hung, wedged, stuck in a blocking call) was left
+                # running after the timeout fired -- `call_tool()`
+                # reported the timeout cleanly, but the subprocess itself
+                # stayed alive, unmonitored, until the whole Kernel shut
+                # down and `close()` finally reaped it. Since a server
+                # that didn't answer this request won't usefully answer
+                # the next one either, kill it now so the leak doesn't
+                # outlive the timeout: the process stops burning
+                # resources immediately, and the *next* call fails fast
+                # (a closed pipe -> `OSError`) instead of paying out the
+                # same timeout again against the same stuck process.
+                with contextlib.suppress(ProcessLookupError):
+                    self._process.kill()
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(self._process.wait(), timeout=5.0)
+                raise
             if not raw:
                 return None  # stream closed -- the process exited or crashed
             try:
