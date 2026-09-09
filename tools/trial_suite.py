@@ -37,7 +37,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # `tools/` is not a package
 
+import json  # noqa: E402
+
+from observer_kit import fast_copy_repo  # noqa: E402
 from simorgh.contracts import topics  # noqa: E402
 from simorgh.kernel.config import LoadedConfig  # noqa: E402
 from simorgh.kernel.secrets import EnvSecretStore  # noqa: E402
@@ -132,8 +136,14 @@ def git(repo: str, *args: str) -> str:
 
 
 def make_lab(root: str) -> str:
+    # Copy-on-write clone (see `tools/trial.py::make_lab`): near-instant
+    # and no disk until something writes, instead of duplicating the
+    # whole tree per trial. `.git` comes along and is dropped so the
+    # lab's history starts at "base", which `_judge` relies on.
     repo = os.path.join(root, "repo")
-    shutil.copytree(REPO_ROOT, repo, ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".claude"))
+    fast_copy_repo(Path(repo), source=REPO_ROOT)
+    shutil.rmtree(os.path.join(repo, ".git"), ignore_errors=True)
+    shutil.rmtree(os.path.join(repo, ".claude"), ignore_errors=True)
     subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True)
     subprocess.run(["git", "-C", repo, "add", "-A"], capture_output=True)
     subprocess.run(
@@ -149,6 +159,11 @@ async def run_one(trial: Trial, root: str, timeout_s: float) -> Result:
     kernel = Kernel(
         LoadedConfig({
             "runtime": {"data_dir": os.path.join(root, "data")},
+            # Explicit rather than inferred from the cwd set above:
+            # `find_repo_root` reads the cwd at boot, and the cwd is
+            # process-global, which is also why `--parallel` runs each
+            # trial in its own process rather than in this one.
+            "execution": {"repo_root": repo},
             "curiosity": {"autonomy_on_boot": False},
         }, None),
         secrets=EnvSecretStore({}),
@@ -233,24 +248,104 @@ def _judge(result: Result, repo: str) -> None:
                 result.problems.append(f"{trial.expect_file} is not valid Python: {exc.msg}")
 
 
-async def main(names: list[str], timeout_s: float) -> int:
-    chosen = [t for t in TRIALS if not names or t.name in names]
-    results: list[Result] = []
-    for trial in chosen:
-        root = tempfile.mkdtemp(prefix=f"simorgh-{trial.name}-")
-        try:
-            results.append(await run_one(trial, root, timeout_s))
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-        last = results[-1]
-        mark = "PASS" if last.ok else "FAIL"
-        print(f"  {mark}  {trial.name:24s} {last.status:10s} {last.seconds:5.0f}s")
-        for problem in last.problems:
-            print(f"        - {problem}")
+_RESULT_MARK = "RESULT_JSON:"
 
+
+def _report(result: Result) -> None:
+    mark = "PASS" if result.ok else "FAIL"
+    print(f"  {mark}  {result.trial.name:24s} {result.status:10s} {result.seconds:5.0f}s", flush=True)
+    for problem in result.problems:
+        print(f"        - {problem}", flush=True)
+
+
+def _summary(results: list[Result]) -> int:
     failed = [r for r in results if not r.ok]
     print(f"\n{len(results) - len(failed)}/{len(results)} clean")
     return 1 if failed else 0
+
+
+async def _run_in_process(trial: Trial, timeout_s: float) -> Result:
+    root = tempfile.mkdtemp(prefix=f"simorgh-{trial.name}-")
+    try:
+        return await run_one(trial, root, timeout_s)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+async def _run_in_subprocess(trial: Trial, timeout_s: float, gate: asyncio.Semaphore) -> Result:
+    """One trial in its own interpreter.
+
+    Trials cannot share a process: `run_one` does `os.chdir(repo)`
+    (process-global, and `find_repo_root` reads it at boot), and
+    Orchestration's tool registries are module-level state that two
+    kernels would corrupt in each other. A subprocess gives each trial
+    its own cwd, its own event loop and its own module state, which is
+    exactly the isolation a lab is for. The child prints its scored
+    result as one `RESULT_JSON:` line; anything else it prints is its
+    own narration and is dropped here.
+    """
+    async with gate:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-u", __file__, trial.name, "--timeout", f"{timeout_s:.0f}", "--json",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=str(REPO_ROOT),
+        )
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s + 120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            result = Result(trial=trial, status="timed out", seconds=timeout_s + 120)
+            result.problems.append("the trial's own process did not finish; killed")
+            return result
+    text = out.decode("utf-8", errors="replace")
+    for line in reversed(text.splitlines()):
+        if line.startswith(_RESULT_MARK):
+            data = json.loads(line[len(_RESULT_MARK):])
+            result = Result(trial=trial, status=data["status"], seconds=data["seconds"], problems=data["problems"])
+            return result
+    result = Result(trial=trial, status="crashed")
+    tail = " | ".join(text.strip().splitlines()[-3:])[:200]
+    result.problems.append(f"runner crashed before scoring (exit {proc.returncode}): {tail}")
+    return result
+
+
+async def main(names: list[str], timeout_s: float, *, parallel: int = 1, as_json: bool = False) -> int:
+    chosen = [t for t in TRIALS if not names or t.name in names]
+
+    if as_json:
+        # Child mode for `--parallel`: exactly one trial, scored, as one
+        # machine-readable line at the very end.
+        if len(chosen) != 1:
+            print("--json runs exactly one named trial", file=sys.stderr)
+            return 2
+        result = await _run_in_process(chosen[0], timeout_s)
+        _report(result)
+        print(_RESULT_MARK + json.dumps({
+            "name": result.trial.name, "status": result.status,
+            "seconds": result.seconds, "problems": result.problems,
+        }), flush=True)
+        return 0 if result.ok else 1
+
+    if parallel <= 1:
+        results: list[Result] = []
+        for trial in chosen:
+            results.append(await _run_in_process(trial, timeout_s))
+            _report(results[-1])
+        return _summary(results)
+
+    # A trial is almost entirely waiting on a model, so N of them at
+    # once finish in close to the time of the slowest one. The cap
+    # matters because each trial's `run_tests` now runs pytest across
+    # every core (`execution/tools.py::pytest_parallel_args`): several
+    # of those at the same instant oversubscribe the machine, and a
+    # timing-sensitive trial under that load can fail for a reason
+    # that is ours, not Sim's. Results print in the order they finish.
+    gate = asyncio.Semaphore(parallel)
+    results = []
+    for coro in asyncio.as_completed([_run_in_subprocess(t, timeout_s, gate) for t in chosen]):
+        result = await coro
+        results.append(result)
+        _report(result)
+    return _summary(results)
 
 
 if __name__ == "__main__":
@@ -260,4 +355,9 @@ if __name__ == "__main__":
     # and a task may now span attempts (orchestration/resume.py), so the
     # old 240s cut healthy runs off mid-work (loader gate, 2026-09-07).
     parser.add_argument("--timeout", type=float, default=900.0)
-    sys.exit(asyncio.run(main(parser.parse_args().names, parser.parse_args().timeout)))
+    parser.add_argument("--parallel", type=int, default=1,
+                        help="run this many trials at once, each in its own process (default: 1, "
+                             "serial -- the loader gate keeps that; 3 is a good number for a dev run)")
+    parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)  # child mode of --parallel
+    args = parser.parse_args()
+    sys.exit(asyncio.run(main(args.names, args.timeout, parallel=args.parallel, as_json=args.json)))
