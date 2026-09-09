@@ -5,7 +5,18 @@ are requested with a short timeout; a missing block is omitted and
 logged, never fatal -- Cognition must work correctly whether or not
 Persona/World Model exist yet or are reachable (graceful degradation,
 principle 4.5's spirit applied to *other subsystems* being absent, not
-just providers)."""
+just providers).
+
+For `purpose="chat"` a `user_profile` block is also requested, from World
+Model's `user_profile` facet (fed by Persona's `persona.user_model.updated`
+-- "call me X", "I prefer X" statements extracted by
+`persona/user_model.py`). Before this, nothing ever read that facet back:
+Persona wrote it and forgot it, so a user who said "call me Al" got no
+different a reply than one who never had. `_MIN_FACET_CONFIDENCE` mirrors
+`persona.config.Config.user_model_min_confidence`'s default (0.5) --
+Cognition does not import Persona's config, so this is restated rather
+than shared, same reasoning as `persona/service.py`'s own
+`_load_identity_summary`."""
 
 from __future__ import annotations
 
@@ -20,6 +31,8 @@ CONSTITUTION_SUMMARY = (
     "Core directives, priority order: Safety > Lawfulness > Loyalty > "
     "Corrigibility > Restraint > Stability > Growth > Transparency."
 )
+
+_MIN_FACET_CONFIDENCE = 0.5
 
 
 class PromptAssembler:
@@ -42,6 +55,11 @@ class PromptAssembler:
         if summary is not None:
             blocks.append(self._block("self_summary", summary.get("text", ""), protected=True))
 
+        if purpose == "chat":
+            profile_text = await self._user_profile_text()
+            if profile_text:
+                blocks.append(self._block("user_profile", profile_text, protected=True))
+
         if task_rules:
             blocks.append(self._block("task_rules", task_rules, protected=True))
 
@@ -57,6 +75,19 @@ class PromptAssembler:
             ))
 
         return AssembledContext(blocks=tuple(blocks))
+
+    async def _user_profile_text(self) -> str:
+        reply = await self._try_request(topics.WORLD_ENV_QUERY, {"what": "user_profile", "args": {}})
+        if reply is None:
+            return ""
+        facets = reply.get("facets", {})
+        known = [
+            f"{name}: {facet.get('value')}" for name, facet in facets.items()
+            if facet.get("confidence", 0.0) >= _MIN_FACET_CONFIDENCE
+        ]
+        if not known:
+            return ""
+        return "What you know about the user: " + "; ".join(sorted(known))
 
     def _block(self, name: str, text: str, *, protected: bool) -> PromptBlock:
         return PromptBlock(name=name, text=text, protected=protected, tokens=estimate_tokens(text))
