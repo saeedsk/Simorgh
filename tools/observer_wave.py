@@ -31,12 +31,21 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # `tools/` is not a package
-from observer_kit import agent_workspace, fast_copy_repo, new_run_id  # noqa: E402
+from observer_kit import agent_workspace, fast_copy_repo, new_run_id, prune_stale_workspaces  # noqa: E402
 
 
 def stage_wave(count: int, *, label: str = "observer") -> tuple[str, list[Path]]:
     """Returns `(run_id, [sandbox_path, ...])`, one sandbox per observer,
-    each already a full repo clone ready to `git init` and use."""
+    each already a full repo clone ready to `git init` and use.
+
+    Prunes sandboxes left over from earlier waves first (2026-09-08: a
+    prior wave's sandboxes were only ever reclaimed by someone noticing
+    and doing it by hand, and grew to 13 GB across three waves before
+    that happened) -- see `prune_stale_workspaces` for why this is safe
+    to do unconditionally on every new wave."""
+    removed = prune_stale_workspaces(keep_prefix=label)
+    if removed:
+        print(f"# pruned {len(removed)} stale sandbox(es) from earlier waves", file=sys.stderr)
     run_id = new_run_id(label)
     sandboxes = []
     for i in range(1, count + 1):

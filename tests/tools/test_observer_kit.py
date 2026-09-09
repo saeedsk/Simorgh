@@ -69,6 +69,61 @@ class TestAgentWorkspace(unittest.TestCase):
             self.assertTrue(workspace.is_dir())
 
 
+class TestPruneStaleWorkspaces(unittest.TestCase):
+    """2026-09-08: three finished waves' sandboxes (13 GB) sat on disk
+    until a human noticed and deleted them by hand. `stage_wave` now
+    calls this on every new wave so that never has to happen again."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def _age(self, path: Path, seconds_old: float) -> None:
+        import os
+        now = __import__("time").time()
+        os.utime(path, (now - seconds_old, now - seconds_old))
+
+    def test_an_old_sandbox_is_removed(self) -> None:
+        old = self.root / "w6-01-aaaa"
+        old.mkdir()
+        self._age(old, 3600)
+        removed = kit.prune_stale_workspaces(root=self.root, min_age_seconds=1800)
+        self.assertEqual(removed, [old])
+        self.assertFalse(old.exists())
+
+    def test_a_fresh_sandbox_is_left_alone(self) -> None:
+        fresh = self.root / "w8-01-bbbb"
+        fresh.mkdir()
+        removed = kit.prune_stale_workspaces(root=self.root, min_age_seconds=1800)
+        self.assertEqual(removed, [])
+        self.assertTrue(fresh.exists())
+
+    def test_the_current_waves_own_prefix_is_spared_even_if_old(self) -> None:
+        """Guards a wave still actively running under the label about
+        to be staged again -- age alone must not be enough to delete it."""
+        current = self.root / "w8-01-cccc"
+        current.mkdir()
+        self._age(current, 3600)
+        removed = kit.prune_stale_workspaces(root=self.root, min_age_seconds=1800, keep_prefix="w8")
+        self.assertEqual(removed, [])
+        self.assertTrue(current.exists())
+
+    def test_the_findings_directory_is_never_touched(self) -> None:
+        """Findings live under a wholly separate root in real use
+        (`FINDINGS_ROOT`), but this is the second line of defense: even
+        a stray `findings` dir directly under the pruned root survives."""
+        findings = self.root / "findings"
+        findings.mkdir()
+        self._age(findings, 3600)
+        removed = kit.prune_stale_workspaces(root=self.root, min_age_seconds=1800)
+        self.assertEqual(removed, [])
+        self.assertTrue(findings.exists())
+
+    def test_a_missing_root_is_a_no_op(self) -> None:
+        self.assertEqual(kit.prune_stale_workspaces(root=self.root / "does-not-exist"), [])
+
+
 class TestFindingsRoundTrip(unittest.TestCase):
     """Findings live under `FINDINGS_ROOT`, a directory SEPARATE from
     `DEFAULT_WORKSPACE_ROOT` (sandboxes) and from `REPO_ROOT` -- this
