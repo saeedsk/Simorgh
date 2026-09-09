@@ -151,36 +151,56 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
     "reflection": frozenset({"stall_idle_seconds"}),
 }
 
+# Same standard of evidence as `KNOWN_DEAD_FIELDS`, for a field whose
+# `simorgh.toml` key is nested one level inside its `[section]` --
+# `[persona.user_model] min_confidence_to_use` rather than a flat
+# `[persona] min_confidence_to_use`. `KNOWN_DEAD_FIELDS`'s `present =
+# known & set(section)` line only matches a bare top-level key, so it
+# can never see these; `dead_fields` below checks this dict too, one
+# level of nesting deep (`section[subsection][key]`), which is all four
+# entries here need -- see the module docstring's reasoning for why a
+# hand-written schema isn't the fix. Maps the TOML `"subsection.key"`
+# path to the dataclass attribute it parses into (the two names differ
+# for every entry here, which is exactly why this can't just reuse
+# `KNOWN_DEAD_FIELDS`'s bare-string form).
+#
 # Confirmed dead by the same grep-the-whole-repo method as everything
-# above, but NOT in `KNOWN_DEAD_FIELDS`: this module's `present = known
-# & set(section)` line only matches a field whose `simorgh.toml` key is
-# the bare field name at the top of its `[section]` (true for every
-# entry above). These three subsystems nest the raw key one level
-# deeper in their own `from_mapping` (`[persona.user_model]
-# min_confidence_to_use`, `[verification.trajectory]
-# wasted_step_ratio_warn`, `[verification.review]
-# require_real_provider`, `[worldmodel.git] refresh_seconds`), so
-# `set(section)` never contains the field name itself and `dead_fields`
-# silently never flags them -- adding them to `KNOWN_DEAD_FIELDS` as-is
-# would be exactly the inert, cries-wolf-never entry this module exists
-# to avoid. Left here as a record for whoever extends `dead_fields` to
-# take a field -> dotted-path mapping instead of assuming they're the
-# same string:
-#   persona.user_model_min_confidence -- `persona/user_model.py`'s
+# in `KNOWN_DEAD_FIELDS` (2026-09-08, re-verified against every fix
+# committed earlier the same day -- none of them wired these up):
+#   persona.user_model.min_confidence_to_use (-> Config.
+#     user_model_min_confidence) -- `persona/user_model.py`'s
 #     `UserModel.register(self, *, min_confidence: float = 0.5)` is the
 #     only place this would apply, and `register` is never called
-#     anywhere in the codebase.
-#   verification.trajectory_wasted_step_ratio_warn -- `TrajectoryMetrics
-#     .wasted` (`verification/trajectory.py`) is counted but never
-#     turned into a ratio or compared against this field anywhere in
-#     `verdict.py`/`service.py`; only `max_denied_actions` is actually
-#     checked, against `trajectory.denied_actions`.
-#   verification.review_require_real_provider -- `service.py`'s
-#     `_review` hardcodes a literal `"require_real_provider": False` in
-#     its `cognition.think` request payload; this field never reaches it.
-#   worldmodel.git_refresh_seconds -- no file under `simorgh/worldmodel/`
-#     reads it outside `config.py`; there is no periodic git-refresh
-#     loop in the package for it to throttle.
+#     anywhere in the codebase. `cognition/assembler.py` even names this
+#     exact field in its own docstring ("mirrors `persona.config.Config.
+#     user_model_min_confidence`'s default (0.5)") but restates the 0.5
+#     as its own hardcoded `_MIN_FACET_CONFIDENCE` module constant
+#     rather than reading the config value -- by the module's own
+#     admission, Cognition "does not import Persona's config".
+#   verification.trajectory.wasted_step_ratio_warn (-> VerificationConfig.
+#     trajectory_wasted_step_ratio_warn) -- `TrajectoryMetrics.wasted`
+#     (`verification/trajectory.py`) is counted but never turned into a
+#     ratio or compared against this field anywhere in `verdict.py`
+#     (whose `combine()` checks only `trajectory.denied_actions` against
+#     `max_denied_actions`) or `service.py`.
+#   verification.review.require_real_provider (-> VerificationConfig.
+#     review_require_real_provider) -- `service.py`'s `_think` helper
+#     (used by both the plan-review and checklist call sites) hardcodes
+#     a literal `"require_real_provider": False` in its `cognition.think`
+#     request payload; this field never reaches it.
+#   worldmodel.git.refresh_seconds (-> Config.git_refresh_seconds) -- no
+#     file under `simorgh/worldmodel/` reads it outside `config.py`;
+#     there is no periodic git-refresh loop anywhere in the package
+#     (`facets/git_state.py` runs `git` synchronously on demand, not on
+#     an interval) for it to throttle.
+KNOWN_DEAD_NESTED_FIELDS: dict[str, dict[str, str]] = {
+    "persona": {"user_model.min_confidence_to_use": "user_model_min_confidence"},
+    "verification": {
+        "trajectory.wasted_step_ratio_warn": "trajectory_wasted_step_ratio_warn",
+        "review.require_real_provider": "review_require_real_provider",
+    },
+    "worldmodel": {"git.refresh_seconds": "git_refresh_seconds"},
+}
 
 
 def _config_classes() -> dict[str, Callable[..., Any]]:
@@ -260,19 +280,41 @@ def dead_sections(config, *, names: Iterable[str] | None = None) -> list[str]:
     return dead
 
 
+def _present_nested(section: dict, nested_known: dict[str, str]) -> dict[str, str]:
+    """The subset of `nested_known` (`"subsection.key" -> attr`) whose
+    `subsection.key` is actually present in `section` -- one level of
+    nesting, `section[subsection][key]`, which is all `KNOWN_DEAD_
+    NESTED_FIELDS` needs."""
+    present: dict[str, str] = {}
+    for path, attr in nested_known.items():
+        subsection, _, key = path.partition(".")
+        sub = section.get(subsection)
+        if isinstance(sub, dict) and key in sub:
+            present[path] = attr
+    return present
+
+
 def dead_fields(config, *, names: Iterable[str] | None = None) -> list[tuple[str, str]]:
     """`(section, field)` pairs that were explicitly set to something
     other than their default, and parsed cleanly, but that no code
-    path reads (`KNOWN_DEAD_FIELDS`). A section already caught by
-    `dead_sections` (an unrecognised key) is skipped here -- it is
-    already reported, and this check only adds value for a field that
-    genuinely parses into a different, live-looking Config value."""
+    path reads (`KNOWN_DEAD_FIELDS`, plus `KNOWN_DEAD_NESTED_FIELDS`
+    for a field nested one level inside its section). A section already
+    caught by `dead_sections` (an unrecognised key) is skipped here --
+    it is already reported, and this check only adds value for a field
+    that genuinely parses into a different, live-looking Config value.
+
+    A nested field is reported with its dotted `"subsection.key"` path
+    as `field`, so `report()` needs no changes to log it."""
     classes = _config_classes()
     already_dead = set(dead_sections(config, names=names))
+    all_names = set(KNOWN_DEAD_FIELDS) | set(KNOWN_DEAD_NESTED_FIELDS)
     dead: list[tuple[str, str]] = []
-    for name in sorted(names if names is not None else KNOWN_DEAD_FIELDS):
-        known = KNOWN_DEAD_FIELDS.get(name)
-        if not known or name in already_dead:
+    for name in sorted(names if names is not None else all_names):
+        if name in already_dead:
+            continue
+        known = KNOWN_DEAD_FIELDS.get(name, frozenset())
+        nested_known = KNOWN_DEAD_NESTED_FIELDS.get(name, {})
+        if not known and not nested_known:
             continue
         cls = classes.get(name)
         if cls is None:
@@ -281,7 +323,8 @@ def dead_fields(config, *, names: Iterable[str] | None = None) -> list[tuple[str
         if not section:
             continue
         present = known & set(section)
-        if not present:
+        present_nested = _present_nested(section, nested_known)
+        if not present and not present_nested:
             continue
         baseline = dict(EFFECTIVE_DEFAULTS.get(name, {}))
         try:
@@ -292,6 +335,9 @@ def dead_fields(config, *, names: Iterable[str] | None = None) -> list[tuple[str
         for field in sorted(present):
             if getattr(written_cfg, field) != getattr(baseline_cfg, field):
                 dead.append((name, field))
+        for path, attr in sorted(present_nested.items()):
+            if getattr(written_cfg, attr) != getattr(baseline_cfg, attr):
+                dead.append((name, path))
     return dead
 
 
