@@ -106,6 +106,18 @@ class Config:
     classifier_timeout_s: float = 3.0
     human_prompt_timeout_s: float = 1800.0
     autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project")
+    # -- static analysis (rules.py::StaticAnalysisRule): bandit, PyCQA's
+    # Python security linter, run over every Python code payload as a
+    # principled complement to the hand-maintained `denylist` regexes
+    # above (2026-09-09 toolset #3). Optional dependency: with bandit not
+    # installed the rule abstains -- a missing linter must never deny.
+    # HIGH keeps it to the findings bandit itself is sure matter
+    # (shell=True with input, unsafe deserialization of untrusted data);
+    # MEDIUM catches eval/pickle/tmp-path patterns the denylist already
+    # names by hand and would double-report.
+    static_analysis_enabled: bool = True
+    static_analysis_min_severity: str = "HIGH"  # LOW | MEDIUM | HIGH
+    static_analysis_timeout_s: float = 20.0
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":
