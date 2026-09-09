@@ -186,13 +186,34 @@ class Service:
             self._failure_streak[origin] = 0
 
     async def _tighten(self, to: str, reason: str) -> None:
-        if self._posture.level == to:
-            return
+        """Live-caught (observer, 2026-09-09): this used to bail out
+        entirely -- no ledger entry, no reason recorded, nothing -- the
+        instant `to` equaled the *current* level, which is true on every
+        boot for `guarded`-level triggers (health-critical default,
+        drift-detected, budget-pressure) since `baseline_posture` is
+        itself `"guarded"` by default. `Posture.tighten` was already
+        written to keep recording the reason on a same-level or
+        no-op-rank tighten (see its own tests); this wrapper's stricter
+        equality guard threw that audit trail away before `Posture` ever
+        saw it, and also fed `GUARDIAN_POSTURE_CHANGED` the *requested*
+        `to` rather than the posture's real resulting level -- so a
+        `guarded`-targeted trigger arriving while already `locked` would
+        have wrongly announced `mode: "guarded"`. `posture.reasons` also
+        feeds `trust_score` in `_on_posture_request` (the `budget`
+        command's answer), so the dropped reason silently reported
+        "fully trusted" right after a critical health finding, drift
+        detection, or budget-pressure warning that changed nothing about
+        the posture level. Record the reason unconditionally; only
+        announce a change (and arm a lock-expiry) when the level
+        actually moved."""
+        before = self._posture.level
         self._posture.tighten(to, reason)
         await self._ctx.ledger.append(TRUST_STREAM, self._event(TRUST_STREAM, "tightened", {"to": to, "reason": reason}))
+        if self._posture.level == before:
+            return
         await self._ctx.bus.publish(Message.new(
             topics.GUARDIAN_POSTURE_CHANGED, source="guardian",
-            payload={"mode": to, "trust_score": 0.0, "reason": reason},
+            payload={"mode": self._posture.level, "trust_score": 0.0, "reason": reason},
         ))
         if self._posture.level == "locked" and self._config.lock_ttl_s > 0:
             self._arm_lock_expiry()
