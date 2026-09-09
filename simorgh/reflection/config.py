@@ -21,6 +21,14 @@ class Config:
 
     critique_max_tokens: int = 400
 
+    # -- distillation (distillation.py): turn a solved, tool-using
+    # task into a reusable skill without being asked. Capped hard,
+    # because the failure mode of eagerness is a skills directory
+    # full of near-duplicates nobody trusts.
+    distillation_enabled: bool = True
+    max_distillations_per_day: int = 3
+    skill_dir: str = "simorgh_skills"
+
     pattern_window_seconds: float = 86400.0
     pattern_min_rate: float = 0.5
     pattern_min_samples: int = 3

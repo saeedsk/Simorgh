@@ -25,8 +25,9 @@ from simorgh.contracts.protocols import Context, Health
 
 from .calibration import CalibrationTable
 from .config import Config
-from .denials import DenialMiner
+from . import distillation
 from .critique import parse_critique
+from .denials import DenialMiner
 from .drift import DriftTracker, parse_verdict
 from .health import HealthMonitor
 from .patterns import PatternMiner
@@ -37,6 +38,8 @@ VERSION = "0.1.0"
 HEALTH_STREAM = "reflect:health"
 DRIFT_STREAM_PREFIX = "reflect:drift:"
 CRITIQUE_STREAM_PREFIX = "reflect:critique:"
+# Skills Reflection proposed off the back of a solved task.
+DISTILLATION_STREAM = "reflect:distillation"
 CALIBRATION_STREAM = "reflect:calibration"
 PATTERNS_STREAM = "reflect:patterns"
 SELF_STREAM = "reflect:self"
@@ -51,6 +54,10 @@ class _TaskMeta:
     scope_paths: tuple[str, ...] = ()
     tracker: DriftTracker | None = None
     started_ts: float = 0.0
+    # Which tools this task actually used, for distillation.py: a task
+    # that reached outside the repo and got somewhere is a technique
+    # worth keeping, and the tool list is how that shows.
+    tools_used: set[str] = field(default_factory=set)
 
 
 class Service:
@@ -71,6 +78,7 @@ class Service:
         topics.REFLECT_HEALTH_FINDING, topics.REFLECT_PATTERNS_FOUND, topics.REFLECT_CALIBRATION_UPDATED,
         topics.REFLECT_DRIFT_DETECTED, topics.SELF_OBSERVATION, topics.MEMORY_STORE,
         topics.COGNITION_THINK, topics.REFLECT_REVIEW_REPLY, topics.SYSTEM_HEALTH,
+        topics.TASK_CREATE,
     )
 
     def __init__(self, config: Config | None = None) -> None:
@@ -78,6 +86,7 @@ class Service:
         self.config = config or Config()
         self._ctx: Context | None = None
         self._subs: list = []
+        self._distilled_today = 0
         self._health = HealthMonitor(self.config)
         self._last_health_severity: str | None = None
         self._patterns = PatternMiner(self.config)
@@ -170,8 +179,14 @@ class Service:
     async def _on_task_step(self, message: Message) -> None:
         p = message.payload
         meta = self._tasks.get(p["task_id"])
-        if meta is None or meta.tracker is None:
+        if meta is None:
             return
+        if p.get("tool"):
+            meta.tools_used.add(str(p["tool"]))
+        if meta.tracker is None:
+            return
+        if p.get("tool"):
+            meta.tools_used.add(str(p["tool"]))
         meta.tracker.observe_step(p.get("tool"), p.get("summary", ""))
         await self._append(f"{DRIFT_STREAM_PREFIX}{p['task_id']}", "step_seen", {"step_no": p["step_no"], "tool": p.get("tool")})
 
@@ -261,6 +276,48 @@ class Service:
         })
         if critique.confidence is not None:
             self._calibration.record(meta.kind, critique.confidence, succeeded)
+        await self._maybe_distil(message, task_id, meta, succeeded)
+
+    async def _maybe_distil(self, message: Message, task_id: str, meta: _TaskMeta, succeeded: bool) -> None:
+        """Offer to turn a solved problem into a skill.
+
+        Sim could always write skills when asked; what it never did was
+        notice it had just worked something out that will be needed
+        again. `distillation.candidate_for` is deliberately stingy --
+        most tasks are ordinary work -- and the daily cap means a bad
+        run of judgement costs a few tasks, not a directory full of
+        near-duplicate skills. Planning dedupes on the subject, so a
+        second attempt at the same slug is dropped there rather than
+        producing two skills that do the same thing.
+        """
+        if not self.config.distillation_enabled or self._ctx is None:
+            return
+        candidate = distillation.candidate_for(
+            kind=meta.kind, succeeded=succeeded, description=meta.description,
+            tools=meta.tools_used, existing_skills=self._existing_skills(),
+        )
+        if candidate is None:
+            return
+        if self._distilled_today >= self.config.max_distillations_per_day:
+            return
+        self._distilled_today += 1
+        subject = f"{self.config.skill_dir}/{candidate.slug}.py"
+        await self._append(DISTILLATION_STREAM, "proposed", {
+            "task_id": task_id, "slug": candidate.slug, "subject": subject,
+            "tools": list(candidate.tools),
+        })
+        await self._publish(message, topics.TASK_CREATE, {
+            "kind": "skill", "description": candidate.description, "subject": subject,
+            "origin": "reflection",
+        })
+
+    def _existing_skills(self) -> set[str]:
+        from pathlib import Path as _Path
+
+        try:
+            return {p.stem for p in _Path(self.config.skill_dir).glob("*.py")}
+        except OSError:
+            return set()
 
     # -- calibration inputs from elsewhere --------------------------------------------------
 
