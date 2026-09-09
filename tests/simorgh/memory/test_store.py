@@ -94,6 +94,19 @@ class TestMemoryEngineStoreAndRetrieve(unittest.IsolatedAsyncioTestCase):
         items, _ = await self.engine.retrieve(query="", kinds=["semantic"], k=5, filters={"tags": ["a"]})
         self.assertEqual([i.content for i in items], ["tagged one"])
 
+    async def test_filters_by_tag_requires_all_tags_not_any(self):
+        # Live-caught (observer, 2026-09-08): a set-intersection check
+        # here meant `filters={"tags": ["skill", "greet"]}` matched ANY
+        # record sharing even one of those tags -- so a record tagged
+        # only `["skill", "farewell"]` passed the filter too, because
+        # "skill" alone was enough to intersect. Two skills acquired in
+        # the same session -- `execution.Service._skill_description`'s
+        # actual call shape -- got each other's procedural record.
+        await self.engine.store(kind="procedural", content="greets a person", tags=["skill", "greet"], source_ref="", confidence=1.0)
+        await self.engine.store(kind="procedural", content="says farewell", tags=["skill", "farewell"], source_ref="", confidence=1.0)
+        items, _ = await self.engine.retrieve(query="", kinds=["procedural"], k=5, filters={"tags": ["skill", "greet"]})
+        self.assertEqual([i.content for i in items], ["greets a person"])
+
     async def test_filters_by_since(self):
         await self.engine.store(kind="episodic", content="old event", tags=[], source_ref="", confidence=1.0)
         self.clock.advance(1000.0)

@@ -121,7 +121,17 @@ class MemoryEngine:
                 if ref in tombstoned:
                     continue
                 tags = tuple(event.payload.get("tags", []))
-                if filters.get("tags") and not set(filters["tags"]) & set(tags):
+                # `filters["tags"]` is a MUST-HAVE-ALL set, not "any of" --
+                # an intersection check here let a shared tag (every skill's
+                # procedural record carries "skill" alongside its own name)
+                # pass the filter for every OTHER skill's record too, so a
+                # caller doing `filters={"tags": ["skill", name]}` to pick
+                # out ONE skill's record got the whole "skill"-tagged pool
+                # back instead (live-caught, 2026-09-08: two skills
+                # acquired in one session, `_skill_description("greet")`
+                # returned `farewell`'s record because it happened to be
+                # the more recent one and lexical similarity was a tie).
+                if filters.get("tags") and not set(filters["tags"]) <= set(tags):
                     continue
                 if filters.get("since") is not None and event.ts < filters["since"]:
                     continue

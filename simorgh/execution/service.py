@@ -270,7 +270,22 @@ class Service:
         except Exception:  # noqa: BLE001 -- a description lookup failure must never block loading the skill
             return None
         items = reply.payload.get("items") or []
-        return items[0]["content"] if items else None
+        if not items:
+            return None
+        # `memory.retrieve` ranks by similarity*confidence plus a recency
+        # term, not by recency alone -- right for open-ended semantic
+        # search, wrong here: `filters` already narrows the pool to
+        # records tagged for exactly this one skill, so what's left to
+        # pick among them is which is CURRENT, not which reads most like
+        # the query. A skill re-applied via `apply_skill` appends a new
+        # procedural record (append-only) rather than replacing the old
+        # one, and a stale first-draft description that happens to repeat
+        # the skill's own name in its text can out-score a fresh, accurate
+        # one on lexical similarity alone (live-caught, 2026-09-08: a
+        # skill's fixed v2 behavior still reported its v1 description).
+        # Taking the newest of the (already skill-scoped) candidates
+        # instead keeps the announced description in step with the code.
+        return max(items, key=lambda i: i.get("ts", 0.0))["content"]
 
     async def _replay_inflight(self) -> None:
         events = await self._ctx.ledger.read(INFLIGHT_STREAM)

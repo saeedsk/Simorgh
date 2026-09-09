@@ -91,6 +91,13 @@ class _ExecutionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         sub = await self.bus.subscribe(topics.MEMORY_RETRIEVE, _on_retrieve)
         self.addAsyncCleanup(sub.unsubscribe)
 
+    async def _answer_memory_retrieve_with_items(self, items: list[dict]) -> None:
+        async def _on_retrieve(message: Message) -> None:
+            await self.bus.reply(message, type=topics.MEMORY_RETRIEVE_REPLY, payload={"items": items, "truncated": False})
+
+        sub = await self.bus.subscribe(topics.MEMORY_RETRIEVE, _on_retrieve)
+        self.addAsyncCleanup(sub.unsubscribe)
+
 
 class TestSkillsOnDiskAreAnnouncedAtBoot(_ExecutionServiceTestCase):
     """A skill Sim wrote in an earlier session must be REACHABLE in this
@@ -206,6 +213,36 @@ class TestSkillAcquiredRegistersOnDemand(_ExecutionServiceTestCase):
 
         self.assertIsNotNone(registered)
         self.assertIn("lonely", registered.payload["description"])
+
+    async def test_the_newest_matching_record_wins_not_the_top_similarity_score(self):
+        # Live-caught (observer, 2026-09-08): `memory.retrieve` ranks by
+        # similarity*confidence plus a recency term, not by recency
+        # alone. A skill re-applied via `apply_skill` appends a NEW
+        # procedural record rather than replacing the old one, and a
+        # stale first-draft description that happens to repeat the
+        # skill's own name in its text can out-score a fresh, accurate
+        # one on lexical similarity. `_skill_description` must pick the
+        # one with the latest `ts` among the (already skill-scoped)
+        # candidates memory hands back, not `items[0]`.
+        await self._answer_memory_retrieve_with_items([
+            {"ref": "memory:procedural:2", "kind": "procedural", "content": "v2: now with emphasis",
+             "score": 0.1, "confidence": 1.0, "ts": 200.0},
+            {"ref": "memory:procedural:1", "kind": "procedural", "content": "the fixme skill: fixme fixme fixme",
+             "score": 0.9, "confidence": 1.0, "ts": 100.0},
+        ])
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        (self.root / "simorgh_skills" / "fixme.py").write_text(_SKILL_SOURCE)
+
+        registered_fut = asyncio.ensure_future(self._wait_for(
+            topics.TOOL_REGISTERED, predicate=lambda p: p.get("name") == "skill:fixme",
+        ))
+        await self.bus.publish(Message.new(
+            topics.LEARN_SKILL_ACQUIRED, source="learning",
+            payload={"name": "fixme", "path": "simorgh_skills/fixme.py", "tests": 1},
+        ))
+        registered = await asyncio.wait_for(registered_fut, timeout=5)
+
+        self.assertEqual(registered.payload["description"], "v2: now with emphasis")
 
     async def test_a_path_outside_readable_roots_is_refused_without_registering(self):
         await self._start()
