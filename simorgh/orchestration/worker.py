@@ -3,8 +3,11 @@ a time (consumer group `workers`, competing-consumer -- multiple Worker
 instances share the group and never double-claim the same delivery), runs
 its Session to a terminal Outcome, and reports it. Tracks `system.state.
 changed` so an in-flight Session can check `is_paused()` between steps
-(Flow 5) -- lease-heartbeat renewal and wall-clock budgets are not
-implemented this session (see README).
+(Flow 5). Runs a `task.lease_heartbeat` timer alongside a claimed task's
+Session (`_heartbeat_loop`) so a single slow step cannot let its lease
+expire before the next `task.step` renews it the normal way -- wall-clock
+step budgets beyond `_ACTION_TIMEOUTS` are still not implemented (see
+README).
 """
 
 from __future__ import annotations
@@ -48,10 +51,17 @@ class Worker:
     def __init__(
         self, bus, ledger, *, clock=None, worker_id: str | None = None,
         assemble_timeout_s: float = DEFAULT_TIMEOUT_S, think_timeout_s: float | None = None,
+        heartbeat_s: float = 30.0,
     ) -> None:
         self._bus = bus
         self._ledger = ledger
         self._clock = clock
+        # `Config.heartbeat_s` (`orchestration/config.py`, default 30) --
+        # documented there since before this fix as declared-but-unread.
+        # This is the first code path that reads it: how often
+        # `_heartbeat_loop` renews a claimed task's lease while a single
+        # step is still running.
+        self._heartbeat_s = heartbeat_s
         self.worker_id = worker_id or f"w-{uuid.uuid4().hex[:8]}"
         self._paused = False
         # Read by `Service`'s own periodic `system.metrics` publish (a
@@ -175,7 +185,16 @@ class Worker:
 
         await restore_session(session, self._ledger)
 
-        outcome = await self.run(session, user_text=description)
+        lease_seconds = float(message.payload.get("lease_seconds", 600.0))
+        heartbeat = asyncio.create_task(self._heartbeat_loop(task_id, lease_seconds))
+        try:
+            outcome = await self.run(session, user_text=description)
+        finally:
+            heartbeat.cancel()
+            try:
+                await heartbeat
+            except asyncio.CancelledError:
+                pass
         requeued = self._requeued(task_id)
         self._forget_cancel(task_id)
         if requeued:
@@ -187,6 +206,36 @@ class Worker:
             # accident).
             return
         await self._report(session, outcome)
+
+    async def _heartbeat_loop(self, task_id: str, lease_seconds: float) -> None:
+        """Keeps a claimed task's lease alive for as long as we are still
+        inside a single step's `await`.
+
+        `TASK_STEP` (`planning.service._on_task_step` ->
+        `TaskStore.refresh_lease`) only fires once a tool call
+        *completes* -- so a single step that outlives `lease_seconds` on
+        its own (a full `run_tests`, a stuck `web_fetch`, a cold-start
+        `cognition.think`) got no renewal at all until it finished, and
+        `Scheduler.scan_leases` treats an expired lease as available:
+        it could hand this exact task_id to a second worker while we
+        were still mid-step. Started the moment a claim is granted,
+        cancelled in `_on_available`'s `finally` the instant the session
+        ends, whatever the outcome -- so it never outlives the task it
+        is renewing.
+        """
+        # Configured `heartbeat_s`, but never slower than a third of
+        # THIS task's own lease -- a short `lease_seconds` (a test, or a
+        # deliberately tight deployment) must not be outrun by a
+        # `heartbeat_s` sized for the 600s default.
+        interval = max(0.1, min(self._heartbeat_s, lease_seconds / 3.0))
+        while True:
+            await asyncio.sleep(interval)
+            msg = Message.new(
+                topics.TASK_LEASE_HEARTBEAT, source=self._bus.source,
+                payload={"task_id": task_id, "worker_id": self.worker_id},
+                partition_key=f"task:{task_id}", clock=self._clock,
+            )
+            await self._bus.publish(msg)
 
     async def run(self, session: Session, *, user_text: str = "") -> Outcome:
         self.current_task_id, self.current_kind = session.task_id, session.kind

@@ -1,0 +1,20 @@
+{
+  "$id": "https://simorgh.local/schema/task.lease_heartbeat.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Renews a claimed task's lease mid-step, when a single tool call or think outlives `lease_seconds` on its own. Carries no step data -- only Planning's `refresh_lease` reads it.",
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "worker_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "worker_id"
+  ],
+  "title": "task.lease_heartbeat",
+  "type": "object"
+}

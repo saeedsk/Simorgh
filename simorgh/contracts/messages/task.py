@@ -77,6 +77,12 @@ TaskStep = define(t.TASK_STEP, [
     O("cost_usd", Float),
     O("tokens", Int),
 ], doc="The trajectory Verification and Reflection read.")
+TaskLeaseHeartbeat = define(t.TASK_LEASE_HEARTBEAT, [
+    F("task_id", Str),
+    F("worker_id", Str),
+], doc="Renews a claimed task's lease mid-step, when a single tool call "
+       "or think outlives `lease_seconds` on its own. Carries no step "
+       "data -- only Planning's `refresh_lease` reads it.")
 TaskPaused = define(t.TASK_PAUSED, [
     F("task_id", Str),
     F("reason", Str),

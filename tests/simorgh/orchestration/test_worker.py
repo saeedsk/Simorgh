@@ -1,10 +1,12 @@
 """Worker-level tests: the claim loop, terminal reporting, and resume on
 a second Worker after a simulated crash (S5/S7, 16 section 6/9)."""
 
+import asyncio
 import unittest
 from pathlib import Path
 
 from simorgh.contracts import topics
+from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context
 from simorgh.orchestration.config import Config
 from simorgh.orchestration.service import Service as OrchestrationService
@@ -446,6 +448,189 @@ class TestMultiProcessSourceAttribution(unittest.TestCase):
             await sub.unsubscribe()
             await worker.stop()
             await gx.stop()
+            await cognition.stop()
+            await planning.stop()
+
+
+class _SlowFakeCognition(FakeCognition):
+    """Like `FakeCognition`, but sleeps a real `delay_s` before replying
+    -- stands in for a single step that itself outlives `lease_seconds`
+    (a full `run_tests`, a stuck `web_fetch`, a cold-start
+    `cognition.think`), without needing a real slow tool."""
+
+    def __init__(self, bus, script, *, delay_s: float, floor: bool = False) -> None:
+        super().__init__(bus, script, floor=floor)
+        self._delay_s = delay_s
+
+    async def _on(self, message) -> None:
+        await asyncio.sleep(self._delay_s)
+        await super()._on(message)
+
+
+class _LeaseTrackingPlanning:
+    """A minimal stand-in for `planning.store.TaskStore` +
+    `planning.scheduler.Scheduler`'s own lease bookkeeping: grants a
+    claim, and tracks `lease_until` against the *same* `FakeClock` the
+    test drives directly, the way `TaskStore.claim`/`refresh_lease` set
+    `now() + lease_seconds` for real. `lease_expired_at(t)` answers
+    exactly what `Scheduler.scan_leases` asks: is `lease.until <= t`.
+    """
+
+    def __init__(self, bus, clock, *, lease_seconds: float) -> None:
+        self._bus = bus
+        self._clock = clock
+        self._lease_seconds = lease_seconds
+        self._tasks: dict[str, dict] = {}
+        self.lease_until: float | None = None
+        self.refresh_count = 0
+        self._subs: list = []
+
+    def add_task(self, task_id: str, **fields) -> None:
+        self._tasks[task_id] = fields
+
+    async def start(self) -> None:
+        self._subs.append(await self._bus.subscribe(topics.TASK_CLAIM, self._on_claim))
+        self._subs.append(await self._bus.subscribe(topics.TASK_LEASE_HEARTBEAT, self._on_refresh))
+        self._subs.append(await self._bus.subscribe(topics.TASK_STEP, self._on_refresh))
+
+    async def stop(self) -> None:
+        for s in self._subs:
+            await s.unsubscribe()
+
+    async def _on_claim(self, message: Message) -> None:
+        task_id = message.payload["task_id"]
+        task = self._tasks.get(task_id)
+        if task is not None:
+            self.lease_until = self._clock.now() + self._lease_seconds
+        await self._bus.reply(message, type=topics.TASK_CLAIM_REPLY,
+                               payload={"granted": task is not None, "task": task or {}})
+
+    async def _on_refresh(self, message: Message) -> None:
+        self.refresh_count += 1
+        self.lease_until = self._clock.now() + self._lease_seconds
+
+    def lease_expired_at(self, t: float) -> bool:
+        return self.lease_until is not None and self.lease_until <= t
+
+
+class TestLeaseHeartbeatSurvivesASlowSingleStep(unittest.TestCase):
+    """The documented gap this fix closes: `task.step` (`_on_task_step`
+    -> `TaskStore.refresh_lease`) only fires once a tool call
+    *completes*, so a single step slower than `lease_seconds` used to
+    get no renewal at all until it finished -- `Scheduler.scan_leases`
+    would then see an expired lease mid-step and treat the task_id as
+    available for a second worker to claim, even though the first
+    worker was still running it (observer, 2026-09-08).
+
+    `Worker._heartbeat_loop` now publishes `task.lease_heartbeat` on a
+    real-wall-clock timer for as long as a task is claimed, independent
+    of step completion. This proves it: the `FakeClock` is advanced
+    past the original `lease_seconds` *while* a single `cognition.think`
+    call is still in flight (real wall-clock sleep), and the lease is
+    still not expired by the time the step finally completes.
+    """
+
+    @run
+    async def test_lease_is_renewed_mid_step_before_it_would_expire(self):
+        async with Harness() as h:
+            lease_seconds = 2.0  # in FakeClock units, driven by the test below
+            step_delay_s = 0.2  # real wall-clock seconds the "step" takes
+
+            planning = _LeaseTrackingPlanning(h.client("planning"), h.clock, lease_seconds=lease_seconds)
+            planning.add_task("t1", kind="chat", mode="execute", description="hi")
+            await planning.start()
+
+            cognition = _SlowFakeCognition(
+                h.client("cognition"), script=[{"text": "hello back"}], delay_s=step_delay_s,
+            )
+            await cognition.start()
+
+            # `heartbeat_s` real-wall-clock small enough to fire several
+            # times inside `step_delay_s`; the Worker itself additionally
+            # never waits longer than lease_seconds/3 (see
+            # `_heartbeat_loop`), so this also proves that floor works
+            # from a `heartbeat_s` that is not specially tuned to the
+            # test's own `lease_seconds`.
+            worker = Worker(
+                h.client("orchestration"), h.ledger, clock=h.clock.now, worker_id="w1",
+                assemble_timeout_s=0.01, heartbeat_s=0.05,
+            )
+            await worker.start()
+
+            await h.client("planning").publish(Message.new(
+                topics.TASK_AVAILABLE, source="planning",
+                payload={"task_id": "t1", "kind": "chat", "lease_seconds": lease_seconds},
+                clock=h.clock.now,
+            ))
+            # Let the claim complete and the slow step actually start.
+            await asyncio.sleep(0.02)
+            self.assertIsNotNone(planning.lease_until, "the claim never granted -- nothing to test")
+
+            # Advance the FakeClock past what the ORIGINAL lease_until
+            # would be, still well inside the step's real 0.2s delay --
+            # this is the moment `Scheduler.scan_leases` would have
+            # expired the lease before this fix (nothing but `task.step`,
+            # which hasn't fired yet, ever refreshed it).
+            original_lease_until = planning.lease_until
+            h.clock.advance(lease_seconds + 1.0)
+            self.assertTrue(
+                planning.lease_expired_at(h.clock.now()),
+                "test setup bug: the original lease should already read as expired at this clock time",
+            )
+
+            # Give the real-wall-clock heartbeat loop a chance to fire at
+            # least once against the NEW clock time before the step
+            # finishes.
+            await asyncio.sleep(step_delay_s)  # >= step_delay_s so the think call also completes
+            await h.pump(10, real_delay=0.01)
+
+            self.assertGreater(planning.refresh_count, 0, "no heartbeat was ever published mid-step")
+            self.assertGreater(
+                planning.lease_until, original_lease_until,
+                "the lease was never renewed while the step was in flight",
+            )
+            self.assertFalse(
+                planning.lease_expired_at(h.clock.now()),
+                "the lease reads as expired -- a second worker could have claimed t1 mid-step",
+            )
+
+            await worker.stop()
+            await cognition.stop()
+            await planning.stop()
+
+    @run
+    async def test_heartbeat_loop_stops_once_the_task_ends(self):
+        """The loop must not outlive the session it is renewing -- a
+        leaked timer would keep refreshing a lease for a task that is
+        already terminal, masking a real stuck/crashed worker."""
+        async with Harness() as h:
+            planning = _LeaseTrackingPlanning(h.client("planning"), h.clock, lease_seconds=60.0)
+            planning.add_task("t1", kind="chat", mode="execute", description="hi")
+            await planning.start()
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": "hello back"}])
+            await cognition.start()
+
+            worker = Worker(
+                h.client("orchestration"), h.ledger, clock=h.clock.now, worker_id="w1",
+                assemble_timeout_s=0.01, heartbeat_s=0.02,
+            )
+            await worker.start()
+
+            await h.client("planning").publish(Message.new(
+                topics.TASK_AVAILABLE, source="planning",
+                payload={"task_id": "t1", "kind": "chat", "lease_seconds": 60.0},
+                clock=h.clock.now,
+            ))
+            await h.pump(30, real_delay=0.01)  # the (fast) session finishes well inside this
+
+            count_after_completion = planning.refresh_count
+            await asyncio.sleep(0.1)  # several heartbeat_s intervals, if the loop leaked
+            self.assertEqual(
+                planning.refresh_count, count_after_completion,
+                "the heartbeat loop kept publishing after the task it belonged to had already finished",
+            )
+
+            await worker.stop()
             await cognition.stop()
             await planning.stop()
 

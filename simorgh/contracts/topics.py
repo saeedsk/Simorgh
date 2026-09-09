@@ -76,6 +76,17 @@ TASK_BLOCKED = "task.blocked"
 # runner made it visible -- case 1 timed out, kept the worker, and cases
 # 2..n then timed out in turn against a worker that was never free.
 TASK_CANCEL = "task.cancel"
+# Keeps a claimed task's lease alive while a single step is still
+# running. `TASK_STEP` only fires once a tool call *completes*, so a
+# step that outlives `lease_seconds` on its own (a full `run_tests`, a
+# slow `web_fetch`, a cold-start `cognition.think`) got no renewal at
+# all until it finished, and `Scheduler.scan_leases` could hand the same
+# task_id to a second worker mid-step (2026-09-08). A `Worker` publishes
+# this on a timer for as long as it holds a task; unlike `TASK_STEP` it
+# carries no step payload and nothing else replays it into ledger
+# history, progress counts, or resume state -- it only ever reaches
+# Planning's `refresh_lease`.
+TASK_LEASE_HEARTBEAT = "task.lease_heartbeat"
 TASK_EDITS_KEPT = "task.edits_kept"
 TASK_DEPENDENCY_SATISFIED = "task.dependency.satisfied"
 # --- 4.5 plan / project ---------------------------------------------------
