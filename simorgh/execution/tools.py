@@ -62,7 +62,8 @@ from .packages import FindPackageTool, InstallPackageTool
 from .pdftext import looks_like_pdf, pdf_to_text
 from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
-from .render import RenderPageTool
+from .container import RunContainerTool
+from .render import BrowsePageTool, RenderPageTool
 
 # A PDF's bytes are mostly fonts and images, so the cap that bounds how
 # much TEXT a fetch may return is the wrong ceiling for one. What
@@ -1510,6 +1511,7 @@ def builtin_tools(config: Config) -> list:
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),
+        BrowsePageTool(config), RunContainerTool(config),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

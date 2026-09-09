@@ -125,6 +125,8 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "run_js_sandboxed": 45.0,
     "web_fetch": 45.0,
     "render_page": 30.0,
+    "browse_page": 60.0,
+    "run_container": 330.0,
     "search_listings": 45.0,
     "find_package": 30.0,
     "install_package": 330.0,

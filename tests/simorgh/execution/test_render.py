@@ -196,3 +196,115 @@ class RealBrowserSmokeTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.metadata["page_errors"])
         self.assertIn("boom", result.metadata["page_errors"][0])
         self.assertIn("hi", result.output)
+
+
+class ClassifyActionsTestCase(unittest.TestCase):
+    """`browse_page`'s action list, before any browser is launched."""
+
+    def test_a_normal_action_list_passes(self):
+        from simorgh.execution.render import classify_actions
+
+        self.assertEqual(classify_actions(
+            [{"type": ["#q", "hello"]}, {"click": "#go"}, {"wait": "#results"},
+             {"screenshot": "after"}, {"scroll": 400}]), "")
+
+    def test_there_is_no_way_to_run_your_own_javascript(self):
+        # A JS string inside a JSON argument would be code that
+        # Guardian's code/command rules never see -- the entire static
+        # analysis layer routed around by a field name.
+        from simorgh.execution.render import classify_actions
+
+        for action in ({"evaluate": "fetch('http://x')"}, {"eval": "1"}, {"script": "x"}):
+            with self.subTest(action=action):
+                self.assertIn("not an allowed action", classify_actions([action]))
+
+    def test_a_credential_looking_field_is_never_typed_into(self):
+        from simorgh.execution.render import classify_actions
+
+        for selector in ("#password", "input[name=secret]", "#api_token", "#cvv", "#ssn"):
+            with self.subTest(selector=selector):
+                refusal = classify_actions([{"type": [selector, "hunter2"]}])
+                self.assertIn("credential", refusal)
+
+    def test_a_javascript_url_selector_is_refused(self):
+        from simorgh.execution.render import classify_actions
+
+        self.assertIn("not a usable selector", classify_actions([{"click": "javascript:alert(1)"}]))
+
+    def test_too_many_actions_are_refused(self):
+        from simorgh.execution.render import classify_actions
+
+        self.assertIn("at most", classify_actions([{"scroll": 1}] * 50))
+
+    def test_a_screenshot_name_cannot_escape_its_directory(self):
+        from simorgh.execution.render import classify_actions
+
+        for name in ("../../etc/passwd", "a/b", "with space"):
+            with self.subTest(name=name):
+                self.assertTrue(classify_actions([{"screenshot": name}]))
+
+    def test_a_malformed_action_is_refused(self):
+        from simorgh.execution.render import classify_actions
+
+        self.assertTrue(classify_actions([{"click": "#a", "type": ["#b", "c"]}]))
+        self.assertTrue(classify_actions(["click #a"]))
+        self.assertTrue(classify_actions("not a list"))
+
+    def test_mutating_actions_are_recognised(self):
+        from simorgh.execution.render import mutates
+
+        self.assertTrue(mutates([{"click": "#go"}]))
+        self.assertTrue(mutates([{"type": ["#q", "x"]}]))
+        self.assertFalse(mutates([{"wait": "#x"}, {"screenshot": "s"}]))
+
+
+class BrowsePageRealTestCase(unittest.IsolatedAsyncioTestCase):
+    """A real browser against a real local page with a form."""
+
+    def _skip_unless_available(self):
+        if not shutil.which("node") or not shutil.which("npm"):
+            self.skipTest("node/npm not installed")
+        import subprocess as sp
+
+        root = sp.run(["npm", "root", "-g"], capture_output=True, text=True, timeout=10)
+        if root.returncode != 0 or not (Path(root.stdout.strip()) / "puppeteer").exists():
+            self.skipTest("puppeteer not installed globally")
+
+    async def test_typing_and_clicking_actually_changes_the_page(self):
+        self._skip_unless_available()
+        from simorgh.execution.render import BrowsePageTool
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs").mkdir()
+            (root / "docs" / "form.html").write_text(
+                "<html><body><input id='q'><button id='go' "
+                "onclick=\"document.getElementById('out').innerText='got: '+"
+                "document.getElementById('q').value\">Go</button>"
+                "<div id='out'>nothing yet</div></body></html>"
+            )
+            config = Config(repo_root=root, render_page_timeout_s=20.0)
+            result = await BrowsePageTool(config).run(
+                {"target": "docs/form.html",
+                 "actions": [{"type": ["#q", "almaden"]}, {"click": "#go"}, {"screenshot": "after"}]},
+                ctx=_ctx(config))
+            self.assertTrue(result.ok, result.error)
+            self.assertIn("got: almaden", result.output)
+            self.assertEqual(result.metadata["actions_done"], 3)
+            self.assertTrue(result.metadata["screenshots"])
+            self.assertTrue(Path(result.metadata["screenshots"][0]).is_file())
+
+    async def test_a_selector_that_does_not_exist_stops_and_says_where(self):
+        self._skip_unless_available()
+        from simorgh.execution.render import BrowsePageTool
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs").mkdir()
+            (root / "docs" / "p.html").write_text("<html><body><p>hi</p></body></html>")
+            config = Config(repo_root=root, render_page_timeout_s=20.0)
+            result = await BrowsePageTool(config).run(
+                {"target": "docs/p.html", "actions": [{"click": "#nope"}]}, ctx=_ctx(config))
+        self.assertFalse(result.ok)
+        self.assertEqual(result.metadata["actions_done"], 0)
+        self.assertIn("nope", result.output)
