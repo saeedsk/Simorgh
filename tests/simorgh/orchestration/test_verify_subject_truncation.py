@@ -93,12 +93,38 @@ class TestWrittenPathsTravelWithTheVerifyRequest(unittest.TestCase):
             session.steps.append(Step(1, "act", "wrote it", tool="apply_source_patch", ok=True))
             session.uncommitted.add("docs/games/x.html")
             session.created.add("docs/games/x.html")
+            session.wrote.add("docs/games/x.html")
 
             ref = await runner._put_verify_subject(session, "done")
             payload = json.loads(await h.ledger.get_blob(ref))
 
             self.assertEqual(payload["written_paths"], ["docs/games/x.html"])
             self.assertEqual(payload["subject"], "docs/games/x.html")
+
+    @run
+    async def test_a_committed_file_is_still_reported_as_written(self):
+        """The hole the 2026-09-09 acceptance trial found in the first
+        version of this: `written_paths` was `uncommitted | created`, and
+        BOTH are discarded when `git_commit` succeeds. So a task that did
+        the right thing reported writing nothing, and every file-reading
+        check skipped -- they fired only for tasks that had already
+        failed. A page with the model's own `GIT_COMMIT:` marker
+        appended after `</html>` sailed through on exactly this."""
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+            session = Session(
+                task_id="t-committed", kind="patch", mode="execute", profile=profiles.PATCH,
+                user_text="build the page", subject="docs/games/x.html",
+            )
+            session.steps.append(Step(1, "act", "wrote it", tool="apply_source_patch", ok=True))
+            # What a successful write-then-commit leaves behind.
+            session.wrote.add("docs/games/x.html")
+            session.uncommitted.clear()
+            session.created.clear()
+
+            payload = json.loads(await h.ledger.get_blob(await runner._put_verify_subject(session, "done")))
+            self.assertEqual(payload["written_paths"], ["docs/games/x.html"])
 
     @run
     async def test_a_session_that_wrote_nothing_reports_an_empty_list(self):

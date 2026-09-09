@@ -199,6 +199,36 @@ class Config:
     results_max_rows: int = 500
     results_keep_files: int = 50
 
+    # -- find_package / install_package (packages.py). The tools that
+    # turn "no capability for this" into "there is a library for this".
+    # `run_shell` could always pip-install; these are the narrow,
+    # checked, audited version, and the install leaves a line in
+    # `package_log` so a human can see what Sim added and why.
+    package_lookup_timeout_s: float = 10.0
+    package_install_timeout_s: float = 300.0
+    package_min_age_days: int = 30
+    max_installs_per_day: int = 10
+    package_log: str = "simorgh_packages.txt"
+    # Crude, overridable, and aimed at the accident rather than the
+    # attacker -- same bargain as DEFAULT_SHELL_REFUSALS.
+    package_denylist: tuple[str, ...] = (r"(?i)^sudo", r"(?i)^setuptools$", r"(?i)^pip$")
+    # -- run_script (script.py): real Python, repo importable, network
+    # reachable -- for USING an installed library. Guardian still reads
+    # the payload as `code`, so hand-written network calls are refused
+    # here exactly as they are in the sandbox.
+    script_dir: str = ".simorgh_scripts"
+    script_timeout_s: float = 180.0
+    script_cpu_seconds: int = 120
+    script_memory_mb: int = 1024
+    script_output_max_chars: int = 8000
+    script_keep_files: int = 50
+    # Not os.environ wholesale: a subprocess should not inherit every
+    # credential in the session just to reach the network.
+    script_env_passthrough: tuple[str, ...] = (
+        "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR",
+        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+    )
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a

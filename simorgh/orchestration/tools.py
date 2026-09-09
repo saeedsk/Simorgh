@@ -25,8 +25,20 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "web_fetch": ("read_only", True),
     "web_search": ("read_only", True),
     "render_page": ("read_only", True),
+    "install_package": (
+        "first line: `pip` or `npm`. Second line: the package name alone (optionally pinned, "
+        'e.g. `homeharvest==0.8.18`), or a JSON object like {"spec": "homeharvest", '
+        '"reason": "real listing data", "allow_new": false}. A URL, path or VCS ref is refused.'
+    ),
+    "run_script": (
+        "every line after the marker is the Python program, and nothing else. It runs with the "
+        "repo importable and the network reachable, so `import <an installed library>` works -- "
+        "but writing your own network calls (requests, urllib, socket) is still refused: install "
+        "a library and call it instead."
+    ),
     "search_listings": ("read_only", True),
     "geocode": ("read_only", True),
+    "find_package": ("read_only", True),
     "run_python_sandboxed": ("reversible", False),
     "run_js_sandboxed": ("reversible", False),
     "run_tests": ("reversible", False),
@@ -44,6 +56,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # A shell can reach the network and anything else on the machine;
     # Guardian gates every call on `irreversible` (execution/shell.py).
     "run_shell": ("irreversible", True),
+    # Each changes this machine and reaches the network: gated like run_shell.
+    "install_package": ("irreversible", True),
+    "run_script": ("irreversible", True),
     # -- MCP (execution/mcp.py's own module docstring): a human adds an
     # entry here, by the server's registered tool name
     # (`mcp_<server>_<tool>`), for every MCP tool they want the model to
@@ -88,6 +103,8 @@ _MARKER_ARG_KEY: dict[str, str] = {
     "web_search": "query",
     "render_page": "target",
     "geocode": "address",
+    "find_package": "query",
+    "run_script": "code",
     "run_python_sandboxed": "code",
     "run_js_sandboxed": "code",
     "run_tests": "target",
@@ -165,6 +182,7 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "apply_skill": ("subject", "code"),
     "git_commit": ("path", "message"),
     "search_listings": ("location", "filters"),
+    "install_package": ("manager", "spec"),
 }
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
@@ -221,7 +239,7 @@ _MARKER_NO_ARGS = frozenset({"git_revert"})
 # not a JSON object is kept as the plain second string (the tool's own
 # schema then rejects it honestly), and an empty rest adds nothing at
 # all, so a bare one-line marker still works exactly as before.
-_MARKER_JSON_REST = frozenset({"search_listings"})
+_MARKER_JSON_REST = frozenset({"search_listings", "install_package"})
 
 
 def _json_rest(rest: str, second: str) -> dict:
@@ -376,7 +394,7 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
     args = call.get("args", {})
     if isinstance(args, dict) and set(args) == {"argument"}:
         raw = args["argument"]
-        if tool in ("run_python_sandboxed", "run_js_sandboxed"):
+        if tool in ("run_python_sandboxed", "run_js_sandboxed", "run_script"):
             # Same defence the file writers get: a fenced program is still
             # a program. Found by trial 2026-09-07 -- the fence was kept
             # here and stripped for apply_source_patch, so the sandbox

@@ -38,6 +38,11 @@ _TOOL_NOTES: dict[str, str] = {
                         "optional JSON filters like {\"zip_code\": \"95120\", \"max_price\": 2500000} "
                         "(unofficial data source -- see the tool's own disclaimer)",
     "geocode": "turn a free-text address into latitude/longitude",
+    "find_package": "look up a package on PyPI or npm by name: version, age, licence, homepage",
+    "install_package": "install one package with pip or npm, so you can use a library that already "
+                        "does what you need",
+    "run_script": "run a Python script with the repo importable and the network reachable -- the way "
+                   "to actually USE an installed library",
     "run_python_sandboxed": "run a short Python snippet in a sandbox; no repo access",
     "run_js_sandboxed": "run a short JavaScript snippet with Node in a sandbox; no repo access",
     "apply_source_patch": "write a change to a source file",
