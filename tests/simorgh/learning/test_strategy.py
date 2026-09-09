@@ -20,6 +20,21 @@ class TestBuildReply(unittest.TestCase):
         self.assertEqual(reply["samples"], 0)
         self.assertNotIn("strategy", reply)  # absence *is* the floor signal (real catalog has no floor field)
 
+    def test_samples_without_a_strategy_fall_back_to_overall_competence(self):
+        # Real outcomes almost never carry a `strategy` (only
+        # `PatchPipeline` runs could, and it doesn't write one) -- but
+        # real task-level history still exists and must not be reported
+        # as the zero-sample floor.
+        table = CompetenceTable()
+        for i in range(8):
+            table.apply(_outcome(i + 1, "patch:src/memory", i % 4 == 0, None))
+        reply = build_reply("patch:src/memory", competence=table, config=Config())
+
+        self.assertNotIn("strategy", reply)
+        self.assertEqual(reply["samples"], 8)
+        self.assertEqual(reply["success_rate"], table.success_rate("patch:src/memory"))
+        self.assertNotEqual(reply["success_rate"], 0.5)
+
     def test_with_samples_returns_the_best_strategy(self):
         table = CompetenceTable()
         for i in range(5):
