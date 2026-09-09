@@ -266,7 +266,20 @@ class BusClient:
         fut: asyncio.Future = loop.create_future()
         self._pending[message.id] = fut
         started = time.perf_counter()
-        await self.publish(message)
+        try:
+            await self.publish(message)
+        except Exception:
+            # `publish` can reject the message before it ever reaches the
+            # backend (a bad envelope/contract, a policy violation, a
+            # closed bus...); when it does, nothing will ever resolve or
+            # time out this future, so the entry above would sit in
+            # `_pending` forever -- a caller that retries a malformed
+            # request (a caller bug, but one contract validation is
+            # supposed to catch instantly) leaks one Future per attempt.
+            # Found live while stress-testing contract validation
+            # (2026-09-08): reject cleanly, but don't leak.
+            self._pending.pop(message.id, None)
+            raise
         try:
             reply = await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
