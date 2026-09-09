@@ -82,6 +82,47 @@ class TestDedupeIsForAutonomousOriginsOnly(unittest.TestCase):
         self.assertNotEqual(second.task.id, first.task.id)
 
 
+class TestPatternsFoundDedupeUsesTaskType(unittest.TestCase):
+    """2026-09-08, observer w8-04, reproduced against a real Kernel:
+    `PatternMiner`'s proposal template ("'{task_type}' tasks failed N/M
+    recent outcomes (X%) -- worth reviewing for a systematic issue.") is
+    almost entirely shared boilerplate -- two patterns for different
+    task_types measured ~0.93 SequenceMatcher similarity, well past the
+    0.45 dedupe threshold, so the second pattern silently collapsed into
+    the first's task and Planning never got a task for it. `on_patterns_
+    found` now passes each pattern's own `task_type` as a `distinguish`
+    key so a match must actually be about the same task_type."""
+
+    @run
+    async def test_two_different_task_types_both_become_tasks(self):
+        intake, _store = await _intake()
+        patch_pattern = {
+            "kind": "failure_rate", "rate": 1.0, "task_type": "patch",
+            "proposal": "'patch' tasks failed 5/5 recent outcomes (100%) -- worth reviewing for a systematic issue.",
+        }
+        unknown_pattern = {
+            "kind": "failure_rate", "rate": 1.0, "task_type": "unknown",
+            "proposal": "'unknown' tasks failed 5/5 recent outcomes (100%) -- worth reviewing for a systematic issue.",
+        }
+        created = await intake.on_patterns_found(patterns=[patch_pattern, unknown_pattern])
+        self.assertEqual(len(created), 2, "a genuinely distinct task_type's pattern was dropped as a false duplicate")
+        self.assertNotEqual(created[0].id, created[1].id)
+
+    @run
+    async def test_the_same_task_type_mined_again_is_still_a_real_duplicate(self):
+        """The fix must not defeat dedupe entirely -- a pattern re-mined
+        next window for the *same* task_type is still the same idea."""
+        intake, _store = await _intake()
+        pattern = {
+            "kind": "failure_rate", "rate": 1.0, "task_type": "patch",
+            "proposal": "'patch' tasks failed 5/5 recent outcomes (100%) -- worth reviewing for a systematic issue.",
+        }
+        first = await intake.on_patterns_found(patterns=[pattern])
+        self.assertEqual(len(first), 1)
+        second = await intake.on_patterns_found(patterns=[pattern])
+        self.assertEqual(second, [], "the same task_type's repeated pattern should still dedupe")
+
+
 class TestGoalStatedRiskOverride(unittest.TestCase):
     @run
     async def test_project_risk_defaults_to_medium_when_omitted(self):

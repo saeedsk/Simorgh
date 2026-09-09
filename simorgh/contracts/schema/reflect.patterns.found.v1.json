@@ -22,6 +22,12 @@
           },
           "rate": {
             "type": "number"
+          },
+          "task_type": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
