@@ -420,7 +420,19 @@ async def _status_panel(bus: BusClient, vitals: VitalsCache) -> str:
                                  render=lambda p: (
         "skills: " + ", ".join(t["name"] for t in p.get("tools", [])) if p.get("tools") else "no tools registered yet"
     ))
-    return "\n\n".join([health, render_mod.vitals(vitals.snapshot()), posture, skills])
+    git = await _panel_piece(bus, topics.WORLD_ENV_QUERY, {"what": "git_state", "args": {}}, timeout=3.0, label="git",
+                              render=_render_git_state)
+    return "\n\n".join([health, render_mod.vitals(vitals.snapshot()), posture, skills, git])
+
+
+def _render_git_state(p: dict) -> str:
+    if not p.get("available", False):
+        return "git: unavailable (no repo / git not found)"
+    dirty = f"{p.get('changed_files', 0)} uncommitted" if p.get("dirty") else "clean"
+    return (
+        f"git: {p.get('branch', '?')} @ {p.get('head', '')[:8]}   {dirty}\n"
+        + "\n".join(f"  {line}" for line in p.get("recent_commits", [])[:5])
+    )
 
 
 async def _mcp_pending_proposals(ledger: LedgerClient) -> dict[str, dict]:
