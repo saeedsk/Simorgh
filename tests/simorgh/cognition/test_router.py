@@ -89,6 +89,43 @@ class TestRouter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.provider, "gemini")
         self.assertFalse(floor)
 
+    async def test_a_failed_provider_is_not_retried_again_within_the_cooldown(self):
+        """Live-caught, 2026-09-09: with no circuit breaker at all, a
+        provider that is genuinely down for the whole run (an exhausted
+        API key, a real outage) got retried on EVERY complete() call --
+        a single multi-step task logged 30+ consecutive identical
+        failures for the same dead provider, paying a full network
+        round trip each time before falling through. The second call
+        here, made before the cooldown elapses, must skip straight to
+        the fallback without calling the broken provider again."""
+        primary = _FakeProvider("claude_code_cli", error=ProviderUnavailable("credit limit exceeded"))
+        secondary = _FakeProvider("gemini")
+        router = Router(
+            [primary, secondary], {}, self.floor, order=("claude_code_cli", "gemini"),
+            clock=self.clock, cooldown_s=30.0,
+        )
+        await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=5.0)
+        self.assertEqual(primary.calls, 1)
+
+        self.clock.advance(5.0)  # still inside the 30s cooldown
+        response, _floor = await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=5.0)
+        self.assertEqual(response.provider, "gemini")
+        self.assertEqual(primary.calls, 1, "the cooling-down provider must not be re-dialed")
+
+    async def test_a_provider_is_retried_again_once_its_cooldown_elapses(self):
+        primary = _FakeProvider("claude_code_cli", error=ProviderUnavailable("transient blip"))
+        secondary = _FakeProvider("gemini")
+        router = Router(
+            [primary, secondary], {}, self.floor, order=("claude_code_cli", "gemini"),
+            clock=self.clock, cooldown_s=30.0,
+        )
+        await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=5.0)
+        self.assertEqual(primary.calls, 1)
+
+        self.clock.advance(31.0)  # past the cooldown
+        await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=5.0)
+        self.assertEqual(primary.calls, 2, "a provider must be given another chance once its cooldown elapses")
+
     async def test_every_candidate_failing_falls_to_the_floor_by_default(self):
         primary = _FakeProvider("claude_code_cli", error=ProviderUnavailable("down"))
         router = Router([primary], {}, self.floor, order=("claude_code_cli",), clock=self.clock)
