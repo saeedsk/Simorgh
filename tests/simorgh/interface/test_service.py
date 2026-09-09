@@ -181,7 +181,8 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_status_renders_a_real_reply(self):
         """07-post-cutover-review.md §3.8: `status` absorbs `vitals`/
-        `budget`/`skills` into one panel -- health, posture, and tools,
+        `budget`/`skills` into one panel -- health, posture, tools, and
+        (2026-09-08, wiring `git_state`'s first real caller) git state,
         each answered by a separate real responder."""
         async def _status_responder(message: Message) -> None:
             await self.other.reply(message, type=topics.SYSTEM_STATUS_REPLY, payload={
@@ -195,15 +196,21 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
                 "mode": "guarded", "trust_score": 0.9, "tightened_by": [],
             })
 
-        async def _tools_responder(message: Message) -> None:
-            await self.other.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
-                "facet": "tools", "as_of": 0.0, "tools": [{"name": "read_file"}],
-            })
+        async def _world_responder(message: Message) -> None:
+            if message.payload.get("what") == "git_state":
+                await self.other.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
+                    "facet": "git_state", "as_of": 0.0, "available": True, "branch": "main",
+                    "head": "deadbeef12345678", "dirty": False, "changed_files": 0, "recent_commits": ["deadbee fix"],
+                })
+            else:
+                await self.other.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
+                    "facet": "tools", "as_of": 0.0, "tools": [{"name": "read_file"}],
+                })
 
         subs = [
             await self.other.subscribe(topics.SYSTEM_STATUS_REQUEST, _status_responder),
             await self.other.subscribe(topics.GUARDIAN_POSTURE_REQUEST, _posture_responder),
-            await self.other.subscribe(topics.WORLD_ENV_QUERY, _tools_responder),
+            await self.other.subscribe(topics.WORLD_ENV_QUERY, _world_responder),
         ]
         out = await self._line("status")
         for sub in subs:
@@ -212,6 +219,39 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("kernel", out)
         self.assertIn("posture: guarded", out)
         self.assertIn("read_file", out)
+        self.assertIn("git: main", out)
+        self.assertIn("clean", out)
+
+    async def test_status_git_piece_degrades_honestly_when_git_is_unavailable(self):
+        async def _status_responder(message: Message) -> None:
+            await self.other.reply(message, type=topics.SYSTEM_STATUS_REPLY, payload={
+                "state": "running", "mode": "single", "run_id": "test", "subsystems": [], "uptime_seconds": 0.0,
+            })
+
+        async def _posture_responder(message: Message) -> None:
+            await self.other.reply(message, type=topics.GUARDIAN_POSTURE_REPLY, payload={
+                "mode": "guarded", "trust_score": 0.9, "tightened_by": [],
+            })
+
+        async def _world_responder(message: Message) -> None:
+            if message.payload.get("what") == "git_state":
+                await self.other.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
+                    "facet": "git_state", "as_of": 0.0, "available": False,
+                })
+            else:
+                await self.other.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
+                    "facet": "tools", "as_of": 0.0, "tools": [],
+                })
+
+        subs = [
+            await self.other.subscribe(topics.SYSTEM_STATUS_REQUEST, _status_responder),
+            await self.other.subscribe(topics.GUARDIAN_POSTURE_REQUEST, _posture_responder),
+            await self.other.subscribe(topics.WORLD_ENV_QUERY, _world_responder),
+        ]
+        out = await self._line("status")
+        for sub in subs:
+            await sub.unsubscribe()
+        self.assertIn("git: unavailable", out)
 
     async def test_unwired_command_gives_an_honest_no_response(self):
         out = await self._line("research nothing will answer this")
