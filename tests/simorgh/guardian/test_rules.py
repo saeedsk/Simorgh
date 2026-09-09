@@ -244,6 +244,31 @@ class TestStaticAnalysisRule(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.kind, "deny")
         self.assertIn("line 3", decision.reasons[0])
 
+    async def test_rewriting_the_line_above_an_unchanged_sink_is_still_caught(self):
+        # An observer's finding, 2026-09-09: a patch that only rewrites
+        # the line ABOVE an existing, byte-identical `os.system(cmd)`
+        # sink -- feeding it attacker-controlled input instead of a
+        # literal -- introduces a real HIGH bandit finding (B605) on the
+        # sink line. Because that sink line's own text never changed,
+        # the old line-number-only diff scope called it "equal" and
+        # dropped the finding, so the pipeline approved the patch
+        # outright. The fix widens the scan to lines immediately next to
+        # a REPLACED region.
+        import unittest.mock
+
+        from simorgh.guardian import rules
+
+        old = 'import os\n\ndef f(x):\n    cmd = "echo hello"\n    os.system(cmd)\n'
+        new = 'import os\n\ndef f(x):\n    cmd = "echo " + x\n    os.system(cmd)\n'
+        with unittest.mock.patch.object(rules, "_existing_text", return_value=old):
+            decision = await _evaluate(
+                StaticAnalysisRule(),
+                _proposal(tool="apply_source_patch", args={"subject": "tools/x.py", "code": new}),
+                _ctx(),
+            )
+        self.assertEqual(decision.kind, "deny")
+        self.assertIn("B605", decision.reasons[0])
+
 
 class TestRunScriptIsStillGuarded(unittest.IsolatedAsyncioTestCase):
     """`run_script` (2026-09-09) runs real Python with the repo
@@ -408,7 +433,22 @@ class TestChangedLineNumbers(unittest.TestCase):
     def test_inserted_and_replaced_lines_are_reported_one_based(self):
         old = "a\nb\nc\n"
         new = "a\nB\nc\nd\n"
-        self.assertEqual(_changed_line_numbers(old, new), {2, 4})
+        # Lines 1 ("a") and 3 ("c") are untouched text but sit
+        # immediately beside the replaced line 2 -- included too
+        # (2026-09-09 fix) because a rewritten neighbor can change an
+        # unchanged line's *meaning* (e.g. a redefined variable it uses,
+        # in either direction) even though its own text never moved.
+        # Line 4 is a plain insert with no such neighbor relationship on
+        # its far side, so nothing beyond it is pulled in.
+        self.assertEqual(_changed_line_numbers(old, new), {1, 2, 3, 4})
+
+    def test_a_line_next_to_a_pure_insert_is_not_widened_in(self):
+        # An insert -- unlike a replace -- never changes what an
+        # existing, untouched line does, so a harmless append must not
+        # resurrect the older "unrelated docstring add" false positive.
+        old = "a\nb\nc\n"
+        new = "a\nb\nc\nd\n"
+        self.assertEqual(_changed_line_numbers(old, new), {4})
 
     def test_an_unchanged_file_reports_nothing(self):
         self.assertEqual(_changed_line_numbers("a\nb\n", "a\nb\n"), set())
@@ -488,6 +528,26 @@ class TestDenylistRule(unittest.IsolatedAsyncioTestCase):
         decision = await _evaluate(
             DenylistRule(),
             _proposal(tool="run_shell", args={"command": "subprocess.run(['ls'])"}),
+            _ctx(),
+        )
+        self.assertEqual(decision.kind, "deny")
+        self.assertIn("Directive 1", decision.reasons[0])
+
+    async def test_denies_subprocess_via_run_containers_list_shaped_command(self):
+        # `run_container`'s `command` is declared `["array", "string"]`
+        # and the tool itself treats a string and a list of argv tokens
+        # as equivalent (it `shlex.split`s a string into the list form
+        # before running it). An observer proved (2026-09-09) that this
+        # rule read `command` only as a string, so the identical
+        # Directive-1 payload sailed through untouched -- reaching only
+        # ReversibilityRule's generic "irreversible" gate -- when passed
+        # as a list, while the same text as a plain string was denied.
+        decision = await _evaluate(
+            DenylistRule(),
+            _proposal(tool="run_container", args={
+                "image": "python:3.11",
+                "command": ["python3", "-c", "subprocess.run(['ls'])"],
+            }),
             _ctx(),
         )
         self.assertEqual(decision.kind, "deny")

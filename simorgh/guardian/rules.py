@@ -16,6 +16,7 @@ import importlib.util
 import json
 import posixpath
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -67,14 +68,45 @@ def _added_or_changed_lines(old: str, new: str) -> str:
     already there, untouched, and the diff never looked. Scanning only
     what changed lets an existing, already-reviewed line stay allowed
     while a genuinely new denylisted line -- inserted or edited into
-    existence by this very patch -- still gets caught."""
+    existence by this very patch -- still gets caught.
+
+    Also includes the one line immediately touching each REPLACED region
+    on either side, even though its own text is untouched: a line whose
+    TEXT doesn't change can still change MEANING when a line right next
+    to it is rewritten (`cmd = "echo hello"` -> `cmd = "echo " + x` makes
+    the next, byte-identical `os.system(cmd)` a newly-introduced shell-
+    injection sink). Without this, difflib's `SequenceMatcher` calls
+    that sink line "equal" -- present unchanged in both old and new --
+    and it is dropped from the scan entirely, so the tool that
+    introduced the vulnerability sails through as an unrelated,
+    already-reviewed line. An observer proved this end-to-end,
+    2026-09-09: exactly that two-line patch was approved by the full
+    Guardian pipeline with no denylist/bandit reason attached.
+
+    Deliberately narrower than "touches any changed region": a line next
+    to a pure INSERT (new lines added, nothing existing rewritten) is not
+    widened in, because that is exactly the shape of a harmless append --
+    an unrelated trailing comment, one appended statement -- and widening
+    on inserts too would resurrect the older, already-fixed regression
+    this same function's first docstring paragraph describes (an
+    unrelated docstring add re-triggering on tools/trial.py's untouched
+    `subprocess.run`). A `replace` rewrites an existing line in place,
+    which is the shape that can silently change a neighbor's behavior;
+    a plain `insert` does not retroactively change what an existing,
+    unrelated line does."""
     old_lines = old.splitlines()
     new_lines = new.splitlines()
     matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
+    opcodes = matcher.get_opcodes()
     changed: list[str] = []
-    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+    for idx, (tag, _i1, _i2, j1, j2) in enumerate(opcodes):
         if tag in ("replace", "insert"):
             changed.extend(new_lines[j1:j2])
+        elif tag == "equal" and j1 < j2:
+            if idx > 0 and opcodes[idx - 1][0] == "replace":
+                changed.append(new_lines[j1])
+            if idx < len(opcodes) - 1 and opcodes[idx + 1][0] == "replace":
+                changed.append(new_lines[j2 - 1])
     return "\n".join(changed)
 
 
@@ -82,6 +114,36 @@ def _added_or_changed_lines(old: str, new: str) -> str:
 # they name it INSIDE their text. A rule that only reads `path`/`subject`
 # abstains on these and every other rule then waves them through.
 _CODE_ARG_KEYS = ("code", "command")
+
+
+def _code_arg_text(value: object) -> str | None:
+    """A `code`/`command` argument as a single program string, or None if
+    it names no program at all. `run_container`'s `command` -- and any
+    future tool's -- is declared `["array", "string"]` and the tool
+    itself accepts either: a string is run as-is, a list is the argv
+    form (`RunContainerTool.run` even `shlex.split`s a string INTO this
+    same list shape before executing it). Every rule that reads
+    `_CODE_ARG_KEYS` used to require `isinstance(value, str)`, so the
+    list form -- the schema's own primary shape, not an edge case --
+    was invisible to `DenylistRule`, `StaticAnalysisRule`'s subject scan,
+    `ImmunityRule` and `ProtectedRule`'s write-scan alike. An observer
+    proved the consequence, 2026-09-09: a `run_container` proposal whose
+    `command` was `["python3", "-c", "import subprocess; subprocess.run(...)"]`
+    reached `needs_human` (reversibility only) with no denylist reason
+    attached, while the byte-identical program as a `command` STRING was
+    denied outright by `DenylistRule`. Joining a list with `shlex.join`
+    (falling back to a plain space-join on the rare non-str element) is
+    the same command a shell would actually run, so it scans the same."""
+    if isinstance(value, str):
+        return value if value else None
+    if isinstance(value, list) and value:
+        try:
+            return shlex.join(str(v) for v in value)
+        except (TypeError, ValueError):
+            return " ".join(str(v) for v in value)
+    return None
+
+
 # A protected subject mentioned anywhere in such a program. Deliberately
 # crude -- it looks for the literal name, so it over-matches a mention in
 # a comment and under-matches a path assembled from pieces. Over-matching
@@ -164,9 +226,9 @@ def _subject_paths(proposal: Proposal) -> list[str]:
     # but only a program that ALSO looks like it writes something,
     # so a plain `cat`/`open(path)` read is never denied by this.
     for key in _CODE_ARG_KEYS:
-        value = proposal.args.get(key)
-        if isinstance(value, str) and value and _looks_like_a_write(value):
-            paths.extend(t for t in _mentioned_paths(value) if t not in paths)
+        text = _code_arg_text(proposal.args.get(key))
+        if text and _looks_like_a_write(text):
+            paths.extend(t for t in _mentioned_paths(text) if t not in paths)
     return paths
 
 
@@ -234,7 +296,7 @@ class ProtectedRule:
         # actions are what this rule exists to see (2026-09-08).
         if (
             ctx.tool is not None and ctx.tool.read_only
-            and not any(isinstance(proposal.args.get(k), str) and proposal.args.get(k) for k in _CODE_ARG_KEYS)
+            and not any(_code_arg_text(proposal.args.get(k)) for k in _CODE_ARG_KEYS)
         ):
             return Decision("abstain", self.layer)
         for path in _subject_paths(proposal):
@@ -297,9 +359,12 @@ def _code_text(proposal: Proposal) -> str | None:
     denylist hit) submitted via `run_python_sandboxed`'s `code` argument
     was denied instantly; the identical text submitted via `run_shell`'s
     `command` argument was approved and its subprocess actually ran,
-    because both rules abstained before ever looking at it."""
-    parts = [proposal.args.get(key) for key in _CODE_ARG_KEYS]
-    texts = [p for p in parts if isinstance(p, str) and p]
+    because both rules abstained before ever looking at it.
+
+    `_code_arg_text` additionally normalizes a LIST-shaped `command`
+    (`run_container`'s argv form) to the same text a string command
+    would produce -- see its own docstring, 2026-09-09."""
+    texts = [t for t in (_code_arg_text(proposal.args.get(key)) for key in _CODE_ARG_KEYS) if t]
     return "\n".join(texts) if texts else None
 
 
@@ -351,12 +416,21 @@ def bandit_available() -> bool:
 def _changed_line_numbers(old: str, new: str) -> set[int]:
     """1-based line numbers in `new` that this patch inserts or rewrites
     -- the line-number twin of `_added_or_changed_lines`, for a scanner
-    that reports by line rather than by text."""
+    that reports by line rather than by text. Same REPLACE-only
+    boundary-line inclusion as `_added_or_changed_lines`, and for the
+    same reason: a line whose own text is untouched can still be newly
+    dangerous because a line beside it was rewritten (2026-09-09)."""
     matcher = difflib.SequenceMatcher(None, old.splitlines(), new.splitlines())
+    opcodes = matcher.get_opcodes()
     lines: set[int] = set()
-    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+    for idx, (tag, _i1, _i2, j1, j2) in enumerate(opcodes):
         if tag in ("replace", "insert"):
             lines.update(range(j1 + 1, j2 + 1))
+        elif tag == "equal" and j1 < j2:
+            if idx > 0 and opcodes[idx - 1][0] == "replace":
+                lines.add(j1 + 1)
+            if idx < len(opcodes) - 1 and opcodes[idx + 1][0] == "replace":
+                lines.add(j2)
     return lines
 
 
