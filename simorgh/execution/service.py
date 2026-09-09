@@ -92,7 +92,10 @@ class Service:
                          "read_only": tool.read_only, "reversibility": tool.reversibility,
                          "schema_ref": "", "provider": getattr(tool, "provider", "builtin")},
             ))
-            await ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name}))
+            await ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
+                "name": tool.name, "provider": getattr(tool, "provider", "builtin"),
+                "reversibility": tool.reversibility, "read_only": tool.read_only,
+            }))
 
         # Skills already on disk get ANNOUNCED, not loaded. Loading stays
         # on demand by design (see
@@ -160,7 +163,10 @@ class Service:
                          "schema_ref": "", "provider": "mcp",
                          "marker_arg_key": mcp_single_arg_key(tool.args_schema)},
             ))
-            await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name, "provider": "mcp"}))
+            await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
+                "name": tool.name, "provider": "mcp", "reversibility": tool.reversibility,
+                "read_only": tool.read_only, "marker_arg_key": mcp_single_arg_key(tool.args_schema),
+            }))
 
     async def _on_state_changed(self, message: Message) -> None:
         self._paused = message.payload["state"] in ("paused", "stopping")
@@ -249,7 +255,10 @@ class Service:
                      "read_only": tool.read_only, "reversibility": tool.reversibility,
                      "schema_ref": "", "provider": "skill", "marker_arg_key": tool.marker_arg_key},
         ))
-        await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name, "provider": "skill"}))
+        await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
+            "name": tool.name, "provider": "skill", "reversibility": tool.reversibility,
+            "read_only": tool.read_only, "marker_arg_key": tool.marker_arg_key,
+        }))
         return tool
 
     async def _skill_description(self, name: str) -> str | None:

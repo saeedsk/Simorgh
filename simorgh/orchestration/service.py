@@ -110,16 +110,42 @@ class Service:
         the durable record already existed and nothing read it. A
         failure here is not fatal: the subscription above still carries
         everything registered from now on.
+
+        This used to replay only `name` (`note_registered`), never the
+        policy (`register_tool_policy`) -- so any tool registered before
+        Orchestration subscribes (every statically-configured MCP server
+        or `[[execution.external_tools]]` entry, on every single boot,
+        since Execution is layer 3 and Orchestration is layer 6) kept
+        its `reversibility`/`read_only` config completely unapplied for
+        the life of the process: `_TOOL_POLICY.get(tool, ...)` always
+        missed and fell back to the unregistered-tool default. An
+        operator who set `reversibility = "read_only"` on a vetted
+        external tool got no effect at all -- every call still escalated
+        to a human every time (live-caught, 2026-09-08, auditing
+        `execution/external.py`: `orchestration.tools._TOOL_POLICY` had
+        no entry for a freshly-booted external tool even after the
+        replay ran). Now the same fields the live `tool.registered`
+        payload carries are persisted here and replayed the same way.
         """
         try:
             events = await ctx.ledger.read(_TOOLS_STREAM)
         except Exception as exc:  # noqa: BLE001 -- no such stream on a fresh install is normal
             ctx.logger.info("orchestration.tool_replay_skipped", error=repr(exc))
             return
-        names = [str((e.payload or {}).get("name") or "") for e in events]
-        for name in names:
-            if name:
-                note_registered(name)
+        names = []
+        for event in events:
+            payload = event.payload or {}
+            name = str(payload.get("name") or "")
+            if not name:
+                continue
+            names.append(name)
+            note_registered(name)
+            if "reversibility" in payload:
+                register_tool_policy(
+                    name, reversibility=payload.get("reversibility", "irreversible"),
+                    provider=payload.get("provider", "builtin"),
+                    marker_arg_key=payload.get("marker_arg_key"),
+                )
         if names:
             ctx.logger.info("orchestration.tools_replayed", count=len(names))
 

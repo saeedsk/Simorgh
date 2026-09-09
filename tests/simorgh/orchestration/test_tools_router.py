@@ -130,6 +130,96 @@ class TestToolCallRouter(unittest.TestCase):
         self.assertFalse(payload["scope"]["network"])
 
 
+class TestReplayRestoresPolicyNotJustTheName(unittest.IsolatedAsyncioTestCase):
+    """Execution registers tools on boot layer 3; Orchestration only
+    subscribes on layer 6, the last one -- so every `tool.registered`
+    from boot lands on nobody, and `_replay_registrations` (service.py)
+    is the only way Orchestration ever learns about it. It used to
+    replay only `name` (`note_registered`), never `register_tool_policy`
+    -- so a statically-configured MCP server or `[[execution.
+    external_tools]]` entry kept whatever `reversibility`/`read_only` an
+    operator wrote in `simorgh.toml` completely unapplied for the life
+    of the process: `to_action_payload` fell back to the unregistered-
+    tool default every single call. Live-caught, 2026-09-08, auditing
+    `execution/external.py`: a real Kernel boot showed
+    `orchestration.tools._TOOL_POLICY` had no entry at all for a
+    freshly-registered external tool even after replay ran."""
+
+    def tearDown(self):
+        from simorgh.orchestration.tools import forget_registered
+        forget_registered()
+
+    async def test_replay_restores_reversibility_provider_and_marker_arg_key(self):
+        import time as _time
+
+        from simorgh.contracts.envelope import Event
+        from simorgh.orchestration.service import Service, _TOOLS_STREAM
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        events = [Event(
+            stream=_TOOLS_STREAM, type="registered", ts=_time.time(), trace_id="", causation_id=None,
+            payload={"name": "ddg_search_ext", "provider": "external", "reversibility": "read_only",
+                     "read_only": True},
+        )]
+
+        class _Ledger:
+            async def read(self, stream):
+                assert stream == _TOOLS_STREAM
+                return events
+
+        class _Logger:
+            def info(self, *a, **kw):
+                pass
+
+        class _Ctx:
+            ledger = _Ledger()
+            logger = _Logger()
+
+        service = Service()
+        await service._replay_registrations(_Ctx())
+
+        self.assertEqual(_TOOL_POLICY.get("ddg_search_ext"), ("read_only", True))
+        payload = to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": "ddg_search_ext", "args": {"argument": "amazon"}}, rationale="r",
+        )
+        self.assertEqual(payload["reversibility"], "read_only")
+        self.assertEqual(payload["args"], {"input": "amazon"})
+
+    async def test_an_old_shape_event_with_no_reversibility_field_still_notes_the_name(self):
+        """Backward compatible with a ledger written before this fix:
+        `{"name": ...}` alone must not crash replay, and still makes the
+        tool nameable/offerable even though its policy stays unrestored."""
+        import time as _time
+
+        from simorgh.contracts.envelope import Event
+        from simorgh.orchestration.service import Service, _TOOLS_STREAM
+        from simorgh.orchestration.tools import _TOOL_POLICY, known_tools
+
+        events = [Event(
+            stream=_TOOLS_STREAM, type="registered", ts=_time.time(), trace_id="", causation_id=None,
+            payload={"name": "legacy_tool"},
+        )]
+
+        class _Ledger:
+            async def read(self, stream):
+                return events
+
+        class _Logger:
+            def info(self, *a, **kw):
+                pass
+
+        class _Ctx:
+            ledger = _Ledger()
+            logger = _Logger()
+
+        service = Service()
+        await service._replay_registrations(_Ctx())
+
+        self.assertIn("legacy_tool", known_tools())
+        self.assertNotIn("legacy_tool", _TOOL_POLICY)
+
+
 if __name__ == "__main__":
     unittest.main()
 
