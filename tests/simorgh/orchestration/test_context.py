@@ -85,6 +85,73 @@ class TestMemoryRetrieveSizeCap(unittest.TestCase):
             self.assertEqual(mem, "- the sky is blue")
 
 
+class TestRequestsInheritTheTaskTraceId(unittest.TestCase):
+    """2026-09-08 observer finding: `Assembler._request` minted a fresh
+    `trace_id` (a `Message.new` default) for every internal request, so
+    each of a task's memory-retrieve/world-facet calls got its own
+    1-2-event `trace:<uuid>` ledger stream instead of joining the task's
+    own -- measured, 3 trivial tasks produced 74 such fragments. This is
+    a partial fix (see `context.py::Assembler._request`'s docstring for
+    what is still out of scope): `_memory_retrieve` and `world_facet` now
+    pass `session.task_id`/a caller-given `trace_id` through so those two
+    call sites' requests are traceable back to the task that made them."""
+
+    @run
+    async def test_memory_retrieve_request_carries_the_session_task_id_as_trace_id(self):
+        async with Harness() as h:
+            memory_bus = h.client("memory")
+            seen = []
+
+            async def _responder(message):
+                seen.append(message.trace_id)
+                await memory_bus.reply(message, type=topics.MEMORY_RETRIEVE_REPLY,
+                                        payload={"items": [], "truncated": False})
+
+            sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
+            assembler = Assembler(h.client("orchestration"))
+            session = Session(task_id="trace-t1", kind="chat", mode="execute", profile=profiles.CHAT)
+            await assembler._memory_retrieve("query", session)  # noqa: SLF001
+            await sub.unsubscribe()
+
+            self.assertEqual(seen, ["trace-t1"])
+
+    @run
+    async def test_world_facet_request_carries_a_given_trace_id(self):
+        async with Harness() as h:
+            world_bus = h.client("worldmodel")
+            seen = []
+
+            async def _responder(message):
+                seen.append(message.trace_id)
+                await world_bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY,
+                                       payload={"ok": True, "facet": "tools", "as_of": 0.0, "tools": []})
+
+            sub = await world_bus.subscribe(topics.WORLD_ENV_QUERY, _responder)
+            assembler = Assembler(h.client("orchestration"))
+            await assembler.world_facet("tools", trace_id="trace-t2")
+            await sub.unsubscribe()
+
+            self.assertEqual(seen, ["trace-t2"])
+
+    @run
+    async def test_world_facet_without_a_trace_id_still_works(self):
+        """Backward compatible: `trace_id` is optional, and an omitted one
+        still mints a fresh id (never breaks a caller that has none)."""
+        async with Harness() as h:
+            world_bus = h.client("worldmodel")
+
+            async def _responder(message):
+                await world_bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY,
+                                       payload={"ok": True, "facet": "tools", "as_of": 0.0, "tools": []})
+
+            sub = await world_bus.subscribe(topics.WORLD_ENV_QUERY, _responder)
+            assembler = Assembler(h.client("orchestration"))
+            reply = await assembler.world_facet("tools")
+            await sub.unsubscribe()
+
+            self.assertIsNotNone(reply)
+
+
 if __name__ == "__main__":
     unittest.main()
 

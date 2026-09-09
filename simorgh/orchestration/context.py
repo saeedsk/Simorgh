@@ -82,14 +82,28 @@ class Assembler:
         blocks.extend(session.messages)
         return blocks
 
-    async def _request(self, type_: str, payload: dict) -> Message | None:
+    async def _request(self, type_: str, payload: dict, *, trace_id: str | None = None) -> Message | None:
         # `self._bus.source` (never a hardcoded literal): in `local-multi`
         # mode this Worker's own `BusClient` is bound to an instance-
         # qualified source (`orchestration@w1`), and `ReservedTopologyPolicy`
         # authenticates only the exact source `ContextFactory.build` issued
         # a token for -- a bare `"orchestration"` request would raise
         # `PolicyViolation` before ever reaching Memory/Self/World/Persona.
-        req = Message.new(type_, source=self._bus.source, payload=payload, clock=self._clock)
+        #
+        # `trace_id` (caller-supplied, usually `session.task_id`): without
+        # it `Message.new` mints a fresh uuid4 per call and every message
+        # gets its own `trace:<uuid>` ledger stream (`bus/trace.py`), so a
+        # single task's memory-retrieve/world-facet requests each spawned
+        # their own 1-2-event stream instead of joining the task's.
+        # Measured 2026-09-08: 3 trivial chat tasks produced 74 such
+        # fragments. This closes this module's two call sites (and
+        # `session.py`/`worker.py`'s own internal `Message.new` calls got
+        # the same treatment alongside this) -- Cognition's and
+        # Execution's internal requests still mint their own; threading a
+        # trace_id through those ~15 remaining call sites needs its own
+        # pass (they don't uniformly have a task id in scope the way every
+        # orchestration call site already does via `session`).
+        req = Message.new(type_, source=self._bus.source, payload=payload, trace_id=trace_id, clock=self._clock)
         reply = await self._bus.request_or_error(req, timeout=self._timeout_s)
         if reply.payload.get("ok") is False:
             return None
@@ -99,6 +113,7 @@ class Assembler:
         reply = await self._request(
             topics.MEMORY_RETRIEVE,
             {"query": query, "kinds": ["episodic", "semantic"], "k": 8},
+            trace_id=session.task_id,
         )
         if not reply:
             return ""
@@ -116,6 +131,6 @@ class Assembler:
             total += len(line)
         return "\n".join(lines)
 
-    async def world_facet(self, what: str, args: dict | None = None) -> dict | None:
-        reply = await self._request(topics.WORLD_ENV_QUERY, {"what": what, "args": args or {}})
+    async def world_facet(self, what: str, args: dict | None = None, *, trace_id: str | None = None) -> dict | None:
+        reply = await self._request(topics.WORLD_ENV_QUERY, {"what": what, "args": args or {}}, trace_id=trace_id)
         return reply.payload if reply else None

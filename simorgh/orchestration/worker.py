@@ -166,7 +166,7 @@ class Worker:
         claim_req = Message.new(
             topics.TASK_CLAIM, source=self._bus.source,
             payload={"task_id": task_id, "worker_id": self.worker_id},
-            partition_key=f"task:{task_id}", clock=self._clock,
+            partition_key=f"task:{task_id}", trace_id=task_id, clock=self._clock,
         )
         reply = await self._bus.request_or_error(claim_req, timeout=2.0)
         if reply.payload.get("ok") is False or not reply.payload.get("granted", False):
@@ -233,7 +233,7 @@ class Worker:
             msg = Message.new(
                 topics.TASK_LEASE_HEARTBEAT, source=self._bus.source,
                 payload={"task_id": task_id, "worker_id": self.worker_id},
-                partition_key=f"task:{task_id}", clock=self._clock,
+                partition_key=f"task:{task_id}", trace_id=task_id, clock=self._clock,
             )
             await self._bus.publish(msg)
 
@@ -333,7 +333,8 @@ class Worker:
                 payload["result_summary"] = outcome.result_summary
 
         msg = Message.new(type_, source=self._bus.source, payload=payload,
-                          partition_key=f"task:{session.task_id}", clock=self._clock)
+                          partition_key=f"task:{session.task_id}",
+                          trace_id=session.task_id, clock=self._clock)
         # Live-caught (the creator: "step 1 final answer ok [31.5s]" then a
         # minute of "still thinking" and no reply): the Ledger refuses any
         # inline string over its threshold (4096 chars by default), so a
@@ -376,7 +377,7 @@ class Worker:
                 "floor": outcome.floor,
                 "tool_steps": len(session.steps), "user_text": session.user_text,
             },
-            partition_key=f"task:{session.task_id}", clock=self._clock,
+            partition_key=f"task:{session.task_id}", trace_id=session.task_id, clock=self._clock,
         )
         await self._bus.publish(turn)
 
