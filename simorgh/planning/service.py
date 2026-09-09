@@ -653,7 +653,32 @@ class Service:
         before they next become available (see `_maybe_reground_then_
         available`), and records the drift itself as a `plan.revised`
         with a real reason -- closes harness-06 gap #3, "no drift/
-        re-grounding check across a multi-tick PROJECT_TASK.\""""
+        re-grounding check across a multi-tick PROJECT_TASK."
+
+        `reflect.drift.detected` is only ever computed at the drifting
+        task's own terminal transition (reflection/service.py's module
+        docstring), which means it always races the *same*
+        `task.completed`/`task.failed`/`task.blocked` message Planning's
+        own `_on_task_completed`/`_on_task_failed` react to. Reflection's
+        side needs a real `cognition.think(purpose="review")` round trip
+        before it can publish; Planning's dependency-satisfied path
+        (`_propagate_completion` -> `_maybe_reground_then_available`)
+        needs no such round trip and reacts to the identical message
+        essentially synchronously. Live-reproduced 2026-09-08 (this
+        session): a dependent that becomes ready in the very same
+        propagation as the task whose *own* drift is what's being
+        reported had, 5/5 runs, already been transitioned to `available`
+        by the time this handler ran -- flagging the project here was
+        always too late to protect it, silently defeating this feature
+        for the single most natural trigger (a task's own drift review
+        firing at its own completion). `_reground_available_children`
+        below closes that gap by re-running the same check against any
+        *other* child that is already `available` but not yet claimed --
+        the drifting task itself is excluded (it may itself still be
+        `available`, e.g. when `reflect.drift.detected` is raised for a
+        task still in flight rather than at its own terminal transition,
+        and re-grounding a task against its own drift finding is not
+        what this closes)."""
         p = message.payload
         task_id = p.get("task_id")
         if not task_id:
@@ -670,6 +695,30 @@ class Service:
             partition_key=f"plan:{plan_id}" if plan_id else None,
             payload={"plan_id": plan_id, "reason": reason, "diff": {"added": [], "removed": [], "reordered": []}},
         ))
+        await self._reground_available_children(project_id, exclude_task_id=task_id)
+
+    async def _reground_available_children(self, project_id: str, *, exclude_task_id: str) -> None:
+        """Catches up any child of `project_id` (other than
+        `exclude_task_id`, the task whose drift this was raised for)
+        that reached `available` before this drift flag landed (see
+        `_on_drift_detected`'s docstring for why that race is the
+        common case, not an edge case). Only `available`-and-unclaimed
+        children are touched: one already `claimed`/`in_progress` is
+        already being worked, and re-grounding it out from under a
+        worker is a larger change than this race fix's scope."""
+        project = await self._store.get(project_id)
+        if project is None or self._cognition is None:
+            return
+        for child in self._store.children(project_id):
+            if child.id == exclude_task_id or child.status != AVAILABLE:
+                continue
+            still_valid, reason = await reground.check(
+                self._cognition, goal=project.description, child=child,
+                why=self._why_for_child(project_id, child), changes_since=self._changes_since(project_id, child),
+            )
+            await self._store.record_regrounded(child.id, still_valid=still_valid, reason=reason)
+            if still_valid is False:
+                await self._supersede_with_replacement(child, project_id, reason)
 
     async def _on_self_patch_applied(self, message: Message) -> None:
         subject = message.payload.get("subject")
