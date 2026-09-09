@@ -28,6 +28,7 @@ didn't already ask to load.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -204,3 +205,200 @@ def render_summary(target: str, payload: dict, text: str) -> str:
     lines.append("--- visible text ---")
     lines.append(text)
     return "\n".join(lines)
+
+
+_BROWSE_DRIVER = r"""
+const puppeteer = require('puppeteer');
+
+async function main() {
+  const [, , url, timeoutMsStr, actionsJson, shotDir] = process.argv;
+  const timeoutMs = parseInt(timeoutMsStr, 10);
+  const actions = JSON.parse(actionsJson);
+  const browser = await puppeteer.launch({headless: 'new', args: ['--no-sandbox']});
+  const consoleMessages = [], pageErrors = [], failedRequests = [], screenshots = [];
+  let done = 0, lastError = null, navError = null;
+  try {
+    const page = await browser.newPage();
+    page.on('console', m => consoleMessages.push(`${m.type()}: ${m.text()}`));
+    page.on('pageerror', e => pageErrors.push(String(e)));
+    page.on('requestfailed', r => failedRequests.push(`${r.url()} -- ${r.failure() && r.failure().errorText}`));
+    try {
+      await page.goto(url, {waitUntil: 'networkidle0', timeout: timeoutMs});
+    } catch (e) { navError = String(e && e.message || e); }
+    if (!navError) {
+      for (const action of actions) {
+        try {
+          if (action.click) await page.click(action.click, {timeout: 10000});
+          else if (action.type) await page.type(action.type[0], action.type[1], {delay: 5});
+          else if (action.press) await page.keyboard.press(action.press);
+          else if (action.wait !== undefined) {
+            if (typeof action.wait === 'number') await new Promise(r => setTimeout(r, action.wait));
+            else await page.waitForSelector(action.wait, {timeout: 10000});
+          } else if (action.screenshot) {
+            const file = `${shotDir}/${action.screenshot}.png`;
+            await page.screenshot({path: file});
+            screenshots.push(file);
+          } else if (action.scroll) {
+            await page.evaluate(y => window.scrollBy(0, y), action.scroll);
+          } else { throw new Error('unknown action: ' + JSON.stringify(action)); }
+          done += 1;
+        } catch (e) { lastError = `${JSON.stringify(action)}: ${String(e && e.message || e)}`; break; }
+      }
+    }
+    const title = navError ? '' : await page.title().catch(() => '');
+    const text = navError ? '' : await page.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
+    console.log(JSON.stringify({
+      ok: !navError && !lastError, nav_error: navError, last_error: lastError,
+      actions_done: done, actions_total: actions.length, title, text,
+      console_messages: consoleMessages, page_errors: pageErrors,
+      failed_requests: failedRequests, screenshots,
+    }));
+  } finally { await browser.close(); }
+}
+
+main().catch(e => {
+  console.log(JSON.stringify({ok: false, nav_error: String(e && e.message || e), last_error: null,
+    actions_done: 0, actions_total: 0, title: '', text: '', console_messages: [],
+    page_errors: [], failed_requests: [], screenshots: []}));
+  process.exit(0);
+});
+"""
+
+_MUTATING_ACTIONS = ("click", "type", "press")
+_SECRET_SELECTOR = re.compile(r"pass|secret|token|otp|cvv|card|ssn", re.I)
+_MAX_ACTIONS = 20
+
+
+def classify_actions(actions: list) -> str:
+    """`""` when the actions are safe to run, otherwise the refusal.
+
+    Deliberately absent: any `evaluate`/run-JS action. A JS string
+    inside a JSON argument would be code Guardian's `code`/`command`
+    rules never see -- the whole static-analysis layer routed around by
+    a field name.
+    """
+    if not isinstance(actions, list):
+        return "refused: actions must be a list"
+    if len(actions) > _MAX_ACTIONS:
+        return f"refused: at most {_MAX_ACTIONS} actions per call"
+    allowed = {"click", "type", "press", "wait", "screenshot", "scroll"}
+    for action in actions:
+        if not isinstance(action, dict) or len(action) != 1:
+            return f"refused: each action is one key, got {action!r}"
+        key, value = next(iter(action.items()))
+        if key not in allowed:
+            return f"refused: {key!r} is not an allowed action ({', '.join(sorted(allowed))})"
+        if key == "type":
+            if not isinstance(value, list) or len(value) != 2:
+                return "refused: type takes [selector, text]"
+            selector, text = str(value[0]), str(value[1])
+            # Sim never types a credential into a page. The selector is
+            # the honest signal available here -- the text itself could
+            # be anything, and guessing at it would be worse.
+            if _SECRET_SELECTOR.search(selector):
+                return f"refused: {selector!r} looks like a credential field"
+            if len(text) > 2000:
+                return "refused: that is too much text to type"
+        if key in ("click", "wait") and isinstance(value, str):
+            if len(value) > 200 or value.lower().startswith("javascript:"):
+                return f"refused: {value[:60]!r} is not a usable selector"
+        if key == "screenshot" and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(value)):
+            return "refused: a screenshot name may only be letters, digits, _ and -"
+    return ""
+
+
+def mutates(actions: list) -> bool:
+    return any(isinstance(a, dict) and set(a) & set(_MUTATING_ACTIONS) for a in actions or [])
+
+
+class BrowsePageTool(RenderPageTool):
+    """`render_page` with hands: click, type, wait, scroll, screenshot.
+
+    Shares the whole target-resolution and safety story with its parent
+    -- SSRF guard for a URL, `pathsafety` for a local file -- and adds
+    only the action loop. `reversible` when the actions can change
+    something on the page, `read_only` when they cannot: a click on a
+    public page can post, and Guardian should see that difference even
+    though the creator's auto-approve currently waves both through.
+    """
+
+    name = "browse_page"
+    description = (
+        "Load a page in a real headless browser and interact with it: click, type, wait, scroll, "
+        "screenshot. Reports the same errors as render_page plus what it managed to do."
+    )
+    read_only = False
+    reversibility = "reversible"
+    args_schema = {
+        "type": "object", "required": ["target"],
+        "properties": {"target": {"type": "string"}, "actions": {"type": "array"}},
+    }
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        import asyncio
+
+        if not self._node:
+            return ToolResult(ok=False, error="refused: no `node` executable found on this machine")
+        if not self._node_module_path:
+            return ToolResult(ok=False, error="refused: could not locate Puppeteer's global node_modules (is it installed?)")
+        actions = args.get("actions") or []
+        refusal = classify_actions(actions)
+        if refusal:
+            return ToolResult(ok=False, error=refusal)
+        target = str(args["target"]).strip()
+        try:
+            url = self._resolve_target(target)
+        except FetchRefused as exc:
+            return ToolResult(ok=False, error=str(exc))
+
+        timeout = min(ctx.constraints.get("timeout_s", self._config.render_page_timeout_s),
+                      self._config.render_page_timeout_s)
+        shots = Path(self._config.repo_root) / self._config.render_screenshot_dir
+        shots.mkdir(parents=True, exist_ok=True)
+        start = time.monotonic()
+        with tempfile.TemporaryDirectory(prefix="simorgh-browse-") as workdir:
+            driver = Path(workdir) / "browse_driver.js"
+            driver.write_text(_BROWSE_DRIVER)
+            try:
+                completed = await asyncio.to_thread(
+                    subprocess.run,
+                    [self._node, str(driver), url, str(int(timeout * 1000)),
+                     json.dumps(actions), str(shots)],
+                    capture_output=True, text=True, cwd=workdir,
+                    env={"NODE_PATH": self._node_module_path}, timeout=timeout + 15.0,
+                    stdin=subprocess.DEVNULL,
+                )
+            except subprocess.TimeoutExpired as exc:
+                return ToolResult(ok=False, output=(exc.stdout or "") if isinstance(exc.stdout, str) else "",
+                                  error="timeout", metadata={"duration_s": time.monotonic() - start})
+            if completed.returncode != 0:
+                return ToolResult(ok=False, error=f"browse process exited {completed.returncode}",
+                                  metadata={"stderr": completed.stderr})
+            try:
+                payload = json.loads(completed.stdout.strip().splitlines()[-1])
+            except (json.JSONDecodeError, IndexError):
+                return ToolResult(ok=False, error="browse process produced no parseable result",
+                                  metadata={"stdout": completed.stdout, "stderr": completed.stderr})
+
+        text = str(payload.get("text") or "")[: self._config.render_page_max_chars]
+        ok = bool(payload.get("ok"))
+        summary = render_summary(target, payload, text)
+        done, total = payload.get("actions_done", 0), payload.get("actions_total", 0)
+        if total:
+            summary = f"{summary}\nactions: {done}/{total} done"
+            if payload.get("last_error"):
+                summary += f"\nstopped at: {payload['last_error']}"
+        if payload.get("screenshots"):
+            summary += "\nscreenshots: " + ", ".join(payload["screenshots"])
+        return ToolResult(
+            ok=ok, output=summary,
+            error=None if ok else (payload.get("nav_error") or payload.get("last_error") or "browse failed"),
+            metadata={
+                "title": payload.get("title", ""), "actions_done": done, "actions_total": total,
+                "screenshots": payload.get("screenshots", []),
+                "page_errors": payload.get("page_errors", []),
+                "console_messages": payload.get("console_messages", []),
+                "failed_requests": payload.get("failed_requests", []),
+                "duration_s": time.monotonic() - start,
+            },
+        )

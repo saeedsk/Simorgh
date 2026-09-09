@@ -240,6 +240,22 @@ class Config:
     render_page_max_chars: int = 20_000
     render_page_allow_private_networks: bool = False
     render_page_node_path: str = ""  # "" -> resolved once via `npm root -g`
+    # `browse_page` writes screenshots here (a readable root, gitignored).
+    render_screenshot_dir: str = "results/screenshots"
+    # -- run_container (container.py). The one tool whose isolation runs
+    # the other way: the container cannot see the repository at all.
+    # Files go in by being copied into a scratch dir mounted at /work,
+    # never a bind mount of the repo -- a container that could write
+    # back into the tree would make every write-scope rule advisory.
+    container_docker_path: str = ""
+    container_image_prefixes: tuple[str, ...] = (
+        "python:", "node:", "ubuntu:", "debian:", "alpine:", "golang:", "rust:",
+    )
+    container_scratch_dir: str = "results/containers"
+    container_timeout_s: float = 300.0
+    container_memory_mb: int = 1024
+    container_cpus: float = 1.0
+    container_output_max_chars: int = 8000
     # -- geocode (geocode.py): turns a free-text address into lat/lng
     # using the free, keyless Nominatim (OpenStreetMap) API -- no
     # account or credential needed, unlike every commercial geocoder.

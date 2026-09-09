@@ -56,12 +56,14 @@ from . import pathsafety
 from .config import Config
 from .htmltext import html_to_text, looks_like_html
 from .netsafety import FetchRefused, validate_public_http_url
+from .doctext import document_to_text
 from .geocode import GeocodeTool
 from .packages import FindPackageTool, InstallPackageTool
 from .pdftext import looks_like_pdf, pdf_to_text
 from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
-from .render import RenderPageTool
+from .container import RunContainerTool
+from .render import BrowsePageTool, RenderPageTool
 
 # A PDF's bytes are mostly fonts and images, so the cap that bounds how
 # much TEXT a fetch may return is the wrong ceiling for one. What
@@ -571,6 +573,23 @@ class WebFetchTool:
                     "raw_chars": len(raw), "text_chars": len(text), "js_shell": False,
                 },
             )
+
+        # A spreadsheet, document or image fetched over HTTP gets the
+        # same treatment `read_file` gives it on disk (doctext.py) --
+        # otherwise a link to an .xlsx of the very data a task is about
+        # comes back as binary noise with ok=True.
+        if self._config.web_fetch_extract_text:
+            handled = document_to_text(raw, name=urlparse(url).path)
+            if handled is not None:
+                text, problem = handled
+                return ToolResult(
+                    ok=not (problem and not text), output=text or "", error=problem or None,
+                    metadata={
+                        "url": url, "status": status_code, "truncated": False, "kind": "document",
+                        "sha256": hashlib.sha256(raw).hexdigest(), "fetched_at": ctx.clock.now(),
+                        "raw_chars": len(raw), "text_chars": len(text), "js_shell": False,
+                    },
+                )
 
         # Decode the WHOLE raw body, not a byte-capped prefix: extraction
         # used to run on `raw[:web_fetch_max_bytes]` (200 KB), so a long
@@ -1492,6 +1511,7 @@ def builtin_tools(config: Config) -> list:
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),
+        BrowsePageTool(config), RunContainerTool(config),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

@@ -38,3 +38,12 @@ pytest-xdist>=3.6
 # lazily, only when the tool is actually called, so nothing here is
 # required to boot.
 homeharvest>=0.4
+
+# Formats `read_file` and `web_fetch` understand beyond text and PDF
+# (simorgh/execution/doctext.py): Word documents, spreadsheets, and an
+# image's dimensions/EXIF. All optional and imported lazily -- without
+# them those files report what to install, rather than binary noise.
+# OCR is a further opt-in: `pytesseract` plus a `tesseract` binary.
+python-docx>=1.1
+openpyxl>=3.1
+Pillow>=10.0

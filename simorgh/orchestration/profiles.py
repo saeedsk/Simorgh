@@ -40,7 +40,7 @@ PATCH = Profile(
            # is far broader than either.
            "web_search", "web_fetch", "search_listings", "geocode",
            # A missing capability is not a denial: find a library, install it, use it.
-           "find_package", "install_package", "run_script",
+           "find_package", "install_package", "run_script", "browse_page", "run_container",
            "grant_capability", "revoke_capability"),
     # 8 left no room: read, apply, run_tests, git_commit is already four
     # tool calls before a single wrong turn, and the last step is spent

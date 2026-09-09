@@ -16,6 +16,9 @@ from simorgh.guardian.rules import (
     ProtectedRule,
     ReversibilityRule,
     ScopeRule,
+    GrantRule,
+    PackageRule,
+    ShellcheckRule,
     StaticAnalysisRule,
     _changed_line_numbers,
     bandit_available,
@@ -277,6 +280,128 @@ class TestRunScriptIsStillGuarded(unittest.IsolatedAsyncioTestCase):
             _ctx(),
         )
         self.assertEqual(decision.kind, "deny")
+
+
+class TestPackageRule(unittest.IsolatedAsyncioTestCase):
+    """`install_package` may only install a plain package name. The tool
+    checks this for usability; this is the boundary, and the two fail
+    differently -- a rule denial is recorded, immune to retry, and
+    visible in the trace."""
+
+    async def test_a_url_spec_is_denied(self):
+        for spec in ("https://evil.example/x.tar.gz", "git+https://github.com/x/y",
+                     "file:///tmp/x", "./local", "/abs/path", "x-1.0.whl"):
+            with self.subTest(spec=spec):
+                decision = await _evaluate(
+                    PackageRule(), _proposal(tool="install_package", args={"spec": spec}), _ctx())
+                self.assertEqual(decision.kind, "deny", spec)
+
+    async def test_a_plain_name_abstains(self):
+        decision = await _evaluate(
+            PackageRule(), _proposal(tool="install_package", args={"spec": "homeharvest==0.8.18"}), _ctx())
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_a_denylisted_name_is_denied(self):
+        decision = await _evaluate(
+            PackageRule(), _proposal(tool="install_package", args={"spec": "sudo-utils"}), _ctx())
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_it_says_nothing_about_other_tools(self):
+        decision = await _evaluate(
+            PackageRule(), _proposal(tool="read_file", args={"spec": "https://x"}), _ctx())
+        self.assertEqual(decision.kind, "abstain")
+
+
+class TestGrantRule(unittest.IsolatedAsyncioTestCase):
+    """A grant over `os` would hand out arbitrary execution wearing a
+    tool's name -- and unlike run_shell, it would persist across
+    restarts."""
+
+    async def test_a_denylisted_module_is_denied(self):
+        for path in ("os:system", "subprocess:run", "builtins:eval", "os.path:join"):
+            with self.subTest(path=path):
+                decision = await _evaluate(
+                    GrantRule(), _proposal(tool="grant_capability", args={"import_path": path}), _ctx())
+                self.assertEqual(decision.kind, "deny", path)
+
+    async def test_a_real_library_abstains(self):
+        decision = await _evaluate(
+            GrantRule(),
+            _proposal(tool="grant_capability", args={"import_path": "homeharvest:scrape_property"}),
+            _ctx())
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_only_the_allowed_commands_may_launch_a_server(self):
+        decision = await _evaluate(
+            GrantRule(), _proposal(tool="grant_capability", args={"command": "bash"}), _ctx())
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_npx_abstains(self):
+        decision = await _evaluate(
+            GrantRule(), _proposal(tool="grant_capability", args={"command": "npx"}), _ctx())
+        self.assertEqual(decision.kind, "abstain")
+
+
+class TestShellcheckRule(unittest.IsolatedAsyncioTestCase):
+    async def test_it_abstains_without_shellcheck_installed(self):
+        # A missing optional linter must never deny.
+        import unittest.mock
+
+        from simorgh.guardian import rules
+
+        with unittest.mock.patch.object(rules, "shellcheck_available", return_value=True), \
+                unittest.mock.patch.object(rules, "run_shellcheck", return_value=None):
+            decision = await _evaluate(
+                ShellcheckRule(), _proposal(tool="run_shell", args={"command": "rm -rf $x/"}), _ctx())
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_it_abstains_before_any_thread_hop_when_not_installed(self):
+        # The common case on a machine without shellcheck: no work at
+        # all, no extra scheduling point in the action path.
+        import unittest.mock
+
+        from simorgh.guardian import rules
+
+        with unittest.mock.patch.object(rules, "shellcheck_available", return_value=False), \
+                unittest.mock.patch.object(rules, "run_shellcheck") as ran:
+            decision = await _evaluate(
+                ShellcheckRule(), _proposal(tool="run_shell", args={"command": "rm -rf $x/"}), _ctx())
+        self.assertEqual(decision.kind, "abstain")
+        ran.assert_not_called()
+
+    async def test_a_dangerous_finding_denies(self):
+        import unittest.mock
+
+        from simorgh.guardian import rules
+
+        findings = [{"code": 2115, "message": 'Use "${var:?}" to ensure this never expands to /'}]
+        with unittest.mock.patch.object(rules, "shellcheck_available", return_value=True), \
+                unittest.mock.patch.object(rules, "run_shellcheck", return_value=findings):
+            decision = await _evaluate(
+                ShellcheckRule(), _proposal(tool="run_shell", args={"command": "rm -rf $x/"}), _ctx())
+        self.assertEqual(decision.kind, "deny")
+        self.assertIn("SC2115", decision.reasons[0])
+
+    async def test_a_style_finding_is_noted_but_does_not_block(self):
+        # shellcheck has hundreds of checks and most are style. Denying
+        # on all of them would make run_shell unusable and teach the
+        # model to route around Guardian.
+        import unittest.mock
+
+        from simorgh.guardian import rules
+
+        findings = [{"code": 2086, "message": "Double quote to prevent globbing"}]
+        with unittest.mock.patch.object(rules, "shellcheck_available", return_value=True), \
+                unittest.mock.patch.object(rules, "run_shellcheck", return_value=findings):
+            decision = await _evaluate(
+                ShellcheckRule(), _proposal(tool="run_shell", args={"command": "echo $x"}), _ctx())
+        self.assertEqual(decision.kind, "abstain")
+        self.assertTrue(decision.reasons)
+
+    async def test_it_says_nothing_about_a_python_payload(self):
+        decision = await _evaluate(
+            ShellcheckRule(), _proposal(args={"code": "print(1)"}), _ctx())
+        self.assertEqual(decision.kind, "abstain")
 
 
 class TestChangedLineNumbers(unittest.TestCase):
