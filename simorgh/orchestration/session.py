@@ -122,6 +122,7 @@ KEEP_EDITS_UNTIL_ATTEMPT = 6
 _ACTION_TIMEOUTS: dict[str, float] = {
     "run_tests": 330.0,
     "run_python_sandboxed": 45.0,
+    "run_js_sandboxed": 45.0,
     "web_fetch": 45.0,
     "apply_source_patch": 60.0,
     "apply_skill": 60.0,

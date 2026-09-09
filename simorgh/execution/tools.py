@@ -872,6 +872,59 @@ class RunPythonSandboxedTool:
             )
 
 
+class RunJsSandboxedTool:
+    """The Node/JS twin of `run_python_sandboxed`: same fresh-subprocess,
+    empty-env, temp-cwd, CPU/mem/time-bounded isolation, no repo access
+    -- because Simorgh's own generated-game trials (2026-09-09) showed a
+    real gap: `SyntaxCheck` (verification/checks/syntax.py) parses only
+    Python via `ast.parse`, so a task that writes or reasons about
+    JavaScript had no way to actually run it and see what happens,
+    only read it back and guess. `node` is resolved to an absolute
+    path once at construction time since the subprocess runs with an
+    empty environment (no PATH for execvp to search)."""
+
+    name = "run_js_sandboxed"
+    description = "Run JavaScript code with Node in an isolated, resource-bounded subprocess with no repo access."
+    read_only = True
+    reversibility = "reversible"
+    args_schema = {"type": "object", "required": ["code"], "properties": {"code": {"type": "string"}}}
+
+    _UNSET = object()
+
+    def __init__(self, config: Config, *, node_path: str | None = _UNSET) -> None:
+        self._config = config
+        self._node = shutil.which("node") if node_path is self._UNSET else node_path
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        if not self._node:
+            return ToolResult(ok=False, error="refused: no `node` executable found on this machine")
+        code = args["code"]
+        timeout = min(ctx.constraints.get("timeout_s", self._config.sandbox_timeout_s), self._config.sandbox_timeout_s)
+        start = time.monotonic()
+        with tempfile.TemporaryDirectory(prefix="simorgh-sandbox-js-") as workdir:
+            script = Path(workdir) / "code.js"
+            script.write_text(code)
+            preexec = _apply_rlimits(self._config.sandbox_cpu_seconds, self._config.sandbox_memory_mb * 1024 * 1024) if resource else None
+            try:
+                completed = subprocess.run(
+                    [self._node, str(script)], capture_output=True, text=True,
+                    cwd=workdir, env={}, timeout=timeout, preexec_fn=preexec,
+                    stdin=subprocess.DEVNULL,
+                )
+            except subprocess.TimeoutExpired as exc:
+                return ToolResult(
+                    ok=False, output=(exc.stdout or ""), error="timeout",
+                    metadata={"stderr": exc.stderr or "", "duration_s": time.monotonic() - start},
+                )
+            ok = completed.returncode == 0
+            return ToolResult(
+                ok=ok, output=completed.stdout,
+                error=None if ok else f"exit_code={completed.returncode}",
+                metadata={"stderr": completed.stderr, "exit_code": completed.returncode,
+                          "duration_s": time.monotonic() - start},
+            )
+
+
 # pytest's own exit code for "no tests were collected". Not a failure.
 _PYTEST_NO_TESTS_COLLECTED = 5
 
@@ -1417,7 +1470,7 @@ class SkillTool:
 def builtin_tools(config: Config) -> list:
     return [
         ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), SelfMapTool(config),
-        RunPythonSandboxedTool(config),
+        RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), ProposeMcpServerTool(),
