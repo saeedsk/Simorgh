@@ -114,6 +114,26 @@ class TestMemoryEngineStoreAndRetrieve(unittest.IsolatedAsyncioTestCase):
         items, _ = await self.engine.retrieve(query="widget facts", kinds=["semantic"], k=5, filters=None)
         self.assertEqual(items[0].ts, self.clock.now())  # the fresher, higher-confidence one ranks first
 
+    async def test_retrieve_score_decays_by_the_expected_factor_after_a_fake_clock_advance(self):
+        """2026-09-08 observer audit: `score_confidence` itself was
+        already covered directly, and `test_confidence_decay_pulls_an_old_item_below_a_fresh_one_of_equal_relevance`
+        already covers relative ordering, but nothing pinned the actual
+        *retrieved* score to the expected decayed value -- confirming it
+        neither sticks at the stored confidence (no decay applied) nor
+        collapses to zero (decay applied wrong), for exactly three
+        half-lives (half_life_seconds=100.0 in this class's asyncSetUp,
+        recency_weight=0.0 so the score is decay-only)."""
+        await self.engine.store(kind="semantic", content="widgets are blue", tags=[], source_ref="", confidence=1.0)
+        fresh_items, _ = await self.engine.retrieve(query="widgets are blue", kinds=["semantic"], k=5, filters=None)
+        self.assertAlmostEqual(fresh_items[0].score_confidence(now=self.clock.now(), half_life_seconds=100.0), 1.0, places=6)
+
+        self.clock.advance(300.0)  # three half-lives
+        decayed_items, _ = await self.engine.retrieve(query="widgets are blue", kinds=["semantic"], k=5, filters=None)
+        score = decayed_items[0].score_confidence(now=self.clock.now(), half_life_seconds=100.0)
+        self.assertLess(score, 0.99)   # not stuck at 1.0
+        self.assertGreater(score, 0.0)  # not collapsed to zero
+        self.assertAlmostEqual(score, 0.125, places=6)  # 0.5 ** 3
+
     async def test_counts_reports_live_records_per_kind(self):
         await self.engine.store(kind="episodic", content="e1", tags=[], source_ref="", confidence=1.0)
         await self.engine.store(kind="episodic", content="e2", tags=[], source_ref="", confidence=1.0)
