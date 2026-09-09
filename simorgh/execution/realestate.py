@@ -109,11 +109,20 @@ def rows_to_listings(rows: list[dict]) -> list[Listing]:
     return listings
 
 
-_ZIP_RE = re.compile(r"\b(\d{5})(?:-\d{4})?\b")
+# Anchored to the end of the string (a real address's ZIP is its last
+# token: "San Jose, CA 95120", "Austin, TX 78701-1234"), not anywhere in
+# it. An unanchored `\b(\d{5})\b` also matches a leading street number --
+# live-caught 2026-09-09, observer W21-11: `location="12345 Main St,
+# Austin, TX"` extracted "12345" as the ZIP (the street number, not a
+# ZIP at all) and silently filtered 200 real Austin listings down to
+# zero, because none of them happen to carry ZIP 12345. Anchoring to the
+# end fixes that case (the string ends in "TX", not digits) while still
+# matching every real trailing-ZIP location.
+_ZIP_RE = re.compile(r"(?<!\d)(\d{5})(?:-\d{4})?\s*$")
 
 
 def zip_in(location: str) -> str:
-    """The 5-digit ZIP written into a location string, or "".
+    """The 5-digit ZIP at the end of a location string, or "".
 
     Live-caught 2026-09-09, the acceptance trial: asked for ZIP 95120,
     the model called `search_listings` with `location="San Jose, CA
@@ -124,8 +133,12 @@ def zip_in(location: str) -> str:
     the *page* was fine. Writing the ZIP where a human would write it
     must not silently mean "ignore it": it is now the filter unless the
     caller says otherwise.
+
+    Anchored to the end of the string so a leading street number that
+    happens to be 5 digits (see the module docstring's caveat above)
+    is never mistaken for it.
     """
-    match = _ZIP_RE.search(location or "")
+    match = _ZIP_RE.search((location or "").strip())
     return match.group(1) if match else ""
 
 
@@ -173,6 +186,21 @@ class RealEstateListingsTool:
         location = str(args.get("location") or "").strip()
         if not location:
             return ToolResult(ok=False, error="refused: an empty location")
+        # The two-part marker's second line is meant to be a JSON object
+        # of filters, merged into `args` by the router. When it is not
+        # JSON the router leaves it under `filters`, which nothing here
+        # reads -- so before this, "under 2 million please" was silently
+        # dropped and the search ran unfiltered, returning results that
+        # looked like an answer to a question nobody had asked
+        # (wave-21 observer W21-10).
+        leftover = args.get("filters")
+        if leftover:
+            return ToolResult(
+                ok=False,
+                error=("refused: the second line must be a JSON object of filters, e.g. "
+                       '{"zip_code": "95120", "max_price": 2500000} -- got '
+                       f"{str(leftover)[:80]!r}, which names no filter this tool has"),
+            )
         try:
             self._enforce_rate_limit(ctx)
         except ListingsUnavailable as exc:

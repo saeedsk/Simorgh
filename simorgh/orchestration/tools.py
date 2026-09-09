@@ -26,29 +26,6 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "web_search": ("read_only", True),
     "render_page": ("read_only", True),
     "browse_page": ("reversible", True),
-    "install_package": (
-        "first line: `pip` or `npm`. Second line: the package name alone (optionally pinned, "
-        'e.g. `homeharvest==0.8.18`), or a JSON object like {"spec": "homeharvest", '
-        '"reason": "real listing data", "allow_new": false}. A URL, path or VCS ref is refused.'
-    ),
-    "run_script": (
-        "every line after the marker is the Python program, and nothing else. It runs with the "
-        "repo importable and the network reachable, so `import <an installed library>` works -- "
-        "but writing your own network calls (requests, urllib, socket) is still refused: install "
-        "a library and call it instead."
-    ),
-    "browse_page": (
-        "first line: the URL or repo path. Second line: a JSON array of actions, e.g. "
-        '[{"type": ["#q", "hello"]}, {"click": "#go"}, {"wait": "#results"}, '
-        '{"screenshot": "after"}]. Allowed: click, type, press, wait, scroll, screenshot. '
-        "There is deliberately no way to run your own JavaScript here."
-    ),
-    "run_container": (
-        "first line: the image (e.g. `python:3.12-slim`). Second line: a JSON object like "
-        '{"command": ["python", "-c", "print(1)"], "network": false, '
-        '"input_files": ["docs/data.csv"]}. The repo is NOT visible inside -- name files in '
-        "input_files and they are copied to /work."
-    ),
     "search_listings": ("read_only", True),
     "geocode": ("read_only", True),
     "find_package": ("read_only", True),
@@ -239,6 +216,36 @@ _MARKER_ARG_HINT.update({
         "every line after the marker is the JavaScript program, run with Node, and nothing else -- "
         "no explanation before or after it. Example:\nRUN_JS_SANDBOXED:\nconsole.log(2 + 2)\n"
     ),
+    # Live-caught 2026-09-09 (tools audit): these four hints were pasted
+    # into `_TOOL_POLICY` by mistake instead of here -- a duplicate
+    # `"browse_page"` key in that dict literal even silently overwrote
+    # its real `(reversibility, network)` tuple with this hint STRING,
+    # so every `BROWSE_PAGE:` marker crashed `to_action_payload` trying
+    # to unpack a string into two variables. Moved to the table they
+    # actually belong in.
+    "install_package": (
+        "first line: `pip` or `npm`. Second line: the package name alone (optionally pinned, "
+        'e.g. `homeharvest==0.8.18`), or a JSON object like {"spec": "homeharvest", '
+        '"reason": "real listing data", "allow_new": false}. A URL, path or VCS ref is refused.'
+    ),
+    "run_script": (
+        "every line after the marker is the Python program, and nothing else. It runs with the "
+        "repo importable and the network reachable, so `import <an installed library>` works -- "
+        "but writing your own network calls (requests, urllib, socket) is still refused: install "
+        "a library and call it instead."
+    ),
+    "browse_page": (
+        "first line: the URL or repo path. Second line: a JSON array of actions, e.g. "
+        '[{"type": ["#q", "hello"]}, {"click": "#go"}, {"wait": "#results"}, '
+        '{"screenshot": "after"}]. Allowed: click, type, press, wait, scroll, screenshot. '
+        "There is deliberately no way to run your own JavaScript here."
+    ),
+    "run_container": (
+        "first line: the image (e.g. `python:3.12-slim`). Second line: a JSON object like "
+        '{"command": ["python", "-c", "print(1)"], "network": false, '
+        '"input_files": ["docs/data.csv"]}. The repo is NOT visible inside -- name files in '
+        "input_files and they are copied to /work."
+    ),
 })
 # Tools whose marker takes no argument at all.
 _MARKER_NO_ARGS = frozenset({"git_revert"})
@@ -254,23 +261,43 @@ _MARKER_NO_ARGS = frozenset({"git_revert"})
 # required argument and the rest is `{"zip_code": "95120", ...}`.
 #
 # Degrading gracefully matters more than strictness here: a rest that is
-# not a JSON object is kept as the plain second string (the tool's own
+# not valid JSON is kept as the plain second string (the tool's own
 # schema then rejects it honestly), and an empty rest adds nothing at
 # all, so a bare one-line marker still works exactly as before.
-_MARKER_JSON_REST = frozenset({"search_listings", "install_package"})
+#
+# `browse_page` and `run_container` document exactly this same "first
+# line plus a JSON second part" shape (see their `_MARKER_ARG_HINT`
+# entries) but were missing from this set -- live-caught 2026-09-09
+# (tools audit): a `BROWSE_PAGE:` marker whose second line was the
+# documented JSON array of actions arrived at the tool as that array's
+# *string* rendering, so `render.py::classify_actions` always answered
+# "refused: actions must be a list", and a `RUN_CONTAINER:` marker's
+# JSON object arrived as the literal text of the `command` field, which
+# `shlex.split` then chopped into garbage tokens -- both had never once
+# worked from the model's side, exactly the failure mode this set exists
+# to prevent for `search_listings`/`install_package`.
+_MARKER_JSON_REST = frozenset({"search_listings", "install_package", "browse_page", "run_container"})
 
 
 def _json_rest(rest: str, second: str) -> dict:
     stripped = (rest or "").strip()
     if not stripped:
         return {}
-    if stripped.startswith("{"):
+    if stripped.startswith("{") or stripped.startswith("["):
         try:
             parsed = json.loads(stripped)
         except json.JSONDecodeError:
             parsed = None
         if isinstance(parsed, dict):
+            # An object's keys merge straight into `args` -- the
+            # `search_listings`/`install_package`/`run_container` shape,
+            # where the second part carries several named options.
             return parsed
+        if isinstance(parsed, list):
+            # `browse_page`'s `actions` IS a JSON array, not a dict of
+            # extra options -- assign it to the one field it belongs to
+            # rather than trying (and failing) to merge a list.
+            return {second: parsed}
     return {second: rest}
 
 # Filled at runtime from Execution's `tool.registered` announcements

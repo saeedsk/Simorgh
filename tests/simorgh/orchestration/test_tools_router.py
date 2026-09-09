@@ -305,6 +305,88 @@ class TestJsonRestMarkers(unittest.TestCase):
         self.assertTrue(payload["scope"]["network"])
 
 
+class TestEveryToolPolicyEntryIsARealTuple(unittest.TestCase):
+    """`_TOOL_POLICY` is `dict[str, tuple[str, bool]]` -- a plain string
+    value there is a bug in the table itself, not something any marker
+    input can trigger. Live-caught 2026-09-09 (tools audit): a duplicate
+    `"browse_page"` key in the dict literal, meant for a marker hint,
+    silently overwrote the real `("reversible", True)` tuple with a hint
+    STRING, so `to_action_payload` crashed unpacking it into two
+    variables on every single `browse_page` call -- the tool had never
+    once worked from the model's side."""
+
+    def test_every_policy_value_is_a_two_tuple(self):
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        for name, value in _TOOL_POLICY.items():
+            self.assertIsInstance(value, tuple, f"{name}'s policy is {value!r}, not a tuple")
+            self.assertEqual(len(value), 2, f"{name}'s policy is {value!r}, not a 2-tuple")
+            reversibility, network = value
+            self.assertIsInstance(reversibility, str)
+            self.assertIsInstance(network, bool)
+
+    def test_browse_page_does_not_crash_to_action_payload(self):
+        payload = to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": "browse_page", "args": {"argument": "https://example.com\n[]"}},
+            rationale="r",
+        )
+        self.assertEqual(payload["reversibility"], "reversible")
+        self.assertTrue(payload["scope"]["network"])
+
+
+class TestBrowsePageAndRunContainerJsonRest(unittest.TestCase):
+    """Same defect class as `TestJsonRestMarkers` above, for the other
+    two tools that document a JSON second part but were missing from
+    `_MARKER_JSON_REST`. Live-caught 2026-09-09 (tools audit):
+    `browse_page`'s documented JSON array of actions arrived at the tool
+    as that array's string rendering, so `classify_actions` always
+    answered "refused: actions must be a list"; `run_container`'s
+    documented JSON object arrived as the literal text of `command`,
+    which `shlex.split` then chopped into garbage tokens, and
+    `network`/`input_files`/`timeout_s` were silently unreachable."""
+
+    def test_browse_page_actions_arrive_as_a_real_list(self):
+        payload = to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": "browse_page",
+                  "args": {"argument": 'https://example.com\n[{"click": "#go"}, {"wait": "#results"}]'}},
+            rationale="r",
+        )
+        args = payload["args"]
+        self.assertEqual(args["target"], "https://example.com")
+        self.assertEqual(args["actions"], [{"click": "#go"}, {"wait": "#results"}])
+
+    def test_browse_page_bare_marker_still_works(self):
+        payload = to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": "browse_page", "args": {"argument": "https://example.com"}},
+            rationale="r",
+        )
+        self.assertEqual(payload["args"], {"target": "https://example.com"})
+
+    def test_run_container_json_object_merges_into_args(self):
+        payload = to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": "run_container",
+                  "args": {"argument": 'python:3.12-slim\n{"command": ["python", "-c", "print(1)"], '
+                                        '"network": false}'}},
+            rationale="r",
+        )
+        args = payload["args"]
+        self.assertEqual(args["image"], "python:3.12-slim")
+        self.assertEqual(args["command"], ["python", "-c", "print(1)"])
+        self.assertIs(args["network"], False)
+
+    def test_run_container_bare_marker_still_works(self):
+        payload = to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": "run_container", "args": {"argument": "python:3.12-slim\necho hi"}},
+            rationale="r",
+        )
+        self.assertEqual(payload["args"], {"image": "python:3.12-slim", "command": "echo hi"})
+
+
 class TestTheWriteScopeHintIsTrue(unittest.TestCase):
     """Live-caught 2026-09-09, the final acceptance trial: asked to
     write `docs/games/x.html`, Sim said "apply_source_patch only writes

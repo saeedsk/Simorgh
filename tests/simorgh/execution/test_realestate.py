@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from simorgh.execution.config import Config
-from simorgh.execution.realestate import Listing, RealEstateListingsTool, render, rows_to_listings
+from simorgh.execution.realestate import Listing, RealEstateListingsTool, render, rows_to_listings, zip_in
 
 
 class _Clock:
@@ -55,6 +55,31 @@ def _scraper(rows=ROWS, seen: list | None = None):
             seen.append(kwargs)
         return _FakeFrame(rows)
     return scrape
+
+
+class ZipInTestCase(unittest.TestCase):
+    """Live-caught 2026-09-09, observer W21-11: a real query for
+    `location="12345 Main St, Austin, TX"` against homeharvest returned
+    200 real Austin listings (zip codes 78745, 78754, 78729, ...), none
+    of them "12345" -- but the old unanchored `\\b(\\d{5})\\b` regex read
+    the leading street number as a ZIP filter and silently zeroed the
+    result out. The ZIP must be read from the end of the string, where a
+    real address actually puts it."""
+
+    def test_a_trailing_zip_is_found(self):
+        self.assertEqual(zip_in("San Jose, CA 95120"), "95120")
+
+    def test_a_trailing_zip_plus_four_is_found(self):
+        self.assertEqual(zip_in("San Jose, CA 95120-1234"), "95120")
+
+    def test_a_leading_street_number_is_not_mistaken_for_a_zip(self):
+        self.assertEqual(zip_in("12345 Main St, Austin, TX"), "")
+
+    def test_a_leading_five_digit_street_number_with_no_real_zip(self):
+        self.assertEqual(zip_in("10001 Wilshire Blvd, Los Angeles CA"), "")
+
+    def test_no_zip_at_all(self):
+        self.assertEqual(zip_in("San Jose, CA"), "")
 
 
 class RowsToListingsTestCase(unittest.TestCase):
@@ -196,3 +221,26 @@ class RealHomeharvestSmokeTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(result.metadata["matched"], 0)
         self.assertIn("95120", result.output)
         self.assertIn("unofficial", result.output)
+
+    async def test_a_street_number_that_looks_like_a_zip_is_not_used_as_a_filter(self):
+        """Live-caught 2026-09-09, observer W21-11: `location="12345 Main
+        St, Austin, TX"` returned 200 real Austin listings, none in ZIP
+        "12345" (that's a street number, not a ZIP) -- the old
+        unanchored ZIP regex filtered all 200 away to nothing."""
+        import importlib.util
+        import socket
+
+        if importlib.util.find_spec("homeharvest") is None:
+            self.skipTest("homeharvest not installed")
+        try:
+            socket.gethostbyname("www.realtor.com")
+        except socket.gaierror:
+            self.skipTest("no network access in this environment")
+        tool = RealEstateListingsTool(Config(repo_root=Path.cwd(), real_estate_max_results=5))
+        result = await tool.run({"location": "12345 Main St, Austin, TX"}, ctx=_ctx())
+        if not result.ok:
+            self.skipTest(f"live source did not answer in this sandbox: {result.error}")
+        self.assertEqual(result.metadata["zip_code"], "")
+        self.assertFalse(result.metadata["zip_from_location"])
+        self.assertGreater(result.metadata["total_fetched"], 0)
+        self.assertEqual(result.metadata["matched"], result.metadata["total_fetched"])
