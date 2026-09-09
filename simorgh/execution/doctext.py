@@ -197,6 +197,12 @@ def image_to_text(data: bytes, *, max_chars: int, ocr: bool = True) -> tuple[str
             lines.append(text)
         elif problem:
             lines.append(f"({problem})")
+        else:
+            # OCR ran and found nothing. Saying so matters: silence here
+            # is indistinguishable from OCR never having run, and a
+            # reader would have no way to tell "this image has no text"
+            # from "nobody looked".
+            lines.append("(no text found in the image by OCR)")
     return "\n".join(lines)[:max_chars], ""
 
 

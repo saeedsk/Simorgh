@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import shutil
 import tempfile
 import unittest
 import unittest.mock
@@ -130,11 +131,27 @@ class ContentTestCase(unittest.TestCase):
         self.assertIn("120x40", text)
         self.assertIn("PNG", text)
 
+    @unittest.skipUnless(
+        _HAS_PIL and importlib.util.find_spec("pytesseract") and shutil.which("tesseract"),
+        "OCR stack not installed")
+    def test_ocr_actually_reads_words_out_of_an_image(self):
+        from PIL import Image, ImageDraw
+
+        image = Image.new("RGB", (420, 90), "white")
+        ImageDraw.Draw(image).text((12, 32), "ALMADEN VALLEY 95120", fill="black")
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        text, problem = image_to_text(buffer.getvalue(), max_chars=2000)
+        self.assertEqual(problem, "")
+        self.assertIn("ALMADEN", text)
+        self.assertIn("95120", text)
+
     @unittest.skipUnless(_HAS_PIL, "Pillow not installed")
-    def test_missing_ocr_is_stated_not_silently_skipped(self):
+    def test_the_ocr_outcome_is_always_stated(self):
+        """Whatever happened, the reader can tell. Silence would leave
+        "this image has no text" and "nobody looked" identical."""
         text, _ = image_to_text(_png_bytes(), max_chars=2000, ocr=True)
-        # Either OCR ran, or the reason it did not is in the text.
-        self.assertTrue("OCR" in text or "ocr" in text)
+        self.assertTrue("OCR" in text or "ocr" in text, text)
 
     def test_a_corrupt_file_is_a_problem_not_an_exception(self):
         if _HAS_DOCX:

@@ -43,7 +43,11 @@ homeharvest>=0.4
 # (simorgh/execution/doctext.py): Word documents, spreadsheets, and an
 # image's dimensions/EXIF. All optional and imported lazily -- without
 # them those files report what to install, rather than binary noise.
-# OCR is a further opt-in: `pytesseract` plus a `tesseract` binary.
 python-docx>=1.1
 openpyxl>=3.1
 Pillow>=10.0
+
+# Reading the text inside an image. Needs BOTH this and a `tesseract`
+# binary on PATH; without either, an image still reports its dimensions
+# and says which piece is missing rather than failing.
+pytesseract>=0.3
