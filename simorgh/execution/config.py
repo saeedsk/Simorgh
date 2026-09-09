@@ -288,11 +288,20 @@ class Config:
     max_grants_per_day: int = 10
     # Granting a tool over any of these hands out the machine rather
     # than a library. Crude and deliberate -- see grants.py's docstring
-    # on what this does and does not buy.
+    # on what this does and does not buy. This can never be complete --
+    # any stdlib-root check is blind to a *third-party* package whose
+    # whole point is running the machine (confirmed live: `pip install
+    # sh` then granting `sh:bash` as kind="callable" and calling it with
+    # `{"c": "id; whoever"}` runs it, because `sh`'s entire API surface
+    # is "any attribute name is a shell command" -- no stdlib root is
+    # ever touched). The entries below are the ones known to do this;
+    # a name not listed here is not thereby safe.
     grant_import_denylist: tuple[str, ...] = (
         "os", "sys", "subprocess", "shutil", "socket", "ctypes", "importlib", "builtins",
         "pickle", "marshal", "code", "codeop", "pty", "signal", "multiprocessing",
         "http", "urllib", "requests", "pathlib", "glob", "tempfile", "webbrowser",
+        "sh", "plumbum", "pexpect", "fabric", "invoke", "sarge", "envoy", "shlex", "runpy",
+        "pdb", "platform", "psutil", "paramiko",
     )
 
     # -- MCP (mcp.py's own module docstring): a human-configured, static

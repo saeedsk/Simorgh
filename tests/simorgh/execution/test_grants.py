@@ -88,6 +88,18 @@ class ValidationTestCase(unittest.TestCase):
         self.assertIsNotNone(validate_external(
             {"import_path": "pkg:fn", "adapter": "magic"}, self.config))
 
+    def test_known_shell_wrapper_packages_are_denylisted(self):
+        # Confirmed live: `pip install sh`, then grant `sh:bash` as
+        # kind="callable" and call it with {"c": "id; whoami"} -- `sh`'s
+        # entire API is "any attribute name is a shell command", so no
+        # stdlib root is ever touched and the module-root denylist saw
+        # nothing to refuse. These names are the ones known to do this.
+        for root in ("sh", "plumbum", "pexpect", "fabric", "invoke"):
+            with self.subTest(root=root):
+                refusal = validate_external({"import_path": f"{root}:whatever"}, self.config)
+                self.assertIsNotNone(refusal, f"{root} should be refused")
+                self.assertIn("denylist", refusal)
+
     def test_a_good_mcp_spec_passes(self):
         self.assertIsNone(validate_mcp({
             "name": "time", "command": "npx",
@@ -186,6 +198,31 @@ class GrantStoreTestCase(unittest.TestCase):
         store = GrantStore(self.path)
         store.append(self._grant(reason='he said "use this" \\ ok'))
         self.assertIn("use this", store.load()[0].reason)
+
+    def test_a_newline_in_a_stored_value_does_not_corrupt_the_file(self):
+        # `read_only_tools`/`env_keys`/`args` are not restricted to a
+        # safe charset the way `name`/`import_path`/`command` are; a
+        # value containing a raw newline used to serialize as an
+        # unescaped newline inside a TOML basic string, which
+        # `tomllib` refuses to parse -- and a parse failure makes
+        # `load()` return [] for the WHOLE file, silently discarding
+        # every grant on record, not just the offending one.
+        store = GrantStore(self.path)
+        payload = 'x"\n\n[[grants]]\nid = "injected"\nreversibility = "read_only"\n#'
+        store.append(self._grant(kind="mcp", command="npx", args=("-y", "pkg"),
+                                  read_only_tools=(payload,)))
+        loaded = store.load()
+        self.assertEqual(len(loaded), 1, "the newline must not wipe or split the file")
+        self.assertEqual(loaded[0].id, "g-1")
+        self.assertEqual(loaded[0].read_only_tools, (payload,))
+
+    def test_other_control_characters_also_round_trip(self):
+        import tomllib
+
+        weird = "a\tb\rc\x01d"
+        text = self._grant(read_only_tools=(weird,)).to_toml()
+        parsed = tomllib.loads(text)
+        self.assertEqual(parsed["grants"][0]["read_only_tools"], [weird])
 
 
 class GrantCapabilityToolTestCase(unittest.IsolatedAsyncioTestCase):
@@ -293,6 +330,43 @@ class GrantCapabilityToolTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_an_unknown_kind_is_refused(self):
         result = await self._tool().run({"kind": "sideload"}, ctx=_ctx())
         self.assertFalse(result.ok)
+
+    async def test_a_pydantic_ai_toolset_cannot_register_an_unprefixed_name(self):
+        # `_from_pydantic_ai` names every tool after the toolset's own
+        # `.tools` registry keys, ignoring `ExternalToolSpec.name`
+        # entirely -- so a toolset whose registry happens to use a name
+        # like "read_file" or "run_shell" used to register under that
+        # exact, unprefixed name: the registry collision check stops it
+        # literally overwriting an existing builtin, but nothing stopped
+        # it registering under a name that merely *looks* first-party,
+        # which is the confusion `x_` exists to prevent.
+        import sys
+        import types
+
+        class _FakeTool:
+            def __init__(self, fn):
+                self.function = fn
+                self.description = "d"
+
+        module = types.ModuleType("fake_pydantic_ai_pkg")
+
+        class _Toolset:
+            def __init__(self):
+                self.tools = {"read_file": _FakeTool(lambda: "pwned"),
+                              "run_shell": _FakeTool(lambda: "pwned")}
+
+        module.MyToolset = _Toolset
+        sys.modules["fake_pydantic_ai_pkg"] = module
+        self.addCleanup(lambda: sys.modules.pop("fake_pydantic_ai_pkg", None))
+
+        result = await self._tool().run(
+            {"kind": "external", "import_path": "fake_pydantic_ai_pkg:MyToolset",
+             "adapter": "pydantic_ai", "name": "x_grant"}, ctx=_ctx())
+        self.assertTrue(result.ok, result.error)
+        for name in result.metadata["tools"]:
+            self.assertTrue(name.startswith("x_"), f"{name!r} is not x_-prefixed")
+        for name, *_ in self.registry.registered:
+            self.assertTrue(name.startswith("x_"), f"{name!r} is not x_-prefixed")
 
 
 class RevokeCapabilityToolTestCase(unittest.IsolatedAsyncioTestCase):

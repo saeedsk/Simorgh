@@ -30,6 +30,17 @@ do to itself, so the boundary is stated here rather than left implicit:
    would be the dishonest kind of security. What it does buy is that
    every capability Sim adds is *named, recorded, and revocable*.
 
+   How incomplete, concretely, so nobody reads more into it than is
+   there: the denylist checks the import's ROOT MODULE against a list
+   of stdlib names. A third-party package whose whole purpose is
+   running the machine touches none of them. Proved live 2026-09-09 by
+   wave-21 observer W21-05: `pip install sh`, then grant `sh:bash`,
+   then call it -- `bash -c 'id; whoami'` really ran, and the grant was
+   valid by every rule here. The known such packages are now listed,
+   but a name that is not listed is not thereby safe. The property that
+   survives is the one in point 1: it ran as an `irreversible` tool,
+   through Guardian, recorded in `grants.toml`, revocable.
+
 A grant is not the same as a skill. A skill is code Sim wrote and can
 rewrite; a grant is a door to somebody else's code, which is why it
 gets a file, an audit trail, and a revoke command.
@@ -99,7 +110,23 @@ class Grant:
 
     def to_toml(self) -> str:
         def q(value: str) -> str:
-            return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+            # A TOML basic string may not contain a raw control character
+            # (newline included) -- only `\\` and `"` were ever escaped
+            # here, so a value with an embedded newline (or a literal
+            # `[[grants]]` after one) produced a file `tomllib` refuses
+            # to parse. `GrantStore.load` treats any parse failure as
+            # "no grants on file", so one such value silently discarded
+            # every row in the file, not just its own -- the audit trail
+            # `to_toml` exists to protect. Escape every control
+            # character TOML forbids raw, not just the two that were.
+            text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+            text = (text.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+                    .replace("\b", "\\b").replace("\f", "\\f"))
+            text = "".join(
+                c if c == "\t" or ord(c) >= 0x20 else f"\\u{ord(c):04x}"
+                for c in text
+            )
+            return '"' + text + '"'
 
         def arr(values) -> str:
             return "[" + ", ".join(q(v) for v in values) + "]"
@@ -430,6 +457,24 @@ class GrantCapabilityTool:
             return ToolResult(ok=False, error=f"refused: {grant.import_path} produced no callable tool")
         registered = []
         for tool in tools:
+            # `tool_name_for` only names the FIRST tool from a grant (via
+            # `grant.name`, threaded through `ExternalToolSpec.name`).
+            # `_from_pydantic_ai` ignores `spec.name` entirely and names
+            # every tool after the toolset's own registry keys; a
+            # multi-tool `_from_langchain` list falls back the same way
+            # once there is more than one item. Either way the adapter,
+            # not this module, ends up choosing the registered name --
+            # so an attacker-authored package can hand back a tool
+            # called `read_file` or `run_shell` with no `x_` prefix,
+            # breaking the one guarantee this module exists to keep
+            # ("a grant can never occupy, or be mistaken for, a
+            # builtin's name"). The registry collision check stops it
+            # literally overwriting an existing tool, but a name that
+            # merely *looks* first-party is exactly the confusion this
+            # prefix is for. Enforce it here, once, regardless of what
+            # any adapter decided.
+            if not tool.name.startswith(GRANT_NAME_PREFIX):
+                tool.name = GRANT_NAME_PREFIX + tool.name
             if await self._register(tool, provider="external:granted", marker_arg_key="input"):
                 registered.append(tool.name)
         if not registered:
