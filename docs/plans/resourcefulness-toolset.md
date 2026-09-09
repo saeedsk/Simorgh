@@ -435,3 +435,280 @@ verified *live* (not just unit-tested), what was deferred and why.
   needed for anything in this plan.
 - The creator's own Sim process may be running and self-editing
   `src/memory/long_term.py`; leave that file alone.
+
+---
+
+# Part II: design pass (2026-09-09, later the same day)
+
+The items above that were checklist-shaped stay as they are. These four
+had real design decisions in them; they are now settled here so the
+executing session implements rather than decides. Each names the exact
+seams in today's code.
+
+## D1. Self-granted capabilities (replaces WS5 and the adoption half of WS6)
+
+### The idea in one paragraph
+
+A **grant** is a record that Sim may add at runtime saying "this
+external callable / this MCP server is now a tool." Grants live in
+their own file, are loaded at boot like human config, are visible and
+revocable by a human, default to the strictest Guardian tier, and are
+themselves proposed through Guardian as an `irreversible` action. The
+human-written `simorgh.toml` stays human-only; Sim never edits it.
+
+### Storage: `${data_dir}/grants.toml`
+
+```toml
+[[grants]]
+id = "g-2026-09-09-7f3a"          # ulid-ish, unique
+kind = "external"                  # external | mcp
+status = "active"                  # active | revoked
+granted_at = "2026-09-09T14:02:11Z"
+granted_by_task = "3c68a390"       # task_id, or "human"
+reason = "listings for the 95120 map task"
+reversibility = "irreversible"     # never looser than the grant rules allow
+# kind = "external": the same fields as [[execution.external_tools]]
+import_path = "homeharvest:scrape_property"
+adapter = "callable"
+name = "x_hh_scrape"
+# kind = "mcp": the same fields as [[execution.mcp_servers]]
+# command = "npx"; args = ["-y", "@modelcontextprotocol/server-time"]
+# read_only_tools = ["get_current_time"]
+```
+
+- `kernel/config.py` (merge order today: `./simorgh.toml` >
+  `${data_dir}/simorgh.toml` > defaults) gains one more step: load
+  `${data_dir}/grants.toml` and append every `status = "active"` grant
+  to `execution.external_tools` / `execution.mcp_servers` with
+  `provider` tagged `external:granted` / `mcp:granted`. A malformed
+  grants file is logged and skipped, never fatal (same rule as a bad
+  MCP server in `Execution._start_mcp_server`).
+- `.gitignore` the file. It is state, not source.
+
+### Runtime path: the `grant_capability` tool
+
+`execution/grants.py::GrantCapabilityTool`, `name = "grant_capability"`,
+`reversibility = "irreversible"` (it changes what Sim can do; Guardian's
+`ReversibilityRule` gates it -- human prompt unless `sim.sh`'s
+auto-approve is on, which is the creator's current setting).
+
+Marker shape: two-part (`_MARKER_SPLIT_FIRST_LINE`): first line `kind`,
+rest a JSON object with the fields above minus `id/status/granted_*`.
+
+`run()`:
+1. Validate (section "Guard rails"). Any failure is a refusal with the
+   reason; nothing is written.
+2. `kind = external`: `external.adapt(ExternalToolSpec(...))` ->
+   `ExternalTool`s. `kind = mcp`: `Execution._start_mcp_server(
+   McpServerConfig(...))` (refactor its body into a function that
+   returns the registered tools so the grant tool can call it).
+3. Register each tool in `Execution._registry` (collision -> refuse,
+   same as boot), publish `tool.registered` with the `:granted`
+   provider, append to `TOOLS_STREAM` exactly as boot does.
+   `orchestration/tools.py::register_tool_policy` already learns the
+   policy from that event -- nothing to edit there.
+4. Append the grant to `grants.toml` (write-temp-then-rename), append a
+   `capability.granted` event to a new `CAPABILITIES_STREAM`.
+5. Output: the new tool names and the marker each answers to, plus the
+   sentence "granted as irreversible: every call will be gated; a human
+   can promote it with `capability promote <name> read_only`."
+
+### Guard rails (the part that must not be loosened)
+
+- **Reversibility floor.** A self-grant is always `irreversible`. Only a
+  human `capability promote` (Interface command, writes `grants.toml`)
+  can set `reversible` or `read_only`. For MCP grants, tools the
+  *catalogue* (D2) lists as read-only may be registered `read_only`
+  directly, because a human curated that list.
+- **Import-path denylist** (external grants): the module root may not
+  be any of `os, sys, subprocess, shutil, socket, ctypes, importlib,
+  builtins, pickle, marshal, code, pty, signal, multiprocessing,
+  http, urllib, requests`; the callable may not be a dunder; the path
+  must match `^[A-Za-z_][\w.]*:[A-Za-z_]\w*$`. This is a guard against
+  the obvious, exactly like `DEFAULT_SHELL_REFUSALS`, not a sandbox.
+- **Command allowlist** (MCP grants): `command` in
+  `_PROPOSAL_ALLOWED_COMMANDS` (`npx, uvx, node, python, python3`);
+  first arg for `npx`/`uvx` must be `-y`/a package name matching
+  `^(@[\w-]+/)?[\w.-]+(@[\w.-]+)?$`; no `-e`, `-c`, `--eval`, absolute
+  paths, or shell metacharacters anywhere in `args`; `env` keys must be
+  names only -- values are read from the process environment, never
+  from the grant (a grant never stores a secret).
+- **Name prefix.** External grants are named `x_<name>`; MCP tools keep
+  `mcp_<server>_<tool>`. A grant can never claim a builtin's name.
+- **Immunity.** A grant Guardian denies is recorded like any rejected
+  proposal, so `ImmunityRule` refuses a near-identical retry.
+- **Quota.** `execution.max_grants_per_day` (default 10). Over quota ->
+  proposal only, no grant.
+
+### Revocation and audit
+
+- `revoke_capability <name>` -- a tool (`reversible`) *and* an Interface
+  command. Sets `status = "revoked"`, publishes a new
+  `tool.unregistered` topic (Orchestration drops the policy and the
+  marker; Guardian's tool projection drops the `ToolInfo`; Execution
+  removes it from `_registry` and closes the MCP client if no other
+  tool uses it), appends `capability.revoked`.
+- `capabilities` Interface command: every grant with who/when/why/
+  status and the tools it produced. `status` shows the count.
+
+### Acceptance
+
+1. `pip install homeharvest` (via `install_package` or `run_shell`),
+   then `GRANT_CAPABILITY:` external `homeharvest:scrape_property` ->
+   `X_HH_SCRAPE:` works in the same session with a JSON `input`; the
+   call is gated as irreversible; restart the Kernel and it is still
+   registered; `capabilities` lists it.
+2. `GRANT_CAPABILITY:` external `os:system` -> refused, reason names
+   the denylisted module; a retry with `subprocess:run` -> refused by
+   immunity or the denylist, never granted.
+3. MCP grant of `@modelcontextprotocol/server-time` (catalogued,
+   read-only) -> `mcp_time_get_current_time` callable and `read_only`;
+   an uncatalogued package -> `irreversible`; `args = ["-e", ...]` ->
+   refused.
+4. `revoke_capability x_hh_scrape` -> the marker no longer routes; the
+   file shows `revoked`; boot does not load it.
+5. The 11th grant in a day -> proposal recorded, nothing granted.
+
+## D2. MCP catalogue (the curated half of WS6)
+
+`docs/mcp-catalog.toml` (human-maintained; Sim reads, never writes):
+
+```toml
+[[servers]]
+package = "@modelcontextprotocol/server-time"
+command = "npx"; args = ["-y", "@modelcontextprotocol/server-time"]
+read_only_tools = ["get_current_time", "convert_time"]
+needs_env = []
+[[servers]]
+package = "@modelcontextprotocol/server-fetch"     # read-only fetch
+command = "uvx"; args = ["mcp-server-fetch"]
+read_only_tools = ["fetch"]
+needs_env = []
+[[servers]]
+package = "@modelcontextprotocol/server-github"
+command = "npx"; args = ["-y", "@modelcontextprotocol/server-github"]
+read_only_tools = ["search_repositories", "get_file_contents", "list_issues"]
+needs_env = ["GITHUB_PERSONAL_ACCESS_TOKEN"]
+```
+
+Seed it with: time, fetch, filesystem (scoped to `data_dir`), git,
+sqlite, memory, sequential-thinking, puppeteer, ddg-search (already
+wired), github, brave-search, google-maps, slack (the last four keyed).
+
+`propose_mcp_server` gains the auto path: if the proposed package is in
+the catalogue and every `needs_env` name is set in the environment, it
+calls the D1 grant path directly (still an `irreversible` proposal, so
+Guardian sees it) instead of only recording a proposal. Off-catalogue
+-> proposal only, for a human `mcp`, unless
+`execution.allow_uncatalogued_mcp_grants = true`.
+
+The RESEARCH and PATCH scaffolds get a five-line note: "servers you can
+ask for by name, and the env var each needs" rendered from the
+catalogue, so the model knows what exists.
+
+## D3. Containers (WS3, settled)
+
+`execution/container.py::RunContainerTool`, `name = "run_container"`,
+`reversibility = "irreversible"`.
+
+- Docker binary: `shutil.which("docker")`, then the Docker Desktop path
+  in section 6. `docker info` probed once per 60s and cached; failure
+  -> refusal "Docker daemon is not running".
+- Args: `image` (must start with a prefix in
+  `execution.container_image_prefixes`, default `("python:", "node:",
+  "ubuntu:", "debian:", "alpine:")`), `command` (list of strings, no
+  shell), `network` (bool, default false), `timeout_s` (capped by
+  config), `input_files` (repo-relative paths under `readable_roots`,
+  copied into the scratch dir -- never a bind mount of the repo).
+- Run: `docker run --rm --name simorgh-<action_id> --network
+  {none|bridge} -m <mem> --cpus <n> --pids-limit 256 --read-only
+  --tmpfs /tmp -v <scratch>:/work -w /work <image> <command...>`.
+  Scratch = `<data_dir>/containers/<action_id>/`; files the command
+  writes there come back as paths in the result (WS10's hand-back).
+- Timeout: `subprocess.TimeoutExpired` -> `docker kill simorgh-<id>`
+  then `docker rm -f`, same lesson as `mcp.py`'s hung-server fix. Never
+  leave a container behind: a test asserts `docker ps -a` has no
+  `simorgh-` names after a timeout.
+- Guardian: `DenylistRule` cannot read a command list today (it scans
+  `code`/`command` strings); join the list with spaces into a synthetic
+  `command` arg before proposing so the existing rules see it.
+- Marker: two-part -- first line `image`, rest JSON.
+- Tests: unit tests with a fake `docker` (a shell script on a temp
+  PATH that records its argv and echoes); one smoke test that skips
+  unless `docker info` succeeds.
+
+## D4. Capability self-test (new)
+
+`kernel/capabilities.py`: a table of probes, each `(name, cost,
+probe() -> (ok, detail))`, run by `kernel/selfcheck.py` at boot in the
+background and by a new `capabilities check` Interface command on
+demand.
+
+| probe | cost | expect |
+|---|---|---|
+| node present | free | `node --version` |
+| puppeteer resolvable | free | `NODE_PATH` from `npm root -g` has `puppeteer/` |
+| bandit importable | free | `importlib.util.find_spec("bandit")` |
+| homeharvest importable | free | same |
+| docker daemon | cheap | `docker info` exit 0 |
+| web_search | network | `python` returns >= 1 result, not `low_confidence` |
+| geocode | network | "San Jose, CA" -> lat within 0.5 of 37.34 |
+| search_listings | network, rate-limited | "San Jose, CA 95120", zip 95120 -> >= 1 |
+| render_page | cheap | a bundled fixture with a thrown error reports it |
+
+Rules: network probes run at most once per `capabilities_probe_ttl_s`
+(default 6h) and never at boot when the last run is fresh -- Nominatim
+and Realtor.com must not see a probe on every restart. Results go to a
+`capabilities` ledger stream; a failed *free* probe degrades Execution's
+health; a failed *network* probe is reported in `status` and in the
+scaffold ("search_listings is currently failing: ..."), so the model
+does not spend steps on a tool that is known to be down.
+
+Acceptance: uninstall bandit -> `status` says so within one boot; block
+the network -> `capabilities check` marks the three network probes
+failed and the PATCH scaffold carries the warning.
+
+## D5. Skill distillation (new)
+
+Turn a solved multi-tool task into a reusable skill without a human
+asking.
+
+- **Trigger** (in Reflection's post-task review, which already reads
+  the trajectory): a task completed with a passing verdict, kind
+  `patch` or `research`, whose trajectory has >= 3 distinct tool calls
+  and at least one `search_listings`/`web_fetch`/`render_page`/
+  `run_container`/granted tool -- i.e. it *did* something a skill could
+  encapsulate. Not for chat turns, not for pure code edits.
+- **Proposal:** Reflection creates a `skill` task through Planning's
+  intake with subject `simorgh_skills/<slug>.py` and description
+  "Write a skill `<slug>(...)` that does <goal>; inputs: <the task's
+  named inputs>; this is how it was done: <tool names and argument
+  shapes from the trajectory, no outputs>". `intake._find_duplicate`
+  with `subject=` already dedupes a repeat.
+- **Budget:** counts against curiosity's budget, at most
+  `learning.max_distillations_per_day` (default 3).
+- **The skill task itself** runs the existing SKILL profile: draft,
+  `run_python_sandboxed` it once with a real argument, commit. A skill
+  that needs the network imports an installed library (allowed) and
+  never `requests` directly (denied) -- the same rule the scaffold now
+  states.
+- **Use:** `_announce_skills_on_disk` already tells the model the skill
+  exists next boot; `_on_skill_acquired` loads it the same session.
+
+Acceptance: after the 95120 task completes, a `skill` task appears
+within one reflection cycle; it produces `simorgh_skills/listings_map.py`
+that takes `(location, zip_code)`; a second task "same map for 95125"
+completes in fewer steps and its trajectory shows the skill call.
+
+## D6. Revised phase order for the executing session
+
+- **Phase A** (small, independent): WS10, WS9 (incl. the two trial-2
+  findings), WS7, WS1, **D4**.
+- **Phase B**: WS2, then **D1** (external grants first, MCP grants
+  second), then **D2**. Review the D1 diff on the expensive model before
+  merging -- it is the one change that widens what Sim can do to
+  itself.
+- **Phase C**: **D3**, WS4, WS8, WS11, **D5**.
+
+Everything in Part II has an acceptance list; treat those as the tests
+to write first.
