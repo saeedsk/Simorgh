@@ -24,6 +24,7 @@ class Router:
     def __init__(
         self, providers: list[Provider], budgets: dict[str, RollingWindowBudget],
         floor: FloorProvider, *, order: tuple[str, ...], clock: Clock, logger: Logger | None = None,
+        cooldown_s: float = 30.0,
     ) -> None:
         self._by_name = {p.name: p for p in providers}
         self._budgets = budgets
@@ -31,6 +32,24 @@ class Router:
         self._order = order
         self._clock = clock
         self._logger = logger
+        # No circuit breaker existed at all before this: a provider that
+        # is genuinely down for the whole run (an exhausted API key, a
+        # revoked credential, a real outage) got retried on EVERY single
+        # `complete()` call for the rest of the process's life, paying a
+        # full network round trip -- and its own timeout, if it hangs
+        # rather than fails fast -- before falling through to the next
+        # candidate. Live-caught, 2026-09-09: Together's credits ran out
+        # mid-session and a single multi-step task logged 30+ consecutive
+        # `cognition.provider_failed` entries for the identical 402,
+        # visibly slowing the whole task while it re-learned the same
+        # fact on every step. `_cooldown_until` remembers a failure for
+        # `cooldown_s` and skips straight to the next candidate during
+        # that window -- short enough that a real transient blip (a
+        # dropped connection, a momentary rate limit) still recovers on
+        # its own within one task, long enough that a truly-dead
+        # provider is not re-dialed every single step.
+        self._cooldown_s = cooldown_s
+        self._cooldown_until: dict[str, float] = {}
 
     def candidate_names(self) -> list[str]:
         return [name for name in self._order if name in self._by_name] + [self._floor.name]
@@ -40,9 +59,10 @@ class Router:
         configured order that is actually available. Budget exhaustion is
         not consulted -- that needs an await, and this exists to answer
         "what is thinking for me", which should not require I/O."""
+        now = self._clock.now()
         for name in self._order:
             provider = self._by_name.get(name)
-            if provider is not None and provider.available():
+            if provider is not None and provider.available() and self._cooldown_until.get(name, 0.0) <= now:
                 return name
         return self._floor.name
 
@@ -65,9 +85,12 @@ class Router:
         last_error: Exception | None = None
         any_available_but_over_budget = False
         prompt_tokens = sum(estimate_tokens(m.get("content", "")) for m in messages)
+        now = self._clock.now()
         for name in self._order:
             provider = self._by_name.get(name)
             if provider is None or not provider.available():
+                continue
+            if self._cooldown_until.get(name, 0.0) > now:
                 continue
             provider_budget = self._budgets.get(name)
             if provider_budget is not None and not await provider_budget.can_spend():
@@ -83,6 +106,7 @@ class Router:
                 )
             except Exception as exc:  # noqa: BLE001 -- ProviderUnavailable or anything else: try the next candidate
                 last_error = exc
+                self._cooldown_until[name] = now + self._cooldown_s
                 # Live-caught, 2026-09-08: a failover used to be
                 # completely silent -- nothing on the Ledger, nothing in
                 # any log, not even a debug line -- so the only trace of
