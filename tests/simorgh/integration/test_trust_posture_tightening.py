@@ -264,5 +264,48 @@ class TestSystemResumeIsTheOnlyLooseningPath(_TrustPostureTestCase):
         self.assertEqual(changed.messages[-1].payload["reason"], "system.resume")
 
 
+class TestTightenAtTheBaselineLevelStillRecordsTheReason(_TrustPostureTestCase):
+    """Live-caught (observer, 2026-09-09) with a real Kernel: the default
+    `baseline_posture` is `"guarded"` (`guardian/config.py`), and a
+    critical health finding's default target is also `"guarded"`
+    (`health_critical_tightens_to`) -- so from a fresh boot, the very
+    first real critical health finding a running system sees tightens
+    to the level it is already at. Every existing test in this file
+    boots with `baseline_posture="trusted"` specifically so this
+    equal-levels case never comes up; none of them would have caught
+    `_tighten`'s `if self._posture.level == to: return` swallowing the
+    reason (and therefore `trust_score`) whole. This test boots with the
+    real production default instead."""
+
+    async def test_critical_health_finding_at_default_baseline_still_records_the_reason(self) -> None:
+        kernel = await self._boot(GuardianConfig())  # real defaults: mode/baseline_posture both "guarded"
+        bus = kernel.bus
+        changed = _Collector()
+        await bus.subscribe(topics.GUARDIAN_POSTURE_CHANGED, changed)
+
+        reply_before = await bus.request(Message.new(topics.GUARDIAN_POSTURE_REQUEST, source="test", payload={}))
+        self.assertEqual(reply_before.payload["trust_score"], 1.0)
+        self.assertEqual(reply_before.payload["tightened_by"], [])
+
+        await bus.publish(Message.new(
+            topics.REFLECT_HEALTH_FINDING, source="reflection",
+            payload={"severity": "critical", "detail": "valence pinned at -1.0"},
+        ))
+        await _pump()
+
+        # No level change (guarded -> guarded), so no posture-changed
+        # announcement -- that part of the old behavior is correct and
+        # stays as-is.
+        self.assertEqual(changed.messages, [])
+
+        # But the reason must not vanish: it drives `trust_score` and the
+        # `budget` command's `tightened_by` list, both read from
+        # `guardian.posture.reply` (`_on_posture_request`).
+        reply_after = await bus.request(Message.new(topics.GUARDIAN_POSTURE_REQUEST, source="test", payload={}))
+        self.assertEqual(reply_after.payload["trust_score"], 0.0)
+        self.assertEqual(len(reply_after.payload["tightened_by"]), 1)
+        self.assertIn("critical health finding", reply_after.payload["tightened_by"][0])
+
+
 if __name__ == "__main__":
     unittest.main()
