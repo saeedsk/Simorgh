@@ -712,3 +712,9 @@ completes in fewer steps and its trajectory shows the skill call.
 
 Everything in Part II has an acceptance list; treat those as the tests
 to write first.
+
+**Detailed designs** -- signatures, config fields, marker shapes,
+events/schemas, edge cases and named tests for every workstream above
+-- are in `resourcefulness-designs.md`. Its "Order of implementation"
+section supersedes D6 where they differ (it front-loads five
+cross-cutting pieces that several workstreams share).
