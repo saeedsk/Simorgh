@@ -74,6 +74,9 @@ _TOOL_NOTES: dict[str, str] = {
                         "does what you need",
     "run_script": "run a Python script with the repo importable and the network reachable -- the way "
                    "to actually USE an installed library",
+    "grant_capability": "turn an installed library callable, or an MCP server, into a tool you can "
+                         "call from now on -- recorded, gated, and revocable",
+    "revoke_capability": "take back a capability granted earlier",
     "run_python_sandboxed": "run a short Python snippet in a sandbox; no repo access",
     "run_js_sandboxed": "run a short JavaScript snippet with Node in a sandbox; no repo access",
     "apply_source_patch": "write a change to a source file",

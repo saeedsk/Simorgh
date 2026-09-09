@@ -22,3 +22,7 @@ secrets/
 # Structured data a tool fetched, written by execution/service.py so
 # `read_file` and a script can load it. Real data, not source.
 results/
+
+# Capabilities Sim granted itself (execution/grants.py). State, not
+# source: a human reads and edits it, git does not carry it.
+grants.toml

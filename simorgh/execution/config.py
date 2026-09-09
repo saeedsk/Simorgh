@@ -259,6 +259,21 @@ class Config:
     real_estate_timeout_s: float = 30.0
     real_estate_max_calls: int = 20
     real_estate_window_s: float = 3600.0
+    # -- self-granted capabilities (grants.py). The one change that
+    # widens what Sim can do to itself, so: its own file (never
+    # simorgh.toml), always the strictest Guardian tier, a module
+    # denylist for the obvious, and a daily cap.
+    grants_path: str = "grants.toml"
+    max_grants_per_day: int = 10
+    # Granting a tool over any of these hands out the machine rather
+    # than a library. Crude and deliberate -- see grants.py's docstring
+    # on what this does and does not buy.
+    grant_import_denylist: tuple[str, ...] = (
+        "os", "sys", "subprocess", "shutil", "socket", "ctypes", "importlib", "builtins",
+        "pickle", "marshal", "code", "codeop", "pty", "signal", "multiprocessing",
+        "http", "urllib", "requests", "pathlib", "glob", "tempfile", "webbrowser",
+    )
+
     # -- MCP (mcp.py's own module docstring): a human-configured, static
     # list of external tool servers. Empty by default -- Sim never adds
     # to this itself; each entry is a deliberate capability grant, same
@@ -269,6 +284,13 @@ class Config:
     # each an optional import, wrapped behind the Tool protocol so
     # Guardian still gates every call.
     external_tools: tuple[ExternalToolSpec, ...] = ()
+
+    @property
+    def grants_file(self) -> Path:
+        """Where grants live: repo-relative by default, so a sandboxed
+        copy of the repo has its own and never inherits the real one."""
+        candidate = Path(self.grants_path).expanduser()
+        return candidate if candidate.is_absolute() else self.repo_root / candidate
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":

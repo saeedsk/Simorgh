@@ -25,6 +25,14 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "web_fetch": ("read_only", True),
     "web_search": ("read_only", True),
     "render_page": ("read_only", True),
+    "grant_capability": (
+        "first line: `external` or `mcp`. Second line: a JSON object. For external, "
+        '{"import_path": "homeharvest:scrape_property", "name": "hh_scrape", "reason": "..."} '
+        "-- the callable must already be installed. For mcp, "
+        '{"name": "time", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-time"], '
+        '"read_only_tools": ["get_current_time"]}. The tool is granted at the strictest '
+        "Guardian tier and recorded; a human can revoke it."
+    ),
     "install_package": (
         "first line: `pip` or `npm`. Second line: the package name alone (optionally pinned, "
         'e.g. `homeharvest==0.8.18`), or a JSON object like {"spec": "homeharvest", '
@@ -59,6 +67,11 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # Each changes this machine and reaches the network: gated like run_shell.
     "install_package": ("irreversible", True),
     "run_script": ("irreversible", True),
+    # Widens what Sim can do to itself: always gated, never auto.
+    "grant_capability": ("irreversible", False),
+    # Only ever narrows it, so it must not need an approval it
+    # might not be able to get.
+    "revoke_capability": ("reversible", False),
     # -- MCP (execution/mcp.py's own module docstring): a human adds an
     # entry here, by the server's registered tool name
     # (`mcp_<server>_<tool>`), for every MCP tool they want the model to
@@ -105,6 +118,7 @@ _MARKER_ARG_KEY: dict[str, str] = {
     "geocode": "address",
     "find_package": "query",
     "run_script": "code",
+    "revoke_capability": "target",
     "run_python_sandboxed": "code",
     "run_js_sandboxed": "code",
     "run_tests": "target",
@@ -133,6 +147,14 @@ _MARKER_ARG_KEY: dict[str, str] = {
     # marker layer -- see the tool's own docstring.
     "propose_mcp_server": "proposal",
 }
+
+# Snapshots of the hand-written tables above, taken at import time.
+# `unregister_tool` removes only entries that were learned at
+# runtime: a revoked grant must never be able to delete `read_file`'s
+# policy or marker key on its way out.
+_TOOL_POLICY_BUILTIN = frozenset(_TOOL_POLICY)
+_MARKER_ARG_KEY_BUILTIN = frozenset(_MARKER_ARG_KEY)
+
 
 # Live-caught (the creator, real use): told to use `propose_mcp_server`,
 # the model wrote `PROPOSE_MCP_SERVER: {"name": "...", "description":
@@ -183,6 +205,7 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "git_commit": ("path", "message"),
     "search_listings": ("location", "filters"),
     "install_package": ("manager", "spec"),
+    "grant_capability": ("kind", "spec"),
 }
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
@@ -239,7 +262,7 @@ _MARKER_NO_ARGS = frozenset({"git_revert"})
 # not a JSON object is kept as the plain second string (the tool's own
 # schema then rejects it honestly), and an empty rest adds nothing at
 # all, so a bare one-line marker still works exactly as before.
-_MARKER_JSON_REST = frozenset({"search_listings", "install_package"})
+_MARKER_JSON_REST = frozenset({"search_listings", "install_package", "grant_capability"})
 
 
 def _json_rest(rest: str, second: str) -> dict:
@@ -302,6 +325,24 @@ def note_registered(name: str) -> None:
 
 def forget_registered() -> None:
     _REGISTERED.clear()
+
+
+def unregister_tool(name: str) -> None:
+    """Forget a tool Execution has withdrawn (a revoked grant, an MCP
+    server that went away).
+
+    Both halves matter: dropping it from `_REGISTERED` stops it being
+    offered, and dropping its marker key stops a stale `X_THING:` marker
+    routing to a tool that no longer exists -- which would otherwise
+    fail somewhere further down, with a worse error. The policy entry
+    goes too, so a later re-registration cannot inherit a stale
+    reversibility.
+    """
+    _REGISTERED.discard(name)
+    if name not in _MARKER_ARG_KEY_BUILTIN:
+        _MARKER_ARG_KEY.pop(name, None)
+    if name not in _TOOL_POLICY_BUILTIN:
+        _TOOL_POLICY.pop(name, None)
 
 
 def offered_tools(profile_tools: tuple[str, ...]) -> tuple[str, ...]:

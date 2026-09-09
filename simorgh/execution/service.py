@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -44,7 +45,8 @@ from .config import Config
 # The Ledger's blob-ref shape, matched here by shape rather than by
 # importing the Ledger's helper (the module-boundary rule).
 _BLOB_REF = re.compile(r"^blob:[0-9a-f]{64}$")
-from .external import load_external_tools
+from .external import adapt, load_external_tools
+from .grants import GrantCapabilityTool, GrantStore, RevokeCapabilityTool
 from .mcp import McpClient, McpServerConfig, McpToolProxy, mcp_single_arg_key
 from .tools import SkillTool, builtin_tools
 from .verifier import ApprovalVerifier
@@ -92,20 +94,7 @@ class Service:
         # the same name is never shadowed by an optional package's.
         external = load_external_tools(self._config.external_tools, logger=ctx.logger)
         for tool in builtin_tools(self._config) + self._extra_tools + external:
-            if tool.name in self._registry:
-                ctx.logger.warning("tool_name_collision", name=tool.name, provider=getattr(tool, "provider", "builtin"))
-                continue
-            self._registry[tool.name] = tool
-            await ctx.bus.publish(Message.new(
-                topics.TOOL_REGISTERED, source="execution",
-                payload={"name": tool.name, "version": "1", "description": tool.description,
-                         "read_only": tool.read_only, "reversibility": tool.reversibility,
-                         "schema_ref": "", "provider": getattr(tool, "provider", "builtin")},
-            ))
-            await ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
-                "name": tool.name, "provider": getattr(tool, "provider", "builtin"),
-                "reversibility": tool.reversibility, "read_only": tool.read_only,
-            }))
+            await self._register_tool(tool)
 
         # Skills already on disk get ANNOUNCED, not loaded. Loading stays
         # on demand by design (see
@@ -121,6 +110,15 @@ class Service:
         for server in self._config.mcp_servers:
             await self._start_mcp_server(server)
 
+        # Capabilities Sim granted itself in an earlier session, then the
+        # tools that manage them -- registered last so a grant can never
+        # shadow a builtin by racing it.
+        await self._load_grants()
+        await self._register_tool(GrantCapabilityTool(
+            self._config, register=self._register_tool, start_mcp=self._start_mcp_server))
+        await self._register_tool(RevokeCapabilityTool(
+            self._config, unregister=self._unregister_tool))
+
         await self._replay_inflight()
 
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_APPROVED, self._on_approved, group="execution"))
@@ -132,6 +130,83 @@ class Service:
         # invisible until a task tried and failed. In the background:
         # boot must not wait on a `docker info` that hangs.
         self._probe_task = asyncio.create_task(self._probe_capabilities())
+
+    async def _register_tool(self, tool, *, provider: str | None = None,
+                             marker_arg_key: str = "") -> bool:
+        """Put one tool in the registry and tell everyone, once.
+
+        Boot, MCP servers, skills and runtime grants all land here, so a
+        tool registered by any of them is announced identically -- the
+        `tool.registered` payload Orchestration learns its policy from,
+        and the `TOOLS_STREAM` entry a restart replays. Extracted when
+        grants arrived (2026-09-09): a second registration path that
+        published a slightly different payload is exactly how the MCP
+        `marker_arg_key` gap happened the first time.
+
+        False when the name is already taken -- a collision is never an
+        overwrite, so no grant can shadow a builtin.
+        """
+        if tool.name in self._registry:
+            self._ctx.logger.warning(
+                "tool_name_collision", name=tool.name,
+                provider=provider or getattr(tool, "provider", "builtin"))
+            return False
+        resolved = provider or getattr(tool, "provider", "builtin")
+        self._registry[tool.name] = tool
+        payload = {"name": tool.name, "version": "1", "description": tool.description,
+                   "read_only": tool.read_only, "reversibility": tool.reversibility,
+                   "schema_ref": "", "provider": resolved}
+        if marker_arg_key:
+            payload["marker_arg_key"] = marker_arg_key
+        await self._ctx.bus.publish(Message.new(topics.TOOL_REGISTERED, source="execution", payload=payload))
+        await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
+            "name": tool.name, "provider": resolved,
+            "reversibility": tool.reversibility, "read_only": tool.read_only,
+            **({"marker_arg_key": marker_arg_key} if marker_arg_key else {}),
+        }))
+        return True
+
+    async def _unregister_tool(self, name: str, *, reason: str) -> bool:
+        """Drop a tool from the registry and say so.
+
+        The other half of `_register_tool`: a revoked grant has to stop
+        being callable NOW, not at the next boot, and Orchestration's
+        policy table and marker map have to forget it too -- otherwise
+        a marker for a tool that no longer exists still routes and
+        fails somewhere less honest.
+        """
+        if self._registry.pop(name, None) is None:
+            return False
+        await self._ctx.bus.publish(Message.new(
+            topics.TOOL_UNAVAILABLE, source="execution",
+            payload={"name": name, "reason": reason},
+        ))
+        await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "unregistered", {
+            "name": name, "reason": reason,
+        }))
+        return True
+
+    async def _load_grants(self) -> None:
+        """Register everything Sim granted itself in an earlier session.
+
+        Failures are per-grant and never fatal: a library that has since
+        been uninstalled, or a server that will not start, must not stop
+        the Kernel booting -- the same rule a bad MCP server already
+        gets. A grant that cannot load simply is not there, and
+        `capabilities` shows it.
+        """
+        store = GrantStore(self._config.grants_file)
+        for grant in store.active():
+            try:
+                if grant.kind == "external":
+                    for tool in adapt(grant.as_external_spec()):
+                        await self._register_tool(tool, provider="external:granted",
+                                                   marker_arg_key="input")
+                elif grant.kind == "mcp":
+                    env = {key: os.environ.get(key, "") for key in grant.env_keys}
+                    await self._start_mcp_server(grant.as_mcp_config(env))
+            except Exception as exc:  # noqa: BLE001 -- a stale grant degrades, never crashes boot
+                self._ctx.logger.warning("grant_load_failed", grant=grant.id, error=repr(exc))
 
     async def _probe_capabilities(self) -> None:
         try:
@@ -173,12 +248,14 @@ class Service:
 
     # -- MCP servers (mcp.py's own module docstring: a human-configured,
     # static list -- never autonomously expanded) ---------------------------
-    async def _start_mcp_server(self, server: McpServerConfig) -> None:
+    async def _start_mcp_server(self, server: McpServerConfig) -> list[str]:
         """Start one configured MCP server and register every tool it
-        declares. Never raises: a server that fails to launch, times out,
-        or speaks a broken protocol is logged and skipped -- one
-        misconfigured server must not stop the rest of Execution (and
-        therefore the whole Kernel) from booting."""
+        declares; returns the names registered (empty when the server
+        failed, which a runtime grant needs to know). Never raises: a
+        server that fails to launch, times out, or speaks a broken
+        protocol is logged and skipped -- one misconfigured server must
+        not stop the rest of Execution (and therefore the whole Kernel)
+        from booting."""
         client = McpClient(server)
         try:
             await asyncio.wait_for(client.start(), timeout=server.timeout_s)
@@ -189,23 +266,16 @@ class Service:
             self._ctx.logger.warning("mcp_server_start_failed", server=server.name, detail=repr(exc))
             with contextlib.suppress(Exception):
                 await client.close()
-            return
+            return []
 
         self._mcp_clients.append(client)
+        registered = []
         for spec in specs:
             tool = McpToolProxy(client, server, spec)
-            self._registry[tool.name] = tool
-            await self._ctx.bus.publish(Message.new(
-                topics.TOOL_REGISTERED, source="execution",
-                payload={"name": tool.name, "version": "1", "description": tool.description,
-                         "read_only": tool.read_only, "reversibility": tool.reversibility,
-                         "schema_ref": "", "provider": "mcp",
-                         "marker_arg_key": mcp_single_arg_key(tool.args_schema)},
-            ))
-            await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
-                "name": tool.name, "provider": "mcp", "reversibility": tool.reversibility,
-                "read_only": tool.read_only, "marker_arg_key": mcp_single_arg_key(tool.args_schema),
-            }))
+            if await self._register_tool(tool, provider="mcp",
+                                          marker_arg_key=mcp_single_arg_key(tool.args_schema)):
+                registered.append(tool.name)
+        return registered
 
     async def _on_state_changed(self, message: Message) -> None:
         self._paused = message.payload["state"] in ("paused", "stopping")
