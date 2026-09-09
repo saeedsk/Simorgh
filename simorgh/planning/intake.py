@@ -34,8 +34,17 @@ class Intake:
         candidates, reflection patterns, research follow-ups), where the
         same idea genuinely does resurface in slightly different words. A
         human typing a request is authoritative: if they ask again, or
-        ask something merely similar, they get a new task, always."""
-        if origin == "human":
+        ask something merely similar, they get a new task, always.
+
+        `benchmark` is exempt for the same reason (observer, 2026-09-08,
+        GAIA deep dive): every case is a distinct, deliberately chosen
+        question, not a resurfacing idea -- but `Runner.prompt()` appends
+        the same ~330-char answer-format boilerplate to every question,
+        which alone pushed unrelated GAIA questions (e.g. Kipchoge's
+        marathon and Mercedes Sosa's albums) over this threshold, so
+        5 of 7 cases in one run silently got handed back an unrelated,
+        already-completed task_id and were never actually asked."""
+        if origin in ("human", "benchmark"):
             return None
         for tid, desc in self._store.descriptions():
             if difflib.SequenceMatcher(None, description, desc).ratio() >= self._threshold:
