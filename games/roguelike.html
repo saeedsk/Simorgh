@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Simorgh Roguelike</title>
+<style>
+  :root {
+    --bg: #0b0b12;
+    --panel: #14141d;
+    --border: #2a2a3a;
+    --text: #d8d8e8;
+    --accent: #7fd4ff;
+    --danger: #ff6b6b;
+    --gold: #ffd166;
+    --green: #7cf29c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Consolas', 'Courier New', monospace;
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+  }
+  #app {
+    display: flex;
+    gap: 16px;
+    max-width: 1200px;
+    width: 100%;
+  }
+  #left-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  h1 {
+    margin: 0 0 4px 0;
+    font-size: 20px;
+    color: var(--accent);
+    letter-spacing: 2px;
+  }
+  #subtitle {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 8px;
+  }
+  #game-canvas {
+    background: #000;
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    image-rendering: pixelated;
+  }
+  #right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 320px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .panel h2 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+  #stats-list div { display: flex; justify-content: space-between; padding: 2px 0; font-size: 13px; }
+  #stats-list span.label { color: #999; }
+  .bar-bg { background: #23232f; border-radius: 3px; height: 12px; overflow: hidden; margin: 4px 0 8px 0; border: 1px solid var(--border); }
+  .bar-fill { height: 100%; transition: width 0.2s; }
+  #hp-fill { background: linear-gradient(90deg, #d64545, #ff6b6b); }
+  #inventory-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 13px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+  #inventory-list li {
+    padding: 4px 6px;
+    border-bottom: 1px solid #1e1e28;
+    display: flex;
+    justify-content: space-between;
+  }
+  #inventory-list li:hover { background: #1c1c28; }
+  #inventory-list button {
+    background: #2a2a3a;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+    padding: 1px 6px;
+  }
+  #inventory-list button:hover { background: #3a3a4e; }
+  #log-panel {
+    flex: 1;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+  }
+  #log-list {
+    overflow-y: auto;
+    flex: 1;
+    font-size: 12px;
+    display: flex;
+    flex-direction: column-reverse;
+  }
+  #log-list div { padding: 2px 0; border-bottom: 1px dashed #1e1e28; }
+  .log-dmg { color: var(--danger); }
+  .log-heal { color: var(--green); }
+  .log-info { color: #999; }
+  .log-gold { color: var(--gold); }
+  .log-level { color: var(--accent); font-weight: bold; }
+  #controls-hint {
+    font-size: 11px;
+    color: #777;
+    line-height: 1.6;
+  }
+  #controls-hint b { color: var(--accent); }
+  #overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 10;
+  }
+  #overlay.show { display: flex; }
+  #overlay h1 { font-size: 42px; color: var(--danger); margin-bottom: 10px; }
+  #overlay p { font-size: 18px; color: var(--text); margin: 4px 0; }
+  #overlay button {
+    margin-top: 20px;
+    background: var(--accent);
+    color: #06060a;
+    border: none;
+    border-radius: 4px;
+    padding: 10px 24px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  #overlay button:hover { opacity: 0.85; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="left-col">
+    <h1>SIMORGH ROGUELIKE</h1>
+    <div id="subtitle">A procedurally generated dungeon crawl. Descend as deep as you dare.</div>
+    <canvas id="game-canvas" width="640" height="480"></canvas>
+    <div class="panel" id="controls-hint">
+      Move / attack: <b>Arrow Keys</b> or <b>WASD</b> &nbsp;|&nbsp;
+      Wait: <b>Space</b> &nbsp;|&nbsp;
+      Use potion: click inventory item
+    </div>
+  </div>
+  <div id="right-col">
+    <div class="panel" id="stats-panel">
+      <h2>Character</h2>
+      <div id="stats-list">
+        <div><span class="label">Level Depth</span><span id="stat-depth">1</span></div>
+        <div><span class="label">HP</span><span id="stat-hp">10 / 10</span></div>
+      </div>
+      <div class="bar-bg"><div class="bar-fill" id="hp-fill" style="width:100%"></div></div>
+      <div id="stats-list">
+        <div><span class="label">Attack</span><span id="stat-atk">2</span></div>
+        <div><span class="label">Defense</span><span id="stat-def">0</span></div>
+        <div><span class="label">Gold</span><span id="stat-gold">0</span></div>
+        <div><span class="label">Turn</span><span id="stat-turn">0</span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Inventory</h2>
+      <ul id="inventory-list"></ul>
+    </div>
+    <div class="panel log-panel" id="log-panel">
+      <h2>Log</h2>
+      <div id="log-list"></div>
+    </div>
+  </div>
+</div>
+
+<div id="overlay">
+  <h1>YOU DIED</h1>
+  <p id="overlay-depth">You reached dungeon depth 1.</p>
+  <p id="overlay-turns">Survived 0 turns.</p>
+  <button id="restart-btn">Descend Again</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Configuration ----------
+  const TILE = 20;
+  const MAP_W = 32;
+  const MAP_H = 24;
+  const CANVAS_W = MAP_W * TILE;
+  const CANVAS_H = MAP_H * TILE;
+
+  const TILE_WALL = 0;
+  const TILE_FLOOR = 1;
+  const TILE_STAIRS = 2;
+
+  const canvas = document.getElementById('game-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
+
+  const logList = document.getElementById('log-list');
+  const invList = document.getElementById('inventory-list');
+  const overlay = document.getElementById('overlay');
+
+  // ---------- RNG helpers ----------
+  function randInt(min, max) { // inclusive
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+  function choice(arr) { return arr[randInt(0, arr.length - 1)]; }
+  function chance(p) { return Math.random() < p; }
+
+  // ---------- Enemy type definitions ----------
+  // Behaviors: 'chase', 'flee_low_hp', 'caller'
+  const ENEMY_TYPES = [
+    {
+      key: 'rat', name: 'Giant Rat', glyph: 'r', color: '#a9825c',
+      baseHp: 5, baseAtk: 1, baseDef: 0, behavior: 'chase', xp: 3, speed: 1
+    },
+    {
+      key: 'goblin', name: 'Goblin', glyph: 'g', color: '#7cc36b',
+      baseHp: 9, baseAtk: 3, baseDef: 1, behavior: 'chase', xp: 6, speed: 1
+    },
+    {
+      key: 'kobold', name: 'Kobold Coward', glyph: 'k', color: '#e0c15c',
+      baseHp: 7, baseAtk: 2, baseDef: 0, behavior: 'flee_low_hp', xp: 5, speed: 1
+    },
+    {
+      key: 'shaman', name: 'Goblin Shaman', glyph: 's', color: '#c66bd6',
+      baseHp: 8, baseAtk: 2, baseDef: 0, behavior: 'caller', xp: 8, speed: 1,
+      callRange: 6
+    },
+    {
+      key: 'orc', name: 'Orc Brute', glyph: 'O', color: '#d64545',
+      baseHp: 16, baseAtk: 5, baseDef: 2, behavior: 'chase', xp: 12, speed: 1
+    },
+    {
+      key: 'wraith', name: 'Wraith', glyph: 'W', color: '#9aa8ff',
+      baseHp: 12, baseAtk: 4, baseDef: 1, behavior: 'chase', xp: 14, speed: 1
+    }
+  ];
+
+  // ---------- Item definitions ----------
+  const ITEM_TYPES = {
+    potion: { name: 'Health Potion', glyph: '!', color: '#ff6b6b' },
+    weapon: { name: 'Weapon', glyph: '/', color: '#ffd166' },
+    armor: { name: 'Armor Scrap', glyph: ']', color: '#7fd4ff' },
+    gold: { name: 'Gold', glyph: '$', color: '#ffd166' }
+  };
+
+  const WEAPON_NAMES = ['Rusty Dagger', 'Short Sword', 'Battle Axe', 'War Hammer', 'Steel Blade', 'Cursed Rapier'];
+  const ARMOR_NAMES = ['Leather Scrap', 'Chainmail Patch', 'Iron Plate', 'Bone Shield'];
+
+  // ---------- Global game state ----------
+  let state = null; // set in newGame
+
+  function log(msg, cls) {
+    const div = document.createElement('div');
+    div.textContent = msg;
+    if (cls) div.className = cls;
+    logList.appendChild(div);
+    // cap log length
+    while (logList.children.length > 200) logList.removeChild(logList.firstChild);
+    logList.scrollTop = 0; // column-reverse means newest at bottom visually? we'll just leave scroll natural
+  }
+
+  // ---------- Dungeon generation ----------
+  function makeGrid(w, h, fill) {
+    const g = [];
+    for (let y = 0; y < h; y++) {
+      const row = [];
+      for (let x = 0; x < w; x++) row.push(fill);
+      g.push(row);
+    }
+    return g;
+  }
+
+  function generateDungeon(depth) {
+    const grid = makeGrid(MAP_W, MAP_H, TILE_WALL);
+    const rooms = [];
+    const maxRooms = 10 + Math.min(depth, 6);
+    const minSize = 4;
+    const maxSize = 8;
+
+    for (let i = 0; i < maxRooms; i++) {
+      const w = randInt(minSize, maxSize);
+      const h = randInt(minSize, maxSize);
+      const x = randInt(1, MAP_W - w - 2);
+      const y = randInt(1, MAP_H - h - 2);
+      const newRoom = { x, y, w, h };
+
+      let overlaps = false;
+      for (const r of rooms) {
+        if (
+          newRoom.x <= r.x + r.w + 1 && newRoom.x + newRoom.w + 1 >= r.x &&
+          newRoom.y <= r.y + r.h + 1 && newRoom.y + newRoom.h + 1 >= r.y
+        ) { overlaps = true; break; }
+      }
+      if (overlaps) continue;
+
+      // carve room
+      for (let ry = y; ry < y + h; ry++) {
+        for (let rx = x; rx < x + w; rx++) {
+          grid[ry][rx] = TILE_FLOOR;
+        }
+      }
+
+      if (rooms.length > 0) {
+        const prev = rooms[rooms.length - 1];
+        const cx1 = Math.floor(prev.x + prev.w / 2);
+        const cy1 = Math.floor(prev.y + prev.h / 2);
+        const cx2 = Math.floor(newRoom.x + newRoom.w / 2);
+        const cy2 = Math.floor(newRoom.y + newRoom.h / 2);
+        if (chance(0.5)) {
+          carveHTunnel(grid, cx1, cx2, cy1);
+          carveVTunnel(grid, cy1, cy2, cx2);
+        } else {
+          carveVTunnel(grid, cy1, cy2, cx1);
+          carveHTunnel(grid, cx1, cx2, cy2);
+        }
+      }
+
+      rooms.push(newRoom);
+    }
+
+    // stairs down in the last room
+    const stairsRoom = rooms[rooms.length - 1];
+    const stairsX = Math.floor(stairsRoom.x + stairsRoom.w / 2);
+    const stairsY = Math.floor(stairsRoom.y + stairsRoom.h / 2);
+    grid[stairsY][stairsX] = TILE_STAIRS;
+
+    return { grid, rooms, stairs: { x: stairsX, y: stairsY } };
+  }
+
+  function carveHTunnel(grid, x1, x2, y) {
+    const start = Math.min(x1, x2);
+    const end = Math.max(x1, x2);
+    for (let x = start; x <= end; x++) {
+      if (grid[y][x] === TILE_WALL) grid[y][x] = TILE_FLOOR;
+    }
+  }
+  function carveVTunnel(grid, y1, y2, x) {
+    const start = Math.min(y1, y2);
+    const end = Math.max(y1, y2);
+    for (let y = start; y <= end; y++) {
+      if (grid[y][x] === TILE_WALL) grid[y][x] = TILE_FLOOR;
+    }
+  }
+
+  function isWalkable(grid, x, y) {
+    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return false;
+    return grid[y][x] !== TILE_WALL;
+  }
+
+  function randomFloorTile(grid, rooms, excludeRoomIdx) {
+    let room;
+    let tries = 0;
+    do {
+      room = choice(rooms);
+      tries++;
+    } while (tries < 20 && excludeRoomIdx !== undefined && rooms.indexOf(room) === excludeRoomIdx);
+    const x = randInt(room.x, room.x + room.w - 1);
+    const y = randInt(room.y, room.y + room.h - 1);
+    return { x, y };
+  }
+
+  // ---------- Entity creation ----------
+  function spawnEnemies(depth, grid, rooms, playerStart) {
+    const enemies = [];
+    const count = 4 + Math.min(depth * 2, 14);
+    // difficulty scaling: pick from a pool weighted by depth
+    const pool = ENEMY_TYPES.filter(t => {
+      if (t.key === 'orc' || t.key === 'wraith') return depth >= 2;
+      return true;
+    });
+
+    for (let i = 0; i < count; i++) {
+      const type = choice(pool);
+      let pos;
+      let tries = 0;
+      do {
+        pos = randomFloorTile(grid, rooms);
+        tries++;
+      } while (tries < 30 && Math.abs(pos.x - playerStart.x) + Math.abs(pos.y - playerStart.y) < 5);
+
+      const hpMul = 1 + (depth - 1) * 0.25;
+      const atkMul = 1 + (depth - 1) * 0.18;
+      enemies.push({
+        id: 'e' + i + '_' + depth + '_' + Math.random().toString(36).slice(2, 7),
+        type: type.key,
+        name: type.name,
+        glyph: type.glyph,
+        color: type.color,
+        x: pos.x, y: pos.y,
+        hp: Math.round(type.baseHp * hpMul),
+        maxHp: Math.round(type.baseHp * hpMul),
+        atk: Math.max(1, Math.round(type.baseAtk * atkMul)),
+        def: type.baseDef,
+        behavior: type.behavior,
+        callRange: type.callRange || 0,
+        xp: type.xp,
+        alerted: false
+      });
+    }
+    return enemies;
+  }
+
+  function spawnItems(depth, grid, rooms) {
+    const items = [];
+    const count = 5 + Math.min(depth, 6);
+    for (let i = 0; i < count; i++) {
+      const pos = randomFloorTile(grid, rooms);
+      const roll = Math.random();
+      let item;
+      if (roll < 0.45) {
+        item = { kind: 'potion', x: pos.x, y: pos.y, heal: randInt(4, 8) };
+      } else if (roll < 0.7) {
+        item = {
+          kind: 'weapon', x: pos.x, y: pos.y,
+          name: choice(WEAPON_NAMES), atkBonus: randInt(1, 3) + Math.floor(depth / 2)
+        };
+      } else if (roll < 0.88) {
+        item = {
+          kind: 'armor', x: pos.x, y: pos.y,
+          name: choice(ARMOR_NAMES), defBonus: randInt(1, 2)
+        };
+      } else {
+        item = { kind: 'gold', x: pos.x, y: pos.y, amount: randInt(5, 15) * depth };
+      }
+      items.push(item);
+    }
+    return items;
+  }
+
+  // ---------- Game state setup ----------
+  function newGame() {
+    overlay.classList.remove('show');
+    logList.innerHTML = '';
+    state = {
+      depth: 1,
+      turn: 0,
+      player: {
+        x: 0, y: 0,
+        hp: 20, maxHp: 20,
+        baseAtk: 3, weaponBonus: 0,
+        baseDef: 0, armorBonus: 0,
+        gold: 0,
+        weaponName: 'Fists',
+        armorName: 'None',
+        inventory: [] // {kind, name, heal/atkBonus/defBonus, id}
+      },
+      grid: null,
+      rooms: null,
+      stairs: null,
+      enemies: [],
+      items: [],
+      gameOver: false
+    };
+    generateLevel(1);
+    log('You descend into the dungeon. Depth 1.', 'log-level');
+    render();
+  }
+
+  function generateLevel(depth) {
+    const dungeon = generateDungeon(depth);
+    state.grid = dungeon.grid;
+    state.rooms = dungeon.rooms;
+    state.stairs = dungeon.stairs;
+
+    const startRoom = dungeon.rooms[0];
+    state.player.x = Math.floor(startRoom.x + startRoom.w / 2);
+    state.player.y = Math.floor(startRoom.y + startRoom.h / 2);
+
+    state.enemies = spawnEnemies(depth, state.grid, state.rooms, state.player);
+    state.items = spawnItems(depth, state.grid, state.rooms);
+    state.depth = depth;
+  }
+
+  // ---------- Combat ----------
+  function playerAttack(enemy) {
+    const atk = state.player.baseAtk + state.player.weaponBonus;
+    const dmg = Math.max(1, atk - enemy.def + randInt(-1, 1));
+    enemy.hp -= dmg;
+    log(`You hit the ${enemy.name} for ${dmg} damage.`, 'log-dmg');
+    if (enemy.hp <= 0) {
+      log(`The ${enemy.name} dies!`, 'log-info');
+      state.enemies = state.enemies.filter(e => e !== enemy);
+      // small chance of gold drop
+      if (chance(0.3)) {
+        const g = randInt(2, 8) * state.depth;
+        state.player.gold += g;
+        log(`You find ${g} gold on its corpse.`, 'log-gold');
+      }
+    }
+  }
+
+  function enemyAttack(enemy) {
+    const def = state.player.baseDef + state.player.armorBonus;
+    const dmg = Math.max(1, enemy.atk - def + randInt(-1, 1));
+    state.player.hp -= dmg;
+    log(`The ${enemy.name} hits you for ${dmg} damage.`, 'log-dmg');
+    if (state.player.hp <= 0) {
+      state.player.hp = 0;
+      endGame();
+    }
+  }
+
+  // ---------- Movement / turn logic ----------
+  function tryMovePlayer(dx, dy) {
+    if (state.gameOver) return;
+    const nx = state.player.x + dx;
+    const ny = state.player.y + dy;
+
+    // check enemy at target -> attack
+    const target = state.enemies.find(e => e.x === nx && e.y === ny);
+    if (target) {
+      playerAttack(target);
+      endPlayerTurn();
+      return;
+    }
+
+    if (!isWalkable(state.grid, nx, ny)) {
+      return; // bump into wall, doesn't consume a turn
+    }
+
+    state.player.x = nx;
+    state.player.y = ny;
+
+    // pickup item
+    const itemIdx = state.items.findIndex(it => it.x === nx && it.y === ny);
+    if (itemIdx >= 0) {
+      pickupItem(state.items[itemIdx]);
+      state.items.splice(itemIdx, 1);
+    }
+
+    // check stairs
+    if (state.grid[ny][nx] === TILE_STAIRS) {
+      log(`You descend the stairs into deeper darkness...`, 'log-level');
+      generateLevel(state.depth + 1);
+      log(`Depth ${state.depth}.`, 'log-level');
+      endPlayerTurn(true);
+      return;
+    }
+
+    endPlayerTurn();
+  }
+
+  function waitTurn() {
+    if (state.gameOver) return;
+    endPlayerTurn();
+  }
+
+  function pickupItem(item) {
+    if (item.kind === 'gold') {
+      state.player.gold += item.amount;
+      log(`You pick up ${item.amount} gold.`, 'log-gold');
+      return;
+    }
+    const id = 'i' + Math.random().toString(36).slice(2, 9);
+    if (item.kind === 'potion') {
+      state.player.inventory.push({ id, kind: 'potion', name: `Health Potion (+${item.heal})`, heal: item.heal });
+      log(`You pick up a Health Potion.`, 'log-info');
+    } else if (item.kind === 'weapon') {
+      state.player.inventory.push({ id, kind: 'weapon', name: `${item.name} (+${item.atkBonus} atk)`, atkBonus: item.atkBonus });
+      log(`You pick up a ${item.name}.`, 'log-info');
+    } else if (item.kind === 'armor') {
+      state.player.inventory.push({ id, kind: 'armor', name: `${item.name} (+${item.defBonus} def)`, defBonus: item.defBonus });
+      log(`You pick up ${item.name}.`, 'log-info');
+    }
+  }
+
+  function useItem(id) {
+    if (state.gameOver) return;
+    const idx = state.player.inventory.findIndex(i => i.id === id);
+    if (idx < 0) return;
+    const item = state.player.inventory[idx];
+    if (item.kind === 'potion') {
+      const healAmt = Math.min(item.heal, state.player.maxHp - state.player.hp);
+      state.player.hp += healAmt;
+      log(`You drink a potion and heal ${healAmt} HP.`, 'log-heal');
+      state.player.inventory.splice(idx, 1);
+      endPlayerTurn();
+    } else if (item.kind === 'weapon') {
+      const old = state.player.weaponName;
+      state.player.weaponBonus = item.atkBonus;
+      state.player.weaponName = item.name.replace(/\s*\(\+\d+ atk\)/, '');
+      log(`You equip ${state.player.weaponName}, replacing ${old}.`, 'log-info');
+      state.player.inventory.splice(idx, 1);
+    } else if (item.kind === 'armor') {
+      const old = state.player.armorName;
+      state.player.armorBonus = item.defBonus;
+      state.player.armorName = item.name.replace(/\s*\(\+\d+ def\)/, '');
+      log(`You equip ${state.player.armorName}, replacing ${old}.`, 'log-info');
+      state.player.inventory.splice(idx, 1);
+    }
+    render();
+  }
+
+  function endPlayerTurn(skipEnemyTurn) {
+    state.turn++;
+    if (!skipEnemyTurn) {
+      runEnemyTurns();
+    }
+    render();
+  }
+
+  function dist(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
+
+  function runEnemyTurns() {
+    if (state.gameOver) return;
+    // snapshot list because it can shrink (enemy dies mid-turn is not possible here, only player dies)
+    for (const enemy of state.enemies.slice()) {
+      if (state.gameOver) return;
+      if (!state.enemies.includes(enemy)) continue; // safety
+
+      const d = dist(enemy, state.player);
+      if (d <= 8) enemy.alerted = true;
+      if (!enemy.alerted) continue;
+
+      if (enemy.behavior === 'caller' && d <= (enemy.callRange || 6)) {
+        // alert nearby allies
+        for (const other of state.enemies) {
+          if (other !== enemy && dist(other, enemy) <= 4 && !other.alerted) {
+            other.alerted = true;
+          }
+        }
+      }
+
+      let moveDx = 0, moveDy = 0;
+      const wantFlee = enemy.behavior === 'flee_low_hp' && enemy.hp <= enemy.maxHp * 0.3;
+
+      if (d === 1) {
+        // adjacent: attack unless fleeing
+        if (wantFlee) {
+          moveDx = enemy.x - state.player.x > 0 ? 1 : (enemy.x - state.player.x < 0 ? -1 : 0);
+          moveDy = enemy.y - state.player.y > 0 ? 1 : (enemy.y - state.player.y < 0 ? -1 : 0);
+        } else {
+          enemyAttack(enemy);
+          if (state.gameOver) return;
+          continue;
+        }
+      } else {
+        // move toward or away from player
+        const dxSign = state.player.x - enemy.x;
+        const dySign = state.player.y - enemy.y;
+        const stepX = dxSign > 0 ? 1 : (dxSign < 0 ? -1 : 0);
+        const stepY = dySign > 0 ? 1 : (dySign < 0 ? -1 : 0);
+        if (wantFlee) {
+          moveDx = -stepX;
+          moveDy = -stepY;
+        } else {
+          moveDx = stepX;
+          moveDy = stepY;
+        }
+      }
+
+      // try move in the preferred axis, fallback to other axis, else stay
+      const candidates = [];
+      if (moveDx !== 0) candidates.push([moveDx, 0]);
+      if (moveDy !== 0) candidates.push([0, moveDy]);
+      // shuffle so it isn't purely x-biased
+      if (candidates.length === 2 && chance(0.5)) candidates.reverse();
+
+      let moved = false;
+      for (const [cdx, cdy] of candidates) {
+        const nx = enemy.x + cdx;
+        const ny = enemy.y + cdy;
+        if (!isWalkable(state.grid, nx, ny)) continue;
+        if (nx === state.player.x && ny === state.player.y) continue; // don't step onto player tile (attack handled at d===1)
+        if (state.enemies.some(o => o !== enemy && o.x === nx && o.y === ny)) continue;
+        enemy.x = nx; enemy.y = ny;
+        moved = true;
+        break;
+      }
+      // if didn't move and not adjacent, nothing happens (no message spam)
+    }
+  }
+
+  function endGame() {
+    state.gameOver = true;
+    log('You have died.', 'log-dmg');
+    document.getElementById('overlay-depth').textContent = `You reached dungeon depth ${state.depth}.`;
+    document.getElementById('overlay-turns').textContent = `Survived ${state.turn} turns with ${state.player.gold} gold.`;
+    overlay.classList.add('show');
+  }
+
+  // ---------- Rendering ----------
+  function render() {
+    // clear
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    // draw tiles
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        const t = state.grid[y][x];
+        if (t === TILE_WALL) continue;
+        let color = t === TILE_STAIRS ? '#3a3a1a' : '#1c1c26';
+        ctx.fillStyle = color;
+        ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+        ctx.strokeStyle = '#101018';
+        ctx.strokeRect(x * TILE, y * TILE, TILE, TILE);
+        if (t === TILE_STAIRS) {
+          ctx.fillStyle = '#ffd166';
+          ctx.font = 'bold 16px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('>', x * TILE + TILE / 2, y * TILE + TILE / 2 + 1);
+        }
+      }
+    }
+
+    // items
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const item of state.items) {
+      const def = ITEM_TYPES[item.kind];
+      ctx.fillStyle = def.color;
+      ctx.fillText(def.glyph, item.x * TILE + TILE / 2, item.y * TILE + TILE / 2 + 1);
+    }
+
+    // enemies
+    ctx.font = 'bold 15px monospace';
+    for (const enemy of state.enemies) {
+      ctx.fillStyle = enemy.color;
+      ctx.fillText(enemy.glyph, enemy.x * TILE + TILE / 2, enemy.y * TILE + TILE / 2 + 1);
+      // hp bar above
+      const barW = TILE - 4;
+      const pct = Math.max(0, enemy.hp / enemy.maxHp);
+      ctx.fillStyle = '#331111';
+      ctx.fillRect(enemy.x * TILE + 2, enemy.y * TILE - 3, barW, 3);
+      ctx.fillStyle = pct > 0.5 ? '#7cf29c' : (pct > 0.25 ? '#ffd166' : '#ff6b6b');
+      ctx.fillRect(enemy.x * TILE + 2, enemy.y * TILE - 3, barW * pct, 3);
+    }
+
+    // player
+    ctx.fillStyle = '#7fd4ff';
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText('@', state.player.x * TILE + TILE / 2, state.player.y * TILE + TILE / 2 + 1);
+
+    renderHud();
+  }
+
+  function renderHud() {
+    document.getElementById('stat-depth').textContent = state.depth;
+    document.getElementById('stat-hp').textContent = `${Math.max(0, state.player.hp)} / ${state.player.maxHp}`;
+    document.getElementById('stat-atk').textContent = `${state.player.baseAtk + state.player.weaponBonus} (${state.player.weaponName})`;
+    document.getElementById('stat-def').textContent = `${state.player.baseDef + state.player.armorBonus} (${state.player.armorName})`;
+    document.getElementById('stat-gold').textContent = state.player.gold;
+    document.getElementById('stat-turn').textContent = state.turn;
+
+    const pct = Math.max(0, state.player.hp / state.player.maxHp) * 100;
+    document.getElementById('hp-fill').style.width = pct + '%';
+
+    // inventory
+    invList.innerHTML = '';
+    if (state.player.inventory.length === 0) {
+      const li = document.createElement('li');
+      li.textContent = '(empty)';
+      li.style.color = '#666';
+      invList.appendChild(li);
+    }
+    for (const item of state.player.inventory) {
+      const li = document.createElement('li');
+      const span = document.createElement('span');
+      span.textContent = item.name;
+      li.appendChild(span);
+      const btn = document.createElement('button');
+      btn.textContent = item.kind === 'potion' ? 'Drink' : 'Equip';
+      btn.addEventListener('click', () => useItem(item.id));
+      li.appendChild(btn);
+      invList.appendChild(li);
+    }
+  }
+
+  // ---------- Input ----------
+  const KEY_MOVES = {
+    ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+    w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0],
+    W: [0, -1], S: [0, 1], A: [-1, 0], D: [1, 0]
+  };
+
+  window.addEventListener('keydown', (e) => {
+    if (state.gameOver) return;
+    if (KEY_MOVES[e.key]) {
+      e.preventDefault();
+      const [dx, dy] = KEY_MOVES[e.key];
+      tryMovePlayer(dx, dy);
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      waitTurn();
+    }
+  });
+
+  document.getElementById('restart-btn').addEventListener('click', newGame);
+
+  // ---------- Start ----------
+  newGame();
+})();
+</script>
+</body>
+</html>
