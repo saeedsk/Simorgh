@@ -11,6 +11,7 @@ See 16 section 12 Q4/Q5 and this package's README "Not done this session".
 
 from __future__ import annotations
 
+import json
 import re
 
 # (reversibility, network) per known tool name -- conservative default
@@ -86,7 +87,6 @@ _MARKER_ARG_KEY: dict[str, str] = {
     "web_fetch": "url",
     "web_search": "query",
     "render_page": "target",
-    "search_listings": "location",
     "geocode": "address",
     "run_python_sandboxed": "code",
     "run_js_sandboxed": "code",
@@ -164,6 +164,7 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "apply_source_patch": ("subject", "code"),
     "apply_skill": ("subject", "code"),
     "git_commit": ("path", "message"),
+    "search_listings": ("location", "filters"),
 }
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
@@ -191,6 +192,13 @@ _MARKER_ARG_HINT.update({
         "every line after the marker is the Python program, and nothing else -- "
         "no explanation before or after it. Example:\nRUN_PYTHON_SANDBOXED:\nprint(2 + 2)\n"
     ),
+    "search_listings": (
+        "first line: the location only (e.g. `San Jose, CA 95120`). Every following "
+        "line, optional: a JSON object of filters, e.g. "
+        '{"zip_code": "95120", "min_sqft": 1500, "max_price": 2500000}. '
+        "Do NOT put filters in the first line as prose -- the whole line is read as "
+        "the location and will match nothing."
+    ),
     "run_js_sandboxed": (
         "every line after the marker is the JavaScript program, run with Node, and nothing else -- "
         "no explanation before or after it. Example:\nRUN_JS_SANDBOXED:\nconsole.log(2 + 2)\n"
@@ -198,6 +206,36 @@ _MARKER_ARG_HINT.update({
 })
 # Tools whose marker takes no argument at all.
 _MARKER_NO_ARGS = frozenset({"git_revert"})
+# Two-part markers whose SECOND part is a JSON object of extra arguments,
+# merged into `args`, rather than one more string.
+#
+# A single-string marker can only ever carry one meaningful value, so a
+# tool with real options had nowhere to put them. Live-caught 2026-09-09
+# (second 95120 trial): the model wrote `SEARCH_LISTINGS: San Jose, CA
+# 95120 for sale, price filter 1000000 to 4000000, single family` -- the
+# whole sentence became `location`, the source matched nothing, and two
+# steps were spent on zero results. Now the first line is the one
+# required argument and the rest is `{"zip_code": "95120", ...}`.
+#
+# Degrading gracefully matters more than strictness here: a rest that is
+# not a JSON object is kept as the plain second string (the tool's own
+# schema then rejects it honestly), and an empty rest adds nothing at
+# all, so a bare one-line marker still works exactly as before.
+_MARKER_JSON_REST = frozenset({"search_listings"})
+
+
+def _json_rest(rest: str, second: str) -> dict:
+    stripped = (rest or "").strip()
+    if not stripped:
+        return {}
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+    return {second: rest}
 
 # Filled at runtime from Execution's `tool.registered` announcements
 # (`orchestration/service.py::_on_tool_registered`) -- MCP servers,
@@ -350,6 +388,8 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
             if second == "code":
                 rest = _strip_code_fence(rest)
             args = {first: head.strip(), second: rest}
+            if tool in _MARKER_JSON_REST:
+                args = {first: head.strip(), **_json_rest(rest, second)}
         elif tool in _MARKER_NO_ARGS:
             args = {}
         elif tool in _MARKER_ARG_KEY:

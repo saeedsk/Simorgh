@@ -138,3 +138,40 @@ class TestAnHonestNoOpIsNotForcedToRunTheSuite(unittest.TestCase):
     def test_no_write_tool_at_all_does_not_apply(self) -> None:
         req = _request("patch", [_step("read_file")])
         self.assertFalse(FullSuiteRanCheck().applies(req))
+
+
+class TestOnlyPythonChangesNeedThePythonSuite(unittest.IsolatedAsyncioTestCase):
+    """Live-caught 2026-09-09, second 95120 trial: a task whose whole
+    product was one `.html` page wrote it, ran `run_tests` on the page
+    itself (a pytest usage error), and blocked here demanding a suite
+    run that could not have said anything about an HTML file. The page
+    was correct and finished; it was left uncommitted.
+
+    A `.py` change still needs the suite -- that is the bug this check
+    exists to catch, and it is unchanged.
+    """
+
+    def _req(self, written: list[str]) -> VerifyRequest:
+        return VerifyRequest(
+            verification_id="v1", task_id="t1", kind="task",
+            subject={"kind": "patch", "description": "d", "result": "done", "complete_log": True,
+                     "steps": [_step("apply_source_patch"), _step("git_commit")],
+                     "written_paths": written, "subject": ""},
+        )
+
+    def test_an_html_only_task_is_not_asked_for_a_python_suite_run(self):
+        self.assertFalse(FullSuiteRanCheck().applies(self._req(["docs/games/real_estate.html"])))
+
+    def test_a_python_change_still_needs_it(self):
+        self.assertTrue(FullSuiteRanCheck().applies(self._req(["simorgh/execution/tools.py"])))
+
+    def test_a_mixed_change_still_needs_it(self):
+        self.assertTrue(FullSuiteRanCheck().applies(self._req(["docs/x.html", "simorgh/y.py"])))
+
+    def test_an_absent_written_paths_field_keeps_the_old_conservative_behaviour(self):
+        req = VerifyRequest(
+            verification_id="v1", task_id="t1", kind="task",
+            subject={"kind": "patch", "description": "d", "result": "done", "complete_log": True,
+                     "steps": [_step("apply_source_patch")]},
+        )
+        self.assertTrue(FullSuiteRanCheck().applies(req))

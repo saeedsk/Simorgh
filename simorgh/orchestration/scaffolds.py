@@ -34,7 +34,8 @@ _TOOL_NOTES: dict[str, str] = {
     "web_fetch": "fetch a URL; HTML comes back as text and a PDF as its text",
     "render_page": "load a URL or repo-local file in a real headless browser; "
                     "reports title, visible text, JS errors, and failed network requests",
-    "search_listings": "search real, current for-sale property listings by location, with price/sqft filters "
+    "search_listings": "search real, current for-sale property listings: first line the location, then "
+                        "optional JSON filters like {\"zip_code\": \"95120\", \"max_price\": 2500000} "
                         "(unofficial data source -- see the tool's own disclaimer)",
     "geocode": "turn a free-text address into latitude/longitude",
     "run_python_sandboxed": "run a short Python snippet in a sandbox; no repo access",

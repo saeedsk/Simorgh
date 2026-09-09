@@ -204,6 +204,32 @@ class TestRunTestsTool(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.ok)
         self.assertIn("exit_code", result.error)
 
+    async def test_a_non_python_target_reports_nothing_to_run_not_a_failure(self):
+        """Live-caught 2026-09-09, second 95120 trial: told to run its
+        tests, Sim called `run_tests` on the .html page it had just
+        written. pytest exits 4 (usage error, not 5), the tool reported
+        a failing suite, FullSuiteRanCheck then demanded the whole
+        suite, and the task blocked with a correct page uncommitted."""
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "page.html").write_text("<html><body>hi</body></html>")
+        result = await RunTestsTool(self.config).run(
+            {"target": "docs/page.html"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok, result.error)
+        self.assertIn("nothing was run", result.output)
+        self.assertIn("run_tests with no target", result.output)
+        self.assertTrue(result.metadata["no_tests_collected"])
+
+    async def test_a_real_usage_error_on_a_python_target_is_still_a_failure(self):
+        # Exit 4 only reads as "nothing to run" when the target really is
+        # not Python. A broken conftest under a Python path must not be
+        # laundered into a pass.
+        (self.root / "tests" / "conftest.py").write_text("import nonexistent_module_xyz\n")
+        result = await RunTestsTool(self.config).run(
+            {"target": "tests/test_sample.py"}, ctx=_ctx(self.config),
+        )
+        self.assertFalse(result.ok)
+
     async def test_never_touches_the_real_working_tree(self):
         # A run that (hypothetically) tried to write into the repo would
         # write into the isolated copy, not `self.root` -- prove the
