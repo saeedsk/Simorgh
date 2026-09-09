@@ -60,6 +60,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # this class of mistake is unreachable through the default path; the
 # explicit check in `fast_copy_repo` covers a caller who overrides it.
 DEFAULT_WORKSPACE_ROOT = Path(tempfile.gettempdir()) / "simorgh-observers"
+# Findings live under a SEPARATE root from sandboxes, deliberately.
+# Sandboxes are disposable and meant to be deleted once a wave finishes
+# -- large, and a real 20-agent wave used 10 GB of them. Findings are
+# the opposite: small, durable, and the entire point of running the
+# wave. Putting both under one parent was a real mistake, made and
+# caught the same day it landed: a wave finished, its sandboxes were
+# deleted to reclaim disk (an entirely reasonable cleanup), and that
+# `rm -rf` on the shared parent took the wave's whole findings file
+# with it. A system temp directory is legitimately swept by disk
+# pressure and by exactly this kind of cleanup; a cache directory under
+# the user's home is not, and is where this now lives instead.
+FINDINGS_ROOT = Path.home() / ".cache" / "simorgh-observer-findings"
 
 # Directories an observer's sandbox never needs and that make a real
 # copy needlessly slow when the fast path isn't available: build
@@ -166,7 +178,7 @@ class Finding:
 
 
 def _findings_path(run_id: str) -> Path:
-    out = DEFAULT_WORKSPACE_ROOT / "findings" / f"{run_id}.jsonl"
+    out = FINDINGS_ROOT / f"{run_id}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
     return out
 

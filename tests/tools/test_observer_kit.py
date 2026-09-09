@@ -70,21 +70,26 @@ class TestAgentWorkspace(unittest.TestCase):
 
 
 class TestFindingsRoundTrip(unittest.TestCase):
-    """Findings live under `DEFAULT_WORKSPACE_ROOT`, not `REPO_ROOT` --
-    both are outside the repo on purpose (see the module docstring), so
-    this patches the one `_findings_path` actually reads. Each test uses
-    its own freshly generated run id rather than a literal like "r1":
-    the store is a real append-only file on disk, and a repeated literal
+    """Findings live under `FINDINGS_ROOT`, a directory SEPARATE from
+    `DEFAULT_WORKSPACE_ROOT` (sandboxes) and from `REPO_ROOT` -- this
+    patches the one `_findings_path` actually reads. Each test uses its
+    own freshly generated run id rather than a literal like "r1": the
+    store is a real append-only file on disk, and a repeated literal
     would silently accumulate across test runs instead of catching a
     real mixing bug.
+
+    The separation from `DEFAULT_WORKSPACE_ROOT` is itself load-bearing,
+    not cosmetic: they used to share one parent, and the first real wave
+    lost its entire findings file to an ordinary `rm -rf` of finished
+    sandboxes (2026-09-08) -- see `TestFindingsSurviveSandboxCleanup`.
     """
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self._orig_root = kit.DEFAULT_WORKSPACE_ROOT
-        kit.DEFAULT_WORKSPACE_ROOT = Path(self._tmp.name)
-        self.addCleanup(lambda: setattr(kit, "DEFAULT_WORKSPACE_ROOT", self._orig_root))
+        self._orig_root = kit.FINDINGS_ROOT
+        kit.FINDINGS_ROOT = Path(self._tmp.name)
+        self.addCleanup(lambda: setattr(kit, "FINDINGS_ROOT", self._orig_root))
 
     def test_a_recorded_finding_is_loadable(self) -> None:
         run_id = kit.new_run_id("test")
@@ -104,6 +109,54 @@ class TestFindingsRoundTrip(unittest.TestCase):
         kit.record_finding("obs-2", "blocker", "b", run_id=run_b)
         self.assertEqual(len(kit.load_findings(run_a)), 1)
         self.assertEqual(len(kit.load_findings(run_b)), 1)
+
+
+class TestFindingsSurviveSandboxCleanup(unittest.TestCase):
+    """The exact mistake made and caught 2026-09-08: wave 5 finished,
+    its 20 sandboxes (10 GB) were deleted to reclaim disk -- an entirely
+    ordinary cleanup -- and that `rm -rf` on `DEFAULT_WORKSPACE_ROOT`
+    took the whole findings file with it, because `record_finding` used
+    to write under that same directory. Every finding from the wave was
+    gone, recoverable only by re-reading each observer's own final
+    report by hand.
+
+    `FINDINGS_ROOT` now lives under the user's cache directory,
+    deliberately outside `DEFAULT_WORKSPACE_ROOT`. This test proves the
+    property that actually matters: deleting every sandbox a wave
+    created must never touch its findings.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._orig_findings = kit.FINDINGS_ROOT
+        self._orig_workspace = kit.DEFAULT_WORKSPACE_ROOT
+        kit.FINDINGS_ROOT = Path(self._tmp.name) / "findings"
+        kit.DEFAULT_WORKSPACE_ROOT = Path(self._tmp.name) / "sandboxes"
+        self.addCleanup(lambda: setattr(kit, "FINDINGS_ROOT", self._orig_findings))
+        self.addCleanup(lambda: setattr(kit, "DEFAULT_WORKSPACE_ROOT", self._orig_workspace))
+
+    def test_deleting_every_sandbox_leaves_findings_intact(self) -> None:
+        import shutil
+
+        run_id = kit.new_run_id("cleanup-test")
+        for i in range(3):
+            kit.agent_workspace(f"obs-{i}")  # creates a real dir under DEFAULT_WORKSPACE_ROOT
+            kit.record_finding(f"obs-{i}", "blocker", f"finding {i}", run_id=run_id)
+
+        self.assertTrue(kit.DEFAULT_WORKSPACE_ROOT.is_dir())
+        shutil.rmtree(kit.DEFAULT_WORKSPACE_ROOT)  # the ordinary end-of-wave cleanup
+
+        loaded = kit.load_findings(run_id)
+        self.assertEqual(len(loaded), 3, "a wave's findings must outlive its own sandboxes")
+
+    def test_the_two_roots_are_never_the_same_directory_or_nested(self) -> None:
+        """The structural property, not just this one scenario: neither
+        root may contain the other, by construction, on any machine."""
+        findings, workspace = kit.FINDINGS_ROOT.resolve(), kit.DEFAULT_WORKSPACE_ROOT.resolve()
+        self.assertNotEqual(findings, workspace)
+        self.assertNotIn(findings, workspace.parents)
+        self.assertNotIn(workspace, findings.parents)
 
 
 class TestClusteringDedupesRealObserverOverlap(unittest.TestCase):

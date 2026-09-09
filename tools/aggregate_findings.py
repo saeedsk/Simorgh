@@ -29,7 +29,7 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # `tools/` is not a package
-from observer_kit import DEFAULT_WORKSPACE_ROOT, Finding, load_findings  # noqa: E402
+from observer_kit import FINDINGS_ROOT, Finding, load_findings  # noqa: E402
 
 _SEVERITY_ORDER = {"blocker": 0, "degraded": 1, "cosmetic": 2}
 _WORD = re.compile(r"[a-z0-9]+")
@@ -88,10 +88,9 @@ def render(clusters: list[dict]) -> str:
 
 
 def _list_runs() -> list[str]:
-    base = DEFAULT_WORKSPACE_ROOT / "findings"
-    if not base.exists():
+    if not FINDINGS_ROOT.exists():
         return []
-    return sorted(p.stem for p in base.glob("*.jsonl"))
+    return sorted(p.stem for p in FINDINGS_ROOT.glob("*.jsonl"))
 
 
 def main(argv: list[str] | None = None) -> int:
