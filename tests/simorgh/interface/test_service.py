@@ -437,6 +437,88 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health.status, "ok")
 
 
+class PostureSeedTestCase(unittest.IsolatedAsyncioTestCase):
+    """Live-caught (observer, 2026-09-08): `VitalsCache.on_guardian_posture`
+    only ever ran off `guardian.posture.changed`, which Guardian publishes
+    only on an actual tighten/loosen -- never once at boot. A fresh,
+    perfectly healthy, untightened boot therefore showed `posture:
+    unknown` in the vitals line of `status`/`vitals` forever, right next
+    to `status`'s *other* posture line (a live `guardian.posture.request`)
+    correctly saying `guarded` -- the same panel contradicting itself.
+    `Service.start` now fires one best-effort `guardian.posture.request`
+    to seed the cache (fired, not awaited, same reasoning as
+    `_seed_activity`: a missing Guardian must never hold `start()`)."""
+
+    async def test_start_seeds_vitals_posture_from_a_live_guardian_query(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        clock = FakeClock()
+        ledger = make_ledger({"backend": "memory"}, clock=clock.now)
+        await ledger.start()
+        self.addAsyncCleanup(ledger.stop)
+        backend = make_backend(BusConfig(backend="memory"), clock=clock.now)
+        bus = make_client(backend, source="interface", ledger=ledger, clock=clock.now)
+        await bus.start()
+        self.addAsyncCleanup(bus.stop)
+        guardian = make_client(backend, source="guardian", ledger=ledger, clock=clock.now)
+        await guardian.start()
+        self.addAsyncCleanup(guardian.stop)
+
+        async def _posture_responder(message: Message) -> None:
+            await guardian.reply(message, type=topics.GUARDIAN_POSTURE_REPLY, payload={
+                "mode": "guarded", "trust_score": 1.0, "tightened_by": [],
+            })
+
+        # Subscribed before `start()`, exactly as Guardian (an earlier
+        # boot layer, kernel/registry.py) is already up before Interface.
+        posture_sub = await guardian.subscribe(topics.GUARDIAN_POSTURE_REQUEST, _posture_responder)
+        self.addAsyncCleanup(posture_sub.unsubscribe)
+
+        ctx = Context(
+            name="interface", instance_id="", run_id="test", mode="single",
+            bus=bus, ledger=ledger, config={}, secrets={}, clock=clock,
+            logger=_Logger(), data_dir=Path(tmp.name) / "data",
+        )
+        service = Service(InterfaceConfig(), run_repl=False)
+        await service.start(ctx)
+        self.addAsyncCleanup(service.stop)
+
+        self.assertEqual(service.vitals.snapshot().posture, "unknown")  # honest until the reply lands
+        for _ in range(200):
+            if service.vitals.snapshot().posture != "unknown":
+                break
+            await asyncio.sleep(0.01)
+        self.assertEqual(service.vitals.snapshot().posture, "guarded")
+
+    async def test_start_never_blocks_when_nobody_answers_the_posture_query(self):
+        """No Guardian responder at all: `start()` must return promptly
+        (fired, not awaited) and the cache must stay honestly `unknown`,
+        never fabricate or hang."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        clock = FakeClock()
+        ledger = make_ledger({"backend": "memory"}, clock=clock.now)
+        await ledger.start()
+        self.addAsyncCleanup(ledger.stop)
+        backend = make_backend(BusConfig(backend="memory"), clock=clock.now)
+        bus = make_client(backend, source="interface", ledger=ledger, clock=clock.now)
+        await bus.start()
+        self.addAsyncCleanup(bus.stop)
+
+        ctx = Context(
+            name="interface", instance_id="", run_id="test", mode="single",
+            bus=bus, ledger=ledger, config={}, secrets={}, clock=clock,
+            logger=_Logger(), data_dir=Path(tmp.name) / "data",
+        )
+        service = Service(InterfaceConfig(), run_repl=False)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await service.start(ctx)
+        self.addAsyncCleanup(service.stop)
+        self.assertLess(loop.time() - started, 1.0, "start() waited on the posture query instead of firing it")
+        self.assertEqual(service.vitals.snapshot().posture, "unknown")
+
+
 class ReplThreadOrderingTestCase(unittest.IsolatedAsyncioTestCase):
     """Live-caught (the creator's own real use, via a real terminal):
     `_repl_main` used to schedule each line's handling with
