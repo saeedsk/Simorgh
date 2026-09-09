@@ -992,8 +992,26 @@ class Service:
                     "green" if record.status == "completed" else "yellow", enabled=self._color,
                 ))
             if watched:
-                self._watched_tasks.discard(task_id)
-                self._turn_started.pop(task_id, None)
+                # `task.blocked` (planning/service.py::_retry_or_block) is
+                # never the last word on a task: it is the ONLY event that
+                # publisher emits for an attempt Planning is about to retry
+                # with a fresh budget on this same task_id (the terminal
+                # give-up case is a *different* topic, `task.failed` with
+                # `terminal: true`). Saying "task <id> ended blocked" here
+                # reads as final when it is not, and discarding the task
+                # from `_watched_tasks` made it worse: the retry's own
+                # steps and its eventual answer fell through to
+                # `_narrate_autonomous` (a truncated one-line summary,
+                # capped to fit the terminal width) instead of this
+                # personalised "finished" block with the model's real,
+                # untruncated answer -- so a human who typed `improve ...`
+                # and watched it get blocked would see their own request's
+                # real completion rendered as though it were someone else's
+                # unrelated background task (observer, 2026-09-08).
+                retrying = message.type == topics.TASK_BLOCKED
+                if not retrying:
+                    self._watched_tasks.discard(task_id)
+                    self._turn_started.pop(task_id, None)
                 # Only a COMPLETED task has an answer. A blocked or
                 # failed one has a `result_summary` too -- and when the
                 # claims guard rejects a fabrication, that summary IS
@@ -1010,7 +1028,14 @@ class Service:
                 # colour.
                 finished = record.status == "completed"
                 reply_text = p.get("result_summary", "") if finished else ""
-                what = "finished" if finished else f"ended {record.status}"
+                if retrying:
+                    retry_after = p.get("retry_after")
+                    when = f" in {retry_after:.0f}s" if isinstance(retry_after, (int, float)) else ""
+                    what = f"blocked -- retrying{when}"
+                elif finished:
+                    what = "finished"
+                else:
+                    what = f"ended {record.status}"
                 header = render_mod.notice(
                     "info" if finished else "warn", f"task {task_id} {what}", "orchestration",
                     enabled=self._color,
