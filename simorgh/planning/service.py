@@ -492,13 +492,37 @@ class Service:
                 await self._maybe_reground_then_available(dependent)
 
     async def _propagate_failure(self, task_id: str) -> None:
-        for dep_id in dag.dependents_of(task_id, self._store.index.tasks):
-            dependent = self._store.index.tasks.get(dep_id)
-            if dependent is None or dependent.status in (COMPLETED, FAILED):
-                continue
-            await self._store.record_dependency_event(dep_id, satisfied_by=None, failed_by=task_id)
-            if dependent.status != BLOCKED:
-                await self._store.transition(dep_id, BLOCKED, note=f"dependency_failed:{task_id}")
+        """Blocks every downstream task, not just the failed task's
+        immediate dependents. `dag.dependents_of` is one hop; a chain
+        A -> B -> C (C depends only on B, not directly on A) needs a walk
+        over the whole downstream closure, or C -- whose only dependency
+        just went BLOCKED and will now never complete -- is left PENDING
+        forever with `dag.is_ready` perpetually false and nothing ever
+        transitioning it out. Live-reproduced with a real Kernel
+        (observer, 2026-09-08): A failed terminally, B correctly went
+        BLOCKED, and C sat PENDING with no note and no further event,
+        indistinguishable from a task legitimately still waiting on live
+        work. BFS rather than recursion: a diamond that re-converges
+        (C depends on both A and B) must not be visited, and blocked,
+        twice."""
+        queue = [task_id]
+        seen = {task_id}
+        while queue:
+            failed_id = queue.pop(0)
+            for dep_id in dag.dependents_of(failed_id, self._store.index.tasks):
+                if dep_id in seen:
+                    continue
+                seen.add(dep_id)
+                dependent = self._store.index.tasks.get(dep_id)
+                if dependent is None or dependent.status in (COMPLETED, FAILED):
+                    continue
+                await self._store.record_dependency_event(dep_id, satisfied_by=None, failed_by=failed_id)
+                if dependent.status != BLOCKED:
+                    await self._store.transition(dep_id, BLOCKED, note=f"dependency_failed:{failed_id}")
+                # This dependent is now BLOCKED and will never COMPLETE,
+                # so anything depending on IT must be blocked too --
+                # queue it for the same treatment.
+                queue.append(dep_id)
 
     # -- re-grounding (spec section 5.5) ---------------------------------------------
 
