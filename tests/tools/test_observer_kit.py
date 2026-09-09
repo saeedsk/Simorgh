@@ -123,6 +123,40 @@ class TestPruneStaleWorkspaces(unittest.TestCase):
     def test_a_missing_root_is_a_no_op(self) -> None:
         self.assertEqual(kit.prune_stale_workspaces(root=self.root / "does-not-exist"), [])
 
+    def test_recent_activity_deep_inside_keeps_an_old_looking_workspace_alive(self) -> None:
+        """The real 2026-09-08 incident: a workspace directory's own
+        mtime is set once at `mkdir` time and never updated again --
+        creating its `repo/` subdirectory doesn't touch it, and neither
+        does any file changed deep inside afterward. An agent's sandbox
+        with hours of real, ongoing work (commits, edits) looked
+        exactly as "old" by that measure as one nobody had touched
+        since creation, and got deleted out from under a still-running
+        agent. Staleness must be judged by the newest mtime ANYWHERE
+        under the workspace, not the workspace directory's own."""
+        workspace = self.root / "w1-01-aaaa"
+        (workspace / "repo" / "simorgh").mkdir(parents=True)
+        self._age(workspace, 3600)  # the workspace dir itself looks old
+        recent_file = workspace / "repo" / "simorgh" / "fix.py"
+        recent_file.write_text("real work in progress")  # freshly modified just now
+        removed = kit.prune_stale_workspaces(root=self.root, min_age_seconds=1800)
+        self.assertEqual(removed, [])
+        self.assertTrue(workspace.exists())
+
+    def test_genuinely_stale_activity_deep_inside_is_still_removed(self) -> None:
+        workspace = self.root / "w1-01-bbbb"
+        repo = workspace / "repo"
+        nested = repo / "simorgh"
+        nested.mkdir(parents=True)
+        old_file = nested / "old.py"
+        old_file.write_text("old")
+        self._age(old_file, 3600)
+        self._age(nested, 3600)
+        self._age(repo, 3600)
+        self._age(workspace, 3600)
+        removed = kit.prune_stale_workspaces(root=self.root, min_age_seconds=1800)
+        self.assertEqual(removed, [workspace])
+        self.assertFalse(workspace.exists())
+
 
 class TestFindingsRoundTrip(unittest.TestCase):
     """Findings live under `FINDINGS_ROOT`, a directory SEPARATE from

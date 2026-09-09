@@ -156,11 +156,24 @@ def prune_stale_workspaces(
     can never take a wave's findings with it -- see `FINDINGS_ROOT`'s
     own docstring for the incident that made that separation mandatory.
 
-    Only directories older than `min_age_seconds` (by mtime) are
+    Only directories with no activity in the last `min_age_seconds` are
     removed, and `keep_prefix` (typically the wave about to be staged)
     is always spared -- both guard against pruning a sandbox some other
     concurrently-running wave is still actively using. Returns the
     paths actually removed, for the caller to log.
+
+    "No activity" is the newest mtime of ANY file anywhere under the
+    workspace directory, not the workspace directory's own mtime. A
+    real incident (2026-09-08) found the difference matters: a
+    workspace dir's own mtime is set once at `mkdir` time
+    (`agent_workspace()`) and never updated again -- creating its
+    `repo/` subdirectory doesn't touch it, and neither does any file
+    changed deep inside `repo/` afterward, including every commit an
+    agent makes there. That made a workspace look "stale" the moment
+    it crossed `min_age_seconds` in wall-clock age, regardless of
+    whether an agent was still actively working in it -- an agent
+    running a real trial suite (tens of minutes) had its own sandbox,
+    with a fix not yet committed, deleted out from under it mid-run.
     """
     root = Path(root) if root is not None else DEFAULT_WORKSPACE_ROOT
     if not root.is_dir():
@@ -173,13 +186,32 @@ def prune_stale_workspaces(
         if keep_prefix and entry.name.startswith(keep_prefix):
             continue
         try:
-            if entry.stat().st_mtime >= cutoff:
+            if _newest_mtime_under(entry) >= cutoff:
                 continue
         except OSError:
             continue
         shutil.rmtree(entry, ignore_errors=True)
         removed.append(entry)
     return removed
+
+
+def _newest_mtime_under(path: Path) -> float:
+    """The most recent mtime of `path` itself or anything under it --
+    real activity, not just "when was this directory created." See
+    `prune_stale_workspaces`'s docstring for why the directory's own
+    mtime alone is not enough."""
+    newest = path.stat().st_mtime
+    for dirpath, _dirnames, filenames in os.walk(path):
+        try:
+            newest = max(newest, os.stat(dirpath).st_mtime)
+        except OSError:
+            continue
+        for name in filenames:
+            try:
+                newest = max(newest, os.stat(os.path.join(dirpath, name)).st_mtime)
+            except OSError:
+                continue
+    return newest
 
 
 def agent_workspace(name: str, *, parent: Path | None = None) -> Path:
