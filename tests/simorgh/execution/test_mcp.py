@@ -15,6 +15,7 @@ from simorgh.execution.mcp import (
     McpServerConfig,
     McpToolProxy,
     McpTransportError,
+    mcp_single_arg_key,
     mcp_tool_name,
 )
 
@@ -200,6 +201,28 @@ class TestMcpToolProxy(unittest.IsolatedAsyncioTestCase):
         result = await proxy.run({"query": "x"}, ctx=self._ctx())
         self.assertFalse(result.ok)
         self.assertIn("mcp call failed", result.error)
+
+
+class TestMcpSingleArgKey(unittest.TestCase):
+    """`mcp_single_arg_key` -- the marker-remap inference that closes the
+    gap `TestMcpServerWiring` (`execution/test_service.py`) exercises
+    end-to-end: without it, a brand-new MCP tool's `tool.registered`
+    never carried a `marker_arg_key`, so a marker-driven call to it
+    always arrived as `{"argument": ...}` no matter what the tool's real
+    schema needed."""
+
+    def test_a_single_property_schema_gives_that_propertys_name(self):
+        schema = {"type": "object", "required": ["expression"], "properties": {"expression": {"type": "string"}}}
+        self.assertEqual(mcp_single_arg_key(schema), "expression")
+
+    def test_a_multi_property_schema_gives_none(self):
+        schema = {"type": "object", "properties": {"table": {"type": "string"}, "filter": {"type": "string"}}}
+        self.assertIsNone(mcp_single_arg_key(schema))
+
+    def test_an_empty_or_missing_schema_gives_none(self):
+        self.assertIsNone(mcp_single_arg_key({"type": "object", "properties": {}}))
+        self.assertIsNone(mcp_single_arg_key({}))
+        self.assertIsNone(mcp_single_arg_key(None))
 
 
 if __name__ == "__main__":

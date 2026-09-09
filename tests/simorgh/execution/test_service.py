@@ -322,6 +322,57 @@ class TestMcpServerWiring(_ExecutionServiceTestCase):
         self.assertEqual(health.status, "degraded")
         self.assertIn("broken", health.detail)
 
+    async def test_tool_registered_carries_a_marker_arg_key_for_a_single_field_schema(self):
+        """Live-caught (`execution/mcp.py::mcp_single_arg_key`'s own
+        docstring): before this, an MCP tool's `tool.registered` never
+        carried `marker_arg_key` at all -- only a skill's did -- so
+        `orchestration/tools.py::register_tool_policy` had nothing to
+        record for a brand-new server, and every marker-driven call to
+        it arrived as `{"argument": ...}` against a schema with no such
+        property. A real end-to-end repro (a stub server requiring
+        `expression`) failed with "missing required field 'expression'"
+        until this fix."""
+        server = McpServerConfig(name="calc", command="fake-calc")
+        tools = [{"name": "calc", "description": "d",
+                  "inputSchema": {"type": "object", "required": ["expression"],
+                                   "properties": {"expression": {"type": "string"}}}}]
+        seen: list[dict] = []
+        real_publish = self.bus.publish
+
+        async def _spy_publish(message):
+            if message.type == topics.TOOL_REGISTERED:
+                seen.append(message.payload)
+            return await real_publish(message)
+
+        with unittest.mock.patch("simorgh.execution.service.McpClient", lambda s: _FakeMcpClient(s, tools=tools)), \
+             unittest.mock.patch.object(self.bus, "publish", side_effect=_spy_publish):
+            await self._boot(config=ExecutionConfig(repo_root=self.root, mcp_servers=(server,)))
+        payload = next(p for p in seen if p.get("name") == "mcp_calc_calc")
+        self.assertEqual(payload.get("marker_arg_key"), "expression")
+
+    async def test_tool_registered_omits_marker_arg_key_for_a_multi_field_schema(self):
+        """The marker layer is genuinely single-argument -- a schema with
+        more than one property has no single "raw text" slot to infer,
+        so this stays `None` and needs a human's hand-written
+        `_MARKER_ARG_KEY` entry, same as before this fix."""
+        server = McpServerConfig(name="db", command="fake-db")
+        tools = [{"name": "query", "description": "d",
+                  "inputSchema": {"type": "object", "properties": {
+                      "table": {"type": "string"}, "filter": {"type": "string"}}}}]
+        seen: list[dict] = []
+        real_publish = self.bus.publish
+
+        async def _spy_publish(message):
+            if message.type == topics.TOOL_REGISTERED:
+                seen.append(message.payload)
+            return await real_publish(message)
+
+        with unittest.mock.patch("simorgh.execution.service.McpClient", lambda s: _FakeMcpClient(s, tools=tools)), \
+             unittest.mock.patch.object(self.bus, "publish", side_effect=_spy_publish):
+            await self._boot(config=ExecutionConfig(repo_root=self.root, mcp_servers=(server,)))
+        payload = next(p for p in seen if p.get("name") == "mcp_db_query")
+        self.assertIsNone(payload.get("marker_arg_key"))
+
     async def test_one_broken_server_does_not_block_a_working_one(self):
         broken = McpServerConfig(name="broken", command="does-not-exist")
         working = McpServerConfig(name="search", command="fake-search")
