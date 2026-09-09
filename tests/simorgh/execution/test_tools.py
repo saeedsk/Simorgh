@@ -971,3 +971,17 @@ class TestWebFetchOnAPdf(unittest.IsolatedAsyncioTestCase):
         result = await tool.run({"url": "https://example.com/"}, ctx=self._ctx())
         self.assertTrue(result.ok)
         self.assertNotEqual(result.metadata.get("kind"), "pdf")
+
+
+class TestWriteScopeRefusalNamesTheScopes(unittest.IsolatedAsyncioTestCase):
+    """A bare "outside the writable scope" taught the model nothing, so
+    when it guessed the scopes wrong it had no way to find out."""
+
+    async def test_the_refusal_lists_where_it_could_have_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Config(repo_root=Path(tmp))
+            result = await ApplySourcePatchTool(config).run(
+                {"subject": "nowhere/x.py", "code": "x = 1\n"}, ctx=_ctx(config))
+        self.assertFalse(result.ok)
+        for scope in config.write_scopes_source:
+            self.assertIn(scope, result.error)

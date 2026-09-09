@@ -303,3 +303,33 @@ class TestJsonRestMarkers(unittest.TestCase):
         )
         self.assertEqual(payload["reversibility"], "read_only")
         self.assertTrue(payload["scope"]["network"])
+
+
+class TestTheWriteScopeHintIsTrue(unittest.TestCase):
+    """Live-caught 2026-09-09, the final acceptance trial: asked to
+    write `docs/games/x.html`, Sim said "apply_source_patch only writes
+    under src/ or simorgh/, so I'll use run_shell with a heredoc" and
+    routed a perfectly legal write through the broadest tool it has.
+
+    It was not guessing -- it was repeating this hint, which named
+    `src/` (the retired v1 tree, deliberately NOT writable since
+    2026-09-08) and omitted `docs/`, `tests/`, `tools/` and
+    `simorgh_skills/`, all of which are. A prompt that misinforms is
+    worse than a prompt that says nothing.
+    """
+
+    def test_the_hint_names_the_real_write_scopes(self):
+        from simorgh.execution.config import Config
+        from simorgh.orchestration.tools import marker_hint
+
+        hint = marker_hint("apply_source_patch") or ""
+        for scope in Config().write_scopes_source:
+            self.assertIn(scope, hint, f"{scope} is writable but the hint does not say so")
+
+    def test_the_hint_does_not_claim_src_is_writable(self):
+        from simorgh.execution.config import Config
+        from simorgh.orchestration.tools import marker_hint
+
+        self.assertNotIn("src/", Config().write_scopes_source)
+        hint = marker_hint("apply_source_patch") or ""
+        self.assertIn("NOT src/", hint)

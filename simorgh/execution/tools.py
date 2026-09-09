@@ -1088,12 +1088,21 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
     not one")."""
     subject = subject.replace("\\", "/")
     if ".." in Path(subject).parts or not pathsafety.in_write_scope(subject, write_scopes=write_scopes):
-        return ToolResult(ok=False, error=f"refused: {subject!r} is outside the writable scope")
+        # Name them. A bare "outside the writable scope" taught the
+        # model nothing, and on 2026-09-09 it guessed the scopes wrong
+        # in the other direction -- believing only src/ and simorgh/
+        # were writable, it routed a perfectly legal docs/ write through
+        # run_shell, the broadest tool it has, rather than ask.
+        return ToolResult(
+            ok=False,
+            error=f"refused: {subject!r} is outside the writable scope ({', '.join(write_scopes)})")
     target = (config.repo_root / subject).resolve()
     scope_ok = any((config.repo_root / s).resolve() in target.parents or (config.repo_root / s).resolve() == target.parent
                     for s in write_scopes)
     if not scope_ok:
-        return ToolResult(ok=False, error=f"refused: {subject!r} resolves outside the writable scope")
+        return ToolResult(
+            ok=False,
+            error=f"refused: {subject!r} resolves outside the writable scope ({', '.join(write_scopes)})")
     problem = _python_syntax_problem(subject, code)
     if problem is not None:
         # Refusing beats writing a broken file, and the model gets a real
@@ -1308,7 +1317,9 @@ class GitDiscardTool:
             return ToolResult(ok=False, error="refused: name the path to discard")
         scopes = self._config.write_scopes_source + self._config.write_scopes_skills
         if ".." in Path(subject).parts or not pathsafety.in_write_scope(subject, write_scopes=scopes):
-            return ToolResult(ok=False, error=f"refused: {subject!r} is outside the writable scope")
+            return ToolResult(
+                ok=False,
+                error=f"refused: {subject!r} is outside the writable scope ({', '.join(scopes)})")
         root = self._config.repo_root
         run = lambda cmd: subprocess.run(  # noqa: E731
             cmd, cwd=root, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
