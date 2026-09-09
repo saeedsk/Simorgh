@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Match</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #1e1e2f 0%, #2d2b55 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #eee;
+  }
+  h1 {
+    margin-bottom: 8px;
+    font-weight: 600;
+    letter-spacing: 2px;
+  }
+  .status {
+    margin-bottom: 20px;
+    font-size: 1.1rem;
+    color: #b8b8d4;
+  }
+  .status strong { color: #ffd76e; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 100px);
+    grid-gap: 14px;
+    margin-bottom: 24px;
+  }
+  .card {
+    width: 100px;
+    height: 100px;
+    perspective: 800px;
+    cursor: pointer;
+  }
+  .card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+    transition: transform 0.45s cubic-bezier(0.4, 0.2, 0.2, 1);
+  }
+  .card.flipped .card-inner,
+  .card.solved .card-inner {
+    transform: rotateY(180deg);
+  }
+  .card-face {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 44px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+  }
+  .card-back {
+    background: linear-gradient(145deg, #4a4e8f, #34386e);
+    border: 2px solid #5a5fa8;
+  }
+  .card-back::after {
+    content: '?';
+    color: rgba(255,255,255,0.25);
+    font-size: 40px;
+    font-weight: bold;
+  }
+  .card-front {
+    background: linear-gradient(145deg, #f5f6ff, #dcdff5);
+    transform: rotateY(180deg);
+    border: 2px solid #c3c8ec;
+  }
+  .card.solved .card-front {
+    background: linear-gradient(145deg, #d9f7e0, #b7ecc8);
+    border-color: #86d9a0;
+  }
+  .card.solved { cursor: default; }
+  button {
+    background: #ffd76e;
+    color: #2d2b55;
+    border: none;
+    padding: 10px 28px;
+    border-radius: 24px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 215, 110, 0.4);
+  }
+  .win-message {
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 20, 35, 0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+  .win-message.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .win-message h2 {
+    font-size: 2.6rem;
+    color: #ffd76e;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  }
+  .win-message p { font-size: 1.3rem; }
+</style>
+</head>
+<body>
+  <h1>Memory Match</h1>
+  <div class="status">Moves: <strong id="moves">0</strong> &nbsp;|&nbsp; Pairs: <strong id="pairs">0</strong>/8</div>
+  <div class="grid" id="grid"></div>
+  <button id="restart">Restart Game</button>
+  <div class="win-message" id="winMessage">
+    <h2>You win!</h2>
+    <p id="winText"></p>
+    <button id="playAgain">Play Again</button>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  var EMOJIS = ['🌟', '🍀', '🎈', '🦊', '🌵', '🍉', '🚀', '🎧'];
+  var grid = document.getElementById('grid');
+  var movesEl = document.getElementById('moves');
+  var pairsEl = document.getElementById('pairs');
+  var winMessage = document.getElementById('winMessage');
+  var winText = document.getElementById('winText');
+
+  var firstCard = null;
+  var lockBoard = false;
+  var moves = 0;
+  var matchedPairs = 0;
+
+  function shuffle(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  function createCard(emoji) {
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.emoji = emoji;
+
+    var inner = document.createElement('div');
+    inner.className = 'card-inner';
+
+    var back = document.createElement('div');
+    back.className = 'card-face card-back';
+
+    var front = document.createElement('div');
+    front.className = 'card-face card-front';
+    front.textContent = emoji;
+
+    inner.appendChild(back);
+    inner.appendChild(front);
+    card.appendChild(inner);
+
+    card.addEventListener('click', function () { onCardClick(card); });
+    return card;
+  }
+
+  function onCardClick(card) {
+    if (lockBoard) return;
+    if (card.classList.contains('flipped') || card.classList.contains('solved')) return;
+
+    card.classList.add('flipped');
+
+    if (!firstCard) {
+      firstCard = card;
+      return;
+    }
+
+    // Second card flipped
+    moves++;
+    movesEl.textContent = moves;
+
+    if (firstCard.dataset.emoji === card.dataset.emoji) {
+      firstCard.classList.add('solved');
+      card.classList.add('solved');
+      firstCard.classList.remove('flipped');
+      card.classList.remove('flipped');
+      firstCard = null;
+      matchedPairs++;
+      pairsEl.textContent = matchedPairs;
+      if (matchedPairs === 8) {
+        setTimeout(function () {
+          winText.textContent = 'You found all 8 pairs in ' + moves + ' moves!';
+          winMessage.classList.add('show');
+        }, 500);
+      }
+    } else {
+      lockBoard = true;
+      var a = firstCard, b = card;
+      firstCard = null;
+      setTimeout(function () {
+        a.classList.remove('flipped');
+        b.classList.remove('flipped');
+        lockBoard = false;
+      }, 900);
+    }
+  }
+
+  function newGame() {
+    moves = 0;
+    matchedPairs = 0;
+    firstCard = null;
+    lockBoard = false;
+    movesEl.textContent = '0';
+    pairsEl.textContent = '0';
+    winMessage.classList.remove('show');
+    grid.innerHTML = '';
+    shuffle(EMOJIS.concat(EMOJIS)).forEach(function (emoji) {
+      grid.appendChild(createCard(emoji));
+    });
+  }
+
+  document.getElementById('restart').addEventListener('click', newGame);
+  document.getElementById('playAgain').addEventListener('click', newGame);
+
+  newGame();
+})();
+</script>
+</body>
+</html>
