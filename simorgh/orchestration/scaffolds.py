@@ -24,6 +24,37 @@ from __future__ import annotations
 from .api import Profile
 from .tools import offered_tools
 
+# Filled at runtime from `capability.probed` (execution/capabilities.py),
+# via `orchestration/service.py`. Module-level for the same reason
+# `tools.py::register_tool_policy` is: the consumer is a pure render
+# function several layers below the subscription, and threading a
+# callable through Service -> Worker -> SessionRunner to deliver one
+# optional line of prompt text is more machinery than the fact is
+# worth. Empty in every test that does not set it, so nothing is
+# said unless a probe actually failed.
+_UNAVAILABLE: dict[str, tuple[str, tuple[str, ...]]] = {}
+
+
+def note_capability(name: str, *, ok: bool, detail: str, tools: tuple[str, ...] | list[str]) -> None:
+    if ok:
+        _UNAVAILABLE.pop(name, None)
+        return
+    _UNAVAILABLE[name] = (detail, tuple(tools))
+
+
+def unavailable_note(offered: tuple[str, ...] | list[str]) -> str:
+    """What to tell the model about tools it is being offered that are
+    known not to work right now. Empty when there is nothing to say --
+    the common case, and it must cost nothing in the prompt."""
+    lines = []
+    for detail, tools in _UNAVAILABLE.values():
+        affected = [t for t in tools if t in offered]
+        if affected:
+            lines.append(f"- {', '.join(affected)}: not working in this session ({detail})")
+    if not lines:
+        return ""
+    return "Do not spend steps on these:\n" + "\n".join(lines)
+
 _TOOL_NOTES: dict[str, str] = {
     "self_map": "ask your own world model what real subsystems/files make you up -- the authoritative "
                 "answer for questions about your own code or architecture; simorgh/ is what runs, src/ is retired v1",
@@ -55,6 +86,39 @@ _TOOL_NOTES: dict[str, str] = {
     "propose_mcp_server": "propose a new MCP server to the human",
     "draft_candidate": "draft a change without applying it",
 }
+
+# A compact index of keyless data sources, generated into the RESEARCH
+# scaffold rather than written twice: `docs/sourcebook.md` is the full
+# table with example URLs, and a test asserts every name here appears
+# there, so the prompt and the doc cannot drift apart.
+#
+# The failure this prevents (2026-09-09): asked for real data, Sim
+# answered "no API is configured". Most public data needs no key, and
+# nothing in the prompt had ever said so.
+_KEYLESS_SOURCES: tuple[tuple[str, str], ...] = (
+    ("weather, forecast and history", "api.open-meteo.com"),
+    ("places, addresses and map data", "the geocode tool, nominatim.openstreetmap.org, overpass-api.de"),
+    ("earthquakes", "earthquake.usgs.gov"),
+    ("encyclopedia and structured facts", "en.wikipedia.org/api/rest_v1, wikidata.org"),
+    ("papers", "export.arxiv.org, api.semanticscholar.org"),
+    ("packages", "the find_package tool"),
+    ("repositories", "api.github.com (60/h without a token)"),
+    ("company filings", "data.sec.gov"),
+    ("census and demographics", "api.census.gov"),
+    ("currency rates", "open.er-api.com"),
+    ("news and discussion", "hacker-news.firebaseio.com, reddit .json URLs"),
+    ("for-sale property listings", "the search_listings tool"),
+)
+
+
+def keyless_sources_block() -> str:
+    lines = [f"- {what}: {where}" for what, where in _KEYLESS_SOURCES]
+    return (
+        "Most public data needs no API key. Before concluding that something cannot be "
+        "fetched, try one of these -- web_fetch returns a JSON body untouched, and "
+        "docs/sourcebook.md has the exact URLs:\n" + "\n".join(lines)
+    )
+
 
 _PATCH = """\
 You are changing your own source. Work in this order and do not stop early:
@@ -102,6 +166,7 @@ Answer the question from evidence you actually gathered. Read or fetch
 before you conclude. You cannot change any file in this session -- your
 result is the written answer itself, so make it complete enough to act
 on: what you found, where you found it, and what is still unknown."""
+_RESEARCH = _RESEARCH + "\n\n" + keyless_sources_block()
 
 # The format below is not decoration: Planning parses this answer with
 # `planning/decomposer.py::parse_steps`, which reads exactly these two
@@ -171,7 +236,8 @@ _BY_SCAFFOLD: dict[str, str] = {
 }
 
 
-def render(profile: Profile, *, subject: str | None = None, task: str | None = None) -> str:
+def render(profile: Profile, *, subject: str | None = None, task: str | None = None,
+           unavailable: str = "") -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -213,6 +279,13 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         "before asking for the next. Anything after the first marker is ignored.\n\n"
         "Tools available to you this session:\n" + "\n".join(lines)
     )
+    # A tool that is offered but known to be down right now (its binary
+    # missing, its optional package uninstalled). Saying so costs one
+    # line and saves the three steps it takes to discover by failing --
+    # and nothing is said at all when everything works, which is the
+    # common case (kernel/capabilities.py).
+    if unavailable:
+        tools = f"{tools}\n\n{unavailable}"
     return f"{body}\n\n{tools}" if body else tools
 
 

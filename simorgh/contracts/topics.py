@@ -106,6 +106,11 @@ ACTION_NEEDS_HUMAN = "action.needs_human"
 ACTION_RESULT = "action.result"
 # --- 4.7 tool -------------------------------------------------------------
 TOOL_REGISTERED = "tool.registered"
+# What a capability probe found (execution/capabilities.py): whether the
+# binary, optional package or service a tool stands on works right now.
+# Distinct from `tool.unavailable`, which is about one named tool; a
+# probe covers a shared dependency and names every tool it affects.
+TOOL_PROBED = "tool.probed"
 TOOL_UNAVAILABLE = "tool.unavailable"
 TOOL_INVOKED = "tool.invoked"
 # --- 4.8 verify -----------------------------------------------------------
