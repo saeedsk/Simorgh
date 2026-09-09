@@ -51,7 +51,7 @@ from simorgh.contracts.envelope import Message
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 _REASONS = {
-    200: "OK", 400: "Bad Request", 404: "Not Found",
+    200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found",
     405: "Method Not Allowed", 413: "Payload Too Large", 500: "Internal Server Error",
 }
 
@@ -254,9 +254,44 @@ class HttpApi:
             payload = {"state": "unknown", "error": {"code": "status_unavailable", "detail": str(exc)}}
         return json.dumps(payload, default=str).encode("utf-8")
 
+    def _origin_allowed(self, headers: dict[str, str]) -> bool:
+        """Cross-origin CSRF guard for the one route with a real side
+        effect. This is a local, unauthenticated dashboard (module
+        docstring) -- reachable to any process on 127.0.0.1, which
+        normally just means "this machine's own user," except a browser
+        tab is also on 127.0.0.1 from the server's point of view. A page
+        the creator has open in another tab can fire a same-origin-free
+        "simple request" (no CORS preflight is required for a POST whose
+        `Content-Type` is `text/plain`, `application/x-www-form-urlencoded`,
+        or `multipart/form-data` -- the body content is never actually
+        checked against that header, so a page can still send JSON text
+        with one of those headers) and, with zero auth anywhere on this
+        server, have it accepted exactly like a real dashboard click --
+        silently starting a chat turn, which the rest of the system can
+        turn into a real, tool-using task once Guardian approves it
+        (`simorgh.toml`'s `[guardian]` `auto_approve` default).
+
+        Browsers always attach `Origin` on a cross-site request
+        regardless of `mode` (including `no-cors`, which is exactly
+        what a fire-and-forget CSRF attempt would use, since it never
+        needs to read the response) -- so a present, mismatching
+        `Origin` is a reliable cross-origin signal. Its absence (curl,
+        a script, any non-browser client) is not a CSRF vector -- those
+        callers are trusted the same as any other local process talking
+        to a local API, same posture as every other route here."""
+        origin = headers.get("origin")
+        if not origin:
+            return True
+        allowed = {f"http://{self._host}:{self.port}", f"http://localhost:{self.port}",
+                   f"http://127.0.0.1:{self.port}"}
+        return origin in allowed
+
     async def _handle_chat_request(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, headers: dict[str, str],
     ) -> None:
+        if not self._origin_allowed(headers):
+            await self._try_respond(writer, 403, b'{"error":"cross-origin request rejected"}', "application/json")
+            return
         try:
             length = int(headers.get("content-length", "0"))
         except ValueError:
