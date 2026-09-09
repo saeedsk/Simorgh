@@ -161,6 +161,91 @@ class TestReadingLines(unittest.IsolatedAsyncioTestCase):
     async def test_ctrl_d_ends_the_prompt(self):
         self.assertEqual(await self._drive("\x04"), [])
 
+    async def test_a_second_line_typed_mid_turn_queues_instead_of_blocking(self):
+        """Live-caught with a real pty (2026-09-08): `run()` used to
+        `await on_line(line)` inline, so `prompt_async()` was not running
+        -- and the terminal was not even in raw mode -- for the whole
+        length of a turn. A line typed in that window landed in the
+        kernel's own cooked-mode line discipline instead of
+        prompt_toolkit's, and its trailing Enter came out translated
+        (`ICRNL`) to a literal newline -- this module's own `c-j` binding
+        for "insert a newline, not submit" -- so it never became its own
+        submission; the next keystroke just appended onto it, which is
+        the "silently merged into one multi-line message" a wave-7
+        observer reported. The fix: queue each line and hand it to a
+        background worker instead of awaiting it inline, so the loop is
+        back inside `prompt_async()` before the first line's handler has
+        even started. This proves the structural half of that fix: a
+        second line submitted while the first is still running is kept
+        separate and runs after it, never merged and never dropped."""
+        from prompt_toolkit.application import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        seen: list[str] = []
+        release = asyncio.Event()
+        started = asyncio.Event()
+
+        async def on_line(line: str) -> None:
+            if line == "slow":
+                started.set()
+                await release.wait()
+            seen.append(line)
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+            prompt = Tui(on_line=on_line)
+            run_task = asyncio.ensure_future(prompt.run())
+            inp.send_text("slow\r")
+            await asyncio.wait_for(started.wait(), timeout=5)
+            # The first turn is still running (blocked on `release`) --
+            # a second line submitted now must be accepted, not lost and
+            # not merged into the first turn's text.
+            inp.send_text("second\r")
+            await asyncio.sleep(0.05)
+            self.assertEqual(seen, [])  # the first turn has not finished
+            release.set()
+            inp.send_text("\x04")
+            await asyncio.wait_for(run_task, timeout=5)
+        self.assertEqual(seen, ["slow", "second"])
+
+    async def test_ctrl_c_still_reaches_the_prompt_mid_turn(self):
+        """The same bug's other half, also live-caught: with `run()`
+        blocked awaiting a turn, the terminal was in cooked mode with
+        `ISIG` back on, so a Ctrl-C meant to cancel the running turn
+        never reached this module's own key binding at all -- it was
+        consumed by the OS as a real SIGINT before prompt_toolkit ever
+        saw it. `kernel/cli.py` answers a first SIGINT by publishing
+        `system.stop`, not by cancelling one turn, so one mistimed
+        Ctrl-C could shut down the whole system and wedge the terminal
+        in cooked mode, accepting no further input -- reproduced with a
+        real pty, no crash, no message. Proof that the fix keeps
+        `prompt_async()` (and so this binding) live for the whole turn:
+        Ctrl-C sent while `on_line` is still running for an earlier line
+        must still fire `on_interrupt`."""
+        from prompt_toolkit.application import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        release = asyncio.Event()
+        started = asyncio.Event()
+        interrupted: list[bool] = []
+
+        async def on_line(line: str) -> None:
+            started.set()
+            await release.wait()
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+            prompt = Tui(on_line=on_line, on_interrupt=lambda: interrupted.append(True))
+            run_task = asyncio.ensure_future(prompt.run())
+            inp.send_text("slow\r")
+            await asyncio.wait_for(started.wait(), timeout=5)
+            inp.send_text("\x03")  # Ctrl-C, buffer empty -> "cancel the running turn"
+            await asyncio.sleep(0.05)
+            self.assertEqual(interrupted, [True])
+            release.set()
+            inp.send_text("\x04")
+            await asyncio.wait_for(run_task, timeout=5)
+
     async def test_two_interrupts_end_the_prompt(self):
         self.assertEqual(await self._drive("\x03\x03"), [])
 
