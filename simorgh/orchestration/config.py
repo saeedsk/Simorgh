@@ -16,17 +16,28 @@ What each field really does once adopted:
   It is not meaningless just because there's a single process.
 - `think_timeout_s`, `metrics_interval_s` -- read by `Service`/`Worker`
   directly (see `service.py`).
-- `lease_seconds`, `heartbeat_s`, `max_depth`, `max_children_concurrent`,
+- `heartbeat_s` -- read by `Worker._heartbeat_loop` (2026-09-08 fix):
+  how often a claimed task's lease is renewed with `task.
+  lease_heartbeat` while a single step is still in flight, so a step
+  slower than `[planning] lease_seconds` (a full `run_tests`, a stuck
+  `web_fetch`, a cold-start `cognition.think`) can no longer let
+  `Scheduler.scan_leases` treat the task as abandoned and hand it to a
+  second worker mid-step. The Worker never waits longer than a third of
+  the task's own `lease_seconds` regardless of this value, so a short
+  lease (a test, a tight deployment) is never outrun by a `heartbeat_s`
+  sized for the 600s default.
+- `lease_seconds`, `max_depth`, `max_children_concurrent`,
   `needs_human_timeout_s` -- declared so the config surface matches the
   full `16-orchestration.md` spec, but **no code path reads them yet**,
-  in *either* single or multi-process mode. This isn't a single-mode
-  limitation: lease-heartbeat renewal, wall-clock budgets, and
-  delegation (fresh/fork sub-sessions with `depth`/concurrent children)
-  are simply not built yet (see `orchestration/README.md`'s "What this
-  build deliberately does NOT implement"). Changing these in
-  `simorgh.toml` will not (yet) change any observable behaviour --
-  wire them here, and note it in this docstring, the day a `Worker`
-  actually renews a lease or spawns a child session.
+  in *either* single or multi-process mode (`[planning]`'s own
+  `lease_seconds` is the value that actually sets lease length; this
+  section's copy is unread). Wall-clock budgets and delegation
+  (fresh/fork sub-sessions with `depth`/concurrent children) are simply
+  not built yet (see `orchestration/README.md`'s "What this build
+  deliberately does NOT implement"). Changing these in `simorgh.toml`
+  will not (yet) change any observable behaviour -- wire them here, and
+  note it in this docstring, the day a `Worker` actually spawns a child
+  session.
 """
 
 from __future__ import annotations

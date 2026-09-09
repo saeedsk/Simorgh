@@ -54,6 +54,7 @@ class Service:
         topics.TASK_WORK_NEXT_REQUEST,
         topics.TASK_STARTED,
         topics.TASK_STEP,
+        topics.TASK_LEASE_HEARTBEAT,
         topics.TASK_PAUSED,
         topics.TASK_COMPLETED,
         topics.TASK_FAILED,
@@ -152,6 +153,7 @@ class Service:
             topics.TASK_WORK_NEXT_REQUEST: self._on_work_next,
             topics.TASK_STARTED: self._on_task_started,
             topics.TASK_STEP: self._on_task_step,
+            topics.TASK_LEASE_HEARTBEAT: self._on_task_lease_heartbeat,
             topics.TASK_PAUSED: self._on_task_paused,
             topics.TASK_COMPLETED: self._on_task_completed,
             topics.TASK_FAILED: self._on_task_failed,
@@ -283,6 +285,10 @@ class Service:
 
     async def _on_task_step(self, message: Message) -> None:
         await self._store.refresh_lease(message.payload["task_id"], self.config.lease_seconds)
+
+    # Same renewal, fired mid-step by `Worker`'s heartbeat loop rather
+    # than on step completion -- see `topics.TASK_LEASE_HEARTBEAT`.
+    _on_task_lease_heartbeat = _on_task_step
 
     async def _on_task_paused(self, message: Message) -> None:
         p = message.payload
