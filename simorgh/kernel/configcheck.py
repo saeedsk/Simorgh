@@ -65,7 +65,122 @@ EFFECTIVE_DEFAULTS: dict[str, dict] = {
 # park "seems unused."
 KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
     "memory": frozenset({"default_k"}),
+    # 2026-09-08 whole-config audit (same method as `default_k` above:
+    # grep every field's read site across the WHOLE repo, not just its
+    # own package). Each entry below cites the specific place the field
+    # should have been read and confirms nothing reads it there.
+    #
+    # `benchmark/runner.py`'s own module docstring says "Cases run one
+    # at a time (`[benchmark] concurrency`)" -- but `Runner` never reads
+    # `self._config.concurrency` anywhere; cases are simply run
+    # sequentially in a `for` loop with no concurrency knob wired in at
+    # all. The field parses (`int`) and the docstring even points at it,
+    # but no code path acts on it.
+    "benchmark": frozenset({"concurrency"}),
+    # `bus.stop()` (`bus/client.py`) takes its own `drain_seconds`
+    # keyword (default `None`) that nothing in its body actually uses,
+    # and every real caller (`kernel/service.py`, `kernel/supervisor.py`,
+    # `kernel/selfcheck.py`, `kernel/cli.py`) calls `.stop()` with no
+    # arguments -- `Config.drain_seconds` is never read to fill that
+    # keyword, so the `[bus] drain_seconds` setting has no path to any
+    # running code at all.
+    #
+    # `bus.metrics_interval_seconds` should reach `BusService`'s
+    # `metrics_interval` constructor argument (`bus/service.py`, which
+    # defaults it to `15.0` independently), but `kernel/registry.py`
+    # constructs it as `BusService(bus_client)` -- the keyword is never
+    # passed, so the config value that feeds `Config.metrics_interval_
+    # seconds` never reaches the loop it is named for.
+    "bus": frozenset({"drain_seconds", "metrics_interval_seconds"}),
+    # `cognition/service.py`'s own module docstring says `stop()`
+    # "cancels the availability loop", but no such loop exists anywhere
+    # in `simorgh/cognition/`: there is no `asyncio.sleep`/`create_task`
+    # in the whole package that would poll provider availability on this
+    # cadence. The field parses into a real float and even has a
+    # matching mention in the docstring, but the loop it would configure
+    # was never built.
+    "cognition": frozenset({"availability_poll_seconds"}),
+    # `execution/verifier.py`'s `ApprovalVerifier.verify` checks
+    # `now > float(expires_at)` using the `expires_at` Guardian put on
+    # the approval message (governed by `guardian.Config.approval_ttl_s`)
+    # -- `execution.Config.approval_max_age_s` is never read anywhere to
+    # bound anything on the execution side.
+    #
+    # `execution/pathsafety.py`'s root-file check (`if len(rel.parts)
+    # == 1 and rel.parts[0] in ROOT_FILES`) reads its own hardcoded
+    # module-level `ROOT_FILES` frozenset, not `config.readable_root_
+    # files` -- the config field parses into a tuple that nothing ever
+    # passes to `resolve_safe_path`/`read_source`/`safe_read_file` (they
+    # all take `readable_roots` only).
+    "execution": frozenset({"approval_max_age_s", "readable_root_files"}),
+    # `guardian/rules.py`'s `ReversibilityRule.evaluate` reads `ctx.
+    # config.mode` and `ctx.config.irreversible_requires_human` but never
+    # `reversible_auto_in_guarded` -- a `reversible` proposal is
+    # unconditionally allowed outside `locked` mode regardless of
+    # posture, so the field that looks like it should gate "auto-approve
+    # reversible actions while guarded" controls nothing.
+    #
+    # `guardian/pipeline.py`'s escalation branch awaits `ctx.classify
+    # (proposal)` with no `asyncio.wait_for`/timeout wrapping it at all,
+    # so `classifier_timeout_s` is never applied to that call.
+    "guardian": frozenset({"reversible_auto_in_guarded", "classifier_timeout_s"}),
+    # Four `[interface]` fields with no reader anywhere in
+    # `simorgh/interface/`: `prompt_timeout_s` (no `timeout=` on the
+    # prompt_toolkit/readline prompt in `tui.py`), `vitals_idle_
+    # reprint_s`/`vitals_interval_s` (`vitals.py` has no interval or
+    # reprint logic that reads either), and `notice_queue_max` (no
+    # `Queue(...)` construction anywhere in the package that would take
+    # a max size from it).
+    "interface": frozenset({
+        "prompt_timeout_s", "vitals_idle_reprint_s", "vitals_interval_s", "notice_queue_max",
+    }),
+    # `planning/service.py`'s retry/give-up logic reads `self.config.
+    # max_blocked_retries` (a different field) everywhere task attempts
+    # are compared against a limit; `max_task_attempts` itself is never
+    # read outside `config.py`.
+    #
+    # `planning/store.py`'s `TaskStore` docstring says "`leader` gates
+    # only the background emitter loops (spec section 5.7)" but neither
+    # `TaskStore.__init__` nor `planning/service.py` ever reads `self.
+    # config.leader` -- the gate the docstring describes was never
+    # wired to the field.
+    "planning": frozenset({"max_task_attempts", "leader"}),
+    # No file under `simorgh/reflection/` reads `stall_idle_seconds`
+    # outside `config.py` -- grep for `stall`/`idle` in the package
+    # turns up nothing else that would use a stall-detection threshold.
+    "reflection": frozenset({"stall_idle_seconds"}),
 }
+
+# Confirmed dead by the same grep-the-whole-repo method as everything
+# above, but NOT in `KNOWN_DEAD_FIELDS`: this module's `present = known
+# & set(section)` line only matches a field whose `simorgh.toml` key is
+# the bare field name at the top of its `[section]` (true for every
+# entry above). These three subsystems nest the raw key one level
+# deeper in their own `from_mapping` (`[persona.user_model]
+# min_confidence_to_use`, `[verification.trajectory]
+# wasted_step_ratio_warn`, `[verification.review]
+# require_real_provider`, `[worldmodel.git] refresh_seconds`), so
+# `set(section)` never contains the field name itself and `dead_fields`
+# silently never flags them -- adding them to `KNOWN_DEAD_FIELDS` as-is
+# would be exactly the inert, cries-wolf-never entry this module exists
+# to avoid. Left here as a record for whoever extends `dead_fields` to
+# take a field -> dotted-path mapping instead of assuming they're the
+# same string:
+#   persona.user_model_min_confidence -- `persona/user_model.py`'s
+#     `UserModel.register(self, *, min_confidence: float = 0.5)` is the
+#     only place this would apply, and `register` is never called
+#     anywhere in the codebase.
+#   verification.trajectory_wasted_step_ratio_warn -- `TrajectoryMetrics
+#     .wasted` (`verification/trajectory.py`) is counted but never
+#     turned into a ratio or compared against this field anywhere in
+#     `verdict.py`/`service.py`; only `max_denied_actions` is actually
+#     checked, against `trajectory.denied_actions`.
+#   verification.review_require_real_provider -- `service.py`'s
+#     `_review` hardcodes a literal `"require_real_provider": False` in
+#     its `cognition.think` request payload; this field never reaches it.
+#   worldmodel.git_refresh_seconds -- no file under `simorgh/worldmodel/`
+#     reads it outside `config.py`; there is no periodic git-refresh
+#     loop in the package for it to throttle.
 
 
 def _config_classes() -> dict[str, Callable[..., Any]]:
@@ -86,7 +201,24 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
     from simorgh.verification.config import VerificationConfig
     from simorgh.worldmodel.config import Config as WorldModelConfig
 
+    # `benchmark` and `bus` are not in `KERNEL_SECTIONS` (the Kernel
+    # doesn't consume `[benchmark]` at all, and it consumes `[bus]` only
+    # to build the transport, not on the subsystem's behalf) but each
+    # has a genuine `Config.from_mapping` a 2026-09-08 audit found a dead
+    # field in (`benchmark.concurrency`, `bus.drain_seconds`,
+    # `bus.metrics_interval_seconds`) -- without listing the classes
+    # here, adding those names to `KNOWN_DEAD_FIELDS` below would be
+    # inert: `dead_fields` looks up `classes.get(name)` and silently
+    # skips a name this dict doesn't have, which is exactly the kind of
+    # silent no-op this whole module exists to prevent. `BusConfig.
+    # from_mapping`'s `data_dir` keyword defaults to "." so the
+    # baseline/written comparison below still works with a plain dict.
+    from simorgh.benchmark.config import Config as BenchmarkConfig
+    from simorgh.bus.config import Config as BusConfig
+
     return {
+        "benchmark": BenchmarkConfig,
+        "bus": BusConfig,
         "cognition": CognitionConfig,
         "curiosity": CuriosityConfig,
         "execution": ExecutionConfig,

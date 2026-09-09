@@ -109,6 +109,73 @@ class TestAFieldThatParsesButNoOneReads(unittest.TestCase):
         self.assertEqual(payload["field"], "default_k")
 
 
+class TestTheWholeConfigAudit(unittest.TestCase):
+    """2026-09-08: every subsystem's `Config` dataclass was audited the
+    same way `[memory] default_k` was -- grep the whole repo for a real
+    read site, not just its own package. Each of these parses into a
+    real, non-default value but has no reader; see `KNOWN_DEAD_FIELDS`
+    in `simorgh/kernel/configcheck.py` for the specific evidence."""
+
+    def test_benchmark_concurrency_is_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"benchmark": {"concurrency": 4}})),
+            [("benchmark", "concurrency")],
+        )
+
+    def test_bus_drain_seconds_and_metrics_interval_are_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"bus": {"drain_seconds": 99.0, "metrics_interval_seconds": 1.0}})),
+            [("bus", "drain_seconds"), ("bus", "metrics_interval_seconds")],
+        )
+
+    def test_bus_backend_a_live_field_is_not_flagged(self) -> None:
+        self.assertEqual(dead_fields(_Config({"bus": {"backend": "sqlite"}})), [])
+
+    def test_cognition_availability_poll_seconds_is_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"cognition": {"availability_poll_seconds": 5.0}})),
+            [("cognition", "availability_poll_seconds")],
+        )
+
+    def test_execution_approval_max_age_s_and_readable_root_files_are_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"execution": {"approval_max_age_s": 5.0, "readable_root_files": ("x",)}})),
+            [("execution", "approval_max_age_s"), ("execution", "readable_root_files")],
+        )
+
+    def test_guardian_reversible_auto_in_guarded_and_classifier_timeout_are_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"guardian": {"reversible_auto_in_guarded": False, "classifier_timeout_s": 9.0}})),
+            [("guardian", "classifier_timeout_s"), ("guardian", "reversible_auto_in_guarded")],
+        )
+
+    def test_interface_prompt_and_vitals_and_notice_queue_fields_are_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"interface": {
+                "prompt_timeout_s": 5.0, "vitals_idle_reprint_s": 1.0,
+                "vitals_interval_s": 1.0, "notice_queue_max": 1,
+            }})),
+            [
+                ("interface", "notice_queue_max"), ("interface", "prompt_timeout_s"),
+                ("interface", "vitals_idle_reprint_s"), ("interface", "vitals_interval_s"),
+            ],
+        )
+
+    def test_planning_max_task_attempts_and_leader_are_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"planning": {"max_task_attempts": 7, "leader": False}})),
+            [("planning", "leader"), ("planning", "max_task_attempts")],
+        )
+
+    def test_planning_max_blocked_retries_a_live_field_is_not_flagged(self) -> None:
+        self.assertEqual(dead_fields(_Config({"planning": {"max_blocked_retries": 2}})), [])
+
+    def test_reflection_stall_idle_seconds_is_flagged(self) -> None:
+        self.assertEqual(
+            dead_fields(_Config({"reflection": {"stall_idle_seconds": 60.0}})),
+            [("reflection", "stall_idle_seconds")],
+        )
+
 class TestTheWarning(unittest.TestCase):
     def test_it_names_the_section_and_where_to_look(self) -> None:
         logger = _Logger()
