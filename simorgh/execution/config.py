@@ -181,6 +181,36 @@ class Config:
     web_fetch_window_s: float = 3600.0
     web_fetch_allow_private_networks: bool = False
     web_fetch_user_agent: str = "Simorgh/2.0 (personal AI assistant; +https://github.com/saeedsk/Simorgh)"
+    # -- render_page (render.py's own module docstring): a real headless-
+    # Chromium render via Puppeteer, so Sim can see a page the way a
+    # browser actually executes it (JS-driven layout, a runtime error a
+    # syntax check can't catch) instead of only reading the source and
+    # guessing. Same SSRF guard as web_fetch for a remote URL; a local
+    # path is read through the same readable_roots/pathsafety boundary
+    # every other file-reading tool already uses.
+    render_page_timeout_s: float = 20.0
+    render_page_max_chars: int = 20_000
+    render_page_allow_private_networks: bool = False
+    render_page_node_path: str = ""  # "" -> resolved once via `npm root -g`
+    # -- geocode (geocode.py): turns a free-text address into lat/lng
+    # using the free, keyless Nominatim (OpenStreetMap) API -- no
+    # account or credential needed, unlike every commercial geocoder.
+    # Nominatim's usage policy caps unauthenticated use at ~1 req/s and
+    # requires an identifying User-Agent, both honored below.
+    geocode_timeout_s: float = 10.0
+    geocode_min_interval_s: float = 1.0
+    geocode_user_agent: str = "Simorgh/2.0 (personal AI assistant; +https://github.com/saeedsk/Simorgh)"
+    # -- search_listings (realestate.py): real, current for-sale property
+    # data via the `homeharvest` package -- an actively-maintained open-
+    # source library that reads Realtor.com's own site backend, not a
+    # licensed data API. Unofficial and rate-limited hard here on purpose:
+    # a single query can return 1000+ rows city-wide (live-tested,
+    # 2026-09-09), so this caps what comes back and how often it can be
+    # called at all, on top of homeharvest's own request pacing.
+    real_estate_max_results: int = 20
+    real_estate_timeout_s: float = 30.0
+    real_estate_max_calls: int = 20
+    real_estate_window_s: float = 3600.0
     # -- MCP (mcp.py's own module docstring): a human-configured, static
     # list of external tool servers. Empty by default -- Sim never adds
     # to this itself; each entry is a deliberate capability grant, same

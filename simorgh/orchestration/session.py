@@ -124,6 +124,9 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "run_python_sandboxed": 45.0,
     "run_js_sandboxed": 45.0,
     "web_fetch": 45.0,
+    "render_page": 30.0,
+    "search_listings": 45.0,
+    "geocode": 15.0,
     "apply_source_patch": 60.0,
     "apply_skill": 60.0,
 }

@@ -15,7 +15,8 @@ CHAT = Profile(
     # the model fell back to list_dir and could wander into src/, the
     # retired v1 tree left readable for reference (observer, 2026-09-08).
     tools=("self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch",
-           "run_python_sandboxed", "run_js_sandboxed", "propose_mcp_server"),
+           "render_page", "search_listings", "geocode", "run_python_sandboxed", "run_js_sandboxed",
+           "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
 # The creator, 2026-09-07: "gives sim more freedom in autonomously
@@ -33,7 +34,7 @@ PATCH = Profile(
     # `[execution] shell = true`; an unregistered tool is simply refused,
     # so the offer costs nothing when it is off.
     tools=("read_file", "list_dir", "search_code", "run_tests", "apply_source_patch",
-           "git_commit", "git_revert", "git_discard", "run_shell"),
+           "git_commit", "git_revert", "git_discard", "run_shell", "render_page"),
     # 8 left no room: read, apply, run_tests, git_commit is already four
     # tool calls before a single wrong turn, and the last step is spent
     # on the forced final answer. Live-caught 2026-09-07.
@@ -45,7 +46,8 @@ RESEARCH = Profile(
     # anything -- a trial burned its whole budget substituting list_dir
     # (observer, 2026-09-08). Guardian gates it the same as anywhere.
     name="research",
-    tools=("self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch", "run_tests", "run_shell"),
+    tools=("self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch",
+           "search_listings", "geocode", "run_tests", "run_shell"),
     # 6 predates web_search/web_fetch. A question with a repo half and a
     # web half needs search + fetch + two repo steps + an answer, and
     # died on step 6 every time (observer, 2026-09-08).
