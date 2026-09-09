@@ -63,8 +63,21 @@ def parse_spec(spec: str) -> tuple[str, str] | None:
     if not match:
         return None
     name = match.group("name")
-    if "/" in name and not name.startswith("@"):
-        return None
+    if "/" in name:
+        if not name.startswith("@"):
+            return None
+        # A scoped name is exactly `@scope/name` -- two non-empty
+        # segments, neither a path-traversal component. Without this,
+        # `@x/../evil-pkg` matched the regex above (`.` and `/` are
+        # both legal name characters) and both pip and npm resolved it
+        # to a real local directory instead of a registry lookup: pip
+        # ran that directory's setup.py at metadata time -- even under
+        # `--dry-run` -- and npm ran its postinstall script, in both
+        # cases arbitrary code, not "one plain package name". Confirmed
+        # live 2026-09-09 by an observer.
+        segments = name[1:].split("/")
+        if len(segments) != 2 or any(not s or s in (".", "..") or ".." in s for s in segments):
+            return None
     return name, match.group("pin") or ""
 
 
@@ -248,15 +261,27 @@ class InstallPackageTool:
             return (f"refused: {name!r} publishes no homepage or repository, which is unusual for a real "
                     "package. Retry with allow_new: true and say why if you are sure")
         first = hit.get("first_release") or ""
+        age_days = None
         if first:
             try:
                 age_days = (datetime.now(timezone.utc) - datetime.fromisoformat(first).replace(tzinfo=timezone.utc)).days
             except ValueError:
                 age_days = None
-            if age_days is not None and age_days < self._config.package_min_age_days:
-                return (f"refused: {name!r} first published {first} ({age_days} days ago), under the "
-                        f"{self._config.package_min_age_days}-day floor -- a brand-new package with a "
-                        "plausible name is the shape a typosquat takes. Retry with allow_new: true and say why")
+        # A missing or unparseable first-release date is the same shape as
+        # a lookup that could not run: "I don't know its age" must refuse,
+        # not silently pass as if the package were vetted and found old
+        # enough. Without this, a registry response with no upload-time
+        # metadata at all (or a malformed one) skipped the age check
+        # entirely and installed on the first try -- confirmed live
+        # 2026-09-09 by an observer.
+        if age_days is None:
+            return (f"refused: could not determine {name!r}'s first-release date to check its age "
+                    f"(the registry gave no usable upload-time data). Retry with allow_new: true and "
+                    "say why if you are sure")
+        if age_days < self._config.package_min_age_days:
+            return (f"refused: {name!r} first published {first} ({age_days} days ago), under the "
+                    f"{self._config.package_min_age_days}-day floor -- a brand-new package with a "
+                    "plausible name is the shape a typosquat takes. Retry with allow_new: true and say why")
         return None
 
     def _install(self, manager: str, spec: str):

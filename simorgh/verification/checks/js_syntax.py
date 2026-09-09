@@ -30,16 +30,53 @@ _JS_SUFFIXES = (".js", ".mjs")
 _HTML_SUFFIXES = (".html", ".htm")
 _SCRIPT_BLOCK = re.compile(r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script\s*>", re.S | re.I)
 _SRC_ATTR = re.compile(r"\bsrc\s*=", re.I)
+_TYPE_ATTR = re.compile(r"""\btype\s*=\s*(?:"(?P<dq>[^"]*)"|'(?P<sq>[^']*)'|(?P<bare>[^\s"'>]+))""", re.I)
 _NO_NODE = "no `node` executable"
+
+# `new Function(body)` compiles `body` as a plain function body -- it has
+# no opinion at all about non-JS content a page legitimately embeds in a
+# <script> tag:
+#   - `type="module"`: `import`/`export` are only legal at a module's top
+#     level, never inside a Function body, so ANY real ES module script
+#     -- valid or not -- throws `Cannot use import statement outside a
+#     module` here. Live-checked, 2026-09-09: `new
+#     Function("import {x} from './m.js'; console.log(x);")` fails even
+#     though the script is fine.
+#   - `type="application/json"` / `application/ld+json`: JSON-LD
+#     structured data is one of the most common non-`src=` script bodies
+#     on the web (schema.org markup), and `{"a": 1}` is not a valid
+#     function body (`Unexpected token ':'`) even though it is perfectly
+#     valid JSON.
+#   - any other non-JS `type` (a client-side template body -- Handlebars,
+#     `text/x-template`, etc.) is not JavaScript at all.
+# An empty/missing `type`, or an explicit JS mimetype, is the only case
+# this check has any business judging.
+_JS_TYPES = frozenset({
+    "", "text/javascript", "application/javascript", "application/ecmascript",
+    "text/ecmascript", "application/x-javascript",
+})
+
+
+def _script_type(attrs: str) -> str:
+    match = _TYPE_ATTR.search(attrs or "")
+    if not match:
+        return ""
+    return (match.group("dq") or match.group("sq") or match.group("bare") or "").strip().lower()
 
 
 def script_bodies(html: str) -> list[str]:
-    """Every inline `<script>` body in the document. A `src=` script has
-    no body of ours to check (it is a CDN library, and `RenderCheck` is
-    the one that notices when it fails to load)."""
+    """Every inline `<script>` body in the document this check can form
+    an opinion about. A `src=` script has no body of ours to check (it
+    is a CDN library, and `RenderCheck` is the one that notices when it
+    fails to load); a non-JS `type` (a module, JSON-LD, a template) is
+    real content this check cannot parse as a function body without
+    mislabelling it broken -- see `_JS_TYPES`."""
     bodies = []
     for match in _SCRIPT_BLOCK.finditer(html or ""):
-        if _SRC_ATTR.search(match.group("attrs") or ""):
+        attrs = match.group("attrs") or ""
+        if _SRC_ATTR.search(attrs):
+            continue
+        if _script_type(attrs) not in _JS_TYPES:
             continue
         body = (match.group("body") or "").strip()
         if body:

@@ -99,6 +99,19 @@ class ParseSpecTestCase(unittest.TestCase):
     def test_an_unscoped_slash_is_refused(self):
         self.assertIsNone(parse_spec("evil/path"))
 
+    def test_a_scoped_path_traversal_is_refused(self):
+        # `@x/../evil-pkg` matches the "scope separator" shape but is a
+        # relative filesystem path -- both pip and npm resolve it to a
+        # real local directory (pip runs its setup.py at metadata time,
+        # npm runs its postinstall script) instead of looking anything
+        # up on a registry. Confirmed live against real pip and npm
+        # 2026-09-09 by an observer.
+        self.assertIsNone(parse_spec("@x/../evil-local-pkg"))
+        self.assertIsNone(parse_spec("@scope/../../etc/passwd"))
+        self.assertIsNone(parse_spec("@x/.."))
+        self.assertIsNone(parse_spec("@../x"))
+        self.assertIsNone(parse_spec("@a/b/c"))
+
 
 class FactsTestCase(unittest.TestCase):
     def test_pypi_facts_take_the_earliest_upload_as_first_release(self):
@@ -220,6 +233,34 @@ class InstallPackageTestCase(unittest.IsolatedAsyncioTestCase):
         result = await tool.run({"manager": "pip", "spec": "homeharvest"}, ctx=_ctx())
         self.assertFalse(result.ok)
         self.assertIn("could not find", result.error)
+
+    async def test_an_unknown_first_release_date_is_a_refusal_not_a_pass(self):
+        # A registry hit that has a homepage but no usable upload-time
+        # data at all (files present with no upload_time_iso_8601 key)
+        # must refuse exactly like a failed lookup -- "I don't know its
+        # age" is not "I checked and it's old enough".
+        payload = json.dumps({
+            "info": {"name": "homeharvest", "summary": "x", "version": "0.0.1",
+                      "license": "MIT", "home_page": "https://github.com/x/y", "project_urls": {}},
+            "releases": {"0.0.1": [{"filename": "homeharvest-0.0.1.tar.gz"}]},
+        })
+        tool = self._tool(mapping={"pypi.org": payload})
+        result = await tool.run({"manager": "pip", "spec": "homeharvest"}, ctx=_ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("could not determine", result.error)
+        self.assertFalse(self.calls)
+
+    async def test_an_unparseable_first_release_date_is_a_refusal_not_a_pass(self):
+        payload = json.dumps({
+            "info": {"name": "homeharvest", "summary": "x", "version": "0.0.1",
+                      "license": "MIT", "home_page": "https://github.com/x/y", "project_urls": {}},
+            "releases": {"0.0.1": [{"upload_time_iso_8601": "0000-00-00T00:00:00Z"}]},
+        })
+        tool = self._tool(mapping={"pypi.org": payload})
+        result = await tool.run({"manager": "pip", "spec": "homeharvest"}, ctx=_ctx())
+        self.assertFalse(result.ok)
+        self.assertIn("could not determine", result.error)
+        self.assertFalse(self.calls)
 
     async def test_a_denylisted_name_is_refused(self):
         result = await self._tool().run({"manager": "pip", "spec": "pip"}, ctx=_ctx())

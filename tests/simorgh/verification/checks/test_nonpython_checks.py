@@ -208,6 +208,35 @@ class TestJsSyntaxCheck(_RepoFixture):
         html = '<script src="https://cdn/three.js"></script><script>let x=1;</script>'
         self.assertEqual(script_bodies(html), ["let x=1;"])
 
+    def test_a_module_script_is_not_treated_as_a_plain_function_body(self):
+        # `import`/`export` are only legal at a module's top level, so
+        # `new Function(body)` throws on ANY real ES module -- valid or
+        # not. Confirmed live in node, 2026-09-09:
+        # new Function("import {x} from './m.js';") ->
+        #   "Cannot use import statement outside a module".
+        html = '<script type="module">import {x} from "./m.js"; console.log(x);</script>'
+        self.assertEqual(script_bodies(html), [])
+
+    def test_json_ld_is_not_treated_as_javascript(self):
+        # `{"a": 1}` is valid JSON and invalid as a function body
+        # (`Unexpected token ':'`, confirmed live in node) -- JSON-LD
+        # structured data is one of the most common non-src= script
+        # bodies on the real web.
+        html = '<script type="application/ld+json">{"@type": "WebSite", "name": "x"}</script>'
+        self.assertEqual(script_bodies(html), [])
+
+    def test_a_plain_javascript_type_is_still_checked(self):
+        html = '<script type="text/javascript">let x = 1;</script>'
+        self.assertEqual(script_bodies(html), ["let x = 1;"])
+
+    async def test_a_module_script_does_not_fail_the_verification(self):
+        path = self.write(
+            "docs/games/mod.html",
+            '<html><body><script type="module">import {x} from "./m.js";</script></body></html>',
+        )
+        result = await JsSyntaxCheck().run(_req([path]), _ctx())
+        self.assertEqual(result.status, "skipped")
+
     def test_applies_to_js_and_html_only(self):
         self.assertTrue(JsSyntaxCheck().applies(_req(["a.js"])))
         self.assertTrue(JsSyntaxCheck().applies(_req(["a.html"])))
