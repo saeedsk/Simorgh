@@ -201,6 +201,33 @@ class Kernel:
             max_restarts_per_window=self.runtime.supervisor_max_restarts_per_10m,
             on_critical_down=self._on_critical_down,
         )
+        # `StatusServer` only *needs* the Supervisor object (just built,
+        # above) plus the Kernel's own bus/clock/state -- nothing any
+        # subsystem's `start()` produces -- so it is built and its
+        # `system.metrics`/`system.health` subscriptions opened here,
+        # *before* the layer loop below, not after it as originally
+        # written. `execution.Service.start()` (layer 3 of `LAYERS`)
+        # publishes a one-time `system.metrics{subsystem: "execution",
+        # gauges: {skills: N}}` announcing skills on disk (see its own
+        # `_announce_skills_on_disk` docstring) with no periodic
+        # re-publish and no replay path -- unlike `tool.registered`,
+        # `system.metrics` has no durable ledger stream a late subscriber
+        # could catch up from (`MetricsHistoryWriter`'s own `metrics:
+        # history` stream is itself a periodic snapshot of this same
+        # `MetricsTable`, so it is empty until *after* the first snapshot
+        # anyway). Subscribing this late meant that gauge -- the whole
+        # point of the fix described in its own docstring -- was silently
+        # lost on every single boot (confirmed live: a real `Kernel.boot()`
+        # with a nonempty skill directory left `status_snapshot()
+        # ["metrics"]["execution"]` as `None`). The same shape as the
+        # `tool.registered` gap `_replay_registrations` fixed, just with
+        # no ledger-backed replay available -- so the fix here is to
+        # never miss the message in the first place.
+        self._status = StatusServer(
+            bus=self.bus, clock=self._clock, run_id=self.run_id, mode=self.runtime.mode, state=self.state,
+            supervisor=self._supervisor, metrics=self._metrics_table, boot_time=self._boot_time,
+        )
+        await self._status.start()
         started: list[tuple[str, ...]] = []
         try:
             for layer in self._own_layers(factories):
@@ -223,11 +250,6 @@ class Kernel:
             is_running=lambda: self.state.state == RUNNING,
         )
         await self._scheduler.start()
-        self._status = StatusServer(
-            bus=self.bus, clock=self._clock, run_id=self.run_id, mode=self.runtime.mode, state=self.state,
-            supervisor=self._supervisor, metrics=self._metrics_table, boot_time=self._boot_time,
-        )
-        await self._status.start()
         # Observe-tier additions (02-system-architecture.md section 6.2):
         # process resource gauges and a low-frequency metrics-history
         # snapshot, both on `metrics_every_s` -- a `[runtime]` knob that
