@@ -575,7 +575,7 @@ class SessionRunner:
                 # lose the exact content a real code change needs.
                 "allow_summarize": is_chat,
             },
-            clock=self._clock,
+            trace_id=session.task_id, clock=self._clock,
         )
         reply = await self._bus.request_or_error(req, timeout=self._think_timeout_s)
         if reply.payload.get("ok") is False:
@@ -663,7 +663,8 @@ class SessionRunner:
         )
         msg = Message.new(
             topics.ACTION_PROPOSED, source=self._bus.source,
-            payload=payload, partition_key=f"task:{session.task_id}", clock=self._clock,
+            payload=payload, partition_key=f"task:{session.task_id}",
+            trace_id=session.task_id, clock=self._clock,
         )
         await self._bus.publish(msg)
         tool_name = call.get("tool")
@@ -787,7 +788,7 @@ class SessionRunner:
                     "verification_id": verification_id, "task_id": session.task_id,
                     "kind": "task", "subject_ref": subject_ref,
                 },
-                partition_key=f"task:{session.task_id}", clock=self._clock,
+                partition_key=f"task:{session.task_id}", trace_id=session.task_id, clock=self._clock,
             )
             await self._bus.publish(msg)
             result = await self._waiter.wait(
@@ -946,10 +947,12 @@ class SessionRunner:
 
     async def _append(self, session: Session, type_: str, payload: dict) -> None:
         msg = Message.new(type_, source=self._bus.source, payload=payload,
-                          partition_key=f"task:{session.task_id}", clock=self._clock)
+                          partition_key=f"task:{session.task_id}",
+                          trace_id=session.task_id, clock=self._clock)
         await self._ledger.append(f"task:{session.task_id}", Event.from_message(msg, f"task:{session.task_id}"))
 
     async def _publish(self, session: Session, type_: str, payload: dict) -> None:
         msg = Message.new(type_, source=self._bus.source, payload=payload,
-                          partition_key=f"task:{session.task_id}", clock=self._clock)
+                          partition_key=f"task:{session.task_id}",
+                          trace_id=session.task_id, clock=self._clock)
         await self._bus.publish(msg)

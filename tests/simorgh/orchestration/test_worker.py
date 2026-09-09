@@ -78,6 +78,48 @@ class TestWorkerClaimLoop(unittest.TestCase):
             await cognition.stop()
 
     @run
+    async def test_a_completed_tasks_own_ledger_events_share_one_trace_id(self):
+        """2026-09-08 observer finding: every internal `Message.new` call
+        in `session.py`/`worker.py`/`context.py` used to omit `trace_id`,
+        so it defaulted to a fresh uuid4 -- `task.step`, `action.proposed`,
+        `task.completed` and `turn.completed` for the SAME task each got
+        their own ledger `trace:<uuid>` stream instead of joining one.
+        Measured (a separate harness, real ledger reads): 3 trivial chat
+        tasks produced 74 such 1-2-event fragments. Now that these call
+        sites pass `trace_id=session.task_id` (or `task_id` where there is
+        no `session` yet), every event this worker appends for one task
+        should carry that task's own id as its trace_id -- one coherent
+        stream, not a fragment per internal hop."""
+        async with Harness() as h:
+            planning = FakePlanning(h.client("planning"))
+            planning.add_task("t-trace", kind="chat", mode="execute", description="hi")
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": "hello back"}])
+            await planning.start()
+            await cognition.start()
+
+            worker = Worker(
+                h.client("orchestration"), h.ledger, clock=h.clock.now, worker_id="w1",
+                assemble_timeout_s=0.01,
+            )
+            await worker.start()
+
+            await h.client("planning").publish(Message.new(
+                topics.TASK_AVAILABLE, source="planning",
+                payload={"task_id": "t-trace", "kind": "chat", "lease_seconds": 60.0},
+                clock=h.clock.now,
+            ))
+            await h.pump(30, real_delay=0.01)
+
+            events = await h.ledger.read("task:t-trace")
+            self.assertGreater(len(events), 0)
+            trace_ids = {e.trace_id for e in events}
+            self.assertEqual(trace_ids, {"t-trace"})
+
+            await worker.stop()
+            await planning.stop()
+            await cognition.stop()
+
+    @run
     async def test_an_unknown_task_id_is_not_granted_and_worker_does_not_crash(self):
         async with Harness() as h:
             planning = FakePlanning(h.client("planning"))  # no tasks registered
