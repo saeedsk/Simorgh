@@ -71,3 +71,81 @@ class TestPutVerifySubjectKeepsTheFullFigure(unittest.TestCase):
 
             kept = payload["steps"][0]["summary"]
             self.assertIn("temperature 0.7 with top_p 0.9.", kept)
+
+
+class TestRunTestsTargetMarkerReflectsWhatActuallyRan(unittest.TestCase):
+    """`_propose_and_await` prefixes a `run_tests` step's recorded detail
+    with `[ran target='...']`, which `FullSuiteRanCheck`
+    (verification/checks/fullsuiteran.py) trusts to tell a whole-suite
+    run from a narrowed one.
+
+    The first version of this read `call.get("args", {}).get("target")`
+    -- `call` is the marker-parsed call, and EVERY real marker call
+    arrives as `call["args"] == {"argument": "<raw text>"}`.
+    `to_action_payload` remaps that to the tool's real schema key in a
+    FRESH dict it returns; it never mutates `call`. So the lookup always
+    found nothing and always fell back to the literal `"tests"` default,
+    for every real call, regardless of what actually ran -- an observer
+    proved live that a 34-test slice was recorded and trusted as proof
+    the whole 3080-test suite had passed (2026-09-08). This drives the
+    real marker-call shape through the real `to_action_payload` remap,
+    the only way the bug was actually reachable.
+    """
+
+    @run
+    async def test_a_narrowed_marker_call_is_recorded_as_narrowed(self):
+        from simorgh.contracts.envelope import Message
+
+        async with Harness() as h:
+            bus = h.client("orchestration")
+
+            async def _answer_with_target(message):
+                # A real tool result: `stdout_preview` never carries the
+                # target back -- confirming the fix cannot depend on it.
+                reply = message.caused(topics.ACTION_RESULT, {
+                    "action_id": message.payload["action_id"], "ok": True,
+                    "output_ref": "", "stdout_preview": "3 passed",
+                    "duration_ms": 1, "side_effects": [],
+                }, source="execution")
+                await bus.publish(reply)
+
+            from simorgh.contracts import topics
+            sub = await bus.subscribe(topics.ACTION_PROPOSED, _answer_with_target)
+
+            runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+            session = Session(task_id="t-target", kind="patch", mode="execute", profile=profiles.PATCH)
+            # The real marker shape: parser.py always produces this for
+            # a single-string-argument marker, run_tests included.
+            call = {"tool": "run_tests", "args": {"argument": "tests/simorgh/interface/test_service.py"}}
+            ok, _bounded, full = await runner._propose_and_await(session, call, step_no=1)
+            await sub.unsubscribe()
+
+            self.assertTrue(ok)
+            self.assertIn("[ran target='tests/simorgh/interface/test_service.py']", full)
+            self.assertNotIn("[ran target='tests']", full)
+
+    @run
+    async def test_a_real_marker_call_with_no_target_is_recorded_as_the_whole_suite(self):
+        from simorgh.contracts.envelope import Message
+
+        async with Harness() as h:
+            bus = h.client("orchestration")
+
+            async def _answer(message):
+                reply = message.caused(topics.ACTION_RESULT, {
+                    "action_id": message.payload["action_id"], "ok": True,
+                    "output_ref": "", "stdout_preview": "3080 passed",
+                    "duration_ms": 1, "side_effects": [],
+                }, source="execution")
+                await bus.publish(reply)
+
+            from simorgh.contracts import topics
+            sub = await bus.subscribe(topics.ACTION_PROPOSED, _answer)
+
+            runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+            session = Session(task_id="t-whole", kind="patch", mode="execute", profile=profiles.PATCH)
+            call = {"tool": "run_tests", "args": {"argument": ""}}
+            _ok, _bounded, full = await runner._propose_and_await(session, call, step_no=1)
+            await sub.unsubscribe()
+
+            self.assertIn("[ran target='tests']", full)

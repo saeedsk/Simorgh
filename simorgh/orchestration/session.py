@@ -674,6 +674,33 @@ class SessionRunner:
                 # model to guess. The same silence sat behind every failed
                 # `run_tests` and `git_commit` in the earlier trials.
                 full = f"{error}\n\n{full}".strip() if full else error
+            if call.get("tool") == "run_tests":
+                # The one fact verification's `FullSuiteRanCheck` needs
+                # and nothing else records: what TARGET this call ran.
+                # Two real trials committed a change that broke the
+                # suite by narrowing `run_tests` to one passing file --
+                # "run the tests, and run them again if they fail"
+                # (scaffolds.py) is satisfied literally by a target that
+                # was never going to fail (2026-09-08). Prefixed onto
+                # `full`, which is what `_put_verify_subject` forwards as
+                # this step's `summary`, so the check can see it without
+                # a new field threaded through `Step`/the ledger schema.
+                #
+                # Read from `payload["args"]`, NOT `call["args"]`. Every
+                # real marker call arrives as `call["args"] ==
+                # {"argument": "<raw text>"}` -- `to_action_payload`
+                # remaps that to the tool's real schema key (`target`)
+                # in a fresh dict it returns, never mutating `call`
+                # itself. Reading `call.get("args", {}).get("target")`
+                # therefore always found nothing and always fell back to
+                # the literal `"tests"` default, for every real call, no
+                # matter what was actually run -- an observer proved the
+                # check accepted a 34-test slice as proof the whole
+                # 3080-test suite had passed, defeating the entire fix
+                # for the one calling convention every real trial uses
+                # (2026-09-08).
+                target = (payload.get("args") or {}).get("target") or "tests"
+                full = f"[ran target={target!r}]\n{full}"
             return ok, self._bound_for_model(full), full[: self._DETAIL_CHARS]
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
