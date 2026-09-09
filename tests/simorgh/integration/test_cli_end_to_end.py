@@ -320,3 +320,46 @@ class TestChatWhileTheSystemIsPaused(CliEndToEndTestCase):
 
     async def test_a_running_system_still_takes_chat(self) -> None:
         self.assertEqual(self.interface._system_state, "running")  # noqa: SLF001
+
+
+class TestAStatedPreferenceReachesTheUserModel(CliEndToEndTestCase):
+    """2026-09-09 observer investigation: an earlier fix wired World
+    Model's `user_profile` facet into Cognition's chat prompt assembly
+    (`cognition/assembler.py::_user_profile_text`), on the assumption
+    that `persona/user_model.py`'s `UserModel` is populated by something
+    real. Nobody had verified the write side end to end -- does a real
+    typed chat line ever actually trigger `persona.user_model.updated`,
+    or is the read side correctly plumbed with nothing ever flowing
+    through it?
+
+    Live-verified real: typing "call me Alex" through this exact
+    `_handle_line` path (not a unit-level call into `UserModel`
+    directly) results in `Service._on_percept_text`
+    (`simorgh/persona/service.py`) calling `UserModel.extract_from_text`,
+    publishing `persona.user_model.updated`, World Model's
+    `UserProfileFacet.on_updated` (`simorgh/worldmodel/facets/
+    registry_facets.py`) storing it, and a later `world.env.query` for
+    `user_profile` returning the fact -- exactly what `PromptAssembler.
+    _user_profile_text` reads for a chat turn's prompt. This test locks
+    in the write-side half of that chain (the read side already has its
+    own unit coverage in `tests/simorgh/cognition/test_assembler.py`)."""
+
+    async def test_call_me_x_reaches_the_world_model_user_profile_facet(self) -> None:
+        updates: list[dict] = []
+        sub = await self.kernel.bus.subscribe(topics.PERSONA_USER_MODEL_UPDATED, lambda m: updates.append(m.payload) or _aiodone())
+        try:
+            out = await self._type("call me Alex")
+            self.assertNotIn("render error", out)
+            await self._wait_for(lambda: bool(updates), what="persona.user_model.updated")
+        finally:
+            await sub.unsubscribe()
+
+        self.assertEqual(updates[0]["facet"], "preferred_name")
+        self.assertEqual(updates[0]["value"], "Alex")
+
+        reply = await self.kernel.bus.request(
+            self.kernel.bus.new(topics.WORLD_ENV_QUERY, {"what": "user_profile", "args": {}}), timeout=5.0,
+        )
+        self.assertTrue(reply.payload.get("ok"))
+        self.assertIn("preferred_name", reply.payload.get("facets", {}))
+        self.assertEqual(reply.payload["facets"]["preferred_name"]["value"], "Alex")
