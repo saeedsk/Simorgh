@@ -7,6 +7,7 @@ for `approve` so this test never touches the real repo's own
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 import unittest.mock
@@ -168,6 +169,73 @@ class TestMcpReject(_McpDispatchTestCase):
         self.assertIn("ddg_search", out)
         pending_out = await self._mcp("")
         self.assertIn("no pending", pending_out)
+
+
+class TestCancel(_McpDispatchTestCase):
+    """`cancel` used to publish `TASK_CANCEL` and unconditionally claim
+    "asked X to stop" -- true only when the id happened to name a live
+    task. Planning's `_on_task_cancel` silently no-ops on an unknown or
+    already-terminal id, so a typo or a stale id from an old `tasks`
+    listing was told a cancellation was in flight that never happened
+    (observer, 2026-09-08). `cancel` now looks the task up via
+    `TASK_LIST_REQUEST` first and only claims what will actually
+    happen."""
+
+    async def _answer_task_list(self, tasks: list[dict]) -> None:
+        async def _reply(message) -> None:
+            await self.other.reply(message, type=topics.TASK_LIST_REPLY,
+                                    payload={"tasks": tasks, "projects": []})
+
+        self._task_list_sub = await self.other.subscribe(topics.TASK_LIST_REQUEST, _reply)
+
+    async def _cancel(self, args: str) -> str:
+        outcome = await dispatch(
+            Command(name="cancel", args=args, raw=f"cancel {args}"),
+            bus=self.bus, clock=self.clock, session_id="s1", vitals=self.vitals, ledger=self.ledger,
+        )
+        return outcome.text
+
+    async def test_no_task_id_is_a_usage_message(self):
+        out = await self._cancel("")
+        self.assertIn("usage", out)
+
+    async def test_whitespace_only_is_a_usage_message(self):
+        out = await self._cancel("   ")
+        self.assertIn("usage", out)
+
+    async def test_surrounding_whitespace_around_a_real_id_is_stripped(self):
+        await self._answer_task_list([{"task_id": "t1", "status": "available"}])
+        out = await self._cancel("  t1  ")
+        self.assertIn("asked t1 to stop", out)
+
+    async def test_an_unknown_task_id_is_told_honestly_not_a_false_success(self):
+        await self._answer_task_list([{"task_id": "other", "status": "available"}])
+        out = await self._cancel("nope-does-not-exist")
+        self.assertIn("no such task", out)
+        self.assertNotIn("asked", out)
+
+    async def test_an_already_terminal_task_is_told_honestly_not_a_false_success(self):
+        await self._answer_task_list([{"task_id": "t1", "status": "completed"}])
+        out = await self._cancel("t1")
+        self.assertIn("already completed", out)
+        self.assertNotIn("asked", out)
+
+    async def test_a_live_task_gets_the_real_stop_message_and_a_real_publish(self):
+        await self._answer_task_list([{"task_id": "t1", "status": "in_progress"}])
+        seen = []
+
+        async def _watch(message) -> None:
+            seen.append(message.payload)
+
+        sub = await self.other.subscribe(topics.TASK_CANCEL, _watch)
+        try:
+            out = await self._cancel("t1")
+            await asyncio.sleep(0.05)  # memory bus delivery is async
+        finally:
+            await sub.unsubscribe()
+        self.assertIn("asked t1 to stop", out)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0]["task_id"], "t1")
 
 
 if __name__ == "__main__":

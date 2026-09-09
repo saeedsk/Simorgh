@@ -157,19 +157,38 @@ class TestTheCancelCommand(CliEndToEndTestCase):
     out."""
 
     async def test_cancel_asks_the_named_task_to_stop(self) -> None:
+        await self._type("improve simorgh/hello.py add a module docstring")
+        await self._wait_for(lambda: bool(self.created_tasks), what="a real task to cancel")
+        task_id = self.created_tasks[0]["task_id"]
+
         seen = []
         sub = await self.kernel.bus.subscribe(topics.TASK_CANCEL, lambda m: seen.append(m.payload) or _aiodone())
-        out = await self._type("cancel abc123")
+        out = await self._type(f"cancel {task_id}")
         await self._wait_for(lambda: bool(seen), what="task.cancel on the bus")
         await sub.unsubscribe()
         self.assertTrue(seen, f"cancel must actually publish task.cancel; printed: {out!r}")
-        self.assertIn("abc123", out)
-        self.assertEqual(seen[0]["task_id"], "abc123")
+        self.assertIn(task_id, out)
+        self.assertEqual(seen[0]["task_id"], task_id)
 
     async def test_cancel_with_no_task_says_how_to_use_it(self) -> None:
         out = await self._type("cancel")
         self.assertIn("usage", out.lower())
         self.assertIn("task_id", out)
+
+    async def test_cancel_of_an_unknown_id_is_honest_not_a_false_success(self) -> None:
+        """Live bug (observer, 2026-09-08): `cancel` published
+        `task.cancel` and unconditionally said "asked X to stop" even
+        for an id that named no real task -- Planning's own handler
+        silently no-ops on an unknown id, so nothing was actually
+        stopped and the human was told otherwise."""
+        seen = []
+        sub = await self.kernel.bus.subscribe(topics.TASK_CANCEL, lambda m: seen.append(m.payload) or _aiodone())
+        out = await self._type("cancel abc123")
+        await asyncio.sleep(0.05)
+        await sub.unsubscribe()
+        self.assertFalse(seen, "an unknown task_id must not publish task.cancel")
+        self.assertNotIn("asked", out)
+        self.assertIn("no such task", out)
 
 
 async def _aiodone() -> None:
