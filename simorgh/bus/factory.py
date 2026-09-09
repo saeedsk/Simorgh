@@ -70,7 +70,8 @@ def make_backend(config: Config, *, clock: Clock | None = None, session: Any | N
 
         return AwsBackend(clock=clock, region=config.aws.region, topic_prefix=config.aws.topic_prefix,
                           queue_prefix=config.aws.queue_prefix, max_deliveries=config.max_deliveries,
-                          wait_time_seconds=config.aws.wait_time_seconds, session=session)
+                          wait_time_seconds=config.aws.wait_time_seconds, session=session,
+                          on_handler_error=on_handler_error)
     raise BackendUnavailable(f"unknown bus backend {config.backend!r} (memory | sqlite | aws)")
 
 

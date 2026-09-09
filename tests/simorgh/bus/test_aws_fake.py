@@ -103,6 +103,64 @@ class TestAwsBackend(unittest.TestCase):
         self.assertGreaterEqual(len(session.sqs.visibility_changes), 2)
         await backend.stop()
 
+    @run
+    async def test_handler_error_hook_fires_on_every_crash_group_and_broadcast(self):
+        # Regression for 2026-09-08: `AwsBackend` never accepted or called
+        # `on_handler_error` at all -- a crashing subscriber on this backend
+        # was invisible except after final dead-lettering (group) or never
+        # (broadcast). `memory`/`sqlite` always called the hook; this backend
+        # was the one place the "swallows handler exceptions" bug survived.
+        session = FakeBoto3Session(time.time)
+        errors: list[tuple[str, str]] = []
+
+        def on_error(message, exc):
+            errors.append((message.type, repr(exc)))
+
+        backend = AwsBackend(clock=time.time, region="us-east-1", topic_prefix="t", queue_prefix="q",
+                             max_deliveries=3, wait_time_seconds=0, session=session, on_handler_error=on_error)
+        bus = BusClient(backend, source="execution", config=Config(metrics_interval_seconds=0))
+        evt = BusClient(backend, source="reflection", config=Config(metrics_interval_seconds=0))
+
+        async def group_handler(m):
+            raise RuntimeError("group boom")
+
+        async def broadcast_handler(m):
+            raise RuntimeError("broadcast boom")
+
+        await backend.start()
+        await bus.subscribe(topics.ACTION_APPROVED, group_handler, group="execution")
+        await evt.subscribe("task.*", broadcast_handler)
+        await bus.publish(make_message(topics.ACTION_APPROVED, source="execution", partition_key="action:a1"))
+        await evt.publish(make_message(topics.TASK_STARTED, source="reflection", partition_key="task:t1"))
+        await wait_until(lambda: len(errors) >= 2, timeout=5)
+        self.assertIn((topics.ACTION_APPROVED, "RuntimeError('group boom')"), errors)
+        self.assertIn((topics.TASK_STARTED, "RuntimeError('broadcast boom')"), errors)
+        await backend.stop()
+
+    @run
+    async def test_handler_error_hook_does_not_fire_on_explicit_nack(self):
+        session = FakeBoto3Session(time.time)
+        errors: list = []
+        backend = AwsBackend(clock=time.time, region="us-east-1", topic_prefix="t", queue_prefix="q",
+                             max_deliveries=3, wait_time_seconds=0, session=session,
+                             on_handler_error=lambda m, exc: errors.append(exc))
+        bus = BusClient(backend, source="execution", config=Config(metrics_interval_seconds=0))
+        nacked: list = []
+
+        async def handler(m):
+            if not nacked:
+                nacked.append(m.id)
+                await bus.nack(m, retry_after=0.01)
+                return
+
+        await backend.start()
+        await bus.subscribe(topics.ACTION_APPROVED, handler, group="execution")
+        await bus.publish(make_message(topics.ACTION_APPROVED, source="execution", partition_key="action:a1"))
+        await wait_until(lambda: len(nacked) >= 1, timeout=5)
+        await asyncio.sleep(0.2)
+        self.assertEqual(errors, [])
+        await backend.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

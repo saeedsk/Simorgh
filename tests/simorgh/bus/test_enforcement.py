@@ -2,7 +2,12 @@ import unittest
 
 from simorgh.bus.api import PolicyViolation
 from simorgh.bus.enforcement import IdentityRegistry, ReservedTopologyPolicy
+from simorgh.bus.factory import make_backend, make_client
+from simorgh.bus.config import Config
 from simorgh.contracts import security, topics
+from simorgh.contracts.envelope import Message
+
+from .harness import run
 
 
 class TestReservedTopologyPolicy(unittest.TestCase):
@@ -57,6 +62,33 @@ class TestIdentity(unittest.TestCase):
         # a forged source name with a token issued for another name fails
         with self.assertRaises(PolicyViolation):
             policy.authenticate("execution", token)
+
+    @run
+    async def test_a_client_cannot_publish_under_another_already_authenticated_subsystems_name(self):
+        # Full-stack regression for 2026-09-08: this is the local-multi
+        # scenario the Kernel actually creates -- every subsystem
+        # self-authenticates once at boot (`ContextFactory.build`), on the
+        # SAME shared `ReservedTopologyPolicy` object. After that, curiosity's
+        # own `BusClient.publish()` must still refuse to emit a message
+        # claiming `source="guardian"`, even though "guardian" is a fully
+        # authenticated name on this policy -- identity has to be pinned to
+        # the calling client, not to whether the claimed name ever
+        # authenticated at all.
+        secret = security.new_run_secret()
+        identities = IdentityRegistry(secret=secret, run_id="run-1")
+        policy = ReservedTopologyPolicy(identities)
+        backend = make_backend(Config())
+        await backend.start()
+        for name in ("guardian", "curiosity"):
+            policy.authenticate(name, identities.issue(name))
+        curiosity = make_client(backend, source="curiosity", policy=policy)
+        forged = Message.new(
+            topics.ACTION_DENIED, source="guardian",
+            payload={"action_id": "a1", "reasons": ["forged"], "layer": "policy"},
+        )
+        with self.assertRaises(PolicyViolation):
+            await curiosity.publish(forged)
+        await backend.stop()
 
 
 if __name__ == "__main__":
