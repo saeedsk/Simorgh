@@ -320,9 +320,32 @@ keep everything after the marker, so trailing prose landed inside
   last line `ast` can attribute) is prose. Cheap, mechanical, and it
   targets the exact failure seen twice today.
 
+- **`run_tests` on a non-Python subject is a trap (live, trial 2 of the
+  95120 experiment, 2026-09-09).** Sim, told to run tests, called
+  `run_tests docs/games/real_estate_95120_live.html`; pytest exits 4
+  (usage error: not a test path), `RunTestsTool` reported it as a
+  failing suite, `FullSuiteRanCheck` then demanded the whole suite, and
+  the task blocked with a correct, clean, real-data page sitting
+  uncommitted. Fix in `execution/tools.py::RunTestsTool`: a target that
+  is not a `.py` file or a directory (or that pytest cannot collect)
+  reports the same honest "no tests cover this target -- nothing was
+  run" as exit code 5 does, not a failure; and in the PATCH scaffold,
+  say that for a non-Python file `run_tests` with an empty target (the
+  whole suite) is the right call. Verify `FullSuiteRanCheck` still
+  refuses the zero-collected case (`_NO_TESTS_COLLECTED_MARKER`).
+- **Single-string markers cannot carry filters.** Same run: Sim wrote
+  `SEARCH_LISTINGS: San Jose, CA 95120 for sale, price filter 1000000
+  to 4000000, single family` -- the whole string became `location`,
+  homeharvest matched nothing, 0 results, two wasted steps. Give
+  `search_listings` the two-part marker shape `_MARKER_SPLIT_FIRST_LINE`
+  already supports (first line `location`, rest a JSON object of
+  filters), and say so in its `_TOOL_NOTES` line. Same for any future
+  tool with more than one meaningful argument.
+
 *Acceptance:* the original unclosed-IIFE `snake.html` and the
 narration-tailed `breakout.html` (both in `games/` history) fail
-verification; the fixed versions pass.
+verification; the fixed versions pass; `run_tests docs/x.html` reports
+"nothing was run" and does not block a task.
 
 ### WS10. Structured data hand-back (small)
 
