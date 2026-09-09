@@ -23,8 +23,10 @@ What this module changes, against that blueprint:
   lives. The old thread had to bridge every line back with
   `run_coroutine_threadsafe(...).result()`, which blocked the reader
   until the turn finished -- the reason a second line typed during a slow
-  turn could not even be *typed*. Here the buffer stays live while a task
-  runs.
+  turn could not even be *typed*. Here `run()` queues each line and
+  hands it to a background worker instead of awaiting it inline, so the
+  loop is back inside `prompt_async()` -- raw mode, buffer live -- before
+  the previous turn's handler has even started running.
 - **Resize** is prompt_toolkit's own SIGWINCH handling; there is nothing
   to do but stop fighting it.
 - **Enter submits, Ctrl-J and Alt-Enter insert a newline.** A pasted
@@ -377,26 +379,81 @@ class Tui:
         return list(text or [("class:sim.footer", "")])
 
     async def run(self) -> None:
-        """Read lines until EOF, Ctrl-D, or `stop()`."""
+        """Read lines until EOF, Ctrl-D, or `stop()`.
+
+        `prompt_async()` only holds the terminal in raw mode -- no local
+        echo, `ISIG` off so Ctrl-C is a key event instead of a real
+        `SIGINT`, `ICRNL` off so a bare `\\r` reaches prompt_toolkit as
+        Enter -- for as long as it is the one awaiting input. Awaiting
+        `_on_line(line)` right here, inline, gave up that raw mode for
+        the whole turn: the terminal falls back to cooked mode between
+        one `prompt_async()` call and the next, and anything typed in
+        that gap is handled by the kernel's own line discipline instead
+        of prompt_toolkit's. Live-caught (pexpect+pyte, 2026-09-08): a
+        line typed while a turn was running sat in the buffer, pre-filled
+        but never submitted, because its trailing `\\r` arrived translated
+        to `\\n` (`ICRNL`) and this module's own binding treats `c-j` as
+        "insert a newline", not "submit" -- so the *next* real keystroke
+        appended onto it instead of starting a fresh line, which is
+        exactly the "silently merged into one multi-line message" a
+        wave-7 observer reported. Far worse: with `ISIG` back on in that
+        same gap, a Ctrl-C meant to cancel the running turn is consumed
+        by the kernel as a real `SIGINT` before prompt_toolkit ever sees
+        it -- and `kernel/cli.py`'s own signal handler answers a *single*
+        `SIGINT` by publishing `system.stop`, not by cancelling one turn.
+        One Ctrl-C at the wrong moment shut down the whole system and
+        left the terminal wedged in cooked mode, accepting no further
+        input, with no crash and no message -- reproduced live with a
+        pty harness, not inferred.
+
+        The fix: never give up raw mode while a turn is running. Each
+        line goes on a queue instead of being awaited inline, so the
+        very next loop iteration is back inside `prompt_async()` -- raw
+        mode never lapses -- while a single background worker drains the
+        queue and runs `on_line` calls one at a time, in the order they
+        arrived. A second line typed mid-turn is queued behind the first
+        and runs after it finishes; it is never merged with it and never
+        silently dropped.
+        """
         patch_stdout = _pt()["patch_stdout"]
         self._session = self._build_session()
-        # `patch_stdout` is what makes the prompt a real sticky footer:
-        # every print in the process, including the ones the bus handlers
-        # make from other threads, is rendered above the prompt instead of
-        # on top of it.
-        with patch_stdout(raw=True):
-            while not self._stopped:
+        queue: asyncio.Queue[str] = asyncio.Queue()
+
+        async def _drain() -> None:
+            while True:
+                line = await queue.get()
                 try:
-                    line = await self._session.prompt_async()
-                except (EOFError, KeyboardInterrupt):
-                    break
+                    await self._on_line(line)
                 except asyncio.CancelledError:
                     raise
-                if self._stopped:
-                    break
-                if line is None or not line.strip():
-                    continue
-                await self._on_line(line)
+                finally:
+                    queue.task_done()
+
+        worker = asyncio.ensure_future(_drain())
+        try:
+            # `patch_stdout` is what makes the prompt a real sticky footer:
+            # every print in the process, including the ones the bus
+            # handlers make from other threads, is rendered above the
+            # prompt instead of on top of it.
+            with patch_stdout(raw=True):
+                while not self._stopped:
+                    try:
+                        line = await self._session.prompt_async()
+                    except (EOFError, KeyboardInterrupt):
+                        break
+                    except asyncio.CancelledError:
+                        raise
+                    if self._stopped:
+                        break
+                    if line is None or not line.strip():
+                        continue
+                    queue.put_nowait(line)
+        finally:
+            worker.cancel()
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
 
 
 __all__ = ["COMMANDS", "DOUBLE_INTERRUPT_S", "PromptToolkitMissing", "Tui", "available", "path_matches"]
