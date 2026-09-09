@@ -656,6 +656,19 @@ class SessionRunner:
 
     async def _verify_then_finish(self, session: Session, text: str, *, floor: bool) -> Outcome:
         while True:
+            # `_run`'s main loop checks `_is_cancelled` between every
+            # step; this loop never did, and it can run for a long time
+            # -- each pass is a real verify round-trip plus, on a fail,
+            # a real re-think call. An observer measured the cost
+            # directly: a preemption cancel arrived while a session was
+            # mid-revision and the handover took 56 seconds instead of
+            # the sub-second norm, because the worker only hands over
+            # "at the next step boundary" and this loop has none
+            # (2026-09-08). Checked at the top of every pass, so a
+            # cancel is honoured between verification rounds exactly
+            # the way it is honoured between ordinary steps.
+            if self._is_cancelled(session.task_id):
+                return Outcome("failed", reason=CANCELLED_REASON, result_summary=text)
             # A fresh verification_id per attempt (not just per session): a
             # real Verification service treats a *repeated* id on
             # `verify:<id>` as a redelivery and replays the recorded verdict

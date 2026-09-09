@@ -63,4 +63,12 @@ class Config:
             denial_min_repeats=int(data.get("denial_min_repeats", cls.denial_min_repeats)),
             calibration_bins=int(calibration.get("bins", 10)),
             calibration_min_samples=int(calibration.get("min_samples", 10)),
+            # These two were absent from this call entirely -- not read
+            # into a nested/differently-named key, simply never passed
+            # to `cls(...)` at all, so the dataclass default always won
+            # regardless of what simorgh.toml said. An observer proved
+            # it live 2026-09-08: writing max_concurrent_reviews=6 left
+            # the running semaphore at the default of 2.
+            review_timeout_s=float(data.get("review_timeout_s", cls.review_timeout_s)),
+            max_concurrent_reviews=int(data.get("max_concurrent_reviews", cls.max_concurrent_reviews)),
         )

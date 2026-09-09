@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass
 
 from simorgh.contracts import topics
-from simorgh.contracts.envelope import Event
+from simorgh.contracts.envelope import Event, Message
 from simorgh.contracts.protocols import Context, Health
 
 from .api import Area, DriveContext, Gap, Interest, Target
@@ -26,6 +26,7 @@ from .interests import InterestService, is_feed_url, parse_feed_items
 from .projectproposal import OpenEndedProjectProposer
 from .projections import ActiveProject, AreaStaleness, BacklogCounter, RecentCandidates
 from .sampler import DriveWeightedSampler
+from .sharing import ShareScheduler
 
 _CONSUMES = (
     topics.SYSTEM_TICK_IDLE, topics.SYSTEM_TICK_SLEEP, topics.SYSTEM_STATE_CHANGED,
@@ -107,6 +108,29 @@ class Service:
         # is being tunable. An explicitly-passed config still wins.
         if self._config_from_caller is None and ctx.config:
             self._config = Config.from_mapping(dict(ctx.config))
+            # `_recent` was the only one of six objects built from
+            # config in `__init__` that got rebuilt here. The other
+            # five -- DriveEngine, its sampler, InterestService,
+            # ShareScheduler, ActiveProject -- kept the DEFAULT config
+            # they were constructed with, so `drive_gap`/`staleness`/
+            # `interest`/`boredom` weights, every cooldown, and the
+            # active-project confirm timeout were silently unaffected
+            # by anything written in `[curiosity]`. Confirmed live by
+            # an observer 2026-09-08: nine settings changed in the
+            # config, zero of them visible on the live objects that
+            # actually score and pick candidates every tick. This is
+            # the same bug shape fixed elsewhere in this project on
+            # 2026-09-08 (adopting a config and using it are different
+            # steps), just with five objects instead of one.
+            self._engine = DriveEngine(self._config)
+            self._sampler = DriveWeightedSampler(self._engine)
+            self._interests = InterestService(
+                follow_up_cooldown_seconds=self._config.interest_follow_up_cooldown_seconds)
+            self._sharing = ShareScheduler(
+                growth_cooldown_seconds=self._config.share_growth_cooldown_seconds,
+                news_cooldown_seconds=self._config.share_news_cooldown_seconds,
+            )
+            self._active_project = ActiveProject(self._config.active_project_confirm_timeout)
             self._recent = RecentCandidates(maxlen=self._config.recent_subjects)
         self._autonomy_paused = not self._config.autonomy_on_boot
         self._bus = ctx.bus

@@ -10,6 +10,7 @@ import dataclasses
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from simorgh.bus.config import Config as BusConfig
 from simorgh.bus.factory import make_backend, make_client
@@ -361,3 +362,48 @@ class CuriosityServiceTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConfigActuallyReachesTheDerivedObjects(unittest.IsolatedAsyncioTestCase):
+    """`_recent` was the only one of six config-built objects rebuilt in
+    `start()`. Confirmed live by an observer 2026-09-08: nine settings
+    changed in `[curiosity]`, zero of them visible on the objects that
+    actually score and pick candidates every tick -- the same "adopting
+    a config and using it are different steps" bug found elsewhere in
+    this project the same day, just with five objects instead of one.
+    """
+
+    async def test_drive_weights_reach_the_live_engine(self) -> None:
+        service = Service()
+        ctx = mock.MagicMock()
+        ctx.config = {"drive_gap": 9.0, "drive_staleness": 0.001}
+        ctx.bus = mock.AsyncMock()
+        ctx.bus.subscribe = mock.AsyncMock(return_value=mock.MagicMock())
+        ctx.ledger = mock.MagicMock()
+        ctx.clock = mock.MagicMock()
+        try:
+            await service.start(ctx)
+        except Exception:  # noqa: BLE001 -- a mocked bus/ledger need not support the rest of start()
+            pass
+        self.assertEqual(service._engine.config.drive_gap, 9.0)  # noqa: SLF001
+        self.assertEqual(service._engine.config.drive_staleness, 0.001)  # noqa: SLF001
+
+    async def test_cooldowns_reach_interests_and_sharing(self) -> None:
+        service = Service()
+        ctx = mock.MagicMock()
+        ctx.config = {
+            "interest_follow_up_cooldown_seconds": 5.0,
+            "share_growth_cooldown_seconds": 7.0,
+            "active_project_confirm_timeout": 999.0,
+        }
+        ctx.bus = mock.AsyncMock()
+        ctx.bus.subscribe = mock.AsyncMock(return_value=mock.MagicMock())
+        ctx.ledger = mock.MagicMock()
+        ctx.clock = mock.MagicMock()
+        try:
+            await service.start(ctx)
+        except Exception:  # noqa: BLE001
+            pass
+        self.assertEqual(service._interests._cooldown, 5.0)  # noqa: SLF001
+        self.assertEqual(service._sharing._growth_cooldown, 7.0)  # noqa: SLF001
+        self.assertEqual(service._active_project._confirm_timeout, 999.0)  # noqa: SLF001

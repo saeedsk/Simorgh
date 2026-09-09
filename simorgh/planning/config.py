@@ -29,7 +29,25 @@ class Config:
     regrounding_age_seconds: float = 21600.0
     reground_after_sibling_failure: bool = True
     stalled_after_seconds: float = 1800.0
-    priority_weights: dict = field(default_factory=lambda: {"human": 3, "reflection": 2, "curiosity": 1})
+    # A benchmark case sits below a human's own request and above the
+    # system's self-directed work: it was asked for, but the human is
+    # not waiting on this particular case. This dict is the ONLY real
+    # default -- `scheduler.py` used to carry its own separate
+    # `DEFAULT_PRIORITY_WEIGHTS` module constant that PlanningService
+    # never actually used (it always builds its Scheduler from
+    # `self.config.priority_weights`, i.e. this field), so adding
+    # "benchmark" to the scheduler's constant on 2026-09-08 changed
+    # nothing at runtime: `weight.get("benchmark", 0)` resolved to 0,
+    # BELOW curiosity, the opposite of intended -- an observer proved a
+    # human task preempted a running benchmark case only because 0 is
+    # still less than 3, and would have preempted curiosity over
+    # benchmark had both been running, backwards from the ranking this
+    # was supposed to establish. `scheduler.py` now imports this dict
+    # rather than keeping its own copy, so there is one default to get
+    # right, not two to keep in sync by hand.
+    priority_weights: dict = field(
+        default_factory=lambda: {"human": 3, "benchmark": 2, "reflection": 2, "curiosity": 1}
+    )
     leader: bool = True
     # A decomposition or re-grounding is a real model call. This was an
     # unconfigurable 8.0s in `bridge.py`, and every replan measured at
