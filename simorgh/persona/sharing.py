@@ -51,6 +51,7 @@ class SharePolicy:
         if not explicit_ask and now - last < cooldown:
             return ShareDecision(False, f"{kind} cooldown active", defer_until=last + cooldown)
         recent = [t for t in self._share_times if now - t < 3600.0]
+        self._share_times = recent
         if not explicit_ask and len(recent) >= self._max_per_hour:
             return ShareDecision(False, "hourly share cap reached")
         return ShareDecision(True, "ok")
