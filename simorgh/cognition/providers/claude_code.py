@@ -141,7 +141,15 @@ class ClaudeCodeProvider:
         # The CLI can exit 0 while `is_error` is true (e.g. a lapsed login)
         # -- checking only returncode lets that string through as a real reply.
         if payload.get("is_error"):
-            raise ProviderUnavailable(f"claude CLI reported an error: {payload.get('result', '')!r}")
+            # `total_cost_usd` can be nonzero here too (e.g. the session
+            # burned real turns before hitting a context limit or other
+            # mid-run error) -- same `billable` escape hatch as Together's
+            # reasoning-only truncation (`providers/together.py`), so that
+            # spend still reaches this provider's budget instead of
+            # vanishing along with the exception.
+            cost = payload.get("total_cost_usd") or 0.0
+            billable = ProviderResponse(text="", provider=self.name, cost_usd=cost) if cost else None
+            raise ProviderUnavailable(f"claude CLI reported an error: {payload.get('result', '')!r}", billable=billable)
 
         return ProviderResponse(
             text=payload.get("result", "") or "", provider=self.name,

@@ -114,6 +114,77 @@ class TestRouter(unittest.IsolatedAsyncioTestCase):
         # "gemini" has no provider instance -- filtered out, unlike "claude_code_cli".
         self.assertEqual(router.candidate_names(), ["claude_code_cli", "floor"])
 
+    async def test_a_failed_but_billed_call_still_records_its_real_spend(self):
+        # Live-caught, 2026-09-08: Together's own "reasoning only, no
+        # answer" truncation (and Claude Code CLI's `is_error` exit) both
+        # raise `ProviderUnavailable` *after* the remote call already
+        # happened and was billed. The Router used to only ever call
+        # `provider_budget.record()` on the success path, so that real
+        # spend vanished the moment the call was treated as a failure --
+        # silently undercounting the provider's own rolling-window budget.
+        billed_but_failed = ProviderResponse(
+            text="", provider="together", input_tokens=44, output_tokens=2, cost_usd=0.0000076,
+        )
+        primary = _FakeProvider(
+            "together", error=ProviderUnavailable("reasoning only", billable=billed_but_failed),
+        )
+        secondary = _FakeProvider("gemini")
+        provider_budget = _FakeProviderBudget()
+        router = Router(
+            [primary, secondary], {"together": provider_budget}, self.floor,
+            order=("together", "gemini"), clock=self.clock,
+        )
+        response, floor = await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=5.0)
+        self.assertFalse(floor)
+        self.assertEqual(response.provider, "gemini")
+        # The failed together call's real usage was recorded even though
+        # the Router moved on to gemini -- exactly one record, matching
+        # the billed-but-unusable response, not the successful gemini one.
+        self.assertEqual(provider_budget.recorded, [billed_but_failed])
+
+    async def test_a_failed_call_with_no_billable_usage_records_nothing(self):
+        # The common case (a network error, a bad key, "not found on
+        # PATH") never reached the remote API at all -- no `billable`
+        # attribute, so nothing should be recorded for it.
+        primary = _FakeProvider("together", error=ProviderUnavailable("no api key"))
+        secondary = _FakeProvider("gemini")
+        provider_budget = _FakeProviderBudget()
+        router = Router(
+            [primary, secondary], {"together": provider_budget}, self.floor,
+            order=("together", "gemini"), clock=self.clock,
+        )
+        await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=5.0)
+        self.assertEqual(provider_budget.recorded, [])
+
+    async def test_a_provider_failure_is_logged_not_silent(self):
+        class _RecordingLogger:
+            def __init__(self):
+                self.warnings: list[tuple[str, dict]] = []
+
+            def debug(self, event, **fields):
+                pass
+
+            def info(self, event, **fields):
+                pass
+
+            def warning(self, event, **fields):
+                self.warnings.append((event, fields))
+
+            def error(self, event, **fields):
+                pass
+
+        logger = _RecordingLogger()
+        primary = _FakeProvider("together", error=ProviderUnavailable("down"))
+        secondary = _FakeProvider("gemini")
+        router = Router(
+            [primary, secondary], {}, self.floor, order=("together", "gemini"), clock=self.clock, logger=logger,
+        )
+        await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=5.0)
+        self.assertEqual(len(logger.warnings), 1)
+        event, fields = logger.warnings[0]
+        self.assertEqual(event, "cognition.provider_failed")
+        self.assertEqual(fields["provider"], "together")
+
 
 class TestRouterPerCallBudget(unittest.IsolatedAsyncioTestCase):
     """Per-call budget accounting (04 section 7, "Budgets account;

@@ -34,7 +34,24 @@ class Purpose(str, enum.Enum):
 
 class ProviderUnavailable(Exception):
     """A provider could not answer this call; the Router tries the next
-    candidate (or the floor)."""
+    candidate (or the floor).
+
+    `billable` is the escape hatch for a case the Router previously
+    ignored entirely: the call genuinely reached the remote API and was
+    billed (or ran up real subscription cost) *before* this provider
+    decided the reply itself was unusable -- Together's "spent the whole
+    output budget thinking, never reached an answer" truncation
+    (`providers/together.py`) is the live-caught case, and Claude Code
+    CLI's `is_error` exit is the same shape. Carrying the real
+    `ProviderResponse` (real tokens/cost, empty text) lets the Router
+    still record it against that provider's budget even though the call
+    counts as a failure and moves on to the next candidate -- otherwise
+    that spend is real but invisible, silently undercounting the
+    provider's own rolling-window budget."""
+
+    def __init__(self, message: str, *, billable: "ProviderResponse | None" = None) -> None:
+        super().__init__(message)
+        self.billable = billable
 
 
 class NoRealProvider(Exception):

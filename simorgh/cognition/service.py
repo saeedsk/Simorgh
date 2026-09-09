@@ -151,6 +151,7 @@ class Service:
         }
         self._router = Router(
             real_providers, self._budgets, self._floor, order=self._config.provider_order, clock=ctx.clock,
+            logger=ctx.logger,
         )
         self._assembler = PromptAssembler(
             ctx.bus, ctx.source, request_timeout=self._config.assembly_request_timeout, logger=ctx.logger,

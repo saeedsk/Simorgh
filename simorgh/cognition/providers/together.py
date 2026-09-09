@@ -158,16 +158,6 @@ class TogetherProvider:
         choice = choices[0] or {}
         message = choice.get("message") or {}
         text = message.get("content") or ""
-        if not text and message.get("reasoning_content"):
-            # The model spent the whole output budget thinking and never
-            # reached an answer. Handing Cognition "" would look exactly
-            # like a real empty reply and be parsed as a non-answer; saying
-            # the provider failed lets the Router try the next one, which
-            # is what a truncated call actually warrants.
-            raise ProviderUnavailable(
-                f"Together answered with reasoning only (finish_reason={choice.get('finish_reason')!r}); "
-                f"max_tokens was too small for this model to finish thinking",
-            )
 
         usage = data.get("usage") or {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
@@ -177,6 +167,33 @@ class TogetherProvider:
         # them out here is what lets one addition price both tiers without
         # charging the cached part twice.
         uncached = max(0, prompt_tokens - cached)
+
+        if not text and message.get("reasoning_content"):
+            # The model spent the whole output budget thinking and never
+            # reached an answer. Handing Cognition "" would look exactly
+            # like a real empty reply and be parsed as a non-answer; saying
+            # the provider failed lets the Router try the next one, which
+            # is what a truncated call actually warrants.
+            #
+            # Live-caught, 2026-09-08: this HTTP call already happened and
+            # Together already billed `usage.prompt_tokens`/
+            # `completion_tokens` (reasoning tokens are billed output,
+            # same docstring above) -- raising bare here dropped that real
+            # spend on the floor because the Router only ever calls
+            # `provider_budget.record()` on the success path. `billable`
+            # carries the real, priced usage so the Router can still
+            # account for it before moving on to the next candidate.
+            raise ProviderUnavailable(
+                f"Together answered with reasoning only (finish_reason={choice.get('finish_reason')!r}); "
+                f"max_tokens was too small for this model to finish thinking",
+                billable=ProviderResponse(
+                    text="", provider=self.name,
+                    input_tokens=uncached, output_tokens=output_tokens, cached_input_tokens=cached,
+                    cost_usd=self.price(uncached, output_tokens, cached),
+                    metadata={"model": data.get("model") or self._model},
+                ),
+            )
+
         return ProviderResponse(
             text=text, provider=self.name,
             input_tokens=uncached, output_tokens=output_tokens, cached_input_tokens=cached,

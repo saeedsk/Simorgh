@@ -123,6 +123,26 @@ class TestTheReasoningModel(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ProviderUnavailable):
             await _provider(t).complete([{"role": "user", "content": "q"}], tools=None, max_tokens=200)
 
+    async def test_the_truncated_calls_real_usage_is_still_billable(self):
+        # Live-caught, 2026-09-08: Together already billed for this call
+        # (18 prompt + 200 completion tokens, real reasoning tokens) before
+        # deciding the reply itself was unusable. The Router only records
+        # spend on the success path, so without `billable` on the raised
+        # exception this real cost vanished -- silently undercounting the
+        # provider's own rolling-window budget.
+        body = json.loads(_reply(prompt=18, completion=200))
+        body["choices"][0]["message"] = {"role": "assistant", "reasoning_content": "let me count the words"}
+        body["choices"][0]["finish_reason"] = "length"
+        t = _Transport(json.dumps(body))
+        with self.assertRaises(ProviderUnavailable) as ctx:
+            await _provider(t).complete([{"role": "user", "content": "q"}], tools=None, max_tokens=200)
+        billable = ctx.exception.billable
+        self.assertIsNotNone(billable)
+        self.assertEqual(billable.input_tokens, 18)
+        self.assertEqual(billable.output_tokens, 200)
+        self.assertGreater(billable.cost_usd, 0.0)
+        self.assertEqual(billable.text, "")
+
 
 class TestTheResponse(unittest.IsolatedAsyncioTestCase):
     async def test_it_returns_the_text_and_the_token_counts(self):
