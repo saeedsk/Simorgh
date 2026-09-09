@@ -17,7 +17,14 @@ import unittest.mock
 from pathlib import Path
 
 from simorgh.interface import tui
-from simorgh.interface.tui import COMMANDS, Tui, _lex_line, path_matches
+from simorgh.interface.tui import (
+    COMMANDS,
+    Tui,
+    _lex_line,
+    _make_completer,
+    _MAX_LINE_FOR_COMPLETION_AND_LEXING,
+    path_matches,
+)
 
 
 def _styles(line: str, *, first_line: bool = True) -> list[tuple[str, str]]:
@@ -90,6 +97,86 @@ class TestCompletion(unittest.TestCase):
 
         for name, _desc in COMMANDS:
             self.assertIn(name, COMMAND_NAMES, f"the menu offers {name!r}, which parser.py does not know")
+
+
+class _FakeCompleteEvent:
+    completion_requested = False
+
+
+class TestLongLinesDoNotFreezeCompletionOrLexing(unittest.TestCase):
+    """A long pasted/typed line with no whitespace is one giant "word".
+    `complete_while_typing=True` calls `_SimCompleter.get_completions` once
+    per *character* inserted (confirmed live via cProfile: exactly as many
+    calls to `document.get_word_before_cursor` as characters typed), and
+    each of those calls scanned back over the *entire* text-before-cursor
+    looking for a word boundary that, for a whitespace-free paste, is
+    never found before position 0. That is O(current length) of work on
+    every one of O(length) keystrokes -- O(length^2) overall, and it is
+    what turned a several-thousand-character paste into a multi-minute
+    freeze (reproduced live with a pty+pyte harness, 0% CPU, no progress).
+    `_lex_line` re-scans the whole line on every redraw for the same
+    reason, though prompt_toolkit coalesces redraws across bursts of
+    keystrokes so it contributes less in practice than the completer does.
+
+    Both now bail out in O(1) once the line crosses
+    `_MAX_LINE_FOR_COMPLETION_AND_LEXING` -- no real command name or
+    repo-relative path is anywhere near that long, so nothing genuine is
+    ever short-circuited by it.
+    """
+
+    def test_lex_line_returns_one_plain_span_past_the_cap(self):
+        line = "x" * (_MAX_LINE_FOR_COMPLETION_AND_LEXING + 1)
+        self.assertEqual(_lex_line(line, first_line=True), [("", line)])
+
+    def test_lex_line_still_highlights_up_to_the_cap(self):
+        line = "@" + "x" * (_MAX_LINE_FOR_COMPLETION_AND_LEXING - 1)
+        self.assertEqual(len(line), _MAX_LINE_FOR_COMPLETION_AND_LEXING)
+        self.assertEqual(_lex_line(line, first_line=True), [("class:sim.path", line)])
+
+    def test_completer_yields_nothing_past_the_cap(self):
+        from prompt_toolkit.document import Document
+
+        completer = _make_completer(Path("."))
+        line = "@" + "x" * _MAX_LINE_FOR_COMPLETION_AND_LEXING
+        doc = Document(line, cursor_position=len(line))
+        self.assertEqual(list(completer.get_completions(doc, _FakeCompleteEvent())), [])
+
+    def test_completions_do_not_grow_quadratically_with_line_length(self):
+        """Feed the completer a document once per character of a growing,
+        whitespace-free line -- exactly how `complete_while_typing=True`
+        drives it while someone types or pastes -- and confirm the total
+        cost stays roughly linear instead of quadratic. An O(n^2)
+        regression would make the second run take ~4x as long as the
+        first for only 2x the length; a capped, roughly-linear one keeps
+        that ratio well under that.
+        """
+        import time
+        from prompt_toolkit.document import Document
+
+        completer = _make_completer(Path("."))
+
+        def total_time(length: int) -> float:
+            text = "x" * length
+            start = time.perf_counter()
+            for i in range(1, length + 1):
+                doc = Document(text[:i], cursor_position=i)
+                list(completer.get_completions(doc, _FakeCompleteEvent()))
+            return time.perf_counter() - start
+
+        small = _MAX_LINE_FOR_COMPLETION_AND_LEXING
+        large = _MAX_LINE_FOR_COMPLETION_AND_LEXING * 4
+        small_time = total_time(small)
+        large_time = total_time(large)
+        # Uncapped, quadrupling the length quadruples the per-call cost on
+        # top of quadrupling the call count -- roughly a 16x blow-up.
+        # Capped past the threshold, the extra calls are O(1), so the
+        # ratio should stay close to the 4x call-count growth.
+        self.assertLess(
+            large_time,
+            small_time * 8,
+            f"completer time grew {large_time / small_time:.1f}x for a 4x longer line "
+            "-- looks quadratic again",
+        )
 
 
 class TestTheInterruptRule(unittest.TestCase):
