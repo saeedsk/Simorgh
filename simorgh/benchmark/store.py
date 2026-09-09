@@ -17,6 +17,7 @@ needs.
 from __future__ import annotations
 
 import json
+from collections import deque
 
 from simorgh.contracts.envelope import Event
 
@@ -56,11 +57,28 @@ class RunStore:
         return detail_ref
 
     async def history(self, *, suite: str = "", model: str = "", limit: int = 100) -> list[RunRecord]:
-        """Runs, oldest first, most recent `limit` after filtering."""
+        """Runs, oldest first, most recent `limit` after filtering.
+
+        The filter is applied while streaming: only the last `limit`
+        matching records are kept, so a long stream is not fully
+        materialized when only recent runs are needed.
+        """
         try:
             events = await self._ledger.read(STREAM)
         except Exception:  # noqa: BLE001 -- no stream yet is an empty history, not an error
             return []
+        if limit > 0:
+            kept: deque[RunRecord] = deque(maxlen=limit)
+            for event in events:
+                if event.type != "benchmark.run":
+                    continue
+                payload = event.payload
+                if suite and payload.get("suite") != suite:
+                    continue
+                if model and payload.get("model") != model:
+                    continue
+                kept.append(RunRecord.from_payload(payload))
+            return list(kept)
         records = []
         for event in events:
             if event.type != "benchmark.run":
@@ -71,7 +89,7 @@ class RunStore:
             if model and payload.get("model") != model:
                 continue
             records.append(RunRecord.from_payload(payload))
-        return records[-limit:] if limit > 0 else records
+        return records
 
     async def latest(self, *, suite: str = "", model: str = "") -> RunRecord | None:
         records = await self.history(suite=suite, model=model, limit=1)
