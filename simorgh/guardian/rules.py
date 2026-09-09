@@ -101,10 +101,19 @@ def _mentioned_paths(text: str) -> list[str]:
 # the text-match cannot otherwise tell `cat path` from `echo x > path`.
 # `subject`/`path` arguments (`apply_source_patch`, `apply_skill`) need
 # no such check: naming a file there always means writing it.
+#
+# `\.write\(` alone does not match `pathlib.Path(...).write_text(...)`
+# or `.write_bytes(...)` -- "write" there is immediately followed by
+# "_text("/"_bytes(", not "(". An observer proved the consequence,
+# 2026-09-08: `Path("docs/SOUL.md").write_text("...")`, run through
+# `run_shell`, was never flagged as a write by this regex, so
+# `ProtectedRule` never added `docs/SOUL.md` to the paths it checks and
+# the write landed on the real protected file. `\.write\w*\(` covers
+# `.write(`, `.write_text(` and `.write_bytes(` alike.
 _WRITE_SIGNS = re.compile(
     r">>?(?!=)|\btee\b|\bcp\b|\bmv\b|\brm\b|\bsed\b.*-i\b|\bdd\b|\btruncate\b"
     r"|open\([^)]*['\"][waxWAX][+b]?['\"]"
-    r"|\.write\(|\.writelines\(|\.unlink\(|\.remove\(|shutil\.(move|copy|rmtree)"
+    r"|\.write\w*\(|\.writelines\(|\.unlink\(|\.remove\(|shutil\.(move|copy|rmtree)"
     r"|os\.(remove|unlink|rename|replace)",
 )
 
@@ -214,8 +223,23 @@ class ProtectedRule:
             # ALSO defeat the one check that never needed obfuscation
             # to begin with (2026-09-08).
             canonical = posixpath.normpath(path)
+            # Lower-cased too: the deploy filesystem (macOS/APFS default)
+            # is case-insensitive but case-PRESERVING -- `DOCS/SOUL.MD`
+            # and `docs/SOUL.md` are the same on-disk file, but a plain
+            # substring check is case-sensitive and would not know that.
+            # An observer proved the consequence, 2026-09-08: a run_shell
+            # `echo ... > DOCS/SOUL.MD` was approved (the mismatched case
+            # never matched `protected_subjects`'s lower-case entries)
+            # and actually overwrote the real, protected docs/SOUL.md.
+            # Case-folding over-matches on a case-sensitive filesystem
+            # (e.g. a same-named but different-case file elsewhere in the
+            # tree) -- the accepted trade this whole scan already makes
+            # (over-match rather than under-match).
+            canonical_lower = canonical.lower()
+            path_lower = path.lower()
             for protected in ctx.config.protected_subjects:
-                if protected in path or protected in canonical:
+                protected_lower = protected.lower()
+                if protected in path or protected in canonical or protected_lower in path_lower or protected_lower in canonical_lower:
                     return Decision(
                         "deny", self.layer,
                         (f"{path!r} is protected ({protected!r}); only the creator may edit it directly",),
@@ -238,13 +262,29 @@ class ScopeRule:
         return Decision("abstain", self.layer)
 
 
+def _code_text(proposal: Proposal) -> str | None:
+    """The free-form code/command payload a proposal carries, or None.
+    Joins every key in `_CODE_ARG_KEYS` present rather than reading
+    `code` alone: an observer proved, 2026-09-08, that `DenylistRule`
+    and `ImmunityRule` both read only `proposal.args.get("code")`, so
+    `run_shell`'s payload -- which arrives as `command`, not `code` --
+    was invisible to either rule. A `subprocess.run(...)` (a Directive-1
+    denylist hit) submitted via `run_python_sandboxed`'s `code` argument
+    was denied instantly; the identical text submitted via `run_shell`'s
+    `command` argument was approved and its subprocess actually ran,
+    because both rules abstained before ever looking at it."""
+    parts = [proposal.args.get(key) for key in _CODE_ARG_KEYS]
+    texts = [p for p in parts if isinstance(p, str) and p]
+    return "\n".join(texts) if texts else None
+
+
 class DenylistRule:
     name = "denylist"
     layer = "denylist"
 
     async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
-        code = proposal.args.get("code")
-        if not isinstance(code, str):
+        code = _code_text(proposal)
+        if code is None:
             return Decision("abstain", self.layer)
         scan_text = code
         # `run_shell`/`run_python_sandboxed` also carry `code`, but name
@@ -276,8 +316,8 @@ class ImmunityRule:
     layer = "immunity"
 
     async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
-        code = proposal.args.get("code")
-        if not isinstance(code, str) or not code:
+        code = _code_text(proposal)
+        if code is None:
             return Decision("abstain", self.layer)
         found = ctx.rejected_similarity(code)
         if found is not None:
