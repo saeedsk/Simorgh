@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
+from .doctext import document_to_text
 from .pdftext import looks_like_pdf, pdf_to_text
 
 _CREDENTIAL_LOOKING_NAMES = (".env", "credentials", "secret", "id_rsa", ".pem")
@@ -121,6 +122,17 @@ def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ..
         # exactly as it works on source (2026-09-08).
         if looks_like_pdf(data):
             text, problem = pdf_to_text(data, source=raw_path)
+            if problem and not text:
+                return "", f"[{problem}]"
+            return (f"[{problem}]\n\n{text}" if problem else text), ""
+        # Same treatment for the other formats that are not plain text:
+        # a spreadsheet of the very data a task is about, or a
+        # screenshot in the repo, used to come back as binary noise
+        # (doctext.py). `None` means "not one of mine" -- distinct from
+        # "mine, and empty".
+        handled = document_to_text(data, name=raw_path)
+        if handled is not None:
+            text, problem = handled
             if problem and not text:
                 return "", f"[{problem}]"
             return (f"[{problem}]\n\n{text}" if problem else text), ""

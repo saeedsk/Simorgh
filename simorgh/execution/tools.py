@@ -56,6 +56,7 @@ from . import pathsafety
 from .config import Config
 from .htmltext import html_to_text, looks_like_html
 from .netsafety import FetchRefused, validate_public_http_url
+from .doctext import document_to_text
 from .geocode import GeocodeTool
 from .packages import FindPackageTool, InstallPackageTool
 from .pdftext import looks_like_pdf, pdf_to_text
@@ -571,6 +572,23 @@ class WebFetchTool:
                     "raw_chars": len(raw), "text_chars": len(text), "js_shell": False,
                 },
             )
+
+        # A spreadsheet, document or image fetched over HTTP gets the
+        # same treatment `read_file` gives it on disk (doctext.py) --
+        # otherwise a link to an .xlsx of the very data a task is about
+        # comes back as binary noise with ok=True.
+        if self._config.web_fetch_extract_text:
+            handled = document_to_text(raw, name=urlparse(url).path)
+            if handled is not None:
+                text, problem = handled
+                return ToolResult(
+                    ok=not (problem and not text), output=text or "", error=problem or None,
+                    metadata={
+                        "url": url, "status": status_code, "truncated": False, "kind": "document",
+                        "sha256": hashlib.sha256(raw).hexdigest(), "fetched_at": ctx.clock.now(),
+                        "raw_chars": len(raw), "text_chars": len(text), "js_shell": False,
+                    },
+                )
 
         # Decode the WHOLE raw body, not a byte-capped prefix: extraction
         # used to run on `raw[:web_fetch_max_bytes]` (200 KB), so a long

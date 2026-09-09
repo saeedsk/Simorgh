@@ -16,6 +16,7 @@ import importlib.util
 import json
 import posixpath
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -451,6 +452,143 @@ class StaticAnalysisRule:
         return Decision("abstain", self.layer)
 
 
+_SHELLCHECK_DANGEROUS = {
+    # `rm -rf "$x/"` where $x may be empty -- the classic way a cleanup
+    # script deletes the wrong tree. Every one of these is a *correctness*
+    # bug shellcheck is certain about, not a style opinion.
+    "SC2115",  # use "${var:?}" to ensure this never expands to /
+    "SC2114",  # warning: deletes a system directory
+    "SC2216",  # piping to a command that ignores stdin
+    "SC2242",  # exit with an invalid status
+}
+
+
+def shellcheck_available() -> bool:
+    return bool(shutil.which("shellcheck"))
+
+
+def run_shellcheck(command: str, timeout_s: float) -> list[dict] | None:
+    """shellcheck's findings for `command`, or None when it could not
+    run. None is "no opinion", never "clean" -- same contract as
+    `run_bandit`."""
+    path = shutil.which("shellcheck")
+    if not path:
+        return None
+    try:
+        completed = subprocess.run(
+            [path, "-f", "json", "-s", "bash", "-"], input=f"#!/bin/bash\n{command}\n",
+            capture_output=True, text=True, timeout=timeout_s, stdin=None,
+        )
+        return json.loads(completed.stdout or "[]")
+    except (subprocess.TimeoutExpired, OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+class ShellcheckRule:
+    """shellcheck over a shell command, for the few findings that mean
+    "this will destroy something you did not mean to destroy".
+
+    Deliberately tiny in scope. shellcheck has hundreds of checks and
+    most are style; denying on all of them would make `run_shell`
+    unusable and teach the model to route around Guardian, which is the
+    outcome this whole layer exists to prevent. Only the codes in
+    `_SHELLCHECK_DANGEROUS` deny. Everything else it noticed rides along
+    on an `abstain` as reasons, so the finding is visible in the trace
+    without blocking the call.
+
+    Optional, like bandit: not installed means abstain, never deny.
+    """
+
+    name = "shellcheck"
+    layer = "shellcheck"
+
+    async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
+        if not getattr(ctx.config, "shellcheck_enabled", True):
+            return Decision("abstain", self.layer)
+        command = proposal.args.get("command")
+        if not isinstance(command, str) or not command.strip():
+            return Decision("abstain", self.layer)
+        # Checked before the thread hop, not inside it: without
+        # shellcheck installed this rule has nothing to say, and paying
+        # a thread switch on every shell proposal to discover that is
+        # both waste and an extra scheduling point in the action path.
+        if not shellcheck_available():
+            return Decision("abstain", self.layer)
+        findings = await asyncio.to_thread(
+            run_shellcheck, command, getattr(ctx.config, "shellcheck_timeout_s", 10.0))
+        if not findings:
+            return Decision("abstain", self.layer)
+        deny, noted = [], []
+        for finding in findings:
+            code = f"SC{finding.get('code')}"
+            message = str(finding.get("message") or "")[:200]
+            (deny if code in _SHELLCHECK_DANGEROUS else noted).append(f"shellcheck {code}: {message}")
+        if deny:
+            return Decision("deny", self.layer, tuple(f"denied: {r}" for r in deny))
+        return Decision("abstain", self.layer, tuple(noted[:5]))
+
+
+class PackageRule:
+    """`install_package` may only ever install a plain package name.
+
+    The tool checks this itself; this rule is the boundary. Two layers
+    because they fail differently: an edit to the tool is a code change
+    somebody reviews, while a rule denial is recorded, immune to retry,
+    and visible in the trace. A URL, a local path or a VCS ref in a
+    package spec is a way to run code from somewhere nobody reviewed.
+    """
+
+    name = "package"
+    layer = "package"
+
+    _BAD_SPEC = re.compile(r"://|^file:|^\.{0,2}/|^-|\.tar\.|\.whl$|^git\+", re.I)
+
+    async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
+        if proposal.tool != "install_package":
+            return Decision("abstain", self.layer)
+        spec = str(proposal.args.get("spec") or "").strip()
+        if not spec:
+            return Decision("abstain", self.layer)
+        if self._BAD_SPEC.search(spec):
+            return Decision("deny", self.layer, (
+                f"denied: {spec!r} is not a plain package name -- a URL, path or VCS ref installs "
+                "code from somewhere nobody reviewed",
+            ))
+        for pattern in getattr(ctx.config, "package_denylist", ()):
+            if re.search(pattern, spec):
+                return Decision("deny", self.layer, (f"denied: {spec!r} is on the package denylist",))
+        return Decision("abstain", self.layer)
+
+
+class GrantRule:
+    """`grant_capability` may not be pointed at the machine.
+
+    Mirrors `grants.py::validate_external`'s module denylist, for the
+    same reason `PackageRule` mirrors its tool: the tool's check is
+    usability, this one is the boundary. A grant over `os` or
+    `subprocess` would hand out arbitrary execution wearing a tool's
+    name -- and unlike `run_shell`, it would persist across restarts.
+    """
+
+    name = "grant"
+    layer = "grant"
+
+    async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
+        if proposal.tool != "grant_capability":
+            return Decision("abstain", self.layer)
+        import_path = str(proposal.args.get("import_path") or "").strip()
+        if import_path:
+            root = import_path.split(":", 1)[0].split(".", 1)[0]
+            if root in getattr(ctx.config, "grant_import_denylist", ()):
+                return Decision("deny", self.layer, (
+                    f"denied: a tool over {root!r} would hand out the machine, not a library",))
+        command = str(proposal.args.get("command") or "").strip()
+        if command and command not in ("npx", "uvx", "node", "python", "python3"):
+            return Decision("deny", self.layer, (
+                f"denied: {command!r} may not launch an MCP server",))
+        return Decision("abstain", self.layer)
+
+
 class ImmunityRule:
     name = "immunity"
     layer = "immunity"
@@ -535,6 +673,9 @@ DEFAULT_PIPELINE: tuple = (
     ScopeRule(),
     DenylistRule(),
     StaticAnalysisRule(),
+    ShellcheckRule(),
+    PackageRule(),
+    GrantRule(),
     ImmunityRule(),
     BudgetRule(),
     ReversibilityRule(),
