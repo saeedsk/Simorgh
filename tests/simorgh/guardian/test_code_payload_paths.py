@@ -76,6 +76,30 @@ class TestAProgramCannotReachAProtectedFile(unittest.IsolatedAsyncioTestCase):
         decision = await self._verdict({"command": "cp /tmp/evil sim.sh"})
         self.assertEqual(decision.kind, "deny")
 
+    async def test_numpy_save_onto_a_protected_file_is_denied(self) -> None:
+        """`np.save(path, ...)` is a one-call write with no `open(...)`
+        in sight. An observer reproduced this end-to-end, 2026-09-08: ran
+        `run_python_sandboxed`'s exact subprocess setup (empty env, temp
+        cwd, `python -I`) with `pd.DataFrame(...).to_csv(<a real file>)`
+        and the target file's content was actually gone -- this rule had
+        abstained on the identical code payload, because `_WRITE_SIGNS`
+        never recognised the call as a write at all."""
+        decision = await self._verdict({"code": "import numpy as np\nnp.save('docs/SOUL.md', [1, 2, 3])"})
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_pandas_to_csv_onto_a_protected_file_is_denied(self) -> None:
+        decision = await self._verdict(
+            {"code": "import pandas as pd\npd.DataFrame({'a': [1]}).to_csv('simorgh/guardian/rules.py')"})
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_torch_save_onto_a_protected_file_is_denied(self) -> None:
+        decision = await self._verdict({"code": "import torch\ntorch.save(model, 'simloader.py')"})
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_joblib_dump_onto_a_protected_file_is_denied(self) -> None:
+        decision = await self._verdict({"code": "import joblib\njoblib.dump(model, 'sim.sh')"})
+        self.assertEqual(decision.kind, "deny")
+
 
 class TestOrdinaryProgramsAreStillAllowed(unittest.IsolatedAsyncioTestCase):
     """Over-matching costs a denial, so it still has to be rare. These
@@ -93,6 +117,11 @@ class TestOrdinaryProgramsAreStillAllowed(unittest.IsolatedAsyncioTestCase):
 
     async def test_running_the_tests_is_fine(self) -> None:
         decision = await self._verdict({"command": "python -m pytest tests/simorgh/interface -q"})
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_saving_a_dataframe_to_an_unprotected_path_is_fine(self) -> None:
+        decision = await self._verdict(
+            {"code": "import pandas as pd\npd.DataFrame({'a': [1]}).to_csv('/tmp/scratch.csv')"})
         self.assertEqual(decision.kind, "abstain")
 
     async def test_a_read_only_tool_is_never_blocked_by_this_rule(self) -> None:

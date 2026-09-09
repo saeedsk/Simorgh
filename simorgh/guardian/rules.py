@@ -110,11 +110,27 @@ def _mentioned_paths(text: str) -> list[str]:
 # `ProtectedRule` never added `docs/SOUL.md` to the paths it checks and
 # the write landed on the real protected file. `\.write\w*\(` covers
 # `.write(`, `.write_text(` and `.write_bytes(` alike.
+#
+# The idioms above are all "open a handle, then write to it" -- they
+# miss the whole other family of one-call dataframe/array serializers
+# that write a path directly with no `open(...)` anywhere in sight. An
+# observer reproduced the consequence end-to-end, 2026-09-08: run
+# `run_python_sandboxed`'s exact subprocess setup (empty env, temp cwd,
+# `python -I`) with `pd.DataFrame(...).to_csv('/abs/path/to/protected')`
+# and the target file's real content was gone -- `_looks_like_a_write`
+# returned False, so `_subject_paths` never even looked at the path
+# mentioned in the code, and `ProtectedRule` abstained outright. Same
+# result for `np.save(...)`. Covering every such library's own save/dump
+# method by name (`np.save`, `numpy.savez`, `torch.save`, `joblib.dump`,
+# and pandas' `.to_<format>(` family) is the same "over-match rather
+# than under-match" trade as the rest of this scan.
 _WRITE_SIGNS = re.compile(
     r">>?(?!=)|\btee\b|\bcp\b|\bmv\b|\brm\b|\bsed\b.*-i\b|\bdd\b|\btruncate\b"
     r"|open\([^)]*['\"][waxWAX][+b]?['\"]"
     r"|\.write\w*\(|\.writelines\(|\.unlink\(|\.remove\(|shutil\.(move|copy|rmtree)"
-    r"|os\.(remove|unlink|rename|replace)",
+    r"|os\.(remove|unlink|rename|replace)"
+    r"|\.to_(csv|json|pickle|parquet|excel|feather|hdf|sql)\("
+    r"|\b(np|numpy)\.save[z]?\(|\btorch\.save\(|\bjoblib\.dump\(",
 )
 
 
