@@ -80,6 +80,23 @@ class DriveWeightedSamplerTest(unittest.TestCase):
         self.assertEqual(set(table), {"a", "b"})
         self.assertIn("total", table["a"])
 
+    def test_focus_multiplier_from_config_changes_score_table(self):
+        """`[curiosity.focus]` (`Config.focus`, area -> multiplier) parses
+        but was never read by either caller of `DriveEngine.score_area`
+        (`sampler.pick`, `sampler.score_table`), which both left its
+        `focus_multiplier` keyword at the default of 1.0 -- so writing
+        `[curiosity.focus] a = 5.0` changed the parsed `Config` object
+        but left every score, and therefore every pick, identical to
+        leaving it unset. Regression for the live-confirmed 2026-09-08
+        fix wiring `Config.focus` into both call sites via `_focus_multiplier`."""
+        ctx = self._ctx((Area(name="a", modules=("m1.py",)), Area(name="b", modules=("m2.py",))))
+        plain = DriveWeightedSampler(DriveEngine(Config()))
+        focused = DriveWeightedSampler(DriveEngine(Config.from_mapping({"focus": {"a": 5.0}})))
+        plain_table = plain.score_table(ctx)
+        focused_table = focused.score_table(ctx)
+        self.assertEqual(plain_table["a"]["total"] * 5.0, focused_table["a"]["total"])
+        self.assertEqual(plain_table["b"]["total"], focused_table["b"]["total"])
+
 
 if __name__ == "__main__":
     unittest.main()
