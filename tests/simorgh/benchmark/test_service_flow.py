@@ -128,6 +128,39 @@ class RunnerTestCase(unittest.IsolatedAsyncioTestCase):
         record, _ = await self._run(delay=0.0)
         self.assertEqual(record.correct, 1)
 
+    async def test_a_deduplicated_task_id_fails_fast_instead_of_the_full_timeout(self):
+        """Observer, 2026-09-08 (GAIA deep dive): a dedupe that hands
+        back an existing task_id used to make `_AnswerWatch` block the
+        entire `case_timeout_s` waiting for an outcome that already
+        fired to a different watcher -- 5 of 7 real GAIA cases in one
+        run each cost 600s this way. `origin="benchmark"` is now exempt
+        from Intake's fuzzy dedupe (test_intake.py), but this is the
+        harness's own belt-and-suspenders: if a `task.create` reply ever
+        carries `deduplicated_against` again, for any reason, the case
+        must fail immediately and honestly, not silently burn its whole
+        timeout."""
+        async with Harness() as h:
+            bus = h.client("benchmark")
+            other = h.client("orchestration")
+
+            async def _on_create(message: Message) -> None:
+                await other.reply(message, type=topics.TASK_CREATE_REPLY, payload={
+                    "task_id": "some-other-cases-task", "deduplicated_against": "some-other-cases-task",
+                })
+
+            sub = await other.subscribe(topics.TASK_CREATE, _on_create)
+            try:
+                runner = Runner(bus, config=Config(case_timeout_s=5.0), clock=h.clock.now)
+                started = h.clock.now()
+                result = await runner.run_case(SUITE.cases[0])
+                elapsed = h.clock.now() - started
+            finally:
+                await sub.unsubscribe()
+        self.assertTrue(result.skipped)
+        self.assertFalse(result.correct)
+        self.assertIn("some-other-cases-task", result.error)
+        self.assertLess(elapsed, 1.0, "must not have waited out case_timeout_s")
+
     async def test_a_case_prompt_carries_the_function_schemas_when_there_are_any(self):
         async with Harness() as h:
             runner = Runner(h.client("benchmark"), clock=h.clock.now)

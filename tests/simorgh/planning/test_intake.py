@@ -61,6 +61,26 @@ class TestDedupeIsForAutonomousOriginsOnly(unittest.TestCase):
         self.assertIsNotNone(second.task)
         self.assertNotEqual(second.task.id, first.task.id)
 
+    @run
+    async def test_a_benchmark_case_is_never_deduped_either(self):
+        """Observer, 2026-09-08 (GAIA deep dive): every case gets the
+        same ~330-char answer-format suffix appended by
+        `benchmark/runner.py::Runner.prompt`, which alone pushed two
+        wholly unrelated GAIA questions (Kipchoge's marathon, Mercedes
+        Sosa's albums) over this 45% fuzzy threshold -- 5 of 7 cases in
+        one real run silently got handed back an unrelated,
+        already-completed task_id and were never actually asked."""
+        intake, _store = await _intake()
+        suffix = "\n\nFINAL ANSWER: <answer in the exact format requested>" * 8  # a shared, long boilerplate
+        first = await intake.on_goal_stated(
+            goal=f"How many hours did Kipchoge take?{suffix}", origin="benchmark", wants_project=False,
+        )
+        second = await intake.on_goal_stated(
+            goal=f"How many albums did Mercedes Sosa release?{suffix}", origin="benchmark", wants_project=False,
+        )
+        self.assertIsNotNone(second.task)
+        self.assertNotEqual(second.task.id, first.task.id)
+
 
 class TestGoalStatedRiskOverride(unittest.TestCase):
     @run

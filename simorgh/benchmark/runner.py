@@ -90,6 +90,25 @@ class Runner:
             if not task_id:
                 return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
                                   expected=case.answer, error="planning created no task")
+            dup_of = reply.payload.get("deduplicated_against")
+            if dup_of:
+                # Belt-and-suspenders: `origin="benchmark"` is now exempt
+                # from Intake's fuzzy dedupe (observer, 2026-09-08 --
+                # every GAIA question got the shared ~330-char
+                # answer-format suffix appended, which alone pushed
+                # unrelated questions over the similarity threshold, so
+                # 5 of 7 cases in one run silently got handed back an
+                # unrelated, already-completed task_id). If a dedupe
+                # ever fires here anyway -- a future policy change, a
+                # genuinely repeated question -- fail the case
+                # immediately with an honest reason instead of blocking
+                # the full case_timeout_s waiting for an outcome that
+                # already happened to a different case.
+                return CaseResult(
+                    case_id=case.id, level=case.level, correct=False, skipped=True, expected=case.answer,
+                    error=f"planning handed back an existing task ({dup_of!r}) instead of asking this "
+                          f"case's question -- never actually asked",
+                )
             answer_text, steps, error = await watch.wait(task_id, self._config.case_timeout_s)
             if not answer_text and error:
                 # A case we gave up on used to keep its worker. The
