@@ -447,6 +447,7 @@ class Service:
             count = self._config.candidates_per_tick
         else:
             count = round(self._config.candidates_per_tick * rate)
+        research_bias = self._engine.research_prior_multiplier(self._mood["valence"])
         for _ in range(max(0, count)):
             temperature = self._engine.temperature(self._mood["arousal"])
             recent = self._recent.recent_subjects(self._config.recent_subjects)
@@ -455,7 +456,7 @@ class Service:
                 break
             picked.append(target.subject)
             preview = await self._preview(target)
-            idea = await self._idea_proposer.propose(target, preview, self._think)
+            idea = await self._idea_proposer.propose(target, preview, self._think, research_bias)
             if idea is None or self._recent.similar(idea.description):
                 continue
             candidate_id = self._candidate_id(target.subject, idea.description)
