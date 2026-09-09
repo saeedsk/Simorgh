@@ -358,6 +358,30 @@ class TestSkillTool(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.ok)
         self.assertIn("exit_code", result.error)
 
+    async def test_an_async_run_entrypoint_is_awaited_not_left_as_a_coroutine(self):
+        # Live-caught (observer, 2026-09-08): `skill_marker_arg_key`
+        # already recognizes `async def run(...)` when inferring the
+        # marker arg (it walks both `ast.FunctionDef` and
+        # `ast.AsyncFunctionDef`), so nothing tells the model this shape
+        # is unsupported -- but `_SKILL_DRIVER` called `_skill.run(**args)`
+        # and printed the return value directly. For an async def that
+        # return value is an un-awaited coroutine, which blew up
+        # `json.dumps` with "Object of type coroutine is not JSON
+        # serializable" plus a "coroutine 'run' was never awaited"
+        # RuntimeWarning on every single invocation.
+        tool = SkillTool(
+            self.config, skill_name="async_greet", description="greets asynchronously",
+            source=(
+                "import asyncio\n"
+                "async def run(name=\"world\"):\n"
+                "    await asyncio.sleep(0)\n"
+                "    return f\"hello {name}\"\n"
+            ),
+        )
+        result = await tool.run({"name": "simorgh"}, ctx=_ctx(self.config))
+        self.assertTrue(result.ok, result.metadata)
+        self.assertIn("hello simorgh", result.output)
+
     async def test_a_missing_run_entrypoint_returns_ok_false(self):
         tool = SkillTool(self.config, skill_name="empty", description="no entrypoint", source="x = 1\n")
         result = await tool.run({}, ctx=_ctx(self.config))

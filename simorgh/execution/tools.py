@@ -1272,13 +1272,22 @@ class GitRevertTool:
         )
 
 
-_SKILL_DRIVER = """import sys, os, json
+_SKILL_DRIVER = """import sys, os, json, asyncio, inspect
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _skill_module as _skill
 _args = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
 if not hasattr(_skill, "run"):
     raise SystemExit("skill module has no run() entrypoint")
 _result = _skill.run(**_args)
+# A skill drafted as `async def run(...)` (skill_marker_arg_key already
+# recognizes ast.AsyncFunctionDef when inferring the marker arg, so the
+# model is never told this shape is unsupported) returns a coroutine here
+# rather than the skill's real return value. Un-awaited, that coroutine
+# used to reach json.dumps() and blow up with "Object of type coroutine is
+# not JSON serializable" plus a "coroutine 'run' was never awaited"
+# RuntimeWarning on every single invocation -- live-caught, 2026-09-08.
+if inspect.isawaitable(_result):
+    _result = asyncio.run(_result)
 print(_result if isinstance(_result, str) else json.dumps(_result))
 """
 
