@@ -275,6 +275,45 @@ class TestHealthAndStatus(unittest.IsolatedAsyncioTestCase):
                 await kernel.shutdown()
 
 
+class TestBootTimeMetricsReachStatusSnapshot(unittest.IsolatedAsyncioTestCase):
+    """`execution.Service.start()` (layer 2 of `LAYERS`) publishes a
+    one-time `system.metrics{subsystem: "execution", gauges: {skills:
+    N}}` from `_announce_skills_on_disk` -- with no periodic re-publish
+    and no ledger-backed replay path, unlike `tool.registered`'s
+    `_replay_registrations`. `StatusServer` used to be built and started
+    only *after* every layer had already finished booting
+    (`Kernel.boot`), so its `system.metrics` subscription opened strictly
+    after this boot-time-only publish -- the same "subscriber boots
+    after a one-time boot-time publish" shape as the `tool.registered`
+    gap, just with the message genuinely unrecoverable rather than
+    replayable. Confirmed live before the fix: a real boot with a
+    nonempty skill directory left `status_snapshot()["metrics"]
+    ["execution"]` as `None` forever. Fixed by building/starting
+    `StatusServer` before the layer loop instead of after it."""
+
+    async def test_skills_gauge_from_executions_boot_time_publish_reaches_the_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "skills"
+            skill_dir.mkdir()
+            (skill_dir / "example.py").write_text("def run(*a, **k):\n    return 'ok'\n")
+            config = LoadedConfig({
+                "runtime": {"data_dir": tmp},
+                "execution": {"skill_dir": str(skill_dir), "repo_root": tmp},
+            }, None)
+            kernel = Kernel(config, secrets=EnvSecretStore({}), clock=FakeClock())
+            await kernel.boot()
+            try:
+                snap = kernel.status_snapshot()
+                execution_metrics = snap["metrics"].get("execution")
+                self.assertIsNotNone(
+                    execution_metrics,
+                    "execution's boot-time system.metrics publish never reached StatusServer",
+                )
+                self.assertEqual(execution_metrics["gauges"]["skills"], 1)
+            finally:
+                await kernel.shutdown()
+
+
 class TestLocalMultiMode(unittest.IsolatedAsyncioTestCase):
     """`local-multi` mode (03-kernel.md section 5.6): `simorgh run` boots
     everything except `orchestration`; a real subsystem token round-trip
