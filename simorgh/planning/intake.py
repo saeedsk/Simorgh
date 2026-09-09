@@ -26,7 +26,7 @@ class Intake:
         self._store = store
         self._threshold = dedupe_threshold
 
-    def _find_duplicate(self, description: str, *, origin: str = "curiosity") -> str | None:
+    def _find_duplicate(self, description: str, *, origin: str = "curiosity", distinguish: str | None = None) -> str | None:
         """Live-caught (the creator, 2026-09-07): three different `improve`
         requests -- different paths, different wording -- each came back
         as the *first* one's id, and the later two never ran. The 45%
@@ -43,10 +43,26 @@ class Intake:
         which alone pushed unrelated GAIA questions (e.g. Kipchoge's
         marathon and Mercedes Sosa's albums) over this threshold, so
         5 of 7 cases in one run silently got handed back an unrelated,
-        already-completed task_id and were never actually asked."""
+        already-completed task_id and were never actually asked.
+
+        `distinguish`, when given, is a substring the *matched* existing
+        description must also contain for the match to count -- the same
+        boilerplate problem as `benchmark` above, but on the other side:
+        Reflection's own `reflect.patterns.found` proposals for two
+        genuinely different `task_type`s ("'patch' tasks failed 5/5
+        recent outcomes (100%) -- worth reviewing..." vs the same
+        sentence for `'unknown'`) differ by one quoted word inside a
+        long shared template, which alone measured ~0.93 similarity --
+        well past this threshold -- so the second pattern silently
+        collapsed into the first's task and was never surfaced
+        (observer, 2026-09-08, w8-04, reproduced against a real Kernel).
+        Passing the pattern's own `task_type` here keeps the fuzzy match
+        but requires it actually be about the same task_type."""
         if origin in ("human", "benchmark"):
             return None
         for tid, desc in self._store.descriptions():
+            if distinguish is not None and distinguish not in desc:
+                continue
             if difflib.SequenceMatcher(None, description, desc).ratio() >= self._threshold:
                 return tid
         return None
@@ -97,7 +113,9 @@ class Intake:
         created: list[Task] = []
         for pattern in patterns:
             proposal = pattern.get("proposal", "")
-            if not proposal or self._find_duplicate(proposal):
+            if not proposal:
+                continue
+            if self._find_duplicate(proposal, distinguish=pattern.get("task_type")):
                 continue
             task = await self._store.create(
                 kind="patch", description=proposal, origin="reflection", mode="execute",

@@ -8,7 +8,7 @@ from .. import topics as t
 
 ReflectPatternsFound = define(t.REFLECT_PATTERNS_FOUND, [
     F("window", Float),
-    F("patterns", List(Obj(F("kind", Str), F("rate", Float), F("proposal", Str), O("agent", Str)))),
+    F("patterns", List(Obj(F("kind", Str), F("rate", Float), F("proposal", Str), O("agent", Str), O("task_type", Str)))),
 ])
 ReflectDriftDetected = define(t.REFLECT_DRIFT_DETECTED, [
     F("kind", Enum("goal", "scope", "behavior")),

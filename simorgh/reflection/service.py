@@ -372,7 +372,19 @@ class Service:
             await self._append(PATTERNS_STREAM, "mined", {"window": self.config.pattern_window_seconds, "count": len(patterns)})
             await self._publish(message, topics.REFLECT_PATTERNS_FOUND, {
                 "window": self.config.pattern_window_seconds,
-                "patterns": [{"kind": p.kind, "rate": p.rate, "proposal": p.proposal} for p in patterns],
+                # `task_type` on the wire (2026-09-08 observer, w8-04): two
+                # genuinely distinct patterns -- different task_types, same
+                # window -- render as near-identical proposal text (only the
+                # quoted type differs), which pushed their SequenceMatcher
+                # ratio to ~0.93 against Planning's 0.45 dedupe threshold and
+                # silently collapsed the second one into the first's task.
+                # `Pattern` already carries `task_type`; only the wire
+                # payload was dropping it. The schema is
+                # `additionalProperties: true`, so this is a pure addition --
+                # no existing consumer (World Model's `self.observation`
+                # mirror, Planning's `on_patterns_found`) breaks by gaining a
+                # field it ignores.
+                "patterns": [{"kind": p.kind, "rate": p.rate, "proposal": p.proposal, "task_type": p.task_type} for p in patterns],
             })
             # 06-worldmodel.md section 5's ingestion table: a mined pattern
             # is also a `self.observation{kind:limitation}` -- the only
