@@ -16,6 +16,12 @@
         "null"
       ]
     },
+    "metadata_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "ok": {
       "type": "boolean"
     },

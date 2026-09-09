@@ -59,4 +59,8 @@ ActionResult = define(t.ACTION_RESULT, [
     F("duration_ms", Int),
     F("side_effects", List(Str)),
     O("error", Str),
+    # Everything the tool reported ABOUT its result, as a blob ref.
+    # Optional because every producer before 2026-09-09 sent none, and
+    # a replayed historical event must still validate.
+    O("metadata_ref", Str),
 ])
