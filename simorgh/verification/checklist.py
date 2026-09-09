@@ -41,6 +41,43 @@ Respond with ONLY a numbered list, one question per line:
 2. [optional] <question>
 ..."""
 
+# A research task produces an ANSWER, not a change, and asking about it
+# in the language of a change breaks it. The generator, told "a change
+# was made", naturally writes questions like "does any file use r\"\"\" as
+# its first-line docstring?" -- whose correct answer, and the entire
+# point of the task, is "no". `verdict.combine` then fails on any
+# required "no", RESEARCH has `max_revisions=0` so there is no second
+# chance, and `decomposer.py` makes the research step a dependency of
+# every patch step in a project. One inverted question therefore left
+# three sibling tasks pending forever with no error anywhere, and the
+# project died at step one (observer, 2026-09-08).
+_RESEARCH_CHECKLIST_PROMPT = """A question was investigated and answered:
+
+Question: {description}
+
+The answer given:
+{result}
+{evidence}
+Write up to {max_items} short, specific, binary (yes/no-answerable)
+questions that would each catch a real failure of this ANSWER -- that it
+does not address the question asked, that it states something the
+evidence above contradicts, or that it claims a finding no step
+supports.
+
+Do not ask whether the codebase has some property: a finding of "no
+such thing exists" is a perfectly good answer to a research question,
+and a question whose honest answer is "no" would fail the task for
+being right. Ask about the answer, never about the world it describes.
+
+Mark each question [required] (a "no" means the answer fails) or
+[optional] (a "no" is useful feedback but not disqualifying).
+
+Respond with ONLY a numbered list, one question per line:
+1. [required] <question>
+2. [optional] <question>
+..."""
+
+
 _ANSWER_PROMPT = """Task: {description}
 
 Result reported by the pipeline that made it:
@@ -90,9 +127,10 @@ async def generate_checklist(think, req: VerifyRequest, config, max_items: int |
     max_items = max_items or config.checklist_max_items
     if req.checklist_hint:
         return [ChecklistItem(question=req.checklist_hint, required=True)]
+    template = (_RESEARCH_CHECKLIST_PROMPT if req.subject.get("kind") == "research" else _CHECKLIST_PROMPT)
     reply: ThinkReply = await think(
         purpose="review",
-        prompt=_CHECKLIST_PROMPT.format(
+        prompt=template.format(
             description=req.subject.get("description", ""), result=req.subject.get("result", ""), max_items=max_items,
             evidence=_evidence(req.subject),
         ),

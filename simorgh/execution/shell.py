@@ -218,6 +218,14 @@ class RunShellTool:
             output = f"{output}\n{stderr}".strip() or f"exited {completed.returncode} with no output"
         elif stderr:
             output = f"{output}\n[stderr]\n{stderr}".strip()
+        if ok and not output:
+            # A success with an empty body is indistinguishable from a
+            # broken tool. Twice on 2026-09-08 a model was handed
+            # nothing here and concluded its edit had been applied: once
+            # from a heredoc truncated to its first line (which runs an
+            # empty program and exits 0), once from a command that
+            # genuinely printed nothing. Say which happened.
+            output = f"exited 0 with no output (the command produced nothing on stdout or stderr)"
         return ToolResult(
             ok=ok, output=output,
             error=None if ok else f"exit_code={completed.returncode}",

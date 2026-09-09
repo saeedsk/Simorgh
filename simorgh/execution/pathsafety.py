@@ -17,6 +17,15 @@ _MAX_PATH_CHARS = 4096
 _MAX_READ_CHARS = 20_000
 # A hard stop so a pathological file cannot be slurped into memory. Far
 # above any source file; this is a guard, not a policy.
+# Files at the repository root that any read tool may open. Reading
+# them is safe; whether they may be WRITTEN is a separate question that
+# `write_scopes_source` and Guardian's protected list answer -- and
+# simloader.py and sim.sh are protected there precisely because they are
+# the mechanism that undoes a bad change.
+ROOT_FILES: frozenset[str] = frozenset({
+    "README.md", "CLAUDE.md", "requirements.txt", "simorgh.toml", "simloader.py", "sim.sh",
+})
+
 _MAX_FILE_BYTES = 8_000_000
 # A PDF's bytes are mostly fonts and images, so the cap that protects
 # against a huge *text* file refuses ordinary papers: three in `papers/`
@@ -38,8 +47,17 @@ def resolve_safe_path(
 
     if rel.is_absolute() or ".." in rel.parts:
         return None, f"refused: {raw_path!r} is not a safe relative path"
-    if not rel.parts or rel.parts[0] not in readable_roots:
-        return None, f"refused: {raw_path!r} is outside the readable areas ({', '.join(readable_roots)})"
+    # A single named file at the repo root is allowed alongside the
+    # readable directories. Without this, `readable_roots` holds
+    # directories only and README.md, requirements.txt, simloader.py and
+    # sim.sh were readable by nothing -- Sim could not read its own
+    # bootloader, and a chat session spent its whole budget hunting for
+    # a README it was standing on (observer, 2026-09-08).
+    if len(rel.parts) == 1 and rel.parts[0] in ROOT_FILES:
+        pass
+    elif not rel.parts or rel.parts[0] not in readable_roots:
+        return None, (f"refused: {raw_path!r} is outside the readable areas "
+                      f"({', '.join(readable_roots)}, and these files at the root: {', '.join(ROOT_FILES)})")
     if any(
         name in part.lower() or part.lower().endswith(".key")
         for part in rel.parts
