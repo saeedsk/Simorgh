@@ -131,7 +131,21 @@ class Service:
         now = self._ctx.clock.now() if self._ctx is not None else (cause.ts if cause is not None else 0.0)
         report = await run_compaction(self.client.backend, self.policy, now=now)
         self.compactions += 1
-        self.last_report = report.as_payload()
+        payload = report.as_payload()
+        # Stream retention only ever deletes/truncates streams; blobs those
+        # streams referenced (oversized tool output, transcripts) are
+        # content-addressed and may be shared by several streams, so they
+        # need their own sweep once nothing live points at them any more.
+        # Not every backend implements this (only `jsonl` owns a local
+        # blob directory to sweep); skip quietly where it does not.
+        sweep = getattr(self.client.backend, "sweep_unreferenced_blobs", None)
+        if sweep is not None:
+            try:
+                payload["blobs_swept"] = await sweep()
+            except Exception as exc:  # noqa: BLE001 -- a failed sweep must not break compaction
+                if self._ctx is not None:
+                    self._ctx.logger.warning("ledger.blob_sweep_failed", error=repr(exc))
+        self.last_report = payload
         if report.streams_deleted or report.events_truncated:
             await self.client.append(
                 COMPACTION_STREAM,

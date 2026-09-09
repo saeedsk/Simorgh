@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -42,6 +43,12 @@ try:  # POSIX advisory locks; on platforms without fcntl the lock is a no-op
     import fcntl
 except ImportError:  # pragma: no cover - platform-dependent
     fcntl = None  # type: ignore[assignment]
+
+# Matches a blob ref wherever it appears in a stream's raw JSON lines --
+# scanning bytes directly (rather than parsing each event) is what makes
+# a sweep over every stream affordable at the sizes retention already
+# has to cope with (02-ledger's own trace-volume incident: 190k+ files).
+_BLOB_REF_BYTES = re.compile(rb"blob:(?:sha256:)?([0-9a-f]{64})")
 
 
 class _StreamMeta:
@@ -424,6 +431,50 @@ class JsonlBackend:
 
     async def get_blob(self, ref: str) -> bytes:
         return self._blobs.get(ref)
+
+    async def sweep_unreferenced_blobs(self, *, grace_seconds: float = 3600.0) -> int:
+        """Delete blobs no live stream or snapshot still references.
+
+        Live-caught: `run_compaction` deletes/truncates *streams* per
+        retention, but nothing ever swept the blob store itself -- a
+        `trace:` stream that expired after its 2-day window left the
+        oversized payload it had pointed to sitting in `blobs/` forever,
+        since content addressing means the same bytes may be shared by
+        several streams and a naive "delete the blob when its one
+        producing stream goes" would break that sharing. So: read what
+        actually still points at each blob (scanning raw bytes across
+        every remaining stream and snapshot file is far cheaper than
+        parsing each event, and `blob:<sha256>` cannot appear by accident
+        in any other field), and remove anything neither referenced nor
+        younger than `grace_seconds` -- the grace period covers the
+        window between `put_blob` and the event that will reference it
+        landing (`TraceWriter.write_blob_body` runs before `write()`).
+        """
+        referenced: set[str] = set()
+        for subdir in ("streams", "snapshots"):
+            directory = self.root / subdir
+            if not directory.exists():
+                continue
+            with os.scandir(directory) as it:
+                for entry in it:
+                    if not entry.is_file():
+                        continue
+                    try:
+                        data = Path(entry.path).read_bytes()
+                    except OSError:
+                        continue
+                    for match in _BLOB_REF_BYTES.finditer(data):
+                        referenced.add(match.group(1).decode("ascii"))
+        cutoff = time.time() - grace_seconds
+        removed = 0
+        for digest, mtime in self._blobs.list_digests():
+            if digest in referenced:
+                continue
+            if mtime > cutoff:
+                continue  # too young: may not be referenced yet
+            if self._blobs.delete(digest):
+                removed += 1
+        return removed
 
     # ------------------------------------------------------------------ stats
     async def stat(self) -> dict:
