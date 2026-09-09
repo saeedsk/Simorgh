@@ -179,6 +179,32 @@ class TestSkillAcquisitionProceduralMemory(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(farewell_result.payload["ok"], farewell_result.payload)
         self.assertIn("farewell Simorgh", farewell_result.payload["stdout_preview"])
 
+    async def test_a_skill_source_larger_than_the_read_display_cap_still_runs_uncorrupted(self):
+        # Live-caught by an observer probe, 2026-09-09: `_load_skill` read
+        # a skill's real source with `pathsafety.safe_read_file`, the same
+        # helper `read_file` uses to shape a `READ_FILE` tool result for
+        # the model -- capped at `_MAX_READ_CHARS` (20,000) with a
+        # human-readable "...[truncated at N of M chars; you have seen
+        # lines 1-K of T. Read the rest with <path>:K+1-T]" hint appended.
+        # That hint is correct as a tool-output nudge; it is not valid
+        # Python. Any skill whose source exceeded the cap got that text
+        # spliced into the *executable* module written to the sandbox --
+        # the file on disk was intact, but every invocation failed with a
+        # `SyntaxError` on the injected hint line. A generated skill well
+        # past 20,000 characters (a plausible size for anything non-trivial)
+        # was corrupted this way on every single run.
+        big_source = ("# padding line to exceed the 20,000-char read-display cap\n" * 500) + (
+            'def run(x=1):\n    return x * 2\n'
+        )
+        self.assertGreater(len(big_source), 20_000)
+        (self.root / "simorgh_skills" / "big.py").write_text(big_source)
+
+        await self.bus.publish(_proposal("big-1", tool="skill:big", args={"x": 21}))
+        result = await _wait_for(self.bus, topics.ACTION_RESULT, predicate=lambda p: p.get("action_id") == "big-1")
+        self.assertIsNotNone(result, "no action.result for the large lazily-loaded skill tool")
+        self.assertTrue(result.payload["ok"], result.payload)
+        self.assertIn("42", result.payload["stdout_preview"])
+
 
 if __name__ == "__main__":
     unittest.main()

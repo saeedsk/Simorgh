@@ -240,9 +240,20 @@ class Service:
         second `tool.registered`/ledger entry (see
         `test_a_second_acquisition_of_the_same_name_does_not_re_register`)."""
         existing = self._registry.get(f"skill:{name}")
-        source = pathsafety.safe_read_file(self._config.repo_root, path, readable_roots=self._config.readable_roots)
-        if source.startswith("[refused"):
-            self._ctx.logger.warning("skill_load_refused", name=name, path=path, detail=source)
+        # `safe_read_file` caps at `_MAX_READ_CHARS` and appends a
+        # human-readable "...[truncated at N of M chars; read the rest
+        # with ...]" hint -- correct for a `read_file` tool result shown
+        # to the model, wrong here: that hint text was landing verbatim
+        # inside the *executable* source this loads, silently corrupting
+        # any skill whose source exceeded the cap (live-caught by an
+        # observer probe, 2026-09-09: a 500KB generated skill wrote to
+        # disk intact but failed with a SyntaxError from the injected
+        # truncation notice the moment it ran). `read_source` returns the
+        # file's real, uncapped content -- capping belongs to the
+        # tool-output path, not to what actually gets executed.
+        source, refusal = pathsafety.read_source(self._config.repo_root, path, readable_roots=self._config.readable_roots)
+        if refusal:
+            self._ctx.logger.warning("skill_load_refused", name=name, path=path, detail=refusal)
             return existing
         if existing is not None and getattr(existing, "_source", None) == source:
             return existing
