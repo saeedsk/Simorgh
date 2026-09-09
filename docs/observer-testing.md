@@ -110,6 +110,37 @@ sandbox, and keep the anti-stall protocol's background-and-poll
 discipline for it regardless, since even 57s exceeds a foreground
 call's comfort margin.
 
+## Sandbox trials: what got faster, measured (2026-09-08)
+
+A trial's time is model latency plus pytest. The model part is
+irreducible; the pytest part was most of the rest, and it is gone:
+
+| what | before | after |
+|---|---|---|
+| full unit suite | 250s serial | 66s (`-n auto`, 12 cores) |
+| one `run_tests` call inside a trial, full suite | ~250s | 72s, rlimits and copy included |
+| loader gate, unit half | 250-670s | ~72s |
+| lab copy per trial (`make_lab`) | 2.7s, 109 MB of disk each | near-instant, copy-on-write |
+| whole 7-trial suite, `--parallel 3` | 25m 37s serial | 4m 34s |
+
+That last row is 5.6x, not 10x, and the gap is honest: with pytest
+out of the way a trial is almost entirely waiting on the model, and
+three trials at once finish in about the time of the slowest one.
+`tools/trial_suite.py --parallel N` runs each trial in its own process
+-- it has to, `run_one` does a process-global `os.chdir` and
+Orchestration's tool registries are module-level state two kernels
+would corrupt. Keep N small: every trial's `run_tests` now uses every
+core, and several at once oversubscribe the machine. The loader gate
+stays serial on purpose; a gate that refuses under contention is worse
+than a slow one.
+
+Two trials fail today for a reason that predates all of this and only
+became visible because they now finish inside the cap instead of timing
+out: `breaks-the-suite` and `already-done` both commit a change they
+should not. Nothing gates a commit on the whole suite passing, and a
+model that narrows `run_tests` to one file satisfies "run the tests"
+literally (wave 5, self-modification observer, blocker 3). Open.
+
 ## Anti-stall protocol (unchanged, still required)
 
 A previous round lost 7 of 11 observers to a 600-second watchdog by

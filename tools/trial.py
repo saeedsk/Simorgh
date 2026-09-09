@@ -43,7 +43,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # `tools/` is not a package
 
+from observer_kit import fast_copy_repo  # noqa: E402
 from simorgh.contracts import topics  # noqa: E402
 import simorgh.cognition.parser as parser_mod  # noqa: E402
 from simorgh.kernel.config import LoadedConfig  # noqa: E402
@@ -70,12 +72,20 @@ def git(repo: str, *args: str) -> str:
 
 
 def make_lab(root: str) -> str:
-    """A throwaway copy of this repo, with its own git history."""
+    """A throwaway copy of this repo, with its own git history.
+
+    Cloned with `observer_kit.fast_copy_repo` (APFS copy-on-write, a
+    `shutil.copytree` fallback elsewhere): the copy is near-instant and
+    costs no disk until something writes, where the old `copytree`
+    duplicated the whole tree -- `papers/` alone is 109 MB -- per trial.
+    The clone brings `.git` along; it is removed so the lab's history
+    starts at "trial baseline" exactly as before, which `run_trial`'s
+    "what it changed" report relies on.
+    """
     repo = os.path.join(root, "repo")
-    shutil.copytree(
-        REPO_ROOT, repo,
-        ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".claude"),
-    )
+    fast_copy_repo(Path(repo), source=REPO_ROOT)
+    shutil.rmtree(os.path.join(repo, ".git"), ignore_errors=True)
+    shutil.rmtree(os.path.join(repo, ".claude"), ignore_errors=True)
     git(repo, "init", "-q")
     subprocess.run(["git", "-C", repo, "add", "-A"], capture_output=True)
     subprocess.run(
@@ -93,6 +103,11 @@ async def run_trial(task: str, *, kind: str, subject: str | None, root: str, tim
     kernel = Kernel(
         LoadedConfig({
             "runtime": {"data_dir": os.path.join(root, "data")},
+            # Explicit, not inferred from the cwd `os.chdir(repo)` set
+            # above: `find_repo_root` reads the cwd at boot, and a lab
+            # that ran in a shared process would otherwise point Sim's
+            # write tools at whichever repo was current that instant.
+            "execution": {"repo_root": repo},
             # The point of a trial: nothing self-directed competes with it.
             "curiosity": {"autonomy_on_boot": False},
         }, None),

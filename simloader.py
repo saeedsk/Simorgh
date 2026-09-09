@@ -45,6 +45,7 @@ image too.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import queue
@@ -60,8 +61,24 @@ import time
 from pathlib import Path
 
 TAG_PREFIX = "sim-good-"
+
+
+def pytest_parallel_args() -> list[str]:
+    """`-n auto` when pytest-xdist is installed, else nothing.
+
+    The unit gate ran the 3000-test suite serially: 250s on a quiet
+    machine, 670s under load, and the creator watched it print nothing
+    for a minute at a time. Split across 12 cores it takes 57s with the
+    identical pass/fail result -- real processes, not threads, since the
+    GIL makes threads useless for CPU-bound assertions. Optional on
+    purpose: this file is stdlib-only and must gate a checkout on a
+    machine that never installed the extra.
+    """
+    return ["-n", "auto"] if importlib.util.find_spec("xdist") else []
+
+
 # Only for the "this will take a while" line; nothing depends on it.
-EXPECTED_UNIT_S = 720
+EXPECTED_UNIT_S = 90 if pytest_parallel_args() else 720
 _TAG = re.compile(rf"^{re.escape(TAG_PREFIX)}(\d+)$")
 DEFAULT_NOTES = Path("~/.simorgh/loader").expanduser()
 
@@ -389,7 +406,7 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
             say("press s to skip the gate and boot anyway (nothing will be tagged known-good)")
         try:
             code, unit_out = stream(
-                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
+                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *pytest_parallel_args(), "tests"],
                 cwd=repo, timeout_s=timeout_s, progress=PytestProgress(started), skip=skip,
             )
         except GateSkipped:

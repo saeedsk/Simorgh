@@ -26,6 +26,7 @@ import ast
 
 import difflib
 import hashlib
+import importlib.util
 import ipaddress
 import json
 import os
@@ -640,6 +641,28 @@ class ProposeMcpServerTool:
         )
 
 
+def pytest_parallel_args(target: Path) -> list[str]:
+    """`["-n", "auto"]` when pytest-xdist is importable and the target is
+    a directory, else nothing.
+
+    The suite is 3000+ tests and ran serially: 250s per call, and a patch
+    task calls `run_tests` twice, so one trial spent 500s inside this
+    tool alone -- the `breaks-the-suite` trial blew its 900s cap on
+    exactly that (loader gate, 2026-09-08). Across 12 cores the same
+    suite takes 57s with the identical pass/fail result. It is a
+    separate-process split, not threads: the GIL makes threads useless
+    for CPU-bound assertions, and xdist's workers are real interpreters.
+
+    A single test FILE stays serial: spawning a dozen workers costs a
+    second or two of startup, more than a small file takes to run.
+    Optional on purpose -- `pytest-xdist` is in requirements.txt but a
+    machine without it must still be able to run its tests.
+    """
+    if importlib.util.find_spec("xdist") is None or not target.is_dir():
+        return []
+    return ["-n", "auto"]
+
+
 def _apply_rlimits(cpu_seconds: int, memory_bytes: int):
     def _set() -> None:
         for res, value in (
@@ -754,8 +777,14 @@ class RunTestsTool:
         with tempfile.TemporaryDirectory(prefix="simorgh-tests-") as workdir:
             dest = Path(workdir) / "repo"
             try:
+                # `papers/` (109 MB of PDFs) and the observers' scratch
+                # area were copied into every isolated test run and no
+                # test reads either; the copy is 17 MB without them.
+                # NOT "ledger": that pattern would also drop the
+                # `simorgh/ledger` package and its tests.
                 shutil.copytree(root, dest, ignore=shutil.ignore_patterns(
                     "__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info", ".pytest_cache",
+                    "papers", "scratchpad", ".simorgh",
                 ))
             except OSError as exc:
                 return ToolResult(ok=False, error=f"could not stage an isolated copy: {exc!r}")
@@ -764,7 +793,9 @@ class RunTestsTool:
             preexec = _apply_rlimits(self._config.test_cpu_seconds, self._config.test_memory_mb * 1024 * 1024) if resource else None
             try:
                 completed = subprocess.run(
-                    [sys.executable, "-m", "pytest", "-q", target], capture_output=True, text=True,
+                    [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                     *pytest_parallel_args(dest / target), target],
+                    capture_output=True, text=True,
                     cwd=dest, timeout=timeout, preexec_fn=preexec, stdin=subprocess.DEVNULL,
                 )
             except subprocess.TimeoutExpired as exc:
