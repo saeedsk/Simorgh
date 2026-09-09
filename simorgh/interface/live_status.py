@@ -47,6 +47,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "self_map"): "Checking",
     ("act", "web_fetch"): "Fetching",
     ("act", "run_python_sandboxed"): "Running",
+    ("act", "run_js_sandboxed"): "Running",
     ("act", "run_tests"): "Testing",
     ("act", "search_code"): "Searching",
     ("act", "apply_source_patch"): "Patching",

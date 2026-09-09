@@ -15,7 +15,7 @@ CHAT = Profile(
     # the model fell back to list_dir and could wander into src/, the
     # retired v1 tree left readable for reference (observer, 2026-09-08).
     tools=("self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch",
-           "run_python_sandboxed", "propose_mcp_server"),
+           "run_python_sandboxed", "run_js_sandboxed", "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
 # The creator, 2026-09-07: "gives sim more freedom in autonomously

@@ -24,6 +24,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "web_fetch": ("read_only", True),
     "web_search": ("read_only", True),
     "run_python_sandboxed": ("reversible", False),
+    "run_js_sandboxed": ("reversible", False),
     "run_tests": ("reversible", False),
     "draft_candidate": ("reversible", False),
     # Model-callable since 2026-09-07 (profiles.py's own note): the tools
@@ -82,6 +83,7 @@ _MARKER_ARG_KEY: dict[str, str] = {
     "web_fetch": "url",
     "web_search": "query",
     "run_python_sandboxed": "code",
+    "run_js_sandboxed": "code",
     "run_tests": "target",
     # Absent until 2026-09-08, so every `RUN_SHELL:` marker arrived as
     # `{"argument": ...}` while the tool reads `command`, and answered
@@ -182,6 +184,10 @@ _MARKER_ARG_HINT.update({
     "run_python_sandboxed": (
         "every line after the marker is the Python program, and nothing else -- "
         "no explanation before or after it. Example:\nRUN_PYTHON_SANDBOXED:\nprint(2 + 2)\n"
+    ),
+    "run_js_sandboxed": (
+        "every line after the marker is the JavaScript program, run with Node, and nothing else -- "
+        "no explanation before or after it. Example:\nRUN_JS_SANDBOXED:\nconsole.log(2 + 2)\n"
     ),
 })
 # Tools whose marker takes no argument at all.
@@ -326,7 +332,7 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
     args = call.get("args", {})
     if isinstance(args, dict) and set(args) == {"argument"}:
         raw = args["argument"]
-        if tool == "run_python_sandboxed":
+        if tool in ("run_python_sandboxed", "run_js_sandboxed"):
             # Same defence the file writers get: a fenced program is still
             # a program. Found by trial 2026-09-07 -- the fence was kept
             # here and stripped for apply_source_patch, so the sandbox

@@ -20,6 +20,7 @@ from simorgh.execution.tools import (
     ListDirTool,
     ProposeMcpServerTool,
     ReadFileTool,
+    RunJsSandboxedTool,
     RunPythonSandboxedTool,
     RunTestsTool,
     SearchCodeTool,
@@ -528,6 +529,45 @@ class TestSubprocessesNeverInheritTerminalStdin(unittest.IsolatedAsyncioTestCase
         for kwargs in calls:
             self.assertEqual(kwargs.get("stdin"), subprocess.DEVNULL)
 
+    async def test_run_js_sandboxed_uses_stdin_devnull(self):
+        calls, spy = self._spy()
+        config = Config(repo_root=Path.cwd(), sandbox_timeout_s=5.0)
+        with unittest.mock.patch("simorgh.execution.tools.subprocess.run", side_effect=spy):
+            await RunJsSandboxedTool(config, node_path="/usr/bin/env").run(
+                {"code": "console.log('hi')"}, ctx=_ctx(config))
+        self.assertTrue(calls)
+        for kwargs in calls:
+            self.assertEqual(kwargs.get("stdin"), subprocess.DEVNULL)
+
+    async def test_run_js_sandboxed_reports_real_output(self):
+        import shutil as _shutil
+
+        node = _shutil.which("node")
+        if not node:
+            self.skipTest("node not installed on this machine")
+        config = Config(repo_root=Path.cwd(), sandbox_timeout_s=5.0)
+        result = await RunJsSandboxedTool(config).run({"code": "console.log(2 + 2)"}, ctx=_ctx(config))
+        self.assertTrue(result.ok, result.error)
+        self.assertIn("4", result.output)
+
+    async def test_run_js_sandboxed_is_refused_with_no_node_on_the_machine(self):
+        config = Config(repo_root=Path.cwd())
+        tool = RunJsSandboxedTool(config, node_path=None)
+        result = await tool.run({"code": "console.log(1)"}, ctx=_ctx(config))
+        self.assertFalse(result.ok)
+        self.assertIn("node", result.error)
+
+    async def test_run_js_sandboxed_reports_a_real_syntax_error(self):
+        import shutil as _shutil
+
+        node = _shutil.which("node")
+        if not node:
+            self.skipTest("node not installed on this machine")
+        config = Config(repo_root=Path.cwd(), sandbox_timeout_s=5.0)
+        result = await RunJsSandboxedTool(config).run({"code": "this is not js("}, ctx=_ctx(config))
+        self.assertFalse(result.ok)
+        self.assertIn("exit_code", result.error)
+
     async def test_skill_execution(self):
         calls, spy = self._spy()
         config = Config(repo_root=Path.cwd(), sandbox_timeout_s=5.0)
@@ -691,7 +731,8 @@ class TestBuiltinTools(unittest.TestCase):
     def test_registers_exactly_the_scoped_set(self):
         names = {tool.name for tool in builtin_tools(Config(repo_root=Path.cwd()))}
         self.assertEqual(names, {
-            "read_file", "list_dir", "search_code", "self_map", "run_python_sandboxed", "run_tests",
+            "read_file", "list_dir", "search_code", "self_map", "run_python_sandboxed",
+            "run_js_sandboxed", "run_tests",
             "apply_source_patch", "git_commit", "git_revert", "git_discard", "apply_skill",
             "web_fetch", "web_search", "propose_mcp_server", "run_shell",
         })
