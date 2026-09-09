@@ -391,8 +391,21 @@ class Service:
                     name = Path(subject).stem
                     await self._load_skill(name, path=subject)
                     await self._ctx.bus.publish(Message.new(
+                        # The contract (`contracts/messages/learn.py`)
+                        # names this field `tests`, not `tests_passed`.
+                        # Every publish here raised ContractError and
+                        # never delivered -- silently, until the bus
+                        # stopped swallowing handler errors earlier
+                        # today, at which point it became a traceback on
+                        # every single skill apply instead (observer,
+                        # 2026-09-08). `apply_skill` runs its own
+                        # sandbox smoke test before this point, but that
+                        # count is not threaded through to here, so `0`
+                        # is honest -- it says a real test count was not
+                        # measured at this call site, not that zero
+                        # tests exist.
                         topics.LEARN_SKILL_ACQUIRED, source="execution",
-                        payload={"name": name, "path": subject, "tests_passed": 0,
+                        payload={"name": name, "path": subject, "tests": 0,
                                  "description": f"skill {name!r} written by a skill task"},
                     ))
             if tool.name == "web_fetch" and result.ok:

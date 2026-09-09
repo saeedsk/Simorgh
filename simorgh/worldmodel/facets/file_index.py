@@ -4,6 +4,16 @@ v1's `_list_source_files` (main.py) generalized beyond `src/` and given
 a real preview instead of just a name list, since 06-worldmodel.md
 section 12 Q2 keeps this read directly (observation of the host, not an
 action) rather than through an Execution tool.
+
+Its default `under` stayed at v1's own `src/` -- retired but not
+deleted -- rather than `simorgh/`, the live v2 tree, which the sibling
+`capability_map.py` facet had the identical bug in for the same reason
+(2026-09-08). It matters here too: Curiosity's own real call
+(`simorgh/curiosity/service.py`) passes `args={}`, taking this default
+every time, so its self-directed exploration was reading the wrong
+tree's file list. No model-callable tool exposes this facet directly
+(an observer confirmed Sim answers "where do you live" questions by
+grepping instead), so the wrong default was invisible from the outside.
 """
 
 from __future__ import annotations
@@ -29,7 +39,7 @@ class FileIndexFacet:
         if path:
             return self._preview(path, args.get("max_chars", 2000))
         if self._cache is None:
-            self._cache = self._scan(args.get("under", "src"), args.get("exclude_skills", True))
+            self._cache = self._scan(args.get("under", "simorgh"), args.get("exclude_skills", True))
         return self._cache
 
     def _scan(self, under: str, exclude_skills: bool) -> dict:

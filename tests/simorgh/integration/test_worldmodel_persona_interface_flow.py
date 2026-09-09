@@ -101,9 +101,13 @@ class WorldModelPersonaInterfaceFlowTestCase(unittest.IsolatedAsyncioTestCase):
             self.kernel.bus.new(topics.WORLD_ENV_QUERY, {"what": "capability_map"}), timeout=3,
         )
         self.assertTrue(reply.payload["ok"])
-        self.assertTrue(reply.payload["areas"])  # real, non-empty area list from this repo's src/
-        self.assertIn("orchestrator", reply.payload["areas"])
-        self.assertTrue(reply.payload["modules_by_area"]["orchestrator"])
+        # `simorgh/`, not `src/`: the capability map scans the live v2
+        # tree Sim actually runs, not v1's retired one (fixed
+        # 2026-09-08, after an observer found Sim answering "what
+        # subsystems make you up" with v1's six directories).
+        self.assertTrue(reply.payload["areas"])  # real, non-empty area list from this repo's simorgh/
+        self.assertIn("orchestration", reply.payload["areas"])
+        self.assertTrue(reply.payload["modules_by_area"]["orchestration"])
 
     async def test_percept_nudges_personas_real_mood(self):
         seen = []

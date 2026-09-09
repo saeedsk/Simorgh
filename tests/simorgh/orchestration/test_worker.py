@@ -10,7 +10,7 @@ from simorgh.orchestration.config import Config
 from simorgh.orchestration.service import Service as OrchestrationService
 from simorgh.orchestration.worker import Worker
 
-from .fakes import FakeCognition, FakeGuardianExecution, FakePlanning
+from .fakes import FakeCognition, FakeGuardianExecution, FakePlanning, FakeVerification
 from .harness import Harness, run
 
 
@@ -416,3 +416,57 @@ class TestMultiProcessSourceAttribution(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTurnCompletedFiresForEveryKindNotJustChat(unittest.TestCase):
+    """`turn.completed` used to publish only for `session.kind == "chat"`,
+    and Memory's `_on_turn_completed` is the ONLY thing in the system
+    that ever writes episodic memory -- so every research/patch/skill/
+    project outcome went unrecorded. An observer proved it live
+    2026-09-08: a real research task ran real searches, answered,
+    completed, and a follow-up task asking "what did you find out
+    before" got nothing back and re-did the whole search from scratch.
+
+    Broadening the publish to every kind is safe for Interface, whose
+    own `_on_turn_completed` only resolves a future keyed by
+    `session_id` in `_pending_turns` -- nothing but a live chat prompt
+    populates that map, so a non-chat task_id simply finds no waiter.
+    """
+
+    @run
+    async def test_a_research_tasks_completion_publishes_turn_completed(self):
+        from simorgh.contracts.envelope import Message
+
+        async with Harness() as h:
+            planning = FakePlanning(h.client("planning"))
+            planning.add_task("t1", kind="research", mode="execute", description="what is X")
+            cognition = FakeCognition(h.client("cognition"), script=[{"text": "X is Y"}])
+            verification = FakeVerification(h.client("verification"), verdicts=["pass"])
+            await planning.start()
+            await cognition.start()
+            await verification.start()
+
+            worker = Worker(h.client("orchestration"), h.ledger, clock=h.clock.now, worker_id="w1",
+                            assemble_timeout_s=0.01)
+            await worker.start()
+
+            turns = []
+            sub = await h.client("memory").subscribe(topics.TURN_COMPLETED, lambda m: turns.append(m) or None)
+
+            await h.client("planning").publish(Message.new(
+                topics.TASK_AVAILABLE, source="planning",
+                payload={"task_id": "t1", "kind": "research", "lease_seconds": 60.0},
+                clock=h.clock.now,
+            ))
+            await h.pump(30, real_delay=0.01)
+
+            self.assertTrue(turns, "a non-chat task's completion must still publish turn.completed, "
+                                   "or nothing ever writes episodic memory for it")
+            self.assertEqual(turns[0].payload["text"], "X is Y")
+            self.assertEqual(turns[0].payload["task_id"], "t1")
+
+            await sub.unsubscribe()
+            await worker.stop()
+            await planning.stop()
+            await cognition.stop()
+            await verification.stop()
