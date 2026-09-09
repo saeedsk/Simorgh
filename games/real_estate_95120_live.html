@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Real Estate — San Jose, CA 95120 (live listings)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html,body{margin:0;height:100%;font-family:system-ui,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column}
+  header{padding:8px 14px;background:#1a2b4c;color:#fff}
+  header h1{margin:0;font-size:16px}
+  header p{margin:2px 0 0;font-size:11px;opacity:.8}
+  #layout{flex:1;display:flex;min-height:0}
+  #sidebar{width:400px;overflow-y:auto;padding:10px;border-right:1px solid #ddd;box-sizing:border-box}
+  #map{flex:1;min-height:0}
+  fieldset{border:1px solid #ccc;border-radius:6px;margin:0 0 10px;padding:8px}
+  legend{font-size:12px;font-weight:600}
+  .range{display:flex;gap:8px;align-items:center;font-size:12px}
+  .range input{width:100px}
+  #cards{display:flex;flex-direction:column;gap:8px}
+  .card{border:1px solid #ddd;border-radius:6px;padding:8px;cursor:pointer;font-size:13px}
+  .card:hover{background:#f0f4ff}
+  .card b.price{font-size:15px;color:#1a2b4c}
+  .card .addr{font-weight:600}
+  .card .meta{color:#555;font-size:12px;margin-top:2px}
+  .btn{margin-top:6px;font-size:12px;padding:4px 10px;border:1px solid #999;border-radius:4px;background:#fff;cursor:pointer}
+  #count{font-size:12px;color:#444;margin:0 0 6px}
+  .leaflet-popup{font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>For-Sale Listings — San Jose, CA 95120</h1>
+  <p>Data: fetched via homeharvest (reads Realtor.com's site backend — unofficial, not a licensed API; may be stale or rate-limited; verify on Realtor.com/Zillow). 20 listings captured this session.</p>
+</header>
+<div id="layout">
+  <div id="sidebar">
+    <fieldset>
+      <legend>Filters</legend>
+      <div class="range">Price $ <input id="pmin" type="number" value="1000000" step="10000"> – <input id="pmax" type="number" value="4500000" step="10000"></div>
+      <div class="range" style="margin-top:4px">Sqft <input id="smin" type="number" value="1000" step="10"> – <input id="smax" type="number" value="6000" step="10"></div>
+      <div class="range" style="margin-top:4px">$/sqft <input id="cmin" type="number" value="700" step="10"> – <input id="cmax" type="number" value="2400" step="10"></div>
+      <button class="btn" onclick="applyFilters()">Apply</button>
+      <button class="btn" onclick="resetFilters()">Reset</button>
+    </fieldset>
+    <p id="count"></p>
+    <div id="cards"></div>
+  </div>
+  <div id="map"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const LISTINGS = [
+ {a:"20791 Via Corta",p:4218000,s:5749,bd:5,ba:4,ll:[37.21733,-121.82147]},
+ {a:"1415 Montego Dr",p:2999000,s:2219,bd:4,ba:2,ll:[37.22021,-121.88884]},
+ {a:"1564 Coleman Rd",p:1988000,s:2033,bd:4,ba:2,ll:[37.22708,-121.90127]},
+ {a:"1108 Calle Almaden",p:1850000,s:2278,bd:5,ba:2,ll:[37.23631,-121.87401]},
+ {a:"6138 Mancuso St",p:3280000,s:3454,bd:4,ba:4,ll:[37.22793,-121.88288]},
+ {a:"1232 Copper Peak Ln",p:1080000,s:1298,bd:2,ba:2,ll:[37.19543,-121.84290]},
+ {a:"7183 Brooktree Ct",p:3495000,s:4041,bd:5,ba:3,ll:[37.20658,-121.83493]},
+ {a:"21450 Chona Ct",p:2995000,s:1297,bd:3,ba:3,ll:[37.20101,-121.80828]},
+ {a:"6738 Worthing Ct",p:2100000,s:2167,bd:4,ba:2,ll:[37.21545,-121.84150]},
+ {a:"7098 Bret Harte Dr",p:2150000,s:2029,bd:4,ba:2,ll:[37.20919,-121.83598]},
+ {a:"1003 Belder Dr",p:2199000,s:2200,bd:4,ba:3,ll:[37.20322,-121.83490]},
+ {a:"6568 Broadacres Dr",p:2098000,s:1986,bd:4,ba:2,ll:[37.21659,-121.88236]},
+ {a:"6572 Hidden Creek Dr",p:1598000,s:1859,bd:4,ba:2,ll:[37.21986,-121.85828]},
+ {a:"1173 Corvallis Dr",p:2199888,s:1994,bd:3,ba:3,ll:[37.21328,-121.85731]},
+ {a:"1314 Peralta Ct",p:2180000,s:2269,bd:4,ba:2,ll:[37.22477,-121.87757]},
+ {a:"6314 Menlo Dr",p:1650000,s:1862,bd:4,ba:2,ll:[37.22653,-121.86093]},
+ {a:"1523 Foster Ct",p:2399000,s:2028,bd:4,ba:3,ll:[37.22970,-121.89930]},
+ {a:"977 Ivory Creek Dr",p:1299000,s:1470,bd:3,ba:2,ll:[37.19919,-121.82844]},
+ {a:"6186 Silberman Dr",p:2248000,s:2265,bd:4,ba:2,ll:[37.22584,-121.88122]},
+ {a:"7111 Wooded Lake Dr",p:2295000,s:2609,bd:4,ba:3,ll:[37.20472,-121.87058]}
+];
+LISTINGS.forEach(l=>l.c=Math.round(l.p/l.s));
+const fmt=n=>n.toLocaleString("en-US");
+const map=L.map("map").setView([37.213,-121.862],13);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OpenStreetMap contributors"}).addTo(map);
+const markers={};
+function popupHtml(l){return "<b>"+fmt(l.p)+"</b><br>"+l.a+", San Jose 95120<br>"+fmt(l.s)+" sqft · $"+fmt(l.c)+"/sqft<br>"+l.bd+" bd / "+l.ba+" ba";}
+function render(list){
+  Object.values(markers).forEach(m=>map.removeLayer(m));
+  for(const k in markers) delete markers[k];
+  const cards=document.getElementById("cards");
+  cards.innerHTML="";
+  list.forEach(l=>{
+    const m=L.marker(l.ll).addTo(map).bindPopup(popupHtml(l));
+    markers[l.a]=m;
+    const d=document.createElement("div");
+    d.className="card";
+    d.innerHTML='<span class="addr">'+l.a+'</span><br><b class="price">$'+fmt(l.p)+'</b><div class="meta">'+fmt(l.s)+' sqft · $'+fmt(l.c)+'/sqft · '+l.bd+' bd / '+l.ba+' ba</div>';
+    d.onclick=()=>{map.setView(l.ll,16);m.openPopup();};
+    cards.appendChild(d);
+  });
+  document.getElementById("count").textContent=list.length+" of "+LISTINGS.length+" listings shown";
+}
+function val(id){return parseFloat(document.getElementById(id).value);}
+function applyFilters(){
+  const list=LISTINGS.filter(l=>l.p>=val("pmin")&&l.p<=val("pmax")&&l.s>=val("smin")&&l.s<=val("smax")&&l.c>=val("cmin")&&l.c<=val("cmax"));
+  render(list);
+}
+function resetFilters(){
+  document.getElementById("pmin").value=0;document.getElementById("pmax").value=99999999;
+  document.getElementById("smin").value=0;document.getElementById("smax").value=999999;
+  document.getElementById("cmin").value=0;document.getElementById("cmax").value=99999;
+  applyFilters();
+}
+render(LISTINGS);
+</script>
+</body>
+</html>
