@@ -165,6 +165,42 @@ class TestDenylistRule(unittest.IsolatedAsyncioTestCase):
         decision = await _evaluate(DenylistRule(), _proposal(args={"code": "eval(x)"}), _ctx())
         self.assertEqual(decision.kind, "deny")
 
+    async def test_denies_exec(self):
+        # `eval(` was covered but its sibling `exec(` was not at all: an
+        # observer proved 2026-09-08 that an obfuscated payload built
+        # from string concatenation (so no denylisted substring appears
+        # literally anywhere) sailed through `exec(...)` untouched, even
+        # though a bare `exec(` call with no obfuscation whatsoever was
+        # already, on its own, a Directive-1 violation nothing caught.
+        decision = await _evaluate(DenylistRule(), _proposal(args={"code": "exec(x)"}), _ctx())
+        self.assertEqual(decision.kind, "deny")
+        self.assertIn("Directive 1", decision.reasons[0])
+
+    async def test_denies_os_setuid(self):
+        # `os.system` was covered but the rest of the os-module
+        # privilege-escalation family was not. An observer proved
+        # 2026-09-08 that `os.setuid(0)` submitted through
+        # `run_python_sandboxed` was approved outright.
+        decision = await _evaluate(
+            DenylistRule(), _proposal(args={"code": "import os\nos.setuid(0)"}), _ctx(),
+        )
+        self.assertEqual(decision.kind, "deny")
+        self.assertIn("Directive 1", decision.reasons[0])
+
+    async def test_denies_os_setresgid(self):
+        decision = await _evaluate(
+            DenylistRule(), _proposal(args={"code": "import os\nos.setresgid(1000, 1000, 1000)"}), _ctx(),
+        )
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_abstains_on_os_getuid(self):
+        # A read of the current uid is not a privilege change; the
+        # setuid-family pattern must not over-match it.
+        decision = await _evaluate(
+            DenylistRule(), _proposal(args={"code": "import os\nprint(os.getuid())"}), _ctx(),
+        )
+        self.assertEqual(decision.kind, "abstain")
+
     async def test_abstains_on_clean_code(self):
         decision = await _evaluate(
             DenylistRule(), _proposal(args={"code": "def f(x):\n    return x + 1\n"}), _ctx(),
