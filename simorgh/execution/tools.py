@@ -249,6 +249,18 @@ def _no_match_note(config) -> str:
             f"specific document, or LIST_DIR to see what is there.")
 
 
+def _rg_line_is_credential(line: str) -> bool:
+    """`ripgrep` output is `path:lineno:text`; check the path prefix
+    against the same credential-name filter `resolve_safe_path` (and
+    `read_file`) already enforce, so `search_code` cannot grep a
+    `.env`/`credentials.json`/etc. that a direct `read_file` on the same
+    path would refuse. `rg`'s own default hidden-file skip masked the
+    dotfile case (`.env`) by accident but never covered a non-hidden
+    name like `credentials.json` -- found live, 2026-09-08."""
+    path_part = line.split(":", 1)[0]
+    return pathsafety.looks_like_credential_path(Path(path_part).parts)
+
+
 class SearchCodeTool:
     """Regex text search across `readable_roots` (the same path-safety
     boundary `read_file`/`list_dir` already enforce) -- the one gap
@@ -326,7 +338,10 @@ class SearchCodeTool:
         if completed.returncode not in (0, 1):  # 1 == "no matches", not an error
             return self._run_pure_python(query, root)
 
-        lines = [ln for ln in completed.stdout.splitlines() if "__pycache__" not in ln]
+        lines = [
+            ln for ln in completed.stdout.splitlines()
+            if "__pycache__" not in ln and not _rg_line_is_credential(ln)
+        ]
         truncated = len(lines) > self._config.search_max_matches
         lines = lines[: self._config.search_max_matches]
         output = "\n".join(lines) if lines else _no_match_note(self._config)
@@ -345,6 +360,8 @@ class SearchCodeTool:
                 continue
             for path in sorted(base_path.rglob("*")):
                 if "__pycache__" in path.parts or not path.is_file():
+                    continue
+                if pathsafety.looks_like_credential_path(path.relative_to(root).parts):
                     continue
                 try:
                     if path.stat().st_size > self._config.search_max_file_bytes:

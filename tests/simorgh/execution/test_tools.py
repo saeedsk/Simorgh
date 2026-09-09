@@ -145,6 +145,33 @@ class TestSearchCodeTool(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.metadata["via"], "python")
 
+    async def test_pure_python_backend_will_not_grep_a_credentials_file(self):
+        # Live-caught, 2026-09-08: `read_file` refuses `tools/credentials.json`
+        # by name (pathsafety._CREDENTIAL_LOOKING_NAMES), but search_code's
+        # pure-Python file walk had no such filter and returned the secret
+        # verbatim -- a policy bypass via a second read path.
+        (self.root / "src" / "credentials.json").write_text("SECRET_TOKEN=sk-supersecrettoken12345\n")
+        result = await SearchCodeTool(self.config, ripgrep_path="").run(
+            {"query": "supersecrettoken"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok)
+        self.assertNotIn("supersecrettoken", result.output)
+        self.assertNotIn("credentials.json", result.output)
+
+    @unittest.skipUnless(shutil.which("rg"), "ripgrep not installed on this machine")
+    async def test_ripgrep_backend_will_not_grep_a_credentials_file(self):
+        # Same bypass, ripgrep backend: `rg`'s default hidden-file skip
+        # happens to hide a dotfile like `.env`, but a non-hidden name
+        # like `credentials.json` was found and returned verbatim.
+        (self.root / "src" / "credentials.json").write_text("SECRET_TOKEN=sk-supersecrettoken12345\n")
+        rg = shutil.which("rg")
+        result = await SearchCodeTool(self.config, ripgrep_path=rg).run(
+            {"query": "supersecrettoken"}, ctx=_ctx(self.config),
+        )
+        self.assertTrue(result.ok)
+        self.assertNotIn("supersecrettoken", result.output)
+        self.assertNotIn("credentials.json", result.output)
+
 
 class TestRunTestsTool(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
