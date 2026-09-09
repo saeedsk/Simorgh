@@ -145,6 +145,22 @@ class TestRequestReply(unittest.TestCase):
             with self.assertRaises(ValueError):
                 await planning.reply(make_message(topics.TASK_CLAIM), type=topics.TASK_CLAIM_REPLY, payload={})
 
+    @run
+    async def test_request_of_a_contract_invalid_message_does_not_leak_pending(self):
+        # `request()` registers the future *before* publishing so a reply that
+        # races the `publish()` call still lands; if `publish()` then rejects
+        # the message (bad envelope/contract/policy), nothing will ever
+        # resolve or time out that future, so it must be cleaned up right
+        # there instead of sitting in `_pending` forever. Found live while
+        # stress-testing contract validation (2026-09-08): a caller retrying
+        # a malformed request leaked one Future per attempt.
+        async with Harness("memory") as h:
+            worker = h.client("orchestration")
+            bad = Message.new(topics.TASK_CREATE, source="orchestration", payload={})  # missing required fields
+            with self.assertRaises(ContractError):
+                await worker.request(bad, timeout=1.0)
+            self.assertEqual(worker._pending, {})
+
 
 class TestExplicitNackAndStop(unittest.TestCase):
     @run
