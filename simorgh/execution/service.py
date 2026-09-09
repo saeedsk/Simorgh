@@ -337,7 +337,7 @@ class Service:
             ctx = ToolContext(
                 action_id=action_id, task_id=None, scope={}, constraints=approved.get("constraints") or {},
                 data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
-                ledger=self._ctx.ledger,
+                ledger=self._ctx.ledger, bus=self._ctx.bus,
             )
             try:
                 result = await asyncio.wait_for(tool.run(args or {}, ctx=ctx), timeout=timeout)

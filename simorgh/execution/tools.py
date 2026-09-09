@@ -48,6 +48,7 @@ try:
 except ImportError:  # POSIX-only
     resource = None  # type: ignore[assignment]
 
+from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
@@ -61,6 +62,19 @@ from .pdftext import looks_like_pdf, pdf_to_text
 # matters is the text that comes out, which `pdf_to_text`'s page limit
 # already bounds.
 _PDF_MAX_BYTES = 60_000_000
+# HTML has the same shape of problem, one size down: `web_fetch_max_bytes`
+# (200,000) used to cap the RAW bytes before extraction ever ran, so a
+# real page lost most of its content with no marker saying so. A live
+# fetch of docs.python.org's asyncio page (observer, 2026-09-08) is
+# 177,075 bytes -- under the cap, so it survived by luck; a page even a
+# little larger would have been cut mid-tag with the loss invisible.
+# Extraction needs the WHOLE document for the same reason `pdf_to_text`
+# does (a table of contents, a byline, the actual body copy can all sit
+# past 200 KB of nav and script), so read a much bigger raw budget when
+# text extraction is going to run, then cap the EXTRACTED TEXT --
+# `web_fetch_max_bytes` characters of it -- with an honest truncation
+# marker instead of cutting the source silently.
+_HTML_MAX_RAW_BYTES = 10_000_000
 from .shell import RunShellTool
 from .websearch import WebSearchTool
 
@@ -127,6 +141,77 @@ class ListDirTool:
         content = pathsafety.safe_list_dir(self._config.repo_root, args.get("path", ""), readable_roots=self._config.readable_roots)
         ok = not content.startswith("[refused:")
         return ToolResult(ok=ok, output=content, error=None if ok else content)
+
+
+class SelfMapTool:
+    """Ask the World Model what you are actually made of, instead of
+    guessing from the filesystem. Wraps `world.env.query`
+    (worldmodel/service.py's `capability_map` facet) over the bus -- the
+    same inventory Curiosity's own sampler reads -- so a self-knowledge
+    question ("where does your code live", "what subsystems make you
+    up") has a direct, correct answer instead of falling back to
+    `list_dir` and wandering the tree by hand.
+
+    Live-caught 2026-09-08: asked exactly that question, the model never
+    touched `world.env.query` -- nothing model-callable reached it -- so
+    it called `list_dir`, wandered into `src/` (the retired v1 tree,
+    left readable but not what runs), and answered with v1's six
+    directories mislabeled as living under `simorgh/`. This tool gives
+    it the real answer in one call; `list_dir`/`search_code` are still
+    there for anything this facet does not cover.
+    """
+
+    name = "self_map"
+    description = (
+        "The authoritative list of your own subsystems and files, straight from "
+        "your world model -- not a filesystem guess. Returns the top-level "
+        "packages under simorgh/ (the live v2 tree you actually run) and, per "
+        "package, the modules in it. Pass `area` to see just one package's "
+        "modules. This does NOT include src/, which is retired v1 code kept "
+        "readable for reference but not what runs today."
+    )
+    read_only = True
+    reversibility = "read_only"
+    args_schema = {"type": "object", "properties": {"area": {"type": "string"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        if ctx.bus is None:
+            return ToolResult(ok=False, error="no bus available to reach the world model")
+        # Always ask for the WHOLE map first and filter locally, rather
+        # than passing a caller-given `area` straight to the facet: a
+        # marker-shaped call (`SELF_MAP: <whatever the model typed>`)
+        # hands this whatever free text followed the marker, not
+        # necessarily a real area name -- live-caught 2026-09-08, asked
+        # "what subsystems make you up", the model wrote
+        # `SELF_MAP: full map of subsystems and top-level files`, that
+        # string matched no real area, the facet came back with 0
+        # modules, and the model treated the empty result as the tool
+        # having failed and fell back to list_dir anyway.
+        try:
+            reply = await ctx.bus.request(
+                ctx.bus.new(topics.WORLD_ENV_QUERY, {"what": "capability_map", "args": {}}), timeout=5.0)
+        except TimeoutError:
+            return ToolResult(ok=False, error="world model did not respond in time")
+        if not reply.payload.get("ok", False):
+            err = reply.payload.get("error", {})
+            return ToolResult(ok=False, error=err.get("detail") or repr(err) or "world model query failed")
+        areas = reply.payload.get("areas", [])
+        by_area = reply.payload.get("modules_by_area", {})
+        wanted = str((args or {}).get("area") or "").strip().lower()
+        match = next((a for a in areas if a.lower() == wanted), None) if wanted else None
+        if match:
+            modules = by_area.get(match, [])
+            text = f"area: {match}\nmodules ({len(modules)}):\n" + "\n".join(f"  {m}" for m in modules)
+            return ToolResult(ok=True, output=text, metadata={"area": match, "modules": modules})
+        lines = [f"You are made of {len(areas)} subsystems under simorgh/ (src/ is retired v1, not this):"]
+        for a in areas:
+            lines.append(f"  {a} ({len(by_area.get(a, []))} files)")
+        if wanted:
+            lines.append(f"\n(no subsystem matched area={wanted!r} -- showing the full map instead)")
+        return ToolResult(ok=True, output="\n".join(lines), metadata={"areas": areas, "modules_by_area": by_area})
 
 
 _NO_MATCHES = "(no matches)"
@@ -413,7 +498,17 @@ class WebFetchTool:
                 # against the document, for a cap of ours (observer,
                 # 2026-09-08).
                 head = response.read(1024)
-                budget = _PDF_MAX_BYTES if looks_like_pdf(head) else self._config.web_fetch_max_bytes
+                if looks_like_pdf(head):
+                    budget = _PDF_MAX_BYTES
+                elif self._config.web_fetch_extract_text and looks_like_html(head.decode(charset, errors="replace")):
+                    # Same reasoning as the PDF cap just above: extraction
+                    # needs the whole document, so give a page that is
+                    # going to be extracted a raw budget sized for that,
+                    # not the (much smaller) budget meant to bound what
+                    # the model ultimately sees.
+                    budget = _HTML_MAX_RAW_BYTES
+                else:
+                    budget = self._config.web_fetch_max_bytes
                 raw = head + response.read(budget * 4 + 1 if encoding else budget + 1)
         except Exception as exc:  # noqa: BLE001 -- any network failure becomes a ToolResult, never a crash
             return ToolResult(ok=False, error=f"fetch failed: {exc!r}")
@@ -424,7 +519,6 @@ class WebFetchTool:
         # itself: "came back as unreadable gzip-compressed bytes". The
         # garbage was then stored into Memory as a fetched page.
         raw = _decompress(raw, encoding)
-        truncated = len(raw) > self._config.web_fetch_max_bytes
 
         # A PDF is bytes all the way down, so it has to be handled before
         # anything decodes it as text. This used to return `%PDF-1.5`
@@ -454,20 +548,46 @@ class WebFetchTool:
                 },
             )
 
-        content = raw[: self._config.web_fetch_max_bytes].decode(charset, errors="replace")
+        # Decode the WHOLE raw body, not a byte-capped prefix: extraction
+        # used to run on `raw[:web_fetch_max_bytes]` (200 KB), so a long
+        # real page lost most of its content before extraction ever saw
+        # it, with nothing in the output saying so. A live fetch of
+        # nfl.com (observer, 2026-09-08) came back as 3,872,038 bytes;
+        # capped first, extraction had 200,000 of those to work with and
+        # produced 4,708 characters of text -- capped after extraction
+        # (below), the same fetch yields 90,520.
+        full_text = raw.decode(charset, errors="replace")
+        raw_chars = len(full_text)
         # Markup is not content. Measured on real pages: 74% of a docs
         # page, 87% of an arXiv abstract, and 99.5% of a JavaScript app
         # -- which returned 224 usable characters with `ok=True` and
         # told the model nothing was wrong (observer, 2026-09-08).
         js_shell = False
-        raw_chars = len(content)
-        if self._config.web_fetch_extract_text and looks_like_html(content):
-            content, js_shell = html_to_text(content, url=url)
+        if self._config.web_fetch_extract_text and looks_like_html(full_text):
+            content, js_shell = html_to_text(full_text, url=url)
+            raw_truncated = len(raw) > _HTML_MAX_RAW_BYTES
+            text_truncated = len(content) > self._config.web_fetch_max_bytes
+            if text_truncated:
+                cut = len(content) - self._config.web_fetch_max_bytes
+                source_note = (
+                    f" The source page itself was cut at the {_HTML_MAX_RAW_BYTES:,}-byte fetch "
+                    f"limit before this text was extracted from it."
+                    if raw_truncated else ""
+                )
+                content = (
+                    content[: self._config.web_fetch_max_bytes]
+                    + f"\n\n[... truncated: {cut:,} more characters of extracted text were cut off "
+                      f"at the {self._config.web_fetch_max_bytes:,}-character limit.{source_note}]"
+                )
+            truncated = raw_truncated or text_truncated
+        else:
+            content = full_text[: self._config.web_fetch_max_bytes]
+            truncated = len(raw) > self._config.web_fetch_max_bytes
         return ToolResult(
             ok=True, output=content,
             metadata={
                 "url": url, "status": status_code, "truncated": truncated,
-                "sha256": hashlib.sha256(raw[: self._config.web_fetch_max_bytes]).hexdigest(),
+                "sha256": hashlib.sha256(raw).hexdigest(),
                 "fetched_at": ctx.clock.now(),
                 "raw_chars": raw_chars, "text_chars": len(content), "js_shell": js_shell,
             },
@@ -1270,7 +1390,8 @@ class SkillTool:
 
 def builtin_tools(config: Config) -> list:
     return [
-        ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), RunPythonSandboxedTool(config),
+        ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), SelfMapTool(config),
+        RunPythonSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), ProposeMcpServerTool(),

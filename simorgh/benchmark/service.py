@@ -175,8 +175,23 @@ class Service:
             suite=payload.get("suite", ""), model=payload.get("model", ""),
             limit=int(payload.get("limit") or self._config.history_limit),
         )
+        runs = [r.to_payload(with_cases=False) for r in records]
+        # `history` shows a compare block for the two most recent runs of
+        # each suite, and a real diff needs their per-case results -- the
+        # summary payload above never carries `cases`. Fetch just those
+        # two runs' full detail blobs (store.detail), same lookup
+        # `benchmark <run_id>` already uses, and swap them in. Everything
+        # else stays the cheap summary the chart plots.
+        by_suite: dict[str, list[int]] = {}
+        for i, run in enumerate(runs):
+            by_suite.setdefault(run.get("suite", ""), []).append(i)
+        for indices in by_suite.values():
+            for i in indices[-2:]:
+                detail = await self._store.detail(runs[i].get("run_id", ""))
+                if detail is not None:
+                    runs[i] = detail.to_payload(with_cases=True)
         await self._ctx.bus.reply(message, type=topics.BENCHMARK_HISTORY_REPLY, payload={
-            "runs": [r.to_payload(with_cases=False) for r in records], "model": self._model,
+            "runs": runs, "model": self._model,
             "running": bool(self._task and not self._task.done()), "progress": dict(self._running),
         })
 

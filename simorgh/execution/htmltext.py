@@ -50,6 +50,21 @@ _HEADING = {"h1": "#", "h2": "##", "h3": "###", "h4": "####", "h5": "#####", "h6
 _SHELL_MIN_HTML = 5_000
 _SHELL_MIN_CHARS = 300
 _SHELL_MIN_RATIO = 0.02
+# The ratio check alone false-positives on large, legitimate, script-heavy
+# pages: a real nfl.com fetch (observer, 2026-09-08) came back as 3,872,038
+# bytes of HTML, 57% of it inline <script> (React bundles, trackers, ads)
+# that a genuine JS shell also relies on -- but with 47,030 visible
+# characters of real navigation and headline text, a ratio of 1.2%, well
+# under the 2% cutoff. The ratio was never wrong about the shell case (the
+# HF Space above was 224 characters, nowhere near this), it is wrong about
+# *scale*: as a real page grows past a megabyte, its markup overhead grows
+# with it while its prose does not grow proportionally, so the ratio keeps
+# shrinking even though the absolute amount of content stays large and
+# real. A shell never accumulates real content no matter how large its
+# script payload is, so gate the ratio signal on an absolute content cap:
+# below it, a low ratio still means "no content built the page"; above it,
+# there is plainly a page here.
+_SHELL_RATIO_MAX_CHARS = 2_000
 _WS = re.compile(r"[ \t\r\f\v]+")
 _BLANKS = re.compile(r"\n{3,}")
 
@@ -142,7 +157,15 @@ def is_js_shell(body: str, html: str) -> bool:
     if len(html) < _SHELL_MIN_HTML:
         return False
     visible = _visible_chars(body)
-    return visible < _SHELL_MIN_CHARS or (visible / len(html)) < _SHELL_MIN_RATIO
+    if visible < _SHELL_MIN_CHARS:
+        return True
+    if visible > _SHELL_RATIO_MAX_CHARS:
+        # Enough real content that no ratio, however low, makes this a
+        # shell -- a bigger page is expected to dilute its own ratio with
+        # markup it would carry either way (framework chrome, tracking
+        # scripts, structured data).
+        return False
+    return (visible / len(html)) < _SHELL_MIN_RATIO
 
 
 def html_to_text(html: str, *, url: str = "") -> tuple[str, bool]:

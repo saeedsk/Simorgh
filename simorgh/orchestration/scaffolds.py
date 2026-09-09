@@ -25,6 +25,8 @@ from .api import Profile
 from .tools import offered_tools
 
 _TOOL_NOTES: dict[str, str] = {
+    "self_map": "ask your own world model what real subsystems/files make you up -- the authoritative "
+                "answer for questions about your own code or architecture; simorgh/ is what runs, src/ is retired v1",
     "read_file": "read a file from the repo, including a PDF (papers/ holds papers)",
     "list_dir": "list a directory",
     "search_code": "grep the repo; cheaper than reading whole files to find something",
@@ -117,7 +119,15 @@ prose after the list -- the list is the whole answer."""
 _CHAT = """\
 Answer the person. Use a tool when it would make the answer true rather
 than plausible, and skip the tools when you already know. Do not open
-work you were not asked for."""
+work you were not asked for.
+
+A question about your own code, architecture or subsystems is answered
+by self_map, not by list_dir or exploring the tree by hand -- it asks
+your own world model directly and is always current. `simorgh/` is the
+live code you actually run; `src/` is retired v1 code kept around for
+reference only -- it still exists, but it is not where you live now, so
+do not describe it as your current structure unless asked specifically
+about the old v1 code."""
 
 _BY_SCAFFOLD: dict[str, str] = {
     "patch": _PATCH,

@@ -20,6 +20,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "read_file": ("read_only", False),
     "list_dir": ("read_only", False),
     "search_code": ("read_only", False),
+    "self_map": ("read_only", False),
     "web_fetch": ("read_only", True),
     "web_search": ("read_only", True),
     "run_python_sandboxed": ("reversible", False),
@@ -74,6 +75,10 @@ _MARKER_ARG_KEY: dict[str, str] = {
     "read_file": "path",
     "list_dir": "path",
     "search_code": "query",
+    # Its one optional argument -- see execution/tools.py::SelfMapTool. A
+    # bare `SELF_MAP:` marker with no argument still works: `args.get`
+    # treats an empty string the same as "no area given".
+    "self_map": "area",
     "web_fetch": "url",
     "web_search": "query",
     "run_python_sandboxed": "code",
@@ -119,6 +124,11 @@ _MARKER_ARG_KEY: dict[str, str] = {
 # has real internal structure need an entry; a bare path/url/code
 # argument is self-explanatory from the tool's own name.
 _MARKER_ARG_HINT: dict[str, str] = {
+    "self_map": (
+        "leave this blank for the full map, or name one real subsystem "
+        "(e.g. worldmodel, cognition) to see just its files -- do not "
+        "describe what you want in prose, it is matched literally"
+    ),
     "read_file": (
         "a repo path, optionally with an inclusive 1-based line range, e.g. "
         "simorgh/foo.py:120-260. A result is cut at ~8000 chars, so read a "
