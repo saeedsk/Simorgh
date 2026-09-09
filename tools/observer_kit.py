@@ -139,6 +139,49 @@ def fast_copy_repo(dest: Path, *, source: Path | None = None) -> Path:
         os.environ["_OBSERVER_KIT_LAST_COPY_S"] = f"{time.monotonic() - started:.2f}"
 
 
+def prune_stale_workspaces(
+    *, root: Path | None = None, min_age_seconds: float = 1800.0, keep_prefix: str | None = None,
+) -> list[Path]:
+    """Delete old sandbox directories directly under `root` (default
+    `DEFAULT_WORKSPACE_ROOT`) to reclaim disk automatically, instead of
+    relying on someone noticing and doing it by hand.
+
+    A finished wave's sandboxes are pure disk waste -- a real 14-agent
+    wave used ~3.7 GB, and they accumulated across waves 6/7/8 to 13 GB
+    before anyone thought to clean them up (2026-09-08: the coordinator
+    did it manually, on a direct nudge, when it should have happened on
+    its own the moment the next wave started). This is safe to call
+    freely because `FINDINGS_ROOT` lives under a wholly separate parent
+    (`~/.cache`, not this function's `root`) precisely so a sweep here
+    can never take a wave's findings with it -- see `FINDINGS_ROOT`'s
+    own docstring for the incident that made that separation mandatory.
+
+    Only directories older than `min_age_seconds` (by mtime) are
+    removed, and `keep_prefix` (typically the wave about to be staged)
+    is always spared -- both guard against pruning a sandbox some other
+    concurrently-running wave is still actively using. Returns the
+    paths actually removed, for the caller to log.
+    """
+    root = Path(root) if root is not None else DEFAULT_WORKSPACE_ROOT
+    if not root.is_dir():
+        return []
+    cutoff = time.time() - min_age_seconds
+    removed = []
+    for entry in root.iterdir():
+        if not entry.is_dir() or entry.name == "findings":
+            continue
+        if keep_prefix and entry.name.startswith(keep_prefix):
+            continue
+        try:
+            if entry.stat().st_mtime >= cutoff:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(entry, ignore_errors=True)
+        removed.append(entry)
+    return removed
+
+
 def agent_workspace(name: str, *, parent: Path | None = None) -> Path:
     """A fresh, collision-proof directory for one observer.
 
