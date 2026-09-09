@@ -67,6 +67,42 @@ def mcp_tool_name(server: str, tool: str) -> str:
     return f"mcp_{server}_{tool}"
 
 
+def mcp_single_arg_key(schema: dict) -> str | None:
+    """The one property name a marker-driven call should land its raw
+    text on, or `None` when the schema genuinely has more than one (the
+    marker layer is single-argument only -- `orchestration/tools.py`'s
+    own module docstring).
+
+    Live-caught, 2026-09-08 (an observer's own stub server, `calc`
+    requiring `expression`): `execution/service.py` announced every MCP
+    tool's `tool.registered` with no `marker_arg_key` at all -- only
+    `SkillTool` ever set that field -- so `orchestration/tools.py::
+    register_tool_policy` had nothing to record for a brand-new MCP
+    tool, and every marker call to it arrived as `{"argument": ...}`
+    against a schema that has no such property. Two hand-maintained
+    entries (`ddg_search`/`ddg_get_answer`) happened to paper over this
+    for the one server wired in so far; a genuinely new server, added
+    through exactly the `propose_mcp_server` -> `mcp approve` -> restart
+    path this is meant to support, got a tool that registered, was
+    offered to the model, and could never actually be called from a
+    marker reply -- it failed with a clear "missing required field"
+    error rather than doing something wrong, but the model had no way to
+    fix it: nothing it could write would ever reach the right key. This
+    infers the same convention `_MARKER_ARG_KEY` already hand-encodes
+    for the wired-in tools, generically, from the schema the server
+    itself supplies -- exactly the single case the marker layer can
+    represent, so a schema with more than one property still gets no
+    key here (there is no single "raw text" to land it on) and needs a
+    human's hand-written `_MARKER_ARG_KEY` entry, same as before.
+    """
+    if not isinstance(schema, dict):
+        return None
+    properties = schema.get("properties")
+    if not isinstance(properties, dict) or len(properties) != 1:
+        return None
+    return next(iter(properties))
+
+
 class McpClient:
     """One MCP server subprocess. `start()` spawns it and performs the
     `initialize`/`notifications/initialized` handshake; `list_tools()`

@@ -44,7 +44,7 @@ from .config import Config
 # importing the Ledger's helper (the module-boundary rule).
 _BLOB_REF = re.compile(r"^blob:[0-9a-f]{64}$")
 from .external import load_external_tools
-from .mcp import McpClient, McpServerConfig, McpToolProxy
+from .mcp import McpClient, McpServerConfig, McpToolProxy, mcp_single_arg_key
 from .tools import SkillTool, builtin_tools
 from .verifier import ApprovalVerifier
 
@@ -157,7 +157,8 @@ class Service:
                 topics.TOOL_REGISTERED, source="execution",
                 payload={"name": tool.name, "version": "1", "description": tool.description,
                          "read_only": tool.read_only, "reversibility": tool.reversibility,
-                         "schema_ref": "", "provider": "mcp"},
+                         "schema_ref": "", "provider": "mcp",
+                         "marker_arg_key": mcp_single_arg_key(tool.args_schema)},
             ))
             await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {"name": tool.name, "provider": "mcp"}))
 
