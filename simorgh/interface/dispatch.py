@@ -255,6 +255,7 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         # it still answered "running" -- a true sentence about a
         # different question (observer, 2026-09-08). The state machine
         # carries `autonomous_paused`; that is what was asked about.
+        # Reads autonomy state from the kernel via SYSTEM_STATUS_REQUEST (bare `auto`).
         return await _request(bus, topics.SYSTEM_STATUS_REQUEST, {}, timeout=3.0, render=_render_auto)
 
     if name == "interests":
