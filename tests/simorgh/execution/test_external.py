@@ -129,6 +129,26 @@ class TestAdapters(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tools[0].reversibility, "read_only")
         self.assertTrue(tools[0].read_only)
 
+    async def test_default_reversibility_is_the_fail_safe_irreversible_tier(self):
+        """Live-caught, 2026-09-08: the default used to be "reversible",
+        so any `[[execution.external_tools]]` entry with no explicit
+        `reversibility` got Guardian's `ReversibilityRule` auto-allow in
+        guarded mode with no human in the loop -- proven end to end with
+        a `kind="callable"` wrapper around `os.remove` that deleted a
+        real file with zero escalation. `mcp.py` already defaults new
+        tools to "irreversible" unless explicitly allowlisted read_only;
+        external.py must match that fail-safe posture, since an
+        unconfigured external tool is, by definition, one nobody has
+        vetted yet."""
+        spec = ExternalToolSpec(import_path=f"{_HERE}:word_count")
+        self.assertEqual(spec.reversibility, "irreversible")
+        self.assertFalse(spec.read_only)
+        tools = adapt(spec)
+        self.assertEqual(tools[0].reversibility, "irreversible")
+
+        mapped = ExternalToolSpec.from_mapping({"import_path": f"{_HERE}:word_count"})
+        self.assertEqual(mapped.reversibility, "irreversible")
+
     async def test_an_upstream_exception_is_a_result_not_a_crash(self):
         tools = adapt(ExternalToolSpec(import_path=f"{_HERE}:Exploding", kind="langchain"))
         result = await tools[0].run({"input": "x"}, ctx=_ctx())

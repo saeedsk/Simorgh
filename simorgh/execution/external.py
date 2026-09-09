@@ -67,7 +67,24 @@ class ExternalToolSpec:
     import_path: str
     kind: str = "auto"
     name: str = ""
-    reversibility: str = "reversible"
+    # Fail-safe default, matching `mcp.py`'s own pattern (`reversibility
+    # = "read_only" if self.read_only else "irreversible"`, i.e. nothing
+    # gets Guardian's lighter scrutiny unless a human explicitly grants
+    # it): an operator adding `[[execution.external_tools]]` names a
+    # third-party callable Sim has never audited -- a LangChain/
+    # pydantic_ai/Composio tool can delete files, send messages, spend
+    # money, or run arbitrary code. Defaulting to "reversible" here used
+    # to mean Guardian's `ReversibilityRule` auto-allowed every such call
+    # with no human in the loop unless the operator remembered to set
+    # `reversibility = "irreversible"` themselves -- the same shape as
+    # the MCP `marker_arg_key` gap: a wrong default classification an
+    # operator could ship without noticing (live-caught, 2026-09-08: a
+    # `kind="callable"` wrapper around `os.remove` with no explicit
+    # `reversibility` was approved and executed with no escalation,
+    # permanently deleting a real file). Now unconfigured means the
+    # safest tier; `reversibility = "read_only"` or `"reversible"` is an
+    # explicit, deliberate loosening the operator has to write down.
+    reversibility: str = "irreversible"
     read_only: bool = False
     timeout_s: float = 30.0
     kwargs: Mapping[str, Any] = field(default_factory=dict)
@@ -79,7 +96,7 @@ class ExternalToolSpec:
             raise ValueError(f"external tool kind must be one of {KINDS}, not {kind!r}")
         return cls(
             import_path=str(data["import_path"]), kind=kind, name=str(data.get("name", "")),
-            reversibility=str(data.get("reversibility", "reversible")),
+            reversibility=str(data.get("reversibility", "irreversible")),
             read_only=bool(data.get("read_only", False)),
             timeout_s=float(data.get("timeout_s", 30.0)), kwargs=dict(data.get("kwargs", {}) or {}),
         )
