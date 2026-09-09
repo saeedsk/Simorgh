@@ -225,6 +225,42 @@ class TestPerceptTextRunsAChatTurnWithNoPlanningTask(unittest.TestCase):
             await service.stop()
 
 
+class TestWorkerIdReflectsTheRealInstanceId(unittest.TestCase):
+    """`local-multi` mode gives its Context a real per-process
+    `instance_id` (the operator's own `--id`, kernel/service.py's
+    `ctx_factory.build("orchestration", instance_id=self.worker_id)`).
+    Before this test, `Service.start` always synthesized
+    `f"{ctx.name}-{i}"`, so every worker process reported the identical
+    `worker_id` ("orchestration-0") regardless of `--id` -- status,
+    leases, and logs could not tell two worker processes apart
+    (observer, 2026-09-08)."""
+
+    @run
+    async def test_an_instance_id_on_the_context_is_used_verbatim(self):
+        async with Harness() as h:
+            service = OrchestrationService(Config(workers=1))
+            ctx = _stub_context(h)
+            ctx = Context(
+                name=ctx.name, instance_id="worker-7", run_id=ctx.run_id, mode=ctx.mode,
+                bus=ctx.bus, ledger=ctx.ledger, config=ctx.config, secrets=ctx.secrets,
+                clock=ctx.clock, logger=ctx.logger, data_dir=ctx.data_dir,
+            )
+            await service.start(ctx)
+            self.assertEqual([w.worker_id for w in service._workers], ["worker-7"])
+            await service.stop()
+
+    @run
+    async def test_no_instance_id_keeps_the_synthetic_in_process_naming(self):
+        async with Harness() as h:
+            service = OrchestrationService(Config(workers=2, metrics_interval_s=0))
+            ctx = _stub_context(h)  # instance_id="" -- single mode
+            await service.start(ctx)
+            self.assertEqual(
+                [w.worker_id for w in service._workers], ["orchestration-0", "orchestration-1"],
+            )
+            await service.stop()
+
+
 class TestWorkerBusyTrackingAndMetrics(unittest.TestCase):
     """A dashboard's "what is each worker doing right now" view needs
     `Worker.current_task_id`/`current_kind` set while a session is
