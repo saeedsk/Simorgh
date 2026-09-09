@@ -80,7 +80,21 @@ def pytest_parallel_args() -> list[str]:
 # Only for the "this will take a while" line; nothing depends on it.
 EXPECTED_UNIT_S = 90 if pytest_parallel_args() else 720
 _TAG = re.compile(rf"^{re.escape(TAG_PREFIX)}(\d+)$")
-DEFAULT_NOTES = Path("~/.simorgh/loader").expanduser()
+# Notes default to a directory *inside the repo being gated*, not the
+# invoking process's real `$HOME`. This used to be
+# `Path("~/.simorgh/loader").expanduser()` -- fine for the real checkout,
+# but a bootloader run against an independent sandbox copy of the repo
+# still has the operator's real `$HOME`, so every unqualified `bless`
+# there wrote straight into that person's actual
+# `~/.simorgh/loader/decisions.jsonl`, corrupting the real audit trail
+# with sandbox-only decisions (observer, 2026-09-08 -- reproduced live:
+# a sandbox run with no `--notes` resolved to `/Users/<real-user>/.simorgh/loader`).
+# `--repo` already resolves correctly per-checkout (it defaults to this
+# file's own directory), so anchoring notes there instead makes the
+# escape structurally impossible: a sandbox's `simloader.py` can only
+# ever write under that sandbox's own repo tree. Untracked, so rollback's
+# `git checkout <tag>` never touches it (see `is_dirty`'s docstring).
+NOTES_DIRNAME = ".simorgh_loader"
 
 
 # ---------------------------------------------------------------- output
@@ -678,7 +692,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Boot Simorgh from a known-good tag, and keep it that way.")
     parser.add_argument("command", choices=("run", "bless", "status", "rollback"))
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parent))
-    parser.add_argument("--notes", default=str(DEFAULT_NOTES), help="where decisions are written for Sim to read")
+    parser.add_argument("--notes", default=None,
+                         help=f"where decisions are written for Sim to read "
+                              f"(default: <repo>/{NOTES_DIRNAME})")
     parser.add_argument("--full", action="store_true", help="gate with the trial suite too, not just unit tests")
     parser.add_argument("--timeout", type=float, default=5400.0, help="seconds the whole gate may take")
     parser.add_argument("--max-rollbacks", type=int, default=3)
@@ -686,7 +702,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reason", default="requested by operator")
     parser.add_argument("sim_args", nargs="*", help="passed through to `python -m simorgh run`")
     args = parser.parse_args(argv)
-    repo, notes = Path(args.repo).resolve(), Path(args.notes).expanduser()
+    repo = Path(args.repo).resolve()
+    notes = Path(args.notes).expanduser() if args.notes else repo / NOTES_DIRNAME
 
     if args.command == "status":
         return cmd_status(repo, notes)

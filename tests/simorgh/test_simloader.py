@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -262,6 +263,81 @@ class LoaderIsIndependentTestCase(unittest.TestCase):
         source = _LOADER.read_text()
         self.assertNotIn("import simorgh", source)
         self.assertNotIn("from simorgh", source)
+
+
+class NotesPathTestCase(unittest.TestCase):
+    """The default `--notes` directory must be scoped to the repo being
+    gated, never to the invoking process's real `$HOME`.
+
+    Was `DEFAULT_NOTES = Path("~/.simorgh/loader").expanduser()`: a
+    sandbox copy of this repo has the operator's real home too, so an
+    unqualified `bless`/`run` there wrote straight into that person's
+    actual `~/.simorgh/loader/decisions.jsonl` -- corrupting the real
+    audit trail with sandbox-only decisions (observer, 2026-09-08,
+    reproduced live). `--repo` already resolves correctly per-checkout,
+    so the default must be anchored there instead, making the escape
+    structurally impossible rather than merely unlikely.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = _Repo(Path(self._tmp.name))
+
+    def _resolved_notes(self, *, home: Path) -> Path:
+        captured: dict[str, Path] = {}
+
+        def _fake_status(repo, notes):
+            captured["notes"] = notes
+            return 0
+
+        env = dict(os.environ, HOME=str(home))
+        with mock.patch.object(simloader, "cmd_status", side_effect=_fake_status), \
+             mock.patch.dict(simloader.os.environ, env, clear=False):
+            rc = simloader.main(["status", "--repo", str(self.repo.path)])
+        self.assertEqual(rc, 0)
+        return captured["notes"]
+
+    def test_default_notes_live_under_the_repo_not_home(self):
+        real_home = Path(self._tmp.name) / "definitely-not-the-repo"
+        real_home.mkdir()
+        notes = self._resolved_notes(home=real_home)
+        self.assertEqual(notes, self.repo.path.resolve() / simloader.NOTES_DIRNAME)
+        self.assertFalse(str(notes).startswith(str(real_home.resolve())))
+
+    def test_default_notes_are_unaffected_by_which_home_is_set(self):
+        """However `$HOME` is set at invocation time, the default must
+        resolve identically -- it must not consult `$HOME`/`Path.home()`
+        at all."""
+        home_a = Path(self._tmp.name) / "home-a"
+        home_b = Path(self._tmp.name) / "home-b"
+        home_a.mkdir()
+        home_b.mkdir()
+        self.assertEqual(self._resolved_notes(home=home_a), self._resolved_notes(home=home_b))
+
+    def test_an_explicit_notes_flag_still_wins(self):
+        explicit = Path(self._tmp.name) / "explicit-notes"
+        captured: dict[str, Path] = {}
+
+        def _fake_status(repo, notes):
+            captured["notes"] = notes
+            return 0
+
+        with mock.patch.object(simloader, "cmd_status", side_effect=_fake_status):
+            simloader.main(["status", "--repo", str(self.repo.path), "--notes", str(explicit)])
+        self.assertEqual(captured["notes"], explicit)
+
+    def test_a_real_bless_writes_notes_only_under_the_repo(self):
+        """End-to-end, through `write_note`: no file lands under `$HOME`."""
+        home = Path(self._tmp.name) / "home-for-real-bless"
+        home.mkdir()
+        env = dict(os.environ, HOME=str(home))
+        with mock.patch.object(simloader, "run_gate", return_value=(False, "unit suite failed: boom")), \
+             mock.patch.dict(simloader.os.environ, env, clear=False):
+            rc = simloader.main(["bless", "--repo", str(self.repo.path)])
+        self.assertEqual(rc, 1)
+        self.assertTrue((self.repo.path / simloader.NOTES_DIRNAME / "decisions.jsonl").exists())
+        self.assertEqual(list(home.rglob("*")), [], "bless must never write under $HOME")
 
 
 if __name__ == "__main__":

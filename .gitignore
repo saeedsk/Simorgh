@@ -6,6 +6,10 @@ venv/
 *.egg-info/
 .DS_Store
 
+# simloader.py's decision notes (decisions.jsonl, last_unit.txt, ...),
+# scoped to this checkout by default -- see simloader.py's NOTES_DIRNAME.
+.simorgh_loader/
+
 # Never commit credentials. Simorgh reads API keys only from environment
 # variables at runtime (GEMINI_API_KEY, GOOGLE_API_KEY, ...) -- these
 # patterns are a backstop in case a local .env file or key dump ever
