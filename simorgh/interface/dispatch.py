@@ -447,7 +447,18 @@ def _mcp_server_toml_block(proposal: dict) -> str:
         # validation); the human adds an `env` table by hand if the
         # server actually needs one.
         lines.append(f"# env vars this server needs (add real values yourself): {', '.join(proposal['env_keys'])}")
-    lines.append(f"# approved via `mcp approve` -- Sim's own reason: {proposal.get('reason', '')}")
+    # A `#` comment ends at the first newline in TOML -- anything after
+    # one becomes a bare line with no `key = value`, which
+    # `tomllib.load` refuses outright ("Expected '=' after a key in a
+    # key/value pair"). This was unreachable while `reason` was
+    # truncated to its first line by the PROPOSE_MCP_SERVER marker bug;
+    # fixing that bug today (cognition/parser.py) legitimately restored
+    # multi-line reasons, and one committed to `simorgh.toml` by
+    # `mcp approve` broke the file Sim reads at its next boot (observer,
+    # 2026-09-08). Collapsed to one line here, same as `preview()`
+    # elsewhere in this codebase collapses a narrated multi-line value.
+    reason = " ".join(str(proposal.get("reason", "")).split())
+    lines.append(f"# approved via `mcp approve` -- Sim's own reason: {reason}")
     return "\n".join(lines) + "\n"
 
 

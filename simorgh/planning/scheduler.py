@@ -14,13 +14,20 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Bus, Clock
 
+from .config import Config
 from .model import TERMINAL_STATUSES, Task
 from .store import TaskStore
 
-# A benchmark case sits below a human's own request and above the
-# system's self-directed work: it was asked for, but the human is not
-# waiting on this particular case.
-DEFAULT_PRIORITY_WEIGHTS = {"human": 3, "benchmark": 2, "reflection": 2, "curiosity": 1}
+# The real default lives on `Config.priority_weights` -- this used to be
+# a second copy of the same dict, and `PlanningService` never actually
+# built its `Scheduler` from this one (it always passes
+# `self.config.priority_weights`), so editing this constant alone
+# changed nothing at runtime. An observer proved it on 2026-09-08:
+# adding "benchmark" here left the live weight at 0 (the `.get(...,0)`
+# fallback), BELOW curiosity's 1, the opposite of the intended ranking.
+# Importing rather than duplicating means there is one number to get
+# right.
+DEFAULT_PRIORITY_WEIGHTS = Config().priority_weights
 
 
 def select_ready(store: TaskStore, *, priority_weights: dict[str, int], limit: int = 1) -> list[Task]:
