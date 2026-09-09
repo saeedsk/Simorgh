@@ -123,6 +123,7 @@ class SharePolicy(Protocol):
 | `lexicon_weight` | float | 0.15 | Per-word delta (v1 value) |
 | `exclamation_arousal` | float | 0.10 | v1 value |
 | `outcome_nudge.success` / `.failure` | float | +0.08 / −0.10 | Valence nudge per task outcome |
+| `outcome_nudge.blocked` | float | −0.03 | Valence nudge per `task.blocked` (non-terminal; smaller than `.failure` since one task may retry-and-block many times before completing or failing) |
 | `share.growth_cooldown_s` | float | 900 | v1 `DEFAULT_SHARE_COOLDOWN_SECONDS` (growth) |
 | `share.news_cooldown_s` | float | 1800 | v1 (news) |
 | `share.quiet_when_active_s` | float | 20 | Don't share within this many seconds of user input |

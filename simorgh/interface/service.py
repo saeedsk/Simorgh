@@ -118,6 +118,7 @@ class Service:
 
     def __init__(self, config: Config | None = None, *, run_repl: bool = True,
                  http_enabled: bool | None = None, wait_for_boot: bool = False) -> None:
+        self._config_from_caller = config
         self.config = config or Config()
         self._run_repl = run_repl
         # The REPL thread starts during the `persona, interface` boot
@@ -183,6 +184,13 @@ class Service:
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
         self._loop = asyncio.get_running_loop()
+        # A config passed by the caller still wins, so a test that
+        # constructs the service with one is unaffected (same pattern as
+        # `persona.Service.start` / `curiosity.Service.start`).
+        if self._config_from_caller is None and ctx.config:
+            self.config = Config.from_mapping(dict(ctx.config))
+            self._color = render_mod.color_enabled(self.config.color)
+            self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
         self._subs = [
             await ctx.bus.subscribe(topics.UI_NOTICE, self._on_notice),
             await ctx.bus.subscribe(topics.UI_PROMPT, self._on_prompt),

@@ -54,6 +54,34 @@ FINISHING_TOOLS = ("git_commit", "git_discard")
 # log, the ledger or the CLI ever mentioned a discarded patch. The task
 # could never have finished, and the reason was invisible.
 DURABLE_TOOLS = ("apply_source_patch", "apply_skill")
+# How much of each step's `summary` (== `detail`, up to `_DETAIL_CHARS`
+# == 2000, see `_bound_for_model`'s neighbour below) survives into the
+# verification subject's step list. Kept equal to `_DETAIL_CHARS` so
+# this cut loses nothing that a previous cut did not already remove.
+# Patch/skill diffs run longer and are worth more room.
+_VERIFY_SUMMARY_CHARS = 2000
+_VERIFY_PATCH_SUMMARY_CHARS = 4000
+
+
+def _trim_evidence(text: str, limit: int) -> str:
+    """Cut `text` to `limit` chars for the verification reviewer without
+    slicing through a word or number. A bare `text[:limit]` turned
+    "temperature 0.7" into "temperature 0." -- indistinguishable from a
+    source that genuinely only said "0." -- and a reviewer read the
+    truncated tail as the actual fact, rejecting an answer whose full,
+    correct number came from a later step (two observers, 2026-09-08).
+    Back up to the last whitespace and say the text was cut, so an
+    incomplete quote reads as incomplete instead of as a contradiction.
+    """
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    last_space = cut.rfind(" ")
+    if last_space > limit * 0.5:
+        cut = cut[:last_space]
+    return cut + " ...[cut]"
+
+
 # Shapes a reply takes when it is narrating tool calls rather than
 # making them. `[tool_call X]` was our own transcript stand-in; the
 # others are what a model invents around it.
@@ -775,15 +803,41 @@ class SessionRunner:
         # test?" it was never asked to write, and a research answer failed
         # on whatever its two paragraphs did not happen to mention
         # (watched trials, 2026-09-07). Now it sees what was actually done.
+        #
+        # The cut used to be a bare `[:300]` -- far below the 2000 chars
+        # `step.summary` (`detail`, above) actually carries. A PDF read
+        # whose relevant number landed at char 340 came through as
+        # "...sampling 21 CoT trajectories... temperature 0." -- a real
+        # quote from a LATER step already had the full "temperature
+        # 0.7", but the truncated EARLIER step read like the source
+        # itself only supported "0.", and the reviewer failed a correct
+        # answer as unsupported/contradicted (two independent observers,
+        # 2026-09-08). Cut at a generous width that matches what was
+        # already captured in `detail`, and never mid-word: a hard slice
+        # invents a fact ("0.") that was never actually said.
         steps = [
             {
                 "tool": step.tool, "ok": step.ok, "phase": step.phase,
-                "summary": (step.summary or "")[: 1500 if step.tool in ("apply_source_patch", "apply_skill") else 300],
+                "summary": _trim_evidence(
+                    step.summary or "",
+                    _VERIFY_PATCH_SUMMARY_CHARS if step.tool in ("apply_source_patch", "apply_skill")
+                    else _VERIFY_SUMMARY_CHARS,
+                ),
             }
             for step in session.steps
         ]
+        # Same signal `unsupported_claims` uses below as `complete_log`:
+        # a retry's own `session.steps` is only what THIS attempt did,
+        # not the whole session's history -- an earlier attempt may have
+        # applied the patch and run out of steps, and this attempt's log
+        # can legitimately show no write tool at all. Mechanical checks
+        # that judge "did a write tool run in the whole session" need to
+        # know when they are looking at a partial log, the same way
+        # `unsupported_claims` already does.
+        complete_log = session.attempt <= 1 and not session.carried
         payload = json.dumps({
             "description": session.user_text, "result": text[:2000], "kind": session.kind, "steps": steps,
+            "complete_log": complete_log,
         }).encode("utf-8")
         return await self._ledger.put_blob(payload, content_type="application/json")
 

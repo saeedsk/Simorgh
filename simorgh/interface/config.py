@@ -84,3 +84,37 @@ class Config:
 
     def resolved_history_path(self) -> Path | None:
         return self.history_path.expanduser() if self.history_path is not None else None
+
+    @classmethod
+    def from_mapping(cls, data: dict | None) -> "Config":
+        data = data or {}
+        default = cls()
+        history_path = data.get("history_path", default.history_path)
+        return cls(
+            history_path=Path(history_path) if history_path is not None else None,
+            history_length=int(data.get("history_length", default.history_length)),
+            color=str(data.get("color", default.color)),
+            unicode=str(data.get("unicode", default.unicode)),
+            narrate=bool(data.get("narrate", default.narrate)),
+            narrate_autonomous=bool(data.get("narrate_autonomous", default.narrate_autonomous)),
+            narrate_steps=bool(data.get("narrate_steps", default.narrate_steps)),
+            narrate_heartbeat_s=float(data.get("narrate_heartbeat_s", default.narrate_heartbeat_s)),
+            boot_wait_s=float(data.get("boot_wait_s", default.boot_wait_s)),
+            rich_prompt=bool(data.get("rich_prompt", default.rich_prompt)),
+            live_status=str(data.get("live_status", default.live_status)),
+            prompt_timeout_s=float(data.get("prompt_timeout_s", default.prompt_timeout_s)),
+            vitals_idle_reprint_s=float(data.get("vitals_idle_reprint_s", default.vitals_idle_reprint_s)),
+            vitals_interval_s=float(data.get("vitals_interval_s", default.vitals_interval_s)),
+            notice_queue_max=int(data.get("notice_queue_max", default.notice_queue_max)),
+            shell_timeout_s=float(data.get("shell_timeout_s", default.shell_timeout_s)),
+            chat_reply_timeout_s=float(data.get("chat_reply_timeout_s", default.chat_reply_timeout_s)),
+            http_host=str(data.get("http_host", default.http_host)),
+            http_port=int(data.get("http_port", default.http_port)),
+            http_status_timeout_s=float(data.get("http_status_timeout_s", default.http_status_timeout_s)),
+            http_chat_timeout_s=float(data.get("http_chat_timeout_s", default.http_chat_timeout_s)),
+            history_stream=str(data.get("history_stream", default.history_stream)),
+            history_default_minutes=float(data.get("history_default_minutes", default.history_default_minutes)),
+            history_max_points=int(data.get("history_max_points", default.history_max_points)),
+            logs_default_limit=int(data.get("logs_default_limit", default.logs_default_limit)),
+            logs_max_limit=int(data.get("logs_max_limit", default.logs_max_limit)),
+        )

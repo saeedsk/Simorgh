@@ -238,17 +238,30 @@ def offered_tools(profile_tools: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(offered)
 
 
-def register_tool_policy(name: str, *, reversibility: str, provider: str) -> None:
+def register_tool_policy(name: str, *, reversibility: str, provider: str,
+                          marker_arg_key: str | None = None) -> None:
     if not name:
         return
     _DYNAMIC_TOOLS[name] = provider
     if name not in _TOOL_POLICY:
         _TOOL_POLICY[name] = (reversibility, provider in ("mcp", "external"))
-    if name not in _MARKER_ARG_KEY and provider == "skill":
-        # `SkillTool.run(**args)` takes the skill's own `run()` keyword;
-        # the convention across every skill written so far is one string
-        # argument named `text`. Without an entry the marker's argument
-        # arrives as `argument=` and the call is a TypeError.
+    if marker_arg_key:
+        # `execution/tools.py::SkillTool` now inspects the skill's own
+        # `run()` signature (AST, no exec) and announces its real first
+        # parameter name on `tool.registered`. Always wins over whatever
+        # is already recorded -- live-caught, audit 2026-09-08: a skill
+        # is first announced from disk (no source read yet, so no key)
+        # and only gets a real `marker_arg_key` once `_load_skill` reads
+        # its source, so the *later*, informed event has to be able to
+        # overwrite the earlier default, not be blocked by an
+        # already-present entry.
+        _MARKER_ARG_KEY[name] = marker_arg_key
+    elif name not in _MARKER_ARG_KEY and provider == "skill":
+        # No signature info yet (e.g. announced-from-disk, not yet
+        # loaded) -- fall back to the historical convention (one string
+        # argument named `text`) so a marker call still has a chance of
+        # matching a skill whose `run()` genuinely takes `text`, instead
+        # of hard-failing with `argument=`.
         _MARKER_ARG_KEY[name] = "text"
     if name not in _MARKER_ARG_KEY and provider == "external":
         # `execution/external.py` wraps every adapter behind one string

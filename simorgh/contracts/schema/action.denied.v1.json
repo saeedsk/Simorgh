@@ -26,6 +26,12 @@
       },
       "type": "array"
     },
+    "task_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "tool": {
       "type": [
         "string",

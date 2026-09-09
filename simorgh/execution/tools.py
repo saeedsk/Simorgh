@@ -1132,6 +1132,41 @@ print(_result if isinstance(_result, str) else json.dumps(_result))
 """
 
 
+def skill_marker_arg_key(source: str) -> str | None:
+    """The keyword `SkillTool.run` should be called with for a marker-shaped
+    (single-string) call -- the skill's own `run()` function's first
+    parameter name, e.g. `def run(path):` -> `"path"`.
+
+    Static (AST-only, no exec) on purpose: this runs at registration time,
+    outside the sandboxed subprocess, so it must never execute a single
+    line of the skill's own code -- `inspect.signature` would require
+    importing the module first. Returns `None` when the source doesn't
+    parse or has no top-level `run`/`async def run`, leaving the caller to
+    fall back to the historical `"text"` default.
+
+    Live-caught (audit, 2026-09-08): `orchestration/tools.py::
+    register_tool_policy` hardcoded every skill's marker arg to `"text"`
+    regardless of what the skill's `run()` actually declared -- a skill
+    written as `def run(path):` was called with `text=...` and raised
+    `TypeError: run() got an unexpected keyword argument 'text'` on every
+    single invocation from the marker layer.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
+            args = node.args
+            positional = [*args.posonlyargs, *args.args]
+            if positional:
+                return positional[0].arg
+            if args.kwonlyargs:
+                return args.kwonlyargs[0].arg
+            return None
+    return None
+
+
 class SkillTool:
     """A skill loaded on demand (08-execution.md section 5.2's
     `skill:<name>` convention; Phase 4 roadmap item 4.7): the acquired
@@ -1155,6 +1190,13 @@ class SkillTool:
         self.name = f"skill:{skill_name}"
         self.description = description
         self._source = source
+        # Threaded through `tool.registered` (Service._load_skill) to
+        # `orchestration/tools.py::register_tool_policy`, so a marker-
+        # shaped call (`APPLY_SKILL:`-acquired skills are always called
+        # this way -- there is no other calling convention this session)
+        # lands on the skill's own first parameter name instead of a
+        # hardcoded "text".
+        self.marker_arg_key = skill_marker_arg_key(source) or "text"
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         timeout = min(ctx.constraints.get("timeout_s", self._config.sandbox_timeout_s), self._config.sandbox_timeout_s)
@@ -1166,8 +1208,19 @@ class SkillTool:
             preexec = _apply_rlimits(self._config.sandbox_cpu_seconds, self._config.sandbox_memory_mb * 1024 * 1024) if resource else None
             try:
                 completed = subprocess.run(
+                    # `cwd` used to be the throwaway `workdir` (a fresh
+                    # tempdir with only the driver + module in it), so a
+                    # correctly-invoked skill that took a repo-relative
+                    # path (e.g. "simorgh/__init__.py") could never open
+                    # it -- live-caught, audit 2026-09-08. A skill already
+                    # runs as arbitrary Python with no filesystem
+                    # confinement beyond the CPU/memory rlimits below (an
+                    # absolute path was always writable); running it from
+                    # `repo_root` instead only makes the common case --
+                    # relative paths -- resolve the way the model expects,
+                    # it does not widen what the skill could already reach.
                     [sys.executable, "-I", str(driver), json.dumps(args)], capture_output=True, text=True,
-                    cwd=workdir, env={}, timeout=timeout, preexec_fn=preexec,
+                    cwd=str(self._config.repo_root), env={}, timeout=timeout, preexec_fn=preexec,
                     stdin=subprocess.DEVNULL,
                 )
             except subprocess.TimeoutExpired as exc:

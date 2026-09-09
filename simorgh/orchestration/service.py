@@ -40,6 +40,7 @@ class Service:
     )
 
     def __init__(self, config: Config | None = None) -> None:
+        self._config_from_caller = config
         self.config = config or Config()
         self._workers: list[Worker] = []
         self._ctx: Context | None = None
@@ -53,6 +54,16 @@ class Service:
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
+        # Every service is handed its own `[section]` from simorgh.toml
+        # (`kernel/context.py` builds `ctx.config` for exactly this) --
+        # this one never read it, so `[orchestration] workers` (and
+        # everything else in the section) had zero effect in `single`
+        # mode, the mode `sim.sh` actually runs (observer, 2026-09-08).
+        # A config passed by the caller still wins, so a test that
+        # constructs the service with one is unaffected. See
+        # `config.py`'s docstring for which fields this actually changes.
+        if self._config_from_caller is None and ctx.config:
+            self.config = Config.from_mapping(dict(ctx.config))
         for i in range(max(1, self.config.workers)):
             worker = Worker(ctx.bus, ctx.ledger, clock=ctx.clock.now if hasattr(ctx.clock, "now") else None,
                             worker_id=f"{ctx.name}-{i}", think_timeout_s=self.config.think_timeout_s)
@@ -107,6 +118,7 @@ class Service:
         register_tool_policy(
             p.get("name", ""), reversibility=p.get("reversibility", "irreversible"),
             provider=p.get("provider", "builtin"),
+            marker_arg_key=p.get("marker_arg_key"),
         )
 
     async def stop(self) -> None:
