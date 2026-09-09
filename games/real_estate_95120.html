@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Real Estate Explorer — San Jose, CA 95120 (SAMPLE DATA)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html,body{margin:0;height:100%;font-family:system-ui,sans-serif;display:flex;flex-direction:column}
+  header{background:#1a3a5c;color:#fff;padding:10px 16px}
+  header h1{margin:0;font-size:18px}
+  .banner{background:#fff3cd;color:#664d03;padding:6px 16px;font-size:13px;border-bottom:1px solid #ffe697}
+  #filters{display:flex;flex-wrap:wrap;gap:12px;padding:10px 16px;background:#f5f5f5;border-bottom:1px solid #ddd;align-items:flex-end}
+  .fgroup{display:flex;flex-direction:column;font-size:12px;color:#333}
+  .fgroup input{width:90px;padding:4px}
+  button{padding:6px 14px;cursor:pointer}
+  #main{flex:1;display:flex;min-height:0}
+  #list{width:380px;overflow-y:auto;border-right:1px solid #ccc;padding:8px}
+  #map{flex:1}
+  .card{border:1px solid #ddd;border-radius:6px;padding:8px;margin-bottom:8px;cursor:pointer;background:#fff}
+  .card:hover{border-color:#1a73e8}
+  .card b{color:#1a3a5c}
+  .price{font-size:16px;font-weight:700;color:#2e7d32}
+  .dim{color:#666;font-size:12px}
+</style>
+</head>
+<body>
+<header><h1>Real Estate Explorer — San Jose, CA 95120</h1></header>
+<div class="banner">⚠️ <strong>SAMPLE / PLACEHOLDER DATA — NOT LIVE LISTINGS.</strong> No real-estate data API is configured in this environment, and Zillow/Realtor.com prohibit scraping. Addresses and prices below are illustrative examples, not verified active listings. To make this real, integrate a licensed listings API (e.g., Bridge Interactive/MLS, Rentcast, ATTOM, or RPR) with an API key.</div>
+<div id="filters">
+  <div class="fgroup">Price min $<input id="pmin" type="number" placeholder="0"></div>
+  <div class="fgroup">Price max $<input id="pmax" type="number" placeholder="5000000"></div>
+  <div class="fgroup">SqFt min <input id="smin" type="number" placeholder="0"></div>
+  <div class="fgroup">SqFt max <input id="smax" type="number" placeholder="6000"></div>
+  <div class="fgroup">$/sqFt min <input id="ppmin" type="number" placeholder="0"></div>
+  <div class="fgroup">$/sqFt max <input id="ppmax" type="number" placeholder="2000"></div>
+  <button onclick="applyFilters()">Filter</button>
+  <button onclick="resetFilters()">Reset</button>
+</div>
+<div id="main">
+  <div id="list"></div>
+  <div id="map"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// SAMPLE DATA ONLY — illustrative, not real active listings.
+const listings = [
+ {addr:"5847 Casa Loma Ave, San Jose, CA 95120", price:1898000, sqft:2450, beds:4, baths:3, lat:37.2231, lng:-121.8606},
+ {addr:"1023 Muriel Way, San Jose, CA 95120",   price:1450000, sqft:1720, beds:3, baths:2, lat:37.2295, lng:-121.8420},
+ {addr:"6721 Via Vona, San Jose, CA 95120",     price:2295000, sqft:3180, beds:5, baths:4, lat:37.2160, lng:-121.8712},
+ {addr:"1955 Crossfield Ct, San Jose, CA 95120",price:1690000, sqft:2010, beds:4, baths:3, lat:37.2350, lng:-121.8550},
+ {addr:"5590 Harwood Ct, San Jose, CA 95120",   price:1250000, sqft:1380, beds:3, baths:2, lat:37.2215, lng:-121.8380},
+ {addr:"7002 Derby Ct, San Jose, CA 95120",     price:2575000, sqft:3650, beds:5, baths:4, lat:37.2135, lng:-121.8760},
+ {addr:"1155 Blue Field Pl, San Jose, CA 95120",price:1599000, sqft:2150, beds:4, baths:3, lat:37.2385, lng:-121.8480},
+ {addr:"6310 Monte Vista Dr, San Jose, CA 95120",price:2100000, sqft:2890, beds:4, baths:3, lat:37.2200, lng:-121.8665}
+];
+listings.forEach(l => l.ppsf = Math.round(l.price / l.sqft));
+
+const map = L.map('map').setView([37.2255, -121.8580], 14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OpenStreetMap'}).addTo(map);
+let markers = [];
+
+function render(list){
+  const el = document.getElementById('list');
+  el.innerHTML = list.length ? '' : '<p>No listings match the filters.</p>';
+  markers.forEach(m => map.removeLayer(m)); markers = [];
+  list.forEach(l => {
+    const d = document.createElement('div'); d.className = 'card';
+    d.innerHTML = `<div class="price">$${l.price.toLocaleString()}</div>
+      <b>${l.addr}</b>
+      <div class="dim">${l.beds} bd · ${l.baths} ba · ${l.sqft.toLocaleString()} sqft · $${l.ppsf}/sqft</div>`;
+    d.onclick = () => { map.setView([l.lat, l.lng], 17); markers.forEach(m => m.openPopup && m.openPopup()); };
+    el.appendChild(d);
+    const m = L.marker([l.lat, l.lng]).addTo(map)
+      .bindPopup(`<b>$${l.price.toLocaleString()}</b><br>${l.addr}<br>${l.beds}bd/${l.baths}ba · ${l.sqft.toLocaleString()} sqft · $${l.ppsf}/sqft`);
+    markers.push(m);
+  });
+}
+
+function applyFilters(){
+  const pmin=+document.getElementById('pmin').value||0, pmax=+document.getElementById('pmax').value||Infinity;
+  const smin=+document.getElementById('smin').value||0, smax=+document.getElementById('smax').value||Infinity;
+  const ppmin=+document.getElementById('ppmin').value||0, ppmax=+document.getElementById('ppmax').value||Infinity;
+  render(listings.filter(l => l.price>=pmin && l.price<=pmax && l.sqft>=smin && l.sqft<=smax && l.ppsf>=ppmin && l.ppsf<=ppmax));
+}
+function resetFilters(){
+  ['pmin','pmax','smin','smax','ppmin','ppmax'].forEach(id => document.getElementById(id).value='');
+  render(listings);
+}
+
+render(listings);
+</script>
+</body>
+</html>
