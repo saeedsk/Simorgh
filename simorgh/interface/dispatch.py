@@ -18,6 +18,7 @@ Interface never fakes a result.
 from __future__ import annotations
 
 import re
+import uuid
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,11 @@ _NOT_YET = "not yet available in this build"
 # bus topics are, so this is the same kind of agreement `execution/
 # service.py`'s own `INFLIGHT_STREAM`/`TOOLS_STREAM` constants are.
 MCP_PROPOSALS_STREAM = "mcp:proposals"
+# Same agreement, for `execution/capabilities.py::CAPABILITIES_STREAM`.
+# Kept in step by a test rather than an import, for the reason above.
+CAPABILITIES_STREAM = "capabilities"
+# And for `kernel/scheduler.py::SCHEDULE_STREAM`, same agreement again.
+SCHEDULE_STREAM = "schedule"
 # `simorgh.toml`'s primary search location (`kernel/config.py::find_
 # config_path`'s first candidate, `./simorgh.toml`) -- this command
 # targets the same file a normal `sim.sh` boot would read next, but
@@ -270,6 +276,12 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "mcp":
         return await _mcp_command(args, bus=bus, ledger=ledger, clock=clock)
 
+    if name == "capabilities":
+        return await _capabilities_command(ledger)
+
+    if name == "schedule":
+        return await _schedule_command(args, bus=bus, ledger=ledger, clock=clock)
+
     # unrecognized after autocorrect failed, or plain chat text
     return Outcome("", exit_repl=False)
 
@@ -434,6 +446,134 @@ def _render_git_state(p: dict) -> str:
         f"git: {p.get('branch', '?')} @ {p.get('head', '')[:8]}   {dirty}\n"
         + "\n".join(f"  {line}" for line in p.get("recent_commits", [])[:5])
     )
+
+
+
+
+# `<n><unit>` -- 30s, 15m, 2h, 1d. A schedule is one of the few places a
+# bare number is genuinely ambiguous, so the unit is required.
+_EVERY_RE = re.compile(r"^(\d+)\s*([smhd])$", re.I)
+_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def parse_delay(text: str) -> float | None:
+    """Seconds for `30s` / `15m` / `2h` / `1d`, or None."""
+    match = _EVERY_RE.match((text or "").strip())
+    if not match:
+        return None
+    return float(match.group(1)) * _UNIT_SECONDS[match.group(2).lower()]
+
+
+async def _schedule_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock) -> Outcome:
+    """`schedule` / `schedule <delay> <label>` / `schedule every <delay> <label>`.
+
+    The Kernel has had a complete scheduler since the beginning: it
+    subscribes to `system.schedule.add`, arms a timer, survives a
+    restart by replaying its own ledger stream, and fires
+    `percept.time.scheduled`. Nothing in the entire system ever
+    published that message, so none of it could be reached -- a finished
+    subsystem with no door. This is the door.
+    """
+    args = (args or "").strip()
+    if not args:
+        return await _schedule_list(ledger)
+
+    recurring = False
+    if args.lower().startswith("every "):
+        recurring, args = True, args[6:].strip()
+    delay_text, _, label = args.partition(" ")
+    delay = parse_delay(delay_text)
+    label = label.strip()
+    if delay is None:
+        return Outcome(
+            "schedule needs a delay with a unit -- `schedule 15m water the plants`, "
+            "`schedule every 1h check the build`, or bare `schedule` to list what is set.",
+            exit_repl=False,
+        )
+    if not label:
+        return Outcome("schedule needs something to say when it fires.", exit_repl=False)
+
+    schedule_id = uuid.uuid4().hex[:12]
+    payload = {"schedule_id": schedule_id, "label": label,
+               "at": None if recurring else clock.now() + delay,
+               "every_seconds": delay if recurring else None}
+    await bus.publish(bus.new(topics.SYSTEM_SCHEDULE_ADD, payload))
+    when = f"every {delay_text}" if recurring else f"in {delay_text}"
+    return Outcome(f"scheduled {when}: {label}  ({schedule_id})", exit_repl=False)
+
+
+async def _schedule_list(ledger: LedgerClient) -> Outcome:
+    try:
+        events = await ledger.read(SCHEDULE_STREAM)
+    except Exception as exc:  # noqa: BLE001
+        return Outcome(f"could not read the schedule: {exc!r}", exit_repl=False)
+    live: dict[str, dict] = {}
+    for event in events:
+        payload = event.payload or {}
+        schedule_id = str(payload.get("schedule_id") or "")
+        if not schedule_id:
+            continue
+        if event.type == "schedule.added":
+            live[schedule_id] = payload
+        elif event.type == "schedule.cancelled":
+            live.pop(schedule_id, None)
+    if not live:
+        return Outcome("nothing scheduled. `schedule 15m <label>` or `schedule every 1h <label>`.",
+                       exit_repl=False)
+    lines = []
+    for schedule_id, payload in sorted(live.items(), key=lambda kv: kv[1].get("fire_at") or 0):
+        recurrence = payload.get("recurrence") or {}
+        every = recurrence.get("every_s")
+        when = f"every {int(every)}s" if every else f"at {payload.get('fire_at')}"
+        lines.append(f"  {schedule_id}  {when}  {payload.get('label', '')}")
+    return Outcome(f"{len(live)} scheduled:\n" + "\n".join(lines), exit_repl=False)
+
+
+async def _capabilities_command(ledger: LedgerClient) -> Outcome:
+    """What Sim can actually reach right now.
+
+    Half the toolset stands on something outside this repository -- Node,
+    a bundled Chromium, an optional pip package, a Docker daemon. Each is
+    allowed to be absent and every tool refuses cleanly, but "absent" was
+    only ever discoverable by asking Sim to do the thing and watching it
+    fail. Execution has probed all of it since boot and written the
+    answers to the ledger; nothing read them back.
+
+    Latest result per probe, since the stream is append-only and
+    re-probed after a package install.
+    """
+    try:
+        events = await ledger.read(CAPABILITIES_STREAM)
+    except Exception as exc:  # noqa: BLE001 -- a diagnostic must not raise
+        return Outcome(f"could not read capability probes: {exc!r}", exit_repl=False)
+    if not events:
+        return Outcome(
+            "no capability probes recorded yet -- they run just after boot, so try again in a moment.",
+            exit_repl=False,
+        )
+    latest: dict[str, dict] = {}
+    for event in events:
+        payload = event.payload or {}
+        name = str(payload.get("name") or "")
+        if name:
+            latest[name] = payload
+    lines = []
+    for name in sorted(latest):
+        payload = latest[name]
+        mark = "yes" if payload.get("ok") else "NO "
+        tools = ", ".join(payload.get("tools") or ())
+        detail = str(payload.get("detail") or "").strip()
+        line = f"  [{mark}] {name}"
+        if tools:
+            line += f"  ({tools})"
+        if detail:
+            line += f"\n        {detail}"
+        lines.append(line)
+    missing = [n for n, p in latest.items() if not p.get("ok")]
+    header = f"{len(latest) - len(missing)}/{len(latest)} capabilities available"
+    if missing:
+        header += f" -- missing: {', '.join(sorted(missing))}"
+    return Outcome(header + "\n" + "\n".join(lines), exit_repl=False)
 
 
 async def _mcp_pending_proposals(ledger: LedgerClient) -> dict[str, dict]:

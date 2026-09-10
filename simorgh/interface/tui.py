@@ -82,6 +82,8 @@ COMMANDS: tuple[tuple[str, str], ...] = (
     ("interests", "topics Sim is following"),
     ("auto", "control the idle self-improvement loop: on | off | now"),
     ("mcp", "review external tools Sim has proposed"),
+    ("capabilities", "what Sim can actually reach: Node, Docker, optional packages"),
+    ("schedule", "fire a reminder later: schedule [every] 15m <label>"),
     ("pause", "hold everything"),
     ("resume", "let it continue"),
     ("help", "list everything"),

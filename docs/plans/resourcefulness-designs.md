@@ -662,14 +662,81 @@ change that widens what Sim can do to itself):
    receiving it over the bus -- a human-maintained config file is not
    a message.
 
+8. **A default must never spend the user's money.** `[memory] embedder
+   = "auto"` was written to prefer the best available provider. This
+   machine happened to export `GEMINI_API_KEY` for chat, so every
+   memory embedding silently became a paid network call -- one per
+   candidate per retrieve. The full suite went from ~90s to ~170s and a
+   memory integration test began failing, which is the only reason it
+   was noticed. `auto` now considers only free, offline embedders
+   (`AUTO_ELIGIBLE`); a remote one has to be named. The general rule:
+   a key exported for one purpose is not consent to be billed for
+   another, and an "auto" that reads ambient credentials is a
+   surprise-shaped default.
+9. **A timing assertion is usually measuring the wrong thing.**
+   `test_a_genuinely_expired_real_approval_is_denied` asserted
+   `duration_ms < 50` as a proxy for "it beat the TTL". `duration_ms`
+   is how long the tool RAN, not whether the approval was valid when
+   checked, so a legitimately-approved action that spent 60ms executing
+   under `-n auto` failed an assertion about a different quantity. The
+   invariant it actually wants -- never both denied-as-expired and
+   executed -- is expressible without a clock.
+
+# Session 2 (2026-09-09, later): Tier 5 and the remaining gaps
+
+Everything in the creator's Tier 1-5 list is now built, on the standing
+instruction that a feature needing an account is built ready and
+key-gated rather than skipped:
+
+- **`notify`** (#16): Slack/email/SMS, each switched on by an env var.
+  Refuses cleanly naming the variable to set; never silently does
+  nothing. Rate-limited, because an autonomous loop that discovers a
+  notifier would send four hundred. The body never enters the ledger
+  metadata.
+- **`run_remote`** (#17): ssh to a host fixed by CONFIGURATION, never by
+  the model. There is deliberately no `host` argument; adding one turns
+  "run my build on my server" into an exfiltration channel. Off by
+  default, key-auth only (`BatchMode=yes`), host keys checked. It
+  reports no local side effects because it genuinely cannot know them.
+- **Licensed listing providers** (#18): RentCast/ATTOM as drop-ins for
+  the homeharvest scraper. The DISCLAIMER travels with the provider --
+  a licensed result must not inherit "unofficial, can break without
+  warning", which would be a lie in the safe direction.
+- **`workspace/`** (#7): scratch that persists. The substance is what
+  does NOT happen to a file there -- never "uncommitted", so it cannot
+  block a finished task and cleanup cannot delete it.
+- **Pluggable embeddings** (#11): see correction 8 above.
+
+Bugs closed alongside: `SyntaxCheck` never ran for a real task;
+`js_syntax` failed valid pages containing a literal `</script>`;
+Learning reported healthy while structurally unable to run;
+`metadata_ref` made `results_max_rows` decorative; ShellcheckRule's
+findings were dropped by `Pipeline.decide` despite its docstring
+promising the opposite; the puppeteer probe passed on an empty
+directory; capability probes never re-ran after an install; and
+`system.schedule.add` -- a complete, restart-surviving Kernel scheduler
+-- had no publisher anywhere in the system, so none of it could be
+reached. `capabilities` and `schedule` are the CLI surface for the last
+two.
+
 ## What is genuinely still open
 
 - The known flaky interface test (`test_a_dispatch_created_task_prints_
   its_real_completion`), unrelated to any of this and deselected
   throughout. Its cause and fix are in the memory note.
-- `capability promote` / `capabilities` / `packages` Interface commands
-  (design 0.5). The tools and the file exist; the human-facing CLI
-  surface for them does not, so a human reviews `grants.toml` and
-  `simorgh_packages.txt` by reading them.
+- `capability promote` and `packages` Interface commands (design 0.5).
+  `capabilities` and `schedule` now exist; the grant-promotion and
+  package-review surfaces do not, so a human still reviews
+  `grants.toml` and `simorgh_packages.txt` by reading them.
+- **Blocker #3**: a patch task can complete turn 1 unverified. A fix
+  was attempted and REVERTED -- widening `DidAnythingCheck`
+  reintroduced the documented 2026-09-08 bug, because a scripted
+  session has an identical step shape. The real fix is a design
+  decision about phase tagging in `session.py`; an extensive KNOWN GAP
+  comment is in place. Do not re-attempt naively.
+- The model still sometimes fabricates a tool conversation inline
+  (writing both the call and an invented result) rather than emitting a
+  marker. Nothing detects this.
+- The `grants-d1` branch remains unmerged, awaiting review.
 - OCR is wired but needs a `tesseract` binary nobody has installed
   here; audio transcription was specified and deliberately not built.

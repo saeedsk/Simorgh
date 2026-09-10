@@ -338,6 +338,8 @@ _QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
     ("plan <goal>", "break a goal into tracked steps"),
     ("auto [on|off|now]", "control the idle self-improvement loop"),
     ("mcp", "review external tools Sim has proposed"),
+    ("capabilities", "what Sim can actually reach: Node, Docker, optional packages"),
+    ("schedule [every] <15m> <label>", "fire a reminder later, or on a repeat"),
     ("pause / resume", "hold everything, or let it continue"),
     ("exit", "leave (Ctrl-D also detaches)"),
 )

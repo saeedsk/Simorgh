@@ -96,6 +96,7 @@ class Service:
         self._mcp_errors: list[str] = []
         self._capability_detail = ""
         self._probe_task: asyncio.Task | None = None
+        self._probe_results: list = []
 
     async def start(self, ctx) -> None:
         self._ctx = ctx
@@ -151,6 +152,23 @@ class Service:
         # boot must not wait on a `docker info` that hangs.
         self._probe_task = asyncio.create_task(self._probe_capabilities())
 
+    def _reprobe_after(self, tool_name: str, ok: bool) -> None:
+        """Re-run the capability probes after something that could have
+        changed the answer.
+
+        Probes ran once, at boot, and never again -- so `install_package`
+        could install puppeteer, homeharvest or docker and the system
+        went on reporting the capability as missing until the next
+        restart. That is the worst version of the bug the probes exist
+        to fix: Sim does the resourceful thing, installs what it needs,
+        and is still told it cannot do the task.
+        """
+        if not ok or tool_name != "install_package":
+            return
+        if self._probe_task is not None and not self._probe_task.done():
+            return  # one already running; its results will be fresher
+        self._probe_task = asyncio.create_task(self._probe_capabilities())
+
     async def _probe_capabilities(self) -> None:
         try:
             results = await run_probes()
@@ -158,6 +176,7 @@ class Service:
             self._ctx.logger.warning("capability_probe_failed", error=repr(exc))
             return
         self._capability_detail = degraded_detail(results)
+        self._probe_results = results
         for result in results:
             payload = {"name": result.name, "ok": result.ok, "detail": result.detail,
                        "cost": result.cost, "tools": list(_probe_tools(result.name))}
@@ -501,6 +520,9 @@ class Service:
                 stderr=str((result.metadata or {}).get("stderr") or ""),
                 metadata_ref=metadata_ref,
             )
+            # A package install can turn a missing capability into a
+            # present one; the probes otherwise ran only at boot.
+            self._reprobe_after(tool.name, result.ok)
             await self._ctx.bus.publish(Message.new(
                 topics.TOOL_INVOKED, source="execution",
                 payload={"name": tool.name, "action_id": action_id, "duration_ms": duration_ms, "ok": result.ok},
