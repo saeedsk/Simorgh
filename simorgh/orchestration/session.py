@@ -188,6 +188,12 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     # server, and a mailbox with thousands of messages is a slow SEARCH.
     # `sec_self` walks the workspace looking for credential-shaped
     # strings, which on a large tree is seconds, not milliseconds.
+    # A service call waits for the house to settle before re-reading.
+    "home_find": 30.0,
+    "home_state": 30.0,
+    "home_describe": 30.0,
+    "home_call": 45.0,
+    "home_undo": 45.0,
     "sec_self": 120.0,
     "sec_posture": 20.0,
     "sec_findings": 20.0,

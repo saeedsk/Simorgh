@@ -351,6 +351,27 @@ class Config:
     security_posture_weights: dict = field(default_factory=lambda: {
         "critical": 25, "high": 10, "medium": 3, "low": 1, "info": 0})
 
+    # -- the house (execution/home/, home-automation-design.md). Sim
+    # does not speak to devices; it speaks to Home Assistant, which has
+    # ~2,800 integrations and a release every month. Set
+    # HOME_ASSISTANT_URL and HOME_ASSISTANT_TOKEN (a long-lived access
+    # token from the HA profile page), or store them in the vault as
+    # `home_assistant:url` / `home_assistant:token`.
+    home_timeout_s: float = 10.0
+    # Log every service call and send none. For trying a rule out.
+    home_dry_run: bool = False
+    # Seconds to wait before re-reading state, so `before -> after` is
+    # about the house rather than about the round trip.
+    home_settle_s: float = 1.0
+    # A name matching more than this many entities is a typo far more
+    # often than it is an intention (`"all": true` overrides).
+    home_max_entities_per_call: int = 20
+    # {"downstairs": ["light.kitchen", "light.hall"]}
+    home_aliases: dict = field(default_factory=dict)
+    # Extra services that always wait for a person, on top of
+    # contracts/home/policy.py's own list.
+    home_always_human_services: tuple[str, ...] = ()
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a

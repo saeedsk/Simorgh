@@ -65,6 +65,7 @@ from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
 from .knowledge.tools import knowledge_tools
 from .pim.tools import pim_tools
+from .home.tools import home_tools
 from .security.tools import security_tools
 from .notify import NotifyTool
 from .remote import RunRemoteTool
@@ -1561,6 +1562,11 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         # domains/04-security-posture.md). Guardian audits the code Sim
         # writes; nothing audited what Sim *is*.
         *security_tools(config, secrets=secrets),
+        # The house, through Home Assistant (execution/home/,
+        # home-automation-design.md). The acting half only: finding,
+        # reading, calling, undoing. The percept bridge and the rules
+        # engine are the `home` subsystem, still to be built.
+        *home_tools(config, secrets=secrets),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

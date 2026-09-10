@@ -84,6 +84,17 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "sec_findings": ("read_only", False),
     "sec_show": ("read_only", False),
     "sec_accept": ("reversible", False),
+    # -- the house (home-automation-design.md). `home_call`'s real
+    # class is computed PER CALL by contracts/home/policy.py, which
+    # Guardian imports too -- "turn a light on" and "unlock the front
+    # door" are not the same act, and the table cannot say so. This is
+    # the floor; `to_action_payload` raises it to irreversible when the
+    # policy says a person must decide.
+    "home_find": ("read_only", True),
+    "home_state": ("read_only", True),
+    "home_describe": ("read_only", True),
+    "home_call": ("reversible", True),
+    "home_undo": ("reversible", True),
     # Runs on a machine this process cannot inspect, snapshot or roll
     # back -- the strongest case for `irreversible` in the table.
     "run_remote": ("irreversible", True),
@@ -120,6 +131,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 # real tool call from a marker reply failed with a bare `KeyError` on its
 # own required arg (e.g. `web_fetch` needs `url`, not `argument`).
 _MARKER_ARG_KEY: dict[str, str] = {
+    "home_find": "query",
+    "home_state": "target",
+    "home_describe": "query",
     "sec_show": "finding",
     "cal_list": "range",
     "mail_search": "query",
@@ -228,6 +242,8 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "remind": ("when", "text"),
     "sec_accept": ("finding", "reason"),
     "sec_findings": ("severity", "spec"),
+    "home_call": ("service", "spec"),
+    "home_undo": ("entity", "spec"),
 }
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
@@ -305,6 +321,31 @@ _MARKER_ARG_HINT.update({
         "it as if it will be read by someone who was not watching. Say what happened and "
         "what (if anything) needs them; do not send a routine progress note. Example:\n"
         "NOTIFY: benchmark regressed\nGAIA dropped from 41% to 29% on commit 4f24467.\n"
+    ),
+    "home_find": (
+        "a name or a word to look for in the house -- \"kitchen\", \"thermostat\", "
+        "\"battery\". Returns entity ids for HOME_STATE and HOME_CALL."
+    ),
+    "home_state": (
+        "an entity id or a name (\"the thermostat\", \"kitchen lights\"). A name that matches "
+        "more than one different thing is refused with the candidates -- ask again more "
+        "precisely rather than guessing."
+    ),
+    "home_describe": (
+        "no argument. What is in the house and which services each kind supports. Start here "
+        "when you do not know what is there."
+    ),
+    "home_call": (
+        "first line: a Home Assistant service, like `light.turn_on` or "
+        "`climate.set_temperature`. Second line: a JSON object with the target and any data, "
+        'e.g. {"target": "kitchen lights", "data": {"brightness_pct": 40}}. It reports what '
+        "ACTUALLY changed -- Home Assistant answers 200 for a call on an unplugged device, so "
+        "do not treat a successful call as proof the house did anything.\nExample:\n"
+        'HOME_CALL: light.turn_on\n{"target": "kitchen lights", "data": {"brightness_pct": 40}}\n'
+    ),
+    "home_undo": (
+        'second line: {"before": {...}} copied from the home_call result you want to reverse. '
+        "There is no hidden last-action slot: acting on one is how the wrong thing gets undone."
     ),
     "sec_show": (
         "the id of a finding from SEC_FINDINGS or SEC_SELF, to read its evidence and what to do "
@@ -397,7 +438,7 @@ _MARKER_NO_ARGS = frozenset({"git_revert", "kb_status", "sec_self", "sec_posture
 # worked from the model's side, exactly the failure mode this set exists
 # to prevent for `search_listings`/`install_package`.
 _MARKER_JSON_REST = frozenset({"search_listings", "install_package", "browse_page", "run_container",
-                               "kb_sources", "sec_findings"})
+                               "kb_sources", "sec_findings", "home_call", "home_undo"})
 
 
 def _json_rest(rest: str, second: str) -> dict:
@@ -579,6 +620,17 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
         elif tool in _MARKER_ARG_KEY:
             args = {_MARKER_ARG_KEY[tool]: raw}
     reversibility, network = _TOOL_POLICY.get(tool, ("irreversible", False))
+    if tool == "home_call" and isinstance(args, dict):
+        # Per-call safety (home-automation-design.md section 7). The
+        # table's label is a floor: "turn a light on" and "unlock the
+        # front door" travel through the same tool, and only the
+        # arguments say which one this is. Guardian recomputes the same
+        # answer from the same pure function rather than trusting this.
+        from simorgh.contracts.home.policy import classify_call, reversibility_of
+
+        reversibility = reversibility_of(classify_call(
+            str(args.get("service") or ""), str(args.get("target") or ""),
+            data=args.get("data") or {}))
     paths = [args["path"]] if isinstance(args, dict) and "path" in args else []
     return {
         "action_id": action_id,

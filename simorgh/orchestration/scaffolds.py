@@ -82,6 +82,12 @@ _TOOL_NOTES: dict[str, str] = {
                "something they would want to know while not watching: work finished, a benchmark "
                "regressed, you are blocked. There is no unsend, and no provider may be configured, "
                "in which case it refuses and names what to set",
+    "home_find": "find things in the house by name and get their entity ids",
+    "home_state": "what one thing in the house is doing right now",
+    "home_describe": "what is in the house and what each kind of thing can do",
+    "home_call": "do something in the house through Home Assistant -- a light, the thermostat, "
+                  "the TV. Reports what actually changed, which is not always what was asked",
+    "home_undo": "put back what the last home_call changed",
     "sec_self": "check your own security posture -- is the API exposed, do irreversible actions "
                  "run unattended, has a credential been written into a working file, what is this "
                  "machine listening on. Entirely local",

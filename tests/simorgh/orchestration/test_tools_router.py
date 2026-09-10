@@ -748,3 +748,79 @@ class TestEveryBuiltinToolIsFullyWired(unittest.TestCase):
         for name in PLAN.tools:
             with self.subTest(tool=name):
                 self.assertEqual(_TOOL_POLICY.get(name, ("irreversible",))[0], "read_only")
+
+
+class TestHomeMarkersReachTheTools(unittest.TestCase):
+    """The house through the marker layer, and the one thing here that
+    no other tool does: `home_call`'s reversibility is computed from its
+    ARGUMENTS. "turn a light on" and "unlock the front door" travel
+    through the same tool, and only the arguments say which."""
+
+    MARKERS = ("HOME_FIND", "HOME_STATE", "HOME_DESCRIBE", "HOME_CALL", "HOME_UNDO")
+
+    def _walk(self, reply: str) -> dict:
+        from simorgh.cognition.parser import parse_marker
+
+        name, argument = parse_marker(reply, self.MARKERS)
+        return to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": name, "args": {"argument": argument}}, rationale="r",
+        )
+
+    def test_a_find_arrives_as_a_query(self):
+        self.assertEqual(self._walk("HOME_FIND: kitchen")["args"], {"query": "kitchen"})
+
+    def test_a_state_arrives_as_a_target(self):
+        self.assertEqual(self._walk("HOME_STATE: climate.hallway")["args"],
+                         {"target": "climate.hallway"})
+
+    def test_a_call_splits_the_service_from_its_json(self):
+        payload = self._walk(
+            'HOME_CALL: light.turn_on\n{"target": "kitchen lights", "data": {"brightness_pct": 40}}')
+        self.assertEqual(payload["tool"], "home_call")
+        self.assertEqual(payload["args"]["service"], "light.turn_on")
+        self.assertEqual(payload["args"]["target"], "kitchen lights")
+        self.assertEqual(payload["args"]["data"], {"brightness_pct": 40})
+
+    def test_turning_a_light_on_is_reversible(self):
+        payload = self._walk('HOME_CALL: light.turn_on\n{"target": "kitchen lights"}')
+        self.assertEqual(payload["reversibility"], "reversible")
+
+    def test_unlocking_a_door_is_escalated_by_the_same_tool(self):
+        payload = self._walk('HOME_CALL: lock.unlock\n{"target": "front door"}')
+        self.assertEqual(payload["reversibility"], "irreversible",
+                         "Guardian escalates on this label")
+
+    def test_disarming_the_alarm_is_escalated(self):
+        payload = self._walk('HOME_CALL: alarm_control_panel.alarm_disarm\n{"target": "house"}')
+        self.assertEqual(payload["reversibility"], "irreversible")
+
+    def test_a_thermostat_outside_the_hard_limits_is_escalated(self):
+        payload = self._walk(
+            'HOME_CALL: climate.set_temperature\n'
+            '{"target": "thermostat", "data": {"temperature": 40}}')
+        self.assertEqual(payload["reversibility"], "irreversible")
+
+    def test_a_thermostat_inside_the_hard_limits_is_not(self):
+        payload = self._walk(
+            'HOME_CALL: climate.set_temperature\n'
+            '{"target": "thermostat", "data": {"temperature": 20}}')
+        self.assertEqual(payload["reversibility"], "reversible")
+
+    def test_the_reading_tools_are_read_only(self):
+        for marker in ("HOME_FIND: x", "HOME_STATE: x", "HOME_DESCRIBE:"):
+            with self.subTest(marker=marker):
+                self.assertEqual(self._walk(marker)["reversibility"], "read_only")
+
+    def test_every_home_tool_has_a_policy_row_and_a_note(self):
+        from simorgh.execution.config import Config
+        from simorgh.execution.home.tools import home_tools
+        from simorgh.orchestration import scaffolds
+        from simorgh.orchestration.session import _ACTION_TIMEOUTS
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        for tool in home_tools(Config()):
+            with self.subTest(tool=tool.name):
+                self.assertIn(tool.name, _TOOL_POLICY)
+                self.assertIn(tool.name, _ACTION_TIMEOUTS)
+                self.assertIn(tool.name, scaffolds._TOOL_NOTES)
