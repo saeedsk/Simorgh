@@ -96,6 +96,7 @@ MARKER_NO_ARGS: frozenset[str] = frozenset({
 MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "apply_source_patch": ("subject", "code"),
     "replace_in_file": ("path", "code"),
+    "start_task": ("goal", "spec"),
     "apply_skill": ("subject", "code"),
     "git_commit": ("path", "message"),
     "search_listings": ("location", "filters"),
@@ -119,6 +120,7 @@ MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
 #: documented JSON arrived at the tool as that JSON's *string*
 #: rendering, and the tool had never once worked from the model's side.
 MARKER_JSON_REST: frozenset[str] = frozenset({
+    "start_task",
     "search_listings", "install_package", "browse_page", "run_container",
     "kb_sources", "sec_findings", "home_call", "home_undo",
     "energy_tariff", "media_control", "media_play",

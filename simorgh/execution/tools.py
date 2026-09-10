@@ -1216,6 +1216,119 @@ class ApplySourcePatchTool:
         return _write_scoped_file(self._config, args["subject"], args["code"], write_scopes=self._config.write_scopes_source)
 
 
+class StartTaskTool:
+    """Hand a build off to a real task, when a chat turn is the wrong
+    shape for it.
+
+    A chat turn does not resume. It gets a step budget, spends it, and
+    if the work is unfinished the next message starts again from
+    nothing -- which is why "rebuild the voxel game" was attempted three
+    times on 2026-09-09 and each attempt rewrote the file from scratch.
+    A task is the opposite: it carries its own budget, and when it
+    exhausts it the work is re-offered with everything it had already
+    done intact (`orchestration/session.py::CONTINUATION_REASON`).
+
+    All the machinery for that existed. What was missing was any way to
+    get from "make me a Minecraft game" to a task without the person
+    knowing to type `improve ... steps=40` instead. The model is the
+    right judge of which it is -- it has the request in front of it --
+    so it gets a tool rather than the Interface getting a keyword
+    classifier that would call a poem a build.
+
+    Refused from inside a task on purpose. Decomposition is Planning's
+    job and it already does it; a task that could spawn tasks is how a
+    quiet afternoon becomes a fork bomb.
+    """
+
+    name = "start_task"
+    description = (
+        "Turn the current request into a background task with its own step budget, for work "
+        "too big to finish in one reply -- building an app, a long document, anything needing "
+        "many edits. Unlike a chat turn, a task resumes where it left off instead of starting "
+        "over. Say what you have started and that `tasks` shows progress."
+    )
+    read_only = False
+    reversibility = "reversible"
+    args_schema = {
+        "type": "object", "required": ["goal"],
+        "properties": {
+            "goal": {"type": "string"},
+            "subject": {"type": "string", "description": "the file it will mostly write"},
+            "steps": {"type": "integer"},
+            "kind": {"type": "string", "enum": ["patch", "research", "project"]},
+        },
+    }
+
+    #: A task cannot ask for an unbounded budget. High enough for a real
+    #: build, low enough that a misjudged request cannot spend an
+    #: afternoon of provider quota before anyone looks.
+    MAX_STEPS = 120
+    DEFAULT_STEPS = 40
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        goal = " ".join(str(args.get("goal") or "").split())
+        if not goal:
+            return ToolResult(ok=False, error="refused: say what the task is for")
+        if ctx.task_id:
+            return ToolResult(
+                ok=False,
+                error=("refused: this is already a task, and a task that starts tasks is how a "
+                       "quiet afternoon becomes a fork bomb. Break the work down in this task, "
+                       "or let Planning decompose it."))
+        if ctx.bus is None:
+            return ToolResult(ok=False,
+                              error="refused: starting a task needs the bus, which this session "
+                                    "has not got")
+
+        try:
+            steps = int(args.get("steps") or self.DEFAULT_STEPS)
+        except (TypeError, ValueError):
+            steps = self.DEFAULT_STEPS
+        steps = max(5, min(steps, self.MAX_STEPS))
+        kind = str(args.get("kind") or "patch").strip().lower()
+        if kind not in ("patch", "research", "project"):
+            kind = "patch"
+
+        payload = {"kind": kind, "description": goal, "origin": "human", "mode": "execute",
+                   "max_steps": steps}
+        subject = str(args.get("subject") or "").strip()
+        if subject:
+            payload["subject"] = subject
+
+        from simorgh.contracts import topics as _topics
+        from simorgh.contracts.envelope import Message as _Message
+
+        try:
+            reply = await ctx.bus.request(
+                _Message.new(_topics.TASK_CREATE, source="execution", payload=payload),
+                timeout=10.0)
+        except Exception as exc:  # noqa: BLE001 -- a failed handoff is a result, not a crash
+            return ToolResult(ok=False, error=f"could not start the task: {exc!r}")
+
+        answer = getattr(reply, "payload", {}) or {}
+        task_id = str(answer.get("task_id") or "")
+        if not task_id:
+            return ToolResult(ok=False, error="the task was not created (no id came back)")
+        existing = answer.get("deduplicated_against")
+        if existing:
+            return ToolResult(
+                ok=True,
+                output=(f"that is already task {existing} -- it is on the backlog rather than "
+                        f"being started twice. `tasks` shows it."),
+                metadata={"task_id": existing, "deduplicated": True})
+        return ToolResult(
+            ok=True,
+            output=(f"started task {task_id} with {steps} steps: {goal}\n"
+                    f"It runs in the background and picks up where it leaves off, so it will not "
+                    f"start over the way a chat reply does. `tasks` shows progress; "
+                    f"`cancel {task_id}` stops it."),
+            side_effects=(f"task {task_id} created",),
+            metadata={"task_id": task_id, "steps": steps, "kind": kind})
+
+
 class ReplaceInFileTool:
     """Change PART of a file, without re-sending the whole thing.
 
@@ -1706,7 +1819,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
-        ReplaceInFileTool(config),
+        ReplaceInFileTool(config), StartTaskTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),

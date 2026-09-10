@@ -221,6 +221,7 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "geocode": 15.0,
     "apply_source_patch": 60.0,
     "replace_in_file": 60.0,
+    "start_task": 20.0,
     "apply_skill": 60.0,
 }
 # Found by a watched trial, 2026-09-07, and the third stale 5-second

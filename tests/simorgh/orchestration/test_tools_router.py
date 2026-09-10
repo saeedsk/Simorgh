@@ -910,9 +910,11 @@ class TestChatCanActuallyMakeThings(unittest.TestCase):
         from simorgh.orchestration import scaffolds
         from simorgh.orchestration.profiles import CHAT
 
-        rendered = scaffolds.render(CHAT)
+        # Normalised, so an assertion does not depend on where the
+        # paragraph happens to wrap.
+        rendered = " ".join(scaffolds.render(CHAT).split())
         self.assertIn("workspace/", rendered)
-        self.assertIn("not an answer to", rendered)
+        self.assertIn("is not an answer to \"build it\"", rendered)
 
     def test_a_profile_with_the_install_pair_is_shown_the_resourceful_note(self):
         """It was gated on `run_shell` alone, so the chat profile -- which

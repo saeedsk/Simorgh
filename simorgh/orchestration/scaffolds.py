@@ -122,6 +122,9 @@ _TOOL_NOTES: dict[str, str] = {
     "apply_source_patch": "write a change to a source file -- or to workspace/, which is scratch: "
                            "not committed, not reviewed, and still there next session, so it is where "
                            "notes and half-finished work belong",
+    "start_task": "hand a BUILD off to a background task with its own step budget, which "
+                   "resumes where it left off instead of starting over -- for an app, a game, a "
+                   "long document, anything too big for one reply",
     "replace_in_file": "change PART of an existing file by finding exact text and replacing "
                         "it -- always use this rather than apply_source_patch when the file "
                         "already exists and you are editing it, or you will truncate it",
@@ -259,11 +262,19 @@ about the old v1 code.
 
 When the person asks you to MAKE something -- a file, a document, a
 deck, a script, a spreadsheet -- make it. `workspace/` is yours to
-write to with apply_source_patch; install_package fetches a library
-that does the job and run_script runs it. Do not hand back instructions
-for the person to paste and run when you could have run them yourself:
-"here is a script that would build it" is not an answer to "build it".
-Say where you put the file when you are done."""
+write to; use replace_in_file to change a file that already exists and
+apply_source_patch only to create one, install_package fetches a
+library that does the job and run_script runs it. Do not hand back
+instructions for the person to paste and run when you could have run
+them yourself: "here is a script that would build it" is not an answer
+to "build it". Say where you put the file when you are done.
+
+Judge the SIZE first. A reply here gets one step budget and does not
+resume: if it runs out, the next message starts again from nothing. So
+anything that will take many edits -- an app, a game, a long document,
+a rewrite -- goes to start_task instead, which keeps its budget and
+picks up where it left off. Start it, say what you started, and stop.
+A single file, a short script, a quick edit: just do it here."""
 
 # The creator, 2026-09-09, after watching another agent solve "real
 # estate listings, no API key" by finding an open-source package on PyPI

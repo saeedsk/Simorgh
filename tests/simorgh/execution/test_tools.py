@@ -759,7 +759,7 @@ class TestBuiltinTools(unittest.TestCase):
         self.assertEqual(names, {
             "read_file", "list_dir", "search_code", "self_map", "run_python_sandboxed",
             "run_js_sandboxed", "run_tests",
-            "apply_source_patch", "replace_in_file",
+            "apply_source_patch", "replace_in_file", "start_task",
             "git_commit", "git_revert", "git_discard", "apply_skill",
             "web_fetch", "web_search", "render_page", "search_listings", "geocode",
             "find_package", "install_package", "run_script",

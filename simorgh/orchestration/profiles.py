@@ -46,6 +46,10 @@ CHAT = Profile(
            # Guardian still sees every one of them, and the package
            # tool keeps its own daily cap.
            "apply_source_patch", "replace_in_file", "install_package", "run_script",
+           # The escape hatch from a one-shot reply into work that
+           # resumes. Chat only: a task that starts tasks is a fork
+           # bomb, and the tool refuses from inside one anyway.
+           "start_task",
            "propose_mcp_server"),
     # 6 was right for a profile that could only read. Writing a file
     # costs a step, installing what it needs costs another, running it a

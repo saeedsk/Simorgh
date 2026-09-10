@@ -51,6 +51,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # Changes part of a file in place. Reversible in exactly the way
     # apply_source_patch is: git has the previous content.
     "replace_in_file": ("reversible", False),
+    # Puts work on the backlog. Reversible: `cancel <id>` undoes it, and
+    # nothing has run yet at the moment it is created.
+    "start_task": ("reversible", False),
     "apply_skill": ("reversible", False),
     "git_commit": ("reversible", False),
     "git_revert": ("reversible", False),
@@ -270,6 +273,16 @@ _MARKER_ARG_HINT.update({
         '[{"type": ["#q", "hello"]}, {"click": "#go"}, {"wait": "#results"}, '
         '{"screenshot": "after"}]. Allowed: click, type, press, wait, scroll, screenshot. '
         "There is deliberately no way to run your own JavaScript here."
+    ),
+    "start_task": (
+        "first line: what the task should achieve, in a sentence. Second line, optional: "
+        '{"subject": "workspace/game.html", "steps": 60}.\n'
+        "Use this when the request is a BUILD rather than a question -- an app, a game, a long "
+        "document, anything needing many edits. A chat reply gets one budget and then starts "
+        "over next time; a task keeps its budget and resumes with the work it already did. "
+        "Start it, say what you started, and stop -- do not also try to do the work in this "
+        "reply.\nExample:\nSTART_TASK: rebuild the voxel game in workspace/midcraft.html\n"
+        '{"subject": "workspace/midcraft.html", "steps": 60}\n'
     ),
     "replace_in_file": (
         "first line: the file to change. Every following line: one or more SEARCH/REPLACE "
