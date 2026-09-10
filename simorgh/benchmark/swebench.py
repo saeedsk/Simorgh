@@ -220,7 +220,24 @@ def parse_django(log: str) -> dict[str, str]:
             # apart. Recorded as ambiguous rather than letting the last
             # line win, which is how a passing namesake could certify a
             # failing test.
-            out[key] = AMBIGUOUS if (seen is not None and seen != status) else status
+            #
+            # Unless BOTH readings are failures. `FAIL` and `ERROR`
+            # differ as strings and agree about the only thing that
+            # matters, and the disagreement rule read them as
+            # unmeasurable: `judge` then returned `skipped=True`, and
+            # `api.py:165` drops a skipped case out of `attempted`
+            # altogether -- so a run in which every reading of the name
+            # was a failure LEFT THE DENOMINATOR and pushed the resolve
+            # rate up. That is the same "a pass hid a failure" the
+            # worst-wins rule was added for, one parser over (observer,
+            # 2026-09-10). Which of the two namesakes failed is
+            # genuinely unknown; that one of them did is not.
+            if seen is None or seen == status:
+                out[key] = status
+            elif seen in _BAD and status in _BAD:
+                out[key] = seen
+            else:
+                out[key] = AMBIGUOUS
             continue
         summary = _DJANGO_SUMMARY.match(line)
         if summary:
@@ -297,7 +314,13 @@ def judge(log: str, instance: dict) -> Verdict:
                               "whether the bug was fixed -- reload the suite and check the row",
                        skipped=True, log_excerpt=log[-1500:])
     failed, missing, unmeasured = [], [], []
-    for name in required_pass + required_keep:
+    # De-duplicated: a few dataset rows name one test in BOTH lists, and
+    # judging it twice counted it twice -- one failing test was reported
+    # as "2 test(s) still failing, including 2 that passed before the
+    # patch", which overstates the damage and calls a fail-to-pass test
+    # a regression (observer, 2026-09-10). `dict.fromkeys` keeps the
+    # order the lists give.
+    for name in dict.fromkeys(required_pass + required_keep):
         status = results.get(name)
         if status is None:
             missing.append(name)
@@ -320,7 +343,10 @@ def judge(log: str, instance: dict) -> Verdict:
     if failed:
         # A real failure outranks an unmeasured test: the patch broke
         # something, and that is true whatever else could not be read.
-        broke = [n for n in failed if n in required_keep]
+        # A test the dataset says was FAILING before the patch cannot be
+        # one "that passed before the patch", even when the row names it
+        # in both lists.
+        broke = [n for n in failed if n in required_keep and n not in required_pass]
         detail = (f"{len(failed)} test(s) still failing"
                   + (f", including {len(broke)} that passed before the patch" if broke else ""))
         return Verdict(False, detail, required_pass=required_pass, required_keep=required_keep,

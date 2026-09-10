@@ -28,6 +28,22 @@ _YES_NO_RE = re.compile(r"\b(YES|NO)\b", re.IGNORECASE)
 #: exists to prevent, one level further down.
 _DETERMINER_NO = re.compile(r"\bno\s+\w")
 _UNKNOWN_RE = re.compile(r"^\W*UNKNOWN\b", re.IGNORECASE)
+#: The verdict the prompt asks for is SHOUTED -- `YES` or `NO`, caps.
+#: The guard above compared the MATCHED TEXT to the lowercase literal
+#: `"no"`, so it only ever ran on an all-lowercase `no`, and an ordinary
+#: English sentence capitalises its first word. "The diff shows No
+#: changes to the file.\nYES the docstring exists" took the guard's
+#: branch never and parsed as a hard NO, overruling the stated YES --
+#: the same failure the guard was added for, one spelling over
+#: (observer, 2026-09-10). All-caps is still read as a verdict wherever
+#: it sits; any other casing gets the determiner test.
+#:
+#: And a determiner OPENING a line was exempt, which is where a
+#: reviewer's throat-clearing usually sits ("No clear signal.").
+#: Exempting it is only safe while nothing else in the answer states a
+#: verdict: when the answer DOES shout one somewhere, that is the
+#: verdict, and a sentence-case `No ...` before it is prose.
+_SHOUTED = re.compile(r"\b(?:YES|NO)\b")
 
 
 def parse_verdict(text: str) -> Literal["yes", "no"] | None:
@@ -38,7 +54,11 @@ def parse_verdict(text: str) -> Literal["yes", "no"] | None:
     test shows it" parsed as a hard NO (2026-09-07). `UNKNOWN` -- the
     prompt's own word for "the evidence does not say" -- is None, never
     a failure. Narration before the verdict is still skipped over."""
-    for line in (text or "").strip().splitlines():
+    body = (text or "").strip()
+    # A shouted verdict anywhere means the answer DID answer, so a
+    # sentence-case `No ...` ahead of it is narration, not the verdict.
+    shouted_elsewhere = _SHOUTED.search(body) is not None
+    for line in body.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -48,21 +68,28 @@ def parse_verdict(text: str) -> Literal["yes", "no"] | None:
         if match is None:
             continue
         word = match.group(1)
-        if word == "no" and _is_determiner(line, match.start()):
+        shouted = word == word.upper()
+        if (not shouted and word.lower() == "no"
+                and _is_determiner(line, match.start(), at_line_start=shouted_elsewhere)):
             continue        # ordinary English, not a verdict
         return word.lower()
     return None
 
 
-def _is_determiner(line: str, at: int) -> bool:
-    """Whether the lowercase `no` at `at` is a determiner.
+def _is_determiner(line: str, at: int, *, at_line_start: bool = False) -> bool:
+    """Whether the un-shouted `no`/`No` at `at` is a determiner.
 
-    A verdict is shouted (`NO`), or opens the line, or stands at the
-    end of one ("The answer is: no"). A lowercase `no` in the middle of
-    a line with a word after it is the determiner -- "no test output is
-    shown", "no clear signal", "there is no way to tell" -- and
-    refusing to read it as a verdict yields None (the evidence does not
-    say), never `yes`."""
-    if at == 0:
+    A verdict is shouted (`NO`), or stands alone or at the end of a line
+    ("The answer is: no", "No, it does not"). A `no` with a bare word
+    after it is the determiner -- "no test output is shown", "No clear
+    signal", "there is no way to tell" -- and refusing to read it as a
+    verdict yields None (the evidence does not say), never `yes`.
+
+    A determiner opening the line is only read as prose when the answer
+    shouts a verdict somewhere else (`at_line_start`); otherwise the
+    line-opening word is all the answer we have, and turning a genuine
+    "No changes ..." into None would let an unanswered item slip past
+    `checklist_min_answered_fraction` instead of failing."""
+    if at == 0 and not at_line_start:
         return False
     return _DETERMINER_NO.match(line[at:].lower()) is not None

@@ -556,8 +556,22 @@ class Service:
             ))
             return
         verdict = await self._pipeline.decide(proposal, ctx)
-        # Answered from here on: every branch below publishes something.
-        self._decided[action_id] = (fingerprint, True)
+        # NOT answered here. This line used to read "answered from here
+        # on: every branch below publishes something," and several
+        # things below it raise BEFORE anything is published: the
+        # `decided` append (the same Ledger whose failure the `received`
+        # append above is explicitly guarded against), the rejected
+        # append inside `_remember_rejection`, `approval_question`,
+        # `tokens.issue`, and `bus.publish` itself. Any of those left
+        # `answered=True` on an action nobody had been told about, and
+        # the legitimate retry was then dropped as a duplicate --
+        # exactly the bug this dedupe's own fix says it closed, three
+        # lines further down. Reproduced 2026-09-10 by failing only the
+        # `decided` append: the first delivery answered nobody and the
+        # retry was swallowed too.
+        #
+        # The claim is marked answered where the invariant is true:
+        # right after a publish has actually succeeded, on each branch.
         decided = {"kind": verdict.kind, "layer": verdict.layer}
         if verdict.notes:
             # What a rule noticed and chose not to act on -- shellcheck's
@@ -585,6 +599,7 @@ class Service:
                 payload,
                 source="guardian",
             ))
+            self._decided[action_id] = (fingerprint, True)
             return
 
         if verdict.kind == "needs_human":
@@ -594,6 +609,9 @@ class Service:
                 {"action_id": action_id, "question": question, "options": ["yes", "no"], "default": "no"},
                 source="guardian",
             ))
+            # Somebody has been told. The `ui.prompt` below is how the
+            # answer gets back, not whether one was given.
+            self._decided[action_id] = (fingerprint, True)
             # Live-caught (the creator, real use: answered "yes" three
             # separate times and every one silently resolved "no"
             # instead): `action.needs_human` alone was never actually
@@ -618,6 +636,7 @@ class Service:
              "approval_token": token, "mode_at_approval": self._config.mode},
             source="guardian",
         ))
+        self._decided[action_id] = (fingerprint, True)
 
     def _rejected_similarity(self, code: str):
         return rule_defs.similarity(code, self._rejected_excerpts, self._config.immunity_similarity_threshold)

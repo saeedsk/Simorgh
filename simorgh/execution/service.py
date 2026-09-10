@@ -82,7 +82,7 @@ class Service:
     name = "execution"
     version = "0.1.0"
     consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED, topics.LEARN_SKILL_ACQUIRED)
-    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS, topics.TOOL_PROBED,)
+    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS, topics.TOOL_PROBED, topics.TOOL_UNAVAILABLE,)
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None,
                  connectors: list | None = None) -> None:
@@ -235,6 +235,40 @@ class Service:
             with contextlib.suppress(Exception):
                 await self._ctx.ledger.append(
                     CAPABILITIES_STREAM, self._event(CAPABILITIES_STREAM, "probed", payload))
+            await self._announce_unavailable(result)
+
+    async def _announce_unavailable(self, result) -> None:
+        """`tool.unavailable {name, reason}` for each tool a failed probe
+        takes down.
+
+        08-execution.md section 8 is explicit -- "if a builtin's
+        dependency is missing (e.g. `git` binary absent), it registers as
+        `tool.unavailable`" -- and 06-worldmodel.md section 5 lists the
+        topic as one of the events that updates the Self Model's
+        capability inventory. `WorldModel._on_tool_unavailable` and
+        `ToolsFacet.on_unavailable` are both written and both work.
+        Nothing in the tree published the message (scan, 2026-09-10), so
+        `available` was set True by `on_registered` and could never
+        become False: `world.env.query{facet: tools}` and the Self Model
+        summary's `[unavailable]` row reported every tool as working on
+        a machine with no Node and no Docker.
+
+        Only *free* probes announce, for the same reason `degraded_
+        detail` only counts those: a missing binary is a durable fact
+        about this machine, while a network probe failing may only mean
+        the laptop is on a plane, and there is no per-tool "it came
+        back" announcement to undo an over-eager one -- recovery rides
+        on `tool.probed`, which the World Model reads for both
+        directions.
+        """
+        if result.ok or result.cost != "free":
+            return
+        reason = result.detail or f"{result.name} is not available"
+        for tool_name in _probe_tools(result.name):
+            with contextlib.suppress(Exception):
+                await self._ctx.bus.publish(Message.new(
+                    topics.TOOL_UNAVAILABLE, source="execution",
+                    payload={"name": tool_name, "reason": reason}))
 
     async def stop(self) -> None:
         if self._probe_task is not None and not self._probe_task.done():

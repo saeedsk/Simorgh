@@ -44,7 +44,8 @@ class Service:
     version = VERSION
     consumes: tuple[str, ...] = (
         topics.WORLD_ENV_QUERY, topics.SELF_SUMMARY, topics.SELF_GAPS,
-        topics.TOOL_REGISTERED, topics.TOOL_UNAVAILABLE, topics.PERSONA_USER_MODEL_UPDATED,
+        topics.TOOL_REGISTERED, topics.TOOL_UNAVAILABLE, topics.TOOL_PROBED,
+        topics.PERSONA_USER_MODEL_UPDATED,
         topics.LEARN_COMPETENCE_UPDATED, topics.REFLECT_CALIBRATION_UPDATED, topics.SELF_OBSERVATION,
         topics.LEARN_SELF_PATCH_APPLIED, topics.LEARN_SELF_PATCH_REVERTED, topics.LEARN_SKILL_ACQUIRED,
         topics.SYSTEM_STARTED, topics.COGNITION_PROVIDER_STATUS,
@@ -83,7 +84,11 @@ class Service:
         self._capability_map = CapabilityMapFacet(self.config.repo_root)
         self._file_index = FileIndexFacet(
             self.config.repo_root, max_files=self.config.file_index_max_files,
-            refresh_seconds=self.config.file_index_refresh_seconds)
+            refresh_seconds=self.config.file_index_refresh_seconds,
+            # `scanned_at` has to be on the same clock as the `as_of`
+            # `_on_env_query` stamps every reply with, or the one
+            # subtraction the field exists for is meaningless.
+            wall_clock=ctx.clock.now)
         self._git_state = GitStateFacet(self.config.repo_root)
         self._tools = ToolsFacet()
         self._user_profile = UserProfileFacet()
@@ -107,6 +112,7 @@ class Service:
             await ctx.bus.subscribe(topics.SELF_GAPS, self._on_self_gaps),
             await ctx.bus.subscribe(topics.TOOL_REGISTERED, self._on_tool_registered),
             await ctx.bus.subscribe(topics.TOOL_UNAVAILABLE, self._on_tool_unavailable),
+            await ctx.bus.subscribe(topics.TOOL_PROBED, self._on_tool_probed),
             await ctx.bus.subscribe(topics.PERSONA_USER_MODEL_UPDATED, self._on_user_model_updated),
             await ctx.bus.subscribe(topics.LEARN_COMPETENCE_UPDATED, self._on_competence_updated),
             await ctx.bus.subscribe(topics.REFLECT_CALIBRATION_UPDATED, self._on_calibration_updated),
@@ -220,7 +226,7 @@ class Service:
         providers.sort(key=lambda x: (not x["selected"], x["name"]))
         self._model.capabilities["providers"] = providers
 
-    def _refresh_areas(self) -> None:
+    async def _refresh_areas(self) -> None:
         """Re-read the code areas from the live capability map.
 
         They were read once at boot and baked into the model, while
@@ -231,20 +237,37 @@ class Service:
         the protected block Cognition prepends to EVERY prompt --
         still said 18 and did not mention it (2026-09-10). The summary
         is what the model reads about itself when nobody asked a
-        question, which makes stale worse there than anywhere."""
+        question, which makes stale worse there than anywhere.
+
+        It goes through `_apply` like every other change to the model,
+        rather than reaching into `capabilities` in place. Mutating it
+        directly left the version at 1 while the rendered text changed
+        underneath it -- two different `self.summary.reply`s both
+        labelled `version: 1` -- and left the durable `SELF.md` on disk
+        still listing an area that had been deleted (observer,
+        2026-09-10). An empty scan is still ignored: a tree that reads
+        as having no code at all is far likelier to be a transient than
+        a system that has lost all of it."""
         areas = list(self._capability_map.areas())
-        if areas and areas != self._model.capabilities.get("areas"):
-            self._model.capabilities["areas"] = areas
+        if not areas:
+            return
+
+        def _set_areas(model, now):
+            if areas == model.capabilities.get("areas"):
+                return model  # `_apply` treats an unchanged model as a no-op
+            return replace(model, capabilities={**model.capabilities, "areas": areas}, updated_at=now)
+
+        await self._apply(_set_areas, section="capabilities", reason="capability_map.rescan")
 
     async def _on_self_summary(self, message: Message) -> None:
-        self._refresh_areas()
+        await self._refresh_areas()
         budget = message.payload.get("budget_tokens", 300)
         text, tokens = render_summary(self._model, budget)
         await self._ctx.bus.reply(message, type=topics.SELF_SUMMARY_REPLY,
                                    payload={"ok": True, "text": text, "version": self._model.version, "tokens": tokens})
 
     async def _on_self_gaps(self, message: Message) -> None:
-        self._refresh_areas()
+        await self._refresh_areas()
         gaps, unexplored = compute_gaps(self._model, message.payload.get("k", 5))
         await self._ctx.bus.reply(message, type=topics.SELF_GAPS_REPLY,
                                    payload={"ok": True, "version": self._model.version, "gaps": gaps, "unexplored_areas": unexplored})
@@ -254,6 +277,22 @@ class Service:
 
     async def _on_tool_unavailable(self, message: Message) -> None:
         self._tools.on_unavailable(message.payload.get("name", ""), message.payload.get("reason", ""))
+
+    async def _on_tool_probed(self, message: Message) -> None:
+        """The recovery half of `tool.unavailable`.
+
+        Execution marks a tool unavailable when a free probe fails, and
+        re-probes after an `install_package` -- so the very case the
+        probes exist for (Sim installs what it was missing and carries
+        on) would otherwise leave the Self Model saying the tool is
+        still broken until the next boot. A passing probe puts every
+        tool it covers back.
+        """
+        payload = message.payload
+        if not payload.get("ok"):
+            return
+        for name in payload.get("tools") or []:
+            self._tools.on_available(str(name))
 
     async def _on_user_model_updated(self, message: Message) -> None:
         p = message.payload

@@ -25,13 +25,43 @@ exist yet, and forcing a cutover now would break every real patch task
 half of the same guarantee: before a patch/self_patch task's answer is
 trusted, at least one `run_tests` step in its log must have targeted
 the WHOLE suite (not a subdirectory or file) and passed.
+
+The objection that could not be answered, and the fix (2026-09-10).
+Twice -- two observers, two independent live runs -- a task did exactly
+what it was asked, ran the whole suite on being told to, found the
+suite already red for a reason of its own, and was failed for it again
+and again until its revision budget was gone, with a correct, committed
+change in the tree. This check could not attribute a suite failure to
+the change under review, so once the suite was red for ANY reason its
+objection was unanswerable: it asked for something the task could not
+deliver and had nothing else to say.
+
+The fix is not "pass when the suite is red" -- that reintroduces
+exactly the false pass this check exists to prevent. It is attribution:
+`_baseline` re-runs ONLY the tests that actually failed against the
+tree at the session's own `base_ref` and asks which of them were
+already failing there. A change is answerable for the ones that pass
+without it, and for nothing else. A pre-existing failure on a file this
+task wrote (or on the test file named after it) is still no excuse --
+"it was already red" must never pass a task that was supposed to fix
+exactly that.
+
+Every unknown -- no `base_ref`, no git, an unparseable or capped
+failure list, a baseline run that will not complete -- resolves to "the
+change is to blame", which is the behaviour this check had before any
+of it existed. It can still cost a revision it should not have. It can
+never accept a change that broke the suite.
 """
 
 from __future__ import annotations
 
+import asyncio
+
+from simorgh.contracts.pytestfailures import parse_marker
 from simorgh.contracts.scratch import is_scratch
 
 from ..api import CheckContext, CheckResult, Feedback, VerifyRequest
+from . import _baseline
 from ._files import written_paths
 from .didanything import WRITE_TOOLS
 
@@ -105,6 +135,61 @@ def _ran_whole_suite_and_failed(steps: list[dict]) -> bool:
     return False
 
 
+def _whole_suite_failure_ids(steps: list[dict]) -> tuple[str, ...] | None:
+    """The node ids of the LAST failing whole-suite run, or None.
+
+    None means the run named none that survived to here -- an older
+    step, a crash with no short summary, or more failures than the
+    marker carries. Every caller treats that as "cannot attribute".
+    """
+    for step in reversed(steps):
+        if step.get("tool") != "run_tests" or step.get("ok"):
+            continue
+        summary = str(step.get("summary") or "")
+        if not summary.startswith(_TARGET_MARKER):
+            continue
+        if summary[len(_TARGET_MARKER):].split("]", 1)[0].strip() not in _WHOLE_SUITE_TARGETS:
+            continue
+        return parse_marker(summary)
+    return None
+
+
+async def _attribution(req: VerifyRequest, steps: list[dict]) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """`(introduced, owned)` for a red whole-suite run, or None.
+
+    `introduced` are the tests that pass at the session's base revision
+    and fail now -- the ones this change is answerable for. `owned` are
+    tests that were already failing but sit on files this task wrote or
+    is named after, which no "it was already red" excuse covers.
+
+    None is "no opinion", and the check then behaves exactly as it did
+    before this existed. See `_baseline` for the full list of unknowns
+    that resolve here, and why every one of them errs towards blaming
+    the change.
+    """
+    base_ref = req.subject.get("base_ref")
+    if not isinstance(base_ref, str) or not base_ref:
+        return None
+    written = written_paths(req)
+    if not written:
+        # Without knowing what this task wrote, `owned_by` cannot refuse
+        # the excuse to a task that was supposed to fix the very test
+        # still failing -- and an excuse granted blind is exactly the
+        # false pass this whole check exists to prevent.
+        return None
+    nodeids = _whole_suite_failure_ids(steps)
+    if not nodeids:
+        return None
+    # Blocking git + pytest work; this coroutine runs inside the
+    # verification service's own loop, and holding it for a baseline run
+    # would stall every other check and every heartbeat with it.
+    new = await asyncio.to_thread(_baseline.introduced, base_ref, nodeids)
+    if new is None:
+        return None
+    already = tuple(n for n in nodeids if n not in set(new))
+    return new, _baseline.owned_by(already, written)
+
+
 def _touched_python(req: VerifyRequest) -> bool:
     """Whether this task wrote any Python at all.
 
@@ -137,7 +222,13 @@ def _touched_python(req: VerifyRequest) -> bool:
 
 class FullSuiteRanCheck:
     name = "full_suite_ran"
-    cost = "free"
+    # Free in every case but one: reading the step log costs nothing,
+    # and only a red WHOLE-suite run pays for a baseline (`_baseline`,
+    # bounded by `BASELINE_TIMEOUT_S`). "cheap" rather than "free" so
+    # the service's cheapest-first ordering runs the genuinely free
+    # checks ahead of it -- if one of those is going to fail anyway, it
+    # short-circuits before anything here spawns a pytest.
+    cost = "cheap"
 
     def applies(self, req: VerifyRequest) -> bool:
         steps = _steps(req)
@@ -170,7 +261,44 @@ class FullSuiteRanCheck:
         suite_failed = _ran_whole_suite_and_failed(steps)
         hint = ("call run_tests with no target (or target='tests') to run the whole suite, "
                 "confirm it passes, then commit")
+        evidence: dict = {}
         if suite_failed:
+            # The whole point of the attribution work: "the suite is
+            # red" is not by itself an objection this task can answer.
+            # Once the suite is red for a reason that predates the
+            # session, demanding a green suite is demanding something
+            # the task cannot deliver, and the only thing that used to
+            # happen next was the revision budget burning down with a
+            # correct, committed change in the tree (two observers,
+            # 2026-09-09 and 2026-09-10).
+            verdict = await _attribution(req, steps)
+            if verdict is not None:
+                introduced, owned = verdict
+                evidence = {"introduced": list(introduced), "already_failing_and_owned": list(owned),
+                            "base_ref": req.subject.get("base_ref")}
+                if not introduced and not owned:
+                    return CheckResult(
+                        status="passed",
+                        detail=("the whole suite ran and failed, but every failing test also fails at "
+                                f"{str(req.subject.get('base_ref'))[:12]} -- this change introduced none of them"),
+                        evidence=evidence,
+                    )
+                if introduced:
+                    detail = ("the whole suite was run and this change made tests fail that pass without "
+                              f"it: {', '.join(introduced[:10])}")
+                    hint = ("these tests pass at the revision this session started from and fail with your "
+                            f"change: {', '.join(introduced[:10])}. Fix the change (or revert it); the rest "
+                            "of the suite's failures are not yours and you do not need to fix them")
+                else:
+                    detail = ("the whole suite was run and tests covering the files this task wrote are "
+                              f"still failing: {', '.join(owned[:10])}")
+                    hint = (f"{', '.join(owned[:10])} were failing before this session and are still "
+                            "failing, and they cover what this task wrote -- they are the work, not "
+                            "unrelated noise. Read those failures and address them")
+                return CheckResult(
+                    status="failed", detail=detail, evidence=evidence,
+                    feedback=Feedback(mechanical_errors=(detail,), revise_hint=hint, retryable=True),
+                )
             detail = ("the whole suite was run and it FAILED -- the change is not checked until "
                       "the suite passes")
             hint = ("the whole suite already ran and did not pass. Read the failures in that "
@@ -184,7 +312,7 @@ class FullSuiteRanCheck:
         return CheckResult(
             status="failed", detail=detail,
             evidence={"steps_with_run_tests": sum(1 for s in steps if s.get("tool") == "run_tests"),
-                      "whole_suite_failed": suite_failed},
+                      "whole_suite_failed": suite_failed, **evidence},
             feedback=Feedback(
                 mechanical_errors=(detail,),
                 revise_hint=hint,

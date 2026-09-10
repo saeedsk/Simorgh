@@ -131,6 +131,13 @@ class Session:
     # first attempt.
     carried: str = ""
     attempt: int = 1
+    # The git commit this session started from, captured once by
+    # `SessionRunner.run`. Travels to Verification in the verify
+    # subject so `full_suite_ran` can stage the tree as it was BEFORE
+    # this session and ask whether a failing test was already failing.
+    # Empty when there is no git repo to ask, which every reader must
+    # treat as "cannot attribute" rather than "nothing pre-existed".
+    base_ref: str = ""
 
     def next_step_no(self) -> int:
         return len(self.steps) + 1

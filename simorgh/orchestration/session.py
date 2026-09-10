@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import subprocess
 import uuid
 
 from simorgh.contracts import topics
+from simorgh.contracts.pytestfailures import hoist_marker
 from simorgh.contracts.scratch import SCRATCH_PREFIX, is_scratch  # noqa: F401 -- re-export
 from simorgh.contracts.envelope import Event, Message
 
@@ -317,6 +320,22 @@ class _EventWaiter:
                 await s.unsubscribe()
 
 
+def _git_head() -> str:
+    """The current commit, or "" when there is no repo to ask.
+
+    Deliberately silent on failure: a session must never fail to start
+    because git is missing, and every reader of `base_ref` treats "" as
+    "cannot attribute", which is the same conservative behaviour these
+    checks had before the field existed.
+    """
+    try:
+        done = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                              text=True, timeout=10, cwd=os.getcwd())
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
 class SessionRunner:
     def __init__(
         self, bus, ledger, *, clock=None, worker_id: str = "w1", is_paused=None, is_cancelled=None,
@@ -351,6 +370,14 @@ class SessionRunner:
         request the model has to remember, so the cleanup happens here
         whichever way the session ended.
         """
+        if not session.base_ref:
+            # Captured here, before the first step, and only here: both
+            # `Session` construction sites in `worker.py` and every
+            # resumed session pass through this one entry point. What it
+            # is for: `full_suite_ran` cannot tell a failure this change
+            # caused from one that was already red without a tree to
+            # compare against, and this commit is that tree.
+            session.base_ref = _git_head()
         outcome = await self._run(session, user_text=user_text)
         if outcome.kind == "completed":
             # `_transcript_echo` catches a fabrication written in our own
@@ -880,7 +907,14 @@ class SessionRunner:
                 # for the one calling convention every real trial uses
                 # (2026-09-08).
                 target = (payload.get("args") or {}).get("target") or "tests"
-                full = f"[ran target={target!r}]\n{full}"
+                # And WHICH tests failed, hoisted past the stderr tail
+                # `_publish_result` puts in front of the output. Both
+                # facts have to survive the 2000-char cut below, and on a
+                # live trial the failure list cleared it by 465 of 2000
+                # characters -- a slightly noisier stderr and
+                # `full_suite_ran` would have been blind again, with no
+                # sign that anything had been lost.
+                full = f"[ran target={target!r}]\n{hoist_marker(full)}"
             return ok, self._bound_for_model(full), full[: self._DETAIL_CHARS]
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
@@ -1054,6 +1088,7 @@ class SessionRunner:
         payload = json.dumps({
             "description": session.user_text, "result": text[:2000], "kind": session.kind, "steps": steps,
             "complete_log": complete_log, "subject": session.subject or "", "written_paths": written,
+            "base_ref": session.base_ref,
         }).encode("utf-8")
         return await self._ledger.put_blob(payload, content_type="application/json")
 

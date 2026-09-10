@@ -123,7 +123,7 @@ class SqliteBackend:
                     conn.execute("INSERT OR IGNORE INTO idempotency(stream, key, seq) VALUES (?,?,?)",
                                  (event.stream, event.idempotency_key, seq))
                 conn.execute("INSERT INTO heads(stream, seq) VALUES (?,?) "
-                             "ON CONFLICT(stream) DO UPDATE SET seq=excluded.seq",
+                             "ON CONFLICT(stream) DO UPDATE SET seq=MAX(heads.seq, excluded.seq)",
                              (event.stream, seq))
                 conn.execute("COMMIT")
                 return seq
@@ -194,6 +194,15 @@ class SqliteBackend:
         def op(conn: sqlite3.Connection) -> int:
             conn.execute("BEGIN IMMEDIATE")
             try:
+                # Write the mark HERE, not only in `append`: a database
+                # written before `heads` existed has no row for the
+                # stream, so the first retention pass after the upgrade
+                # would drop head to 0 and reissue seq 1 -- the very
+                # defect `heads` was added for, on the data it was added
+                # for. MAX(), so the mark can only ever go up.
+                conn.execute("INSERT INTO heads(stream, seq) VALUES (?,?) "
+                             "ON CONFLICT(stream) DO UPDATE SET seq=MAX(heads.seq, excluded.seq)",
+                             (stream, self._head(conn, stream)))
                 cur = conn.execute("DELETE FROM events WHERE stream=? AND seq<?", (stream, seq))
                 conn.execute("DELETE FROM idempotency WHERE stream=? AND seq<?", (stream, seq))
                 conn.execute("COMMIT")

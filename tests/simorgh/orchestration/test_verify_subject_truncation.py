@@ -218,3 +218,80 @@ class TestRunTestsTargetMarkerReflectsWhatActuallyRan(unittest.TestCase):
             await sub.unsubscribe()
 
             self.assertIn("[ran target='tests']", full)
+
+
+class TestBaseRefTravelsWithTheVerifyRequest(unittest.TestCase):
+    """`full_suite_ran` cannot tell a failure this change caused from one
+    that was already red without a tree to compare against, and the only
+    place that tree can be identified is here -- at the start of the
+    session, before the first step. Two observers watched a correct,
+    committed patch burn its whole revision budget against a suite that
+    was red before it began; the field this test guards is what makes
+    that answerable.
+    """
+
+    @run
+    async def test_the_session_base_commit_reaches_the_subject(self):
+        async with Harness() as h:
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now)
+            session = Session(task_id="t-base", kind="patch", mode="execute", profile=profiles.PATCH)
+            session.base_ref = "cafe1234"
+            ref = await runner._put_verify_subject(session, "done")
+            payload = json.loads(await h.ledger.get_blob(ref))
+            self.assertEqual(payload["base_ref"], "cafe1234")
+
+    @run
+    async def test_a_session_with_no_git_says_so_rather_than_guessing(self):
+        """Empty is a real answer with a defined meaning: "cannot
+        attribute". Every reader treats it as the pre-2026-09-10
+        behaviour, never as "nothing was failing before"."""
+        import os
+        import tempfile
+
+        from simorgh.orchestration.session import _git_head
+
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as outside:
+            os.chdir(outside)
+            try:
+                self.assertEqual(_git_head(), "")
+            finally:
+                os.chdir(cwd)
+
+    @run
+    async def test_run_captures_the_base_commit_before_the_first_step(self):
+        """`_git_head` is stubbed on purpose, and the live trial that
+        caught this is the argument for it: `run_tests` copies the repo
+        WITHOUT `.git` before running pytest in it, so a test that
+        insists on finding a real commit passes in a developer's
+        checkout and fails inside every isolated suite run Sim itself
+        does. What this has to prove is the wire -- that `run` asks, and
+        that the answer reaches `Session.base_ref` -- not that git is
+        installed."""
+        from .fakes import FakeCognition, FakeGuardianExecution
+
+        async with Harness() as h:
+            gx = FakeGuardianExecution(h.client("guardian"))
+            await gx.start()
+            cognition = FakeCognition(h.client("cognition"), script=[
+                {"tool_calls": [{"tool": "git_commit", "args": {"path": "simorgh/x.py", "message": "m"}}]},
+            ])
+            await cognition.start()
+            try:
+                session = Session(task_id="t-base2", kind="patch", mode="execute", profile=profiles.PATCH)
+                session.budget.max_steps = 1
+                session.uncommitted.add("simorgh/x.py")
+                runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now,
+                                       verify_timeout_s=0.05)
+                import simorgh.orchestration.session as session_mod
+
+                original = session_mod._git_head
+                session_mod._git_head = lambda: "deadbeef" * 5
+                try:
+                    await runner.run(session, user_text="add a constant")
+                finally:
+                    session_mod._git_head = original
+                self.assertEqual(session.base_ref, "deadbeef" * 5)
+            finally:
+                await cognition.stop()
+                await gx.stop()

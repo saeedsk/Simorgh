@@ -37,6 +37,37 @@ MEMORY_UNAVAILABLE_NOTE = (
     "you would expect to remember as unknown rather than absent. Say so if it matters."
 )
 
+#: How much of a subsystem's own `error.detail` may travel into the
+#: prompt. It is our own text, not a user's, but a prompt is no place
+#: for an unbounded string.
+_REASON_MAX_CHARS = 120
+
+
+def _why_not(error: dict) -> str:
+    """Why a request produced no usable reply, in the words of the reply
+    itself.
+
+    This used to say "it did not answer in time" for every failure,
+    because `_request` collapses a timeout and a real error reply to the
+    same `None`. Live-caught by an observer (2026-09-10): Memory
+    replying instantly with `unavailable: store backend is down` put "it
+    did not answer in time" into the prompt -- the one note whose entire
+    reason to exist is telling the model the truth about what it can
+    see, saying something false about why. A slow store and a broken one
+    are also different things to whoever reads the transcript afterwards.
+    """
+    code = str(error.get("code") or "").strip()
+    if code == "timeout":
+        return "it did not answer in time"
+    detail = " ".join(str(error.get("detail") or "").split())
+    if len(detail) > _REASON_MAX_CHARS:
+        detail = detail[:_REASON_MAX_CHARS] + "…"
+    if code and detail:
+        return f"it answered with an error: {code} -- {detail}"
+    if code:
+        return f"it answered with an error: {code}"
+    return "it answered with an error"
+
 
 class Assembler:
     def __init__(self, bus, *, clock=None, timeout_s: float = DEFAULT_TIMEOUT_S) -> None:
@@ -104,6 +135,15 @@ class Assembler:
         return blocks
 
     async def _request(self, type_: str, payload: dict, *, trace_id: str | None = None) -> Message | None:
+        reply, _why = await self._request_with_reason(type_, payload, trace_id=trace_id)
+        return reply
+
+    async def _request_with_reason(self, type_: str, payload: dict, *,
+                                   trace_id: str | None = None) -> tuple[Message | None, str]:
+        """`(reply, why not)`. The reason exists because dropping a
+        block in silence is indistinguishable from having nothing to
+        put in it -- and it is read off the reply, not assumed, because
+        a wrong reason is its own kind of silence (see `_why_not`)."""
         # `self._bus.source` (never a hardcoded literal): in `local-multi`
         # mode this Worker's own `BusClient` is bound to an instance-
         # qualified source (`orchestration@w1`), and `ReservedTopologyPolicy`
@@ -127,18 +167,8 @@ class Assembler:
         req = Message.new(type_, source=self._bus.source, payload=payload, trace_id=trace_id, clock=self._clock)
         reply = await self._bus.request_or_error(req, timeout=self._timeout_s)
         if reply.payload.get("ok") is False:
-            return None
-        return reply
-
-    async def _request_with_reason(self, type_: str, payload: dict, *,
-                                   trace_id: str | None = None) -> tuple[Message | None, str]:
-        """`(reply, why not)`. The reason exists because dropping a
-        block in silence is indistinguishable from having nothing to
-        put in it."""
-        reply = await self._request(type_, payload, trace_id=trace_id)
-        if reply is not None:
-            return reply, ""
-        return None, "it did not answer in time"
+            return None, _why_not(reply.payload.get("error") or {})
+        return reply, ""
 
     async def _memory_block(self, query: str, session: Session) -> tuple[str, str]:
         """`(what to show, why there is nothing)`.

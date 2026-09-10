@@ -46,6 +46,7 @@ mechanical grounds it cannot actually support (2026-09-08, observer).
 from __future__ import annotations
 
 from ..api import CheckContext, CheckResult, Feedback, VerifyRequest
+from ..verdict import _REFUSAL_EVIDENCE
 
 # The tools that leave something behind.
 #
@@ -86,7 +87,30 @@ _DECLINED = (
     "already has", "already had", "already contains", "already present",
     "already correct", "already does", "already there", "already in place",
     "cannot be changed", "cannot change", "cannot edit", "cannot write",
-    "denied", "protected", "refused", "declined",
+)
+# `already` and `cannot` were tightened into forms that are about the
+# change; `denied`, `protected`, `refused` and `declined` were left as
+# bare substrings, and they are ordinary code-review prose:
+#
+#   "I added a guard clause so the field is protected from mutation."
+#   "The parser refused the malformed input, so I added a test for it."
+#
+# Both passed a real no-op over a step log holding nothing but
+# `read_file` and `search_code` -- the same bug, in the words that were
+# not tightened (observer, 2026-09-10). The refusal half of this list is
+# `verdict._REFUSAL_EVIDENCE` itself now, rather than a second, looser
+# copy of it: a reader and a searcher drifting apart is how the
+# path-safety gap opened, and two lists of refusal phrases in one
+# subsystem is the same shape of mistake.
+#
+# Plus the first-person forms, which belong to THIS check and not to
+# `verdict`: the text here is the worker's own answer, so "I refused to
+# make this change" is an assertion that nothing was written, while the
+# same words in a reviewer's evidence are only a report about somebody
+# else and were removed from `_REFUSAL_EVIDENCE` for that reason.
+_DECLINED = _DECLINED + _REFUSAL_EVIDENCE + (
+    "refused to make", "refused to change", "refused to edit", "refused to write",
+    "refused to modify", "refused to apply", "declined to",
 )
 
 

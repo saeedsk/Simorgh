@@ -26,11 +26,22 @@ class FileIndexFacet:
     name = "file_index"
 
     def __init__(self, repo_root: Path, *, max_files: int = 5000,
-                 refresh_seconds: float = 30.0, clock=None) -> None:
+                 refresh_seconds: float = 30.0, clock=None, wall_clock=None) -> None:
         self._repo_root = repo_root
         self._max_files = max_files
         self._refresh_seconds = max(0.0, float(refresh_seconds))
+        # Two clocks, deliberately. `_clock` measures the TTL and so must
+        # not jump (monotonic). `_wall_clock` is the one `scanned_at` is
+        # reported on, and it has to be the SAME clock the envelope's
+        # `as_of` uses (`ctx.clock.now`) or the field is unreadable:
+        # `scanned_at` was stamped monotonic while `as_of` beside it in
+        # the very same payload is wall time, so a caller doing the only
+        # arithmetic the field exists for -- `as_of - scanned_at`, "how
+        # old is this answer" -- got the seconds since the epoch, about
+        # 1.7 billion, and no reading of it was wrong enough to look
+        # wrong (observer, 2026-09-10).
         self._clock = clock or time.monotonic
+        self._wall_clock = wall_clock or time.time
         # Keyed by what was ASKED FOR, and stamped with when it was
         # scanned. One unkeyed slot meant the first call ever made
         # answered every later one: asking for `src` returned the 308
@@ -63,8 +74,9 @@ class FileIndexFacet:
     def _scan(self, under: str, exclude_skills: bool) -> dict:
         # `scanned_at` travels with the listing: the envelope's `as_of`
         # is when the question was asked, which says nothing about how
-        # old the answer is.
-        stamped = {"scanned_at": self._clock()}
+        # old the answer is -- but only if it is on the same clock, so
+        # this is the wall clock, not the monotonic one the TTL uses.
+        stamped = {"scanned_at": self._wall_clock()}
         root = self._repo_root / under
         if not root.is_dir():
             return {"files": [], "truncated": False, "under": under, **stamped}

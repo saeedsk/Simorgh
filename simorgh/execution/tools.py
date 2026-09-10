@@ -51,6 +51,7 @@ except ImportError:  # POSIX-only
     resource = None  # type: ignore[assignment]
 
 from simorgh.contracts import topics
+from simorgh.contracts.pytestfailures import failing_nodeids, format_marker
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
@@ -294,11 +295,49 @@ def _rg_line_is_credential(line: str, root: Path | None = None,
     With a root, this asks the full question -- resolution, containment
     and extra names -- because an observer got
     `workspace/notes.txt:1:SECRET=hunter2` out of this backend while
-    `read_file` on the same path was refused (2026-09-10)."""
-    path_part = line.split(":", 1)[0]
+    `read_file` on the same path was refused (2026-09-10).
+
+    And the FULL question was still asked about the wrong path. The
+    split was on the first colon, and a colon is a legal character in a
+    filename on every filesystem this runs on, so
+    `workspace/notes:1.env:1:SECRET=hunter2` was checked as
+    `workspace/notes` -- a name that is neither credential-shaped nor a
+    real file, so every check passed and the secret came back, while
+    `read_file` on the same path answered "looks like a credentials
+    path". Reproduced 2026-09-10 against the real `rg`. `rg --null`
+    ends the path with a NUL, which no filename can contain, so
+    `_rg_split` never has to guess; and a path that does not name a real
+    file under the root is refused rather than waved through, because
+    the only way to get one is for this parse to have gone wrong."""
+    path_part = _rg_split(line)[0]
     if root is not None:
-        return pathsafety.hides_a_credential(root, root / path_part, readable_roots=readable_roots)
+        candidate = root / path_part
+        if not candidate.is_file():
+            return True     # not a path we parsed correctly -- fail closed
+        return pathsafety.hides_a_credential(root, candidate, readable_roots=readable_roots)
     return pathsafety.looks_like_credential_path(Path(path_part).parts)
+
+
+#: `rg --null` writes `path\0lineno:text`. A NUL is the one byte a POSIX
+#: filename cannot contain, which is the whole reason for asking for it.
+#: Without it the path had to be guessed off the first colon, and a
+#: colon in a filename made the guess wrong in the direction that leaks.
+def _rg_split(line: str) -> tuple[str, str]:
+    """`(path, rest)` for one `rg --null` output line."""
+    path, sep, rest = line.partition("\0")
+    if not sep:
+        # An `rg` too old for `--null`, or output from somewhere else:
+        # fall back to the first-colon guess rather than refuse
+        # everything, and let the `is_file` check above catch what the
+        # guess gets wrong.
+        path, _, rest = line.partition(":")
+    return path, rest
+
+
+def _rg_display(line: str) -> str:
+    """The NUL back to the `path:lineno:text` the model is shown."""
+    path, rest = _rg_split(line)
+    return f"{path}:{rest}" if rest else path
 
 
 class SearchCodeTool:
@@ -362,6 +401,7 @@ class SearchCodeTool:
                               metadata={"matches": 0, "files_scanned": 0, "via": "ripgrep"})
         cmd = [
             self._rg, "--line-number", "--no-heading", "--with-filename", "--no-ignore",
+            "--null",
             f"--max-filesize={self._config.search_max_file_bytes}",
             "-e", query, *roots,
         ]
@@ -379,7 +419,7 @@ class SearchCodeTool:
             return self._run_pure_python(query, root)
 
         lines = [
-            ln for ln in completed.stdout.splitlines()
+            _rg_display(ln) for ln in completed.stdout.splitlines()
             if "__pycache__" not in ln and not _rg_line_is_credential(
                 ln, root, self._config.readable_roots)
         ]
@@ -1145,7 +1185,19 @@ class RunTestsTool:
             usage_error = completed.returncode == _PYTEST_USAGE_ERROR and not_python
             no_tests = completed.returncode == _PYTEST_NO_TESTS_COLLECTED or usage_error
             ok = completed.returncode == 0 or no_tests
+            # Parsed from the WHOLE stdout, before `[-cap:]` and before
+            # orchestration's own 2000-char head cut, and prepended so it
+            # rides at the head where neither cut can reach it. pytest
+            # prints the failing node ids only in its short summary, at
+            # the very end; for any run longer than the cut, "which tests
+            # failed" reached neither the model nor verification -- both
+            # got the top of a traceback and the word "failed". See
+            # `contracts/pytestfailures.py`.
+            failing = failing_nodeids(completed.stdout) if not ok else ()
             output = completed.stdout[-cap:]
+            marker = format_marker(failing)
+            if marker:
+                output = f"{marker}\n{output}"
             if no_tests:
                 output = (output + "\n\n[no tests cover this target yet -- nothing was run]").strip()
             if usage_error:
@@ -1156,7 +1208,8 @@ class RunTestsTool:
             return ToolResult(
                 ok=ok, output=output,
                 error=None if ok else f"exit_code={completed.returncode}",
-                metadata={"stderr": completed.stderr[-cap:], "exit_code": completed.returncode,
+                metadata={"failing_nodeids": list(failing),
+                          "stderr": completed.stderr[-cap:], "exit_code": completed.returncode,
                           "no_tests_collected": no_tests,
                           "duration_s": time.monotonic() - start},
             )

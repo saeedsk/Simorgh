@@ -77,6 +77,12 @@ class InMemoryBackend:
 
     async def truncate_below(self, stream: str, seq: int) -> int:
         events = self._events.get(stream, [])
+        # Record the mark HERE, not only in `append`. Compaction is the
+        # only thing that removes events without removing the stream, so
+        # it is the one place that must write down what it is about to
+        # make underivable -- otherwise any state in which the mark is
+        # absent regresses on the first pass.
+        self._heads[stream] = max(self._heads.get(stream, 0), events[-1].seq if events else 0)
         kept = [e for e in events if e.seq >= seq]
         removed = len(events) - len(kept)
         self._events[stream] = kept

@@ -137,6 +137,60 @@ class WorldModelTestCase(unittest.IsolatedAsyncioTestCase):
         names = [t["name"] for t in reply.payload["tools"]]
         self.assertIn("read_file", names)
 
+    async def _settle(self):
+        for _ in range(10):
+            await __import__("asyncio").sleep(0)
+
+    async def _register(self, name="run_js_sandboxed"):
+        await self.bus.publish(Message.new(
+            topics.TOOL_REGISTERED, source="execution",
+            payload={"name": name, "version": "1", "description": "run js", "read_only": True,
+                     "reversibility": "read_only", "schema_ref": "blob:none", "provider": "builtin"},
+        ))
+        await self._settle()
+
+    async def _queried(self, name):
+        reply = await self.requester.request(
+            self.requester.new(topics.WORLD_ENV_QUERY, {"what": "tools"}), timeout=2)
+        return next(t for t in reply.payload["tools"] if t["name"] == name)
+
+    async def test_tool_unavailable_reaches_the_capability_inventory(self):
+        """`available` was True at registration and nothing could ever
+        set it False, because nothing in the tree published
+        `tool.unavailable` (scan, 2026-09-10). Execution announces it
+        for every tool a failed free probe takes down now."""
+        await self._register()
+        self.assertTrue((await self._queried("run_js_sandboxed"))["available"])
+
+        await self.bus.publish(Message.new(
+            topics.TOOL_UNAVAILABLE, source="execution",
+            payload={"name": "run_js_sandboxed", "reason": "node is not installed"},
+        ))
+        await self._settle()
+        entry = await self._queried("run_js_sandboxed")
+        self.assertFalse(entry["available"])
+        self.assertEqual(entry["reason"], "node is not installed")
+
+    async def test_a_passing_probe_puts_a_tool_back(self):
+        """Execution re-probes after `install_package`, which is the
+        whole point of the probes -- so a tool Sim installed to unblock
+        itself must stop reading as unavailable without a restart."""
+        await self._register()
+        await self.bus.publish(Message.new(
+            topics.TOOL_UNAVAILABLE, source="execution",
+            payload={"name": "run_js_sandboxed", "reason": "node is not installed"},
+        ))
+        await self._settle()
+        self.assertFalse((await self._queried("run_js_sandboxed"))["available"])
+
+        await self.bus.publish(Message.new(
+            topics.TOOL_PROBED, source="execution",
+            payload={"name": "node", "ok": True, "detail": "node v22", "cost": "free",
+                     "tools": ["run_js_sandboxed", "render_page"]},
+        ))
+        await self._settle()
+        self.assertTrue((await self._queried("run_js_sandboxed"))["available"])
+
     async def test_health_ok(self):
         health = await self.service.health()
         self.assertEqual(health.status, "ok")

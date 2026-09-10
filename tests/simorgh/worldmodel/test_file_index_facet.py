@@ -70,8 +70,17 @@ class FileIndexAnswersWhatWasAskedTestCase(unittest.TestCase):
 
     def test_every_listing_says_when_it_was_scanned(self):
         """The envelope's `as_of` is when the question was asked, which
-        says nothing about how old the answer is."""
-        self.assertEqual(self._get({"under": "alpha"})["scanned_at"], 1000.0)
+        says nothing about how old the answer is.
+
+        It must be on the SAME clock as `as_of` -- wall time. It was
+        first stamped from the monotonic clock that drives the TTL, so
+        the one subtraction the field exists for returned about 1.7
+        billion seconds (observer, 2026-09-10)."""
+        import time
+
+        stamped = self._get({"under": "alpha"})["scanned_at"]
+        self.assertLess(abs(stamped - time.time()), 60.0,
+                        "scanned_at must be wall time, comparable with as_of")
 
     def test_invalidate_clears_every_key(self):
         self._get({"under": "alpha"})

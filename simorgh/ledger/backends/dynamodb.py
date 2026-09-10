@@ -84,11 +84,14 @@ class DynamoBackend:
         return None
 
     # ------------------------------------------------------------------- core
+    def _mark(self, stream: str) -> int:
+        item = self._table.get(stream, HEAD_SK)  # type: ignore[union-attr]
+        return int(item["at_seq"]) if item else 0
+
     async def head(self, stream: str) -> int:
         item = self._table.latest(stream)  # type: ignore[union-attr]
         live = int(item["seq"]) if item else 0
-        mark = self._table.get(stream, HEAD_SK)  # type: ignore[union-attr]
-        return max(live, int(mark["at_seq"]) if mark else 0)
+        return max(live, self._mark(stream))
 
     def _item_from_event(self, event: Event, seq: int) -> dict:
         payload_json = canonical_json(event.payload)
@@ -125,7 +128,11 @@ class DynamoBackend:
         seq = head + 1
         if not self._table.put_if_absent(self._item_from_event(event, seq)):  # type: ignore[union-attr]
             raise ConflictError(event.stream, expected_seq if expected_seq is not None else head, head)
-        self._table.put({"stream": event.stream, "seq": HEAD_SK, "at_seq": seq})  # type: ignore[union-attr]
+        # Never write a mark lower than the one already there: two
+        # processes' `put`s can land in either order, and an unconditional
+        # write lets the loser's stale value overwrite the winner's.
+        if seq > self._mark(event.stream):
+            self._table.put({"stream": event.stream, "seq": HEAD_SK, "at_seq": seq})  # type: ignore[union-attr]
         return seq
 
     async def find_by_idempotency(self, stream: str, key: str) -> int | None:
@@ -156,6 +163,14 @@ class DynamoBackend:
 
     # ------------------------------------------------------------- compaction
     async def truncate_below(self, stream: str, seq: int) -> int:
+        # Write the mark HERE, not only in `append`: a table written
+        # before `HEAD_SK` existed has no such item, so the first
+        # retention pass after the upgrade would drop head to 0 and
+        # reissue seq 1. `head()` is already the max of the live items
+        # and any existing mark, so this can only go up.
+        current = await self.head(stream)
+        if current > self._mark(stream):
+            self._table.put({"stream": stream, "seq": HEAD_SK, "at_seq": current})  # type: ignore[union-attr]
         removed = 0
         for item in self._table.range(stream, 1, None):  # type: ignore[union-attr]
             if int(item["seq"]) < seq:

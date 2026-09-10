@@ -171,3 +171,64 @@ class TheRecordedCostIsTheRealCostTestCase(TestOutcomeRecorder):
         wrong was zero when something was."""
         await self._seed_task("c3")
         self.assertEqual((await self._record("c3"))["cost_usd"], 0.0)
+
+
+class EachTurnOfAReusedSessionIsItsOwnOutcomeTestCase(TestOutcomeRecorder):
+    """A chat turn's `task_id` IS its `session_id` (`Worker.run_percept_chat`
+    takes `task_id=session_id`), and `POST /api/chat` documents sending
+    "the same id every time" for a continuous conversation -- so every
+    turn of such a conversation appends to ONE `task:<session_id>`
+    stream.
+
+    Both halves of `_task_facts` then read the whole conversation as if
+    it were one run. An observer drove two real turns through a booted
+    Kernel on session `sess-abc` (2026-09-10): turn 2 really cost
+    $0.000629 in 0.49s and was published as $0.001256 over 2.943s (turn
+    1 + turn 2, plus the idle time between them), and the ledger held
+    ONE `learn:outcomes` record -- key `sess-abc:completed` -- because
+    every turn's idempotency key is the same string, so turn 2 was
+    dropped and `CompetenceTable` never saw it.
+    """
+
+    async def _seed_turn(self, task_id: str, *, at: float, cost: float, took: float) -> None:
+        stream = f"task:{task_id}"
+        await self.ledger.append(stream, Event(
+            stream=stream, type="task.started", ts=at, trace_id=task_id, causation_id=None,
+            payload={"task_id": task_id, "kind": "chat"}))
+        await self.ledger.append(stream, Event(
+            stream=stream, type="task.step", ts=at + took / 2, trace_id=task_id, causation_id=None,
+            payload={"task_id": task_id, "step_no": 1, "ok": True, "cost_usd": cost}))
+        await self.ledger.append(stream, Event(
+            stream=stream, type="task.completed", ts=at + took, trace_id=task_id, causation_id=None,
+            payload={"task_id": task_id, "result_summary": "ok"}))
+
+    async def _complete(self, task_id: str) -> dict:
+        await self.recorder.on_task_completed(Message.new(
+            "task.completed", source="orchestration",
+            payload={"task_id": task_id, "result_summary": "ok", "artifacts": [],
+                     "verification_ref": None}))
+        return dict(self.published)["learn.outcome.recorded"]
+
+    async def test_the_second_turn_is_costed_as_itself_not_the_conversation(self):
+        await self._seed_turn("sess-abc", at=100.0, cost=0.000627, took=0.485)
+        await self._complete("sess-abc")
+        await self._seed_turn("sess-abc", at=103.0, cost=0.000629, took=0.49)
+        second = await self._complete("sess-abc")
+        self.assertAlmostEqual(second["cost_usd"], 0.000629, places=6)
+        self.assertAlmostEqual(second["duration_s"], 0.49, places=2)
+
+    async def test_the_second_turn_is_recorded_at_all(self):
+        await self._seed_turn("sess-abc", at=100.0, cost=0.000627, took=0.485)
+        await self._complete("sess-abc")
+        await self._seed_turn("sess-abc", at=103.0, cost=0.000629, took=0.49)
+        await self._complete("sess-abc")
+        stored = await self.ledger.read("learn:outcomes", limit=None)
+        self.assertEqual(len(stored), 2, "every turn is an outcome; one key for all of them drops the rest")
+        self.assertEqual(self.competence.samples("chat"), 2)
+
+    async def test_a_redelivered_completion_is_still_only_one_outcome(self):
+        await self._seed_turn("sess-abc", at=100.0, cost=0.000627, took=0.485)
+        await self._complete("sess-abc")
+        await self._complete("sess-abc")
+        stored = await self.ledger.read("learn:outcomes", limit=None)
+        self.assertEqual(len(stored), 1, "the same finished run must never be counted twice")

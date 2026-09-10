@@ -25,6 +25,21 @@ class ToolsFacet:
             self._tools[name]["available"] = False
             self._tools[name]["reason"] = reason
 
+    def on_available(self, name: str) -> None:
+        """A tool that was marked broken is working again.
+
+        Without this, `available` was a one-way latch: `on_registered`
+        set it True once at boot and `on_unavailable` could only ever
+        set it False, so a capability Sim installed to unblock itself
+        stayed "unavailable" in the Self Model for the life of the
+        process. The reason goes with it -- a stale "node is not
+        installed" beside a working tool is its own small lie.
+        """
+        entry = self._tools.get(name)
+        if entry is not None and not entry.get("available", True):
+            entry["available"] = True
+            entry.pop("reason", None)
+
     def invalidate(self) -> None:
         pass
 

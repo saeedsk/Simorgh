@@ -33,10 +33,25 @@ _ITEM_LINE = re.compile(r"^\s*\d+[.):]\s*(.+)$")
 #: Delimited, always: either brackets around the word, or the word
 #: followed by a colon or a dash. A bare leading word is part of the
 #: question -- "Required imports present?" asks about imports.
+#:
+#: "Every spelling" stopped one character short of the dash a model
+#: writes most. The class was `[:\-–]` -- colon, hyphen, EN dash -- and
+#: an EM dash (`—`, U+2014) is what an LLM actually types, so `optional
+#: — also update the docs` silently became REQUIRED again, which is the
+#: whole bug this pattern was widened to fix. A trailing tag with a full
+#: stop after it (`... [optional].`) went the same way, and a bracketed
+#: tag's own leftover punctuation (`[optional]: is there a test?`)
+#: stayed inside the question. All three re-found 2026-09-10 by
+#: attacking the fix rather than the bug. `[‐-―]` is the whole
+#: Unicode dash run, so this cannot be one code point short again.
+_DASHES = r"\-‐-―"
 _LEADING_TAG = re.compile(
-    r"^[*_\s]*(?:[\[(<]\s*(required|optional)\s*[\])>]|(required|optional)\s*[:\-–])[*_]*\s*",
+    r"^[*_\s]*(?:[\[({<]\s*(required|optional)\s*[\])}>]"
+    rf"|(required|optional)\s*[:{_DASHES}]+)"
+    rf"[*_]*\s*[:{_DASHES}]*\s*",
     re.IGNORECASE)
-_TRAILING_TAG = re.compile(r"\s*[*_]*[\[(<]\s*(required|optional)\s*[\])>][*_]*\s*$", re.IGNORECASE)
+_TRAILING_TAG = re.compile(
+    r"\s*[*_]*[\[({<]\s*(required|optional)\s*[\])}>][*_]*[.;,]?\s*$", re.IGNORECASE)
 
 
 def split_tag(text: str) -> tuple[str, bool]:

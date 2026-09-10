@@ -44,8 +44,8 @@ class OutcomeRecorder:
             stale = self._verify_order.pop(0)
             self._verify_cache.pop(stale, None)
 
-    async def _task_facts(self, task_id: str) -> tuple[str, str | None, float, float]:
-        """`(task_type, strategy, cost_usd, duration_s)`.
+    async def _task_facts(self, task_id: str) -> tuple[str, str | None, float, float, int]:
+        """`(task_type, strategy, cost_usd, duration_s, run_index)`.
 
         The cost and the duration used to be hardcoded 0.0 at all three
         call sites, and both are REQUIRED fields of
@@ -58,10 +58,33 @@ class OutcomeRecorder:
         Nothing was missing: this already read the same `task:<id>`
         stream for the kind and the subject, with `limit=1`. The whole
         stream carries the created timestamp and every step's own
-        `cost_usd`."""
+        `cost_usd`.
+
+        One stream is not always one run. A chat turn's `task_id` IS its
+        `session_id` (`Worker.run_percept_chat(task_id=session_id)`) and
+        `POST /api/chat` invites a client to send "the same id every
+        time" for a continuous conversation -- so turn 5 of that
+        conversation appends to the same `task:<session_id>` stream as
+        turns 1-4. Summing the whole stream then reports the whole
+        conversation's spend, and the idle minutes between turns, as
+        what THIS turn cost: an observer drove two real turns through a
+        booted Kernel and watched a $0.000629 / 0.49s turn published as
+        $0.001256 over 2.943s (2026-09-10). A retried task has the same
+        shape -- its earlier attempt was already recorded when it
+        blocked, so counting that attempt again here bills it twice.
+
+        So the facts are read from the LAST RUN in the stream: the
+        events after the previous terminal event, up to and including
+        the last one. A stream with a single run (the common case) is
+        unchanged -- the run is the whole stream, `started` is still the
+        `created` event's ts. `run_index` (how many runs ended before
+        this one) is what makes the idempotency key of each turn
+        distinct; without it every turn of a conversation writes the
+        same key and only the first is ever recorded."""
         task_type = "unknown"
         cost_usd = 0.0
         duration_s = 0.0
+        run_index = 0
         try:
             events = await self._ledger.read(f"task:{task_id}", limit=None)
             if events:
@@ -69,13 +92,14 @@ class OutcomeRecorder:
                 kind = p.get("kind", "unknown")
                 subject = p.get("subject")
                 task_type = f"{kind}:{_area(subject)}" if subject else kind
-                started = events[0].ts
-                for event in events:
+                run, run_index = _last_run(events)
+                started = run[0].ts
+                for event in run:
                     cost_usd += float(event.payload.get("cost_usd") or 0.0)
-                    if event.type in ("task.completed", "task.failed", "task.blocked"):
+                    if event.type in _TERMINAL:
                         duration_s = max(duration_s, event.ts - started)
                 if not duration_s:
-                    duration_s = max(0.0, events[-1].ts - started)
+                    duration_s = max(0.0, run[-1].ts - started)
         except Exception:  # noqa: BLE001 -- a lookup failure must never block recording
             pass
         strategy = None
@@ -86,40 +110,40 @@ class OutcomeRecorder:
                     strategy = e.payload["strategy"]
         except Exception:  # noqa: BLE001
             pass
-        return task_type, strategy, round(cost_usd, 6), round(duration_s, 3)
+        return task_type, strategy, round(cost_usd, 6), round(duration_s, 3), run_index
 
     async def on_task_completed(self, message: Message) -> None:
         p = message.payload
         task_id = p["task_id"]
-        task_type, strategy, cost_usd, duration_s = await self._task_facts(task_id)
+        task_type, strategy, cost_usd, duration_s, run = await self._task_facts(task_id)
         verdict = "unknown"
         vref = p.get("verification_ref")
         if vref and vref in self._verify_cache:
             verdict = self._verify_cache[vref]["verdict"]
         await self._record(task_id=task_id, task_type=task_type, succeeded=True, weight=1.0,
                             verdict=verdict, cost_usd=cost_usd, duration_s=duration_s, strategy=strategy,
-                            stated_confidence=p.get("confidence"))
+                            stated_confidence=p.get("confidence"), run=run)
 
     async def on_task_failed(self, message: Message) -> None:
         p = message.payload
         task_id = p["task_id"]
-        task_type, strategy, cost_usd, duration_s = await self._task_facts(task_id)
+        task_type, strategy, cost_usd, duration_s, run = await self._task_facts(task_id)
         await self._record(task_id=task_id, task_type=task_type, succeeded=False, weight=1.0,
                             verdict="failed", cost_usd=cost_usd, duration_s=duration_s, strategy=strategy,
-                            stated_confidence=None)
+                            stated_confidence=None, event_type="failed", run=run)
 
     async def on_task_blocked(self, message: Message) -> None:
         p = message.payload
         task_id = p["task_id"]
-        task_type, strategy, cost_usd, duration_s = await self._task_facts(task_id)
+        task_type, strategy, cost_usd, duration_s, run = await self._task_facts(task_id)
         await self._record(task_id=task_id, task_type=task_type, succeeded=False,
                             weight=self._config.blocked_sample_weight, verdict="blocked",
                             cost_usd=cost_usd, duration_s=duration_s, strategy=strategy, stated_confidence=None,
-                            event_type="blocked")
+                            event_type="blocked", run=run)
 
     async def _record(self, *, task_id: str, task_type: str, succeeded: bool, weight: float, verdict: str,
                        cost_usd: float, duration_s: float, strategy: str | None,
-                       stated_confidence: float | None, event_type: str = "completed") -> None:
+                       stated_confidence: float | None, event_type: str = "completed", run: int = 0) -> None:
         payload = {
             "task_id": task_id, "task_type": task_type, "succeeded": succeeded, "weight": weight,
             "verdict": verdict, "cost_usd": cost_usd, "duration_s": duration_s, "ts": self._clock(),
@@ -129,7 +153,19 @@ class OutcomeRecorder:
         if stated_confidence is not None:
             payload["stated_confidence"] = stated_confidence
         event = Event(stream="learn:outcomes", type="outcome", ts=self._clock(), trace_id=task_id,
-                      causation_id=None, payload=payload, idempotency_key=f"{task_id}:{event_type}")
+                      causation_id=None, payload=payload,
+                      # Per RUN, not per task: one `task_id` can end more
+                      # than once (every turn of a reused chat session,
+                      # every attempt of a retried task), and a key that
+                      # ignores that silently drops all but the first --
+                      # the append returns the existing seq, so nothing
+                      # raises and `CompetenceTable` simply never sees
+                      # them. `event_type` stays in the key so a task
+                      # that blocks and then completes on the same run
+                      # index is still two distinct records, and a
+                      # genuinely REDELIVERED terminal message still
+                      # lands on the same key and is still deduped.
+                      idempotency_key=f"{task_id}:{event_type}:{run}")
         seq = await self._ledger.append("learn:outcomes", event)
         # idempotency: a duplicate append returns the *existing* seq without
         # writing -- only fold into the live projection on a genuine new seq,
@@ -153,6 +189,24 @@ class OutcomeRecorder:
                 "calibration": self._competence.calibration(task_type),
                 "samples": self._competence.samples(task_type),
             })
+
+
+_TERMINAL = ("task.completed", "task.failed", "task.blocked")
+
+
+def _last_run(events: list) -> tuple[list, int]:
+    """`(the events of the last run, how many runs ended before it)`.
+
+    A run ends at a terminal event; the next run is everything after it.
+    A stream that has not ended yet, or has never ended, is one run --
+    the whole stream -- so the single-run case reads exactly as it did
+    before this existed."""
+    ends = [i for i, e in enumerate(events) if e.type in _TERMINAL]
+    if not ends:
+        return events, 0
+    last = ends[-1]
+    start = ends[-2] + 1 if len(ends) > 1 else 0
+    return events[start:last + 1], len(ends) - 1
 
 
 def _area(subject: str) -> str:

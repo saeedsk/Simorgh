@@ -67,11 +67,27 @@ class CombinedResult:
 #
 # all three observed 2026-09-10. `no workaround` is gone entirely: it
 # is a remark about the evidence, never evidence of a refusal.
+#
+# And `refused:`, added by that same commit, made the hole bigger rather
+# than smaller. It is `pathsafety.py`'s prefix for EVERY argument a tool
+# dislikes -- `refused: 'foo(' is not a valid regex`, `refused: 'x' is
+# not a file`, `refused: path is 5000 chars`, `refused: no 'node'
+# executable found on this machine`. None of those is the system
+# protecting anything; they are a tool saying the arguments were wrong,
+# which is the ordinary shape of a task failing. Quoting one into the
+# evidence dropped a required "no" and passed the task (observer,
+# 2026-09-10). It names neither a refuser nor a target, so it does not
+# belong here. Guardian's own denial reaches a step as `denied:
+# <reasons>` (orchestration/session.py:887), and path safety's
+# PROTECTIVE refusals say what they protected -- those are listed
+# instead, by their own words.
 _REFUSAL_EVIDENCE = (
-    "guardian denied", "was denied", "denied by", "denied (policy)",
+    "guardian denied", "was denied", "denied by", "denied (policy)", "denied:",
     "guardian refused", "guardian declined", "guardian blocked",
     "protected path", "protected file", "is a protected", "protected by guardian",
-    "only the creator", "refused:",
+    "only the creator",
+    "outside the readable areas", "looks like a credentials path",
+    "resolves outside the repository", "is not a safe relative path",
 )
 
 

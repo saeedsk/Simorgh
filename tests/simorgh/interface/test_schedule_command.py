@@ -174,6 +174,116 @@ class ListingTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("schedule", COMMAND_NAMES)
 
 
+class CancellingTestCase(unittest.IsolatedAsyncioTestCase):
+    """The other half of the same door.
+
+    `Scheduler._on_schedule_cancel` is as complete as the add half --
+    it appends `schedule.cancelled`, marks the projection, and cancels
+    the armed timer -- and `_schedule_list` already drops a cancelled
+    id. `system.schedule.cancel` was published by nothing in the tree,
+    so `schedule every 1h ...` had no off switch, and the Kernel
+    replays `SCHEDULE_STREAM` on boot, so a restart did not stop it
+    either.
+    """
+
+    async def _ledger(self, events=()):
+        ledger = make_ledger({"backend": "memory"}, clock=FakeClock())
+        await ledger.start()
+        for event in events:
+            await ledger.append(SCHEDULE_STREAM, event)
+        return ledger
+
+    def _added(self, schedule_id, label):
+        return Event(
+            stream=SCHEDULE_STREAM, type="schedule.added", ts=0.0, trace_id="", causation_id=None,
+            idempotency_key=f"added-{schedule_id}",
+            payload={"schedule_id": schedule_id, "fire_at": 50.0, "label": label},
+        )
+
+    async def test_cancel_publishes_system_schedule_cancel(self):
+        bus = _Bus()
+        ledger = await self._ledger([self._added("a1", "water the plants")])
+        outcome = await _schedule_command("cancel a1", bus=bus, ledger=ledger, clock=_Clock())
+        self.assertEqual(len(bus.published), 1)
+        self.assertEqual(bus.published[0].topic, topics.SYSTEM_SCHEDULE_CANCEL)
+        self.assertEqual(bus.published[0].payload, {"schedule_id": "a1"})
+        self.assertIn("a1", outcome.text)
+
+    async def test_an_unknown_id_publishes_nothing(self):
+        # The Kernel accepts a cancel for an id it does not hold without
+        # complaint, so a typo would be answered "cancelled" while the
+        # real schedule kept firing.
+        bus = _Bus()
+        ledger = await self._ledger([self._added("a1", "water the plants")])
+        outcome = await _schedule_command("cancel a2", bus=bus, ledger=ledger, clock=_Clock())
+        self.assertEqual(bus.published, [])
+        self.assertIn("nothing scheduled with id", outcome.text)
+
+    async def test_cancel_without_an_id_publishes_nothing(self):
+        bus = _Bus()
+        ledger = await self._ledger([self._added("a1", "x")])
+        outcome = await _schedule_command("cancel", bus=bus, ledger=ledger, clock=_Clock())
+        self.assertEqual(bus.published, [])
+        self.assertIn("needs an id", outcome.text)
+
+    async def test_an_already_cancelled_id_is_not_live(self):
+        bus = _Bus()
+        ledger = await self._ledger([
+            self._added("a1", "x"),
+            Event(stream=SCHEDULE_STREAM, type="schedule.cancelled", ts=1.0, trace_id="",
+                  causation_id=None, idempotency_key="cancelled-a1", payload={"schedule_id": "a1"}),
+        ])
+        outcome = await _schedule_command("cancel a1", bus=bus, ledger=ledger, clock=_Clock())
+        self.assertEqual(bus.published, [])
+        self.assertIn("nothing scheduled with id", outcome.text)
+
+    async def test_a_real_kernel_stops_firing_a_cancelled_repeat(self):
+        """The point of the change. A unit test proves a message was
+        published; only a real Kernel proves the timer is disarmed."""
+        import asyncio
+        import tempfile
+        import time
+
+        from simorgh.kernel.config import LoadedConfig
+        from simorgh.kernel.secrets import EnvSecretStore
+        from simorgh.kernel.service import Kernel
+
+        class _RealClock:
+            def now(self):
+                return time.time()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            kernel = Kernel(LoadedConfig({"runtime": {"data_dir": tmp}}, None),
+                            secrets=EnvSecretStore({}))
+            await kernel.boot()
+            try:
+                fired = []
+
+                async def _on_fire(message):
+                    fired.append(message)
+
+                await kernel.bus.subscribe(topics.PERCEPT_TIME_SCHEDULED, _on_fire)
+                outcome = await _schedule_command("every 1s tick", bus=kernel.bus,
+                                                  ledger=kernel.ledger, clock=_RealClock())
+                schedule_id = outcome.text.rsplit("(", 1)[1].rstrip(")").strip()
+                for _ in range(40):
+                    await asyncio.sleep(0.1)
+                    if fired:
+                        break
+                self.assertTrue(fired, "the repeat never fired at all")
+
+                cancel = await _schedule_command(f"cancel {schedule_id}", bus=kernel.bus,
+                                                 ledger=kernel.ledger, clock=_RealClock())
+                self.assertIn("cancelled", cancel.text)
+                await asyncio.sleep(0.3)
+                settled = len(fired)
+                await asyncio.sleep(2.5)  # two more of its 1-second periods
+                self.assertEqual(len(fired), settled, "a cancelled repeat kept firing")
+                self.assertIn("nothing scheduled", (await _schedule_list(kernel.ledger)).text)
+            finally:
+                await kernel.shutdown()
+
+
 class ItReallyFiresTestCase(unittest.IsolatedAsyncioTestCase):
     """The point of the whole change. A unit test of the command proves
     a message was published; only a real Kernel proves the scheduler

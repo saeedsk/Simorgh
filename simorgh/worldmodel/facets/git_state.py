@@ -19,7 +19,14 @@ class GitStateFacet:
         self._repo_root = repo_root
 
     def invalidate(self) -> None:
-        pass  # the caller (service.py) re-polls on its own refresh_seconds cadence
+        # Nothing to invalidate: no cache here, and no periodic refresh
+        # either. This used to claim "the caller (service.py) re-polls
+        # on its own refresh_seconds cadence" -- it does not, and
+        # `kernel/configcheck.py` already lists `worldmodel.git.
+        # refresh_seconds` among its KNOWN_DEAD_NESTED_FIELDS for
+        # exactly that reason. Every query shells out to `git` afresh,
+        # so this answer is never stale; it is only unthrottled.
+        pass
 
     async def get(self, args: dict) -> dict:
         return await asyncio.to_thread(self._read)

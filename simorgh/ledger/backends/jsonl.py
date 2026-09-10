@@ -9,6 +9,10 @@ On-disk layout (02-ledger section 4.2):
     <root>/streams/<escaped>.jsonl   one canonical-JSON Event per line
     <root>/snapshots/<escaped>.json  {"at_seq", "state", "ts"}
     <root>/idem/<escaped>.idx        "key\tseq" lines (a cache; rebuilt if stale)
+    <root>/heads/<escaped>.head      the highest seq ever issued, written only
+                                     when compaction removes events (which is
+                                     the one thing that makes head underivable
+                                     from the file); cleared by delete_stream
     <root>/blobs/<aa>/<sha256>       content-addressed, with .meta sidecars
     <root>/index.json                {stream: {head, bytes, last_ts}}; read at start
                                      so an unchanged stream is never re-read
@@ -93,13 +97,41 @@ class JsonlBackend:
     def _idem_path(self, stream: str) -> Path:
         return self.root / "idem" / f"{escape(stream)}.idx"
 
+    def _head_path(self, stream: str) -> Path:
+        """The durable high-water mark, written only by `truncate_below`.
+
+        Head is otherwise derived from the file, which is correct for
+        every state except the one compaction creates: a pass that keeps
+        nothing leaves a 0-byte file, and a rescan reads head 0 out of
+        it. `index.json` is not that mark -- `_read_index` treats it as
+        disposable by design (absent/truncated/old layout all mean "empty
+        index"), and `_refresh_if_grown` rescans whenever another process
+        changed the size. So the mark is its own tiny file, written only
+        when events are removed, and cleared only by `delete_stream`.
+        """
+        return self.root / "heads" / f"{escape(stream)}.head"
+
+    def _read_mark(self, stream: str) -> int:
+        try:
+            return int(self._head_path(stream).read_text(encoding="utf-8").strip() or 0)
+        except (OSError, ValueError):
+            return 0
+
+    def _write_mark(self, stream: str, seq: int) -> None:
+        if seq <= self._read_mark(stream):
+            return  # the mark only ever goes up
+        try:
+            self._atomic_write(self._head_path(stream), f"{seq}\n".encode("utf-8"))
+        except LedgerUnavailable:
+            pass  # best effort: the events themselves are still the truth
+
     def _lock_for(self, stream: str) -> asyncio.Lock:
         return self._locks.setdefault(stream, asyncio.Lock())
 
     # -------------------------------------------------------------- lifecycle
     async def start(self) -> None:
         try:
-            for sub in ("streams", "snapshots", "idem", "blobs"):
+            for sub in ("streams", "snapshots", "idem", "blobs", "heads"):
                 (self.root / sub).mkdir(parents=True, exist_ok=True)
             (self.root / "LOCK").touch(exist_ok=True)
         except OSError as exc:
@@ -212,7 +244,10 @@ class JsonlBackend:
         if good_end != len(data):
             self._truncate_file(path, good_end)
             self.recovered.append(stream)
-        self._meta[stream] = _StreamMeta(head, good_end, last_ts)
+        # A compaction that kept nothing leaves a file with no seq in it
+        # at all; the mark is the only remaining record of what this
+        # stream has already handed out.
+        self._meta[stream] = _StreamMeta(max(head, self._read_mark(stream)), good_end, last_ts)
         self._idem.rebuild(stream, events)
         self._idem_loaded.add(stream)
         self._index_dirty = True
@@ -248,7 +283,7 @@ class JsonlBackend:
             if path.exists():  # appended by another process since start
                 self._scan_stream(stream, path)
                 meta = self._meta.get(stream)
-        return meta.head if meta else 0
+        return max(meta.head if meta else 0, self._read_mark(stream))
 
     def _refresh_if_grown(self, stream: str) -> None:
         """Another process may have appended: if the file is longer than
@@ -503,6 +538,13 @@ class JsonlBackend:
                 removed = len(events) - len(kept)
                 if removed == 0:
                     return 0
+                # Before anything is removed, write down what this stream
+                # has already handed out. In memory `meta.head` survives
+                # the rewrite, but nothing durable does: a rescan (index
+                # lost, or another process seeing the size change) reads
+                # head straight out of a file that may now be empty.
+                self._write_mark(stream, max(self._meta[stream].head if stream in self._meta else 0,
+                                             events[-1].seq if events else 0))
                 body = b"".join((canonical_json(e.to_dict()) + "\n").encode("utf-8") for e in kept)
                 self._atomic_write(self._stream_path(stream), body)
                 meta = self._meta.setdefault(stream, _StreamMeta())
@@ -522,7 +564,10 @@ class JsonlBackend:
         self._offsets.pop(stream, None)
         async with self._lock_for(stream):
             with self._file_lock():
-                for path in (self._stream_path(stream), self._snapshot_path(stream), self._idem_path(stream)):
+                # Deleting the stream is the one thing that starts it
+                # over, so the mark goes with it; compaction never does.
+                for path in (self._stream_path(stream), self._snapshot_path(stream), self._idem_path(stream),
+                             self._head_path(stream)):
                     if path.exists():
                         path.unlink()
                 self._meta.pop(stream, None)
