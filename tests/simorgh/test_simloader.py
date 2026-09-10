@@ -450,3 +450,146 @@ class SkipKeyTestCase(unittest.TestCase):
                 cwd=Path.cwd(), timeout_s=30, progress=simloader.PytestProgress(started=0.0),
                 skip=_AlwaysPressed(),
             )
+
+
+class TheGateCannotBeTalkedIntoPassingTestCase(unittest.TestCase):
+    """What a change is allowed to do to the suite that judges it.
+
+    Every transcript below was captured from a real `simloader.py bless`
+    against a throwaway repo (observer, 2026-09-10). Each one ended, before
+    the fix, with `[simloader] blessed <sha> as sim-good-000N  (unit suite
+    green)` -- the cheapest way to pass this gate was to break the tests
+    rather than fix the code.
+    """
+
+    def verdict(self, code, text, baseline=None):
+        return simloader.unit_verdict(code, text, baseline=baseline)
+
+    def test_an_honest_green_run_still_passes(self):
+        ok, why, ran = self.verdict(0, "..\n2 passed in 0.65s\n")
+        self.assertTrue(ok, why)
+        self.assertEqual(ran, 2)
+
+    def test_deleting_every_test_is_not_a_pass(self):
+        """`git rm tests/test_*.py` -> pytest exit 5, "no tests ran"."""
+        ok, why, ran = self.verdict(5, "no tests ran in 0.61s\n")
+        self.assertFalse(ok)
+        self.assertEqual(ran, 0)
+        self.assertIn("no tests actually ran", why)
+
+    def test_a_conftest_that_collects_nothing_is_not_a_pass(self):
+        """`collect_ignore_glob = ["*"]`, or `addopts = -k nomatch`."""
+        self.assertFalse(self.verdict(5, "no tests ran in 0.64s\n")[0])
+
+    def test_a_blanket_skip_is_not_a_pass(self):
+        """`pytest_collection_modifyitems` adding `pytest.mark.skip`:
+        exit 0, and not one assertion was evaluated."""
+        ok, why, _ran = self.verdict(0, "ss\n2 skipped in 0.62s\n")
+        self.assertFalse(ok)
+        self.assertIn("no tests actually ran", why)
+
+    def test_a_forced_exit_code_does_not_beat_the_transcript(self):
+        """`def pytest_sessionfinish(session, exitstatus):
+        session.exitstatus = 0`. The loader printed "unit suite: 1
+        failed, 1 passed" and blessed the commit on the very next line."""
+        ok, why, _ran = self.verdict(0, ".F\nFAILED tests/test_real.py::test_bad\n1 failed, 1 passed in 0.62s\n")
+        self.assertFalse(ok)
+        self.assertIn("reported 1 failed", why)
+
+    def test_a_collection_error_is_not_a_pass(self):
+        ok, why, _ran = self.verdict(2, "ERROR tests/test_x.py\n1 error in 0.32s\n")
+        self.assertFalse(ok)
+
+    def test_the_suite_may_not_quietly_shrink(self):
+        """A ratchet against the last green run, so removing most of the
+        suite is refused even though what is left passes."""
+        self.assertFalse(self.verdict(0, "..\n2 passed in 1.1s\n", baseline=3)[0])
+        self.assertTrue(self.verdict(0, "." * 95 + "\n95 passed in 1.1s\n", baseline=100)[0])
+
+    def test_the_summary_is_read_from_the_last_line_that_has_counts(self):
+        text = "1 passed in prose that mentions 9 failed earlier\n\n7 passed, 2 skipped in 3.4s\n"
+        self.assertEqual(simloader.unit_summary(text), {"passed": 7, "skipped": 2})
+
+    def test_the_baseline_round_trips_and_survives_garbage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes = Path(tmp) / "notes"
+            self.assertIsNone(simloader.read_baseline(notes))
+            simloader.write_baseline(notes, 2865)
+            self.assertEqual(simloader.read_baseline(notes), 2865)
+            (notes / "unit_baseline.json").write_text("{not json")
+            self.assertIsNone(simloader.read_baseline(notes))
+
+
+class TheTagMustMeanTheCommitTestCase(LoaderTestCase):
+    """A tag is the loader's statement that it verified *that commit*."""
+
+    def test_untracked_code_blocks_a_bless(self):
+        """Live (2026-09-10): a commit whose test imported an untracked
+        `helper.py`. `bless` ran the working tree -- "1 passed" -- and
+        tagged the commit. A clean checkout of that tag cannot even
+        collect: `ERROR tests/test_x.py ... 1 error`."""
+        (self.repo.path / "helper.py").write_text("VALUE = 1\n")
+        self.assertFalse(simloader.is_dirty(self.repo.path))
+        self.assertEqual(simloader.untracked_code(self.repo.path), ["helper.py"])
+        with self._gate([(True, "green")]):
+            rc = simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
+        self.assertEqual(rc, 2)
+        self.assertEqual(simloader.good_tags(self.repo.path), [])
+
+    def test_untracked_code_lets_sim_boot_but_earns_no_tag(self):
+        """Refusing the boot would be worse than the disease: this tree
+        did pass. Only the tag is withheld."""
+        (self.repo.path / "helper.py").write_text("VALUE = 1\n")
+        with self._gate([(True, "green")]), \
+             mock.patch.object(simloader, "launch_sim", return_value=0) as launched:
+            rc = simloader.cmd_run(
+                self.repo.path, self.notes, full=False, timeout_s=10, max_rollbacks=3,
+                watchdog_s=60, sim_args=[],
+            )
+        self.assertEqual(rc, 0)
+        self.assertTrue(launched.called)
+        self.assertEqual(simloader.good_tags(self.repo.path), [])
+        self.assertIn("tag_withheld", (self.notes / "decisions.jsonl").read_text())
+
+    def test_untracked_data_still_does_not_block_a_tag(self):
+        (self.repo.path / "papers").mkdir()
+        (self.repo.path / "papers" / "a.pdf").write_bytes(b"%PDF")
+        (self.repo.path / "notes.txt").write_text("scratch")
+        self.assertEqual(simloader.untracked_code(self.repo.path), [])
+        with self._gate([(True, "green")]):
+            self.assertEqual(simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10), 0)
+
+
+class ABrokenTagIsNotAKnownGoodImageTestCase(LoaderTestCase):
+    def _break_a_tag(self) -> None:
+        tree = _git(self.repo.path, "rev-parse", "HEAD^{tree}")
+        _git(self.repo.path, "tag", "sim-good-0001", tree)
+
+    def test_a_tag_that_is_not_a_commit_is_ignored(self):
+        self._break_a_tag()
+        self.assertEqual(simloader.good_tags(self.repo.path), [])
+        self.assertEqual(simloader.broken_tags(self.repo.path), ["sim-good-0001"])
+
+    def test_rollback_onto_a_broken_tag_reports_instead_of_crashing(self):
+        """Before: `RuntimeError: git checkout -q sim-good-0001: fatal:
+        Cannot switch branch to a non-commit`, an uncaught traceback out
+        of the boot path with no note written."""
+        self._break_a_tag()
+        rc = simloader.cmd_rollback(self.repo.path, self.notes, reason="x")
+        self.assertEqual(rc, 1)  # nothing older to roll back to
+
+    def test_a_checkout_that_fails_is_reported_not_raised(self):
+        _git(self.repo.path, "tag", "sim-good-0001")
+        self.repo.commit("two")
+        _git(self.repo.path, "tag", "sim-good-0002")
+        with mock.patch.object(
+            simloader, "git",
+            side_effect=lambda *a, **k: (subprocess.CompletedProcess(a, 1, "", "fatal: nope")
+                                         if a[0] == "checkout" else _real_git(*a, **k)),
+        ):
+            rc = simloader.cmd_rollback(self.repo.path, self.notes, reason="x")
+        self.assertEqual(rc, 2)
+        self.assertIn("rollback_failed", (self.notes / "decisions.jsonl").read_text())
+
+
+_real_git = simloader.git

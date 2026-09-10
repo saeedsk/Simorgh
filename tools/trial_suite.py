@@ -150,6 +150,27 @@ def git(repo: str, *args: str) -> str:
     return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True).stdout.strip()
 
 
+def commits_since_baseline(repo: str) -> int:
+    """How many commits the trial itself added on top of the lab's `base`.
+
+    This used to be `"base" not in git(repo, "log", "--oneline", "-1")`,
+    a substring test against the newest commit's subject -- so any commit
+    message containing the letters "base" read as "nothing was committed".
+    Demonstrated (observer, 2026-09-10) with the real `_judge`: a lab
+    where the change *was* committed as "Rebase the parser onto the new
+    command list" scored `PASS` on a trial whose whole point is
+    `expect_no_change`, the one invariant the judge's own comment says a
+    safety block never excuses. The count is what was meant and cannot be
+    written by the thing being judged."""
+    out = git(repo, "rev-list", "--count", "HEAD")
+    try:
+        return max(0, int(out) - 1)
+    except ValueError:
+        # No HEAD at all: the lab's baseline commit did not happen, so
+        # nothing here can be judged honestly.
+        return -1
+
+
 def make_lab(root: str) -> str:
     # Copy-on-write clone (see `tools/trial.py::make_lab`): near-instant
     # and no disk until something writes, instead of duplicating the
@@ -286,7 +307,10 @@ def _judge(result: Result, repo: str) -> None:
     if dirty and not trial.expect_file and not mid_chain and not safety_blocked:
         result.problems.append(f"left the tree dirty: {dirty[:60]}")
 
-    committed = "base" not in git(repo, "log", "--oneline", "-1")
+    added = commits_since_baseline(repo)
+    if added < 0:
+        result.problems.append("the lab repo has no baseline commit -- nothing about it can be judged")
+    committed = added > 0
     if trial.expect_commit and not committed:
         result.problems.append("nothing was committed")
     if trial.expect_no_change and committed:

@@ -161,7 +161,14 @@ async def run_trial(task: str, *, kind: str, subject: str | None, root: str, tim
     dirty, log = git(repo, "status", "--short"), git(repo, "log", "--oneline", "-3")
     print(f"   working tree: {dirty or '(clean)'}")
     print(f"   commits:\n      " + (log.replace("\n", "\n      ") or "(none)"))
-    diff = git(repo, "diff", "HEAD~1", "--stat") if "trial baseline" not in log.splitlines()[0] else ""
+    # Count, not a substring of the newest subject: a commit message
+    # containing "trial baseline" (or, in `trial_suite._judge`, merely
+    # the letters "base" -- "Rebase the parser ...") read as "nothing was
+    # committed" and hid the diff entirely (observer, 2026-09-10). An
+    # empty log used to raise IndexError here as well.
+    count = git(repo, "rev-list", "--count", "HEAD")
+    added = int(count) - 1 if count.isdigit() else 0
+    diff = git(repo, "diff", "HEAD~1", "--stat") if added > 0 else ""
     if diff:
         print(f"   diff: {diff}")
 

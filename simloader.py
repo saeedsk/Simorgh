@@ -380,14 +380,51 @@ def untracked(repo: Path) -> list[str]:
 
 
 def good_tags(repo: Path) -> list[tuple[int, str]]:
-    """Every known-good tag, oldest first."""
+    """Every known-good tag that resolves to a real commit, oldest first.
+
+    A `sim-good-*` tag that does not name a commit -- deleted underneath
+    us, pointing at a tree, or left dangling by a repair -- used to be
+    counted anyway: `status` announced it as "latest known-good" with a
+    blank commit beside it, and `rollback` picked it as a target and died
+    with an uncaught `RuntimeError: git checkout -q sim-good-0001: fatal:
+    Cannot switch branch to a non-commit`, straight out of `cmd_run`,
+    with no note written and no guidance printed (observer, 2026-09-10).
+    A tag the loader cannot check out is not a known-good image."""
     out = git("tag", "--list", f"{TAG_PREFIX}*", cwd=repo).stdout.split()
     found = []
     for tag in out:
         match = _TAG.match(tag)
-        if match:
+        if match and tag_of(repo, tag):
             found.append((int(match.group(1)), tag))
     return sorted(found)
+
+
+def broken_tags(repo: Path) -> list[str]:
+    """`sim-good-*` tags that name nothing checkout-able -- for `status`,
+    so a tag being ignored is visible rather than merely absent."""
+    out = git("tag", "--list", f"{TAG_PREFIX}*", cwd=repo).stdout.split()
+    return sorted(tag for tag in out if _TAG.match(tag) and not tag_of(repo, tag))
+
+
+# Untracked files that can change what the test run does. `papers/x.pdf`
+# and a scratch shell script cannot; a `.py`, a `conftest.py` or a pytest
+# config file is read by the very suite that decides whether a commit is
+# fit to be tagged.
+_UNTRACKED_CODE = re.compile(r"(^|/)(conftest\.py|pytest\.ini|tox\.ini|setup\.cfg)$|\.(py|pth)$")
+
+
+def untracked_code(repo: Path) -> list[str]:
+    """Untracked files the gate would import but the commit does not have.
+
+    Demonstrated live (observer, 2026-09-10): a commit whose test imports
+    `helper.py`, with `helper.py` left untracked. `bless` ran the suite
+    against the working tree -- "1 passed" -- and tagged the commit
+    `sim-good-0001`. A clean checkout of that exact tag then fails to
+    collect at all. The tag is a statement that the loader verified that
+    commit, and the loader had verified a different tree."""
+    return [path for path in untracked(repo)
+            if _UNTRACKED_CODE.search(path) and "__pycache__" not in path
+            and not path.startswith(NOTES_DIRNAME + "/")]
 
 
 def tag_of(repo: Path, tag: str) -> str:
@@ -434,7 +471,8 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
         if notes is not None:
             notes.mkdir(parents=True, exist_ok=True)
             (notes / "last_unit.txt").write_text(tests.stdout)
-        if tests.returncode not in (0, 5):
+        unit_ok, unit_why, ran = unit_verdict(tests.returncode, tests.stdout, baseline=read_baseline(notes))
+        if not unit_ok:
             # Name them. "9 failed" alone sent the human off to re-run
             # the whole suite to learn which nine (2026-09-07). `ERROR `
             # is what a collection failure looks like -- exactly the
@@ -446,9 +484,10 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
                 say(line)
             if len(failed) > 12:
                 say(f"... and {len(failed) - 12} more (full output: {notes / 'last_unit.txt' if notes else 'not kept'})")
-            return False, f"unit suite failed: {tail}"
+            return False, f"unit suite failed: {unit_why} ({tail})"
+        write_baseline(notes, ran)
         if not full:
-            return True, "unit suite green"
+            return True, f"unit suite green ({unit_why})"
 
         rule("gate: scored trial suite")
         total = trial_count(repo)
@@ -479,6 +518,87 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
     if trials.returncode != 0:
         return False, "trial suite had failures"
     return True, "unit suite and trial suite green"
+
+
+_COUNT = re.compile(r"(\d+)\s+(passed|failed|errors?|skipped|xfailed|xpassed|deselected)\b")
+
+
+def unit_summary(text: str) -> dict[str, int]:
+    """The counts pytest itself printed, from its own summary line.
+
+    The exit code is a single byte under the control of the code being
+    judged; the summary line is what pytest says happened. Reading both
+    is the only way to notice they disagree."""
+    for line in reversed(text.strip().splitlines()):
+        found = _COUNT.findall(line)
+        if not found:
+            continue
+        counts: dict[str, int] = {}
+        for number, word in found:
+            counts["error" if word.startswith("error") else word] = int(number)
+        return counts
+    return {}
+
+
+def unit_verdict(code: int, text: str, *, baseline: int | None) -> tuple[bool, str, int]:
+    """Did the unit suite actually pass? Returns (ok, why, tests_that_ran).
+
+    Three separate attacks on the gate were demonstrated live (observer,
+    2026-09-10), each of which ended with `[simloader] blessed ... (unit
+    suite green)`:
+
+    - deleting every test file, or a `conftest.py` with
+      `collect_ignore_glob = ["*"]`, or a `pytest.ini` whose `addopts`
+      select nothing: pytest exits **5**, "no tests ran", which the gate
+      accepted as green. Exit 5 was allowed so an empty checkout would
+      not wedge the loader; the cost was that the cheapest way to pass
+      the gate became deleting the tests.
+    - a `conftest.py` with `pytest_sessionfinish` setting
+      `session.exitstatus = 0`: the loader printed `unit suite: 1
+      failed, 1 passed` and blessed the commit on the next line. The
+      evidence was already on screen and nothing read it.
+    - `pytest_collection_modifyitems` adding a blanket `skip` marker:
+      "2 skipped", exit 0, blessed.
+
+    So: the exit code must be 0, the summary must not report a failure
+    or an error, and tests must actually have RUN -- more than zero, and
+    not far below what the last green gate on this machine saw. The
+    baseline is stored next to the notes and moves with each green gate,
+    so deleting a tenth of the suite still passes and gutting it does
+    not."""
+    counts = unit_summary(text)
+    failed = counts.get("failed", 0) + counts.get("error", 0)
+    ran = counts.get("passed", 0) + failed + counts.get("xfailed", 0) + counts.get("xpassed", 0)
+    if code not in (0, 5):
+        return False, f"pytest exited {code}", ran
+    if failed:
+        # Exit 0 and "N failed" on the same run: a conftest hook can
+        # write the exit code, so believe the transcript, not the byte.
+        return False, f"pytest exited {code} but reported {failed} failed/errored", ran
+    if ran <= 0:
+        return False, "no tests actually ran -- the suite was empty, ignored, or entirely skipped", ran
+    if baseline and ran < baseline * 0.9:
+        return False, f"only {ran} tests ran; the last green gate ran {baseline} -- the suite shrank by more than a tenth", ran
+    return True, f"{ran} tests ran, none failed", ran
+
+
+def read_baseline(notes: Path | None) -> int | None:
+    if notes is None:
+        return None
+    try:
+        return int(json.loads((notes / "unit_baseline.json").read_text())["tests"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def write_baseline(notes: Path | None, tests: int) -> None:
+    if notes is None or tests <= 0:
+        return
+    try:
+        notes.mkdir(parents=True, exist_ok=True)
+        (notes / "unit_baseline.json").write_text(json.dumps({"tests": tests, "ts": time.time()}))
+    except OSError as exc:  # noqa: BLE001 -- never lose a boot to bookkeeping
+        say(f"could not record the unit baseline ({exc!r}); continuing")
 
 
 def trial_count(repo: Path) -> int:
@@ -526,6 +646,14 @@ def cmd_status(repo: Path, notes: Path) -> int:
     stray = untracked(repo)
     if stray:
         say(f"untracked (ignored by the gate's dirty check): {', '.join(stray[:5])}{' ...' if len(stray) > 5 else ''}")
+    stray_code = untracked_code(repo)
+    if stray_code:
+        say(f"untracked CODE -- the gate would run it, no tag can be earned while it is here: {', '.join(stray_code[:5])}")
+    for tag in broken_tags(repo):
+        say(f"ignoring {tag}: it does not name a commit")
+    baseline = read_baseline(notes)
+    if baseline:
+        say(f"last green gate ran {baseline} tests; a run below {int(baseline * 0.9)} is refused")
     if not tags:
         say("known-good tags: none yet -- run `bless` after a green gate")
         return 0
@@ -544,6 +672,13 @@ def cmd_bless(repo: Path, notes: Path, *, full: bool, timeout_s: float) -> int:
     rule("bless")
     if is_dirty(repo):
         say("refusing: the working tree has uncommitted changes -- commit or stash them first")
+        return 2
+    stray_code = untracked_code(repo)
+    if stray_code:
+        say("refusing: the gate would run against code this commit does not contain --")
+        for path in stray_code[:8]:
+            say(f"  {path}  (untracked)")
+        say("commit them or move them aside; a tag has to mean the commit was verified")
         return 2
     commit = head(repo)
     existing = next((tag for _n, tag in good_tags(repo) if tag_of(repo, tag) == commit), None)
@@ -618,7 +753,13 @@ def cmd_rollback(repo: Path, notes: Path, *, reason: str) -> int:
     if target is None:
         say("nothing older to roll back to")
         return 1
-    git("checkout", "-q", target, cwd=repo, check=True)
+    done = git("checkout", "-q", target, cwd=repo)
+    if done.returncode != 0:
+        # A rollback that cannot happen is a thing to report, not a
+        # traceback out of the boot path.
+        say(f"could not check out {target}: {(done.stderr or done.stdout).strip()}")
+        write_note(notes, {"kind": "rollback_failed", "from": current, "to": target, "reason": reason})
+        return 2
     say(f"rolled back {current} -> {target} ({tag_of(repo, target)}): {reason}")
     write_note(notes, {"kind": "rollback", "from": current, "to": target, "reason": reason})
     return 0
@@ -641,7 +782,14 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
         if ok:
             say(f"gate passed: {why}")
             commit = head(repo)
-            if not any(tag_of(repo, t) == commit for _n, t in good_tags(repo)) and not is_dirty(repo):
+            stray_code = untracked_code(repo)
+            if stray_code:
+                # Booting is fine -- this tree just passed. Tagging is
+                # not: the tag would name a commit that lacks these.
+                say(f"not tagging: the gate ran with untracked code ({', '.join(stray_code[:3])}"
+                    f"{' ...' if len(stray_code) > 3 else ''}) that {commit} does not contain")
+                write_note(notes, {"kind": "tag_withheld", "commit": commit, "untracked": stray_code[:20]})
+            elif not any(tag_of(repo, t) == commit for _n, t in good_tags(repo)) and not is_dirty(repo):
                 tag = next_tag(repo)
                 git("tag", "-a", tag, "-m", f"simloader: {why}", cwd=repo, check=True)
                 say(f"tagged {commit} as {tag}")
