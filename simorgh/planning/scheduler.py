@@ -116,25 +116,75 @@ class Scheduler:
         # subsystem that reads `autonomous_paused`), but the backlog
         # already in the store kept executing, which is not what anyone
         # means by "off".
-        self.autonomous_paused = False
+        self._autonomous_paused = False
+        #: task id -> the `{id}:{updated_at}` generation last offered.
+        #: Bounded by the dispatch limit: see `dispatch_ready`.
+        self._last_offer: dict[str, str] = {}
+
+    @property
+    def autonomous_paused(self) -> bool:
+        return self._autonomous_paused
+
+    @autonomous_paused.setter
+    def autonomous_paused(self, value: bool) -> None:
+        """Flipping the pause forgets what was offered.
+
+        `dispatch_ready` offers each `{id}:{updated_at}` generation once,
+        and a task held back by the pause never got its turn. `auto on`
+        has to release the held work immediately rather than wait for
+        each task's next transition, so the table is cleared on any
+        change either way."""
+        if value != self._autonomous_paused:
+            self._last_offer.clear()
+        self._autonomous_paused = bool(value)
 
     def _offerable(self, task: Task) -> bool:
         return not (self.autonomous_paused and task.origin in self._autonomous_origins)
 
     async def dispatch_ready(self) -> None:
+        """Offer the ready work, and offer each generation of it ONCE.
+
+        `idempotency_key` makes a repeat offer a no-op for the
+        *consumer*; it does not stop the publish, and every publish
+        writes a trace stream. Dispatching on the one-second tick (so a
+        backlog is not left waiting for an idle tick that never comes)
+        therefore re-published the same five offers every second: 350 of
+        400 consecutive trace streams on the creator's live ledger were
+        `task.available` for the same five task ids, ~5 new files a
+        second, on a ledger that has been to 192k files before
+        (live-caught 2026-09-10, minutes after the tick dispatch went
+        in). The queue was not moving because the provider budget was
+        exhausted, which is exactly when a re-offer is most useless and
+        most frequent.
+
+        So the key is checked HERE. A task is offered again only when
+        something about it changed -- `updated_at` moves on every
+        transition, including the lease expiry and the blocked retry
+        that are the reasons to re-offer at all -- and the table is
+        pruned to what is currently ready, so it cannot grow.
+        """
         if self.paused:
             return
+        offered: dict[str, str] = {}
         for task in select_ready(self._store, priority_weights=self._priority_weights, limit=5,
-                                  now=self._clock.now()):
+                                 now=self._clock.now()):
             if not self._offerable(task):
+                continue
+            key = f"{task.id}:{task.updated_at}"
+            offered[task.id] = key
+            if self._last_offer.get(task.id) == key:
                 continue
             message = Message.new(
                 topics.TASK_AVAILABLE, source=self._source,
                 partition_key=f"task:{task.id}",
-                idempotency_key=f"{task.id}:{task.updated_at}",
+                idempotency_key=key,
                 payload={"task_id": task.id, "kind": task.kind, "lease_seconds": self._lease_seconds},
             )
             await self._bus.publish(message)
+        # Only what is ready right now: a task that has been claimed,
+        # completed or dropped out of the top of the queue must be
+        # offered afresh when it comes back.
+        self._last_offer = offered
 
     async def scan_leases(self) -> None:
         """Return abandoned work to the queue. A lease that outlives its

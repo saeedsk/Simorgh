@@ -53,7 +53,8 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context
 from simorgh.ledger.factory import make_ledger
-from simorgh.planning.model import AVAILABLE, BLOCKED
+from simorgh.planning.model import AVAILABLE, BLOCKED, Task
+from simorgh.planning.scheduler import Scheduler
 from simorgh.planning.service import Service
 
 from tests.simorgh.helpers import FakeClock
@@ -162,3 +163,77 @@ class BacklogIsOfferedEverySecondTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OfferedOncePerGenerationTestCase(unittest.IsolatedAsyncioTestCase):
+    """Offering every second must not PUBLISH every second.
+
+    `idempotency_key` makes a repeated offer a no-op for the consumer.
+    It does not stop the publish, and every publish writes its own trace
+    stream. Live, 2026-09-10, minutes after the tick dispatch went in:
+    350 of 400 consecutive trace streams on the creator's ledger were
+    `task.available` for the same five task ids, about five new files a
+    second, on a ledger that reached 192,332 trace streams in a day once
+    before. The queue was not moving because the provider budget was
+    exhausted -- which is exactly when a re-offer is most useless and
+    most frequent.
+    """
+
+    def _scheduler(self, sent, tasks):
+        class _Store:
+            def __init__(self, tasks):
+                self._tasks = tasks
+
+            def ready(self, limit=1000):
+                return list(self._tasks)
+
+        class _Bus:
+            async def publish(self, message):
+                sent.append(message.payload["task_id"])
+
+        class _Clock:
+            def now(self):
+                return 0.0
+
+        return Scheduler(_Store(tasks), _Bus(), _Clock(), source="planning")
+
+    def _task(self, tid, updated_at=1.0):
+        return Task(id=tid, kind="patch", description="d", origin="human",
+                    status=AVAILABLE, created_at=0.0, updated_at=updated_at)
+
+    async def test_an_unchanged_task_is_offered_once_not_every_tick(self):
+        sent: list[str] = []
+        tasks = [self._task("a"), self._task("b")]
+        scheduler = self._scheduler(sent, tasks)
+        for _ in range(30):
+            await scheduler.dispatch_ready()
+        self.assertEqual(sorted(sent), ["a", "b"])
+
+    async def test_a_task_that_changed_is_offered_again(self):
+        # `updated_at` moves on every transition -- including the lease
+        # expiry and the blocked retry that are the reasons to re-offer.
+        sent: list[str] = []
+        tasks = [self._task("a")]
+        scheduler = self._scheduler(sent, tasks)
+        await scheduler.dispatch_ready()
+        tasks[0] = self._task("a", updated_at=2.0)
+        await scheduler.dispatch_ready()
+        self.assertEqual(sent, ["a", "a"])
+
+    async def test_a_task_that_left_the_queue_is_offered_afresh(self):
+        sent: list[str] = []
+        tasks = [self._task("a")]
+        scheduler = self._scheduler(sent, tasks)
+        await scheduler.dispatch_ready()
+        tasks.clear()                      # claimed by a worker
+        await scheduler.dispatch_ready()
+        tasks.append(self._task("a"))      # and handed back unchanged
+        await scheduler.dispatch_ready()
+        self.assertEqual(sent, ["a", "a"])
+
+    async def test_the_table_cannot_grow_past_what_is_ready(self):
+        sent: list[str] = []
+        tasks = [self._task(f"t{i}") for i in range(200)]
+        scheduler = self._scheduler(sent, tasks)
+        await scheduler.dispatch_ready()
+        self.assertLessEqual(len(scheduler._last_offer), 5)  # noqa: SLF001
