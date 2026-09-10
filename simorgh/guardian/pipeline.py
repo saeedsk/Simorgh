@@ -18,12 +18,20 @@ class Pipeline:
 
     async def decide(self, proposal: Proposal, ctx: DecisionContext) -> Verdict:
         escalation: tuple[str, tuple[str, ...]] | None = None  # (layer, reasons)
+        notes: list[str] = []
         for rule in self.rules:
             decision = await rule.evaluate(proposal, ctx)
             if decision.kind == "deny":
-                return Verdict("denied", decision.layer, decision.reasons)
+                return Verdict("denied", decision.layer, decision.reasons, notes=tuple(notes))
             if decision.kind == "escalate" and escalation is None:
                 escalation = (decision.layer, decision.reasons)
+            # A rule that abstains WITH reasons noticed something it
+            # chose not to act on -- shellcheck's non-dangerous
+            # findings, say. Those were dropped on the floor here, which
+            # made ShellcheckRule's "visible in the trace" untrue. They
+            # ride along on the verdict instead of blocking the call.
+            if decision.kind == "abstain" and decision.reasons:
+                notes.extend(f"{decision.layer}: {reason}" for reason in decision.reasons)
             # allow/abstain: keep going -- an allow from one rule never
             # short-circuits the rest (deny always wins over allow).
 
@@ -32,10 +40,10 @@ class Pipeline:
             if ctx.config.classifier_enabled and ctx.classify is not None:
                 verdict = await ctx.classify(proposal)
                 if verdict == "ALLOW":
-                    return Verdict("approved", layer)
+                    return Verdict("approved", layer, notes=tuple(notes))
                 if verdict == "DENY":
-                    return Verdict("denied", "classifier", reasons)
+                    return Verdict("denied", "classifier", reasons, notes=tuple(notes))
                 # None (floor) or "ASK": fall through to needs_human.
-            return Verdict("needs_human", layer, reasons)
+            return Verdict("needs_human", layer, reasons, notes=tuple(notes))
 
-        return Verdict("approved")
+        return Verdict("approved", notes=tuple(notes))

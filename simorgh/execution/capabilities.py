@@ -90,7 +90,28 @@ async def _puppeteer() -> tuple[bool, str]:
             return False, "npm root -g produced nothing"
         from pathlib import Path
 
-        return (Path(root) / "puppeteer").exists(), f"{root}/puppeteer"
+        # A DIRECTORY existing is not an installed package: a failed or
+        # interrupted `npm i -g puppeteer` leaves one behind, and the
+        # probe reported the capability as present. Requiring
+        # package.json is the cheap check that the install actually
+        # completed. It still does not prove a browser will launch --
+        # puppeteer downloads Chromium separately, and a probe has no
+        # business spending that -- so the detail says which of the two
+        # was checked rather than implying more than it knows.
+        package = Path(root) / "puppeteer"
+        manifest = package / "package.json"
+        if not manifest.is_file():
+            if package.exists():
+                return False, f"{package} exists but has no package.json -- an incomplete install"
+            return False, f"puppeteer is not installed in {root} (npm i -g puppeteer)"
+        version = ""
+        try:
+            import json as _json
+
+            version = str(_json.loads(manifest.read_text()).get("version") or "")
+        except (OSError, ValueError):
+            pass
+        return True, f"puppeteer {version or '(version unreadable)'} at {package}"
 
     return await asyncio.to_thread(_look)
 

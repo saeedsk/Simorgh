@@ -430,9 +430,15 @@ class Service:
             ))
             return
         verdict = await self._pipeline.decide(proposal, ctx)
-        await self._ctx.ledger.append(stream, self._event(
-            stream, "decided", {"kind": verdict.kind, "layer": verdict.layer},
-        ))
+        decided = {"kind": verdict.kind, "layer": verdict.layer}
+        if verdict.notes:
+            # What a rule noticed and chose not to act on -- shellcheck's
+            # non-dangerous findings, say. `ShellcheckRule` has always
+            # said these ride along "so the finding is visible in the
+            # trace"; until they were written here that was not true of
+            # anywhere.
+            decided["notes"] = list(verdict.notes)
+        await self._ctx.ledger.append(stream, self._event(stream, "decided", decided))
 
         if verdict.kind == "denied":
             if verdict.layer in ("protected", "denylist", "immunity"):

@@ -11,6 +11,10 @@ tool still answers, so nothing looks broken.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+import tempfile
+import types
+import unittest.mock
 
 from simorgh.execution.capabilities import (
     Probe, ProbeResult, degraded_detail, run_probes,
@@ -146,3 +150,51 @@ class SourcebookTestCase(unittest.TestCase):
 
         self.assertIn("open-meteo", scaffolds.render(profiles.RESEARCH, task="x"))
         self.assertNotIn("open-meteo", scaffolds.render(profiles.PATCH, task="x"))
+
+
+class PuppeteerProbeTestCase(unittest.IsolatedAsyncioTestCase):
+    """The probe used to answer "is puppeteer installed?" with "does a
+    directory of that name exist?" -- so a failed or interrupted
+    `npm i -g puppeteer`, which leaves the directory behind, reported the
+    capability as present and `render_page` then failed at the point of
+    use instead."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    async def _probe(self):
+        from simorgh.execution import capabilities
+
+        completed = types.SimpleNamespace(stdout=str(self.root), returncode=0)
+        with unittest.mock.patch.object(capabilities.shutil, "which", return_value="/usr/bin/npm"), \
+                unittest.mock.patch.object(capabilities.subprocess, "run", return_value=completed):
+            return await capabilities._puppeteer()
+
+    async def test_a_complete_install_is_found_and_its_version_reported(self):
+        package = self.root / "puppeteer"
+        package.mkdir()
+        (package / "package.json").write_text('{"name": "puppeteer", "version": "25.8.0"}')
+        ok, detail = await self._probe()
+        self.assertTrue(ok)
+        self.assertIn("25.8.0", detail)
+
+    async def test_a_bare_directory_is_not_an_install(self):
+        (self.root / "puppeteer").mkdir()
+        ok, detail = await self._probe()
+        self.assertFalse(ok)
+        self.assertIn("incomplete install", detail)
+
+    async def test_nothing_installed_says_how_to_install_it(self):
+        ok, detail = await self._probe()
+        self.assertFalse(ok)
+        self.assertIn("npm i -g puppeteer", detail)
+
+    async def test_an_unreadable_manifest_is_still_an_install(self):
+        package = self.root / "puppeteer"
+        package.mkdir()
+        (package / "package.json").write_text("{not json")
+        ok, detail = await self._probe()
+        self.assertTrue(ok, "a corrupt manifest is not proof the package is absent")
+        self.assertIn("version unreadable", detail)

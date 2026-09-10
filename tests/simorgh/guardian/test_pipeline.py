@@ -126,3 +126,68 @@ class TestPipelineClassifier(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAbstainReasonsSurvive(unittest.IsolatedAsyncioTestCase):
+    """`ShellcheckRule` returns its non-dangerous findings on an
+    `abstain`, and its docstring says they ride along "so the finding is
+    visible in the trace without blocking the call". `Pipeline.decide`
+    read reasons only from `deny` and `escalate`, so they went nowhere:
+    the documented behaviour was not real anywhere in the system."""
+
+    class _Noticing:
+        name = layer = "shellcheck"
+
+        async def evaluate(self, proposal, ctx):
+            return Decision("abstain", self.layer, ("shellcheck SC2086: unquoted variable",))
+
+    class _Quiet:
+        name = layer = "quiet"
+
+        async def evaluate(self, proposal, ctx):
+            return Decision("abstain", self.layer)
+
+    class _Denying:
+        name = layer = "denylist"
+
+        async def evaluate(self, proposal, ctx):
+            return Decision("deny", self.layer, ("denied: nope",))
+
+    class _Escalating:
+        name = layer = "reversibility"
+
+        async def evaluate(self, proposal, ctx):
+            return Decision("escalate", self.layer, ("irreversible",))
+
+    async def _decide(self, rules):
+        return await Pipeline(tuple(rules)).decide(_proposal(), _ctx())
+
+    async def test_an_approved_action_carries_what_was_noticed(self):
+        verdict = await self._decide([self._Noticing(), self._Quiet()])
+        self.assertEqual(verdict.kind, "approved")
+        self.assertEqual(verdict.notes, ("shellcheck: shellcheck SC2086: unquoted variable",))
+
+    async def test_a_silent_abstain_adds_nothing(self):
+        verdict = await self._decide([self._Quiet()])
+        self.assertEqual(verdict.notes, ())
+
+    async def test_notes_never_become_reasons(self):
+        # A note must not read as a justification for the verdict.
+        verdict = await self._decide([self._Noticing()])
+        self.assertEqual(verdict.reasons, ())
+
+    async def test_a_denial_still_carries_earlier_notes(self):
+        verdict = await self._decide([self._Noticing(), self._Denying()])
+        self.assertEqual(verdict.kind, "denied")
+        self.assertEqual(verdict.reasons, ("denied: nope",))
+        self.assertIn("shellcheck SC2086: unquoted variable", verdict.notes[0])
+
+    async def test_an_escalation_carries_them_too(self):
+        verdict = await self._decide([self._Noticing(), self._Escalating()])
+        self.assertEqual(verdict.kind, "needs_human")
+        self.assertEqual(verdict.reasons, ("irreversible",))
+        self.assertTrue(verdict.notes)
+
+    async def test_a_note_names_the_layer_that_raised_it(self):
+        verdict = await self._decide([self._Noticing()])
+        self.assertTrue(verdict.notes[0].startswith("shellcheck: "))

@@ -71,6 +71,14 @@ class Verdict:
     layer: str = ""
     reasons: tuple[str, ...] = ()
     constraints: dict = field(default_factory=dict)
+    # What a rule noticed but did not act on. `ShellcheckRule` returns
+    # its non-dangerous findings on an `abstain` -- its docstring says
+    # they ride along "so the finding is visible in the trace without
+    # blocking the call" -- but `Pipeline.decide` read reasons only from
+    # `deny` and `escalate`, so they went nowhere at all and the
+    # documented behaviour was not real. An approved action can now
+    # carry them.
+    notes: tuple[str, ...] = ()
 
 
 class Rule(Protocol):
