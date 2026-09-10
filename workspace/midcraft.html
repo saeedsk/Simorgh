@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Midcraft</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:sans-serif}
+#hud{position:fixed;top:8px;left:8px;color:#fff;text-shadow:1px 1px 2px #000;font-size:13px;z-index:5;pointer-events:none}
+#cross{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;font-size:20px;z-index:5;pointer-events:none}
+#start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);color:#fff;z-index:10;cursor:pointer;text-align:center}
+#bar{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);z-index:5}
+#bar span{display:inline-block;width:24px;height:24px;border:2px solid #fff;margin:0 2px;cursor:pointer}
+#msg{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);color:#fff;text-shadow:1px 1px 2px #000;font-size:12px;z-index:5}
+</style>
+</head>
+<body>
+<div id="hud"></div>
+<div id="cross">+</div>
+<div id="bar"></div>
+<div id="msg"></div>
+<div id="start"><div><h1>Midcraft</h1><p>Click to play</p><p>WASD move · Space jump · Left-click break · Right-click place · 1-7 pick block · Esc release</p></div></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+if(!window.THREE){document.getElementById('start').innerHTML='<div><h1>Midcraft</h1><p>Could not load the 3D library (three.js) — check your internet connection and reload.</p></div>';}else{
+var W=16,H=64,D=16,CS=1,SEED=1337;
+function rand(){SEED=(SEED*1103515245+12345)&0x7fffffff;return SEED/0x7fffffff;}
+function noise2(x,z){var xi=Math.floor(x),zi=Math.floor(z),xf=x-xi,zf=z-zi;
+function h(a,b){var n=a*374761393+b*668265263;n=(n^(n>>13))*1274126177;return ((n^(n>>16))&0x7fffffff)/0x7fffffff;}
+var u=xf*xf*(3-2*xf),v=zf*zf*(3-2*zf);
+return h(xi,zi)*(1-u)*(1-v)+h(xi+1,zi)*u*(1-v)+h(xi,zi+1)*(1-u)*v+h(xi+1,zi+1)*u*v;}
+// world: map of "x,y,z" -> blockId ; 0 air 1 grass 2 dirt 3 stone 4 wood 5 leaves 6 sand 7 planks
+var world={},WX=64,WZ=64;
+for(var x=0;x<WX;x++)for(var z=0;z<WZ;z++){
+ var e=noise2(x/22,z/22)*10+noise2(x/7,z/7)*3;
+ var hgt=Math.floor(8+e);
+ for(var y=0;y<=hgt;y++){
+  var id= y===hgt ? (hgt<9?6:1) : (y>=hgt-3?2:3);
+  world[x+','+y+','+z]=id;
+ }
+ if(hgt>=9&&noise2(x/5+9,z/5+9)>0.72){
+  var th=4+Math.floor(rand()*3);
+  for(var y2=hgt+1;y2<=hgt+th;y2++)world[x+','+y2+','+z]=4;
+  for(var dx=-2;dx<=2;dx++)for(var dz=-2;dz<=2;dz++)for(var dy=0;dy<=2;dy++){
+   if(Math.abs(dx)+Math.abs(dz)+dy<=3&&(dx||dz||dy>0)){var k=(x+dx)+','+(hgt+th-1+dy)+','+(z+dz);if(!world[k])world[k]=5;}
+  }
+ }
+}
+var COLORS={1:0x5aa832,2:0x8a6142,3:0x8a8a8a,4:0x6b4a2b,5:0x2e7d32,6:0xd8cf9a,7:0xb8945f};
+var NAMES={1:'Grass',2:'Dirt',3:'Stone',4:'Wood',5:'Leaves',6:'Sand',7:'Planks'};
+var sel=1;
+var scene=new THREE.Scene();scene.background=new THREE.Color(0x87ceeb);scene.fog=new THREE.Fog(0x87ceeb,40,90);
+var camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,200);
+var renderer=new THREE.WebGLRenderer({antialias:true});renderer.setSize(innerWidth,innerHeight);document.body.appendChild(renderer.domElement);
+addEventListener('resize',function(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+var light=new THREE.DirectionalLight(0xffffff,0.9);light.position.set(30,60,20);scene.add(light);scene.add(new THREE.AmbientLight(0xffffff,0.5));
+var geo=new THREE.BoxGeometry(CS,CS,CS);
+var mats={};for(var k in COLORS){mats[k]=new THREE.MeshLambertMaterial({color:COLORS[k]});}
+var mesh=new THREE.Mesh(geo,mats[1]);
+// chunked rebuild: one merged mesh per rebuild using InstancedMesh per material
+var groups={};
+function rebuild(){
+ for(var k in groups){scene.remove(groups[k]);groups[k].dispose();}
+ groups={};
+ var byMat={};
+ for(var key in world){var p=key.split(',');
+  // skip fully buried blocks: all 6 neighbours solid
+  if(world[(+p[0]+1)+','+p[1]+','+p[2]]!==undefined&&world[(+p[0]-1)+','+p[1]+','+p[2]]!==undefined&&
+     world[p[0]+','+(+p[1]+1)+','+p[2]]!==undefined&&world[p[0]+','+(+p[1]-1)+','+p[2]]!==undefined&&
+     world[p[0]+','+p[1]+','+(+p[2]+1)]!==undefined&&world[p[0]+','+p[1]+','+(+p[2]-1)]!==undefined)continue;
+  var m=world[key];(byMat[m]=byMat[m]||[]).push([+p[0],+p[1],+p[2]]);}
+ for(var m in byMat){
+  var list=byMat[m];
+  var im=new THREE.InstancedMesh(geo,mats[m],list.length);
+  var mtx=new THREE.Matrix4();
+  for(var i=0;i<list.length;i++){mtx.setPosition(list[i][0]+.5,list[i][1]+.5,list[i][2]+.5);im.setMatrixAt(i,mtx);}
+  scene.add(im);groups[m]=im;
+ }
+}
+rebuild();
+// controls
+var yaw=0,pitch=0,player={x:32,y:30,z:32},vel={x:0,y:0,z:0},onGround=false,keys={},locked=false;
+function solidAt(x,y,z){var f=Math.floor;var b=world[f(x)+','+f(y)+','+f(z)];return b!==undefined&&b!==0;}
+function collide(px,py,pz){
+ var r=0.3;
+ for(var dx of[-r,r])for(var dy of[0,1.6])for(var dz of[-r,r]){
+  if(solidAt(px+dx,py+dy,pz+dz))return true;}
+ return false;
+}
+document.addEventListener('keydown',function(e){keys[e.code]=true;
+ if(e.code>='Digit1'&&e.code<='Digit7'){sel=+e.code.slice(5);updateHud();}});
+document.addEventListener('keyup',function(e){keys[e.code]=false;});
+var hud=document.getElementById('hud'),msg=document.getElementById('msg');
+function updateHud(){hud.innerHTML='XYZ: '+player.x.toFixed(1)+' '+player.y.toFixed(1)+' '+player.z.toFixed(1)+' &nbsp; Selected: '+NAMES[sel];
+ var bar=document.getElementById('bar');bar.innerHTML='';for(var i=1;i<=7;i++){var s=document.createElement('span');s.style.background='#'+COLORS[i].toString(16).padStart(6,'0');if(i===sel)s.style.borderColor='#ff0';(function(i){s.onclick=function(){sel=i;updateHud();};})(i);bar.appendChild(s);}}
+updateHud();
+var cv=new THREE.Raycaster();cv.far=6;
+var pointer={x:0,y:0};
+document.addEventListener('mousemove',function(e){
+ if(!locked)return;
+ yaw-=e.movementX*0.0022;pitch-=e.movementY*0.0022;pitch=Math.max(-1.55,Math.min(1.55,pitch));});
+document.addEventListener('mousedown',function(e){
+ if(!locked)return;
+ cv.setFromCamera({x:0,y:0},camera);
+ var hits=cv.intersectObjects(Object.values(groups));
+ if(hits.length){
+  var h=hits[0],pt=h.point, n=h.face.normal;
+  if(e.button===0){
+   var bx=Math.floor(pt.x-n.x*0.5),by=Math.floor(pt.y-n.y*0.5),bz=Math.floor(pt.z-n.z*0.5);
+   delete world[bx+','+by+','+bz];rebuild();msg.textContent='Block broken';setTimeout(function(){msg.textContent='';},800);
+  }else if(e.button===2){
+   var bx2=Math.floor(pt.x+n.x*0.5),by2=Math.floor(pt.y+n.y*0.5),bz2=Math.floor(pt.z+n.z*0.5);
+   var key=bx2+','+by2+','+bz2;
+   if(world[key]===undefined&&by2>=0&&by2<64){
+    var feet=Math.floor(player.y),hx=Math.floor(player.x),hz=Math.floor(player.z);
+    if(!(bx2===hx&&bz2===hz&&(by2===feet||by2===feet+1))){world[key]=sel;rebuild();}
+   }
+  }
+ }
+});
+document.addEventListener('contextmenu',function(e){e.preventDefault();});
+var start=document.getElementById('start');
+start.addEventListener('click',function(){renderer.domElement.requestPointerLock();});
+document.addEventListener('pointerlockchange',function(){locked=(document.pointerLockElement===renderer.domElement);start.style.display=locked?'none':'flex';});
+var last=performance.now();
+function loop(now){
+ var dt=Math.min(0.05,(now-last)/1000);last=now;
+ var speed=keys['ShiftLeft']?9:5;
+ var f=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw)),r=new THREE.Vector3(-f.z,0,f.x);
+ var mv={x:0,z:0};
+ if(keys['KeyW']){mv.x+=f.x;mv.z+=f.z;}if(keys['KeyS']){mv.x-=f.x;mv.z-=f.z;}
+ if(keys['KeyA']){mv.x-=r.x;mv.z-=r.z;}if(keys['KeyD']){mv.x+=r.x;mv.z+=r.z;}
+ var l=Math.hypot(mv.x,mv.z)||1;vel.x=mv.x/l*speed;vel.z=mv.z/l*speed;
+ vel.y-=25*dt;
+ var nx=player.x+vel.x*dt,ny=player.y+vel.y*dt,nz=player.z+vel.z*dt;
+ if(!collide(nx,player.y,player.z))player.x=nx;
+ if(!collide(player.x,player.y,nz))player.z=nz;
+ if(!collide(player.x,ny,player.z)){player.y=ny;onGround=false;}else{if(vel.y<0){onGround=true;}vel.y=0;}
+ if(keys['Space']&&onGround){vel.y=9;onGround=false;}
+ if(player.y<-10){player.x=32;player.y=40;player.z=32;vel={x:0,y:0,z:0};}
+ camera.position.set(player.x,player.y+1.6,player.z);
+ camera.rotation.set(pitch,yaw,0,'YXZ');
+ renderer.render(scene,camera);
+ requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
