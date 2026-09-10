@@ -77,8 +77,28 @@ class ChoosingTestCase(unittest.TestCase):
         # day, no recall is a broken system.
         self.assertEqual(choose_provider("auto", {}, **NO_LOCAL), HASHING)
 
-    def test_a_key_is_preferred_over_hashing(self):
-        self.assertEqual(choose_provider("auto", {"OPENAI_API_KEY": "k"}, **NO_LOCAL), "openai")
+    def test_a_remote_provider_is_never_chosen_automatically(self):
+        """Caught by the suite itself: `auto` used to prefer any
+        configured provider, so a GEMINI_API_KEY exported for CHAT
+        silently rerouted every memory embedding through a paid endpoint
+        -- one network call per candidate per retrieve. The suite went
+        from 90s to 170s and a memory test began failing.
+
+        A key exported for one purpose is not consent to be billed for
+        another, and an embedding sits on the hot path of every recall.
+        A remote embedder has to be named."""
+        for key in ("OPENAI_API_KEY", "VOYAGE_API_KEY", "GEMINI_API_KEY"):
+            with self.subTest(key=key):
+                self.assertEqual(choose_provider("auto", {key: "k"}, **NO_LOCAL), HASHING)
+
+    def test_naming_a_remote_provider_explicitly_still_works(self):
+        self.assertEqual(choose_provider("openai", {"OPENAI_API_KEY": "k"}, **NO_LOCAL), "openai")
+
+    def test_a_free_offline_model_is_chosen_automatically(self):
+        # `local` costs nothing per call and touches no network, so
+        # there is no surprise in preferring it.
+        self.assertEqual(choose_provider("auto", {"OPENAI_API_KEY": "k"},
+                                         local_check=lambda: True), "local")
 
     def test_a_local_model_is_used_when_installed_and_needs_no_key(self):
         self.assertEqual(choose_provider("auto", {}, local_check=lambda: True), "local")
@@ -90,6 +110,15 @@ class ChoosingTestCase(unittest.TestCase):
 
     def test_a_blank_key_does_not_count(self):
         self.assertEqual(choose_provider("auto", {"OPENAI_API_KEY": "  "}, **NO_LOCAL), HASHING)
+
+    def test_the_default_config_never_reaches_the_network(self):
+        # The real ambient environment, whatever keys it happens to hold.
+        import os
+
+        from simorgh.memory.config import Config
+
+        self.assertIn(choose_provider(Config().embedder, os.environ, local_check=lambda: False),
+                      (HASHING, "local"))
 
     def test_a_named_provider_without_its_key_is_reported(self):
         with self.assertRaises(EmbeddingUnavailable) as caught:
@@ -110,20 +139,22 @@ class ChoosingTestCase(unittest.TestCase):
 class EmbeddingTestCase(unittest.TestCase):
     def test_hashing_returns_its_own_name_and_dimension(self):
         provider, vector = Embedder("auto", env={}, **NO_LOCAL).embed("hello")
+        # Also the shape `auto` produces with a key in the environment,
+        # since `auto` never picks a remote provider.
         self.assertEqual(provider, HASHING)
         self.assertEqual(len(vector), EMBED_DIM)
 
     def test_a_real_provider_is_called_and_its_vector_normalised(self):
         opener = _Opener(_openai_body())
         provider, vector = Embedder(
-            "auto", env={"OPENAI_API_KEY": "k"}, opener=opener, **NO_LOCAL).embed("hello")
+            "openai", env={"OPENAI_API_KEY": "k"}, opener=opener, **NO_LOCAL).embed("hello")
         self.assertEqual(provider, "openai")
         self.assertEqual(len(vector), 1536)
         self.assertAlmostEqual(sum(c * c for c in vector), 1.0, places=6)
 
     def test_the_api_key_travels_in_a_header_never_the_url(self):
         opener = _Opener(_openai_body())
-        Embedder("auto", env={"OPENAI_API_KEY": "sk-secret"}, opener=opener, **NO_LOCAL).embed("hi")
+        Embedder("openai", env={"OPENAI_API_KEY": "sk-secret"}, opener=opener, **NO_LOCAL).embed("hi")
         request = opener.calls[0]
         self.assertNotIn("sk-secret", request.full_url)
         self.assertIn("sk-secret", json.dumps(dict(request.headers)))
@@ -131,19 +162,19 @@ class EmbeddingTestCase(unittest.TestCase):
     def test_gemini_puts_its_key_in_a_header_too(self):
         opener = _Opener({"embedding": {"values": [0.5] * 768}})
         provider, vector = Embedder(
-            "auto", env={"GEMINI_API_KEY": "g-secret"}, opener=opener, **NO_LOCAL).embed("hi")
+            "gemini", env={"GEMINI_API_KEY": "g-secret"}, opener=opener, **NO_LOCAL).embed("hi")
         self.assertEqual(provider, "gemini")
         self.assertNotIn("g-secret", opener.calls[0].full_url)
 
     def test_a_provider_failure_falls_back_instead_of_raising(self):
-        embedder = Embedder("auto", env={"OPENAI_API_KEY": "k"},
+        embedder = Embedder("openai", env={"OPENAI_API_KEY": "k"},
                             opener=_Opener(None, raises=OSError("down")), **NO_LOCAL)
         provider, vector = embedder.embed("hello")
         self.assertEqual(provider, HASHING)
         self.assertEqual(len(vector), EMBED_DIM)
 
     def test_an_empty_vector_from_a_provider_is_a_failure_not_an_answer(self):
-        embedder = Embedder("auto", env={"OPENAI_API_KEY": "k"},
+        embedder = Embedder("openai", env={"OPENAI_API_KEY": "k"},
                             opener=_Opener({"data": [{"embedding": []}]}), **NO_LOCAL)
         self.assertEqual(embedder.embed("hello")[0], HASHING)
 
@@ -152,7 +183,7 @@ class EmbeddingTestCase(unittest.TestCase):
         # cache a paid provider would be billed for the whole store on
         # every query.
         opener = _Opener(_openai_body())
-        embedder = Embedder("auto", env={"OPENAI_API_KEY": "k"}, opener=opener, **NO_LOCAL)
+        embedder = Embedder("openai", env={"OPENAI_API_KEY": "k"}, opener=opener, **NO_LOCAL)
         for _ in range(5):
             embedder.embed("the same text")
         self.assertEqual(len(opener.calls), 1)

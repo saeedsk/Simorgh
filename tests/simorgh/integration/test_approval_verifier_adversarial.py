@@ -192,15 +192,25 @@ class TestExpiryBoundary(_AdversarialTestCase):
         await asyncio.sleep(0.3)
         result = [m for m in collector.events if m.payload.get("action_id") == "exp-1" and m.type == topics.ACTION_RESULT]
         denied = [m for m in collector.events if m.payload.get("action_id") == "exp-1" and m.type == topics.ACTION_DENIED]
-        # Execution is fast, so the real race is: did it run within 50ms?
-        # Either a same-loop-tick success (execution beat the clock) or a
-        # clean denial for "expired" are both correct; a result that
-        # somehow reports ok after real wall-clock time already exceeded
-        # expires_at would not be.
+        # Either outcome is correct: a same-loop-tick success (execution
+        # beat the clock) or a clean denial for "expired". What must
+        # never happen is BOTH -- an action denied as expired and also
+        # executed.
+        #
+        # This used to assert `duration_ms < 50` as a proxy for "it beat
+        # the TTL", which was wrong and flaked under `-n auto`:
+        # `duration_ms` measures how long the tool took to RUN, not
+        # whether the approval was still valid when it was checked. A
+        # legitimately-approved action that spends 60ms executing under
+        # parallel load failed an assertion about a different quantity
+        # entirely. Timing on a loaded machine cannot answer the
+        # question; the mutual exclusion below can.
+        self.assertTrue(result or denied, "action neither ran nor was denied")
+        self.assertFalse(result and denied,
+                         "the same action was both denied as expired and executed")
         if result:
-            self.assertLess(result[0].payload["duration_ms"], 50, "action ran well past its own TTL")
-        else:
-            self.assertTrue(denied, "action neither ran promptly nor was denied")
+            self.assertTrue(result[0].payload.get("ok"),
+                            "an action that ran should report its real outcome")
 
     def test_off_by_one_at_the_exact_expiry_instant_is_inclusive_not_exclusive(self):
         """Direct verifier check of the exact boundary (docs asked for

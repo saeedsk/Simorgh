@@ -28,9 +28,12 @@ in, WITHOUT requiring one (the creator, 2026-09-09: build it so that
 | `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | text-embedding-004 |
 | `hashing` | nothing | always available; the honest floor |
 
-`auto` prefers a real model when one is reachable and falls back to
-hashing otherwise, so memory works with nothing configured and gets
-better the day something is.
+`auto` picks a real model only when it is FREE and OFFLINE -- in
+practice `local` -- and falls back to hashing otherwise. A remote,
+billable provider is never chosen automatically, however many keys are
+lying around the environment: an embedding sits on the hot path of every
+recall, and a key exported for chat is not consent to be billed for
+memory. Name one in `[memory] embedder` to use it.
 
 Two things this module is careful about, both of which would otherwise
 turn a quality improvement into a fault:
@@ -63,6 +66,11 @@ OPENAI_URL = "https://api.openai.com/v1/embeddings"
 VOYAGE_URL = "https://api.voyageai.com/v1/embeddings"
 GEMINI_URL = ("https://generativelanguage.googleapis.com/v1beta/models/"
               "text-embedding-004:embedContent")
+
+# Providers `auto` may choose on its own: free, offline, and with no
+# per-call cost. A REMOTE provider must be named explicitly in config --
+# see `choose_provider`.
+AUTO_ELIGIBLE = ("local", "hashing")
 
 # provider -> (env vars -- ANY one of them is enough, model name, dimension)
 PROVIDERS: tuple[tuple[str, tuple[str, ...], str, int], ...] = (
@@ -136,7 +144,25 @@ def choose_provider(configured: str, env, *, local_check=local_model_available) 
     configured = (configured or "auto").strip().lower()
     ready = available_providers(env, local_check=local_check)
     if configured == "auto":
-        return ready[0] if ready else HASHING
+        # Only a free, offline embedder is chosen automatically.
+        #
+        # Caught by the test suite, 2026-09-09: this used to prefer any
+        # configured provider, and a GEMINI_API_KEY that happened to be
+        # exported for CHAT silently rerouted every memory embedding
+        # through a paid endpoint -- one network call per candidate per
+        # retrieve. The suite went from 90s to 170s and a memory test
+        # started failing.
+        #
+        # Two things were wrong with that, beyond the flake. Nobody who
+        # exports a key for one purpose is consenting to be billed for
+        # another. And an embedding is on the hot path of every recall,
+        # so a network round trip there is the wrong shape regardless of
+        # who pays. A remote embedder is a real option -- it is just an
+        # option somebody has to choose, by naming it in config.
+        for name in ready:
+            if name in AUTO_ELIGIBLE:
+                return name
+        return HASHING
     if _row(configured) is None:
         raise EmbeddingUnavailable(
             f"unknown embedder {configured!r}; known: {', '.join(n for n, _, _, _ in PROVIDERS)}")

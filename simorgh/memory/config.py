@@ -37,9 +37,12 @@ class Config:
     # just never read).
     default_k: int = 5
     # Which embedder scores recall (`embedders.py`). "auto" uses a real
-    # model when one is reachable -- a local sentence-transformers
-    # install, or an OpenAI/Voyage/Gemini key -- and the dependency-free
-    # hashing trick otherwise, so memory works with nothing configured.
+    # model only when it is FREE and OFFLINE (a local
+    # sentence-transformers install) and the dependency-free hashing
+    # trick otherwise -- never a remote API, however many keys happen to
+    # be in the environment, since an embedding is on the hot path of
+    # every recall and a key exported for chat is not consent to be
+    # billed for memory. Name "openai"/"voyage"/"gemini" here to use one.
     # It matters more than it looks: hashing matches VOCABULARY, so
     # "how do I stop the loop" and "halting a runaway iteration" score
     # 0.000 against each other (measured 2026-09-09) -- recall finds
