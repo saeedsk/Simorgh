@@ -838,6 +838,34 @@ class Service:
             await self._scheduler.scan_leases()
         await self._reconsider_blocked()
         await self._reconsider_awaiting_human()
+        # A ready task used to be offered in exactly two places: the
+        # moment it was created (`_announce_created`), and the IDLE
+        # tick -- which only fires after `idle_threshold_s` (10s) of
+        # nobody typing. Every other way a task becomes ready published
+        # nothing at all: a blocked retry (`_reconsider_blocked`, right
+        # above), a lease expiry (`Scheduler.scan_leases`), a dependency
+        # satisfied by a parent completing, a resume after a pause. And
+        # `dispatch_ready` offers only the top 5, so the 6th task of any
+        # burst was never offered either.
+        #
+        # Measured 2026-09-10 (20 human tasks, 3 workers, 0.05s of work
+        # each): with nobody typing, 6 ran in the first 0.3s and the
+        # other 14 took 16 seconds of pure waiting, in batches of 5
+        # spaced by the idle threshold and its 3s cooldown. With a
+        # human typing every 2 seconds -- what ordinary chat use looks
+        # like -- the idle tick never fired at all and **13 of the 20
+        # tasks were never offered to anybody** in 40 seconds, with
+        # three workers idle throughout and all 13 sitting in
+        # `available`.
+        #
+        # This tick already runs every second and already scans leases,
+        # and `dispatch_ready`'s emission key (`{id}:{updated_at}`)
+        # makes a re-offer within one generation a deduped no-op -- so
+        # this costs at most five deduped messages a second and closes
+        # every one of those paths at once. It runs last so a task made
+        # ready by the two calls above is offered on the same tick.
+        if self._scheduler is not None:
+            await self._scheduler.dispatch_ready()
         # `status` read a counter `planning.backlog` that NOTHING has
         # ever published, so it reported "backlog: 0" with three tasks
         # live -- and said so in the same breath as a chat reply that

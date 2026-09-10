@@ -96,10 +96,26 @@ class Task:
         # Live-caught 2026-09-07: one project task carried 16 rounds of
         # claimed -> started -> completed -> lease_expired -> claimed, and
         # 101 real tasks had produced 1,305 claims and 1,218 completions.
+        #
+        # A BLOCKED task keeps no lease either, for the same reason one
+        # step further on: nobody is working on it. It is parked waiting
+        # for `blocked_retry_delay_seconds`, and `_reconsider_blocked`
+        # is the one thing that should bring it back -- counting the
+        # attempt and giving up at `max_blocked_retries`. Leaving the
+        # dead worker's lease on it let `Scheduler.scan_leases` expire
+        # that lease instead, and `lease_expired` sets any non-terminal
+        # status straight to `available`: the retry delay, the attempt
+        # accounting and the give-up rule were all skipped, and the task
+        # went back on the queue at once. Measured 2026-09-10 (60 tasks,
+        # 4 workers, every task blocking, 2s leases): 221 claims and 211
+        # `lease_expired` events for 60 tasks in 45 seconds, every task
+        # re-run up to four times, in a run where the retry delay alone
+        # should have allowed none at all.
+        keeps_no_lease = status in TERMINAL_STATUSES or status == BLOCKED
         return replace(
             self, status=status, note=note or self.note, updated_at=updated_at,
             attempts=self.attempts + (1 if attempt else 0),
-            lease=None if status in TERMINAL_STATUSES else self.lease,
+            lease=None if keeps_no_lease else self.lease,
         )
 
 
@@ -122,7 +138,23 @@ class Step:
 
 _TRANSITIONS: dict[str, frozenset[str]] = {
     PENDING: frozenset({AVAILABLE, BLOCKED}),
-    AVAILABLE: frozenset({CLAIMED, PAUSED, BLOCKED}),
+    # COMPLETED is reachable from AVAILABLE for the same reason it is
+    # reachable from CLAIMED below: the work really happened, and only
+    # the bookkeeping lost a race. A worker whose lease expires mid-task
+    # (renewals dropped, or one step longer than the whole lease) has
+    # its task put back on the queue by `Scheduler.scan_leases` -- and
+    # then finishes it and reports `task.completed` against a task that
+    # is now `available`. That raised "illegal transition available ->
+    # completed" inside the bus handler, where it was swallowed: the
+    # finished result was thrown away, the task stayed on the queue, and
+    # it was claimed and run again. Measured 2026-09-10 with renewals
+    # suppressed (4 tasks, 2 workers, 3s of work under a 1s lease): 5
+    # real runs, ZERO completions recorded, one task run three times and
+    # one never run at all.
+    # FAILED is deliberately NOT added here: a completion that lost this
+    # race is real work worth keeping, while a failure that lost it
+    # would only kill a task somebody has legitimately re-queued.
+    AVAILABLE: frozenset({CLAIMED, PAUSED, BLOCKED, COMPLETED}),
     # Terminal states are reachable straight from CLAIMED: `task.started`
     # is a separate message, and if recording it is lost the work still
     # really happened. Refusing the completion left the task `claimed`

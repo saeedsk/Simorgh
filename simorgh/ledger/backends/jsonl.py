@@ -10,9 +10,10 @@ On-disk layout (02-ledger section 4.2):
     <root>/snapshots/<escaped>.json  {"at_seq", "state", "ts"}
     <root>/idem/<escaped>.idx        "key\tseq" lines (a cache; rebuilt if stale)
     <root>/heads/<escaped>.head      the highest seq ever issued, written only
-                                     when compaction removes events (which is
-                                     the one thing that makes head underivable
-                                     from the file); cleared by delete_stream
+                                     when the file can no longer prove it --
+                                     compaction removing events, or a scan
+                                     finding the file shorter than the head we
+                                     already knew; cleared by delete_stream
     <root>/blobs/<aa>/<sha256>       content-addressed, with .meta sidecars
     <root>/index.json                {stream: {head, bytes, last_ts}}; read at start
                                      so an unchanged stream is never re-read
@@ -33,6 +34,7 @@ import os
 import re
 import shutil
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 from simorgh.contracts.envelope import Event, canonical_json
@@ -67,6 +69,10 @@ class _StreamMeta:
 
 class JsonlBackend:
     cross_process = True  # other processes may append under the file lock
+    #: How many per-stream `asyncio.Lock`s to keep. Comfortably more
+    #: than any plausible number of concurrently-written streams, and a
+    #: hard ceiling instead of one per stream ever seen.
+    _MAX_LOCKS = 4096
 
     def __init__(self, root: str | Path, *, fsync: bool = True) -> None:
         self.root = Path(root)
@@ -75,9 +81,20 @@ class JsonlBackend:
         # stream -> (file size when built, {seq: byte offset}); see `read`.
         self._offsets: dict[str, tuple[int, dict[int, int]]] = {}
         self._idem = IdempotencyIndex()
-        self._locks: dict[str, asyncio.Lock] = {}
+        # Bounded, LRU, and only ever evicting an idle lock -- see
+        # `_lock_for`. A plain dict here grew one Lock per stream ever
+        # written, for the life of the process.
+        self._locks: "OrderedDict[str, asyncio.Lock]" = OrderedDict()
         self._blobs = LocalBlobStore(self.root / "blobs", fsync=fsync)
         self.recovered: list[str] = []  # streams whose trailing partial line was truncated on start
+        # stream -> how many DURABLE (newline-terminated) lines the last
+        # full pass could not parse. A trailing partial line is not in
+        # here: that is a crash mid-append, whose seq was never handed
+        # out, and truncating it is the correct repair. An interior bad
+        # line is different -- everything after it is real, acked data,
+        # and `read`, `_scan_stream` and `truncate_below` used to treat
+        # it as the end of the stream. See `_scan_stream`.
+        self.corrupt: dict[str, int] = {}
         # Streams whose `.idx` cache has been read (or rebuilt by a scan).
         # Loading 191k of these at boot would just move the cost, so a
         # stream's keys are read the first time anything asks about them.
@@ -98,16 +115,23 @@ class JsonlBackend:
         return self.root / "idem" / f"{escape(stream)}.idx"
 
     def _head_path(self, stream: str) -> Path:
-        """The durable high-water mark, written only by `truncate_below`.
+        """The durable high-water mark, written whenever the file can no
+        longer prove the head: `truncate_below` removing events, or
+        `_scan_stream` finding a file shorter than a head already handed
+        out.
 
         Head is otherwise derived from the file, which is correct for
-        every state except the one compaction creates: a pass that keeps
-        nothing leaves a 0-byte file, and a rescan reads head 0 out of
-        it. `index.json` is not that mark -- `_read_index` treats it as
+        every state except the ones that shorten it: a compaction pass
+        that keeps nothing leaves a 0-byte file, and a rescan reads head
+        0 out of it; a tail lost to a partial fsync or a bad copy reads
+        a head lower than what `append` already returned to a caller.
+
+        `index.json` is not that mark -- `_read_index` treats it as
         disposable by design (absent/truncated/old layout all mean "empty
         index"), and `_refresh_if_grown` rescans whenever another process
         changed the size. So the mark is its own tiny file, written only
-        when events are removed, and cleared only by `delete_stream`.
+        when the file itself can no longer answer for the head, and
+        cleared only by `delete_stream`.
         """
         return self.root / "heads" / f"{escape(stream)}.head"
 
@@ -126,7 +150,38 @@ class JsonlBackend:
             pass  # best effort: the events themselves are still the truth
 
     def _lock_for(self, stream: str) -> asyncio.Lock:
-        return self._locks.setdefault(stream, asyncio.Lock())
+        """The per-stream serializer, from a table bounded by `_MAX_LOCKS`.
+
+        It used to be a plain dict that only ever grew: one `asyncio.Lock`
+        for every stream this process had ever appended to, kept for the
+        life of the process. Measured 2026-09-10: 20,000 one-event
+        `trace:` streams left 20,000 locks behind, and 178 bytes each
+        extrapolates to ~34 MB on the creator's own 192,456-stream
+        ledger -- all of it for streams written once and never touched
+        again. `_meta` has to hold every stream (it is the index); a
+        mutex for a stream nobody is writing does not.
+
+        Only an idle lock is evicted -- not locked, nobody waiting -- so
+        eviction can never hand two writers of one stream two different
+        locks. Nothing awaits between this call and the `async with`
+        that takes the lock, so a lock handed out here cannot be evicted
+        before it is acquired.
+        """
+        lock = self._locks.get(stream)
+        if lock is not None:
+            self._locks.move_to_end(stream)
+            return lock
+        while len(self._locks) >= self._MAX_LOCKS:
+            victim = None
+            for key, candidate in self._locks.items():  # least recently used first
+                if not candidate.locked() and not candidate._waiters:  # noqa: SLF001
+                    victim = key
+                    break
+            if victim is None:
+                break  # every lock is in use: hold more rather than break one
+            del self._locks[victim]
+        lock = self._locks[stream] = asyncio.Lock()
+        return lock
 
     # -------------------------------------------------------------- lifecycle
     async def start(self) -> None:
@@ -176,7 +231,14 @@ class JsonlBackend:
             if known is not None and known.bytes == entry.stat().st_size:
                 self._meta[stream] = known
                 continue
-            self._scan_stream(stream, self.root / "streams" / name)
+            # `known.head` is the floor: it was recorded at the last
+            # clean start or stop, so every seq up to it was handed out
+            # for real. A file that has GROWN since is rescanned to a
+            # higher head anyway; a file that has SHRUNK (a lost tail, a
+            # partial fsync, somebody's editor) must not be allowed to
+            # lower it and reissue a number twice.
+            self._scan_stream(stream, self.root / "streams" / name,
+                              floor=known.head if known is not None else 0)
             scanned += 1
         self.scanned_on_start = scanned
         self.trusted_on_start = len(self._meta) - scanned
@@ -211,10 +273,30 @@ class JsonlBackend:
             return True
         return any(index[s].bytes != m.bytes or index[s].head != m.head for s, m in self._meta.items())
 
-    def _scan_stream(self, stream: str, path: Path) -> None:
+    def _scan_stream(self, stream: str, path: Path, *, floor: int = 0) -> None:
         """Rebuild head/bytes/last_ts and the idempotency cache from the
         file itself, truncating a trailing partial line (a crash
-        mid-write) rather than failing on it."""
+        mid-write) rather than failing on it.
+
+        Two rules here are asymmetric on purpose, and both were wrong
+        before (observer, 2026-09-10):
+
+        * A line with no terminating newline is a crash mid-append. Its
+          seq was never returned to a caller, so removing it loses
+          nothing and the number is free to be issued again -- this is
+          the one thing that may shorten the file.
+        * A COMPLETE line that will not parse is corruption in the
+          middle of durable, already-acked data. Everything after it is
+          real. This used to `break` at that line and then truncate the
+          file to it, so one flipped byte silently deleted every record
+          that followed. Now the bad line is counted in `self.corrupt`,
+          the scan carries on past it, and nothing is removed.
+
+        `floor` (and the durable mark, and any head this process already
+        knows) is a lower bound on the result: the head of a stream
+        never goes backwards, so a file that came back SHORTER than we
+        last saw it cannot make `append` reissue a sequence number.
+        """
         # Any rewrite of the file makes the read-offset index
         # (`read`) meaningless -- the size check there would catch it,
         # but a rewrite is exactly where a stale byte offset must be
@@ -222,7 +304,8 @@ class JsonlBackend:
         self._offsets.pop(stream, None)
         head = 0
         last_ts: float | None = None
-        good_end = 0
+        complete_end = 0  # end of the last newline-terminated line, parseable or not
+        corrupt = 0
         events: list[Event] = []
         with open(path, "rb") as fh:
             data = fh.read()
@@ -230,24 +313,40 @@ class JsonlBackend:
         while pos < len(data):
             nl = data.find(b"\n", pos)
             if nl == -1:
-                break  # trailing partial line
+                break  # trailing partial line: a crash mid-append
             line = data[pos:nl]
+            complete_end = nl + 1
+            pos = nl + 1
             try:
                 event = Event.from_dict(json.loads(line.decode("utf-8")))
-            except Exception:  # noqa: BLE001 -- any unparseable line ends the good region
-                break
+            except Exception:  # noqa: BLE001 -- durable but unreadable; keep it and keep going
+                corrupt += 1
+                continue
             events.append(event)
             head = max(head, event.seq)
             last_ts = event.ts
-            good_end = nl + 1
-            pos = nl + 1
-        if good_end != len(data):
-            self._truncate_file(path, good_end)
+        if complete_end != len(data):
+            self._truncate_file(path, complete_end)
             self.recovered.append(stream)
+        if corrupt:
+            self.corrupt[stream] = corrupt
+        else:
+            self.corrupt.pop(stream, None)
         # A compaction that kept nothing leaves a file with no seq in it
         # at all; the mark is the only remaining record of what this
-        # stream has already handed out.
-        self._meta[stream] = _StreamMeta(max(head, self._read_mark(stream)), good_end, last_ts)
+        # stream has already handed out. `floor` and any head this
+        # process already knows are the same rule for a file that has
+        # lost its tail some other way.
+        known = self._meta[stream].head if stream in self._meta else 0
+        from_file, head = head, max(head, self._read_mark(stream), floor, known)
+        if head > from_file:
+            # The file can no longer prove this head, and `index.json`
+            # is disposable by design -- without a durable mark the next
+            # boot would reissue those numbers. Only in this case: a
+            # write per scanned stream would be 192k files on the
+            # creator's ledger, for nothing.
+            self._write_mark(stream, head)
+        self._meta[stream] = _StreamMeta(head, complete_end, last_ts)
         self._idem.rebuild(stream, events)
         self._idem_loaded.add(stream)
         self._index_dirty = True
@@ -407,6 +506,7 @@ class JsonlBackend:
         out: list[Event] = []
         offsets: dict[int, int] = {}
         position = 0
+        corrupt = 0
         with open(path, "r", encoding="utf-8") as fh:
             for line in fh:
                 start = position
@@ -415,8 +515,15 @@ class JsonlBackend:
                     break  # partial trailing line: not yet durable
                 try:
                     event = Event.from_dict(json.loads(line))
-                except Exception:  # noqa: BLE001
-                    break
+                except Exception:  # noqa: BLE001 -- durable but unreadable: skip it, do not stop
+                    # This used to `break`, which reported one flipped
+                    # byte as the end of the stream: `head` still said 5
+                    # while `read` returned 2 events, no error, no log,
+                    # and every projection rebuilt itself short
+                    # (observer, 2026-09-10). One unreadable record is a
+                    # gap; it is not a shorter history.
+                    corrupt += 1
+                    continue
                 offsets[event.seq] = start
                 if event.seq >= from_seq:
                     out.append(event)
@@ -424,6 +531,12 @@ class JsonlBackend:
                         # A partial pass indexes only what it saw; it must
                         # not be recorded as covering the whole file.
                         return out
+        # A full pass is also the one place that can tell whether this
+        # stream still holds unreadable records; `truncate_below` asks.
+        if corrupt:
+            self.corrupt[stream] = corrupt
+        else:
+            self.corrupt.pop(stream, None)
         if len(offsets) >= self._OFFSET_INDEX_MIN_EVENTS:
             try:
                 self._offsets[stream] = (path.stat().st_size, offsets)
@@ -465,8 +578,8 @@ class JsonlBackend:
                     break
                 try:
                     event = Event.from_dict(json.loads(line))
-                except Exception:  # noqa: BLE001
-                    break
+                except Exception:  # noqa: BLE001 -- a gap, not the end (see the full pass above)
+                    continue
                 if first:
                     first = False
                     if event.seq != start_seq:
@@ -534,6 +647,15 @@ class JsonlBackend:
             with self._file_lock():
                 self._refresh_if_grown(stream)
                 events = await self.read(stream, from_seq=0, limit=None)
+                if self.corrupt.get(stream):
+                    # Compaction rewrites the file from what `read`
+                    # returned. A record this pass could not parse is
+                    # not in that list, so compacting would delete it
+                    # for good -- turning "one line we cannot read" into
+                    # "one line nobody can ever read again", silently,
+                    # as retention housekeeping. Leave the stream alone
+                    # and let a human look at it.
+                    return 0
                 kept = [e for e in events if e.seq >= seq]
                 removed = len(events) - len(kept)
                 if removed == 0:

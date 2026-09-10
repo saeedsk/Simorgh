@@ -29,8 +29,18 @@ class TestTransitions(unittest.TestCase):
     def test_same_status_is_a_legal_noop(self):
         self.assertTrue(is_legal_transition(IN_PROGRESS, IN_PROGRESS))
 
-    def test_available_cannot_jump_to_completed(self):
-        self.assertFalse(is_legal_transition(AVAILABLE, COMPLETED))
+    def test_available_can_still_be_completed_by_the_worker_that_did_it(self):
+        """This used to be refused, and refusing it lost real work: a
+        worker whose lease expires mid-task has its task put back on the
+        queue, finishes anyway, and reports `task.completed` against a
+        task that is now `available`. See the transition table's own
+        comment and `test_a_completion_after_the_lease_expired_is_not_lost.py`."""
+        self.assertTrue(is_legal_transition(AVAILABLE, COMPLETED))
+
+    def test_available_still_cannot_jump_to_failed(self):
+        """The other half of that asymmetry: a late failure report must
+        not kill a task somebody has legitimately re-queued."""
+        self.assertFalse(is_legal_transition(AVAILABLE, FAILED))
 
 
 class TestDagValidate(unittest.TestCase):

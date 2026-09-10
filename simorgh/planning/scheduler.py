@@ -30,7 +30,18 @@ from .store import TaskStore
 DEFAULT_PRIORITY_WEIGHTS = Config().priority_weights
 
 
-def select_ready(store: TaskStore, *, priority_weights: dict[str, int], limit: int = 1) -> list[Task]:
+#: How long a retry may be held behind never-attempted work before it
+#: stops counting as a retry. Far longer than the window the
+#: fewest-attempts rule was written for -- the GAIA run's retries were
+#: re-claimed within seconds of being requeued, so nothing that fix
+#: prevents happens inside half an hour -- and it turns "never" into a
+#: bound. See `select_ready`.
+STARVATION_GRACE_SECONDS = 1800.0
+
+
+def select_ready(store: TaskStore, *, priority_weights: dict[str, int], limit: int = 1,
+                 now: float | None = None,
+                 starvation_grace_seconds: float = STARVATION_GRACE_SECONDS) -> list[Task]:
     """Highest `priority_weights[origin]` first, then fewest attempts,
     then oldest -- spec section 12 Q3's default (humans first).
 
@@ -47,9 +58,40 @@ def select_ready(store: TaskStore, *, priority_weights: dict[str, int], limit: i
     Fewest-attempts-first is the whole fix: a retry still runs, and it
     runs after the work that has never had a turn. Within one attempt
     count the order is unchanged, so nothing else about dispatch moves.
+
+    ...except that "after the work that has never had a turn" is not a
+    bound when fresh work keeps arriving, and the open question left
+    behind was whether it starves a retry in the other direction.
+    Measured 2026-09-10 with this exact function, one worker, a retry on
+    the queue at t=0:
+
+        arrival probability per service slot   how long the retry waited
+        (20 tasks already queued)
+        0.50                                   34-50 slots
+        0.80                                   68-102 slots
+        0.95                                   333-449 slots
+        1.00 (saturated)                       NEVER, in 5,000 slots,
+                                               every seed
+
+    So yes: below saturation the retry waits for the queue to drain of
+    never-attempted work, and at or above saturation it never runs at
+    all. A slot is one real task, so the 0.95 row is already hours.
+
+    `now` bounds it. A task that has been waiting longer than
+    `starvation_grace_seconds` since it last changed state stops being
+    sorted as a retry and competes on age like anything else -- it does
+    NOT jump the queue, it just stops being sent to the back of it. With
+    `now=None` (a caller that has no clock) the behaviour is exactly the
+    old one.
     """
     candidates = store.ready(limit=1000)
-    candidates.sort(key=lambda t: (-priority_weights.get(t.origin, 0), t.attempts, t.created_at))
+
+    def attempts_key(task: Task) -> int:
+        if now is not None and (now - task.updated_at) >= starvation_grace_seconds:
+            return 0
+        return task.attempts
+
+    candidates.sort(key=lambda t: (-priority_weights.get(t.origin, 0), attempts_key(t), t.created_at))
     return candidates[:limit]
 
 
@@ -82,7 +124,8 @@ class Scheduler:
     async def dispatch_ready(self) -> None:
         if self.paused:
             return
-        for task in select_ready(self._store, priority_weights=self._priority_weights, limit=5):
+        for task in select_ready(self._store, priority_weights=self._priority_weights, limit=5,
+                                  now=self._clock.now()):
             if not self._offerable(task):
                 continue
             message = Message.new(
@@ -106,4 +149,4 @@ class Scheduler:
                 await self._store.expire_lease(task.id)
 
 
-__all__ = ["DEFAULT_PRIORITY_WEIGHTS", "Scheduler", "select_ready"]
+__all__ = ["DEFAULT_PRIORITY_WEIGHTS", "STARVATION_GRACE_SECONDS", "Scheduler", "select_ready"]

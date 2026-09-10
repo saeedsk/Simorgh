@@ -23,17 +23,17 @@ from __future__ import annotations
 import unittest
 
 from simorgh.planning.config import Config
-from simorgh.planning.scheduler import select_ready
+from simorgh.planning.scheduler import STARVATION_GRACE_SECONDS, select_ready
 
 
 class _Task:
-    def __init__(self, id_, *, origin="benchmark", attempts=0, created_at=0.0):
+    def __init__(self, id_, *, origin="benchmark", attempts=0, created_at=0.0, updated_at=None):
         self.id = id_
         self.origin = origin
         self.kind = "research"
         self.attempts = attempts
         self.created_at = created_at
-        self.updated_at = created_at
+        self.updated_at = created_at if updated_at is None else updated_at
 
 
 class _Store:
@@ -76,6 +76,71 @@ class FairDispatchTestCase(unittest.TestCase):
         order = self._order([_Task("bench", origin="benchmark", attempts=0, created_at=1.0),
                              _Task("human", origin="human", attempts=5, created_at=99.0)])
         self.assertEqual(order[0], "human")
+
+
+class AndFreshWorkDoesNotStarveTheRetryForeverTestCase(unittest.TestCase):
+    """The open question the fix above left behind, measured 2026-09-10
+    with `select_ready` itself: one worker, a retry on the queue at t=0,
+    twenty tasks already queued, fresh work arriving at a given rate per
+    service slot.
+
+        arrival probability   slots the retry waited
+        0.50                  34-50
+        0.80                  68-102
+        0.95                  333-449
+        1.00 (saturated)      NEVER, in 5,000 slots, every seed
+        2.00                  NEVER
+
+    A slot is one real task, so the 0.95 row is already hours and the
+    saturated rows are exactly as bad as they sound: the retry is never
+    dispatched again, at all, for as long as the load lasts.
+
+    A retry that has waited longer than `STARVATION_GRACE_SECONDS` stops
+    being sorted as a retry. It does not jump the queue -- it competes
+    on age like everything else. Re-running the same simulation with
+    that rule: 30 slots (the grace itself) at every arrival rate,
+    including 2x saturation.
+
+    The grace is deliberately far longer than the window the
+    fewest-attempts rule protects: the GAIA run's retries were
+    re-claimed within seconds of being requeued, so nothing that fix
+    prevents happens inside half an hour.
+    """
+
+    weights = Config().priority_weights
+
+    def _order(self, tasks, *, now):
+        return [t.id for t in select_ready(_Store(tasks), priority_weights=self.weights,
+                                           limit=len(tasks), now=now)]
+
+    def test_a_retry_held_past_the_grace_stops_being_sent_to_the_back(self):
+        stale = _Task("retried", attempts=9, created_at=0.0, updated_at=0.0)
+        fresh = [_Task(f"fresh{i}", created_at=100.0 + i) for i in range(4)]
+        order = self._order([stale, *fresh], now=STARVATION_GRACE_SECONDS + 1.0)
+        self.assertEqual(order[0], "retried")
+
+    def test_inside_the_grace_the_retry_still_waits_its_turn(self):
+        """The GAIA fix is untouched for the window it was written for."""
+        stale = _Task("retried", attempts=9, created_at=0.0, updated_at=0.0)
+        fresh = [_Task(f"fresh{i}", created_at=100.0 + i) for i in range(4)]
+        order = self._order([stale, *fresh], now=STARVATION_GRACE_SECONDS - 1.0)
+        self.assertEqual(order[0], "fresh0")
+        self.assertEqual(order[-1], "retried")
+
+    def test_an_aged_retry_still_does_not_outrank_a_human(self):
+        """Priority is still the first key; aging only touches the
+        attempts tiebreak inside one origin."""
+        stale = _Task("retried", attempts=9, created_at=0.0, updated_at=0.0)
+        human = _Task("human", origin="human", attempts=0, created_at=999.0)
+        order = self._order([stale, human], now=STARVATION_GRACE_SECONDS + 1.0)
+        self.assertEqual(order[0], "human")
+
+    def test_a_caller_with_no_clock_gets_exactly_the_old_ordering(self):
+        stale = _Task("retried", attempts=9, created_at=0.0, updated_at=0.0)
+        fresh = _Task("fresh", created_at=10_000.0)
+        self.assertEqual(
+            [t.id for t in select_ready(_Store([stale, fresh]), priority_weights=self.weights, limit=2)],
+            ["fresh", "retried"])
 
 
 if __name__ == "__main__":
