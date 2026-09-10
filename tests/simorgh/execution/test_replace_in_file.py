@@ -271,3 +271,46 @@ class ReadPastTheEndTestCase(unittest.TestCase):
         answer = self._read(1, 3)
         self.assertIn("    1| line 1", answer)
         self.assertNotIn("Here are the last", answer)
+
+
+class RefusalPointsAtTheRightToolTestCase(unittest.IsolatedAsyncioTestCase):
+    """When `apply_source_patch` refuses for content loss, it has to name
+    `replace_in_file`.
+
+    It used to say "read it all and send it back complete", which is the
+    expensive way and the one that truncates again on a long file -- so a
+    run would read, rewrite, get refused, and read again until its budget
+    was gone. Watched live 2026-09-09 on a 274-line game."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "workspace").mkdir()
+        (self.root / "workspace" / "g.html").write_text(
+            "\n".join(f"line {n}" for n in range(1, 61)), encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    async def _refusal(self) -> str:
+        from simorgh.execution.tools import ApplySourcePatchTool
+
+        tool = ApplySourcePatchTool(Config(repo_root=self.root))
+        result = await tool.run({"subject": "workspace/g.html", "code": "line 1\nline 2\n"},
+                                ctx=_ctx())
+        self.assertFalse(result.ok)
+        return result.error
+
+    async def test_it_names_replace_in_file(self):
+        self.assertIn("REPLACE_IN_FILE", await self._refusal())
+
+    async def test_it_shows_the_shape_so_the_next_call_can_be_right(self):
+        refusal = await self._refusal()
+        self.assertIn("<<<<<<< SEARCH", refusal)
+        self.assertIn(">>>>>>> REPLACE", refusal)
+
+    async def test_it_still_says_what_was_wrong(self):
+        self.assertIn("drops", await self._refusal())
+
+    async def test_it_still_allows_a_deliberate_shortening(self):
+        self.assertIn("really do mean", await self._refusal())

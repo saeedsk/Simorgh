@@ -1164,11 +1164,21 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
             # written. A rewrite that drops most of a file is almost never
             # the task, and when it is, saying so costs one more call.
             return ToolResult(ok=False, error=(
-                f"refused: the new content for {subject} drops {lost} -- apply_source_patch replaces the "
-                f"whole file. Read it all first, in ranges if it is long "
-                f"(READ_FILE: {subject}:1-200, then :201-400, and so on -- each result tells you the "
-                "true total), and send it back complete with your change. If you truly mean to remove "
-                "that much, say so and send it again."
+                f"refused: the new content for {subject} drops {lost} -- apply_source_patch "
+                f"replaces the whole file.\n"
+                # Naming the right tool, not just the wrong outcome. The
+                # refusal used to say "read it all and send it back
+                # complete", which is the expensive way and the one that
+                # truncates again on a long file -- so a run would read,
+                # rewrite, get refused, and read again until its budget
+                # was gone (live, 2026-09-09).
+                f"Use REPLACE_IN_FILE instead: it changes just the part you name, so nothing "
+                f"else can be lost.\n"
+                f"  REPLACE_IN_FILE: {subject}\n"
+                f"  <<<<<<< SEARCH\n  (the exact lines to change)\n  =======\n"
+                f"  (what to put there)\n  >>>>>>> REPLACE\n"
+                "If you really do mean to replace the whole file with something much shorter, "
+                "say so and send it again."
             ))
     target.parent.mkdir(parents=True, exist_ok=True)
     # A model's reply rarely ends in a newline, and writing it verbatim

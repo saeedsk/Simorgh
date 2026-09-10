@@ -221,7 +221,18 @@ class Service:
             payload = {"task_id": result.task.id}
         else:
             payload = {"task_id": result.duplicate_of, "deduplicated_against": result.duplicate_of}
-        await self._ctx.bus.reply(message, type=topics.TASK_CREATE_REPLY, payload=payload)
+        # `task.create` is legitimately used both ways: as a request, by
+        # the Interface's commands and by `start_task`, which want the
+        # id back; and fire-and-forget, by Reflection's distillation and
+        # by Benchmark, which are announcing work rather than asking for
+        # a receipt. Replying unconditionally raised
+        # "task.create (...) is not a request: no reply_to" out of the
+        # bus handler for every one of the second kind -- the task WAS
+        # created, so the only casualty was a traceback in the middle of
+        # the screen and a dead-lettered message. Caught live 2026-09-09
+        # when Reflection distilled a finished build into a skill.
+        if message.reply_to:
+            await self._ctx.bus.reply(message, type=topics.TASK_CREATE_REPLY, payload=payload)
 
     async def _on_patterns_found(self, message: Message) -> None:
         created = await self._intake.on_patterns_found(patterns=message.payload.get("patterns", []))

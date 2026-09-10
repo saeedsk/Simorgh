@@ -294,7 +294,11 @@ class RewriteMustNotLoseTheFileTestCase(unittest.IsolatedAsyncioTestCase):
         result = await self.patch.run({"subject": "simorgh/big.py", "code": stub}, ctx=self.ctx)
         self.assertFalse(result.ok)
         self.assertIn("drops 29 of 40 non-blank lines", result.error)
-        self.assertIn("READ_FILE: simorgh/big.py", result.error)
+        # The refusal used to send the model back to re-read and re-send
+        # the whole file, which is the expensive way and the one that
+        # truncates again on anything long. It now names the tool that
+        # changes only the part meant (2026-09-09).
+        self.assertIn("REPLACE_IN_FILE: simorgh/big.py", result.error)
         self.assertEqual((self.root / "simorgh" / "big.py").read_text(), self.original)
 
     async def test_a_rewrite_that_keeps_the_file_and_adds_to_it_is_written(self) -> None:
