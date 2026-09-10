@@ -47,7 +47,12 @@ PATCH = Profile(
            # makes the tool refuse and say which variable to set, which
            # is a far better answer than the tool not existing on the
            # day somebody adds the key.
-           "notify"),
+           "notify",
+           # Offered but registered only when `[execution] remote = true`
+           # AND a host is configured -- an unregistered tool is simply
+           # refused, so the offer costs nothing when it is off (the same
+           # bargain `run_shell` above already makes).
+           "run_remote"),
     # 8 left no room: read, apply, run_tests, git_commit is already four
     # tool calls before a single wrong turn, and the last step is spent
     # on the forced final answer. Live-caught 2026-09-07.

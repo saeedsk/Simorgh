@@ -64,6 +64,7 @@ from .pdftext import looks_like_pdf, pdf_to_text
 from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
 from .notify import NotifyTool
+from .remote import RunRemoteTool
 from .container import RunContainerTool
 from .render import BrowsePageTool, RenderPageTool
 
@@ -1541,4 +1542,7 @@ def builtin_tools(config: Config) -> list:
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),
+        # Off unless `[execution] remote = true`: it reaches a machine
+        # nothing here can inspect or roll back (execution/remote.py).
+        *((RunRemoteTool(config),) if getattr(config, "remote", False) else ()),
     ]

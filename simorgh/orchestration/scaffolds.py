@@ -89,6 +89,9 @@ _TOOL_NOTES: dict[str, str] = {
     "git_revert": "undo your last commit if it turned out wrong",
     "git_discard": "throw away an uncommitted change you decided against",
     "run_shell": "run a shell command in the repo when no other tool fits",
+    "run_remote": "run a shell command on the configured remote host (a build machine, a deploy "
+                   "target) -- for work that cannot happen on this box; you cannot choose the host, "
+                   "and nothing here can undo what runs there",
     "web_search": "search the web for pages about something; returns titles, URLs and snippets",
     "propose_mcp_server": "propose a new MCP server to the human",
     "draft_candidate": "draft a change without applying it",

@@ -95,6 +95,10 @@ _CODE_BEARING_MARKERS = {
     # notification whose body is truncated to its first line is exactly
     # the useless message this tool exists to avoid.
     "NOTIFY",
+    # A remote command is multi-line for the same reasons a local one is
+    # (a heredoc, two commands joined by a newline) -- and truncating one
+    # to its first line runs a DIFFERENT command on someone's server.
+    "RUN_REMOTE",
 }
 
 

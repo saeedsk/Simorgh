@@ -57,6 +57,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # `irreversible_requires_human` set, every message waits for
     # approval; a deployment that auto-approves has chosen that.
     "notify": ("irreversible", True),
+    # Runs on a machine this process cannot inspect, snapshot or roll
+    # back -- the strongest case for `irreversible` in the table.
+    "run_remote": ("irreversible", True),
     # -- MCP (execution/mcp.py's own module docstring): a human adds an
     # entry here, by the server's registered tool name
     # (`mcp_<server>_<tool>`), for every MCP tool they want the model to
@@ -111,6 +114,7 @@ _MARKER_ARG_KEY: dict[str, str] = {
     # "refused: no command given". The tool had never once run from the
     # model's side; two observers found it independently.
     "run_shell": "command",
+    "run_remote": "command",
     # Same defect as run_shell, found by the audit the same day:
     # `GIT_DISCARD: path` arrived as `{"argument": ...}` while the tool
     # reads `path`, so it answered "refused: name the path to discard".
@@ -205,6 +209,11 @@ _MARKER_ARG_HINT.update({
     "run_tests": "a test file or directory to run (e.g. tests/simorgh/guardian), or empty for the whole suite.",
     "search_code": "a regular expression to search for across the readable tree.",
     "run_shell": "one shell command, run from the repository root; its output comes back to you.",
+    "run_remote": (
+        "one shell command, run on the configured remote host. You do NOT choose the host -- it is "
+        "fixed by configuration, and there is no way to name a different one. Nothing here can undo "
+        "what runs there, so read before you write."
+    ),
     # Code-bearing: the ENTIRE rest of the message is the program. Found
     # by trial 2026-09-07: with no hint the model wrote its code and then
     # kept talking, and the prose became part of the program -- a

@@ -151,6 +151,24 @@ class Config:
     # call), refuses the catastrophic outright (`shell_refusals`), and
     # `[execution] shell = false` turns it off.
     shell: bool = True
+    # -- run_remote (execution/remote.py). OFF by default, one step
+    # stricter than `run_shell` above: the blast radius is a machine
+    # this code cannot inspect, snapshot or roll back. The host, user
+    # and key come from SIMORGH_REMOTE_HOST/_USER/_KEY -- never from the
+    # model, which supplies only the command. There is deliberately no
+    # `host` argument; adding one would make this a general way to send
+    # anything here to any machine on the internet.
+    remote: bool = False
+    remote_timeout_s: float = 300.0
+    remote_connect_timeout_s: float = 15.0
+    remote_output_max_chars: int = 8000
+    # Setting this False accepts an unknown or CHANGED host key without
+    # complaint, which is exactly the signal that someone is between you
+    # and the host. Only for a throwaway box you would not mind losing.
+    remote_strict_host_key: bool = True
+    # Prefixed to every command as `cd <dir> && ...`; "" runs in the
+    # login directory.
+    remote_working_dir: str = ""
     shell_timeout_s: float = 120.0
     # Commands refused outright, pattern -> the reason the model is
     # given. Not a security boundary (a shell has none, and any of
