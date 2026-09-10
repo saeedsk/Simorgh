@@ -19,6 +19,11 @@ CognitionThink = define(t.COGNITION_THINK, [
     O("expected", Enum("text", "tool_calls", "edit_blocks", "verdict")),
     O("allow_summarize", Bool),
     O("last_step", Bool),
+    # Tool calls left in this attempt. So the assembler can tell the
+    # model to wind down BEFORE the wall rather than at it -- a run that
+    # only learns its budget on the final step discovers the limit at
+    # the moment it can no longer act on it.
+    O("steps_left", Int),
 ])
 CognitionThinkReply = define(t.COGNITION_THINK_REPLY, [
     F("text", Str),

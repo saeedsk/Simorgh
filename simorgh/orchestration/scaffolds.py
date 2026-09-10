@@ -122,6 +122,9 @@ _TOOL_NOTES: dict[str, str] = {
     "apply_source_patch": "write a change to a source file -- or to workspace/, which is scratch: "
                            "not committed, not reviewed, and still there next session, so it is where "
                            "notes and half-finished work belong",
+    "replace_in_file": "change PART of an existing file by finding exact text and replacing "
+                        "it -- always use this rather than apply_source_patch when the file "
+                        "already exists and you are editing it, or you will truncate it",
     "apply_skill": "install or update a skill",
     "git_commit": "commit what you have applied, with a message",
     "git_revert": "undo your last commit if it turned out wrong",

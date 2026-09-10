@@ -95,6 +95,7 @@ MARKER_NO_ARGS: frozenset[str] = frozenset({
 #: after it. `("subject", "body")` means line one is the subject.
 MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "apply_source_patch": ("subject", "code"),
+    "replace_in_file": ("path", "code"),
     "apply_skill": ("subject", "code"),
     "git_commit": ("path", "message"),
     "search_listings": ("location", "filters"),
@@ -125,7 +126,8 @@ MARKER_JSON_REST: frozenset[str] = frozenset({
 
 #: Tools whose second part is a program, so a markdown fence around it
 #: has to come off before it is written or run.
-MARKER_CODE_REST: frozenset[str] = frozenset({"apply_source_patch", "apply_skill"})
+MARKER_CODE_REST: frozenset[str] = frozenset({"apply_source_patch", "apply_skill",
+                                              "replace_in_file"})
 
 
 _FENCE_OPEN = re.compile(r"^\s*```[A-Za-z0-9_+-]*\s*\n")

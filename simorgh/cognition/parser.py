@@ -47,6 +47,10 @@ _CODE_BEARING_MARKERS = {
     # Multi-line payloads whose first line is a path and the rest is the
     # complete file body (`orchestration/tools.py::_MARKER_SPLIT_FIRST_LINE`).
     "APPLY_SOURCE_PATCH", "APPLY_SKILL",
+    # `replace_in_file`'s payload is a path then SEARCH/REPLACE blocks.
+    # Without it here everything after the path is discarded and the
+    # tool is handed no blocks at all.
+    "REPLACE_IN_FILE",
     # `git_commit` is the same shape: first line the path, the rest the
     # commit message. Without it here the message was cut off and the
     # commit went out empty -- live-caught 2026-09-07, watching Sim write

@@ -1216,6 +1216,168 @@ class ApplySourcePatchTool:
         return _write_scoped_file(self._config, args["subject"], args["code"], write_scopes=self._config.write_scopes_source)
 
 
+class ReplaceInFileTool:
+    """Change PART of a file, without re-sending the whole thing.
+
+    Until this existed, `apply_source_patch` was the only way to change
+    a file and it replaces the file entirely -- so altering one line of
+    a 150-line document meant re-emitting all 150 lines. A chat turn has
+    an output budget of a couple of thousand tokens, and the file is
+    larger than that, so each "edit" wrote a truncated copy and the file
+    got shorter every time.
+
+    Live-caught 2026-09-09, rebuilding a voxel game: 147 lines became
+    131, then 129, then 76, then 54, each write a sincere attempt at the
+    whole file that ran out of room part-way. The content-loss guard
+    caught one of the steps and the model simply routed around it with
+    smaller files. No amount of prompting fixes that; the tool was
+    asking for something the model could not deliver.
+
+    The block format is the familiar one, and the tool parses it itself
+    so the marker layer stays a two-part `(path, code)`:
+
+        REPLACE_IN_FILE: workspace/midcraft.html
+        <<<<<<< SEARCH
+        const SIZE = 16;
+        =======
+        const SIZE = 32;
+        >>>>>>> REPLACE
+
+    The marker shape is the one this codebase already uses
+    (`cognition/parser.py`'s own SEARCH/REPLACE regex) and the one every
+    model has seen thousands of times in real merge conflicts -- not a
+    bespoke format invented here.
+
+    **The text to search for must appear exactly once.** Not once-or-more:
+    replacing the first of three identical lines is a coin flip, and the
+    two-thirds of the time it guesses wrong the damage is silent. Zero
+    matches and several matches are both refusals that say which, so the
+    next attempt can add surrounding context rather than guess again.
+    """
+
+    name = "replace_in_file"
+    description = (
+        "Change part of an existing file by finding an exact piece of text and replacing it. "
+        "Use this instead of apply_source_patch whenever the file already exists and you are "
+        "changing some of it -- apply_source_patch replaces the whole file, so on anything "
+        "long it will truncate and destroy the rest."
+    )
+    read_only = False
+    reversibility = "reversible"
+    args_schema = {
+        "type": "object", "required": ["path", "code"],
+        "properties": {"path": {"type": "string"}, "code": {"type": "string"}},
+    }
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        subject = str(args.get("path") or "").strip().replace("\\", "/")
+        if not subject:
+            return ToolResult(ok=False, error="refused: name the file to change")
+        blocks, problem = parse_replace_blocks(str(args.get("code") or ""))
+        if problem:
+            return ToolResult(ok=False, error=f"refused: {problem}")
+
+        content, refusal = pathsafety.read_source(
+            self._config.repo_root, subject, readable_roots=self._config.readable_roots)
+        if refusal:
+            return ToolResult(ok=False, error=refusal)
+
+        updated = content
+        applied = []
+        for index, (find, replace) in enumerate(blocks, start=1):
+            count = updated.count(find)
+            if count == 0:
+                return ToolResult(
+                    ok=False,
+                    error=(f"refused: block {index}'s SEARCH text is not in {subject}. Nothing was "
+                           f"changed. READ_FILE the part you mean to change and copy the text "
+                           f"exactly, including its indentation."))
+            if count > 1:
+                return ToolResult(
+                    ok=False,
+                    error=(f"refused: block {index}'s SEARCH text appears {count} times in "
+                           f"{subject}, so which one you mean is a guess. Nothing was changed. "
+                           f"Add a line or two either side to make it unique."))
+            updated = updated.replace(find, replace, 1)
+            applied.append((find, replace))
+
+        if updated == content:
+            # Saying "written" when nothing moved is the failure this
+            # project keeps calling out.
+            return ToolResult(ok=True, output=f"{subject} already read that way; nothing changed",
+                              metadata={"changed": False, "blocks": len(blocks)})
+
+        result = _write_scoped_file(self._config, subject, updated,
+                                     write_scopes=self._config.write_scopes_source)
+        if not result.ok:
+            return result
+        before = len(content.splitlines())
+        after = len(updated.splitlines())
+        delta = f"{after - before:+d} lines" if after != before else "same length"
+        return ToolResult(
+            ok=True,
+            output=f"{subject}: {len(applied)} change(s) applied, {delta} ({after} lines now)",
+            side_effects=result.side_effects,
+            metadata={"changed": True, "blocks": len(applied), "lines_before": before,
+                      "lines_after": after})
+
+
+_FIND_MARK = "<<<<<<< SEARCH"
+_SPLIT_MARK = "======="
+_REPLACE_MARK = ">>>>>>> REPLACE"
+
+
+def parse_replace_blocks(text: str) -> tuple[list[tuple[str, str]], str]:
+    """`(blocks, problem)`. One or more SEARCH/REPLACE blocks.
+
+    Tolerant about the markers themselves -- a model that writes seven
+    angle brackets instead of eight has not made a meaningful mistake --
+    and strict about the structure, because a half-parsed block would
+    write something nobody asked for.
+    """
+    text = (text or "").strip("\n")
+    if not text.strip():
+        return [], "no SEARCH/REPLACE block given"
+    lines = text.split("\n")
+    blocks: list[tuple[str, str]] = []
+    find: list[str] | None = None
+    replace: list[str] | None = None
+    for line in lines:
+        bare = line.strip()
+        if bare.startswith("<<<<<<<"):
+            if find is not None:
+                return [], "a second SEARCH opened before the first was closed"
+            find, replace = [], None
+            continue
+        if find is not None and replace is None and bare.startswith("=======") and len(bare) >= 7:
+            replace = []
+            continue
+        if bare.startswith(">>>>>>>"):
+            if find is None or replace is None:
+                return [], "a REPLACE end marker with no SEARCH before it"
+            blocks.append(("\n".join(find), "\n".join(replace)))
+            find, replace = None, None
+            continue
+        if replace is not None:
+            replace.append(line)
+        elif find is not None:
+            find.append(line)
+    if find is not None:
+        return [], "a SEARCH block was never closed with >>>>>>> REPLACE"
+    if not blocks:
+        return [], (
+            "no SEARCH/REPLACE block found. The shape is:\n"
+            f"{_FIND_MARK}\nthe exact text to find\n{_SPLIT_MARK}\n"
+            f"what to put there instead\n{_REPLACE_MARK}")
+    for index, (find_text, _) in enumerate(blocks, start=1):
+        if not find_text.strip():
+            return [], f"block {index}'s SEARCH text is empty; it has to name what to replace"
+    return blocks, ""
+
+
 class ApplySkillTool:
     """Port of `use_skill`/`apply_skill` (v1 `src/agents/skills/registry.py`
     write half; 08-execution.md section 5.2): writes a drafted skill's
@@ -1544,6 +1706,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
+        ReplaceInFileTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),

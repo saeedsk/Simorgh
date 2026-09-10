@@ -126,8 +126,27 @@ class TestRoomToFinish(unittest.TestCase):
         self.assertGreaterEqual(profiles.PATCH.max_output_tokens, 8000)
         self.assertGreaterEqual(profiles.SKILL.max_output_tokens, 8000)
 
-    def test_a_chat_turn_is_not_given_a_patch_sized_budget(self):
-        self.assertLess(profiles.CHAT.max_output_tokens, profiles.PATCH.max_output_tokens)
+    def test_a_chat_turn_can_also_emit_a_whole_file(self):
+        """This test used to assert the opposite, and the premise it
+        rested on is gone.
+
+        A chat turn could only talk, so a reply-sized output budget was
+        right. It can now write files, install packages and run scripts
+        -- and with a 2,000-token budget every `apply_source_patch` on
+        anything long truncated part-way, so the file came out shorter
+        than it went in. Live-caught 2026-09-09: 147 lines became 131,
+        then 129, then 76, then 54.
+
+        What separates chat from patch is the scaffold and whether the
+        work is verified, not how much room it has to write.
+        """
+        self.assertGreaterEqual(profiles.CHAT.max_output_tokens, 8000)
+
+    def test_a_chat_turn_that_can_write_has_room_to_finish(self):
+        """Write, install what it needs, run it, check it -- before a
+        single wrong turn, and with the last step spent on the forced
+        final answer."""
+        self.assertGreaterEqual(profiles.CHAT.max_steps, 15)
 
 
 if __name__ == "__main__":

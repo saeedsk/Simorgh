@@ -48,6 +48,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # Guardian auto-allows them in guarded posture; ProtectedRule and
     # DenylistRule still run first and still deny outright.
     "apply_source_patch": ("reversible", False),
+    # Changes part of a file in place. Reversible in exactly the way
+    # apply_source_patch is: git has the previous content.
+    "replace_in_file": ("reversible", False),
     "apply_skill": ("reversible", False),
     "git_commit": ("reversible", False),
     "git_revert": ("reversible", False),
@@ -267,6 +270,15 @@ _MARKER_ARG_HINT.update({
         '[{"type": ["#q", "hello"]}, {"click": "#go"}, {"wait": "#results"}, '
         '{"screenshot": "after"}]. Allowed: click, type, press, wait, scroll, screenshot. '
         "There is deliberately no way to run your own JavaScript here."
+    ),
+    "replace_in_file": (
+        "first line: the file to change. Every following line: one or more SEARCH/REPLACE "
+        "blocks.\nUse this, NOT apply_source_patch, whenever the file already exists and you "
+        "are changing part of it -- apply_source_patch replaces the whole file, so on anything "
+        "longer than your output budget it truncates and destroys the rest. The text you "
+        "search for must appear exactly once; add a line either side if it does not.\n"
+        "Example:\nREPLACE_IN_FILE: workspace/game.html\n<<<<<<< SEARCH\n"
+        "const SIZE = 16;\n=======\nconst SIZE = 32;\n>>>>>>> REPLACE\n"
     ),
     "notify": (
         "first line: a short subject, one line. Every following line: the message body. "

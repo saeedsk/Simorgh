@@ -89,6 +89,12 @@
         "null"
       ]
     },
+    "steps_left": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "task_rules": {
       "type": [
         "string",

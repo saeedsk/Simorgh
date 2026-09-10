@@ -45,13 +45,25 @@ CHAT = Profile(
            # library that does the job gets used rather than described.
            # Guardian still sees every one of them, and the package
            # tool keeps its own daily cap.
-           "apply_source_patch", "install_package", "run_script",
+           "apply_source_patch", "replace_in_file", "install_package", "run_script",
            "propose_mcp_server"),
     # 6 was right for a profile that could only read. Writing a file
     # costs a step, installing what it needs costs another, running it a
     # third, and checking the result a fourth -- before a single wrong
     # turn, and with the last step spent on the forced final answer.
-    read_only=False, max_steps=12, max_revisions=0, scaffold="chat", verify=False,
+    # 12 was still not enough for "build me a game": three attempts in a
+    # row ended with work pending. Matched to the patch profile, which
+    # is what a chat turn now IS once it can write, install and run.
+    read_only=False, max_steps=20, max_revisions=0, scaffold="chat", verify=False,
+    # 2000 was a reply budget, from when chat could only talk. The
+    # moment it could also WRITE FILES that number became a content
+    # shredder: a 150-line document is well over 2000 tokens, so every
+    # `apply_source_patch` truncated part-way and the file came out
+    # shorter than it went in. Live-caught 2026-09-09 rebuilding a voxel
+    # game -- 147 lines became 131, then 129, then 76, then 54, each
+    # write a sincere attempt at the whole file that ran out of room.
+    # Matched to the patch profile, which writes files for a living.
+    max_output_tokens=16_000,
 )
 # The creator, 2026-09-07: "gives sim more freedom in autonomously
 # working and evolving without too much gate". Until then the patch/
@@ -68,6 +80,7 @@ PATCH = Profile(
     # `[execution] shell = true`; an unregistered tool is simply refused,
     # so the offer costs nothing when it is off.
     tools=("read_file", "list_dir", "search_code", "run_tests", "apply_source_patch",
+           "replace_in_file",
            "git_commit", "git_revert", "git_discard", "run_shell", "render_page",
            # A task that builds something data-backed needs the data; both
            # are read-only and Guardian-gated, and run_shell (already here)
@@ -142,7 +155,7 @@ SKILL = Profile(
     # skill it had just written, and verification correctly called it
     # asserted-not-verified (observer, 2026-09-08).
     tools=("read_file", "list_dir", "search_code", "run_tests", "run_python_sandboxed",
-           "apply_skill", "git_commit", "git_discard"),
+           "apply_skill", "replace_in_file", "git_commit", "git_discard"),
     read_only=False, max_steps=20, max_revisions=2, scaffold="skill", max_output_tokens=16_000,
 )
 

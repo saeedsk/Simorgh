@@ -35,6 +35,9 @@ CONSTITUTION_SUMMARY = (
 _MIN_FACET_CONFIDENCE = 0.5
 
 
+_WINDING_DOWN_STEPS = 3
+
+
 class PromptAssembler:
     def __init__(self, bus: Bus, source: str, *, request_timeout: float, logger: Logger | None = None) -> None:
         self._bus = bus
@@ -44,6 +47,7 @@ class PromptAssembler:
 
     async def assemble(
         self, *, purpose: str, messages: list[dict], task_rules: str = "", last_step: bool = False,
+        steps_left: int | None = None,
     ) -> AssembledContext:
         blocks: list[PromptBlock] = [self._block("constitution", CONSTITUTION_SUMMARY, protected=True)]
 
@@ -71,6 +75,21 @@ class PromptAssembler:
                 "final_turn_hint",
                 "This is your last step -- no more tool calls will be honored. "
                 "Write your final answer now, using whatever you've already learned.",
+                protected=True,
+            ))
+        elif steps_left is not None and steps_left <= _WINDING_DOWN_STEPS:
+            # Told BEFORE the wall, not at it. A run that only learns its
+            # budget on the final step has no chance to land what it was
+            # doing -- it discovers the limit at the moment it can no
+            # longer act on it, and blocks with the work half-written.
+            # Live-caught 2026-09-09, three attempts in a row at the same
+            # task, each ending "step budget exhausted with work still
+            # pending" and each starting again from nothing.
+            blocks.append(self._block(
+                "budget_hint",
+                f"You have {steps_left} tool call(s) left before this attempt ends. "
+                "Get to a state you can hand over: save what you have to a file, then say "
+                "plainly what is done and what is left. Do not start anything new.",
                 protected=True,
             ))
 

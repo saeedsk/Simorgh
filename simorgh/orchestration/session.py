@@ -220,6 +220,7 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "run_remote": 330.0,
     "geocode": 15.0,
     "apply_source_patch": 60.0,
+    "replace_in_file": 60.0,
     "apply_skill": 60.0,
 }
 # Found by a watched trial, 2026-09-07, and the third stale 5-second
@@ -619,6 +620,7 @@ class SessionRunner:
     # -- phases -----------------------------------------------------------------------------
 
     async def _think(self, session: Session, user_text: str, *, last_step: bool) -> Message | None:
+        steps_left = session.budget.steps_left
         offered = offered_tools(session.profile.tools)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
         is_chat = session.profile.name == "chat"
@@ -661,6 +663,8 @@ class SessionRunner:
                 "tool_hints": {t: h for t in offered if (h := marker_hint(t))},
                 "budget": {"max_tokens": session.profile.max_output_tokens, "max_cost_usd": 0.5},
                 "require_real_provider": False, "last_step": last_step,
+                # So the model can wind down rather than hit a wall.
+                "steps_left": steps_left,
                 # Live-caught (v2 live trial, 2026-09-06): a chat turn
                 # whose assembled memory-retrieval block happens to be
                 # large (large migrated records, a broad query) could

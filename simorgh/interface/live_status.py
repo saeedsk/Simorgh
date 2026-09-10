@@ -54,6 +54,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "find_package"): "Searching",
     ("act", "install_package"): "Installing",
     ("act", "run_script"): "Running",
+    ("act", "replace_in_file"): "Editing",
     ("act", "notify"): "Messaging",
     ("act", "energy_status"): "Reading the meters",
     ("act", "energy_report"): "Costing the meters",

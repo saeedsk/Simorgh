@@ -171,7 +171,17 @@ def safe_read_lines(repo_root: Path, raw_path: str, *, start: int, end: int,
     lines = content.splitlines()
     total = len(lines)
     if start > total:
-        return f"[lines {start}-{end} are past the end; {raw_path} has {total} lines]"
+        # Show the END of the file rather than nothing. A model that
+        # guesses a line range past the end learns only the length, then
+        # spends another step guessing again -- three steps in a row went
+        # this way on 2026-09-09 while it was trying to edit a file it
+        # had just shortened. Answering with the tail turns a wasted
+        # step into a useful one, and says plainly what it did.
+        tail = lines[max(0, total - 40):]
+        first = total - len(tail) + 1
+        numbered = "\n".join(f"{first + i:5d}| {line}" for i, line in enumerate(tail))
+        return (f"[lines {start}-{end} are past the end; {raw_path} has {total} lines. "
+                f"Here are the last {len(tail)}:]\n{numbered}")
     chunk = lines[start - 1:end]
     numbered = "\n".join(f"{start + i:5d}| {line}" for i, line in enumerate(chunk))
     if len(numbered) > _MAX_READ_CHARS:
