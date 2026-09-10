@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Prince of Persia: The Sands Remake</title>
+<style>
+  html,body{margin:0;padding:0;background:#0b0713;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:Georgia,serif}
+  canvas{border:2px solid #4a3b2a;box-shadow:0 0 40px #000;image-rendering:auto}
+  #hudinfo{color:#c9a86a;margin-top:8px;font-size:13px;text-align:center}
+</style>
+</head>
+<body>
+<canvas id="game" width="960" height="480"></canvas>
+<div id="hudinfo">Arrows / WASD move &nbsp;·&nbsp; Up near a ledge: climb &nbsp;·&nbsp; Shift: careful step &nbsp;·&nbsp; X / J: sword &nbsp;·&nbsp; C / K: block &nbsp;·&nbsp; Find the exit door</div>
+<script>
+"use strict";
+// ============ Prince of Persia: The Sands Remake ============
+// Original hand-drawn canvas graphics + procedural WebAudio. No copyrighted assets.
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const TW = 48, COLS = 20, ROWS = 10;
+
+// ---------- Level maps (chars: # wall, . empty, ^ spikes, L loose, G gate,
+//  B button, p small potion, P big potion, g guard, s sword pickup, S prince, E exit) ----------
+const LEVELS = [
+[
+"####################",
+"#S.......#....g...E#",
+"#..L.....#..#######E",
+"#....##B.#..#......#",
+"#..###...#..#..p...#",
+"#..#..^..#..####...#",
+"#..#.....#......#.##",
+"#..####G.#..L...#..#",
+"#........#...#..#..#",
+"####################"
+],
+[
+"####################",
+"#S.....L...#..g....#",
+"#..........#..###..#",
+"#...##..p..#..#.E..#",
+"#...#......G..#.####",
+"#...#..#####.#..B..#",
+"#...^..#...#.##....#",
+"#..###.#.g.#..#####",
+"#..#...#...#.......#",
+"####################"
+],
+[
+"####################",
+"#S....#....g...g...#",
+"#..p..#..#######...#",
+"#..#..#..#.....#.###",
+"#..#..L..#..P..#...#",
+"#..####..#..#..##.##",
+"#........#..#...#.E#",
+"#..^^^...#..##G##.##",
+"#..###B..#........##",
+"####################"
+]
+];
+
+// ---------- Audio (procedural WebAudio) ----------
+let AC = null;
+function audio(){ if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(AC&&AC.state==='suspended')AC.resume(); return AC; }
+function tone(freq,dur,type,vol,slide){
+  const a=audio(); if(!a)return;
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type||'square'; o.frequency.value=freq;
+  if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(30,freq+slide), a.currentTime+dur);
+  g.gain.setValueAtTime(vol||0.08, a.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, a.currentTime+dur);
+  o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur);
+}
+function noise(dur,vol,filterFreq){
+  const a=audio(); if(!a)return;
+  const n=a.sampleRate*dur, buf=a.createBuffer(1,n,a.sampleRate), d=buf.getChannelData(0);
+  for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  const s=a.createBufferSource(); s.buffer=buf;
+  const f=a.createBiquadFilter(); f.type='bandpass'; f.frequency.value=filterFreq||800;
+  const g=a.createGain(); g.gain.value=vol||0.1;
+  s.connect(f); f.connect(g); g.connect(a.destination); s.start();
+}
+const SFX={
+  step:()=>noise(0.08,0.06,500),
+  jump:()=>tone(220,0.18,'square',0.05,300),
+  land:()=>noise(0.1,0.09,300),
+  sword:()=>{tone(1800,0.08,'sawtooth',0.05,-900);noise(0.06,0.08,2500);},
+  clank:()=>{tone(2200,0.1,'square',0.06,-1400);tone(1400,0.12,'triangle',0.05);},
+  hurt:()=>tone(300,0.3,'sawtooth',0.1,-200),
+  kill:()=>{noise(0.3,0.12,600);tone(160,0.5,'sawtooth',0.08,-100);},
+  potion:()=>{tone(660,0.1,'sine',0.07);setTimeout(()=>tone(880,0.12,'sine',0.07),90);setTimeout(()=>tone(1320,0.15,'sine',0.07),190);},
+  spikes:()=>noise(0.15,0.12,1800),
+  gate:()=>{tone(90,0.6,'sawtooth',0.09,-40);noise(0.5,0.05,200);},
+  crumble:()=>noise(0.4,0.12,400),
+  climb:()=>noise(0.12,0.05,700),
+  die:()=>{tone(220,0.4,'sawtooth',0.1,-160);setTimeout(()=>tone(110,0.8,'sawtooth',0.1,-70),300);},
+  win:()=>{[523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,0.25,'triangle',0.08),i*150));}
+};
+
+// ---------- Game state ----------
+let level=0, grid=[], tiles=[], guards=[], potions=[], looseTiles=[], gates=[], buttons=[];
+let prince=null, exitDoor={x:0,y:0,open:false}, cam={x:0}, shake=0, flash=0;
+let msg="", msgT=0, state='title', stateT=0, totalScore=0;
+const keys={};
+addEventListener('keydown',e=>{ keys[e.code]=true; if(['ArrowUp','ArrowDown','Space'].includes(e.code))e.preventDefault(); audio(); if(state==='title'||state==='dead'||state==='won'){ if(stateT>0.5) startLevel(0,true); } });
+addEventListener('keyup',e=>{ keys[e.code]=false; });
+
+function startLevel(n, reset){
+  level=n;
+  if(reset){ totalScore=0; }
+  const rows=LEVELS[n];
+  grid=[]; tiles=[]; guards=[]; potions=[]; looseTiles=[]; gates=[]; buttons=[];
+  for(let r=0;r<ROWS;r++){
+    grid[r]=[];
+    for(let c=0;c<COLS;c++){
+      const ch=(rows[r][c]||'#');
+      let t = ch==='#'?'W':(ch==='.'||ch===' ')?'_':null;
+      if(t===null){
+        if(ch==='^'){t='_';tiles.push({c,r,type:'spike',phase:Math.random()*2});}
+        else if(ch==='L'){t='L';looseTiles.push({c,r,falling:false,y:r*TW,vy:0,set:false});}
+        else if(ch==='G'){t='G';gates.push({c,r,open:false});}
+        else if(ch==='B'){t='B';buttons.push({c,r});}
+        else if(ch==='p'){t='_';potions.push({c,r,kind:'small',y:r*TW});}
+        else if(ch==='P'){t='_';potions.push({c,r,kind:'big',y:r*TW});}
+        else if(ch==='s'){t='_';potions.push({c,r,kind:'sword',y:r*TW});}
+        else if(ch==='g'){t='_';guards.push(makeGuard(c,r));}
+        else if(ch==='S'){t='_';prince=makePrince(c,r); if(!prince.hasSword)prince.hasSword=false;}
+        else if(ch==='E'){t='_';exitDoor={c,r,open:false};}
+        else t='_';
+      }
+      grid[r][c]=t;
+    }
+  }
+  cam.x=0; shake=0; msg='LEVEL '+(n+1); msgT=2.2;
+}
+function makePrince(c,r){
+  return {x:c*TW+8,y:r*TW,vx:0,vy:0,w:24,h:44,dir:1,onGround:false,hp:4,maxhp:4,
+    lives:3,state:'stand',anim:0,climbCd:0,sword:false,fight:false,atkCd:0,blkCd:0,hurtT:0,
+    hangTile:null,stepT:0,dead:false,blockHold:0};
+}
+function makeGuard(c,r){
+  return {x:c*TW+8,y:r*TW,vx:0,vy:0,w:24,h:44,dir:-1,hp:3,state:'patrol',
+    anim:0,atkT:0,atkCd:1.2,hurtT:0,dead:false,warn:0,onGround:true,spd:60};
+}
+function solid(c,r){ if(c<0||c>=COLS||r<0||r>=ROWS)return true; return grid[r][c]==='W'; }
+function looseAt(c,r){ return looseTiles.find(t=>t.c===c&&t.r===r&&!t.falling); }
+function gateAt(c,r){ return gates.find(g=>g.c===c&&g.r===r); }
+function passable(c,r){ // empty, gate-closed blocks, loose counts as solid from above only handled in physics
+  if(c<0||c>=COLS||r<0||r>=ROWS)return false;
+  const t=grid[r][c];
+  if(t==='W')return false;
+  if(t==='G'&&!gateAt(c,r).open)return false;
+  return true;
+}
+
+// ---------- Update ----------
+let lastT=0;
+function loop(t){
+  const dt=Math.min(0.033,(t-lastT)/1000||0.016); lastT=t;
+  update(dt); draw();
+  requestAnimationFrame(loop);
+}
+function update(dt){
+  stateT+=dt;
+  if(msgT>0)msgT-=dt;
+  if(shake>0)shake-=dt*3;
+  if(flash>0)flash-=dt*4;
+  if(state==='title'){ return; }
+  if(state==='dead'||state==='won')return;
+
+  updatePrince(dt);
+  for(const g of guards)updateGuard(g,dt);
+  for(const s of tiles)if(s.type==='spike'){s.phase+=dt;}
+  for(const lt of looseTiles){
+    if(lt.falling){ lt.vy+=900*dt; lt.y+=lt.vy*dt;
+      let rr=Math.round(lt.y/TW);
+      if(solid(lt.c,rr)||rr>=ROWS-1){ lt.y=rr*TW; lt.falling=false; lt.vy=0; grid[Math.min(rr,ROWS-1)][lt.c]='_'; SFX.crumble(); }
+    }
+  }
+  for(const g of gates){ /* opened on button */ }
+  // prince on spikes
+  for(const s of tiles){
+    if(s.type==='spike'){
+      const ext=(Math.sin(s.phase*2)+1)/2;
+      if(ext>0.55 && Math.abs((s.c+0.5)*TW-(prince.x+12))<30 && Math.abs(prince.y+prince.h-(s.r+1)*TW)<10 && !prince.dead){
+        hurtPrince(1); SFX.spikes();
+      }
+    }
+  }
+  // potions
+  for(let i=potions.length-1;i>=0;i--){
+    const p=potions[i];
+    if(Math.abs(p.c*TW+24-(prince.x+12))<26 && Math.abs((p.r+0.5)*TW-(prince.y+22))<30){
+      potions.splice(i,1);
+      if(p.kind==='small'){ prince.hp=Math.min(prince.maxhp,prince.hp+1); SFX.potion(); }
+      else if(p.kind==='big'){ prince.maxhp++; prince.hp=prince.maxhp; SFX.potion(); }
+      else { prince.sword=true; SFX.potion(); showMsg('Sword acquired!'); }
+    }
+  }
+  // buttons open nearest gates
+  for(const b of buttons){
+    if(Math.abs(b.c*TW+24-(prince.x+12))<26 && Math.abs((b.r+0.5)*TW-(prince.y+22))<30){
+      for(const g of gates){ if(!g.open){ g.open=true; exitDoor.open=true; SFX.gate(); showMsg('The gate opens...'); } }
+    }
+  }
+  // exit
+  if(exitDoor.open && Math.abs(exitDoor.c*TW+24-(prince.x+12))<26 && Math.abs((exitDoor.r+0.5)*TW-(prince.y+22))<30){
+    if(level+1<LEVELS.length){ SFX.win(); totalScore+=100; startLevel(level+1,false); }
+    else { state='won'; stateT=0; SFX.win(); }
+  }
+}
+function showMsg(m){ msg=m; msgT=2.5; }
+function hurtPrince(n){
+  if(prince.hurtT>0||prince.dead)return;
+  prince.hp-=n; prince.hurtT=1; flash=1; shake=0.4; SFX.hurt();
+  if(prince.hp<=0){
+    prince.lives--;
+    if(prince.lives>0){ prince.dead=true; SFX.die(); setTimeout(()=>{ if(state!=='won'){prince.dead=false; prince.hp=prince.maxhp; prince.x=prince.spawnX; prince.y=prince.spawnY; prince.hurtT=1.5;} },1200); }
+    else { state='dead'; stateT=0; SFX.die(); }
+  }
+}
+// spawn point recorded at level start for respawn on death
+function recordSpawn(){ if(prince){prince.spawnX=prince.x;prince.spawnY=prince.y;} }
+
+function updatePrince(dt){
+  const p=prince;
+  if(p.dead)return;
+  if(p.hurtT>0)p.hurtT-=dt;
+  if(p.atkCd>0)p.atkCd-=dt;
+  if(p.blkCd>0)p.blkCd-=dt;
+  if(p.blockHold>0)p.blockHold-=dt;
+
+  const left=keys['ArrowLeft']||keys['KeyA'], right=keys['ArrowRight']||keys['KeyD'];
+  const up=keys['ArrowUp']||keys['KeyW'], down=keys['ArrowDown']||keys['KeyS'];
+  const careful=keys['ShiftLeft']||keys['ShiftRight'];
+
+  // fight mode if guard nearby & prince has sword
+  let near=null;
+  for(const g of guards){ if(!g.dead && Math.abs(g.x-p.x)<90 && Math.abs(g.y-p.y)<40) near=g; }
+  p.fight = !!near && p.sword;
+
+  // combat input
+  if(p.fight){
+    if((keys['KeyX']||keys['KeyJ'])&&p.atkCd<=0){ p.atkCd=0.55; SFX.sword(); p.state='attack'; p.anim=0;
+      setTimeout(()=>{ if(near&&!near.dead&&Math.abs(near.x-p.x)<58){ // hit lands unless guard blocks
+        if(Math.random()<0.75){ near.hp--; near.hurtT=0.35; SFX.hurt(); if(near.hp<=0){near.dead=true;SFX.kill(); showMsg('Guard defeated');} }
+        else SFX.clank();
+      } },140);
+    }
+    if((keys['KeyC']||keys['KeyK'])) p.blockHold=0.2;
+  }
+
+  // horizontal move
+  let spd = p.fight?40:(careful?55:150);
+  p.vx = (left?-spd:0)+(right?spd:0);
+  if(p.vx!==0)p.dir=Math.sign(p.vx);
+  if(p.state!=='attack'||p.anim>0.25) p.x+=p.vx*dt;
+  p.x=Math.max(0,Math.min(COLS*TW-p.w,p.x));
+
+  // vertical
+  p.vy+=1500*dt;
+  const feetCol=Math.floor((p.x+12)/TW);
+  let feetRow=Math.floor((p.y+p.h)/TW);
+  // loose tile check
+  const lt=looseAt(feetCol,feetRow);
+  const onLoose= lt && (p.y+p.h)>=lt.r*TW && (p.y+p.h)<=lt.r*TW+8;
+  if(onLoose&&!lt.falling){ lt.falling=true; lt.vy=40; SFX.crumble(); }
+  let landing=false;
+  if(p.vy>=0){
+    let supportY=null;
+    if(passable(feetCol,feetRow)||grid[feetRow]&&grid[feetRow][feetCol]==='L'){} 
+    // check solid or loose below
+    if(solid(feetCol,feetRow)||grid[feetRow][feetCol]==='L'||(grid[feetRow][feetCol]==='G'&&gateAt(feetCol,feetRow)&&!gateAt(feetCol,feetRow).open)){
+      supportY=feetRow*TW;
+    }
+    if(supportY!==null && p.y+p.h>=supportY){
+      if(p.vy>600)SFX.land();
+      p.y=supportY-p.h; p.vy=0; p.onGround=true; landing=true;
+    } else p.onGround=false;
+  } else p.onGround=false;
+  // head bump
+  const headRow=Math.floor(p.y/TW);
+  if(p.vy<0 && (solid(feetCol,headRow))) { p.y=(headRow+1)*TW; p.vy=0; }
+  if(landing)p.state='stand';
+
+  // jump
+  if(p.onGround && keys['Space'] && !p._jumpHeld){ p.vy=-520; p.onGround=false; p.state='jump'; SFX.jump(); }
+  if(!keys['Space'])p._jumpHeld=false; else p._jumpHeld=true;
+
+  // climbing: up against a wall edge -> climb up one tile
+  if(p.climbCd>0)p.climbCd-=dt;
+  if(up && p.onGround && p.climbCd<=0){
+    // find ledge: wall ahead at head level, empty above it
+    const aheadC=Math.floor((p.x+12+p.dir*20)/TW);
+    const bodyR=Math.floor((p.y+p.h-8)/TW);
+    const topR=Math.floor((p.y+8)/TW);
+    if((solid(aheadC,topR)||grid[topR][aheadC]==='L') && passable(aheadC,topR-1)===false){}
+    if(!passable(aheadC,topR-1)===false && !passable(aheadC,topR)===true){}
+    // simpler: if wall at body level ahead and air above
+    if(solid(aheadC,bodyR) && passable(aheadC,bodyR-1)){
+      p.y=(bodyR-1)*TW - 0; // climb
+      p.climbCd=0.4; SFX.climb(); p.state='climb'; p.anim=0;
+      p.x+= p.dir*10;
+    } else if(up && !passable(Math.floor((p.x+12)/TW),bodyR-1) && passable(Math.floor((p.x+12)/TW),bodyR-2)===false){/*noop*/}
+  }
+  // climb down: hang? simplified - drop through onto lower ledge handled by gravity naturally
+  if(down && p.onGround){
+    // step off ledge = just walk off; nothing extra
+  }
+
+  // animation
+  p.anim+=dt;
+  if(p.onGround){
+    if(p.fight){ if(p.state!=='attack')p.state='fight'; }
+    else if(p.vx!==0){ p.state=careful?'careful':'run';
+      p.stepT-=dt; if(p.stepT<=0){ SFX.step(); p.stepT=careful?0.5:0.25; } }
+    else p.state='stand';
+  } else p.state='jump';
+}
+
+function updateGuard(g,dt){
+  if(g.dead)return;
+  if(g.hurtT>0)g.hurtT-=dt;
+  g.anim+=dt;
+  const p=prince;
+  const dist=Math.abs(g.x-p.x);
+  const sees = p.sword && dist<140 && Math.abs(g.y-p.y)<40;
+  if(sees){ g.state='fight'; g.dir=Math.sign(p.x-g.x)||g.dir; }
+  if(g.state==='fight'){
+    g.atkCd-=dt;
+    if(dist>58){ g.x+=g.dir*40*dt; }
+    else if(g.atkCd<=0){ g.atkCd=1.1+Math.random()*0.5; g.warn=0.4; }
+    if(g.warn>0){ g.warn-=dt;
+      if(g.warn<=0 && !p.dead && Math.abs(g.x-p.x)<62){
+        if(p.fight && p.blockHold>0){ SFX.clank(); }
+        else { hurtPrince(1); }
+      }
+    }
+  } else {
+    // patrol: walk, turn at walls/edges
+    const ahead=Math.floor((g.x+12+g.dir*22)/TW);
+    const fr=Math.floor((g.y+g.h)/TW);
+    if(solid(ahead,fr-1)||!solid(ahead,fr)||gateAt(ahead,fr-1)&&!gateAt(ahead,fr-1).open) g.dir*=-1;
+    g.x+=g.dir*g.spd*dt;
+  }
+  // guard falls
+  g.vy+=1500*dt;
+  const fc=Math.floor((g.x+12)/TW), frr=Math.floor((g.y+g.h)/TW);
+  if(g.vy>=0 && (solid(fc,frr)||grid[frr]&&grid[frr][fc]==='L')){
+    if(g.y+g.h>=frr*TW){ g.y=frr*TW-g.h; g.vy=0; }
+  } else g.y+=g.vy*dt;
+  // guard on spikes dies
+  for(const s of tiles){
+    if(s.type==='spike'){
+      const ext=(Math.sin(s.phase*2)+1)/2;
+      if(ext>0.55 && Math.abs((s.c+0.5)*TW-(g.x+12))<26 && Math.abs(g.y+g.h-(s.r+1)*TW)<8){
+        g.hp=0; g.dead=true; SFX.kill(); showMsg('The spikes claim a guard');
+      }
+    }
+  }
+}
+
+// ---------- Drawing ----------
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+function draw(){
+  ctx.save();
+  const sx=(Math.random()-0.5)*shake*14, sy=(Math.random()-0.5)*shake*14;
+  ctx.translate(sx,sy);
+  // background: desert dusk gradient + moon + dunes
+  const bg=ctx.createLinearGradient(0,0,0,480);
+  bg.addColorStop(0,'#2a1436'); bg.addColorStop(0.45,'#5c2a3f'); bg.addColorStop(0.8,'#9c5230'); bg.addColorStop(1,'#c47a3a');
+  ctx.fillStyle=bg; ctx.fillRect(-20,-20,1000,520);
+  ctx.fillStyle='rgba(255,240,200,0.9)'; ctx.beginPath(); ctx.arc(820,70,26,0,7); ctx.fill();
+  ctx.fillStyle='rgba(255,220,160,0.15)'; ctx.beginPath(); ctx.arc(820,70,44,0,7); ctx.fill();
+  // dunes
+  ctx.fillStyle='rgba(40,20,40,0.55)';
+  for(let i=0;i<3;i++){
+    ctx.beginPath(); ctx.moveTo(-20,300+i*60);
+    for(let x=-20;x<=980;x+=40) ctx.lineTo(x, 290+i*55+Math.sin(x*0.008+i*2)*26);
+    ctx.lineTo(980,500); ctx.lineTo(-20,500); ctx.fill();
+  }
+
+  // tiles with camera-free fixed grid (fits 20x10 exactly)
+  const offX=0;
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const t=grid[r][c], X=c*TW, Y=r*TW;
+    if(t==='W'){
+      const g=ctx.createLinearGradient(X,Y,X,Y+TW);
+      g.addColorStop(0,'#7a5a3a'); g.addColorStop(1,'#4a3520');
+      ctx.fillStyle=g; ctx.fillRect(X,Y,TW,TW);
+      ctx.strokeStyle='rgba(0,0,0,0.35)'; ctx.lineWidth=1;
+      ctx.strokeRect(X+0.5,Y+0.5,TW-1,TW-1);
+      // brick pattern
+      ctx.fillStyle='rgba(0,0,0,0.18)';
+      ctx.fillRect(X,Y+TW/2-1,TW,2);
+      const mid=(r%2)?TW/2:0;
+      ctx.fillRect(X+TW/2,Y+(r%2?0:TW/2),2,TW/2);
+      ctx.fillStyle='rgba(255,220,170,0.08)'; ctx.fillRect(X,Y,TW,3);
+    }
+  }
+  // loose tiles
+  for(const lt of looseTiles){
+    const X=lt.c*TW, Y=lt.falling?lt.y:lt.r*TW;
+    ctx.fillStyle='#6a4a28'; ctx.fillRect(X+2,Y,TW-4,TW);
+    ctx.fillStyle='rgba(0,0,0,0.3)'; for(let i=0;i<3;i++)ctx.fillRect(X+2,Y+8+i*14,TW-4,3);
+    ctx.strokeStyle='#2a1a08'; ctx.strokeRect(X+2.5,Y+0.5,TW-5,TW-1);
+  }
+  // gates
+  for(const g of gates){
+    const X=g.c*TW, Y=g.r*TW;
+    const lift=g.open?TW*0.75:0;
+    ctx.fillStyle='#3a2a14'; ctx.fillRect(X,Y,TW,TW);
+    ctx.fillStyle='#8a7a5a';
+    for(let i=0;i<4;i++)ctx.fillRect(X+6+i*10,Y+lift,4,TW-lift-2);
+    ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(X,Y+TW-4,TW,4);
+  }
+  // buttons
+  for(const b of buttons){
+    const X=b.c*TW, Y=b.r*TW;
+    ctx.fillStyle='#241a10'; ctx.fillRect(X+8,Y+TW-14,TW-16,10);
+    ctx.fillStyle='#c04a3a'; rr(X+14,Y+TW-12,TW-28,8,3); ctx.fill();
+  }
+  // spikes
+  for(const s of tiles){
+    if(s.type!=='spike')continue;
+    const ext=(Math.sin(s.phase*2)+1)/2;
+    const X=s.c*TW, Y=(s.r+1)*TW;
+    ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.fillRect(X,Y-6,TW,6);
+    ctx.fillStyle='#b8bcc4';
+    const h=ext*30;
+    for(let i=0;i<4;i++){
+      ctx.beginPath();
+      ctx.moveTo(X+4+i*11,Y); ctx.lineTo(X+9.5+i*11,Y-h); ctx.lineTo(X+15+i*11,Y);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  // potions
+  for(const p of potions){
+    const X=p.c*TW, Y=p.r*TW;
+    ctx.save(); ctx.translate(X+24,Y+TW-12);
+    if(p.kind==='sword'){
+      ctx.strokeStyle='#d8d8e0'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(-16,4); ctx.lineTo(10,-10); ctx.stroke();
+      ctx.strokeStyle='#8a6a2a'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(-8,-4); ctx.lineTo(-14,8); ctx.stroke();
+    } else {
+      const col=p.kind==='small'?'#d04a8a':'#e0503a';
+      ctx.fillStyle=col; ctx.beginPath(); ctx.arc(0,0,p.kind==='small'?7:10,0,7); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(-2,-3,2.5,0,7); ctx.fill();
+      ctx.fillStyle='#5a3a1a'; ctx.fillRect(-3,-(p.kind==='small'?13:16),6,5);
+      ctx.globalAlpha=0.35; ctx.fillStyle=col; ctx.beginPath(); ctx.arc(0,0,p.kind==='small'?12:16,0,7); ctx.fill();
+    }
+    ctx.restore();
+  }
+  // exit door
+  {
+    const X=exitDoor.c*TW, Y=exitDoor.r*TW;
+    ctx.fillStyle='#241608'; ctx.fillRect(X+4,Y+4,TW-8,TW-4);
+    ctx.fillStyle=exitDoor.open?'#f0c060':'#6a4a20';
+    ctx.fillRect(X+8,Y+10,TW-16,TW-10);
+    ctx.strokeStyle='#120a04'; ctx.lineWidth=2; ctx.strokeRect(X+8,Y+10,TW-16,TW-10);
+    ctx.fillStyle=exitDoor.open?'rgba(255,240,180,0.5)':'rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.arc(X+24,Y+TW/2+4,exitDoor.open?9:5,0,7); ctx.fill();
+  }
+  // guards
+  for(const g of guards)drawFighter(g,'#7a2a2a','#4a1414',g.dead);
+  // prince
+  if(prince)drawFighter(prince,'#d8b080','#3a3a6a',prince.dead);
+  // HUD
+  ctx.fillStyle='rgba(10,6,16,0.75)'; rr(10,10,250,64,8); ctx.fill();
+  ctx.fillStyle='#e8c88a'; ctx.font='14px Georgia';
+  ctx.fillText('Level '+(level+1)+'/'+LEVELS.length+'   Score '+totalScore,20,28);
+  for(let i=0;i<prince.maxhp;i++){
+    ctx.fillStyle=i<prince.hp?'#d84a3a':'#3a2020';
+    ctx.beginPath(); ctx.moveTo(24+i*18,44); ctx.lineTo(34+i*18,36); ctx.lineTo(44+i*18,44);
+    ctx.lineTo(34+i*18,54); ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle='#c9a86a'; ctx.font='12px Georgia'; ctx.fillText('Lives: '+prince.lives+(prince.sword?'  ·  Sword':''),20,68);
+
+  if(msgT>0){ ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,210,960,60);
+    ctx.fillStyle='#f0d8a0'; ctx.font='26px Georgia'; ctx.textAlign='center';
+    ctx.fillText(msg,480,248); ctx.textAlign='left'; }
+  if(state==='title'){
+    ctx.fillStyle='rgba(8,4,14,0.8)'; ctx.fillRect(0,0,960,480);
+    ctx.fillStyle='#f0d8a0'; ctx.textAlign='center';
+    ctx.font='40px Georgia'; ctx.fillText('PRINCE OF PERSIA',480,180);
+    ctx.fillStyle='#c08a4a'; ctx.font='22px Georgia'; ctx.fillText('The Sands Remake',480,220);
+    ctx.fillStyle='#c9a86a'; ctx.font='15px Georgia';
+    ctx.fillText('Arrows/WASD move · Space jump · Up climbs ledges · X attack · C block',480,300);
+    ctx.fillText('Press any key to begin',480,350);
+    ctx.textAlign='left';
+  }
+  if(state==='dead'||state==='won'){
+    ctx.fillStyle='rgba(8,4,14,0.7)'; ctx.fillRect(0,0,960,480);
+    ctx.textAlign='center'; ctx.fillStyle=state==='won'?'#f0d8a0':'#d84a3a';
+    ctx.font='44px Georgia'; ctx.fillText(state==='won'?'THE SANDS ARE AT PEACE':'THE PRINCE HAS FALLEN',480,240);
+    ctx.fillStyle='#c9a86a'; ctx.font='16px Georgia';
+    ctx.fillText('Press any key to play again',480,300); ctx.textAlign='left';
+  }
+  // flash & vignette
+  if(flash>0){ ctx.fillStyle='rgba(220,60,40,'+(flash*0.35)+')'; ctx.fillRect(0,0,960,480); }
+  const vg=ctx.createRadialGradient(480,240,260,480,240,560);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.45)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,960,480);
+  ctx.restore();
+}
+
+// stylized hand-drawn figure
+function drawFighter(f,tunic,dark,dead){
+  if(!f)return;
+  const X=f.x+12, Y=f.y;
+  ctx.save(); ctx.translate(X,Y);
+  if(dead){ ctx.globalAlpha=0.35; }
+  ctx.scale(f.dir,1);
+  const walk=Math.sin(f.anim*10)*(f.state==='run'||f.state==='careful'?1:0);
+  const cbob=f.state==='careful'?Math.abs(Math.sin(f.anim*6))*3:0;
+  // legs
+  ctx.strokeStyle=dark; ctx.lineWidth=7; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,26+cbob); ctx.lineTo(6+walk*7,44); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0,26+cbob); ctx.lineTo(-6-walk*7,44); ctx.stroke();
+  // torso tunic
+  const tg=ctx.createLinearGradient(0,4,0,30); tg.addColorStop(0,tunic); tg.addColorStop(1,dark);
+  ctx.fillStyle=tg; rr(-8,8+cbob,16,22,5); ctx.fill();
+  // belt
+  ctx.fillStyle='#2a1a0a'; ctx.fillRect(-8,24+cbob,16,4);
+  // head + turban
+  ctx.fillStyle='#e0b088'; ctx.beginPath(); ctx.arc(1,2+cbob,6,0,7); ctx.fill();
+  ctx.fillStyle=dead?'#555':'#e8e4d0'; ctx.beginPath(); ctx.arc(0,-1+cbob,7,Math.PI,0); ctx.fill();
+  ctx.fillRect(-7,-2+cbob,14,3);
+  // eye
+  if(!dead){ ctx.fillStyle='#201'; ctx.fillRect(3,1+cbob,2,2); }
+  // arms / sword
+  ctx.strokeStyle=tunic; ctx.lineWidth=5;
+  if(f.state==='attack'){
+    ctx.beginPath(); ctx.moveTo(0,14+cbob); ctx.lineTo(14,6+cbob); ctx.stroke();
+    ctx.strokeStyle='#d8d8e0'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(14,6+cbob); ctx.lineTo(30,-6+cbob); ctx.stroke();
+  } else if(f.fight||f.warn>0){
+    const up=f.warn>0?-10:0;
+    ctx.beginPath(); ctx.moveTo(0,14+cbob); ctx.lineTo(12,12+up+cbob); ctx.stroke();
+    ctx.strokeStyle='#d8d8e0'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(12,12+up+cbob); ctx.lineTo(24,0+up+cbob); ctx.stroke();
+    // shield arm
+    ctx.strokeStyle=dark; ctx.beginPath(); ctx.moveTo(0,16+cbob); ctx.lineTo(-10,20+cbob); ctx.stroke();
+  } else if(f.sword){
+    ctx.beginPath(); ctx.moveTo(0,14+cbob); ctx.lineTo(10,20+walk*3+cbob); ctx.stroke();
+    ctx.strokeStyle='#d8d8e0'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(10,20+walk*3+cbob); ctx.lineTo(18,28+walk*3+cbob); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.moveTo(0,14+cbob); ctx.lineTo(9,20+walk*4+cbob); ctx.stroke();
+  }
+  ctx.restore();
+  if(f.hurtT>0){ ctx.globalAlpha=f.hurtT; ctx.fillStyle='rgba(255,80,60,0.4)'; ctx.fillRect(f.x-2,f.y-4,28,52); ctx.globalAlpha=1; }
+}
+
+// record spawns & boot
+const boot=()=>{ startLevel(0,true); recordSpawn(); requestAnimationFrame(loop); };
+boot();
+</script>
+</body>
+</html>
