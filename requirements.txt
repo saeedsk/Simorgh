@@ -51,3 +51,12 @@ Pillow>=10.0
 # binary on PATH; without either, an image still reports its dimensions
 # and says which piece is missing rather than failing.
 pytesseract>=0.3
+
+# `notify`'s `apprise` provider (simorgh/execution/notify.py): one
+# `APPRISE_URLS` variable covers Telegram, Discord, Pushover, Signal and
+# ~100 more services, each written as a URL. Optional and imported
+# lazily: with the package absent, `auto` simply passes over the
+# provider and naming it explicitly refuses with this pip line. The
+# four self-hosted providers beside it (ntfy, Gotify, Home Assistant,
+# Matrix) are plain HTTP and need nothing installed at all.
+apprise>=1.9

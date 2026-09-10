@@ -14,7 +14,9 @@ nothing is the worst possible failure of a notifier.
 from __future__ import annotations
 
 import json
+import types
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from simorgh.contracts.protocols import ToolContext
@@ -195,3 +197,240 @@ class ContractTestCase(unittest.TestCase):
             with self.subTest(provider=name):
                 self.assertTrue(keys, f"{name} would be 'configured' with nothing set")
                 self.assertIn(name, notify_module._SENDERS)
+
+
+class OpenSourceProviderTestCase(unittest.IsolatedAsyncioTestCase):
+    """The self-hosted providers (platform-connectors-design.md section
+    7). Every one of these is a box the creator runs, so the assertions
+    are about the request that WOULD go out and about the two things
+    that are easy to get wrong: the private-address rule, and a token
+    leaking into a result."""
+
+    def _tool(self, opener, env, **overrides):
+        return NotifyTool(Config(**overrides), opener=opener, env=env)
+
+    async def _send(self, env, **kwargs):
+        opener = _Opener()
+        result = await self._tool(opener, env).run(
+            {"subject": kwargs.pop("subject", "hello"), "body": kwargs.pop("body", "the body")},
+            ctx=_ctx())
+        return result, opener
+
+    # -- ntfy ----------------------------------------------------------------
+
+    async def test_ntfy_puts_the_body_in_the_body_and_the_subject_in_a_header(self):
+        result, opener = await self._send({"NTFY_URL": "https://ntfy.sh/my-topic"})
+        self.assertTrue(result.ok, result.error)
+        request = opener.calls[0]
+        self.assertEqual(request.data, b"the body")
+        self.assertEqual(request.get_header("Title"), "hello")
+        self.assertIsNone(request.get_header("Authorization"))
+
+    async def test_ntfy_sends_its_token_when_one_is_set(self):
+        _, opener = await self._send({"NTFY_URL": "https://ntfy.sh/t", "NTFY_TOKEN": "tk_abc"})
+        self.assertEqual(opener.calls[0].get_header("Authorization"), "Bearer tk_abc")
+
+    async def test_a_subject_that_cannot_be_a_latin1_header_does_not_lose_the_message(self):
+        # urllib encodes headers as latin-1: an em-dash or an emoji in
+        # the subject used to raise deep inside the send.
+        result, opener = await self._send({"NTFY_URL": "https://ntfy.sh/t"}, subject="done — \U0001f680")
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(opener.calls[0].data, b"the body")
+
+    async def test_a_self_hosted_ntfy_on_the_lan_is_allowed(self):
+        # The whole point of ntfy is that it can be your own box. The
+        # cloud providers keep the SSRF refusal; these do not, because
+        # the URL is an operator's environment variable and never a
+        # tool argument.
+        result, opener = await self._send({"NTFY_URL": "http://192.168.1.50:8080/alerts"})
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(len(opener.calls), 1)
+
+    async def test_a_cloud_provider_still_refuses_a_private_address(self):
+        result, opener = await self._send({"SLACK_WEBHOOK_URL": "http://192.168.1.50/hook"})
+        self.assertFalse(result.ok)
+        self.assertEqual(opener.calls, [])
+
+    # -- gotify --------------------------------------------------------------
+
+    async def test_gotify_posts_a_message_with_its_key_in_the_header(self):
+        result, opener = await self._send({"GOTIFY_URL": "http://gotify.lan/", "GOTIFY_TOKEN": "A.key"})
+        self.assertTrue(result.ok, result.error)
+        request = opener.calls[0]
+        self.assertEqual(request.full_url, "http://gotify.lan/message")
+        self.assertEqual(request.get_header("X-gotify-key"), "A.key")
+        self.assertEqual(json.loads(request.data)["message"], "the body")
+
+    async def test_gotify_never_echoes_its_key_into_the_result(self):
+        opener = _Opener(status=401)
+        result = await self._tool(opener, {"GOTIFY_URL": "http://g.lan", "GOTIFY_TOKEN": "SECRETKEY"}).run(
+            {"body": "hi"}, ctx=_ctx())
+        self.assertFalse(result.ok)
+        self.assertNotIn("SECRETKEY", json.dumps([result.error, result.output, result.metadata], default=str))
+
+    # -- home assistant ------------------------------------------------------
+
+    async def test_home_assistant_calls_the_default_notify_service(self):
+        result, opener = await self._send({"HASS_URL": "http://homeassistant.local:8123", "HASS_TOKEN": "llat"})
+        self.assertTrue(result.ok, result.error)
+        request = opener.calls[0]
+        self.assertEqual(request.full_url, "http://homeassistant.local:8123/api/services/notify/notify")
+        self.assertEqual(request.get_header("Authorization"), "Bearer llat")
+
+    async def test_home_assistant_targets_a_named_mobile_app_service(self):
+        _, opener = await self._send({"HASS_URL": "http://ha.lan", "HASS_TOKEN": "t",
+                                      "HASS_NOTIFY_SERVICE": "mobile_app_pixel"})
+        self.assertTrue(opener.calls[0].full_url.endswith("/api/services/notify/mobile_app_pixel"))
+
+    async def test_the_notify_prefix_is_accepted_and_not_mangled(self):
+        # `lstrip("notify.")` strips a character SET, so a service whose
+        # name begins with one of those letters lost it.
+        _, opener = await self._send({"HASS_URL": "http://ha.lan", "HASS_TOKEN": "t",
+                                      "HASS_NOTIFY_SERVICE": "notify.telegram"})
+        self.assertTrue(opener.calls[0].full_url.endswith("/notify/telegram"))
+
+    async def test_a_service_name_starting_with_a_prefix_letter_survives(self):
+        _, opener = await self._send({"HASS_URL": "http://ha.lan", "HASS_TOKEN": "t",
+                                      "HASS_NOTIFY_SERVICE": "trusted_phone"})
+        self.assertTrue(opener.calls[0].full_url.endswith("/notify/trusted_phone"))
+
+    # -- matrix --------------------------------------------------------------
+
+    async def test_matrix_puts_a_room_message_with_an_escaped_room_id(self):
+        result, opener = await self._send({"MATRIX_HOMESERVER": "https://matrix.org",
+                                            "MATRIX_TOKEN": "syt_x", "MATRIX_ROOM": "!abc:matrix.org"})
+        self.assertTrue(result.ok, result.error)
+        request = opener.calls[0]
+        self.assertEqual(request.get_method(), "PUT")
+        self.assertIn("%21abc%3Amatrix.org", request.full_url)
+        self.assertEqual(json.loads(request.data)["msgtype"], "m.text")
+        self.assertIn("the body", json.loads(request.data)["body"])
+
+    async def test_two_matrix_sends_use_different_transaction_ids(self):
+        env = {"MATRIX_HOMESERVER": "https://m.org", "MATRIX_TOKEN": "t", "MATRIX_ROOM": "!r:m.org"}
+        opener = _Opener()
+        tool = self._tool(opener, env)
+        await tool.run({"body": "one"}, ctx=_ctx())
+        await tool.run({"body": "two"}, ctx=_ctx())
+        self.assertNotEqual(opener.calls[0].full_url, opener.calls[1].full_url)
+
+    # -- apprise -------------------------------------------------------------
+
+    async def test_apprise_is_skipped_by_auto_when_the_package_is_absent(self):
+        # Otherwise `auto` picks a provider that cannot work and the
+        # message is lost, while a perfectly good Slack hook sits unused.
+        env = {"APPRISE_URLS": "tgram://token/chat", "SLACK_WEBHOOK_URL": "https://hooks.slack.com/x"}
+        with unittest.mock.patch.object(notify_module, "_apprise_installed", lambda: False):
+            self.assertEqual(choose_provider("auto", env), "slack")
+
+    async def test_naming_apprise_explicitly_says_what_to_install(self):
+        with unittest.mock.patch.object(notify_module, "_apprise_installed", lambda: False):
+            with self.assertRaises(NotifyUnavailable) as caught:
+                choose_provider("apprise", {"APPRISE_URLS": "tgram://t/c"})
+        self.assertIn("pip install apprise", str(caught.exception))
+
+    async def test_apprise_sends_through_the_library_and_reports_the_count(self):
+        sent = {}
+
+        class _FakeApprise:
+            def __init__(self):
+                self.urls = []
+
+            def add(self, url):
+                self.urls.append(url)
+                return True
+
+            def notify(self, title, body):
+                sent["title"], sent["body"], sent["urls"] = title, body, list(self.urls)
+                return True
+
+        module = types.SimpleNamespace(Apprise=_FakeApprise)
+        with unittest.mock.patch.object(notify_module, "_apprise_installed", lambda: True), \
+             unittest.mock.patch.object(notify_module, "_load_apprise", lambda: module):
+            result, opener = await self._send({"APPRISE_URLS": "tgram://t/c, discord://w/t"})
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(sent["urls"], ["tgram://t/c", "discord://w/t"])
+        self.assertEqual(sent["body"], "the body")
+        self.assertEqual(opener.calls, [], "apprise does its own I/O")
+
+    async def test_an_apprise_delivery_failure_is_not_reported_as_sent(self):
+        class _FailingApprise:
+            def add(self, url):
+                return True
+
+            def notify(self, title, body):
+                return False
+
+        module = types.SimpleNamespace(Apprise=_FailingApprise)
+        with unittest.mock.patch.object(notify_module, "_apprise_installed", lambda: True), \
+             unittest.mock.patch.object(notify_module, "_load_apprise", lambda: module):
+            result, _ = await self._send({"APPRISE_URLS": "tgram://t/c"})
+        self.assertFalse(result.ok)
+
+    async def test_an_apprise_url_never_reaches_the_result(self):
+        # An apprise URL embeds its own token: `tgram://<bot token>/<chat>`.
+        class _RejectingApprise:
+            def add(self, url):
+                return False
+
+            def notify(self, title, body):
+                return True
+
+        module = types.SimpleNamespace(Apprise=_RejectingApprise)
+        with unittest.mock.patch.object(notify_module, "_apprise_installed", lambda: True), \
+             unittest.mock.patch.object(notify_module, "_load_apprise", lambda: module):
+            result, _ = await self._send({"APPRISE_URLS": "tgram://SUPERSECRET/chat"})
+        self.assertFalse(result.ok)
+        self.assertNotIn("SUPERSECRET", json.dumps([result.error, result.output, result.metadata], default=str))
+
+
+class ProviderOrderTestCase(unittest.TestCase):
+    def test_self_hosted_providers_come_before_the_cloud_ones(self):
+        """`feedback_resourcefulness`: local first, cloud as a named
+        tier. A person with both a Gotify box and a Slack hook should
+        not have their notifications routed through Slack by default."""
+        order = [name for name, _ in notify_module.PROVIDERS]
+        for local in ("ntfy", "gotify", "home_assistant", "matrix"):
+            self.assertLess(order.index(local), order.index("slack"), local)
+
+    def test_auto_prefers_the_self_hosted_box(self):
+        env = {"SLACK_WEBHOOK_URL": "https://hooks.slack.com/x", "GOTIFY_URL": "http://g.lan",
+               "GOTIFY_TOKEN": "k"}
+        self.assertEqual(choose_provider("auto", env), "gotify")
+
+    def test_every_provider_has_a_sender_and_the_private_set_is_a_subset(self):
+        names = {name for name, _ in notify_module.PROVIDERS}
+        self.assertEqual(names, set(notify_module._SENDERS))
+        self.assertTrue(notify_module._ALLOW_PRIVATE <= names)
+
+    def test_no_cloud_provider_allows_a_private_address(self):
+        for cloud in ("slack", "email", "sms"):
+            self.assertNotIn(cloud, notify_module._ALLOW_PRIVATE)
+
+    def test_nothing_configured_still_names_every_variable(self):
+        message = ""
+        try:
+            choose_provider("auto", {})
+        except NotifyUnavailable as exc:
+            message = str(exc)
+        for variable in ("NTFY_URL", "GOTIFY_URL", "HASS_URL", "MATRIX_HOMESERVER",
+                         "APPRISE_URLS", "SLACK_WEBHOOK_URL"):
+            self.assertIn(variable, message)
+
+    def test_the_missing_package_refusal_comes_from_the_loader_itself(self):
+        """The guard has to sit on the import statement (module-boundary
+        rule 5), which also puts the pip line next to the import that
+        failed rather than in a caller that might forget to catch it."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _no_apprise(name, *args, **kwargs):
+            if name == "apprise":
+                raise ImportError("no module named apprise")
+            return real_import(name, *args, **kwargs)
+
+        with unittest.mock.patch.object(builtins, "__import__", _no_apprise):
+            with self.assertRaises(NotifyUnavailable) as caught:
+                notify_module._load_apprise()
+        self.assertIn("pip install apprise", str(caught.exception))

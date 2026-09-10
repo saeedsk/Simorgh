@@ -275,8 +275,12 @@ class Config:
     # environment variable and off by its absence, so the tool exists and
     # is registered before any credential does -- it refuses cleanly and
     # names the variable to set, rather than being absent when needed.
-    # "auto" picks the first fully-configured provider in notify.PROVIDERS.
-    notify_provider: str = "auto"  # auto | slack | email | sms
+    # "auto" picks the first fully-configured provider in notify.PROVIDERS,
+    # which lists the self-hosted ones first: a person running their own
+    # ntfy or Gotify box, or Home Assistant, should not have their
+    # notifications routed through a third party by default.
+    notify_provider: str = "auto"
+    # auto | ntfy | gotify | home_assistant | matrix | apprise | slack | email | sms
     notify_timeout_s: float = 15.0
     notify_max_chars: int = 4000
     # A notifier that can spam is a notifier nobody reads -- and an
