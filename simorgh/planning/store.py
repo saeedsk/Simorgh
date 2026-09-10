@@ -18,8 +18,9 @@ from typing import Iterable
 
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import Clock, Ledger
-from simorgh.ledger.blobs import is_ref
-from simorgh.ledger.client import ConflictError
+# `is_ref` through the client, not `ledger.blobs`: a subsystem may
+# import `ledger.client` and nothing else of the Ledger.
+from simorgh.ledger.client import ConflictError, is_ref
 
 from .model import (
     AVAILABLE,
