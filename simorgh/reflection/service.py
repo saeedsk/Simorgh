@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from .config import Config
 from . import distillation
 from .critique import parse_critique
 from .denials import DenialMiner
+from .digest import Alert, AlertRouter, Digest, MonitorRegistry
 from .drift import DriftTracker, parse_verdict
 from .health import HealthMonitor
 from .patterns import PatternMiner
@@ -105,12 +107,14 @@ class Service:
         topics.SYSTEM_STARTED, topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_TICK_SLEEP,
         topics.REFLECT_REVIEW_REQUEST,
         topics.ACTION_DENIED,
+        topics.SYSTEM_TICK_IDLE,
     )
     produces: tuple[str, ...] = (
         topics.REFLECT_HEALTH_FINDING, topics.REFLECT_PATTERNS_FOUND, topics.REFLECT_CALIBRATION_UPDATED,
         topics.REFLECT_DRIFT_DETECTED, topics.SELF_OBSERVATION, topics.MEMORY_STORE,
         topics.COGNITION_THINK, topics.REFLECT_REVIEW_REPLY, topics.SYSTEM_HEALTH,
         topics.TASK_CREATE,
+        topics.REFLECT_ALERT_RAISED, topics.REFLECT_ALERT_CLEARED, topics.ACTION_PROPOSED,
     )
 
     def __init__(self, config: Config | None = None) -> None:
@@ -140,10 +144,16 @@ class Service:
         self._tasks: dict[str, _TaskMeta] = {}
         self._paused = False
         self._review_sem: asyncio.Semaphore | None = None
+        self._monitors = MonitorRegistry()
+        self._ad_hoc: list = []
+        self._router: AlertRouter | None = None
+        self._digest: Digest | None = None
+        self._alert_tick_running = False
 
     def _rebuild_from_config(self) -> None:
         """Re-make the pieces that were built from config defaults."""
         self._health = HealthMonitor(self.config)
+        self._build_alerting()
         self._patterns = PatternMiner(self.config)
         self._denials = DenialMiner(
             window_seconds=self.config.denial_window_seconds,
@@ -162,6 +172,7 @@ class Service:
             self.config = Config.from_mapping(dict(ctx.config))
             self._rebuild_from_config()
         self._review_sem = asyncio.Semaphore(self.config.max_concurrent_reviews)
+        self._build_alerting()
         self._subs = [
             await ctx.bus.subscribe(topics.PERSONA_STATE_CHANGED, self._on_persona_state),
             await ctx.bus.subscribe(topics.TASK_CREATED, self._on_task_created),
@@ -180,6 +191,7 @@ class Service:
             await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep),
             await ctx.bus.subscribe(topics.REFLECT_REVIEW_REQUEST, self._on_review_request),
             await ctx.bus.subscribe(topics.ACTION_DENIED, self._on_action_denied),
+            await ctx.bus.subscribe(topics.SYSTEM_TICK_IDLE, self._on_idle_tick),
         ]
         ctx.logger.info("reflection.started")
 
@@ -518,6 +530,177 @@ class Service:
         })
 
     # -- helpers ------------------------------------------------------------------------------
+
+    # -- monitors, alerts and the digest -----------------------------------------------------
+    #
+    # platform-connectors-design.md section 6. The deciding is all in
+    # `digest.py` and is pure; this is the half that touches the world:
+    # run the due monitors on an idle tick, put the raised alerts on the
+    # bus and in the Ledger, and turn the ones that earned a person's
+    # attention into a real `notify` call.
+    #
+    # That call goes out as `action.proposed`, not by reaching for the
+    # tool -- so Guardian sees it exactly like any other irreversible
+    # action, `irreversible_requires_human` still holds it for approval
+    # if that is the deployment's choice, and it is ledgered with
+    # everything else. An alerting path that bypassed the gate would be
+    # the one irreversible thing in the system nobody was watching.
+
+    ALERTS_STREAM = "reflection:alerts"
+
+    def _build_alerting(self) -> None:
+        clock = self._ctx.clock.now if self._ctx is not None else None
+        self._monitors = MonitorRegistry(clock=clock) if clock else MonitorRegistry()
+        try:
+            self._router = AlertRouter(
+                clock=clock or time.time,
+                warn_window_s=self.config.alert_warn_window_s,
+                quiet_hours=self.config.quiet_hours,
+                announce_enabled=self.config.announce_critical,
+            )
+        except ValueError as exc:
+            # A malformed `quiet_hours` must not take the subsystem down,
+            # and must not silently become "no quiet hours" either --
+            # that would send at 3am precisely because someone tried to
+            # stop it.
+            if self._ctx is not None:
+                self._ctx.logger.warning("reflection.quiet_hours_invalid", error=str(exc))
+            self._router = AlertRouter(
+                clock=clock or time.time,
+                warn_window_s=self.config.alert_warn_window_s,
+                announce_enabled=self.config.announce_critical,
+            )
+        self._digest = Digest(hour=self.config.digest_hour, clock=clock or time.time)
+
+    def register_monitor(self, monitor) -> None:
+        """How a domain adds a check. `home`, `pim`, `security` and the
+        rest register theirs at their own `start()`; nothing here needs
+        to know they exist."""
+        self._monitors.register(monitor)
+
+    def raise_alert(self, alert: Alert) -> None:
+        """A one-off alert from something that is not a polling monitor
+        (a percept, a failed sync). Routed on the next idle tick with
+        everything else, so the rate limit and quiet hours apply to it
+        exactly as they do to a monitor's."""
+        self._ad_hoc.append(alert)
+
+    async def _on_idle_tick(self, message: Message) -> None:
+        if self._paused or not self.config.monitors_enabled or self._router is None:
+            return
+        # An idle tick can arrive while the previous one is still
+        # checking. Overlapping runs would double-send every alert the
+        # first pass had not yet recorded as open.
+        if self._alert_tick_running:
+            return
+        self._alert_tick_running = True
+        try:
+            await self._run_monitors(message)
+        except Exception as exc:  # noqa: BLE001 -- alerting must not break the tick it rides on
+            if self._ctx is not None:
+                self._ctx.logger.warning("reflection.monitor_tick_failed", error=repr(exc))
+        finally:
+            self._alert_tick_running = False
+
+    async def _run_monitors(self, cause: Message) -> None:
+        assert self._router is not None and self._ctx is not None
+        deliveries, resolved = await self._monitors.run_due(self._router)
+
+        for name, alerts in self._drain_ad_hoc().items():
+            sent, cleared = self._router.observe(name, alerts)
+            deliveries.extend(sent)
+            resolved.extend(cleared)
+
+        for delivery in deliveries:
+            alert = delivery.alert
+            await self._publish(cause, topics.REFLECT_ALERT_RAISED, {
+                "monitor": alert.monitor, "severity": alert.severity, "key": alert.key,
+                "message": alert.message, "channel": delivery.channel, "reason": delivery.reason,
+                "reopened": float(delivery.reopened), "entity": alert.entity,
+                "detail": dict(alert.detail),
+            })
+            await self._append(self.ALERTS_STREAM, "raised", {
+                "monitor": alert.monitor, "severity": alert.severity, "key": alert.key,
+                "message": alert.message, "channel": delivery.channel, "reason": delivery.reason,
+                "reopened": delivery.reopened, "entity": alert.entity,
+            })
+            if delivery.channel == "digest":
+                if self._digest is not None:
+                    self._digest.hold(alert)
+            else:
+                await self._send_alert(cause, delivery)
+
+        for alert in resolved:
+            await self._publish(cause, topics.REFLECT_ALERT_CLEARED, {
+                "monitor": alert.monitor, "key": alert.key, "message": alert.message,
+                "entity": alert.entity,
+            })
+            await self._append(self.ALERTS_STREAM, "cleared", {
+                "monitor": alert.monitor, "key": alert.key, "entity": alert.entity,
+            })
+
+        await self._maybe_send_digest(cause)
+
+    async def _send_alert(self, cause: Message, delivery) -> None:
+        alert = delivery.alert
+        prefix = "REGRESSED: " if delivery.reopened else ""
+        subject = f"{prefix}{alert.severity}: {alert.monitor}"
+        body = alert.message
+        if alert.entity:
+            body = f"{body}\n\n({alert.entity})"
+        await self._propose_notify(cause, subject=subject, body=body,
+                                    rationale=f"{alert.severity} alert from the {alert.monitor} monitor")
+
+    async def _maybe_send_digest(self, cause: Message) -> None:
+        if not self.config.digest_enabled or self._digest is None or self._router is None:
+            return
+        if not self._digest.due():
+            return
+        body = self._digest.render(
+            monitor_failures=dict(self._monitors.failures),
+            suppressed=self._router.take_suppressed(),
+        )
+        # `sent()` regardless of whether anything went out: a day with
+        # nothing to report is a day the digest is done with, and not
+        # marking it would re-render an empty digest on every tick.
+        self._digest.sent()
+        if not body:
+            return
+        await self._propose_notify(cause, subject="Simorgh daily digest", body=body,
+                                    rationale="the daily digest")
+
+    async def _propose_notify(self, cause: Message, *, subject: str, body: str, rationale: str) -> None:
+        import uuid
+
+        await self._publish(cause, topics.ACTION_PROPOSED, {
+            "action_id": str(uuid.uuid4()),
+            "tool": "notify",
+            "args": {"subject": subject, "body": body},
+            "scope": {"paths": [], "network": True},
+            "reversibility": "irreversible",
+            "rationale": rationale,
+            "proposed_by": self._ctx.source if self._ctx is not None else "reflection",
+        })
+
+    def _drain_ad_hoc(self) -> dict:
+        """Ad-hoc alerts grouped by monitor name.
+
+        Grouped because `AlertRouter.observe` takes one monitor's
+        *complete* view -- handing it a partial list would resolve
+        every other alert that monitor has open.
+        """
+        grouped: dict[str, list] = {}
+        for alert in self._ad_hoc:
+            grouped.setdefault(alert.monitor, []).append(alert)
+        self._ad_hoc = []
+        for name in grouped:
+            # An ad-hoc source has no "current view", so anything it
+            # already had open stays open and is re-stated here.
+            existing = {a.key: a for a in self._router.open_for(name)} if self._router else {}
+            for alert in grouped[name]:
+                existing[alert.key] = alert
+            grouped[name] = list(existing.values())
+        return grouped
 
     async def _publish(self, cause: Message, type_: str, payload: dict) -> None:
         assert self._ctx is not None

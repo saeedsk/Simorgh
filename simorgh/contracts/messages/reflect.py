@@ -27,6 +27,31 @@ ReflectHealthFinding = define(t.REFLECT_HEALTH_FINDING, [
     F("detail", Str),
     O("action_taken", Enum("none", "request_reset", "request_pause_hint")),
 ])
+ReflectAlertRaised = define(t.REFLECT_ALERT_RAISED, [
+    F("monitor", Str),
+    F("severity", Enum("info", "warn", "critical")),
+    # The identity of the PROBLEM, not of the observation: two checks
+    # that find the same expiring certificate carry the same key, which
+    # is what makes an alert idempotent.
+    F("key", Str),
+    F("message", Str),
+    F("channel", Enum("digest", "notify", "announce")),
+    # Why it went where it went, so "why didn't I hear about this" has
+    # an answer.
+    F("reason", Str),
+    # 0 the first time, 1+ each time it comes back after being fixed --
+    # something that regresses is a worse fact than something that broke
+    # once.
+    O("reopened", Float),
+    O("entity", Str),
+    O("detail", Obj()),
+])
+ReflectAlertCleared = define(t.REFLECT_ALERT_CLEARED, [
+    F("monitor", Str),
+    F("key", Str),
+    F("message", Str),
+    O("entity", Str),
+])
 ReflectReviewRequest = define(t.REFLECT_REVIEW_REQUEST, [O("window_seconds", Float)])
 ReflectReviewReply = define(t.REFLECT_REVIEW_REPLY, [
     F("patterns", List(Any_)),

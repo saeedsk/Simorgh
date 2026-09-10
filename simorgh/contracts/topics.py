@@ -150,6 +150,12 @@ REFLECT_PATTERNS_FOUND = "reflect.patterns.found"
 REFLECT_DRIFT_DETECTED = "reflect.drift.detected"
 REFLECT_CALIBRATION_UPDATED = "reflect.calibration.updated"
 REFLECT_HEALTH_FINDING = "reflect.health.finding"
+# One monitor's finding, and its resolution (reflection/digest.py;
+# platform-connectors-design.md section 6). Raised alerts are the hook a
+# domain rule reacts to -- "a critical finding on a camera turns its PoE
+# port off" -- without every domain re-implementing the noticing.
+REFLECT_ALERT_RAISED = "reflect.alert.raised"
+REFLECT_ALERT_CLEARED = "reflect.alert.cleared"
 REFLECT_REVIEW_REQUEST = "reflect.review.request"
 REFLECT_REVIEW_REPLY = "reflect.review.reply"
 # --- 4.13 curiosity -------------------------------------------------------

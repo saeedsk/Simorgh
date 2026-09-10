@@ -1,0 +1,67 @@
+{
+  "$id": "https://simorgh.local/schema/reflect.alert.raised.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `reflect.alert.raised` (catalog v1).",
+  "properties": {
+    "channel": {
+      "enum": [
+        "digest",
+        "notify",
+        "announce"
+      ],
+      "type": "string"
+    },
+    "detail": {
+      "additionalProperties": true,
+      "properties": {},
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "entity": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "monitor": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "reopened": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "warn",
+        "critical"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "monitor",
+    "severity",
+    "key",
+    "message",
+    "channel",
+    "reason"
+  ],
+  "title": "reflect.alert.raised",
+  "type": "object"
+}

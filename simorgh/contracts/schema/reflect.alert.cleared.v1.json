@@ -1,0 +1,30 @@
+{
+  "$id": "https://simorgh.local/schema/reflect.alert.cleared.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `reflect.alert.cleared` (catalog v1).",
+  "properties": {
+    "entity": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "monitor": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "monitor",
+    "key",
+    "message"
+  ],
+  "title": "reflect.alert.cleared",
+  "type": "object"
+}
