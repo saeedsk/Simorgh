@@ -54,6 +54,8 @@ import time
 from pathlib import Path
 from typing import Awaitable, Callable, Iterable
 
+from .parser import COMMANDS as _PARSER_COMMANDS
+
 DOUBLE_INTERRUPT_S = 2.0
 _MAX_PATH_COMPLETIONS = 40
 
@@ -71,24 +73,12 @@ _MAX_LINE_FOR_COMPLETION_AND_LEXING = 4000
 
 # What the completion menu offers after `/`. The description is the
 # right-hand column, the same text `render.py` shows in the splash.
-COMMANDS: tuple[tuple[str, str], ...] = (
-    ("status", "health, vitals, posture, and tools in one panel"),
-    ("improve", "revise existing code, or draft a new skill"),
-    ("tasks", "see the backlog (`tasks work` advances the next item)"),
-    ("cancel", "stop a running task: cancel <task_id>"),
-    ("research", "investigate a question, no code written"),
-    ("benchmark", "score this system on GAIA or BFCL, and track it"),
-    ("plan", "break a goal into tracked steps"),
-    ("interests", "topics Sim is following"),
-    ("auto", "control the idle self-improvement loop: on | off | now"),
-    ("mcp", "review external tools Sim has proposed"),
-    ("capabilities", "what Sim can actually reach: Node, Docker, optional packages"),
-    ("schedule", "fire a reminder later: schedule [every] 15m <label>"),
-    ("pause", "hold everything"),
-    ("resume", "let it continue"),
-    ("help", "list everything"),
-    ("exit", "leave (Ctrl-D also detaches)"),
-)
+#: Derived from `parser.COMMANDS`, never maintained beside it. This was
+#: its own list until 2026-09-09, when four new commands were added to
+#: the parser and the help panel and not to here -- so they worked when
+#: typed and did not autocomplete, which reads like they do not exist.
+COMMANDS: tuple[tuple[str, str], ...] = tuple(
+    (name, description) for name, _, description in _PARSER_COMMANDS)
 
 
 class PromptToolkitMissing(ImportError):

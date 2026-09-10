@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 
+from .parser import SPLASH_COMMANDS as _SPLASH_COMMANDS, command_help as _command_help
 from .vitals import VitalsSnapshot
 
 _RESET = "\x1b[0m"
@@ -326,27 +327,10 @@ def splash(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
     return rows
 
 
-_QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("status", "health, vitals, posture, and tools in one panel"),
-    ("improve <path> <description>", "revise existing code, tested before it lands"),
-    ("... steps=N", "a bigger step cap for a big task"),
-    ("improve <topic>", "draft a new skill, audited before it lands"),
-    ("tasks / tasks work", "see the backlog, advance the next item"),
-    ("cancel <task_id>", "stop a running task"),
-    ("research <topic>", "investigate a question, no code written"),
-    ("benchmark", "score this system on GAIA or BFCL, and track it"),
-    ("plan <goal>", "break a goal into tracked steps"),
-    ("auto [on|off|now]", "control the idle self-improvement loop"),
-    ("mcp", "review external tools Sim has proposed"),
-    ("capabilities", "what Sim can actually reach: Node, Docker, optional packages"),
-    ("tool [name] [args]", "list every tool, or run one -- Guardian gates it as usual"),
-    ("domains", "documents, mail, the house, energy, media, security: on? reachable?"),
-    ("config [section]", "the settings actually in force, and any nothing reads"),
-    ("alerts", "what the monitors have raised, and what is waiting for the digest"),
-    ("schedule [every] <15m> <label>", "fire a reminder later, or on a repeat"),
-    ("pause / resume", "hold everything, or let it continue"),
-    ("exit", "leave (Ctrl-D also detaches)"),
-)
+#: Derived from `parser.COMMANDS` -- see the note there. The splash
+#: shows the head of the table, not all of it: twenty rows on the first
+#: screen someone sees is a wall, and `help` is one word away.
+_QUICK_COMMANDS: tuple[tuple[str, str], ...] = _command_help(limit=_SPLASH_COMMANDS)
 
 
 #: Domain status glyphs. Three states, not two: "nothing set up yet" and

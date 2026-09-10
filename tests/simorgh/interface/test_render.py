@@ -90,7 +90,9 @@ class RenderTestCase(unittest.TestCase):
         out = render.banner(enabled=False)
         self.assertIn("SIMORGH", out)
         self.assertIn("status", out)  # a real, always-working command
-        self.assertIn("improve <topic>", out)
+        # A command with an argument hint, so the splash is showing the
+        # usage and not just a bare name.
+        self.assertIn("domains [name]", out)
 
     def test_banner_auto_uses_no_non_latin_script(self):
         # Live-caught: the Persian name rendered as garbage on the

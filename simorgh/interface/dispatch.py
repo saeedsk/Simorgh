@@ -199,8 +199,14 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         return Outcome(await _status_panel(bus, vitals))
 
     if name == "help":
-        from .parser import COMMAND_NAMES
-        return Outcome("commands: " + ", ".join(sorted(COMMAND_NAMES)) + "  (or !<shell>, or plain chat text)")
+        from .parser import command_help
+
+        rows = command_help()
+        width = max(len(usage) for usage, _ in rows)
+        listed = "\n".join(f"  {usage.ljust(width)}  {description}" for usage, description in rows)
+        return Outcome(f"{len(rows)} commands. A leading `/` is optional everywhere.\n{listed}\n"
+                       "  !<shell command>      run a shell command directly\n"
+                       "  anything else         is chat")
 
     if name == "improve":
         args, steps = _pop_steps(args)
@@ -296,7 +302,7 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         return await _config_command(ledger, args)
 
     if name == "domains":
-        return await _domains_command(ledger)
+        return await _domains_command(ledger, args)
 
     if name == "alerts":
         return await _alerts_command(ledger, args)
@@ -779,7 +785,7 @@ _DOMAIN_BLURB: tuple[tuple[str, str], ...] = (
 )
 
 
-async def _domains_command(ledger: LedgerClient) -> Outcome:
+async def _domains_command(ledger: LedgerClient, args: str = "") -> Outcome:
     """Which domains are set up, which answer, and what to do next.
 
     Reads the same capability probes `capabilities` does, and hands the
@@ -805,8 +811,21 @@ async def _domains_command(ledger: LedgerClient) -> Outcome:
         return Outcome("no domain probes recorded yet -- they run just after boot, so try "
                        "again in a moment.")
 
+    # `domains knowledge` narrows to one. The command took no arguments
+    # and silently ignored anything typed after it, which reads as a
+    # command that does not work rather than one that does not filter.
+    wanted = args.strip().lower()
+    known = {name for name, _ in _DOMAIN_BLURB}
+    if wanted and wanted not in known:
+        near = difflib.get_close_matches(wanted, sorted(known), n=3, cutoff=0.4)
+        hint = f"; did you mean {', '.join(near)}?" if near else ""
+        return Outcome(f"no domain called {wanted!r}{hint}. "
+                       f"They are: {', '.join(sorted(known))}.")
+
     rows: list[dict] = []
     for domain, blurb in _DOMAIN_BLURB:
+        if wanted and domain != wanted:
+            continue
         if domain == "pim":
             accounts = {name: row for name, row in latest.items()
                         if name.startswith(("imap:", "caldav:"))}
