@@ -25,6 +25,7 @@ from .voice import VoiceComposer, mood_phrase
 VERSION = "0.1.0"
 
 _IDENTITY_HEADING_RE = re.compile(r"^##\s*Identity\s*$", re.IGNORECASE | re.MULTILINE)
+_NEXT_HEADING_RE = re.compile(r"^#{1,6}\s", re.MULTILINE)
 _SIGNIFICANT_DELTA = 1e-4
 
 
@@ -32,7 +33,26 @@ def _load_identity_summary(soul_path) -> str:
     """A small, self-contained SOUL.md reader -- Persona does not import
     worldmodel (subsystems talk only through the bus/contracts), so this
     intentionally duplicates a sliver of `worldmodel.selfmodel`'s logic
-    rather than reaching across a package boundary."""
+    rather than reaching across a package boundary.
+
+    Reads the WHOLE `## Identity` section, up to the next heading. It
+    used to take only the first paragraph after the heading, and in the
+    SOUL.md this repository actually ships that paragraph is a naming
+    footnote -- "The creator calls Simorgh "Sim" for short; both names
+    refer to the same one entity described in this document." So the
+    identity block the model saw in every real prompt said nothing
+    whatsoever about who Simorgh is; the paragraph that does say it is
+    the second one. Caught by capturing a real assembled prompt rather
+    than by reading either file (observer bulk5-01, 2026-09-10).
+    `worldmodel/selfmodel.py`'s `_first_paragraph_after` is the same
+    reader with the same result, in a package this observer's scope did
+    not cover -- recorded as its own finding, not fixed here.
+
+    The result is line-joined and left unbounded on purpose:
+    `VoiceComposer.compose` is the single place that applies
+    `voice.max_chars`, and it now trims the identity rather than the
+    mood phrase.
+    """
     try:
         text = soul_path.read_text(encoding="utf-8")
     except OSError:
@@ -41,8 +61,10 @@ def _load_identity_summary(soul_path) -> str:
     if not match:
         return "You are Simorgh."
     rest = text[match.end():].lstrip("\n")
-    paragraph = rest.split("\n\n", 1)[0].strip()
-    return paragraph or "You are Simorgh."
+    next_heading = _NEXT_HEADING_RE.search(rest)
+    section = rest[: next_heading.start()] if next_heading else rest
+    summary = " ".join(section.split())
+    return summary or "You are Simorgh."
 
 
 class Service:
@@ -90,6 +112,7 @@ class Service:
         identity_summary = _load_identity_summary(self.config.resolved_soul_path())
         self._voice = VoiceComposer(identity_summary)
         self._last_decay_ts = ctx.clock.now()
+        await self._restore_mood()
 
         self._subs = [
             await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept_text),
@@ -104,6 +127,58 @@ class Service:
             await ctx.bus.subscribe(topics.CURIOSITY_SHARE_PROPOSED, self._on_share_proposed),
         ]
         ctx.logger.info("persona.started", identity_chars=len(identity_summary))
+
+    async def _restore_mood(self) -> None:
+        """Replay the last `persona:state` entry so mood survives a
+        restart.
+
+        `mood.py`'s docstring has said since it was written that the
+        state lives on a Ledger stream "so mood survives a restart and
+        multiple processes can converge on the same state", and
+        `MoodEngine.restore` exists with the docstring "Restore from a
+        Ledger-replayed state on boot" -- and nothing in the repository
+        ever called it. Persona wrote every mood change to
+        `persona:state` and read it back never. Measured before this
+        fix: a run driven to valence -0.6 ("quietly unsettled") and
+        restarted came up at 0.0, telling the model "calm, nothing much
+        going on". The dominant bug shape in this codebase, in the one
+        subsystem whose whole point is continuity of feeling.
+        Observer bulk5-01, 2026-09-10.
+
+        The restored state is decayed forward by the wall time the
+        process was down, so a long outage comes back near the baseline
+        rather than resuming an hours-old mood at full strength -- the
+        same decay that would have run had the process stayed up.
+        """
+        ledger = self._ctx.ledger
+        try:
+            head = await ledger.head("persona:state") if hasattr(ledger, "head") else 0
+            events = (await ledger.read("persona:state", from_seq=head, limit=1) if head
+                      else await ledger.read("persona:state"))
+        except Exception as exc:  # noqa: BLE001 -- a missing/unreadable stream is a cold start, never fatal
+            self._ctx.logger.warning("persona.mood_restore_failed", error=repr(exc))
+            return
+        if not events:
+            return
+        payload = events[-1].payload or {}
+        try:
+            state = EmotionalState(
+                valence=float(payload.get("valence", 0.0)),
+                arousal=float(payload.get("arousal", 0.0)),
+                cognitive_load=float(payload.get("cognitive_load", 0.0)),
+                ts=float(events[-1].ts or self._ctx.clock.now()),
+            )
+        except (TypeError, ValueError) as exc:
+            self._ctx.logger.warning("persona.mood_restore_failed", error=repr(exc))
+            return
+        self._mood.restore(state)
+        elapsed = self._ctx.clock.now() - state.ts
+        if elapsed > 0:
+            self._mood.decay_toward_baseline(elapsed, half_life_s=self.config.decay_half_life_s)
+        self._ctx.logger.info(
+            "persona.mood_restored", valence=self._mood.current().valence,
+            arousal=self._mood.current().arousal, offline_s=max(0.0, elapsed),
+        )
 
     async def stop(self) -> None:
         for sub in self._subs:

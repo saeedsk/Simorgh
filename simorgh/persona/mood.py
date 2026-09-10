@@ -58,7 +58,20 @@ class MoodEngine:
         self._clock = clock or time.time
         self._baseline = baseline or EmotionalState()
         self._history_limit = history_limit
-        self._state = EmotionalState(ts=self._now())
+        # Start AT the baseline, not at zero. `baseline` used to be
+        # stored only as the target `decay_toward_baseline` pulls
+        # toward, while `_state` was seeded with a bare
+        # `EmotionalState()` -- so a run configured with a resting mood
+        # of 0.9 booted "calm, nothing much going on" and needed roughly
+        # two half-lives of ticks (measured: 1500s to reach 0.62) to get
+        # anywhere near its own resting point. `_on_health_finding`
+        # already sets the state straight to the baseline on a reset;
+        # boot and reset disagreeing about where rest is was the bug.
+        # Observer bulk5-01, 2026-09-10.
+        self._state = EmotionalState(
+            valence=self._baseline.valence, arousal=self._baseline.arousal,
+            cognitive_load=self._baseline.cognitive_load, ts=self._now(),
+        )
         self._history: list[EmotionalState] = [self._state]
 
     def _now(self) -> float:

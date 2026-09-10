@@ -38,6 +38,22 @@ class VoiceComposer:
         self._identity_summary = identity_summary
 
     def compose(self, state: EmotionalState, *, register: str = "neutral", max_chars: int = 600) -> Voice:
+        """The mood sentence always survives `max_chars`.
+
+        This used to be `block[:max_chars]` over the joined string, so
+        the identity summary was spent first and the mood phrase -- the
+        one thing Persona contributes to the prompt that nothing else
+        does -- was whatever happened to fall off the end. Measured
+        before the fix: `voice.max_chars = 20` produced
+        `'You are Simorgh, a c'`, and a 50,000-character `## Identity`
+        paragraph produced 600 characters of that paragraph with no
+        mood in it at all -- silently, with the phrase still sitting in
+        the reply's `mood_phrase` field that `cognition/assembler.py`
+        does not read. Observer bulk5-01, 2026-09-10.
+        """
         phrase = mood_phrase(state)
-        block = f"{self._identity_summary} Right now you're feeling {phrase}."
+        mood_sentence = f"Right now you're feeling {phrase}."
+        room = max_chars - len(mood_sentence) - 1  # -1 for the joining space
+        identity = self._identity_summary if room >= len(self._identity_summary) else self._identity_summary[:max(0, room)]
+        block = f"{identity} {mood_sentence}".strip() if identity else mood_sentence
         return Voice(style_block=block[:max_chars], mood_phrase=phrase, register=register)
