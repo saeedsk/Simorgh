@@ -117,11 +117,24 @@ class ScopedSecretStore:
 def build_secret_store(config, data_dir: Path) -> SecretStore:  # noqa: ANN001 -- kernel.config.LoadedConfig
     """`config.section('secrets')['file']`, `${data_dir}` expanded;
     missing file is fine (env-only deployments), unsafe permissions are
-    not."""
+    not.
+
+    A `LazyVaultSecretStore` (kernel/vault.py) is chained in last --
+    after env and the plain file -- so `vault:<id>:<field>`-shaped
+    secret names resolve to the encrypted multi-value vault without any
+    caller needing to know it exists. It is LAZY on purpose: touching
+    the OS keychain (or creating a fallback key file) has to wait for
+    the first actual `vault:`-prefixed lookup, not happen on every
+    single Kernel/Worker boot -- caught live, 2026-09-09, when an eager
+    version of this left a real keychain entry on the development
+    machine after nothing more than running the test suite.
+    """
     section = config.section("secrets")
     file_value = str(section.get("file", "${data_dir}/secrets.toml")).replace("${data_dir}", str(data_dir))
     file_store = FileSecretStore(Path(file_value))
-    return ChainedSecretStore(EnvSecretStore(), file_store)
+    from .vault import LazyVaultSecretStore
+
+    return ChainedSecretStore(EnvSecretStore(), file_store, LazyVaultSecretStore())
 
 
 __all__ = [
