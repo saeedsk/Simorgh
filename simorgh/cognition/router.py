@@ -12,6 +12,8 @@ work is additive, not a redesign.
 
 from __future__ import annotations
 
+import asyncio
+
 from simorgh.contracts.protocols import Clock, Logger, Provider, ProviderResponse
 
 from .api import Budget, BudgetExceeded, NoRealProvider, Purpose
@@ -22,6 +24,12 @@ from .tokens import estimate_tokens
 
 #: Below this there is no point starting another provider.
 _MIN_CANDIDATE_SECONDS = 5.0
+
+#: How long past its own stated timeout a provider is allowed to run before
+#: the Router stops waiting for it. A provider that honours its timeout
+#: raises its own (much more informative) error well inside this; one that
+#: ignores it is cut off rather than being allowed to eat the deadline.
+_OVERRUN_GRACE_SECONDS = 1.0
 
 
 class Router:
@@ -88,6 +96,7 @@ class Router:
         budget accounting (04 section 7), distinct from availability."""
         last_error: Exception | None = None
         any_available_but_over_budget = False
+        ran_out_of_time = False
         prompt_tokens = sum(estimate_tokens(m.get("content", "")) for m in messages)
         now = self._clock.now()
         # `timeout` bounds this CALL, not each candidate in turn. It used
@@ -104,34 +113,77 @@ class Router:
             provider = self._by_name.get(name)
             if provider is None or not provider.available():
                 continue
-            if self._cooldown_until.get(name, 0.0) > now:
+            if self._cooldown_until.get(name, 0.0) > self._clock.now():
                 continue
             provider_budget = self._budgets.get(name)
-            if provider_budget is not None and not await provider_budget.can_spend():
-                continue
             if provider_budget is not None:
                 est_cost = provider_budget.estimate_cost(prompt_tokens, budget.max_tokens_out)
                 if est_cost > budget.max_cost_usd:
                     any_available_but_over_budget = True
+                    continue
+                # `can_spend` has taken an estimate since it was written and
+                # nobody ever passed one -- the classic one-sided wire. So
+                # the rolling window only ever refused a call *after* it had
+                # already gone over: with $0.01 of a $2.00 daily cap left, a
+                # call estimated at $7 was waved straight through, and the
+                # cap was discovered blown on the next call. Observed
+                # 2026-09-10 with a real `RollingWindowBudget`: spend went
+                # from $1.99 to $9.49 against a $2.00 cap in one call.
+                if not await provider_budget.can_spend(est_cost):
                     continue
             remaining = deadline - self._clock.now()
             if remaining < _MIN_CANDIDATE_SECONDS:
                 # Not enough time left to be worth dialling: starting a
                 # call we know cannot finish spends money and returns
                 # nothing.
+                ran_out_of_time = True
                 if self._logger is not None:
                     self._logger.warning(
                         "cognition.no_time_for_candidate", provider=name, purpose=purpose.value,
                         remaining_s=round(max(0.0, remaining), 1),
                     )
                 continue
+            # Bounding the whole chain is only half of it: the first
+            # candidate used to be handed the ENTIRE remaining deadline, so
+            # a primary that was merely slow (not failing) ate all of it and
+            # every candidate behind it was skipped with
+            # `no_time_for_candidate`. Watched 2026-09-10 with a 6s call
+            # budget: `together` was given 6.00s, burned it, and a perfectly
+            # healthy `gemini` behind it was never dialled once -- the same
+            # "the failover chain exists and can never be reached" failure
+            # the deadline was introduced to fix, one level down. The
+            # deadline is now *shared*: each candidate gets its fair slice
+            # of what is left, so the last one still gets a real shot, and a
+            # candidate that fails fast hands its unused time to the next.
+            share = self._share_of(name, remaining)
             try:
-                response = await provider.complete(
-                    messages, tools=tools, max_tokens=budget.max_tokens_out, timeout=remaining,
+                # A provider is asked to honour `timeout`, and then held to
+                # it: `GeminiProvider` accepted the argument and dropped it
+                # entirely (fixed in the same pass), and any provider can
+                # simply overrun. Without this, one provider ignoring its
+                # timeout puts the whole-call deadline back at its mercy.
+                # A `to_thread` provider's thread is not killed by the
+                # cancellation -- it is abandoned, which is why providers
+                # are still passed a timeout of their own.
+                response = await asyncio.wait_for(
+                    provider.complete(
+                        messages, tools=tools, max_tokens=budget.max_tokens_out, timeout=share,
+                    ),
+                    timeout=share + _OVERRUN_GRACE_SECONDS,
                 )
             except Exception as exc:  # noqa: BLE001 -- ProviderUnavailable or anything else: try the next candidate
                 last_error = exc
-                self._cooldown_until[name] = now + self._cooldown_s
+                # `now` is when this whole call STARTED, which can be a
+                # provider timeout ago. Stamping `now + cooldown_s` meant a
+                # provider that took longer than the cooldown to fail was
+                # put into a cooldown that had ALREADY EXPIRED when it was
+                # written -- so the circuit breaker was a no-op for exactly
+                # the failure it exists for: the provider that hangs and
+                # burns a full timeout, not the one that refuses in 200ms.
+                # Caught through a real Kernel boot, 2026-09-10: a cooldown
+                # stamped 64,836 seconds in the past, and the "cooling
+                # down" provider re-dialled on the very next call.
+                self._cooldown_until[name] = self._clock.now() + self._cooldown_s
                 # Live-caught, 2026-09-08: a failover used to be
                 # completely silent -- nothing on the Ledger, nothing in
                 # any log, not even a debug line -- so the only trace of
@@ -160,8 +212,44 @@ class Router:
         if budget.require_real:
             if last_error is None and any_available_but_over_budget:
                 raise BudgetExceeded(f"every candidate's estimated cost exceeds max_cost_usd={budget.max_cost_usd}")
-            raise NoRealProvider(str(last_error) if last_error else "no real provider available")
+            if last_error is not None:
+                raise NoRealProvider(str(last_error))
+            if ran_out_of_time:
+                # Saying "no real provider available" here was simply
+                # untrue: providers were available and willing, the call's
+                # own deadline had already gone. The distinction is what
+                # tells an operator to raise the timeout rather than go
+                # hunting for a dead API key.
+                raise NoRealProvider(
+                    f"the {timeout:.0f}s call deadline was exhausted before any provider could be dialled",
+                )
+            raise NoRealProvider("no real provider available")
         return self._floor.respond_for_purpose(purpose), True
+
+    def _share_of(self, name: str, remaining: float) -> float:
+        """This candidate's fair slice of the time that is left, so a slow
+        primary cannot starve every candidate behind it. Never less than
+        `_MIN_CANDIDATE_SECONDS` (a slice too small to answer in is not a
+        chance, it is a wasted call) and never more than what is left."""
+        now = self._clock.now()
+        still_to_try = 0
+        seen_self = False
+        for other in self._order:
+            if other == name:
+                seen_self = True
+                continue
+            if not seen_self:
+                continue
+            provider = self._by_name.get(other)
+            # Budget checks need an await and are deliberately not consulted
+            # here: this only has to be a good-faith count of who is behind
+            # this candidate, and over-counting merely makes each slice a
+            # little smaller than it had to be.
+            if provider is not None and provider.available() and self._cooldown_until.get(other, 0.0) <= now:
+                still_to_try += 1
+        if still_to_try == 0:
+            return remaining
+        return min(remaining, max(_MIN_CANDIDATE_SECONDS, remaining / (still_to_try + 1)))
 
 
 __all__ = ["Router"]

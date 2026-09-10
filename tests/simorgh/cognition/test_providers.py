@@ -216,7 +216,7 @@ class TestGeminiProvider(unittest.IsolatedAsyncioTestCase):
             usage_metadata = _Usage()
 
         class _Models:
-            def generate_content(self, *, model, contents):
+            def generate_content(self, *, model, contents, config=None):
                 return _Response()
 
         class _Client:
@@ -227,6 +227,57 @@ class TestGeminiProvider(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.text, "gemini says hi")
         self.assertEqual(response.input_tokens, 10)
         self.assertEqual(response.output_tokens, 5)
+
+    async def test_the_timeout_and_max_tokens_actually_reach_the_sdk(self):
+        """Observer, 2026-09-10: both arguments were accepted by
+        `complete()` and then dropped -- `_complete_sync(prompt)` was
+        called with neither. `timeout` is the Router's slice of a shared
+        whole-call deadline, so a hanging call ran past the deadline every
+        other candidate was held to; `max_tokens` is the ceiling the
+        Router's pre-call cost estimate is computed from, and the provider
+        was never asked to respect it."""
+        seen = {}
+
+        class _Response:
+            text = "ok"
+            usage_metadata = None
+
+        class _Models:
+            def generate_content(self, *, model, contents, config=None):
+                seen["config"] = config
+                return _Response()
+
+        class _Client:
+            models = _Models()
+
+        provider = GeminiProvider(api_key="fake-key", client=_Client())
+        await provider.complete(
+            [{"role": "user", "content": "hi"}], tools=None, max_tokens=250, timeout=12.0,
+        )
+        self.assertEqual(seen["config"]["max_output_tokens"], 250)
+        self.assertEqual(seen["config"]["http_options"], {"timeout": 12_000})
+
+    async def test_an_sdk_without_the_config_keyword_still_answers(self):
+        """The SDK is an optional adapter (principle 4.14) and its
+        signature is not ours to assume: an older one must degrade to an
+        uncapped call, not to no call at all."""
+
+        class _Response:
+            text = "ok"
+            usage_metadata = None
+
+        class _Models:
+            def generate_content(self, *, model, contents):
+                return _Response()
+
+        class _Client:
+            models = _Models()
+
+        provider = GeminiProvider(api_key="fake-key", client=_Client())
+        response = await provider.complete(
+            [{"role": "user", "content": "hi"}], tools=None, max_tokens=250, timeout=12.0,
+        )
+        self.assertEqual(response.text, "ok")
 
     async def test_sdk_failure_degrades_to_provider_unavailable(self):
         class _Models:

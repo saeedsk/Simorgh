@@ -289,6 +289,19 @@ class OutputParser:
     def parse(self, text: str, expected: dict | None) -> ParsedOutput:
         expected = expected or {"kind": "final"}
         kind = expected.get("kind", "final")
+        if not text.strip():
+            # A provider that answers with nothing at all -- a truncated
+            # stream, a content filter, a 200 with an empty choice -- used
+            # to be reported to the caller as a perfectly ordinary `final`
+            # answer whose text happened to be "", with `non_answer=False`
+            # and `floor=False`: a confident, successful nothing.
+            # Downstream that is worse than an error, because everything
+            # treats it as a real reply -- `memory/consolidation.py` stores
+            # it as a distilled semantic memory, a session appends it as
+            # the assistant's turn. The verdict path already reported an
+            # unusable reply honestly (`_parse_verdict`); every other
+            # expectation did not. Observer, 2026-09-10.
+            return ParsedOutput(kind="non_answer", text="", non_answer=True)
         if kind == "markers":
             return self._parse_markers(text, tuple(expected.get("markers", ())))
         if kind == "edit_blocks":

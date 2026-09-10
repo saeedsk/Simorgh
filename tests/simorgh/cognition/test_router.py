@@ -5,10 +5,15 @@ floor unless `require_real_provider`."""
 
 from __future__ import annotations
 
+import asyncio
+import time
 import unittest
 
 from simorgh.cognition.api import Budget, BudgetExceeded, NoRealProvider, ProviderUnavailable, Purpose
+from simorgh.cognition.budget import RollingWindowBudget
+from simorgh.cognition.config import ProviderConfig
 from simorgh.cognition.providers.base import FloorProvider
+from simorgh.ledger.factory import make_ledger
 from simorgh.cognition.router import Router
 from simorgh.contracts.protocols import ProviderResponse
 from tests.simorgh.helpers import FakeClock
@@ -331,9 +336,16 @@ class TheTimeoutBoundsTheWholeCallTestCase(unittest.IsolatedAsyncioTestCase):
                         order=("claude_code_cli", "gemini"), clock=clock)
         await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=60.0)
 
-        self.assertEqual(seen["claude_code_cli"], 60.0)
+        # This used to assert 60.0 -- the first candidate being handed the
+        # WHOLE deadline -- which is exactly how a merely-slow primary
+        # starved every candidate behind it (see
+        # `test_a_merely_slow_primary_does_not_starve_the_chain_behind_it`).
+        # Two candidates, so the first gets half.
+        self.assertEqual(seen["claude_code_cli"], 30.0)
         # The first candidate spent 20 of the 60 seconds the caller will
-        # wait; the second must not be handed a fresh 60.
+        # wait; the second must not be handed a fresh 60. It is last, so it
+        # gets everything still going: 40, including the 10 the first one
+        # was allotted and did not use.
         self.assertAlmostEqual(seen["gemini"], 40.0, places=1)
 
     async def test_a_candidate_is_not_dialled_with_no_time_left(self):
@@ -364,3 +376,231 @@ class TheTimeoutBoundsTheWholeCallTestCase(unittest.IsolatedAsyncioTestCase):
                                   timeout=60.0)
         self.assertEqual(primary.calls, 1)
         self.assertEqual(secondary.calls, 0, "no time was left; dialling it would waste the call")
+
+
+class TheDeadlineIsSharedNotSpentByTheFirstCandidateTestCase(unittest.IsolatedAsyncioTestCase):
+    """Bounding the whole chain with one deadline fixed the caller giving
+    up first, and introduced its own version of the same bug one level
+    down: the first candidate was handed the entire deadline, so a primary
+    that was merely SLOW -- not failing, just slow -- consumed all of it
+    and every candidate behind it was skipped as "no time left".
+
+    Observed 2026-09-10 against the real `Router` with a 6s call budget:
+
+        together.complete(timeout=6.00)
+        cognition.provider_failed provider=together
+        cognition.no_time_for_candidate provider=gemini remaining_s=0.0
+        NoRealProvider: together: timed out after 6.0s
+        slow.calls=[5.999]  good.calls=[]     <-- gemini was healthy
+
+    A failover chain that only survives a *fast* failure is not a failover
+    chain: the slow failure is the one it exists for.
+    """
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.floor = FloorProvider()
+
+    async def test_a_merely_slow_primary_does_not_starve_the_chain_behind_it(self):
+        clock = self.clock
+
+        class _Slow:
+            """Honours its timeout, burns all of it, then fails -- what a
+            real HTTP client with a socket timeout does."""
+
+            name = "together"
+
+            def __init__(self):
+                self.granted: list[float] = []
+
+            def available(self):
+                return True
+
+            async def complete(self, messages, *, tools, max_tokens, timeout=None):
+                self.granted.append(timeout)
+                clock.advance(timeout)
+                raise ProviderUnavailable(f"timed out after {timeout}s")
+
+        slow = _Slow()
+        healthy = _FakeProvider("gemini")
+        router = Router([slow, healthy], {}, self.floor, order=("together", "gemini"), clock=clock)
+
+        response, floor = await router.complete(
+            Purpose.CHAT, [{"role": "user", "content": "hi"}], tools=None,
+            budget=_budget(require_real=True), timeout=60.0,
+        )
+
+        self.assertEqual(slow.granted, [30.0], "the primary may have its share, not the whole deadline")
+        self.assertEqual(healthy.calls, 1, "the healthy fallback must still get dialled")
+        self.assertEqual(response.provider, "gemini")
+        self.assertFalse(floor)
+
+    async def test_the_last_candidate_is_never_handed_a_negative_timeout(self):
+        clock = self.clock
+        granted: list[float] = []
+
+        class _Recorder:
+            def __init__(self, name, burn):
+                self.name = name
+                self.burn = burn
+                self.calls = 0
+
+            def available(self):
+                return True
+
+            async def complete(self, messages, *, tools, max_tokens, timeout=None):
+                self.calls += 1
+                granted.append(timeout)
+                clock.advance(self.burn)
+                raise ProviderUnavailable("nope")
+
+        a, b, c = _Recorder("together", 25.0), _Recorder("claude_code_cli", 20.0), _Recorder("gemini", 1.0)
+        router = Router([a, b, c], {}, self.floor,
+                        order=("together", "claude_code_cli", "gemini"), clock=clock)
+        with self.assertRaises(NoRealProvider):
+            await router.complete(Purpose.CHAT, [], tools=None,
+                                  budget=_budget(require_real=True), timeout=60.0)
+        self.assertTrue(all(t > 0 for t in granted), f"a candidate was dialled with {granted}")
+        self.assertEqual([a.calls, b.calls, c.calls], [1, 1, 1], "every candidate got a real shot")
+
+    async def test_a_provider_that_ignores_its_timeout_cannot_eat_the_deadline(self):
+        """`GeminiProvider` accepted `timeout` and dropped it (fixed in the
+        same pass). The Router must not be at any provider's mercy for the
+        deadline it promised the caller, so it holds each call to its slice
+        itself. Real wall-clock, deliberately: the point is that the Router
+        stops waiting even when the clock it is told about never moves."""
+
+        class _Ignores:
+            name = "together"
+
+            def __init__(self):
+                self.calls = 0
+
+            def available(self):
+                return True
+
+            async def complete(self, messages, *, tools, max_tokens, timeout=None):
+                self.calls += 1
+                await asyncio.sleep(300)  # the timeout argument, ignored
+                raise AssertionError("unreachable")
+
+        rude = _Ignores()
+        router = Router([rude], {}, self.floor, order=("together",), clock=self.clock)
+        started = time.monotonic()
+        with self.assertRaises(NoRealProvider):
+            await router.complete(Purpose.CHAT, [], tools=None,
+                                  budget=_budget(require_real=True), timeout=5.0)
+        self.assertEqual(rude.calls, 1)
+        self.assertLess(time.monotonic() - started, 30.0, "the Router waited on a provider that never stops")
+
+    async def test_running_out_of_time_is_not_reported_as_no_provider_available(self):
+        """Honesty: providers were available and willing; the deadline had
+        gone. Telling the operator "no real provider available" sends them
+        hunting for a dead API key that is not there."""
+        provider = _FakeProvider("together")
+        router = Router([provider], {}, self.floor, order=("together",), clock=self.clock)
+        with self.assertRaises(NoRealProvider) as caught:
+            await router.complete(Purpose.CHAT, [], tools=None,
+                                  budget=_budget(require_real=True), timeout=0.0)
+        self.assertIn("deadline", str(caught.exception))
+        self.assertEqual(provider.calls, 0)
+
+
+class ThePreCallEstimateIsCheckedAgainstTheWindowTestCase(unittest.IsolatedAsyncioTestCase):
+    """`RollingWindowBudget.can_spend` has taken an `est_cost_usd` since it
+    was written and the Router never passed one -- so the daily cap was only
+    ever noticed *after* it had been blown. Observed 2026-09-10 with a real
+    ledger-backed budget: $1.99 spent of a $2.00 cap, one call waved
+    through, $9.49 spent afterwards.
+    """
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.floor = FloorProvider()
+
+    async def asyncSetUp(self):
+        self.ledger = make_ledger({"backend": "memory"}, clock=self.clock)
+        await self.ledger.start()
+
+    async def test_a_call_estimated_over_the_remaining_window_is_refused_before_it_is_made(self):
+        config = ProviderConfig(max_calls=1_000, max_spend_usd=2.0, price_in=0.15, price_out=0.60)
+        window = RollingWindowBudget("together", config, self.ledger, clock=self.clock)
+        await window.record(ProviderResponse(text="x", provider="together", cost_usd=1.99))
+
+        provider = _FakeProvider("together")
+        router = Router([provider], {"together": window}, self.floor, order=("together",), clock=self.clock)
+        huge_prompt = [{"role": "user", "content": "word " * 400_000}]  # ~$0.08 of input alone
+        with self.assertRaises(NoRealProvider):
+            await router.complete(
+                Purpose.CHAT, huge_prompt, tools=None,
+                # generous per-request ceiling: the provider's own remaining
+                # window is what has to stop this, not `max_cost_usd`
+                budget=Budget(max_tokens_in=1_000_000, max_tokens_out=100, max_cost_usd=100.0, require_real=True),
+                timeout=60.0,
+            )
+        self.assertEqual(provider.calls, 0, "the call was made anyway, past a cap it could not fit under")
+        self.assertAlmostEqual((await window.status()).spend_usd, 1.99)
+
+    async def test_a_call_that_fits_the_remaining_window_still_goes_through(self):
+        config = ProviderConfig(max_calls=1_000, max_spend_usd=2.0, price_in=0.15, price_out=0.60)
+        window = RollingWindowBudget("together", config, self.ledger, clock=self.clock)
+        await window.record(ProviderResponse(text="x", provider="together", cost_usd=1.0))
+        provider = _FakeProvider("together")
+        router = Router([provider], {"together": window}, self.floor, order=("together",), clock=self.clock)
+        response, floor = await router.complete(
+            Purpose.CHAT, [{"role": "user", "content": "hi"}], tools=None,
+            budget=_budget(require_real=True), timeout=60.0,
+        )
+        self.assertEqual(response.provider, "together")
+        self.assertFalse(floor)
+
+
+class TheCooldownIsStampedWhenTheFailureHappensTestCase(unittest.IsolatedAsyncioTestCase):
+    """The circuit breaker was stamping `call_start + cooldown_s`, not
+    `failure_time + cooldown_s`. A provider that fails in 200ms was
+    therefore cooled down properly, and one that hangs for a full timeout
+    before failing -- the expensive case the breaker was written for -- got
+    a cooldown that had already expired the moment it was written.
+
+    Caught through a real Kernel boot, 2026-09-10: `cooldown_until` for
+    `together` came back as 1700324360.0 against a clock reading
+    1700389196.0, and the "cooling down" provider was re-dialled on the
+    very next call.
+    """
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.floor = FloorProvider()
+
+    async def test_a_provider_that_takes_longer_than_the_cooldown_to_fail_is_still_cooled_down(self):
+        clock = self.clock
+
+        class _HangsThenFails:
+            name = "together"
+
+            def __init__(self):
+                self.calls = 0
+
+            def available(self):
+                return True
+
+            async def complete(self, messages, *, tools, max_tokens, timeout=None):
+                self.calls += 1
+                clock.advance(40.0)  # a real provider timeout: longer than the 30s cooldown
+                raise ProviderUnavailable("timed out")
+
+        primary = _HangsThenFails()
+        secondary = _FakeProvider("gemini")
+        router = Router([primary, secondary], {}, self.floor, order=("together", "gemini"),
+                        clock=clock, cooldown_s=30.0)
+        await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=600.0)
+        self.assertEqual(primary.calls, 1)
+
+        clock.advance(1.0)  # one second later, well inside the cooldown
+        response, _floor = await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=600.0)
+        self.assertEqual(primary.calls, 1, "the hung provider was re-dialled inside its own cooldown")
+        self.assertEqual(response.provider, "gemini")
+
+        clock.advance(35.0)  # past it
+        await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=600.0)
+        self.assertEqual(primary.calls, 2, "the cooldown must still expire")

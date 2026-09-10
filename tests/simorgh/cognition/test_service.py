@@ -88,6 +88,24 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(reply.payload["floor"])
         self.assertFalse(reply.payload["non_answer"])
 
+    async def test_a_provider_answering_with_nothing_is_reported_as_a_non_answer(self):
+        """Observer, 2026-09-10: a provider that returned an empty string
+        (a truncated stream, a content filter, a 200 with an empty choice)
+        came back to the caller as an ordinary successful answer --
+        `text: ""`, `non_answer: False`, `floor: False`, `ok` -- a
+        confident, successful nothing. Downstream that is worse than an
+        error: `memory/consolidation.py` stores a successful reply as a
+        distilled semantic memory, and a session appends it as the
+        assistant's own turn."""
+        await self._make(providers=[_FakeProvider(text="   \n ")])
+        request = Message.new(topics.COGNITION_THINK, source="test", payload={
+            "purpose": "chat", "messages": [{"role": "user", "content": "what is the answer"}],
+            "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False,
+        })
+        reply = await self.bus.request(request, timeout=5.0)
+        self.assertEqual(reply.payload["text"], "")
+        self.assertTrue(reply.payload["non_answer"], "an empty reply was passed off as a real answer")
+
     async def test_think_with_no_real_provider_returns_an_honest_floor_reply(self):
         await self._make(providers=[])
         request = Message.new(topics.COGNITION_THINK, source="test", payload={

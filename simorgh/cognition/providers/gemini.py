@@ -36,14 +36,38 @@ class GeminiProvider:
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,
     ) -> ProviderResponse:
         prompt = "\n\n".join(m.get("content", "") for m in messages if m.get("content"))
-        return await asyncio.to_thread(self._complete_sync, prompt)
+        return await asyncio.to_thread(self._complete_sync, prompt, max_tokens, timeout)
 
-    def _complete_sync(self, prompt: str) -> ProviderResponse:
+    def _complete_sync(
+        self, prompt: str, max_tokens: int = 0, timeout: float | None = None,
+    ) -> ProviderResponse:
         if not self._api_key:
             raise ProviderUnavailable("no Gemini API key configured (GEMINI_API_KEY)")
+        # Both arguments were accepted and then dropped on the floor: this
+        # provider never told the SDK about either one (observer,
+        # 2026-09-10). Neither omission is cosmetic. `timeout` is the
+        # Router's slice of a shared whole-call deadline, so a hanging SDK
+        # call ran until the SDK's own default gave up -- past the deadline
+        # every other candidate was being held to, and past the caller's own
+        # patience. `max_tokens` is the number the Router's *pre-call* cost
+        # estimate is computed from, so the estimate described a ceiling the
+        # provider was never actually asked to respect.
+        config: dict = {}
+        if max_tokens:
+            config["max_output_tokens"] = int(max_tokens)
+        if timeout:
+            config["http_options"] = {"timeout": int(timeout * 1000)}  # the SDK counts in milliseconds
         try:
             client = self._get_client()
-            response = client.models.generate_content(model=self._model, contents=prompt)
+            try:
+                response = client.models.generate_content(
+                    model=self._model, contents=prompt, config=config or None,
+                )
+            except TypeError:
+                # An SDK version (or an injected double) that predates the
+                # `config` keyword: an uncapped call beats no call at all,
+                # and the Router now enforces its own deadline regardless.
+                response = client.models.generate_content(model=self._model, contents=prompt)
         except Exception as exc:  # noqa: BLE001 -- missing SDK, network, API error: all degrade to the next provider
             raise ProviderUnavailable(f"Gemini request failed: {exc!r}") from exc
 
