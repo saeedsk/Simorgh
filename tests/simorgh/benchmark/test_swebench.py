@@ -246,3 +246,87 @@ class RunnerSwebenchCaseTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("workspace/swebench/astropy__astropy-12907", prompt)
         self.assertIn("separability is wrong", prompt)
         self.assertIn("Do not edit or add tests", prompt)
+
+
+class NothingCheckedIsNotAPassTestCase(unittest.TestCase):
+    """Four ways this evaluator could report a score it had not earned,
+    all found by an observer attacking it on the day it was written
+    (2026-09-10). A wrong score is worse than no score, and every one of
+    these produced a wrong score silently.
+    """
+
+    def test_a_row_naming_no_tests_is_refused_not_resolved(self):
+        """`_names` returns () for a FAIL_TO_PASS that is missing, empty
+        or in a shape it cannot decode, and the success return then said
+        "all 0 fail-to-pass and 0 pass-to-pass test(s) pass" -- a case
+        certified without a single check."""
+        for row in ({"FAIL_TO_PASS": "[]"}, {"FAIL_TO_PASS": "not json"}, {}):
+            verdict = swebench.judge(PYTEST_LOG, dict(row, log_parser="parse_log_pytest"))
+            self.assertFalse(verdict.resolved)
+            self.assertTrue(verdict.skipped)
+            self.assertIn("no fail-to-pass tests", verdict.detail)
+
+    def test_a_name_two_tests_share_cannot_certify_either(self):
+        """Django names a documented test by its docstring, and one
+        docstring can belong to two classes. The last line written won,
+        so a passing namesake could mark a failing test as passed."""
+        log = ("test_zzz_broken (app.tests.A)\nTests the shared behaviour. ... FAIL\n"
+               "test_aaa_fine (app.tests.B)\nTests the shared behaviour. ... ok\n")
+        self.assertEqual(swebench.parse_django(log)["Tests the shared behaviour."],
+                         swebench.AMBIGUOUS)
+        verdict = swebench.judge(log, {"log_parser": "parse_log_django",
+                                       "FAIL_TO_PASS": json.dumps(["Tests the shared behaviour."])})
+        self.assertFalse(verdict.resolved)
+        self.assertTrue(verdict.skipped)
+
+    def test_a_skipped_test_is_not_a_test_the_patch_broke(self):
+        log = "PASSED tests/a.py::t1\nSKIPPED tests/a.py::t2\n"
+        verdict = swebench.judge(log, {"log_parser": "parse_log_pytest",
+                                       "FAIL_TO_PASS": json.dumps(["tests/a.py::t1"]),
+                                       "PASS_TO_PASS": json.dumps(["tests/a.py::t2"])})
+        self.assertFalse(verdict.resolved)
+        self.assertTrue(verdict.skipped, "a test that never ran did not fail")
+        self.assertEqual(verdict.failed, ())
+        self.assertEqual(verdict.unmeasured, ("tests/a.py::t2",))
+
+    def test_a_real_failure_still_outranks_an_unmeasured_one(self):
+        """The patch broke something. That is true whatever else could
+        not be read, and must not be softened into "unmeasured"."""
+        log = "FAILED tests/a.py::t1 - AssertionError\nSKIPPED tests/a.py::t2\n"
+        verdict = swebench.judge(log, {"log_parser": "parse_log_pytest",
+                                       "FAIL_TO_PASS": json.dumps(["tests/a.py::t1"]),
+                                       "PASS_TO_PASS": json.dumps(["tests/a.py::t2"])})
+        self.assertFalse(verdict.skipped)
+        self.assertIn("still failing", verdict.detail)
+
+
+class PytestIdsSurviveTheirOwnPunctuationTestCase(unittest.TestCase):
+    """A parametrised id can contain spaces and dashes inside its
+    brackets, and pytest appends `- <message>` to a failure line.
+    Cutting at the first " - " turned `test_param[x - y]` into
+    `test_param[x`, and `judge` then reported the dataset's test "never
+    appeared in the log" and threw away a run that had measured it
+    (observer, 2026-09-10)."""
+
+    def test_a_parametrised_id_containing_a_dash_is_kept_whole(self):
+        results = swebench.parse_pytest("PASSED tests/t.py::test_param[x - y]\n")
+        self.assertIn("tests/t.py::test_param[x - y]", results)
+
+    def test_a_failure_message_is_still_stripped(self):
+        results = swebench.parse_pytest("FAILED tests/t.py::test_other[a-b] - AssertionError: no\n")
+        self.assertEqual(results, {"tests/t.py::test_other[a-b]": "FAILED"})
+
+    def test_a_skip_tally_is_not_a_test(self):
+        """`SKIPPED [1] tests/t.py:9: needs network` names a file and a
+        line, and was read as a test called "[1] tests/t.py:9: ..."."""
+        results = swebench.parse_pytest("SKIPPED [1] tests/t.py:9: needs network\n")
+        self.assertEqual(results, {})
+
+    def test_a_status_first_line_is_not_glued_to_the_next_line(self):
+        """The trailing-status pattern used `\\s+`, which matches a
+        newline, so two status-first lines matched as one id ending in
+        the second line's verdict."""
+        results = swebench.parse_pytest(
+            "PASSED tests/t.py::test_one[a b]\nFAILED tests/t.py::test_two - boom\n")
+        self.assertEqual(results, {"tests/t.py::test_one[a b]": "PASSED",
+                                   "tests/t.py::test_two": "FAILED"})

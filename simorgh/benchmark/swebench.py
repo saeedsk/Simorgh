@@ -71,6 +71,10 @@ class Verdict:
     required_keep: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()      # named by the dataset, absent from the log
     failed: tuple[str, ...] = ()
+    #: Named by the dataset, present in the log, and the log does not
+    #: say whether it passed: skipped, or a key two tests share. A test
+    #: that never ran is not a test the patch broke.
+    unmeasured: tuple[str, ...] = ()
     #: True when the harness could not run or could not read the result.
     #: Distinct from `resolved=False`, which means the tests ran and the
     #: patch did not fix the bug. Conflating them would turn "we could
@@ -109,11 +113,40 @@ def available() -> tuple[bool, str]:
 # guess, because a wrong parse is a wrong score and a wrong score is
 # worse than no score.
 
-_PYTEST_LINE = re.compile(
-    r"^(?P<status>PASSED|FAILED|ERROR|SKIPPED)\s+(?P<test>\S+.*?)\s*(?:-\s.*)?$", re.M)
-#: Some configurations print the status after the test id instead.
+_PYTEST_LINE = re.compile(r"^(?P<status>PASSED|FAILED|ERROR|SKIPPED)\s+(?P<rest>\S.*)$", re.M)
+#: Some configurations print the status after the test id instead. The
+#: id can contain spaces inside its parameter brackets, so this cannot
+#: stop at the first one.
+#: `[ \t]+`, never `\s+`: with `\s+` the gap could be the NEWLINE, so
+#: a status-first line followed by another status-first line matched as
+#: one "test id" ending in the next line's verdict.
 _PYTEST_TRAILING = re.compile(
-    r"^(?P<test>\S+::\S+?)\s+(?P<status>PASSED|FAILED|ERROR|SKIPPED)\b", re.M)
+    r"^(?P<test>\S[^\n]*?::[^\n]+?)[ \t]+(?P<status>PASSED|FAILED|ERROR|SKIPPED)\b", re.M)
+#: pytest's skip SUMMARY line, which names a file and a line rather than
+#: a test: `SKIPPED [1] tests/test_toy.py:9: needs network`. Read as a
+#: result it invents a test called "[1] tests/test_toy.py:9: ...".
+_PYTEST_SKIP_COUNT = re.compile(r"^\[\d+\]\s")
+
+
+def _nodeid(rest: str) -> str:
+    """The test id out of the text after a status word.
+
+    pytest appends `- <message>` to a failure line, and a parametrised
+    id can contain both spaces and dashes inside its brackets, so the
+    split has to respect bracket depth. Cutting at the first " - "
+    turned `test_param[x - y]` into `test_param[x` -- and `judge` then
+    reported that the dataset's test "never appeared in the log" and
+    threw away a run that had measured it perfectly well (observer,
+    2026-09-10)."""
+    depth = 0
+    for index, char in enumerate(rest):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(0, depth - 1)
+        elif depth == 0 and rest.startswith(" - ", index):
+            return rest[:index].strip()
+    return rest.strip()
 
 #: Django's runner prints `<label> ... <verdict>`, where the label is
 #: the test id `test_name (module.Class)` only when the test has NO
@@ -128,6 +161,13 @@ _DJANGO_VERDICT = re.compile(r"^(?P<test>.+?)\s+\.\.\.\s*(?P<status>ok|OK|FAIL|E
 #: for a documented test.
 _DJANGO_SUMMARY = re.compile(r"^(?P<status>FAIL|ERROR):\s+(?P<test>\S+(?: \([\w.]+\))?)")
 
+#: Two runs disagreeing about one key. Django names a documented test by
+#: its docstring, and a docstring is not unique -- two classes sharing
+#: one line means the last result written wins, so a namesake that
+#: passed could mark a failing test as passed and the case as resolved
+#: (observer, 2026-09-10). Unmeasurable is the only honest reading.
+AMBIGUOUS = "AMBIGUOUS"
+
 _GOOD = {"PASSED", "ok"}
 _BAD = {"FAILED", "ERROR", "FAIL"}
 
@@ -135,7 +175,10 @@ _BAD = {"FAILED", "ERROR", "FAIL"}
 def parse_pytest(log: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for match in _PYTEST_LINE.finditer(log):
-        out[match.group("test").strip()] = match.group("status")
+        rest = match.group("rest")
+        if _PYTEST_SKIP_COUNT.match(rest):
+            continue        # a skip tally, not a test result
+        out[_nodeid(rest)] = match.group("status")
     for match in _PYTEST_TRAILING.finditer(log):
         out.setdefault(match.group("test").strip(), match.group("status"))
     return out
@@ -156,12 +199,20 @@ def parse_django(log: str) -> dict[str, str]:
             raw = found.group("status")
             status = ("SKIPPED" if raw.startswith("skipped")
                       else "PASSED" if raw in ("ok", "OK") else raw)
-            out[found.group("test").strip()] = status
+            key = found.group("test").strip()
+            seen = out.get(key)
+            # Two progress lines under one key that disagree: the key
+            # names more than one test and nothing here can tell them
+            # apart. Recorded as ambiguous rather than letting the last
+            # line win, which is how a passing namesake could certify a
+            # failing test.
+            out[key] = AMBIGUOUS if (seen is not None and seen != status) else status
             continue
         summary = _DJANGO_SUMMARY.match(line)
         if summary:
-            # A summary line is the last word on that test: a subtest
-            # can report `ok` on the progress line and still fail here.
+            # A summary line names the test id, which IS unique, and is
+            # the last word on that test: a subtest can report `ok` on
+            # the progress line and still fail here.
             out[summary.group("test").strip()] = summary.group("status")
     return out
 
@@ -221,13 +272,27 @@ def judge(log: str, instance: dict) -> Verdict:
 
     required_pass = _names(instance.get("FAIL_TO_PASS"))
     required_keep = _names(instance.get("PASS_TO_PASS"))
-    failed, missing = [], []
+    if not required_pass:
+        # Nothing to measure is not a pass. `_names` returns () for a
+        # row whose FAIL_TO_PASS is missing, empty, or in a shape it
+        # cannot decode, and the success return below then reported
+        # "all 0 fail-to-pass and 0 pass-to-pass test(s) pass" with
+        # `resolved=True` -- a case certified without a single check,
+        # from any drift in the dataset's shape (observer, 2026-09-10).
+        return Verdict(False, "this case names no fail-to-pass tests, so nothing here decides "
+                              "whether the bug was fixed -- reload the suite and check the row",
+                       skipped=True, log_excerpt=log[-1500:])
+    failed, missing, unmeasured = [], [], []
     for name in required_pass + required_keep:
         status = results.get(name)
         if status is None:
             missing.append(name)
-        elif status not in _GOOD:
+        elif status in _BAD:
             failed.append(name)
+        elif status not in _GOOD:
+            # SKIPPED, or AMBIGUOUS. Neither says the patch worked and
+            # neither says it broke anything.
+            unmeasured.append(name)
 
     if missing:
         # A test the dataset names and the log never mentions means the
@@ -239,11 +304,23 @@ def judge(log: str, instance: dict) -> Verdict:
                        missing=tuple(missing), failed=tuple(failed), skipped=True,
                        log_excerpt=log[-1500:])
     if failed:
+        # A real failure outranks an unmeasured test: the patch broke
+        # something, and that is true whatever else could not be read.
         broke = [n for n in failed if n in required_keep]
         detail = (f"{len(failed)} test(s) still failing"
                   + (f", including {len(broke)} that passed before the patch" if broke else ""))
         return Verdict(False, detail, required_pass=required_pass, required_keep=required_keep,
-                       failed=tuple(failed), log_excerpt=log[-1500:])
+                       failed=tuple(failed), unmeasured=tuple(unmeasured), log_excerpt=log[-1500:])
+    if unmeasured:
+        # Everything that ran was fine, and something the dataset names
+        # did not run. Reporting that as a failure blamed the patch for
+        # a test that was skipped; reporting it as a pass would certify
+        # a case nobody checked.
+        return Verdict(False, f"{len(unmeasured)} named test(s) neither passed nor failed "
+                              f"(skipped, or a name the log gives to more than one test), "
+                              f"e.g. {unmeasured[0][:80]}",
+                       required_pass=required_pass, required_keep=required_keep,
+                       unmeasured=tuple(unmeasured), skipped=True, log_excerpt=log[-1500:])
     return Verdict(True, f"all {len(required_pass)} fail-to-pass and {len(required_keep)} "
                          f"pass-to-pass test(s) pass",
                    required_pass=required_pass, required_keep=required_keep)

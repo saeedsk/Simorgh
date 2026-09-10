@@ -297,3 +297,27 @@ class WidthFollowsTheTerminalTestCase(unittest.TestCase):
             line = started_line(record)
         self.assertIn("patch", line)
         self.assertTrue(line.strip())
+
+
+class AFiredReminderReachesThePersonTestCase(TestTheServiceNarratesAutonomousWork):
+    """`percept.time.scheduled` was published by the Scheduler and
+    subscribed to by NOTHING.
+
+    The whole point of `remind` and `schedule` is to say something at a
+    time, and the saying never happened: an observer set a reminder,
+    watched the schedule fire on the bus, and watched the terminal stay
+    empty (2026-09-10). The Kernel listed the topic under `produces` and
+    no subsystem consumed it -- the door out was missing.
+    """
+
+    async def test_the_label_is_printed_when_the_schedule_fires(self):
+        await self._emit(topics.PERCEPT_TIME_SCHEDULED,
+                         {"schedule_id": "s1", "label": "take the bins out"})
+        self.assertIn("take the bins out", self._out())
+
+    async def test_a_schedule_with_nothing_to_say_prints_nothing(self):
+        """Bookkeeping, not a reminder; a blank line is worse than
+        silence."""
+        before = len(self.printed)
+        await self._emit(topics.PERCEPT_TIME_SCHEDULED, {"schedule_id": "s2", "label": "  "})
+        self.assertEqual(len(self.printed), before)

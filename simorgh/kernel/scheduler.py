@@ -75,6 +75,15 @@ class _Schedule:
     payload: dict
     requested_by: str
     cancelled: bool = False
+    # A one-shot that has already gone off. Without this the projection
+    # replayed a spent reminder as still outstanding: `active()` returned
+    # it, `start()` armed it with a `fire_at` now in the past, and it
+    # went off again the instant the system booted -- and again on the
+    # next boot, forever, because each firing only appended another
+    # `schedule.fired` that the projection also ignored. Live-caught by
+    # an observer, 2026-09-10: kernel 2 on the same data dir fired
+    # `oneshot` and `past` at delay 0.0 with nothing newly added.
+    fired: bool = False
 
 
 class ScheduleView(Projection):
@@ -101,25 +110,34 @@ class ScheduleView(Projection):
                 sched.cancelled = True
         elif event.type == "schedule.fired":
             sched = self._schedules.get(event.payload["schedule_id"])
-            if sched is not None and sched.every_seconds:
+            if sched is None:
+                return
+            if sched.every_seconds:
                 sched.fire_at = event.payload["next_fire_at"]
+            else:
+                sched.fired = True
 
     def state(self) -> dict:
         return {
             sid: {
                 "label": s.label, "fire_at": s.fire_at, "every_seconds": s.every_seconds,
                 "payload": s.payload, "requested_by": s.requested_by, "cancelled": s.cancelled,
+                "fired": s.fired,
             }
             for sid, s in self._schedules.items()
         }
 
     def load(self, state: dict) -> None:
+        # `**v` filtered, so a snapshot written before a field existed
+        # still loads instead of raising on an unexpected keyword.
+        allowed = {f for f in _Schedule.__dataclass_fields__ if f != "schedule_id"}
         self._schedules = {
-            sid: _Schedule(schedule_id=sid, **v) for sid, v in state.items()
+            sid: _Schedule(schedule_id=sid, **{k: val for k, val in v.items() if k in allowed})
+            for sid, v in state.items()
         }
 
     def active(self) -> list[_Schedule]:
-        return [s for s in self._schedules.values() if not s.cancelled]
+        return [s for s in self._schedules.values() if not s.cancelled and not s.fired]
 
 
 class Scheduler:
@@ -264,6 +282,8 @@ class Scheduler:
         if next_fire_at is not None and not sched.cancelled:
             sched.fire_at = next_fire_at
             self._arm(sched, now)
+        else:
+            sched.fired = True
 
     # -- tick loops -----------------------------------------------------
     async def _second_loop(self) -> None:

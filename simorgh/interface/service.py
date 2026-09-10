@@ -108,6 +108,7 @@ class Service:
         topics.PERSONA_STATE_CHANGED, topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_METRICS,
         topics.SYSTEM_HEALTH, topics.GUARDIAN_POSTURE_CHANGED, topics.TURN_COMPLETED,
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_COMPLETED, topics.COGNITION_PROVIDER_STATUS,
+        topics.PERCEPT_TIME_SCHEDULED,
     )
     produces: tuple[str, ...] = (
         topics.PERCEPT_TEXT_RECEIVED, topics.INTENT_GOAL_STATED, topics.SYSTEM_PAUSE,
@@ -194,6 +195,14 @@ class Service:
             self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
         self._subs = [
             await ctx.bus.subscribe(topics.UI_NOTICE, self._on_notice),
+            # A reminder that fires and tells nobody is not a reminder.
+            # `percept.time.scheduled` was published by the Scheduler and
+            # subscribed to by NOTHING -- the whole point of `remind` and
+            # `schedule` is to say something at a time, and the saying
+            # never happened. Live-caught by an observer, 2026-09-10: the
+            # schedule was added, the event fired, the terminal stayed
+            # empty.
+            await ctx.bus.subscribe(topics.PERCEPT_TIME_SCHEDULED, self._on_schedule_fired),
             await ctx.bus.subscribe(topics.UI_PROMPT, self._on_prompt),
             await ctx.bus.subscribe(topics.ACTION_NEEDS_HUMAN, self._on_needs_human),
             await ctx.bus.subscribe(topics.ACTION_DENIED, self._on_action_denied),
@@ -762,6 +771,15 @@ class Service:
             # for exactly that: never meant for this surface.
             return
         self._out(render_mod.notice(level, p.get("text", ""), p.get("source", ""), enabled=self._color))
+
+    async def _on_schedule_fired(self, message: Message) -> None:
+        label = str(message.payload.get("label") or "").strip()
+        if not label:
+            # A schedule with nothing to say is bookkeeping, not a
+            # reminder; printing a blank line would be worse than
+            # silence.
+            return
+        self._out(render_mod.notice("info", label, "reminder", enabled=self._color))
 
     async def _on_prompt(self, message: Message) -> None:
         """Live-caught (the creator, real use: typed "yes" twice at a

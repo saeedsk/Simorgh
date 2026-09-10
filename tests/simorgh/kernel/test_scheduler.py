@@ -227,3 +227,60 @@ class TestSchedulerDurableSchedules(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestASpentReminderStaysSpent(TestSchedulerDurableSchedules):
+    """A one-shot must go off once, not once per boot.
+
+    `ScheduleView.apply` handled `schedule.fired` only for a recurring
+    schedule, so a spent one-shot replayed as still outstanding:
+    `active()` returned it, `start()` armed it with a `fire_at` now in
+    the past, and it went off the instant the system booted. Each firing
+    appended another `schedule.fired` the projection also ignored, so it
+    recurred forever. Live-caught by an observer on 2026-09-10 -- a
+    second kernel on the same data dir fired two spent reminders at
+    delay 0.0 with nothing newly added.
+    """
+
+    async def test_a_fired_one_shot_is_not_offered_again(self):
+        await self.bus.publish(Message.new(
+            topics.SYSTEM_SCHEDULE_ADD, source="interface",
+            payload={"schedule_id": "once", "at": self.clock.now() + 5.0, "label": "the bins"},
+        ))
+        await _pump(50)
+        self.assertEqual(len(self.fired), 1)
+        # What a fresh boot would arm: nothing.
+        active = [s.schedule_id for s in self.scheduler._view.active()]  # noqa: SLF001
+        self.assertNotIn("once", active)
+
+    async def test_the_spent_flag_survives_a_replay_of_the_stream(self):
+        """The projection is rebuilt from the ledger on every boot, so
+        this is the path that actually decides."""
+        from simorgh.kernel.scheduler import ScheduleView
+
+        await self.bus.publish(Message.new(
+            topics.SYSTEM_SCHEDULE_ADD, source="interface",
+            payload={"schedule_id": "once2", "at": self.clock.now() + 5.0, "label": "the vet"},
+        ))
+        await _pump(50)
+
+        rebuilt = ScheduleView()
+        for event in await self.ledger.read("schedule"):
+            rebuilt.apply(event)
+        self.assertNotIn("once2", [s.schedule_id for s in rebuilt.active()])
+
+    async def test_a_repeat_is_still_offered_after_it_fires(self):
+        await self.bus.publish(Message.new(
+            topics.SYSTEM_SCHEDULE_ADD, source="interface",
+            payload={"schedule_id": "rep", "every_seconds": 10.0, "label": "tick"},
+        ))
+        await _pump(50)
+        self.assertIn("rep", [s.schedule_id for s in self.scheduler._view.active()])  # noqa: SLF001
+
+    async def test_a_snapshot_written_before_the_flag_existed_still_loads(self):
+        from simorgh.kernel.scheduler import ScheduleView
+
+        view = ScheduleView()
+        view.load({"old": {"label": "x", "fire_at": 1.0, "every_seconds": None,
+                           "payload": {}, "requested_by": "", "cancelled": False}})
+        self.assertEqual([s.schedule_id for s in view.active()], ["old"])
