@@ -49,6 +49,22 @@ LAYERS: tuple[tuple[str, ...], ...] = (
 # 3; the Kernel is the only other holder, and only for the self-check).
 NEEDS_HMAC_SECRET: frozenset[str] = frozenset({"guardian", "execution"})
 
+# Secrets a subsystem always receives, without anyone having to write a
+# `[<subsystem>] secrets = [...]` line in `simorgh.toml`. The scoped
+# store (`kernel/secrets.py::ScopedSecretStore`) is deliberately
+# deny-by-default, which is right for anything optional -- but a secret
+# the subsystem's *own* code names, and whose absence it already handles,
+# gains nothing from a second declaration a person has to remember. A
+# missing entry here is how a feature ships switched off with no way to
+# switch it on but an undocumented config line.
+#
+# `SIM_API_TOKEN` gates `interface/httpapi.py`
+# (platform-connectors-design.md section 4). Absent, the dashboard
+# behaves exactly as it always has -- local and unauthenticated.
+DEFAULT_SECRETS: dict[str, frozenset[str]] = {
+    "interface": frozenset({"SIM_API_TOKEN"}),
+}
+
 
 def build_factories(
     *, bus_client: BusClient, ledger_client: LedgerClient, run_repl: bool = False,
@@ -129,4 +145,4 @@ def known_layers(factories: dict[str, Callable[[], Subsystem]]) -> tuple[tuple[s
     return tuple(tuple(name for name in layer if name in factories) for layer in LAYERS)
 
 
-__all__ = ["LAYERS", "NEEDS_HMAC_SECRET", "build_factories", "known_layers"]
+__all__ = ["DEFAULT_SECRETS", "LAYERS", "NEEDS_HMAC_SECRET", "build_factories", "known_layers"]

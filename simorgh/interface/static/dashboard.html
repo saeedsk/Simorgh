@@ -386,6 +386,48 @@
   const POLL_MS = 1000;
   let failures = 0;
 
+  // -- API token ------------------------------------------------------
+  // The server gates every route but `/` and `/api/status` once
+  // SIM_API_TOKEN is set. The page itself is ungated (it is what
+  // carries the token here), so a person opens
+  // `http://host:8765/?token=...` once: the token is kept for this tab
+  // only and stripped from the address bar, so it does not sit in the
+  // history, in a bookmark, or in a screenshot of the URL.
+  const TOKEN_KEY = "simorgh-api-token";
+  function readToken() {
+    try {
+      const url = new URL(window.location.href);
+      const fromUrl = url.searchParams.get("token");
+      if (fromUrl) {
+        try { sessionStorage.setItem(TOKEN_KEY, fromUrl); } catch (e) { /* private mode */ }
+        url.searchParams.delete("token");
+        window.history.replaceState({}, "", url.pathname + (url.search || "") + url.hash);
+        return fromUrl;
+      }
+      return sessionStorage.getItem(TOKEN_KEY) || "";
+    } catch (e) {
+      return "";
+    }
+  }
+  let API_TOKEN = readToken();
+
+  // Every call to the API goes through this, so adding a route never
+  // means remembering the header.
+  async function apiFetch(path, options) {
+    const opts = Object.assign({ cache: "no-store" }, options || {});
+    opts.headers = Object.assign({}, opts.headers || {});
+    if (API_TOKEN) opts.headers["Authorization"] = "Bearer " + API_TOKEN;
+    const res = await fetch(path, opts);
+    if (res.status === 401) {
+      const banner = document.getElementById("conn-banner");
+      if (banner) {
+        banner.textContent = "this dashboard needs a token \u2014 open it as ?token=<SIM_API_TOKEN>";
+        banner.style.display = "";
+      }
+    }
+    return res;
+  }
+
   function fmtUptime(s) {
     if (typeof s !== "number") return "—";
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
@@ -552,7 +594,7 @@
 
   async function poll() {
     try {
-      const res = await fetch("/api/status", { cache: "no-store" });
+      const res = await apiFetch("/api/status");
       const data = await res.json();
       failures = 0;
       document.getElementById("conn-banner").style.display = "none";
@@ -625,7 +667,7 @@
       const pending = addMessage("sim pending", "thinking…");
 
       try {
-        const res = await fetch("/api/chat", {
+        const res = await apiFetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: text, session_id: sessionId }),
@@ -740,7 +782,7 @@
 
   async function refreshBenchmarks() {
     try {
-      const res = await fetch("/api/benchmarks", { cache: "no-store" });
+      const res = await apiFetch("/api/benchmarks");
       if (!res.ok) return;
       const data = await res.json();
       renderBenchmarks(data.runs || []);
@@ -781,7 +823,7 @@
 
   async function pollBusHistory() {
     try {
-      const res = await fetch("/api/history?subsystem=bus&minutes=" + HISTORY_MINUTES, { cache: "no-store" });
+      const res = await apiFetch("/api/history?subsystem=bus&minutes=" + HISTORY_MINUTES);
       const data = await res.json();
       const points = data.points || [];
       const queueSeries = points.map((p) => Object.keys(p.gauges || {})
@@ -803,7 +845,7 @@
 
   async function pollOrchestrationHistory() {
     try {
-      const res = await fetch("/api/history?subsystem=orchestration&minutes=" + HISTORY_MINUTES, { cache: "no-store" });
+      const res = await apiFetch("/api/history?subsystem=orchestration&minutes=" + HISTORY_MINUTES);
       const data = await res.json();
       const points = data.points || [];
       const busy = points.map((p) => Number((p.gauges && p.gauges["workers.busy"]) || 0));
@@ -827,7 +869,7 @@
 
   async function loadStreams() {
     try {
-      const res = await fetch("/api/streams", { cache: "no-store" });
+      const res = await apiFetch("/api/streams");
       const data = await res.json();
       const select = document.getElementById("logs-stream");
       const current = select.value;
@@ -851,8 +893,8 @@
     const stream = document.getElementById("logs-stream").value || "system";
     const limit = document.getElementById("logs-limit").value || "100";
     try {
-      const res = await fetch("/api/logs?stream=" + encodeURIComponent(stream) + "&limit=" + encodeURIComponent(limit),
-                              { cache: "no-store" });
+      const res = await apiFetch("/api/logs?stream=" + encodeURIComponent(stream) +
+                                    "&limit=" + encodeURIComponent(limit));
       const data = await res.json();
       const events = data.events || [];
       const list = document.getElementById("logs-list");
@@ -943,7 +985,7 @@
   }
   async function pollActivity() {
     try {
-      const res = await fetch("/api/activity?limit=60", { cache: "no-store" });
+      const res = await apiFetch("/api/activity?limit=60");
       if (!res.ok) return;
       const data = await res.json();
       const now = document.getElementById("activity-now");

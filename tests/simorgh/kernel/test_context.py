@@ -13,7 +13,8 @@ from tests.simorgh.helpers import FakeClock
 
 
 def _factory(tmp_path: str, *, raw_config: dict | None = None, secrets=None,
-            hmac_secret: bytes = b"\x01" * 32, identity_registry=None) -> ContextFactory:
+            hmac_secret: bytes = b"\x01" * 32, identity_registry=None,
+            default_secrets: dict | None = None) -> ContextFactory:
     return ContextFactory(
         bus_backend=make_backend(BusConfig()),
         ledger=object(),
@@ -24,6 +25,7 @@ def _factory(tmp_path: str, *, raw_config: dict | None = None, secrets=None,
         run_id="run-1",
         hmac_secret=hmac_secret,
         needs_hmac_secret=frozenset({"guardian", "execution"}),
+        default_secrets=default_secrets,
         identity_registry=identity_registry,
     )
 
@@ -135,3 +137,48 @@ class TestHmacSecretStore(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDefaultSecrets(unittest.TestCase):
+    """`registry.DEFAULT_SECRETS`: names a subsystem always receives.
+
+    The scoped store is deny-by-default, which is right for anything
+    optional. It is wrong for a secret the subsystem's own code names
+    and whose absence it already handles gracefully -- there, a missing
+    `[<subsystem>] secrets = [...]` line means a feature that silently
+    cannot be switched on at all."""
+
+    def test_a_default_secret_needs_no_config_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = EnvSecretStore({"SIM_API_TOKEN": "tok", "OTHER": "no"})
+            factory = _factory(tmp, secrets=secrets,
+                               default_secrets={"interface": frozenset({"SIM_API_TOKEN"})})
+            ctx = factory.build("interface")
+            self.assertEqual(ctx.secrets.get("SIM_API_TOKEN"), "tok")
+            self.assertIsNone(ctx.secrets.get("OTHER"))
+
+    def test_it_scopes_only_the_named_subsystem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = EnvSecretStore({"SIM_API_TOKEN": "tok"})
+            factory = _factory(tmp, secrets=secrets,
+                               default_secrets={"interface": frozenset({"SIM_API_TOKEN"})})
+            self.assertIsNone(factory.build("cognition").secrets.get("SIM_API_TOKEN"))
+
+    def test_it_adds_to_rather_than_replaces_the_declared_ones(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = EnvSecretStore({"SIM_API_TOKEN": "tok", "EXTRA": "e"})
+            factory = _factory(tmp, raw_config={"interface": {"secrets": ["EXTRA"]}}, secrets=secrets,
+                               default_secrets={"interface": frozenset({"SIM_API_TOKEN"})})
+            ctx = factory.build("interface")
+            self.assertEqual(ctx.secrets.get("SIM_API_TOKEN"), "tok")
+            self.assertEqual(ctx.secrets.get("EXTRA"), "e")
+
+    def test_the_real_table_gives_interface_the_api_token(self):
+        """Not a restatement of the table: this is the wire from
+        `registry.DEFAULT_SECRETS` to a real Context."""
+        from simorgh.kernel.registry import DEFAULT_SECRETS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            factory = _factory(tmp, secrets=EnvSecretStore({"SIM_API_TOKEN": "tok"}),
+                               default_secrets=DEFAULT_SECRETS)
+            self.assertEqual(factory.build("interface").secrets.get("SIM_API_TOKEN"), "tok")

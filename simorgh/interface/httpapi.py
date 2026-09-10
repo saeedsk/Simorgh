@@ -39,10 +39,14 @@ enough for a handful of routes.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import time
 import uuid
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Awaitable, Callable
 from urllib.parse import parse_qs, urlsplit
 
 from simorgh.contracts import topics
@@ -51,11 +55,51 @@ from simorgh.contracts.envelope import Message
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 _REASONS = {
-    200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found",
-    405: "Method Not Allowed", 413: "Payload Too Large", 500: "Internal Server Error",
+    200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+    405: "Method Not Allowed", 409: "Conflict", 413: "Payload Too Large",
+    429: "Too Many Requests", 500: "Internal Server Error",
 }
 
 _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
+
+#: Routes that answer without a token even when one is configured.
+#: `/` is the page that *carries* the token to the browser, so gating it
+#: would make the dashboard unreachable; `/api/status` is the liveness
+#: check a monitor or a shell script polls, and it reveals only what the
+#: boot banner already prints. Everything else is gated
+#: (platform-connectors-design.md section 4).
+_OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status"})
+
+#: The response to an unauthenticated request. A JSON body, because
+#: every other error on this server is JSON and a dashboard that got
+#: HTML here would render it into the chat log.
+_UNAUTHORIZED = json.dumps({
+    "error": {"code": "unauthorized",
+              "detail": "this API requires `Authorization: Bearer <token>`; "
+                        "the token is the SIM_API_TOKEN secret"}}).encode("utf-8")
+
+
+#: A handler answers `(status, body, content_type)`. It receives the
+#: parsed query, the (already length-capped) request body, and the
+#: request headers -- everything a route can legitimately need, and
+#: nothing that would let it read the socket a second time.
+RouteHandler = Callable[[dict, bytes, dict], Awaitable[tuple[int, bytes, str]]]
+
+
+@dataclass(frozen=True)
+class Route:
+    method: str
+    path: str
+    handler: RouteHandler
+    auth: bool = True
+    #: Overrides the server-wide body cap for this one route. `/api/chat`
+    #: keeps the original 16 KiB: a chat message is not a file upload,
+    #: and the wider cap exists for routes a subsystem registers later.
+    max_body: int | None = None
+    #: `(calls, window_s)` -- a per-route sliding window, so one client
+    #: cannot turn a cheap-looking endpoint into a way to occupy the
+    #: single in-flight turn or spin the Ledger.
+    rate: tuple[int, float] | None = None
 
 
 class HttpApi:
@@ -64,9 +108,15 @@ class HttpApi:
         clock=None, status_timeout_s: float = 3.0, chat_timeout_s: float = 130.0,
         history_stream: str = "metrics:history", history_default_minutes: float = 10.0,
         history_max_points: int = 500, logs_default_limit: int = 100, logs_max_limit: int = 500,
+        token: str = "", max_body_bytes: int = 1_000_000, logger=None,
     ) -> None:
         self._bus = bus
         self._ledger = ledger
+        self._token = (token or "").strip()
+        self._max_body_bytes = max(1, int(max_body_bytes))
+        self._logger = logger
+        self._routes: dict[tuple[str, str], Route] = {}
+        self._rate_hits: dict[str, deque] = {}
         self._host = host
         self._port = port
         self._clock = clock
@@ -81,6 +131,90 @@ class HttpApi:
         self._page = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
         self._pending_chats: dict[str, asyncio.Future] = {}
         self._turn_sub = None
+        self._register_builtin_routes()
+
+    # -- routing -----------------------------------------------------------------------------
+
+    def register_route(self, method: str, path: str, handler: RouteHandler, *, auth: bool = True,
+                       max_body: int | None = None, rate: tuple[int, float] | None = None) -> None:
+        """Add a route. `home`, `voice` and the domain subsystems add
+        their inbound webhooks through this rather than by editing this
+        file (platform-connectors-design.md section 4).
+
+        `auth=True` (the default, and the only safe default) means the
+        route is refused without the bearer token whenever a token is
+        configured. A route may opt out, but `_OPEN_ROUTES` is the
+        reviewed list of the ones that legitimately do.
+        """
+        method = method.upper()
+        if (method, path) in self._routes:
+            raise ValueError(f"route already registered: {method} {path}")
+        self._routes[(method, path)] = Route(
+            method=method, path=path, handler=handler,
+            auth=auth and path not in _OPEN_ROUTES, max_body=max_body, rate=rate)
+
+    def _register_builtin_routes(self) -> None:
+        async def _page(_query, _body, _headers):
+            return 200, self._page.encode("utf-8"), "text/html; charset=utf-8"
+
+        def _json_route(fn):
+            async def _handler(query, _body, _headers):
+                return 200, await fn(query), "application/json"
+
+            return _handler
+
+        async def _status(_query, _body, _headers):
+            return 200, await self._status_json(), "application/json"
+
+        self.register_route("GET", "/", _page, auth=False)
+        self.register_route("GET", "/api/status", _status, auth=False)
+        self.register_route("GET", "/api/history", _json_route(self._history_json))
+        self.register_route("GET", "/api/logs", _json_route(self._logs_json))
+        self.register_route("GET", "/api/benchmarks", _json_route(self._benchmarks_json))
+        self.register_route("GET", "/api/activity", _json_route(self._activity_json))
+
+        async def _streams(_query, _body, _headers):
+            return 200, await self._streams_json(), "application/json"
+
+        self.register_route("GET", "/api/streams", _streams)
+        # 30 chats a minute is far above any human at a keyboard and far
+        # below what it takes to keep the single in-flight turn occupied.
+        self.register_route("POST", "/api/chat", self._chat_route,
+                            max_body=_MAX_BODY_BYTES, rate=(30, 60.0))
+
+    def _authorized(self, headers: dict[str, str]) -> bool:
+        """No token configured means no gate -- the local, single-viewer
+        dashboard this server shipped as. With a token configured, only
+        `Authorization: Bearer <token>` passes, compared in constant time
+        so the comparison itself cannot be used to guess the token a
+        character at a time."""
+        if not self._token:
+            return True
+        supplied = headers.get("authorization", "")
+        scheme, _, value = supplied.partition(" ")
+        if scheme.lower() != "bearer":
+            return False
+        return hmac.compare_digest(value.strip(), self._token)
+
+    def _rate_limited(self, route: Route) -> bool:
+        if route.rate is None:
+            return False
+        limit, window = route.rate
+        now = time.monotonic()
+        hits = self._rate_hits.setdefault(f"{route.method} {route.path}", deque())
+        while hits and hits[0] <= now - window:
+            hits.popleft()
+        if len(hits) >= limit:
+            return True
+        hits.append(now)
+        return False
+
+    @property
+    def requires_token(self) -> bool:
+        """Whether this server is gated. `sec_self` (domain 4) reports
+        it, and Interface warns at boot when this is False on a
+        non-loopback bind."""
+        return bool(self._token)
 
     def _now(self) -> float:
         return self._clock() if self._clock is not None else time.time()
@@ -204,33 +338,55 @@ class HttpApi:
             return
 
         split = urlsplit(path)
-        route, query = split.path, parse_qs(split.query)
-        if method == "GET" and route == "/":
-            await self._try_respond(writer, 200, self._page.encode("utf-8"), "text/html; charset=utf-8")
-        elif method == "GET" and route == "/api/status":
-            body = await self._status_json()
-            await self._try_respond(writer, 200, body, "application/json")
-        elif method == "GET" and route == "/api/history":
-            body = await self._history_json(query)
-            await self._try_respond(writer, 200, body, "application/json")
-        elif method == "GET" and route == "/api/logs":
-            body = await self._logs_json(query)
-            await self._try_respond(writer, 200, body, "application/json")
-        elif method == "GET" and route == "/api/streams":
-            body = await self._streams_json()
-            await self._try_respond(writer, 200, body, "application/json")
-        elif method == "GET" and route == "/api/benchmarks":
-            body = await self._benchmarks_json(query)
-            await self._try_respond(writer, 200, body, "application/json")
-        elif method == "GET" and route == "/api/activity":
-            body = await self._activity_json(query)
-            await self._try_respond(writer, 200, body, "application/json")
-        elif method == "POST" and route == "/api/chat":
-            await self._handle_chat_request(reader, writer, headers)
-        elif method not in ("GET", "POST"):
-            await self._try_respond(writer, 405, b"method not allowed", "text/plain; charset=utf-8")
-        else:
-            await self._try_respond(writer, 404, b"not found", "text/plain; charset=utf-8")
+        query = parse_qs(split.query)
+        route = self._routes.get((method, split.path))
+        if route is None:
+            # A method this server does not speak at all is 405; a path
+            # that simply does not route for a method it does speak is
+            # 404 for that combination. That distinction predates the
+            # route table and is asserted by its own tests.
+            if method not in ("GET", "POST"):
+                await self._try_respond(writer, 405, b"method not allowed", "text/plain; charset=utf-8")
+            else:
+                await self._try_respond(writer, 404, b"not found", "text/plain; charset=utf-8")
+            return
+
+        if route.auth and not self._authorized(headers):
+            await self._try_respond(writer, 401, _UNAUTHORIZED, "application/json",
+                                    extra_headers=('WWW-Authenticate: Bearer realm="simorgh"',))
+            return
+
+        if self._rate_limited(route):
+            limit, window = route.rate
+            body = json.dumps({"error": {
+                "code": "rate_limited",
+                "detail": f"more than {limit} requests to {route.path} in {window:.0f}s"}}).encode("utf-8")
+            await self._try_respond(writer, 429, body, "application/json")
+            return
+
+        body_bytes = b""
+        if method == "POST":
+            if not self._origin_allowed(headers):
+                await self._try_respond(writer, 403, b'{"error":"cross-origin request rejected"}',
+                                        "application/json")
+                return
+            try:
+                length = int(headers.get("content-length", "0"))
+            except ValueError:
+                await self._try_respond(writer, 400, b'{"error":"bad content-length"}', "application/json")
+                return
+            cap = route.max_body if route.max_body is not None else self._max_body_bytes
+            if length < 0 or length > cap:
+                await self._try_respond(writer, 413, b'{"error":"message too large"}', "application/json")
+                return
+            try:
+                body_bytes = await reader.readexactly(length) if length else b""
+            except asyncio.IncompleteReadError:
+                await self._try_respond(writer, 400, b'{"error":"truncated body"}', "application/json")
+                return
+
+        status, payload, content_type = await route.handler(query, body_bytes, headers)
+        await self._try_respond(writer, status, payload, content_type)
 
     async def _benchmarks_json(self, query: dict) -> bytes:
         """Benchmark runs for the dashboard's accuracy-over-time chart --
@@ -286,36 +442,23 @@ class HttpApi:
                    f"http://127.0.0.1:{self.port}"}
         return origin in allowed
 
-    async def _handle_chat_request(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, headers: dict[str, str],
-    ) -> None:
-        if not self._origin_allowed(headers):
-            await self._try_respond(writer, 403, b'{"error":"cross-origin request rejected"}', "application/json")
-            return
+    async def _chat_route(self, _query: dict, body: bytes, _headers: dict) -> tuple[int, bytes, str]:
+        """POST /api/chat. The body has already been read and capped by
+        the dispatcher, and the cross-origin check has already run --
+        this decides only what the message means."""
         try:
-            length = int(headers.get("content-length", "0"))
-        except ValueError:
-            await self._try_respond(writer, 400, b'{"error":"bad content-length"}', "application/json")
-            return
-        if length > _MAX_BODY_BYTES:
-            await self._try_respond(writer, 413, b'{"error":"message too large"}', "application/json")
-            return
-        raw = await reader.readexactly(length) if length else b""
-        try:
-            body = json.loads(raw or b"{}")
-            text = str(body.get("text", "")).strip()
-            client_session_id = body.get("session_id")
+            parsed = json.loads(body or b"{}")
+            text = str(parsed.get("text", "")).strip()
+            client_session_id = parsed.get("session_id")
             client_session_id = str(client_session_id).strip() if client_session_id else None
-        except json.JSONDecodeError:
-            await self._try_respond(writer, 400, b'{"error":"invalid json"}', "application/json")
-            return
+        except (json.JSONDecodeError, AttributeError):
+            return 400, b'{"error":"invalid json"}', "application/json"
         if not text:
-            await self._try_respond(writer, 400, b'{"error":"empty message"}', "application/json")
-            return
+            return 400, b'{"error":"empty message"}', "application/json"
 
         payload = await self._chat(text, session_id=client_session_id)
         status = 409 if payload.get("error") == "turn already in flight" else 200
-        await self._try_respond(writer, status, json.dumps(payload).encode("utf-8"), "application/json")
+        return status, json.dumps(payload).encode("utf-8"), "application/json"
 
     async def _chat(self, text: str, *, session_id: str | None = None) -> dict:
         """One dashboard chat turn: publish `percept.text.received` and
@@ -455,17 +598,20 @@ class HttpApi:
                                                           "detail": str(exc)}}).encode("utf-8")
         return json.dumps({"streams": names}).encode("utf-8")
 
-    async def _try_respond(self, writer: asyncio.StreamWriter, status: int, body: bytes, content_type: str) -> None:
+    async def _try_respond(self, writer: asyncio.StreamWriter, status: int, body: bytes, content_type: str,
+                           *, extra_headers: tuple[str, ...] = ()) -> None:
+        extra = "".join(f"{line}\r\n" for line in extra_headers)
         headers = (
             f"HTTP/1.1 {status} {_REASONS.get(status, '')}\r\n"
             f"Content-Type: {content_type}\r\n"
             f"Content-Length: {len(body)}\r\n"
             "Connection: close\r\n"
             "Cache-Control: no-store\r\n"
+            f"{extra}"
             "\r\n"
         ).encode("latin-1")
         writer.write(headers + body)
         await writer.drain()
 
 
-__all__ = ["HttpApi"]
+__all__ = ["HttpApi", "Route", "RouteHandler"]

@@ -74,6 +74,11 @@ class Config:
     http_port: int = 8765
     http_status_timeout_s: float = 3.0
     http_chat_timeout_s: float = 130.0
+    # platform-connectors-design.md section 4: the body cap for POST
+    # routes a subsystem registers (a webhook payload, a voice
+    # transcript). `/api/chat` keeps its own, much smaller cap -- a chat
+    # message is not a file upload.
+    api_max_body_bytes: int = 1_000_000
     # Observe-tier additions (02-system-architecture.md section 6.2):
     # bounds for the `/api/history` and `/api/logs` read-only queries.
     history_stream: str = "metrics:history"
@@ -112,6 +117,7 @@ class Config:
             http_port=int(data.get("http_port", default.http_port)),
             http_status_timeout_s=float(data.get("http_status_timeout_s", default.http_status_timeout_s)),
             http_chat_timeout_s=float(data.get("http_chat_timeout_s", default.http_chat_timeout_s)),
+            api_max_body_bytes=int(data.get("api_max_body_bytes", default.api_max_body_bytes)),
             history_stream=str(data.get("history_stream", default.history_stream)),
             history_default_minutes=float(data.get("history_default_minutes", default.history_default_minutes)),
             history_max_points=int(data.get("history_max_points", default.history_max_points)),

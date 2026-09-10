@@ -584,3 +584,258 @@ class StreamsEndpointTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuthTestCase(unittest.IsolatedAsyncioTestCase):
+    """`SIM_API_TOKEN` gating (platform-connectors-design.md section 4).
+
+    The dashboard shipped local and unauthenticated, which is the right
+    posture on 127.0.0.1 and the wrong one the moment the bind moves or
+    a tunnel is put in front of it -- `/api/chat` starts a real,
+    tool-using turn. With a token set, every route but the page itself
+    and the liveness check requires `Authorization: Bearer`."""
+
+    TOKEN = "s3cret-token-value"
+
+    async def _start(self, **kwargs) -> HttpApi:
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0, **kwargs)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        return api
+
+    async def _request(self, api: HttpApi, method: str, path: str, *, token: str | None = None,
+                       raw_auth: str | None = None, body: bytes | None = None) -> tuple[int, bytes]:
+        headers = {}
+        if token is not None:
+            headers["Authorization"] = "Bearer " + token
+        if raw_auth is not None:
+            headers["Authorization"] = raw_auth
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+
+        def _do():
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=10)
+            conn.request(method, path, body=body, headers=headers)
+            resp = conn.getresponse()
+            data = resp.read()
+            conn.close()
+            return resp.status, data
+
+        return await asyncio.to_thread(_do)
+
+    async def test_with_no_token_configured_nothing_changes(self):
+        api = await self._start()
+        self.assertFalse(api.requires_token)
+        for path in ("/", "/api/status", "/api/streams"):
+            status, _ = await self._request(api, "GET", path)
+            self.assertEqual(status, 200, path)
+
+    async def test_a_gated_route_refuses_without_a_token(self):
+        api = await self._start(token=self.TOKEN)
+        self.assertTrue(api.requires_token)
+        status, body = await self._request(api, "GET", "/api/streams")
+        self.assertEqual(status, 401)
+        self.assertEqual(json.loads(body)["error"]["code"], "unauthorized")
+
+    async def test_the_refusal_names_the_secret_to_set(self):
+        api = await self._start(token=self.TOKEN)
+        _, body = await self._request(api, "GET", "/api/activity")
+        self.assertIn("SIM_API_TOKEN", json.loads(body)["error"]["detail"])
+
+    async def test_the_right_token_passes(self):
+        api = await self._start(token=self.TOKEN)
+        status, _ = await self._request(api, "GET", "/api/streams", token=self.TOKEN)
+        self.assertEqual(status, 200)
+
+    async def test_a_wrong_token_is_refused(self):
+        api = await self._start(token=self.TOKEN)
+        status, _ = await self._request(api, "GET", "/api/streams", token="not-the-token")
+        self.assertEqual(status, 401)
+
+    async def test_a_prefix_of_the_token_is_refused(self):
+        """A `startswith` comparison would let this through, and would
+        also leak the token one character at a time."""
+        api = await self._start(token=self.TOKEN)
+        status, _ = await self._request(api, "GET", "/api/streams", token=self.TOKEN[:-1])
+        self.assertEqual(status, 401)
+
+    async def test_a_non_bearer_scheme_is_refused(self):
+        api = await self._start(token=self.TOKEN)
+        status, _ = await self._request(api, "GET", "/api/streams", raw_auth="Basic " + self.TOKEN)
+        self.assertEqual(status, 401)
+
+    async def test_the_page_and_the_status_route_stay_open(self):
+        """The page is what carries the token to the browser; gating it
+        would leave the dashboard unreachable. `/api/status` is the
+        liveness check, and shows only what the boot banner prints."""
+        api = await self._start(token=self.TOKEN)
+        for path in ("/", "/api/status"):
+            status, _ = await self._request(api, "GET", path)
+            self.assertEqual(status, 200, path)
+
+    async def test_chat_is_gated(self):
+        api = await self._start(token=self.TOKEN)
+        status, _ = await self._request(api, "POST", "/api/chat", body=b'{"text":"hi"}')
+        self.assertEqual(status, 401)
+
+    async def test_the_401_carries_a_www_authenticate_header(self):
+        api = await self._start(token=self.TOKEN)
+
+        def _do():
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=10)
+            conn.request("GET", "/api/streams")
+            resp = conn.getresponse()
+            resp.read()
+            header = resp.getheader("WWW-Authenticate")
+            conn.close()
+            return header
+
+        self.assertIn("Bearer", await asyncio.to_thread(_do))
+
+
+class RouteTableTestCase(unittest.IsolatedAsyncioTestCase):
+    """`register_route` (platform section 4): `home`, `voice` and the
+    domain subsystems add inbound routes without editing httpapi.py."""
+
+    async def _start(self, **kwargs) -> HttpApi:
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0, **kwargs)
+        return api
+
+    async def _get(self, api: HttpApi, path: str, *, token: str | None = None) -> tuple[int, bytes]:
+        headers = {"Authorization": "Bearer " + token} if token else {}
+
+        def _do():
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=10)
+            conn.request("GET", path, headers=headers)
+            resp = conn.getresponse()
+            data = resp.read()
+            conn.close()
+            return resp.status, data
+
+        return await asyncio.to_thread(_do)
+
+    async def test_a_registered_route_answers(self):
+        api = await self._start()
+        seen = []
+
+        async def _handler(query, body, headers):
+            seen.append((query, body))
+            return 200, b'{"ok":true}', "application/json"
+
+        api.register_route("GET", "/api/home/state", _handler)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        status, body = await self._get(api, "/api/home/state?room=kitchen")
+        self.assertEqual((status, json.loads(body)), (200, {"ok": True}))
+        self.assertEqual(seen[0][0], {"room": ["kitchen"]})
+
+    async def test_a_registered_route_is_gated_by_default(self):
+        api = await self._start(token="tok")
+
+        async def _handler(query, body, headers):
+            return 200, b"{}", "application/json"
+
+        api.register_route("GET", "/api/home/state", _handler)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        self.assertEqual((await self._get(api, "/api/home/state"))[0], 401)
+        self.assertEqual((await self._get(api, "/api/home/state", token="tok"))[0], 200)
+
+    async def test_a_duplicate_route_is_refused_rather_than_silently_shadowing(self):
+        api = await self._start()
+
+        async def _handler(query, body, headers):
+            return 200, b"{}", "application/json"
+
+        with self.assertRaises(ValueError):
+            api.register_route("GET", "/api/status", _handler)
+
+    async def test_a_handler_that_raises_does_not_take_the_server_down(self):
+        api = await self._start()
+
+        async def _boom(query, body, headers):
+            raise RuntimeError("handler exploded")
+
+        api.register_route("GET", "/api/boom", _boom)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        status, _ = await self._get(api, "/api/boom")
+        self.assertEqual(status, 500)
+        # still serving
+        self.assertEqual((await self._get(api, "/api/status"))[0], 200)
+
+
+class BodyLimitTestCase(unittest.IsolatedAsyncioTestCase):
+    """The server-wide POST body cap (`api_max_body_bytes`) and the much
+    smaller one `/api/chat` keeps for itself."""
+
+    async def _post(self, api: HttpApi, path: str, payload: bytes) -> int:
+        def _do():
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=10)
+            conn.request("POST", path, body=payload, headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            conn.close()
+            return resp.status
+
+        return await asyncio.to_thread(_do)
+
+    async def test_chat_keeps_its_own_small_cap_even_when_the_server_cap_is_wide(self):
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0, max_body_bytes=1_000_000)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        big = json.dumps({"text": "x" * 32_000}).encode()
+        self.assertEqual(await self._post(api, "/api/chat", big), 413)
+
+    async def test_a_registered_route_gets_the_server_wide_cap(self):
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0, max_body_bytes=2048)
+        received = []
+
+        async def _handler(query, body, headers):
+            received.append(body)
+            return 200, b"{}", "application/json"
+
+        api.register_route("POST", "/api/hook", _handler)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        self.assertEqual(await self._post(api, "/api/hook", b"x" * 1000), 200)
+        self.assertEqual(received[0], b"x" * 1000)
+        self.assertEqual(await self._post(api, "/api/hook", b"x" * 4000), 413)
+
+
+class RateLimitTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_a_route_over_its_rate_gets_429(self):
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0)
+
+        async def _handler(query, body, headers):
+            return 200, b"{}", "application/json"
+
+        api.register_route("GET", "/api/cheap", _handler, rate=(3, 60.0))
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+
+        def _do():
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=10)
+            conn.request("GET", "/api/cheap")
+            resp = conn.getresponse()
+            resp.read()
+            conn.close()
+            return resp.status
+
+        statuses = [await asyncio.to_thread(_do) for _ in range(5)]
+        self.assertEqual(statuses, [200, 200, 200, 429, 429])
+
+    async def test_an_unlimited_route_is_never_throttled(self):
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+
+        def _do():
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=10)
+            conn.request("GET", "/api/status")
+            resp = conn.getresponse()
+            resp.read()
+            conn.close()
+            return resp.status
+
+        self.assertEqual([await asyncio.to_thread(_do) for _ in range(6)], [200] * 6)

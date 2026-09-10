@@ -233,7 +233,24 @@ class Service:
                 history_max_points=self.config.history_max_points,
                 logs_default_limit=self.config.logs_default_limit,
                 logs_max_limit=self.config.logs_max_limit,
+                token=(ctx.secrets.get("SIM_API_TOKEN") or ""),
+                max_body_bytes=self.config.api_max_body_bytes,
+                logger=ctx.logger,
             )
+            # A dashboard on 127.0.0.1 is reachable only by this
+            # machine's own user, which is the posture this server was
+            # written for. A non-loopback bind with no token is a
+            # different thing entirely: every route, including the one
+            # that starts a real tool-using turn, answers anyone who can
+            # route to this host. That is a choice a person may make, so
+            # it is not refused -- but it is never made silently.
+            if not self._http.requires_token and self.config.http_host not in ("127.0.0.1", "localhost", "::1"):
+                ctx.logger.warning(
+                    "http_api_unauthenticated",
+                    host=self.config.http_host, port=self.config.http_port,
+                    detail="the dashboard is bound off-loopback with no SIM_API_TOKEN set; "
+                           "anyone who can reach this host can start a turn",
+                )
             try:
                 await self._http.start()
                 line = f"dashboard: {self._http.url}"

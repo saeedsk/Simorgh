@@ -67,6 +67,7 @@ class ContextFactory:
         run_id: str,
         hmac_secret: bytes,
         needs_hmac_secret: frozenset[str],
+        default_secrets: dict[str, frozenset[str]] | None = None,
         bus_policy: BusPolicy | None = None,
         identity_registry: Any | None = None,  # simorgh.bus.enforcement.IdentityRegistry, single mode: None
         trace: Any | None = None,  # simorgh.bus.trace.TraceWriter, shared by every client this builds
@@ -89,6 +90,9 @@ class ContextFactory:
         self._run_id = run_id
         self._hmac_secret = hmac_secret
         self._needs_hmac_secret = needs_hmac_secret
+        # `registry.DEFAULT_SECRETS` -- names a subsystem always gets,
+        # so a feature is not switched off by a forgotten config line.
+        self._default_secrets = dict(default_secrets or {})
         self._bus_policy = bus_policy
         self._identity_registry = identity_registry
 
@@ -97,6 +101,7 @@ class ContextFactory:
         bus = self._make_client(self._bus_backend, source=source, ledger=self._ledger,
                                 clock=self._clock.now, policy=self._bus_policy, trace=self._trace)
         allowed = set(self._config.section(name).get("secrets", []))
+        allowed |= set(self._default_secrets.get(name, ()))
         backing: SecretStore = self._secrets
         if name in self._needs_hmac_secret:
             allowed.add("__hmac__")

@@ -917,3 +917,82 @@ class LiveStatusIntegrationTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApiTokenWiringTestCase(unittest.IsolatedAsyncioTestCase):
+    """The seam between `SIM_API_TOKEN` in the Context and the gate in
+    `HttpApi` -- the half of a feature that is usually left unconnected
+    (a designed slot, one side implemented, nobody writes it). Asserted
+    end to end over a real socket, because that is the only thing that
+    proves the token actually arrived."""
+
+    async def asyncSetUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.clock = FakeClock()
+        self.ledger = make_ledger({"backend": "memory"}, clock=self.clock.now)
+        await self.ledger.start()
+        backend = make_backend(BusConfig(backend="memory"), clock=self.clock.now)
+        self.bus = make_client(backend, source="interface", ledger=self.ledger, clock=self.clock.now)
+        await self.bus.start()
+        self.warnings: list = []
+
+    async def asyncTearDown(self):
+        await self.service.stop()
+        await self.bus.stop()
+        await self.ledger.stop()
+        self._tmp.cleanup()
+
+    async def _start(self, *, secrets: dict, host: str = "127.0.0.1"):
+        recorder = self
+
+        class _RecordingLogger(_Logger):
+            def warning(self, event, **fields):
+                recorder.warnings.append((event, fields))
+
+        ctx = Context(
+            name="interface", instance_id="", run_id="test", mode="single",
+            bus=self.bus, ledger=self.ledger, config={}, secrets=secrets, clock=self.clock,
+            logger=_RecordingLogger(), data_dir=Path(self._tmp.name) / "data",
+        )
+        self.service = Service(
+            InterfaceConfig(http_host=host, http_port=0, narrate_autonomous=False),
+            run_repl=False, http_enabled=True,
+        )
+        await self.service.start(ctx)
+        return self.service._http
+
+    async def _status_of(self, api, path: str, token: str | None = None) -> int:
+        import http.client
+
+        headers = {"Authorization": "Bearer " + token} if token else {}
+
+        def _do():
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+            conn.request("GET", path, headers=headers)
+            resp = conn.getresponse()
+            resp.read()
+            conn.close()
+            return resp.status
+
+        return await asyncio.to_thread(_do)
+
+    async def test_the_token_from_the_context_actually_gates_the_server(self):
+        api = await self._start(secrets={"SIM_API_TOKEN": "from-the-vault"})
+        self.assertTrue(api.requires_token)
+        self.assertEqual(await self._status_of(api, "/api/streams"), 401)
+        self.assertEqual(await self._status_of(api, "/api/streams", "from-the-vault"), 200)
+
+    async def test_no_token_leaves_the_local_dashboard_exactly_as_it_was(self):
+        api = await self._start(secrets={})
+        self.assertFalse(api.requires_token)
+        self.assertEqual(await self._status_of(api, "/api/streams"), 200)
+
+    async def test_an_off_loopback_bind_with_no_token_warns_and_still_starts(self):
+        api = await self._start(secrets={}, host="0.0.0.0")
+        self.assertEqual(await self._status_of(api, "/api/status"), 200)
+        events = [event for event, _ in self.warnings]
+        self.assertIn("http_api_unauthenticated", events)
+
+    async def test_an_off_loopback_bind_with_a_token_does_not_warn(self):
+        await self._start(secrets={"SIM_API_TOKEN": "t"}, host="0.0.0.0")
+        self.assertNotIn("http_api_unauthenticated", [event for event, _ in self.warnings])

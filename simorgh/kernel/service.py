@@ -35,7 +35,7 @@ from .config import ConfigError, LoadedConfig
 from . import configcheck
 from .context import ContextFactory, make_logger
 from .metrics import MetricsHistoryWriter, MetricsTable, ProcessMetricsPublisher, StatusServer
-from .registry import NEEDS_HMAC_SECRET, build_factories, known_layers
+from .registry import DEFAULT_SECRETS, NEEDS_HMAC_SECRET, build_factories, known_layers
 from .scheduler import Scheduler
 from .secrets import SecretStore, build_secret_store
 from .state import PAUSED, RUNNING, STOPPED, STOPPING, SystemStateMachine
@@ -193,7 +193,7 @@ class Kernel:
         ctx_factory = ContextFactory(
             bus_backend=self._bus_backend, ledger=self.ledger, config=self.config, secrets=self._secrets,
             clock=self._clock, runtime=self.runtime, run_id=self.run_id, hmac_secret=self._hmac_secret,
-            needs_hmac_secret=NEEDS_HMAC_SECRET, bus_policy=policy, identity_registry=identities,
+            needs_hmac_secret=NEEDS_HMAC_SECRET, default_secrets=DEFAULT_SECRETS, bus_policy=policy, identity_registry=identities,
             trace=self.bus.trace,
         )
         self._supervisor = Supervisor(
@@ -533,7 +533,8 @@ class WorkerKernel:
         ctx_factory = ContextFactory(
             bus_backend=self._bus_backend, ledger=self.ledger, config=self.config, secrets=self._secrets,
             clock=self._clock, runtime=self.runtime, run_id=self.run_id, hmac_secret=b"",
-            needs_hmac_secret=frozenset(), bus_policy=policy, identity_registry=identities,
+            needs_hmac_secret=frozenset(), default_secrets=DEFAULT_SECRETS,
+            bus_policy=policy, identity_registry=identities,
         )
         self._ctx = ctx_factory.build("orchestration", instance_id=self.worker_id)
         self.bus = self._ctx.bus
