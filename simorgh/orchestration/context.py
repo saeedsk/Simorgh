@@ -28,6 +28,15 @@ DEFAULT_TIMEOUT_S = 0.25
 _MEMORY_ITEM_MAX_CHARS = 800
 _MEMORY_BLOCK_MAX_CHARS = 4_000
 
+#: Shown in place of the memory block when the store could not be
+#: consulted, so "I have not seen this before" and "I could not look"
+#: are different prompts. Addressed to the model, because the model is
+#: the one about to reason as though it had checked.
+MEMORY_UNAVAILABLE_NOTE = (
+    "Your memory could not be consulted for this request ({why}), so treat anything "
+    "you would expect to remember as unknown rather than absent. Say so if it matters."
+)
+
 
 class Assembler:
     def __init__(self, bus, *, clock=None, timeout_s: float = DEFAULT_TIMEOUT_S) -> None:
@@ -51,9 +60,21 @@ class Assembler:
         blocks: list[dict] = []
 
         task = session.user_text or user_text
-        mem = await self._memory_retrieve(task or session.task_id, session)
+        mem, unavailable = await self._memory_block(task or session.task_id, session)
         if mem:
             blocks.append({"role": "system", "content": "Relevant memory:\n" + mem})
+        elif unavailable:
+            # Say so. A prompt that lost its memory block was
+            # byte-identical to one where the store was read and nothing
+            # matched, and the difference matters: the second means "you
+            # have not seen this before", the first means "you cannot
+            # see". An observer measured when this starts happening --
+            # `retrieve` reads and embeds EVERY record of each kind, so
+            # at ~1,000 records under load it crosses the 0.25s timeout
+            # here, and consolidation's own steady state is 2,000 per
+            # kind (2026-09-10). This is the normal case, not an edge.
+            blocks.append({"role": "system", "content": MEMORY_UNAVAILABLE_NOTE.format(
+                why=unavailable)})
 
         # Live-caught by the same audit: this was sent on the *first* step
         # only (`session.py` clears `pending_user_text` after one use) and
@@ -109,14 +130,29 @@ class Assembler:
             return None
         return reply
 
-    async def _memory_retrieve(self, query: str, session: Session) -> str:
-        reply = await self._request(
+    async def _request_with_reason(self, type_: str, payload: dict, *,
+                                   trace_id: str | None = None) -> tuple[Message | None, str]:
+        """`(reply, why not)`. The reason exists because dropping a
+        block in silence is indistinguishable from having nothing to
+        put in it."""
+        reply = await self._request(type_, payload, trace_id=trace_id)
+        if reply is not None:
+            return reply, ""
+        return None, "it did not answer in time"
+
+    async def _memory_block(self, query: str, session: Session) -> tuple[str, str]:
+        """`(what to show, why there is nothing)`.
+
+        A successful recall that matched nothing returns `("", "")` --
+        silence is right there, because "I have no memory of this" is
+        already what an absent block means."""
+        reply, why = await self._request_with_reason(
             topics.MEMORY_RETRIEVE,
             {"query": query, "kinds": ["episodic", "semantic"], "k": 8},
             trace_id=session.task_id,
         )
-        if not reply:
-            return ""
+        if reply is None:
+            return "", why
         items = reply.payload.get("items", [])
         lines: list[str] = []
         total = 0
@@ -129,7 +165,7 @@ class Assembler:
                 break  # keep the strongest (highest-ranked) matches, drop the rest honestly
             lines.append(line)
             total += len(line)
-        return "\n".join(lines)
+        return "\n".join(lines), ""
 
     async def world_facet(self, what: str, args: dict | None = None, *, trace_id: str | None = None) -> dict | None:
         reply = await self._request(topics.WORLD_ENV_QUERY, {"what": what, "args": args or {}}, trace_id=trace_id)

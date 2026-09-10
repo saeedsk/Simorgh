@@ -413,3 +413,58 @@ class TestDynamoDbBackend(_Invariants, unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HeadNeverRegressesTestCase(unittest.IsolatedAsyncioTestCase):
+    """Compaction must never hand a sequence number back.
+
+    Head was derived from the live events, so once a retention pass
+    removed them all it fell back to 0 and the next append was handed
+    seq 1 again. Every reader already past that point -- a projection's
+    `applied_seq`, a tail cursor -- then dropped the new events as ones
+    it had already folded. Live-caught by an observer 2026-09-10: five
+    expired events, one compaction pass, head 5 -> 0, next append seq 1,
+    and the live projection's count frozen while events kept arriving.
+
+    The `jsonl` backend already kept this rule; the other three did not.
+    """
+
+    async def _each_backend(self):
+        import tempfile
+        from pathlib import Path
+
+        from simorgh.ledger.backends.memory import InMemoryBackend
+        from simorgh.ledger.backends.sqlite import SqliteBackend
+
+        yield "memory", InMemoryBackend(), None
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        sqlite = SqliteBackend(Path(tmp.name) / "l.db")
+        await sqlite.start()
+        yield "sqlite", sqlite, sqlite
+
+    def _event(self, stream: str, n: int):
+        from simorgh.contracts.envelope import Event
+
+        return Event(stream=stream, type="x", ts=float(n), trace_id="", causation_id=None,
+                     payload={"n": n})
+
+    async def test_a_compacted_stream_does_not_reissue_seqs(self):
+        async for name, backend, closable in self._each_backend():
+            for n in range(5):
+                await backend.append(self._event("activity", n), expected_seq=None)
+            await backend.truncate_below("activity", 6)
+            self.assertEqual(await backend.head("activity"), 5, name)
+            seq = await backend.append(self._event("activity", 99), expected_seq=None)
+            self.assertEqual(seq, 6, f"{name}: a reader past seq 5 would drop this")
+            if closable is not None:
+                await closable.stop()
+
+    async def test_deleting_the_stream_really_does_start_it_over(self):
+        """Compaction is not deletion. Deletion is."""
+        async for name, backend, closable in self._each_backend():
+            await backend.append(self._event("gone", 1), expected_seq=None)
+            await backend.delete_stream("gone")
+            self.assertEqual(await backend.head("gone"), 0, name)
+            if closable is not None:
+                await closable.stop()

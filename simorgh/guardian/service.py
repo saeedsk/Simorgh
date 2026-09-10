@@ -45,6 +45,47 @@ class _TaskInfo:
     origin: str = "human"
 
 
+#: Argument names whose VALUE must never be printed in a question, even
+#: truncated. The name is shown so the person knows a secret is in play.
+_SECRET_ARG = ("token", "secret", "password", "passwd", "key", "credential", "api_key")
+_ARG_PREVIEW_CHARS = 60
+_QUESTION_MAX_CHARS = 400
+
+
+def _preview_arg(name: str, value: object) -> str:
+    """One argument, short enough to read and honest about what it hides."""
+    if any(word in name.lower() for word in _SECRET_ARG):
+        return f"{name}=<hidden>"
+    text = value if isinstance(value, str) else repr(value)
+    text = " ".join(str(text).split())
+    if len(text) > _ARG_PREVIEW_CHARS:
+        # A file body or a patch: say how big rather than showing a slice
+        # nobody can judge.
+        return f"{name}=<{len(text)} chars>"
+    return f"{name}={text}"
+
+
+def approval_question(tool: str, args: dict, reasons) -> str:
+    """What the person is actually being asked to approve.
+
+    It used to be `f"Approve {tool}? ({reasons})"` -- so a human saw
+    "Approve install_package? (irreversible action requires human
+    approval)" with no package name, no registry, and no sign that
+    `allow_new` had switched the typosquat check off. The same sentence
+    covered `run_shell` without the command and a write without the
+    path. Guardian has the arguments two lines earlier; the person
+    deciding was the only party who could not see them (observer,
+    2026-09-10).
+    """
+    parts = [_preview_arg(str(name), value) for name, value in (args or {}).items()]
+    detail = ", ".join(parts)
+    why = "; ".join(reasons or ())
+    question = f"Approve {tool}" + (f" ({detail})" if detail else "") + (f"? [{why}]" if why else "?")
+    if len(question) > _QUESTION_MAX_CHARS:
+        question = question[:_QUESTION_MAX_CHARS - 1] + "…"
+    return question
+
+
 class Service:
     name = "guardian"
     version = "0.1.0"
@@ -522,7 +563,7 @@ class Service:
             return
 
         if verdict.kind == "needs_human":
-            question = f"Approve {p['tool']}? ({'; '.join(verdict.reasons)})"
+            question = approval_question(p["tool"], p.get("args") or {}, verdict.reasons)
             await self._ctx.bus.publish(message.caused(
                 topics.ACTION_NEEDS_HUMAN,
                 {"action_id": action_id, "question": question, "options": ["yes", "no"], "default": "no"},

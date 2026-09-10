@@ -70,9 +70,23 @@ WRITE_TOOLS = frozenset({"apply_source_patch", "apply_skill", "git_commit", "git
 _CHANGE_KINDS = frozenset({"patch", "skill", "self_patch"})
 # Phrases that mean "I deliberately did not write anything", so the
 # answer is honest about it and the checklist can judge it on merit.
+#
+# Each phrase must assert that NOTHING WAS WRITTEN. The bare words were
+# one ordinary sentence away from waving a real no-op through:
+#
+#   "I added __all__ after the imports, which were already sorted"  -> pass
+#   "Added the docstring; the tests already pass."                  -> pass
+#
+# both observed 2026-09-10 with a step log containing nothing but
+# `read_file` and `search_code`. "already" and "cannot" now have to
+# appear in a form that is about the change itself.
 _DECLINED = (
-    "no change", "no changes", "already", "not needed", "no edit",
-    "denied", "protected", "refused", "declined", "cannot",
+    "no change", "no changes", "no edit", "not needed", "nothing to change",
+    "nothing to do", "no modification",
+    "already has", "already had", "already contains", "already present",
+    "already correct", "already does", "already there", "already in place",
+    "cannot be changed", "cannot change", "cannot edit", "cannot write",
+    "denied", "protected", "refused", "declined",
 )
 
 

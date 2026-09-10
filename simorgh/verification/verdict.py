@@ -57,10 +57,21 @@ class CombinedResult:
 
 # Phrases that mean "this did not happen because the system correctly
 # refused", as opposed to "this did not happen because the work is bad".
+#
+# Every phrase here has to NAME the refuser or the protected target.
+# The loose ones read a real defect as a refusal and passed it:
+#
+#   "the attribute is protected by a lock so the model skipped it"  -> pass
+#   "there is no workaround visible in the steps"                   -> pass
+#   "It refused to add a docstring? No, it never edited the file."   -> pass
+#
+# all three observed 2026-09-10. `no workaround` is gone entirely: it
+# is a remark about the evidence, never evidence of a refusal.
 _REFUSAL_EVIDENCE = (
     "guardian denied", "was denied", "denied by", "denied (policy)",
-    "is protected", "only the creator", "refused to", "declined to",
-    "no workaround",
+    "guardian refused", "guardian declined", "guardian blocked",
+    "protected path", "protected file", "is a protected", "protected by guardian",
+    "only the creator", "refused:",
 )
 
 

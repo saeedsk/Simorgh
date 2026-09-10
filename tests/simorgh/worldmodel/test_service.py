@@ -144,3 +144,44 @@ class WorldModelTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSelfSummaryTracksTheTreeTestCase(WorldModelTestCase):
+    """The code areas were read once at boot and baked into the model,
+    while `capability_map` beside them has no cache and answers from the
+    tree as it is.
+
+    So the two disagreed the moment anything changed. An observer added
+    a package mid-session and watched `self_map` report 19 subsystems
+    including it while the self summary -- the protected block Cognition
+    prepends to EVERY prompt -- still said 18 and did not mention it
+    (2026-09-10). Stale matters more there than anywhere: it is what the
+    model reads about itself when nobody asked a question.
+    """
+
+    async def _summary(self) -> str:
+        reply = await self.requester.request(
+            self.requester.new(topics.SELF_SUMMARY, {"budget_tokens": 500}), timeout=2)
+        return reply.payload["text"]
+
+    async def test_an_area_added_after_boot_reaches_the_summary(self):
+        self.assertNotIn("brandnew", await self._summary())
+        (self.repo_root / "simorgh" / "brandnew").mkdir(parents=True)
+        (self.repo_root / "simorgh" / "brandnew" / "mod.py").write_text("Y = 2\n")
+        self.assertIn("brandnew", await self._summary())
+
+    async def test_the_summary_and_the_map_agree(self):
+        (self.repo_root / "simorgh" / "later").mkdir(parents=True)
+        (self.repo_root / "simorgh" / "later" / "mod.py").write_text("Z = 3\n")
+        reply = await self.requester.request(
+            self.requester.new(topics.WORLD_ENV_QUERY, {"what": "capability_map"}), timeout=2)
+        summary = await self._summary()
+        for area in reply.payload["areas"]:
+            self.assertIn(area, summary)
+
+    async def test_an_empty_scan_does_not_wipe_what_is_known(self):
+        """A scan that finds nothing is far more likely to be a
+        transient than a system that has lost all its code."""
+        before = await self._summary()
+        self.service._capability_map.areas = lambda: []  # noqa: SLF001
+        self.assertEqual(await self._summary(), before)

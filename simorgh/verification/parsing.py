@@ -18,6 +18,15 @@ import re
 from typing import Literal
 
 _YES_NO_RE = re.compile(r"\b(YES|NO)\b", re.IGNORECASE)
+#: A lowercase `no` immediately followed by another word is English's
+#: determiner, not a verdict: "no test output is shown", "no clear
+#: signal", "there is no way to tell". Read as a verdict it turned an
+#: admission of uncertainty into a hard NO, and in one observed case
+#: overruled a stated YES on the next line: "Hmm, no clear signal.\nYES
+#: it does address the task." parsed as `no` (observer, 2026-09-10).
+#: This is the same failure the docstring below says this function
+#: exists to prevent, one level further down.
+_DETERMINER_NO = re.compile(r"\bno\s+\w")
 _UNKNOWN_RE = re.compile(r"^\W*UNKNOWN\b", re.IGNORECASE)
 
 
@@ -36,6 +45,24 @@ def parse_verdict(text: str) -> Literal["yes", "no"] | None:
         if _UNKNOWN_RE.search(line):
             return None
         match = _YES_NO_RE.search(line)
-        if match is not None:
-            return match.group(1).lower()
+        if match is None:
+            continue
+        word = match.group(1)
+        if word == "no" and _is_determiner(line, match.start()):
+            continue        # ordinary English, not a verdict
+        return word.lower()
     return None
+
+
+def _is_determiner(line: str, at: int) -> bool:
+    """Whether the lowercase `no` at `at` is a determiner.
+
+    A verdict is shouted (`NO`), or opens the line, or stands at the
+    end of one ("The answer is: no"). A lowercase `no` in the middle of
+    a line with a word after it is the determiner -- "no test output is
+    shown", "no clear signal", "there is no way to tell" -- and
+    refusing to read it as a verdict yields None (the evidence does not
+    say), never `yes`."""
+    if at == 0:
+        return False
+    return _DETERMINER_NO.match(line[at:].lower()) is not None

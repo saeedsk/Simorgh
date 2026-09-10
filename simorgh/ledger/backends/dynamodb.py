@@ -24,6 +24,13 @@ from ..blobs import parse_ref, sha256_hex
 from ..streams import validate_stream
 
 SNAPSHOT_SK = -1
+#: The highest seq this stream has EVER issued, kept as an item below
+#: the snapshot so `latest()` and `range()` -- which only look at seq
+#: >= 1 -- never see it. Without it, head is derived from the live
+#: items and falls back to 0 when compaction removes them all, so the
+#: next append reuses seq 1 and every reader already past it drops the
+#: new events as ones it had folded (observer, 2026-09-10).
+HEAD_SK = -2
 
 
 class DynamoTable(Protocol):
@@ -79,7 +86,9 @@ class DynamoBackend:
     # ------------------------------------------------------------------- core
     async def head(self, stream: str) -> int:
         item = self._table.latest(stream)  # type: ignore[union-attr]
-        return int(item["seq"]) if item else 0
+        live = int(item["seq"]) if item else 0
+        mark = self._table.get(stream, HEAD_SK)  # type: ignore[union-attr]
+        return max(live, int(mark["at_seq"]) if mark else 0)
 
     def _item_from_event(self, event: Event, seq: int) -> dict:
         payload_json = canonical_json(event.payload)
@@ -116,6 +125,7 @@ class DynamoBackend:
         seq = head + 1
         if not self._table.put_if_absent(self._item_from_event(event, seq)):  # type: ignore[union-attr]
             raise ConflictError(event.stream, expected_seq if expected_seq is not None else head, head)
+        self._table.put({"stream": event.stream, "seq": HEAD_SK, "at_seq": seq})  # type: ignore[union-attr]
         return seq
 
     async def find_by_idempotency(self, stream: str, key: str) -> int | None:
@@ -157,6 +167,8 @@ class DynamoBackend:
         for item in self._table.range(stream, 1, None):  # type: ignore[union-attr]
             self._table.delete(stream, int(item["seq"]))  # type: ignore[union-attr]
         self._table.delete(stream, SNAPSHOT_SK)  # type: ignore[union-attr]
+        # Deleting the stream is the one thing that starts it over.
+        self._table.delete(stream, HEAD_SK)  # type: ignore[union-attr]
 
     # ------------------------------------------------------------------ blobs
     async def put_blob(self, data: bytes, *, content_type: str) -> str:
@@ -252,4 +264,4 @@ def _boto3_adapters(table_name: str, bucket_name: str) -> tuple[DynamoTable, Blo
     return Boto3Table(), Boto3Bucket()
 
 
-__all__ = ["BlobBucket", "DynamoBackend", "DynamoTable", "SNAPSHOT_SK"]
+__all__ = ["BlobBucket", "DynamoBackend", "DynamoTable", "HEAD_SK", "SNAPSHOT_SK"]

@@ -81,7 +81,9 @@ class Service:
             self.config = Config.from_mapping(dict(ctx.config))
         self._started_at = ctx.clock.now()
         self._capability_map = CapabilityMapFacet(self.config.repo_root)
-        self._file_index = FileIndexFacet(self.config.repo_root, max_files=self.config.file_index_max_files)
+        self._file_index = FileIndexFacet(
+            self.config.repo_root, max_files=self.config.file_index_max_files,
+            refresh_seconds=self.config.file_index_refresh_seconds)
         self._git_state = GitStateFacet(self.config.repo_root)
         self._tools = ToolsFacet()
         self._user_profile = UserProfileFacet()
@@ -218,13 +220,31 @@ class Service:
         providers.sort(key=lambda x: (not x["selected"], x["name"]))
         self._model.capabilities["providers"] = providers
 
+    def _refresh_areas(self) -> None:
+        """Re-read the code areas from the live capability map.
+
+        They were read once at boot and baked into the model, while
+        `capability_map` beside them has no cache and answers from the
+        tree as it is. So the two disagreed the moment anything changed:
+        an observer added a package mid-session and watched `self_map`
+        report 19 subsystems including it, while the self summary --
+        the protected block Cognition prepends to EVERY prompt --
+        still said 18 and did not mention it (2026-09-10). The summary
+        is what the model reads about itself when nobody asked a
+        question, which makes stale worse there than anywhere."""
+        areas = list(self._capability_map.areas())
+        if areas and areas != self._model.capabilities.get("areas"):
+            self._model.capabilities["areas"] = areas
+
     async def _on_self_summary(self, message: Message) -> None:
+        self._refresh_areas()
         budget = message.payload.get("budget_tokens", 300)
         text, tokens = render_summary(self._model, budget)
         await self._ctx.bus.reply(message, type=topics.SELF_SUMMARY_REPLY,
                                    payload={"ok": True, "text": text, "version": self._model.version, "tokens": tokens})
 
     async def _on_self_gaps(self, message: Message) -> None:
+        self._refresh_areas()
         gaps, unexplored = compute_gaps(self._model, message.payload.get("k", 5))
         await self._ctx.bus.reply(message, type=topics.SELF_GAPS_REPLY,
                                    payload={"ok": True, "version": self._model.version, "gaps": gaps, "unexplored_areas": unexplored})

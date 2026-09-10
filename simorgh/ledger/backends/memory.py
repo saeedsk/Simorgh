@@ -18,6 +18,17 @@ class InMemoryBackend:
 
     def __init__(self) -> None:
         self._events: dict[str, list[Event]] = {}
+        # The highest seq this stream has EVER issued. Derived from the
+        # live events, head fell back to 0 when compaction removed them
+        # all -- so the next append was handed seq 1 again, and every
+        # reader already past that point (a projection's `applied_seq`,
+        # a tail cursor) dropped the new events as ones it had already
+        # folded. Live-caught by an observer 2026-09-10: five expired
+        # events, one compaction pass, `head()` 5 -> 0, next append
+        # seq 1, projection count frozen. The `jsonl` backend already
+        # kept this rule ("head never regresses"); the other three did
+        # not. Only deleting the stream resets it.
+        self._heads: dict[str, int] = {}
         self._snapshots: dict[str, tuple[dict, int]] = {}
         self._blobs = InMemoryBlobStore()
 
@@ -29,7 +40,8 @@ class InMemoryBackend:
 
     async def head(self, stream: str) -> int:
         events = self._events.get(stream)
-        return events[-1].seq if events else 0
+        live = events[-1].seq if events else 0
+        return max(live, self._heads.get(stream, 0))
 
     async def append(self, event: Event, *, expected_seq: int | None) -> int:
         head = await self.head(event.stream)
@@ -37,6 +49,7 @@ class InMemoryBackend:
             raise ConflictError(event.stream, expected_seq, head)
         stored = replace(event, seq=head + 1)
         self._events.setdefault(event.stream, []).append(stored)
+        self._heads[event.stream] = stored.seq
         return stored.seq
 
     async def find_by_idempotency(self, stream: str, key: str) -> int | None:
@@ -72,6 +85,9 @@ class InMemoryBackend:
     async def delete_stream(self, stream: str) -> None:
         self._events.pop(stream, None)
         self._snapshots.pop(stream, None)
+        # Deleting the stream is the one thing that really does start it
+        # over; compaction never does.
+        self._heads.pop(stream, None)
 
     async def put_blob(self, data: bytes, *, content_type: str) -> str:
         return self._blobs.put(data, content_type=content_type)

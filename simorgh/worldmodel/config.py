@@ -10,6 +10,14 @@ from pathlib import Path
 class Config:
     repo_root: Path = Path(".")
     file_index_max_files: int = 5000
+    # How long a directory listing may be reused. It used to be forever:
+    # one unkeyed cache slot, filled by the first call of the process,
+    # and nothing anywhere calls `invalidate()`. Curiosity picks what to
+    # explore from this listing, so it was choosing off a boot snapshot
+    # while `capability_map` beside it saw the tree as it is (observer,
+    # 2026-09-10). Short, because a scan of a few hundred files is
+    # cheap and a wrong answer about your own code is not.
+    file_index_refresh_seconds: float = 30.0
     git_refresh_seconds: float = 60.0
     soul_path: Path = Path("docs/SOUL.md")
 
@@ -23,6 +31,7 @@ class Config:
         return cls(
             repo_root=root,
             file_index_max_files=int(file_index.get("max_files", 5000)),
+            file_index_refresh_seconds=float(file_index.get("refresh_seconds", 30.0)),
             git_refresh_seconds=float(git.get("refresh_seconds", 60.0)),
             soul_path=Path(identity.get("soul_path", "docs/SOUL.md")),
         )

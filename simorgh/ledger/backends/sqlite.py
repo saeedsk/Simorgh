@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS idempotency(stream TEXT NOT NULL, key TEXT NOT NULL, 
   PRIMARY KEY(stream, key));
 CREATE TABLE IF NOT EXISTS snapshots(stream TEXT PRIMARY KEY, at_seq INTEGER NOT NULL, state TEXT NOT NULL, ts REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS blobs(sha256 TEXT PRIMARY KEY, content_type TEXT NOT NULL, size INTEGER NOT NULL, data BLOB NOT NULL);
+-- The highest seq a stream has EVER issued, which compaction must not
+-- lower. Derived from MAX(events.seq), head fell back to 0 once
+-- compaction removed every live event, so the next append reused seq 1
+-- and every reader already past it dropped the new events as ones it
+-- had folded (observer, 2026-09-10). `IF NOT EXISTS`, so an existing
+-- database keeps working and simply falls back to MAX(events.seq)
+-- until its next append records a mark.
+CREATE TABLE IF NOT EXISTS heads(stream TEXT PRIMARY KEY, seq INTEGER NOT NULL);
 """
 
 
@@ -85,7 +93,9 @@ class SqliteBackend:
     @staticmethod
     def _head(conn: sqlite3.Connection, stream: str) -> int:
         row = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events WHERE stream=?", (stream,)).fetchone()
-        return int(row[0]) if row else 0
+        live = int(row[0]) if row else 0
+        mark = conn.execute("SELECT seq FROM heads WHERE stream=?", (stream,)).fetchone()
+        return max(live, int(mark[0]) if mark else 0)
 
     async def head(self, stream: str) -> int:
         return await self._run(lambda c: self._head(c, stream))
@@ -112,6 +122,9 @@ class SqliteBackend:
                 if event.idempotency_key:
                     conn.execute("INSERT OR IGNORE INTO idempotency(stream, key, seq) VALUES (?,?,?)",
                                  (event.stream, event.idempotency_key, seq))
+                conn.execute("INSERT INTO heads(stream, seq) VALUES (?,?) "
+                             "ON CONFLICT(stream) DO UPDATE SET seq=excluded.seq",
+                             (event.stream, seq))
                 conn.execute("COMMIT")
                 return seq
             except BaseException:
@@ -195,7 +208,7 @@ class SqliteBackend:
         def op(conn: sqlite3.Connection) -> None:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                for table in ("events", "idempotency", "snapshots"):
+                for table in ("events", "idempotency", "snapshots", "heads"):
                     conn.execute(f"DELETE FROM {table} WHERE stream=?", (stream,))
                 conn.execute("COMMIT")
             except BaseException:

@@ -71,6 +71,7 @@ class ContextFactory:
         bus_policy: BusPolicy | None = None,
         identity_registry: Any | None = None,  # simorgh.bus.enforcement.IdentityRegistry, single mode: None
         trace: Any | None = None,  # simorgh.bus.trace.TraceWriter, shared by every client this builds
+        metrics: Any | None = None,  # simorgh.bus.metrics.Metrics, shared for the same reason
     ) -> None:
         from simorgh.bus.factory import make_client
 
@@ -81,6 +82,17 @@ class ContextFactory:
         # destroyed but it is pending! ... bus-trace-writer" (2026-09-07).
         # The kernel's own client owns the writer and stops it.
         self._trace = trace
+        # One counter set for the process, for exactly the same reason.
+        # Each client made its own, and `bus.Service` reads the KERNEL
+        # client's -- so its `system.metrics` and its health saw only
+        # the kernel's own traffic. An observer booted the real system,
+        # forced two real dead letters, and watched `bus.Service.health`
+        # report `ok` with 6 delivered while the process had actually
+        # handled 115 and dead-lettered 2 (2026-09-10). The dead-letter
+        # hook is worse than uncounted: `BusClient.__init__` overwrites
+        # `backend.set_dead_letter_hook`, so whichever client was built
+        # LAST owns it, and that is never the one being read.
+        self._metrics = metrics
         self._bus_backend = bus_backend
         self._ledger = ledger
         self._config = config
@@ -99,7 +111,8 @@ class ContextFactory:
     def build(self, name: str, *, instance_id: str = "") -> Context:
         source = f"{name}@{instance_id}" if instance_id else name
         bus = self._make_client(self._bus_backend, source=source, ledger=self._ledger,
-                                clock=self._clock.now, policy=self._bus_policy, trace=self._trace)
+                                clock=self._clock.now, policy=self._bus_policy, trace=self._trace,
+                                metrics=self._metrics)
         allowed = set(self._config.section(name).get("secrets", []))
         allowed |= set(self._default_secrets.get(name, ()))
         backing: SecretStore = self._secrets

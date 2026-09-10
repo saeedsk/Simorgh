@@ -36,7 +36,7 @@ class TestMemoryRetrieveSizeCap(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t1", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem = await assembler._memory_retrieve("query", session)  # noqa: SLF001
+            mem, _why = await assembler._memory_block("query", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertLess(len(mem), len(huge))
@@ -58,7 +58,7 @@ class TestMemoryRetrieveSizeCap(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t2", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem = await assembler._memory_retrieve("query", session)  # noqa: SLF001
+            mem, _why = await assembler._memory_block("query", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertLessEqual(len(mem), _MEMORY_BLOCK_MAX_CHARS + 800)  # one item's worth of slack at the boundary
@@ -79,7 +79,7 @@ class TestMemoryRetrieveSizeCap(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t3", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem = await assembler._memory_retrieve("query", session)  # noqa: SLF001
+            mem, _why = await assembler._memory_block("query", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertEqual(mem, "- the sky is blue")
@@ -110,7 +110,7 @@ class TestRequestsInheritTheTaskTraceId(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="trace-t1", kind="chat", mode="execute", profile=profiles.CHAT)
-            await assembler._memory_retrieve("query", session)  # noqa: SLF001
+            await assembler._memory_block("query", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertEqual(seen, ["trace-t1"])
@@ -220,10 +220,61 @@ class TestTheAssembledPrompt(unittest.TestCase):
 
     @run
     async def test_a_session_with_no_task_text_still_assembles(self):
+        """This harness has no Memory subscriber, so the retrieve times
+        out -- and the prompt now SAYS the store could not be consulted
+        rather than silently omitting the block. Asserting `blocks == []`
+        was asserting the silent drop (2026-09-10)."""
         session = Session(task_id="t1", kind="chat", mode="execute", profile=profiles.CHAT)
         blocks = await self._assemble(session)
-        self.assertEqual(blocks, [])
+        self.assertEqual(len(blocks), 1)
+        self.assertIn("could not be consulted", blocks[0]["content"])
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheLostMemoryBlockSaysSoTestCase(unittest.TestCase):
+    """A prompt that lost its memory block was byte-identical to one
+    where the store was read and nothing matched.
+
+    The difference matters: the second means "you have not seen this
+    before", the first means "you cannot see". An observer measured when
+    this starts happening -- `retrieve` reads and embeds EVERY record of
+    each kind, so it crosses the 0.25s timeout at about 5,000 records on
+    an idle machine and about 1,000 under load, while consolidation's
+    own steady state is 2,000 per kind. It is the normal case, not an
+    edge one, and the only trace was a generic bus counter that never
+    reaches the model.
+    """
+
+    @run
+    async def test_a_timeout_puts_an_honest_note_in_the_prompt(self):
+        async with Harness() as h:
+            # No Memory subscriber at all: the retrieve times out.
+            assembler = Assembler(h.client("orchestration"), timeout_s=0.05)
+            session = Session(task_id="t1", kind="chat", mode="execute",
+                              profile=profiles.CHAT, user_text="what did we decide?")
+            blocks = await assembler.assemble(session, "chat")
+            notes = [b["content"] for b in blocks if "could not be consulted" in b["content"]]
+            self.assertEqual(len(notes), 1)
+            self.assertIn("unknown rather than absent", notes[0])
+
+    @run
+    async def test_a_successful_but_empty_recall_says_nothing(self):
+        """Silence is right there: an absent block already means "I have
+        no memory of this"."""
+        async with Harness() as h:
+            memory_bus = h.client("memory")
+
+            async def _responder(message):
+                await memory_bus.reply(message, type=topics.MEMORY_RETRIEVE_REPLY,
+                                       payload={"items": [], "truncated": False})
+
+            sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
+            assembler = Assembler(h.client("orchestration"))
+            session = Session(task_id="t1", kind="chat", mode="execute",
+                              profile=profiles.CHAT, user_text="anything?")
+            blocks = await assembler.assemble(session, "chat")
+            await sub.unsubscribe()
+            self.assertEqual([b for b in blocks if "could not be consulted" in b["content"]], [])
