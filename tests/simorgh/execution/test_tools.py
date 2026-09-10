@@ -959,6 +959,70 @@ class TestWebFetchTool(unittest.IsolatedAsyncioTestCase):
         self.assertIn("60 minutes", refused.error)
         self.assertIn("refused the same way", refused.error)
 
+    async def test_an_anti_bot_challenge_page_is_not_returned_as_content(self):
+        """Measured live 2026-09-10: `https://pypi.org/project/httpx/`
+        answered HTTP 200 with 3,036 bytes of HTML and 227 characters
+        reading "Client Challenge / A required part of this site
+        couldn't load", and this returned it as `ok=True` content. Sim
+        read it as httpx's project page."""
+        page = ("<html><head><title>Client Challenge</title></head><body>"
+                "<p>A required part of this site couldn't load. This may be due to a browser "
+                "extension, network issues, or browser settings.</p></body></html>")
+        tool = WebFetchTool(
+            Config(), resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(page.encode()),
+        )
+        result = await tool.run({"url": "https://example.com/thing"}, ctx=self._ctx())
+        self.assertFalse(result.ok)
+        self.assertTrue(result.metadata["bot_challenge"])
+        self.assertIn("anti-bot challenge", result.error)
+
+    async def test_an_ordinary_small_page_is_still_content(self):
+        """The guard must not eat real pages: it needs BOTH a challenge
+        phrase and almost no text."""
+        page = "<html><body><h1>Notes</h1><p>" + ("a real sentence. " * 20) + "</p></body></html>"
+        tool = WebFetchTool(
+            Config(), resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(page.encode()),
+        )
+        result = await tool.run({"url": "https://example.com/notes"}, ctx=self._ctx())
+        self.assertTrue(result.ok)
+        self.assertIn("a real sentence", result.output)
+
+    async def test_an_article_about_cloudflare_is_not_a_challenge(self):
+        long_text = ("Cloudflare's DDoS protection by design intercepts requests. " * 40)
+        page = f"<html><body><p>{long_text}</p></body></html>"
+        tool = WebFetchTool(
+            Config(), resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(page.encode()),
+        )
+        result = await tool.run({"url": "https://example.com/article"}, ctx=self._ctx())
+        self.assertTrue(result.ok)
+
+    async def test_a_file_whose_content_is_the_conversation_is_refused(self):
+        """A marker's payload runs to the end of the reply, so anything
+        the model says after its content lands inside the file.
+        `_python_syntax_problem` has caught this for `.py` since
+        2026-09-07; everything else was written verbatim. An observer
+        watched `workspace/domains.csv` be written as six real CSV rows
+        followed by twenty lines of chat -- `ok=True`, verification
+        passed, and the final answer described a clean six-line file
+        (2026-09-10)."""
+        from simorgh.execution.tools import _transcript_tail
+
+        corrupt = ("file,domain\n01-knowledge.md,knowledge\n"
+                   "[system] Result: written workspace/domains.csv (5 data rows + header).")
+        self.assertIsNotNone(_transcript_tail(corrupt))
+        self.assertIsNone(_transcript_tail("file,domain\n01-knowledge.md,knowledge\n"))
+
+    async def test_ordinary_prose_mentioning_a_bracketed_word_is_fine(self):
+        """Narrow on purpose: only a transcript prefix at the start of a
+        line, which appears nowhere in this repository's content."""
+        from simorgh.execution.tools import _transcript_tail
+
+        self.assertIsNone(_transcript_tail("# Notes\n\nSee the [system] design doc for more.\n"))
+        self.assertIsNone(_transcript_tail("| col | [info] |\n|---|---|\n"))
+
     async def test_allow_private_networks_skips_the_ssrf_guard(self):
         config = Config(web_fetch_allow_private_networks=True)
 

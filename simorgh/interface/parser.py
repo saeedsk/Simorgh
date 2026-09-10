@@ -30,10 +30,10 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("skill", "<topic>", "draft a new reusable skill, audited before it lands"),
     ("plan", "<goal>", "break a goal into tracked steps"),
     ("research", "<topic>", "investigate a question, no code written"),
-    ("interests", "", "topics Sim is following"),
-    ("benchmark", "", "score this system on GAIA or BFCL, and track it"),
+    ("interests", "[topic]", "topics Sim is following, or add one"),
+    ("benchmark", "[suites|load|run|stop|history|show]", "score this system on GAIA, BFCL or SWE-bench, and track it"),
     ("schedule", "[every] <15m> <label>", "fire a reminder later, or on a repeat"),
-    ("mcp", "", "review external tools Sim has proposed"),
+    ("mcp", "[list|approve|deny]", "review external tools Sim has proposed"),
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),
     ("pause", "", "hold everything"),
     ("resume", "", "let it continue"),
@@ -42,6 +42,20 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
 )
 
 COMMAND_NAMES: tuple[str, ...] = tuple(name for name, _, _ in COMMANDS)
+
+#: Commands that take nothing, derived from the table's own argument
+#: hints rather than listed again -- a second list is a list that
+#: drifts, and three of these hints were wrong until 2026-09-10.
+#:
+#: Words after one of these is a sentence, not a command with an
+#: argument, and that difference had teeth: `exit strategy for the
+#: company is unclear` shut the system down, and `pause for a moment and
+#: think about it` paused every subsystem (observer, 2026-09-10). Both
+#: read `args` as a free-text "reason", so nothing downstream could tell
+#: a remark from an instruction.
+NO_ARGUMENT_COMMANDS: frozenset[str] = frozenset(
+    name for name, hint, _ in COMMANDS if not hint
+)
 
 
 #: How many rows the startup splash shows. The table is ordered most
@@ -83,14 +97,16 @@ def parse(line: str) -> Command | None:
     # the way -- `benchmark, how did it go?` is a question about the
     # benchmark, not a request to run one.
     lowered = first.lower()
-    if lowered in COMMAND_NAMES:
+    if lowered in COMMAND_NAMES and (explicit or not _swallows_a_sentence(lowered, rest)):
         return Command(name=lowered, args=rest.strip(), raw=raw)
     trimmed = lowered.rstrip(_SENTENCE_PUNCTUATION)
-    if trimmed in COMMAND_NAMES and (explicit or not _looks_like_prose(first, rest)):
+    if (trimmed in COMMAND_NAMES and (explicit or not _looks_like_prose(first, rest))
+            and (explicit or not _swallows_a_sentence(trimmed, rest))):
         return Command(name=trimmed, args=rest.strip(), raw=raw)
     lowered = trimmed
 
-    if len(lowered) >= 4 and (explicit or not _looks_like_prose(first, rest)):
+    if (len(lowered) >= 4 and (explicit or not _looks_like_prose(first, rest))
+            and (explicit or not _swallows_a_sentence(lowered, rest))):
         match = difflib.get_close_matches(lowered, COMMAND_NAMES, n=1, cutoff=_AUTOCORRECT_CUTOFF)
         if match:
             return Command(name=match[0], args=rest.strip(), raw=raw, guessed_from=first)
@@ -100,6 +116,22 @@ def parse(line: str) -> Command | None:
 
 #: Punctuation a command never ends in, and a sentence often does.
 _SENTENCE_PUNCTUATION = ",.;:!?"
+
+
+def _swallows_a_sentence(name: str, rest: str) -> bool:
+    """Whether treating `name` as a command would eat a sentence.
+
+    A command that takes no arguments, followed by words, is somebody
+    talking. `exit strategy for the company is unclear` stopped the
+    system and `pause for a moment and think about it` paused every
+    subsystem, because both commands accept `args` as a free-text
+    reason and neither could tell a remark from an instruction
+    (observer, 2026-09-10).
+
+    Typing the slash overrides this, as it does everywhere else here:
+    `/exit the meeting overran` is a person saying "this is a command",
+    reason and all."""
+    return bool(rest.strip()) and name in NO_ARGUMENT_COMMANDS
 
 
 def _looks_like_prose(first: str, rest: str) -> bool:

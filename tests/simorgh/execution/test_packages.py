@@ -15,6 +15,7 @@ from pathlib import Path
 import tempfile
 
 from simorgh.execution.config import Config
+from simorgh.execution import packages
 from simorgh.execution.packages import (
     FindPackageTool, InstallPackageTool, npm_facts, parse_spec, pypi_facts,
 )
@@ -296,3 +297,62 @@ class RealPyPiSmokeTestCase(unittest.IsolatedAsyncioTestCase):
         if not result.ok or not result.metadata["hits"]:
             self.skipTest(f"PyPI did not answer in this sandbox: {result.error or result.output}")
         self.assertEqual(result.metadata["hits"][0]["name"].lower(), "homeharvest")
+
+
+class TheRegistryPageTooBigToReadTestCase(unittest.IsolatedAsyncioTestCase):
+    """"I could not read the answer" is not "there is no such package".
+
+    Live-caught 2026-09-10. A registry page grows with the package's
+    release history, so the most popular packages have the biggest ones,
+    and the 2 MB read cap did not refuse them -- it TRUNCATED them.
+    `json.loads` raised on the cut, the lookup returned nothing, and
+    `install_package matplotlib` answered "could not find 'matplotlib'
+    on pip's registry to check it". matplotlib's page is 2,447,559
+    bytes. The model's next move was `allow_new: true`: the typosquat
+    guard talked out of the way by one of the most legitimate packages
+    on the index, and that reflex learned for next time.
+    """
+
+    def _oversized_opener(self):
+        body = b'{"info": {"home_page": "https://x", "summary": "s"}, "releases": {}}'
+        body += b" " * (packages._PACKAGE_JSON_MAX_BYTES + 10 - len(body))
+
+        class _Response:
+            def read(self, size=None):
+                return body[:size] if size else body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        return lambda request, timeout: _Response()
+
+    def test_the_cap_is_above_the_real_pages_that_broke_it(self):
+        self.assertGreater(packages._PACKAGE_JSON_MAX_BYTES, 2_447_559)
+
+    def test_an_unreadable_page_refuses_as_itself_not_as_a_missing_package(self):
+        tool = packages.InstallPackageTool(Config())
+        tool._finder._opener = self._oversized_opener()
+        refusal = tool._vet("matplotlib", "pip")
+        self.assertIn("larger than", refusal)
+        self.assertIn("NOT a claim that the package is missing", refusal)
+
+    def test_it_is_still_a_refusal_because_unchecked_stays_unchecked(self):
+        """The guard must not be softened into a pass: nothing was
+        verified, so nothing may be installed without saying why."""
+        tool = packages.InstallPackageTool(Config())
+        tool._finder._opener = self._oversized_opener()
+        self.assertTrue(tool._vet("matplotlib", "pip").startswith("refused:"))
+
+    async def test_find_package_does_not_report_it_as_absent(self):
+        """`ok=True, "no package named 'matplotlib'"` is the "succeeds
+        while saying nothing true" failure, in the tool whose whole job
+        is answering whether a package exists."""
+        tool = packages.FindPackageTool(Config())
+        tool._opener = self._oversized_opener()
+        result = await tool.run({"query": "matplotlib"}, ctx=_ctx())
+        self.assertFalse(result.ok)
+        self.assertNotIn("no package named", (result.output or "") + (result.error or ""))
+        self.assertIn("larger than", result.error)

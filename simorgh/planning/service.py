@@ -460,7 +460,7 @@ class Service:
         await self._retry_or_block(task, p.get("reason", ""),
                                    answer=str(p.get("result_summary") or ""))
 
-    def _made_no_progress(self, task: Task, answer: str) -> bool:
+    def _made_no_progress(self, task: Task, answer: str, reason: str) -> bool:
         """True when this attempt ended with the answer the last one was
         blocked for.
 
@@ -473,7 +473,19 @@ class Service:
         Measured on a GAIA run, 2026-09-10: 18 tasks were retried, 8 of
         them re-produced an identical answer, and retrying past the
         first repeat never once turned a wrong answer into a right one.
-        Meanwhile the retries took 68% of the run's steps."""
+        Meanwhile the retries took 68% of the run's steps.
+
+        Only a block that judged the ANSWER can count. A task blocked
+        for running out of steps, or for finishing with uncommitted
+        changes, carries its answer forward unchanged by design -- and
+        for the first hours of this rule that counted as "no progress",
+        so a patch task that had applied and tested a correct change
+        was killed terminally on the second uncommitted block, with the
+        work sitting in the tree and a note blaming the answer for
+        repeating itself (observer, 2026-09-10, caught the same day the
+        rule landed)."""
+        if not reason.startswith(VERIFICATION_REASON):
+            return False
         stripped = " ".join(answer.split())
         if not stripped:
             # An outcome with no answer says nothing about repetition,
@@ -484,7 +496,7 @@ class Service:
         return stripped == seen
 
     async def _retry_or_block(self, task: Task, reason: str, *, answer: str = "") -> None:
-        if self._made_no_progress(task, answer):
+        if self._made_no_progress(task, answer, reason):
             note = (f"stopped after {task.attempts + 1} attempts: the retry produced the same "
                     f"answer that was already rejected ({reason})")
             # `available -> failed` and `pending -> failed` are illegal,

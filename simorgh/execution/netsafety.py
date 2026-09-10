@@ -38,3 +38,19 @@ def validate_public_http_url(url: str, *, allow_private: bool, resolver=None) ->
         ip = ipaddress.ip_address(entry[4][0])
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
             raise FetchRefused(f"refusing {url!r}: resolves to a private/internal address ({ip}) -- SSRF protection")
+
+
+def wait_note(seconds: float) -> str:
+    """How long until a rate-limited call is allowed again.
+
+    Shared by `web_fetch` and `web_search` because they had separate
+    copies and the copies disagreed: the search one counted whole
+    minutes, so a ten-second wait printed "the next one is allowed in
+    about 0 minutes" -- a refusal that contradicts itself and invites
+    the immediate retry the note exists to prevent (observer,
+    2026-09-10, the day the note was added).
+    """
+    seconds = max(0.0, float(seconds))
+    if seconds < 90:
+        return f"The next one is allowed in about {seconds:.0f}s."
+    return f"The next one is allowed in about {seconds / 60:.0f} minutes."

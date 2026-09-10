@@ -50,7 +50,20 @@ NPM_URL = "https://registry.npmjs.org/{name}"
 # shell metacharacter. `pip install` accepts all of those and each one
 # is a way to run code from somewhere nobody reviewed.
 _SPEC_RE = re.compile(r"^(?P<name>@?[A-Za-z0-9][A-Za-z0-9._/-]{0,127})(?P<pin>(==|@|>=|~=)[A-Za-z0-9._-]{1,32})?$")
-_PACKAGE_JSON_MAX_BYTES = 2_000_000
+# A registry page grows with the package's release history, so the most
+# popular packages have the biggest ones. At 2 MB this cap did not
+# refuse them -- it TRUNCATED them, `json.loads` raised on the cut, and
+# the caller could not tell a half-read page from a name that does not
+# exist. So `install_package matplotlib` answered "could not find
+# 'matplotlib' on pip's registry to check it", and the model's next move
+# was `allow_new: true` -- the typosquat guard talked out of the way by
+# one of the most legitimate packages on the index (observer, 2026-09-10;
+# matplotlib's page is 2,447,559 bytes).
+_PACKAGE_JSON_MAX_BYTES = 32_000_000
+
+#: A page too big to read is not a package that does not exist. Read
+#: back from `_get_json` so the difference survives to the message.
+OVERSIZE = object()
 
 
 def parse_spec(spec: str) -> tuple[str, str] | None:
@@ -81,14 +94,30 @@ def parse_spec(spec: str) -> tuple[str, str] | None:
     return name, match.group("pin") or ""
 
 
-def _get_json(opener, url: str, timeout: float) -> dict | None:
+def _get_json(opener, url: str, timeout: float):
+    """The parsed page, `OVERSIZE`, or None.
+
+    Reads one byte past the cap so "bigger than we will read" is
+    detectable rather than silently cut mid-string."""
     validate_public_http_url(url, allow_private=False)
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with opener(request, timeout=timeout) as response:
-            return json.loads(response.read(_PACKAGE_JSON_MAX_BYTES).decode("utf-8", "replace"))
+            raw = response.read(_PACKAGE_JSON_MAX_BYTES + 1)
+        if len(raw) > _PACKAGE_JSON_MAX_BYTES:
+            return OVERSIZE
+        return json.loads(raw.decode("utf-8", "replace"))
     except (urllib.error.HTTPError, urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
         return None
+
+
+def _oversize_note(name: str) -> str:
+    """Said the same way wherever a page was too big to read, because
+    the one thing it must never sound like is "no such package"."""
+    return (f"{name!r}'s registry page is larger than the "
+            f"{_PACKAGE_JSON_MAX_BYTES // 1_000_000} MB this reads, so its age and homepage could "
+            f"not be checked. This is NOT a claim that the package is missing. If you are sure of "
+            f"the name, retry with allow_new: true and say why")
 
 
 def _iso(value: str) -> str:
@@ -165,7 +194,16 @@ class FindPackageTool:
             return ToolResult(ok=False, error=f"refused: {query!r} is not a plain package name")
         name = parsed[0]
         manager = str(args.get("manager") or "any").strip().lower()
-        hits = await asyncio.to_thread(self._lookup, name, manager)
+        hits, oversize = await asyncio.to_thread(self._lookup_detail, name, manager)
+        if not hits and oversize:
+            # NOT ok=True with "no package named ...". A search that
+            # could not read the answer has not found nothing; it has
+            # found out nothing, and saying otherwise is the "succeeds
+            # while saying nothing true" failure.
+            return ToolResult(
+                ok=False, error=_oversize_note(name),
+                metadata={"hits": [], "query": name, "oversize": True},
+            )
         if not hits:
             return ToolResult(
                 ok=True, output=f"no package named {name!r} on {manager if manager != 'any' else 'PyPI or npm'}",
@@ -174,18 +212,30 @@ class FindPackageTool:
         return ToolResult(ok=True, output=render_hits(hits), metadata={"hits": hits, "query": name})
 
     def _lookup(self, name: str, manager: str) -> list[dict]:
+        return self._lookup_detail(name, manager)[0]
+
+    def _lookup_detail(self, name: str, manager: str) -> tuple[list[dict], bool]:
+        """`(hits, some page was too big to read)`.
+
+        The second half exists so "we could not read the answer" never
+        gets reported as "there is no such package"."""
         timeout = self._config.package_lookup_timeout_s
-        hits = []
+        hits: list[dict] = []
+        oversize = False
         # A scoped name (`@scope/x`) exists only on npm; never send it to PyPI.
         if manager in ("any", "pypi") and not name.startswith("@"):
             payload = _get_json(self._opener, PYPI_URL.format(name=urllib.parse.quote(name)), timeout)
-            if payload:
+            if payload is OVERSIZE:
+                oversize = True
+            elif payload:
                 hits.append(pypi_facts(payload))
         if manager in ("any", "npm"):
             payload = _get_json(self._opener, NPM_URL.format(name=urllib.parse.quote(name, safe="@/")), timeout)
-            if payload:
+            if payload is OVERSIZE:
+                oversize = True
+            elif payload:
                 hits.append(npm_facts(payload))
-        return hits
+        return hits, oversize
 
 
 class InstallPackageTool:
@@ -252,7 +302,9 @@ class InstallPackageTool:
         """Empty when the package looks real. A lookup that cannot run at
         all is a refusal, not a pass: "I could not check" must never read
         as "I checked and it was fine"."""
-        hits = self._finder._lookup(name, "npm" if manager == "npm" else "pypi")
+        hits, oversize = self._finder._lookup_detail(name, "npm" if manager == "npm" else "pypi")
+        if not hits and oversize:
+            return f"refused: {_oversize_note(name)}"
         if not hits:
             return (f"refused: could not find {name!r} on {manager}'s registry to check it. "
                     "If you are sure of the name, retry with allow_new: true and say why")

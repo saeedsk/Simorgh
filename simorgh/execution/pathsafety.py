@@ -8,13 +8,43 @@ refusal string instead.
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterable
 
 from .doctext import document_to_text
 from .pdftext import looks_like_pdf, pdf_to_text
 
-_CREDENTIAL_LOOKING_NAMES = (".env", "credentials", "secret", "id_rsa", ".pem")
+# What a credential file actually looks like, as opposed to what a
+# credential file's name contains. The old rule was a substring test
+# over every path segment, and it hid Sim's own source from Sim:
+# `simorgh/kernel/secrets.py` and its test were unreadable, all three
+# `simorgh/contracts/schema/world.env.*.json` schemas matched on the
+# ".env" inside "world.env.query", and even `docs/secrets-design.md`
+# was refused. `search_code` skipped the same files, so Sim could not
+# grep for a symbol defined in its own secret store (observer,
+# 2026-09-10).
+#
+# This is deliberately narrower than what it replaces. A `.py` or `.md`
+# named after secrets is source ABOUT secrets, not a secret; a `.json`
+# or `.env` or `.pem` by the same name is the thing itself. Secrets in
+# this system live in the environment or a 0600 TOML, never in tracked
+# source, so the file types that can still hide one are the ones still
+# refused.
+
+#: Extensions that hold data rather than source. A credential word in
+#: one of these is a credential file.
+_DATA_EXTENSIONS = frozenset({
+    "", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".txt", ".env",
+})
+#: Extensions that ARE a credential, whatever the file is called.
+_SECRET_EXTENSIONS = frozenset({".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"})
+#: Words that name a credential store when they name a data file.
+_CREDENTIAL_WORDS = ("credential", "secret", "password", "passwd", "token")
+#: Files that are a private key by name alone.
+_KEY_FILENAMES = frozenset({"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".netrc", ".pgpass"})
+#: A directory called this holds credentials whatever is inside it.
+_CREDENTIAL_DIRECTORIES = frozenset({"secrets", "credentials", ".ssh", ".gnupg", ".aws"})
+
 _MAX_PATH_CHARS = 4096
 _MAX_READ_CHARS = 20_000
 # A hard stop so a pathological file cannot be slurped into memory. Far
@@ -37,6 +67,12 @@ _MAX_PDF_BYTES = 60_000_000
 _MAX_LIST_ENTRIES = 300
 
 
+def _is_dotenv(name: str) -> bool:
+    """`.env`, `.env.local`, `prod.env` -- but not `world.env.query.v1.json`,
+    which is a schema with the word in the middle of its name."""
+    return name == ".env" or name.startswith(".env.") or name.endswith(".env")
+
+
 def looks_like_credential_path(parts: Iterable[str]) -> bool:
     """True if any path segment looks like a credentials file/dir name.
 
@@ -49,11 +85,20 @@ def looks_like_credential_path(parts: Iterable[str]) -> bool:
     `tools/credentials.json` were both unreadable via `read_file` but
     their secret contents came back verbatim from `search_code`, via
     ripgrep AND the pure-Python fallback."""
-    return any(
-        name in part.lower() or part.lower().endswith(".key")
-        for part in parts
-        for name in _CREDENTIAL_LOOKING_NAMES
-    )
+    segments = [str(part).strip().lower() for part in parts if str(part).strip()]
+    if not segments:
+        return False
+    if any(segment in _CREDENTIAL_DIRECTORIES for segment in segments[:-1]):
+        return True
+    name = segments[-1]
+    if name in _KEY_FILENAMES or _is_dotenv(name):
+        return True
+    suffix = PurePosixPath(name).suffix
+    if suffix in _SECRET_EXTENSIONS:
+        return True
+    if suffix in _DATA_EXTENSIONS and any(word in name for word in _CREDENTIAL_WORDS):
+        return True
+    return name in _CREDENTIAL_DIRECTORIES
 
 
 def resolve_safe_path(

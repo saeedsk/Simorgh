@@ -123,3 +123,50 @@ class TestInWriteScope(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SimCanReadItsOwnSourceTestCase(unittest.TestCase):
+    """The credential guard matched a WORD anywhere in a path, so it hid
+    Sim's own code from Sim.
+
+    Observed 2026-09-10: `simorgh/kernel/secrets.py` and its test were
+    unreadable, all three `simorgh/contracts/schema/world.env.*.json`
+    schemas matched on the ".env" inside "world.env.query", and
+    `docs/secrets-design.md` was refused for having the word in its
+    title. `search_code` skipped the same files, so Sim could not even
+    grep for a symbol defined in its own secret store.
+
+    The replacement is narrower on purpose: a `.py` or `.md` named after
+    secrets is source ABOUT secrets; a `.json`, `.env` or `.pem` by the
+    same name is the thing itself. Secrets here live in the environment
+    or a 0600 TOML, never in tracked source.
+    """
+
+    def _refused(self, path: str) -> bool:
+        from pathlib import Path
+
+        return pathsafety.looks_like_credential_path(Path(path).parts)
+
+    def test_sims_own_secret_store_is_readable_source(self):
+        for path in ("simorgh/kernel/secrets.py", "tests/simorgh/kernel/test_secrets.py",
+                     "docs/secrets-design.md", "simorgh/kernel/vault.py"):
+            self.assertFalse(self._refused(path), path)
+
+    def test_a_schema_with_env_in_the_middle_of_its_name_is_readable(self):
+        self.assertFalse(self._refused("simorgh/contracts/schema/world.env.query.v1.json"))
+
+    def test_a_real_dotenv_is_still_refused(self):
+        for path in ("tools/.env", "tools/.env.local", "config/prod.env"):
+            self.assertTrue(self._refused(path), path)
+
+    def test_a_credential_data_file_is_still_refused(self):
+        for path in ("tools/credentials.json", "app/token.yaml", "app/passwords.toml"):
+            self.assertTrue(self._refused(path), path)
+
+    def test_a_private_key_is_still_refused_by_name_or_extension(self):
+        for path in ("workspace/id_rsa", "certs/server.pem", "certs/client.key", "x/.netrc"):
+            self.assertTrue(self._refused(path), path)
+
+    def test_a_credential_directory_protects_whatever_is_inside_it(self):
+        for path in ("secrets/anything.txt", "home/.ssh/config", "home/.aws/config"):
+            self.assertTrue(self._refused(path), path)

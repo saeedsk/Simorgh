@@ -60,7 +60,10 @@ class Config:
     # unconfigurable 8.0s in `bridge.py`, and every replan measured at
     # exactly 8.0s -> None -> no steps (watched trial, 2026-09-07).
     # Matches the Worker's `think_timeout_s`.
-    think_timeout_s: float = 120.0
+    # Same reasoning as `orchestration/config.py::think_timeout_s`:
+    # above Cognition's 180-second per-call ceiling, so a slow provider
+    # is waited for rather than declared absent.
+    think_timeout_s: float = 200.0
 
     @classmethod
     def from_mapping(cls, data: dict | None) -> "Config":

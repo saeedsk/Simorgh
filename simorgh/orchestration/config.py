@@ -52,7 +52,15 @@ class Config:
     heartbeat_s: int = 30
     max_depth: int = 3
     max_children_concurrent: int = 4
-    think_timeout_s: float = 120.0
+    # Above Cognition's own `Budget.max_seconds` (180s), with room to
+    # spare. It used to sit BELOW it: Cognition allowed each provider
+    # 180 seconds while the caller here waited 120, so a merely slow
+    # primary killed the task as "no real provider" while that provider
+    # was still answering, and the failover chain behind it could never
+    # be reached (observer, 2026-09-10 -- a task died at 121s with one
+    # `think.completed` on record and no trace of a second call).
+    # Cognition bounds the whole chain now; this waits for it.
+    think_timeout_s: float = 200.0
     needs_human_timeout_s: float = 600.0
     metrics_interval_s: float = 3.0  # 0 disables the periodic `system.metrics` publish
 

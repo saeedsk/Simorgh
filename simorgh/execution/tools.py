@@ -56,8 +56,8 @@ from simorgh.contracts.protocols import ToolContext, ToolResult
 
 from . import pathsafety
 from .config import Config
-from .htmltext import html_to_text, looks_like_html
-from .netsafety import FetchRefused, validate_public_http_url
+from .htmltext import html_to_text, looks_like_bot_challenge, looks_like_html
+from .netsafety import FetchRefused, validate_public_http_url, wait_note
 from .doctext import document_to_text
 from .geocode import GeocodeTool
 from .packages import FindPackageTool, InstallPackageTool
@@ -631,8 +631,10 @@ class WebFetchTool:
         # -- which returned 224 usable characters with `ok=True` and
         # told the model nothing was wrong (observer, 2026-09-08).
         js_shell = False
+        challenge = False
         if self._config.web_fetch_extract_text and looks_like_html(full_text):
             content, js_shell = html_to_text(full_text, url=url)
+            challenge = looks_like_bot_challenge(full_text, content)
             raw_truncated = len(raw) > _HTML_MAX_RAW_BYTES
             text_truncated = len(content) > self._config.web_fetch_max_bytes
             if text_truncated:
@@ -651,6 +653,20 @@ class WebFetchTool:
         else:
             content = full_text[: self._config.web_fetch_max_bytes]
             truncated = len(raw) > self._config.web_fetch_max_bytes
+        if challenge:
+            # A 200 that is really "prove you are a browser" is not
+            # content, and returning it as content is the whole
+            # "succeeds while saying nothing true" failure: an observer
+            # watched Sim read pypi.org's challenge page as httpx's
+            # project page (2026-09-10).
+            return ToolResult(
+                ok=False,
+                error=(f"{url} answered with an anti-bot challenge page instead of its content "
+                       f"(HTTP {status_code}, {len(content)} characters of text). The site is "
+                       f"refusing automated requests; try another source, or an API it publishes."),
+                metadata={"url": url, "status": status_code, "bot_challenge": True,
+                          "raw_chars": raw_chars, "text_chars": len(content)},
+            )
         return ToolResult(
             ok=True, output=content,
             metadata={
@@ -701,7 +717,7 @@ class WebFetchTool:
             raise FetchRefused(
                 f"rate limit exceeded: {len(per_host)}/{self._config.web_fetch_max_calls} fetches "
                 f"of {host or 'this host'} in the last {self._config.web_fetch_window_s:.0f}s. "
-                f"{_wait_note(per_host[0] + self._config.web_fetch_window_s - now)} "
+                f"{wait_note(per_host[0] + self._config.web_fetch_window_s - now)} "
                 f"Retrying the same fetch before then will be refused the same way -- read a "
                 f"different source, or answer from what you already have."
             )
@@ -710,22 +726,23 @@ class WebFetchTool:
                 f"rate limit exceeded: {len(self._recent_calls)}/"
                 f"{self._config.web_fetch_max_total_calls} fetches in the last "
                 f"{self._config.web_fetch_window_s:.0f}s across every host. "
-                f"{_wait_note(self._recent_calls[0] + self._config.web_fetch_window_s - now)} "
+                f"{wait_note(self._recent_calls[0] + self._config.web_fetch_window_s - now)} "
                 f"Answer from what you have already read."
             )
         per_host.append(now)
         self._recent_calls.append(now)
-        # Hosts that have fallen out of the window are just noise.
-        for name in [h for h, calls in self._recent_by_host.items() if not calls]:
-            self._recent_by_host.pop(name, None)
-
-
-def _wait_note(seconds: float) -> str:
-    """How long until the oldest call falls out of the window."""
-    seconds = max(0.0, seconds)
-    if seconds < 90:
-        return f"The next one is allowed in about {seconds:.0f}s."
-    return f"The next one is allowed in about {seconds / 60:.0f} minutes."
+        # Forget hosts whose calls have all fallen out of the window.
+        # This used to test `if not calls`, which could never be true:
+        # only the host being fetched is ever trimmed, so every other
+        # host's deque kept its stale timestamps and its entry forever
+        # (observer, 2026-09-10: 500 hosts, window long past, 240
+        # entries still held). Bounded memory, but unbounded is
+        # unbounded.
+        cutoff = now - self._config.web_fetch_window_s
+        for name in [h for h, calls in self._recent_by_host.items()
+                     if not calls or calls[-1] < cutoff]:
+            if name != host:
+                self._recent_by_host.pop(name, None)
 
 
 MCP_PROPOSALS_STREAM = "mcp:proposals"
@@ -1156,6 +1173,34 @@ def _content_loss(old: str, new: str) -> str | None:
     return f"{old_n - new_n} of {old_n} non-blank lines"
 
 
+#: Lines that are the model talking, not file content. A marker payload
+#: runs to the end of the reply, so anything the model says after its
+#: content lands inside the file.
+_TRANSCRIPT_LINE = re.compile(r"^\s*\[(system|assistant|user|tool|info)\]", re.M | re.I)
+
+
+def _transcript_tail(code: str) -> str | None:
+    """The first line of narration found inside file content, or None.
+
+    `_python_syntax_problem` has caught this for `.py` since 2026-09-07,
+    where an unparseable file made it obvious. Everything else was
+    written verbatim: an observer watched `workspace/domains.csv` be
+    written as six real CSV rows followed by twenty lines of the model's
+    own chat, including "[system] Result: written workspace/domains.csv
+    (5 data rows + header)." The tool said `ok=True`, verification
+    passed, and the final answer described a clean six-line file
+    (2026-09-10).
+
+    Deliberately narrow: a transcript prefix at the start of a line
+    appears nowhere in this repository's tracked content, so this
+    refuses what is unambiguous and leaves prose alone."""
+    found = _TRANSCRIPT_LINE.search(code or "")
+    if found is None:
+        return None
+    line = (code[found.start():].splitlines() or [""])[0]
+    return line.strip()[:120]
+
+
 def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes: tuple[str, ...]) -> ToolResult:
     """Shared body of `apply_source_patch`/`apply_skill`: write `code` to
     `subject`, refusing anything outside `write_scopes` -- a tool-level
@@ -1191,6 +1236,13 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
         # continue." pasted into it. The function above them was perfect;
         # the file would not import.
         return ToolResult(ok=False, error=f"refused: {subject} would not be valid Python -- {problem}")
+    narration = _transcript_tail(code)
+    if narration is not None:
+        return ToolResult(
+            ok=False,
+            error=(f"refused: the content for {subject} contains a line of this conversation "
+                   f"rather than file content -- {narration!r}. A marker's payload runs to the end "
+                   f"of your reply, so end the reply with the file and say nothing after it."))
     already_existed = target.exists()
     # Live-caught (the creator: "I'd like ... code diffs ... similar UI
     # experience as claude code cli" -- 07-post-cutover-review.md §3.11):

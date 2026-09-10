@@ -50,6 +50,8 @@ if TYPE_CHECKING:  # pragma: no cover -- import cycle: config imports this modul
 
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
+from .netsafety import wait_note
+
 DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/"
 BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
 TAVILY_URL = "https://api.tavily.com/search"
@@ -345,12 +347,12 @@ class WebSearchTool:
             # Say how long the door stays shut. Without it the model
             # reads a refusal as a transient failure and re-issues the
             # same search: 26 steps of one GAIA run, 2026-09-10.
-            wait = max(0.0, self._recent_calls[0] + self._config.web_search_window_s - now)
+            wait = self._recent_calls[0] + self._config.web_search_window_s - now
             raise SearchUnavailable(
                 f"refused: {self._config.web_search_max_calls} searches already in the last "
-                f"{self._config.web_search_window_s / 60:.0f} minutes. The next one is allowed in "
-                f"about {wait / 60:.0f} minutes, and searching again before then will be refused "
-                f"the same way -- work from the results you already have."
+                f"{self._config.web_search_window_s / 60:.0f} minutes. {wait_note(wait)} "
+                f"Searching again before then will be refused the same way -- work from the "
+                f"results you already have."
             )
         self._recent_calls.append(now)
 

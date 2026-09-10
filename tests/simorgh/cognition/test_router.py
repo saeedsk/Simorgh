@@ -282,3 +282,85 @@ class TestRouterPerCallBudget(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheTimeoutBoundsTheWholeCallTestCase(unittest.IsolatedAsyncioTestCase):
+    """`timeout` is what the caller will wait for an answer, not what
+    each candidate may take in turn.
+
+    It used to be handed to every provider unchanged, so a chain of
+    three could legitimately run for three times the number the caller
+    was given -- and the caller, waiting once, always gave up first. An
+    observer watched a task die as "blocked -- no real provider" 121
+    seconds in, with Orchestration waiting 120s and each candidate
+    allowed 180s: the failover chain existed and could never be reached,
+    because nobody was still listening when the second candidate would
+    have been dialled (2026-09-10).
+    """
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.floor = FloorProvider()
+
+    async def test_a_later_candidate_only_gets_the_time_that_is_left(self):
+        clock = self.clock
+        seen: dict[str, float | None] = {}
+
+        class _SlowFailure:
+            name = "claude_code_cli"
+            calls = 0
+
+            def available(self):
+                return True
+
+            async def complete(self_inner, messages, *, tools, max_tokens, timeout=None):
+                self_inner.calls += 1
+                seen["claude_code_cli"] = timeout
+                clock.advance(20.0)
+                raise RuntimeError("took 20s, then failed")
+
+        secondary = _FakeProvider("gemini")
+        original = secondary.complete
+
+        async def _record(messages, *, tools, max_tokens, timeout=None):
+            seen["gemini"] = timeout
+            return await original(messages, tools=tools, max_tokens=max_tokens, timeout=timeout)
+
+        secondary.complete = _record
+        router = Router([_SlowFailure(), secondary], {}, self.floor,
+                        order=("claude_code_cli", "gemini"), clock=clock)
+        await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=60.0)
+
+        self.assertEqual(seen["claude_code_cli"], 60.0)
+        # The first candidate spent 20 of the 60 seconds the caller will
+        # wait; the second must not be handed a fresh 60.
+        self.assertAlmostEqual(seen["gemini"], 40.0, places=1)
+
+    async def test_a_candidate_is_not_dialled_with_no_time_left(self):
+        """Starting a call that cannot finish spends money and returns
+        nothing."""
+        clock = self.clock
+
+        class _Burner:
+            def __init__(self, name):
+                self.name = name
+                self.calls = 0
+
+
+            def available(self):
+                return True
+
+            async def complete(self, messages, *, tools, max_tokens, timeout=None):
+                self.calls += 1
+                clock.advance(59.0)
+                raise RuntimeError("slow and then failed")
+
+        primary = _Burner("claude_code_cli")
+        secondary = _FakeProvider("gemini")
+        router = Router([primary, secondary], {}, self.floor,
+                        order=("claude_code_cli", "gemini"), clock=clock)
+        with self.assertRaises(Exception):
+            await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(require_real=True),
+                                  timeout=60.0)
+        self.assertEqual(primary.calls, 1)
+        self.assertEqual(secondary.calls, 0, "no time was left; dialling it would waste the call")

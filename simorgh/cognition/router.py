@@ -20,6 +20,10 @@ from .providers.base import FloorProvider
 from .tokens import estimate_tokens
 
 
+#: Below this there is no point starting another provider.
+_MIN_CANDIDATE_SECONDS = 5.0
+
+
 class Router:
     def __init__(
         self, providers: list[Provider], budgets: dict[str, RollingWindowBudget],
@@ -86,6 +90,16 @@ class Router:
         any_available_but_over_budget = False
         prompt_tokens = sum(estimate_tokens(m.get("content", "")) for m in messages)
         now = self._clock.now()
+        # `timeout` bounds this CALL, not each candidate in turn. It used
+        # to be handed to every provider unchanged, so a chain of three
+        # could legitimately run for three times the number the caller
+        # was told -- and the caller, waiting for one, always gave up
+        # first. An observer watched a task die as "blocked -- no real
+        # provider" 121 seconds in, with Orchestration waiting 120s and
+        # each candidate allowed 180s: the failover chain existed and
+        # could never be reached, because nobody was still listening by
+        # the time the second candidate was dialled (2026-09-10).
+        deadline = now + timeout
         for name in self._order:
             provider = self._by_name.get(name)
             if provider is None or not provider.available():
@@ -100,9 +114,20 @@ class Router:
                 if est_cost > budget.max_cost_usd:
                     any_available_but_over_budget = True
                     continue
+            remaining = deadline - self._clock.now()
+            if remaining < _MIN_CANDIDATE_SECONDS:
+                # Not enough time left to be worth dialling: starting a
+                # call we know cannot finish spends money and returns
+                # nothing.
+                if self._logger is not None:
+                    self._logger.warning(
+                        "cognition.no_time_for_candidate", provider=name, purpose=purpose.value,
+                        remaining_s=round(max(0.0, remaining), 1),
+                    )
+                continue
             try:
                 response = await provider.complete(
-                    messages, tools=tools, max_tokens=budget.max_tokens_out, timeout=timeout,
+                    messages, tools=tools, max_tokens=budget.max_tokens_out, timeout=remaining,
                 )
             except Exception as exc:  # noqa: BLE001 -- ProviderUnavailable or anything else: try the next candidate
                 last_error = exc

@@ -168,6 +168,44 @@ def is_js_shell(body: str, html: str) -> bool:
     return (visible / len(html)) < _SHELL_MIN_RATIO
 
 
+#: Phrases an interstitial uses to say it is not the page you asked
+#: for. Kept literal and few: this decides that a 200 is a failure, so
+#: a guess here costs a working fetch.
+_CHALLENGE_MARKERS = (
+    "client challenge",
+    "checking your browser",
+    "just a moment...",
+    "attention required! | cloudflare",
+    "enable javascript and cookies to continue",
+    "verifying you are human",
+    "ddos protection by",
+)
+#: A real page that happens to mention one of those phrases has more to
+#: say than an interstitial does.
+_CHALLENGE_MAX_TEXT = 1_500
+
+
+def looks_like_bot_challenge(html: str, text: str) -> bool:
+    """Whether a 200 is really an anti-bot interstitial.
+
+    `is_js_shell` cannot catch these: it returns False for anything
+    under `_SHELL_MIN_HTML` bytes of HTML, and a challenge page is
+    small. Measured live 2026-09-10 -- `https://pypi.org/project/httpx/`
+    answered HTTP 200 with 3,036 bytes of HTML and 227 characters of
+    text reading "Client Challenge / A required part of this site
+    couldn't load", and `web_fetch` returned it as `ok=True` content.
+    Sim read it as httpx's project page and only recovered because it
+    happened to try the JSON API next.
+
+    Both conditions are required, so a long article about Cloudflare is
+    still an article.
+    """
+    if len(text) > _CHALLENGE_MAX_TEXT:
+        return False
+    haystack = f"{html[:4000]}\n{text}".lower()
+    return any(marker in haystack for marker in _CHALLENGE_MARKERS)
+
+
 def html_to_text(html: str, *, url: str = "") -> tuple[str, bool]:
     """`(text, is_js_shell)`.
 
@@ -196,4 +234,5 @@ def html_to_text(html: str, *, url: str = "") -> tuple[str, bool]:
     return body, False
 
 
-__all__ = ["html_to_text", "is_js_shell", "looks_like_html"]
+__all__ = [
+    "looks_like_bot_challenge","html_to_text", "is_js_shell", "looks_like_html"]

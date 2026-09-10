@@ -77,15 +77,40 @@ class _SecurityTool:
         if self._store_override is None:
             store.close()
 
-    def _config_file(self) -> dict:
+    def _config_candidates(self) -> tuple[Path, ...]:
+        """Where the running system would look, in its order.
+
+        `$SIMORGH_CONFIG` was missing here while `kernel/config.py::
+        find_config_path` has always honoured it, so a Sim booted with
+        one was audited against a file it never read -- and the audit
+        then reported this module's own defaults as findings. An
+        observer saw `sec_self` say the dashboard was "bound to
+        127.0.0.1:8765, reachable only by this machine's own user" on a
+        machine with no config file at all (2026-09-10). A Sim actually
+        booted with the API on 0.0.0.0 would have been told the same
+        reassuring thing."""
         raw = getattr(self._config, "security_config_path", "")
         if raw:
-            return _load_toml(Path(raw).expanduser())
-        for candidate in (self._repo_root() / "simorgh.toml",
-                          Path.home() / ".simorgh" / "simorgh.toml"):
+            return (Path(raw).expanduser(),)
+        from os import environ
+
+        candidates = []
+        env = environ.get("SIMORGH_CONFIG")
+        if env:
+            candidates.append(Path(env).expanduser())
+        candidates.append(self._repo_root() / "simorgh.toml")
+        candidates.append(Path.home() / ".simorgh" / "simorgh.toml")
+        return tuple(candidates)
+
+    def _config_source(self) -> Path | None:
+        for candidate in self._config_candidates():
             if candidate.exists():
-                return _load_toml(candidate)
-        return {}
+                return candidate
+        return None
+
+    def _config_file(self) -> dict:
+        found = self._config_source()
+        return _load_toml(found) if found is not None else {}
 
     def _data_dir(self) -> Path:
         toml = self._config_file()
@@ -117,6 +142,15 @@ class SecSelfTool(_SecurityTool):
 
         current = score(open_now, getattr(self._config, "security_posture_weights", None))
         lines = [f"posture {current}/100 from {len(open_now)} open finding(s)"]
+        source = self._config_source()
+        if source is None:
+            # Say it out loud. Half of what follows is read out of a
+            # config file, and with no file every one of those lines is
+            # this module's own default presented as an observation.
+            looked = ", ".join(str(c) for c in self._config_candidates())
+            lines.append("  NOTE: no config file was found, so anything below that describes a "
+                         f"setting is this checker's default, not something read from disk. "
+                         f"Looked in: {looked}")
         by_severity: dict[str, list[Finding]] = {}
         for finding in findings:
             by_severity.setdefault(finding.severity, []).append(finding)

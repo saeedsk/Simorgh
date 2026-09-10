@@ -62,7 +62,7 @@ class VerificationConfig:
     # plan review that could never say `approve`. Found by two watched
     # trials independently, 2026-09-07. Matches the Worker's own budget
     # (`orchestration/config.py::think_timeout_s`).
-    think_timeout_seconds: float = 120.0
+    think_timeout_seconds: float = 200.0
     isolated_suite_timeout_seconds: float = 120.0
     max_denied_actions: int = 2
     forced_rigor: Rigor | None = None

@@ -198,3 +198,46 @@ class TestOutputParser(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EveryTwoPartMarkerKeepsBothPartsTestCase(unittest.TestCase):
+    """The set of code-bearing markers must not be maintained by hand.
+
+    It was, and it went wrong every time a tool was added: `run_shell`,
+    `run_script`, `notify`, `run_container`, `search_listings`,
+    `browse_page`, `install_package` each cost a live-caught bug, and on
+    2026-09-09 nine domain markers landed and none of them was added
+    here. `home_call` reached its tool with a service and no target;
+    `remind` with a time and no text; `media_play` and `home_call` need
+    their second field, so they were unreachable from the model
+    entirely. An observer watched a real run ask for `kb_sources add`
+    three times, be refused three times, and abandon the knowledge base
+    (2026-09-10).
+
+    One table decides it now. This test is what says so out loud.
+    """
+
+    def test_no_two_part_marker_is_truncated(self):
+        from simorgh.cognition.parser import _CODE_BEARING_MARKERS
+        from simorgh.contracts.toolargs import MARKER_SPLIT_FIRST_LINE
+
+        missing = sorted(t for t in MARKER_SPLIT_FIRST_LINE
+                         if t.upper() not in _CODE_BEARING_MARKERS)
+        self.assertEqual(missing, [], "these markers would lose everything after line 1")
+
+    def test_both_fields_survive_to_the_tool_arguments(self):
+        from simorgh.cognition.parser import OutputParser
+        from simorgh.contracts.toolargs import args_from_text
+
+        for text, tool, expected in (
+            ('HOME_CALL: light.turn_on\n{"target": "light.kitchen"}', "home_call",
+             {"service": "light.turn_on", "target": "light.kitchen"}),
+            ("REMIND: tomorrow 8am\ncall the dentist", "remind",
+             {"when": "tomorrow 8am", "text": "call the dentist"}),
+            ('KB_SOURCES: add\n{"path": "docs"}', "kb_sources", {"op": "add", "path": "docs"}),
+            ("SEC_ACCEPT: 3f9a1c2b\nknown to the owner", "sec_accept",
+             {"finding": "3f9a1c2b", "reason": "known to the owner"}),
+        ):
+            parsed = OutputParser().parse(text, {"kind": "markers", "markers": (tool,)})
+            argument = parsed.tool_calls[0]["args"]["argument"]
+            self.assertEqual(args_from_text(tool, argument), expected)

@@ -175,3 +175,81 @@ class TestOnlyPythonChangesNeedThePythonSuite(unittest.IsolatedAsyncioTestCase):
                      "steps": [_step("apply_source_patch")]},
         )
         self.assertTrue(FullSuiteRanCheck().applies(req))
+
+
+class TestScratchIsNotSource(unittest.IsolatedAsyncioTestCase):
+    """Live-caught 2026-09-10. Sim was asked to build a throwaway script
+    under `workspace/`, and did: a correct 33-line script and a real
+    1200x960 PNG, confirmed on disk. It then spent its entire revision
+    budget here, because a `.py` path made this check apply and the
+    check wanted the whole 4,600-test suite run first.
+
+    `workspace/` is gitignored, no test imports it, and review never
+    sees it -- the suite has nothing to say about a file there. This is
+    the same exemption the `.html` case above already earned, one
+    directory over.
+    """
+
+    def _req(self, written: list[str]) -> VerifyRequest:
+        return VerifyRequest(
+            verification_id="v1", task_id="t1", kind="task",
+            subject={"kind": "patch", "description": "d", "result": "done", "complete_log": True,
+                     "steps": [_step("apply_source_patch"), _step("run_script")],
+                     "written_paths": written, "subject": ""},
+        )
+
+    def test_a_scratch_script_is_not_asked_for_a_suite_run(self):
+        self.assertFalse(FullSuiteRanCheck().applies(self._req(["workspace/wordfreq.py"])))
+
+    def test_a_nested_scratch_path_counts_too(self):
+        self.assertFalse(FullSuiteRanCheck().applies(self._req(["./workspace/tmp/a/b.py"])))
+
+    def test_a_change_touching_real_source_as_well_still_needs_it(self):
+        self.assertTrue(FullSuiteRanCheck().applies(
+            self._req(["workspace/wordfreq.py", "simorgh/execution/tools.py"])))
+
+    def test_a_directory_that_merely_starts_with_the_word_is_still_source(self):
+        self.assertTrue(FullSuiteRanCheck().applies(self._req(["workspace-notes/thing.py"])))
+
+
+class TestAFailedSuiteIsNotCalledANarrowedOne(unittest.IsolatedAsyncioTestCase):
+    """The model ran exactly what it was told to run, the suite failed,
+    and this check answered "run_tests was called on a narrower target
+    than the whole suite, or never called at all" -- both halves untrue,
+    with the same hint attached, so the only move left was to run it
+    again. Observed 2026-09-10, three revisions in a row.
+    """
+
+    async def _run(self, req: VerifyRequest):
+        ctx = CheckContext(act=None, think=None, review=None, clock=None, config=VerificationConfig())
+        return await FullSuiteRanCheck().run(req, ctx)
+
+    def _failed_suite(self):
+        return _request("patch", [
+            _step("apply_source_patch"),
+            _step("run_tests", ok=False, summary="[ran target='tests']\n1 failed, 4657 passed"),
+        ])
+
+    async def test_the_detail_says_the_suite_failed(self):
+        result = await self._run(self._failed_suite())
+        self.assertEqual(result.status, "failed")
+        self.assertIn("FAILED", result.detail)
+        self.assertNotIn("narrower target", result.detail)
+        self.assertNotIn("never called at all", result.detail)
+
+    async def test_the_hint_sends_it_to_the_failures_not_back_to_the_same_command(self):
+        result = await self._run(self._failed_suite())
+        self.assertIn("Read the failures", result.feedback.revise_hint)
+
+    async def test_the_evidence_records_which_story_it_told(self):
+        result = await self._run(self._failed_suite())
+        self.assertTrue(result.evidence["whole_suite_failed"])
+
+    async def test_a_genuinely_narrowed_target_still_says_narrower(self):
+        req = _request("patch", [
+            _step("apply_source_patch"),
+            _step("run_tests", ok=False, summary="[ran target='tests/simorgh/interface']\n1 failed"),
+        ])
+        result = await self._run(req)
+        self.assertIn("narrower target", result.detail)
+        self.assertFalse(result.evidence["whole_suite_failed"])

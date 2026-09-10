@@ -32,6 +32,8 @@ from .api import ParsedOutput
 
 _CODE_FENCE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL)
 _YES_NO_RE = re.compile(r"\b(YES|NO)\b", re.IGNORECASE)
+from simorgh.contracts.toolargs import MARKER_SPLIT_FIRST_LINE
+
 _EDIT_BLOCK_RE = re.compile(
     r"<<<<<<< SEARCH\n(?P<old>.*?)\n=======\n(?P<new>.*?)\n>>>>>>> REPLACE", re.DOTALL,
 )
@@ -104,6 +106,25 @@ _CODE_BEARING_MARKERS = {
     # to its first line runs a DIFFERENT command on someone's server.
     "RUN_REMOTE",
 }
+
+# ...and every two-part marker the shared table knows about, which is
+# the only way this set stops being wrong every time a tool is added.
+#
+# It had gone wrong again by the time this line was written: none of the
+# nine domain markers that landed on 2026-09-09 (`kb_sources`,
+# `home_call`, `home_undo`, `energy_tariff`, `media_control`,
+# `media_play`, `sec_findings`, `sec_accept`, `remind`) was ever added
+# here, so `first_line_argument` cut each payload before
+# `orchestration/tools.py::to_action_payload` could split it.
+# `home_call` arrived with a service and no target; `remind` with a time
+# and no text; `media_play` and `home_call` were unreachable from the
+# model at all, since each needs its second field. An observer watched a
+# real run ask for `kb_sources add` three times, be refused three times,
+# and give up on the knowledge base entirely (2026-09-10).
+#
+# Every entry above is left as written: each one carries the story of
+# the day it was missing, and this line is what stops the next story.
+_CODE_BEARING_MARKERS |= {tool.upper() for tool in MARKER_SPLIT_FIRST_LINE}
 
 
 def preview(text: str, limit: int = _DEFAULT_PREVIEW_LIMIT) -> str:

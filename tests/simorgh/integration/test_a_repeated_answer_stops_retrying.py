@@ -130,3 +130,53 @@ class RepeatedAnswerTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotEveryBlockIsAboutTheAnswerTestCase(RepeatedAnswerTestCase):
+    """Only a block that judged the ANSWER can be a repeat.
+
+    Caught the same day the rule landed, 2026-09-10. A task blocked for
+    running out of steps, or for finishing with uncommitted changes,
+    carries its answer forward unchanged by design -- that is what a
+    continuation IS. Counting that as "no progress" killed a patch task
+    terminally on its second uncommitted block, with a tested, applied,
+    uncommitted change sitting in the tree, under a note blaming the
+    answer for repeating itself.
+    """
+
+    UNCOMMITTED = "finished with uncommitted changes"
+    OUT_OF_STEPS = "step budget exhausted"
+
+    async def _block_for(self, kernel, task_id: str, answer: str, reason: str) -> None:
+        await kernel.bus.publish(Message.new(
+            topics.TASK_BLOCKED, source="orchestration",
+            partition_key=f"task:{task_id}",
+            payload={"task_id": task_id, "reason": reason, "result_summary": answer},
+        ))
+        await _pump()
+
+    async def test_an_uncommitted_change_is_not_killed_for_repeating_itself(self):
+        kernel = await self._boot()
+        store, task = await self._task(kernel)
+        await self._block_for(kernel, task.id, "patch applied, tests pass", self.UNCOMMITTED)
+        await store.transition(task.id, AVAILABLE)
+        await self._block_for(kernel, task.id, "patch applied, tests pass", self.UNCOMMITTED)
+        self.assertEqual((await store.get(task.id)).status, BLOCKED)
+
+    async def test_running_out_of_steps_twice_is_not_killed_either(self):
+        kernel = await self._boot()
+        store, task = await self._task(kernel)
+        await self._block_for(kernel, task.id, "half way through", self.OUT_OF_STEPS)
+        await store.transition(task.id, AVAILABLE)
+        await self._block_for(kernel, task.id, "half way through", self.OUT_OF_STEPS)
+        self.assertEqual((await store.get(task.id)).status, BLOCKED)
+
+    async def test_a_verification_block_after_an_uncommitted_one_still_gets_its_retry(self):
+        """The reviewer's FIRST objection to this text must not be its
+        last: nothing has judged the answer before now."""
+        kernel = await self._boot()
+        store, task = await self._task(kernel)
+        await self._block_for(kernel, task.id, "the same text", self.UNCOMMITTED)
+        await store.transition(task.id, AVAILABLE)
+        await self._block_for(kernel, task.id, "the same text", VERIFICATION)
+        self.assertEqual((await store.get(task.id)).status, BLOCKED)

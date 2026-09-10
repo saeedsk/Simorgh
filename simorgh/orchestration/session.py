@@ -17,6 +17,7 @@ import re
 import uuid
 
 from simorgh.contracts import topics
+from simorgh.contracts.scratch import SCRATCH_PREFIX, is_scratch  # noqa: F401 -- re-export
 from simorgh.contracts.envelope import Event, Message
 
 from . import scaffolds
@@ -35,16 +36,12 @@ VERIFICATION_REASON = "verification failed"
 CANCELLED_REASON = "the task was cancelled"
 
 # `workspace/` is the one directory that is both readable and writable
-# and never committed (execution/config.py::workspace_dir). Matched by
-# prefix here rather than imported, because Orchestration may not reach
-# into Execution's config (tests/simorgh/test_module_boundaries.py).
-SCRATCH_PREFIX = "workspace/"
-
-
-def is_scratch(path: str) -> bool:
-    normalised = (path or "").strip().lstrip("./")
-    return normalised.startswith(SCRATCH_PREFIX)
-
+# and never committed (execution/config.py::workspace_dir). The rule
+# itself lives in `contracts/scratch.py`: Verification needs the same
+# fact to decide whether a change is worth a suite run, and Execution's
+# config is not importable from either (tests/simorgh/test_module_
+# boundaries.py). Re-exported here because this is where callers and
+# tests already look for it.
 
 
 def record_side_effects(session, effects) -> None:

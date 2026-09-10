@@ -29,6 +29,8 @@ the WHOLE suite (not a subdirectory or file) and passed.
 
 from __future__ import annotations
 
+from simorgh.contracts.scratch import is_scratch
+
 from ..api import CheckContext, CheckResult, Feedback, VerifyRequest
 from ._files import written_paths
 from .didanything import WRITE_TOOLS
@@ -84,6 +86,25 @@ def _ran_whole_suite_and_passed(steps: list[dict]) -> bool:
     return False
 
 
+def _ran_whole_suite_and_failed(steps: list[dict]) -> bool:
+    """The whole suite ran and did not pass.
+
+    Worth telling apart from "never ran", because the advice is the
+    opposite. Without it the check told a task that had just run the
+    entire suite that `run_tests` "was called on a narrower target than
+    the whole suite, or never called at all" -- both halves false, and
+    no move left but to run it again (observer, 2026-09-10)."""
+    for step in steps:
+        if step.get("tool") != "run_tests" or step.get("ok"):
+            continue
+        summary = str(step.get("summary") or "")
+        if not summary.startswith(_TARGET_MARKER):
+            continue
+        if summary[len(_TARGET_MARKER):].split("]", 1)[0].strip() in _WHOLE_SUITE_TARGETS:
+            return True
+    return False
+
+
 def _touched_python(req: VerifyRequest) -> bool:
     """Whether this task wrote any Python at all.
 
@@ -95,6 +116,14 @@ def _touched_python(req: VerifyRequest) -> bool:
     anyway is how the second 95120 trial blocked with a correct page
     uncommitted (live, 2026-09-09).
 
+    A `.py` under `workspace/` is the same case one directory over.
+    That is scratch: gitignored, imported by no test, invisible to
+    review, and incapable of breaking the suite. Demanding a 4,600-test
+    run before a throwaway script may be written cost a real task its
+    whole revision budget -- Sim built the script, ran the suite, the
+    suite failed for reasons of its own, and the task was abandoned
+    holding a correct artefact (observer, 2026-09-10).
+
     Unknown is Python: when the request carries no `written_paths` at
     all (an older producer, a blocked session), this stays true and the
     check behaves exactly as it did before -- the conservative reading,
@@ -103,7 +132,7 @@ def _touched_python(req: VerifyRequest) -> bool:
     paths = written_paths(req)
     if not paths:
         return True
-    return any(p.lower().endswith(".py") for p in paths)
+    return any(p.lower().endswith(".py") and not is_scratch(p) for p in paths)
 
 
 class FullSuiteRanCheck:
@@ -138,19 +167,27 @@ class FullSuiteRanCheck:
         if _ran_whole_suite_and_passed(steps):
             return CheckResult(status="passed", detail="the whole suite ran and passed")
         ran_something = any(s.get("tool") == "run_tests" for s in steps)
-        detail = (
-            "run_tests was called on a narrower target than the whole suite, or never called at all -- "
-            "this change was never checked against anything it might have broken elsewhere"
-            if ran_something else
-            "no run_tests call in this session at all -- this change was never checked against anything"
-        )
+        suite_failed = _ran_whole_suite_and_failed(steps)
+        hint = ("call run_tests with no target (or target='tests') to run the whole suite, "
+                "confirm it passes, then commit")
+        if suite_failed:
+            detail = ("the whole suite was run and it FAILED -- the change is not checked until "
+                      "the suite passes")
+            hint = ("the whole suite already ran and did not pass. Read the failures in that "
+                    "run_tests output and fix them; running the same target again will not "
+                    "change the answer")
+        elif ran_something:
+            detail = ("run_tests was called on a narrower target than the whole suite -- "
+                      "this change was never checked against anything it might have broken elsewhere")
+        else:
+            detail = "no run_tests call in this session at all -- this change was never checked against anything"
         return CheckResult(
             status="failed", detail=detail,
-            evidence={"steps_with_run_tests": sum(1 for s in steps if s.get("tool") == "run_tests")},
+            evidence={"steps_with_run_tests": sum(1 for s in steps if s.get("tool") == "run_tests"),
+                      "whole_suite_failed": suite_failed},
             feedback=Feedback(
                 mechanical_errors=(detail,),
-                revise_hint="call run_tests with no target (or target='tests') to run the whole suite, "
-                            "confirm it passes, then commit",
+                revise_hint=hint,
                 retryable=True,
             ),
         )

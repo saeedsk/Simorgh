@@ -428,3 +428,68 @@ class HomeUndoTestCase(_ToolCase):
             {"before": {"lock.front_door": {"state": "locked", "attributes": {}}}}, ctx=_ctx())
         self.assertFalse(result.ok)
         self.assertIn("no restorable state", result.error)
+
+
+class UndoSaysWhatActuallyWentBackTestCase(unittest.IsolatedAsyncioTestCase):
+    """"The call did not raise" and "the thing went back" are different
+    facts, and this is the tool whose entire job is the second one.
+
+    Home Assistant answers 200 for a service call on a device that is
+    unplugged. Until 2026-09-10 `home_undo` appended to `restored` on
+    the absence of an exception and threw the `ServiceResult` away, so
+    an observer watched it report `put back: light.living_room -> off`
+    with `ok=True` while the bulb was still on. Dry-run mode counted
+    every entity as restored too, having sent nothing at all.
+    """
+
+    def _undo(self, house: FakeHomeAssistant, config: Config | None = None):
+        tools = {t.name: t for t in home_tools(config or Config(), client=house)}
+        return tools["home_undo"]
+
+    async def test_a_device_that_did_not_come_back_is_not_called_restored(self):
+        import json
+
+        house = FakeHomeAssistant(unavailable=("light.living_room",))
+        result = await self._undo(house).run(
+            {"op": "undo", "before": json.dumps({"light.living_room": {"state": "off"}})},
+            ctx=_ctx())
+        self.assertFalse(result.ok)
+        self.assertTrue((result.output or "").startswith("could not put back:"))
+        self.assertIn("still", result.output or "")
+        self.assertEqual(result.metadata["restored"], 0)
+
+    async def test_a_device_that_did_come_back_still_reports_restored(self):
+        import json
+
+        house = FakeHomeAssistant()
+        await house.call("light.turn_on", entity_ids=("light.living_room",))
+        result = await self._undo(house).run(
+            {"op": "undo", "before": json.dumps({"light.living_room": {"state": "off"}})},
+            ctx=_ctx())
+        self.assertTrue(result.ok)
+        self.assertIn("put back:", result.output or "")
+        self.assertEqual(result.metadata["restored"], 1)
+
+    async def test_a_dry_run_restores_nothing_and_says_so(self):
+        """Dry run sends nothing, so nothing went back -- counting those
+        as restored is the same lie with the network unplugged."""
+        import json
+
+        house = FakeHomeAssistant()
+
+        class _DryRun:
+            configured = True
+
+            def __getattr__(self_inner, name):
+                return getattr(house, name)
+
+            async def call(self_inner, service, *, entity_ids=(), data=None, settle_s=0.0):
+                result = await house.call(service, entity_ids=entity_ids, data=data)
+                return ServiceResult(service=service, entities=tuple(entity_ids),
+                                     before=result.before, after=result.after, dry_run=True)
+
+        result = await self._undo(_DryRun()).run(
+            {"op": "undo", "before": json.dumps({"light.living_room": {"state": "off"}})},
+            ctx=_ctx())
+        self.assertEqual(result.metadata["restored"], 0)
+        self.assertIn("dry run", result.output or "")

@@ -349,10 +349,26 @@ class HomeUndoTool(_HomeTool):
                 skipped.append(f"{entity_id} (was {state!r}, which cannot be re-applied)")
                 continue
             try:
-                await client.call(service, entity_ids=(entity_id,), data=data, settle_s=0.0)
-                restored.append(f"{entity_id} -> {state}")
+                result = await client.call(service, entity_ids=(entity_id,), data=data, settle_s=0.0)
             except HomeUnavailable as exc:
                 skipped.append(f"{entity_id} ({exc})")
+                continue
+            # Home Assistant answers 200 for a service call on a device
+            # that is unplugged, so "the call did not raise" and "the
+            # thing went back" are different facts -- the difference
+            # this whole domain exists to keep straight, in the one tool
+            # whose entire job is putting something back. Until
+            # 2026-09-10 this appended to `restored` on the absence of
+            # an exception, and an observer watched it report "put back:
+            # light.living_room -> off" for a bulb that was still on.
+            if result.dry_run:
+                skipped.append(f"{entity_id} (dry run: nothing was sent)")
+                continue
+            after = (result.after or {}).get(entity_id)
+            if after is not None and after.state != state:
+                skipped.append(f"{entity_id} (still {after.state!r}, not {state!r})")
+                continue
+            restored.append(f"{entity_id} -> {state}")
 
         lines = []
         if restored:
