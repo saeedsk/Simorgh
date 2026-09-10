@@ -483,3 +483,36 @@ class TestMcpServerWiring(_ExecutionServiceTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConnectorsAreProbedAndClosed(_ExecutionServiceTestCase):
+    """contracts/connector.py section 3: a connector handed to Execution
+    is probed with the capabilities (so the CLI lists it) and closed
+    when the service stops."""
+
+    async def _start_with(self, connector) -> None:
+        self.service = Service(config=ExecutionConfig(repo_root=self.root), connectors=[connector])
+        await self.service.start(self.ctx)
+
+    async def test_a_connector_shows_up_in_the_capabilities_stream(self):
+        from simorgh.contracts.connector import FakeConnector
+        from simorgh.execution.capabilities import CAPABILITIES_STREAM
+
+        fake = FakeConnector("caldav", ok=False, detail="set CALDAV_PASSWORD", missing=("CALDAV_PASSWORD",))
+        await self._start_with(fake)
+        probed = await self._wait_for(
+            topics.TOOL_PROBED, predicate=lambda p: p.get("name") == "connector:caldav")
+        self.assertIsNotNone(probed)
+        self.assertFalse(probed.payload["ok"])
+        self.assertIn("CALDAV_PASSWORD", probed.payload["detail"])
+        events = await self.ledger.read(CAPABILITIES_STREAM)
+        self.assertIn("connector:caldav", {e.payload.get("name") for e in events})
+        self.assertGreaterEqual(fake.probes, 1)
+
+    async def test_stop_closes_every_connector(self):
+        from simorgh.contracts.connector import FakeConnector
+
+        fake = FakeConnector("imap")
+        await self._start_with(fake)
+        await self.service.stop()
+        self.assertEqual(fake.closed, 1)

@@ -49,7 +49,7 @@ from .mcp import McpClient, McpServerConfig, McpToolProxy, mcp_single_arg_key
 from .tools import SkillTool, builtin_tools
 from .verifier import ApprovalVerifier
 
-from .capabilities import CAPABILITIES_STREAM, PROBES, degraded_detail, run_probes
+from .capabilities import CAPABILITIES_STREAM, PROBES, connector_probe, degraded_detail, run_probes
 
 
 def _probe_tools(name: str) -> tuple[str, ...]:
@@ -84,9 +84,16 @@ class Service:
     consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED, topics.LEARN_SKILL_ACQUIRED)
     produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS, topics.TOOL_PROBED,)
 
-    def __init__(self, *, config: Config | None = None, extra_tools: list | None = None) -> None:
+    def __init__(self, *, config: Config | None = None, extra_tools: list | None = None,
+                 connectors: list | None = None) -> None:
         self._config = config or Config()
         self._extra_tools = extra_tools or []
+        # Account-backed integrations (contracts/connector.py). Each one
+        # is probed with the capabilities and listed by the CLI, so "why
+        # can't Sim reach my mail" is one command; each is closed on
+        # stop. Tools that use a connector receive it at construction,
+        # the same injection seam `extra_tools` already is.
+        self._connectors: list = list(connectors or [])
         self._registry: dict[str, object] = {}
         self._subs: list = []
         self._paused = False
@@ -169,9 +176,16 @@ class Service:
             return  # one already running; its results will be fresher
         self._probe_task = asyncio.create_task(self._probe_capabilities())
 
+    def register_connector(self, connector) -> None:
+        """Add a connector after construction (a tool module that builds
+        its own). It is probed on the next capability pass and closed
+        with the service."""
+        self._connectors.append(connector)
+
     async def _probe_capabilities(self) -> None:
         try:
-            results = await run_probes()
+            probes = PROBES + tuple(connector_probe(c) for c in self._connectors)
+            results = await run_probes(probes)
         except Exception as exc:  # noqa: BLE001 -- diagnostics must never break the boot they diagnose
             self._ctx.logger.warning("capability_probe_failed", error=repr(exc))
             return
@@ -198,6 +212,9 @@ class Service:
         for client in self._mcp_clients:
             await client.close()
         self._mcp_clients.clear()
+        for connector in self._connectors:
+            with contextlib.suppress(Exception):
+                await connector.close()
 
     async def health(self) -> Health:
         if self._degraded_detail:

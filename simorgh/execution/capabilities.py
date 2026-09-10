@@ -168,6 +168,24 @@ async def run_probes(probes: tuple[Probe, ...] = PROBES, *, include: tuple[Cost,
     return results
 
 
+def connector_probe(connector) -> Probe:
+    """Wrap a `contracts.connector.Connector` as a probe named
+    `connector:<name>`, so every account-backed integration shows up in
+    `capabilities` beside Node and Docker with the same yes/NO and the
+    same "what to set" detail. Cost `cheap`: a connector's `probe()` is
+    required to be side-effect-free and never a paid call, but it may
+    do a free HEAD/whoami, which is more than an import check."""
+
+    async def _run() -> tuple[bool, str]:
+        status = await connector.probe()
+        detail = status.detail or ("ready" if status.ok else "unavailable")
+        if not status.ok and status.missing:
+            detail += " -- missing: " + ", ".join(status.missing)
+        return bool(status.ok), detail
+
+    return Probe(f"connector:{connector.name}", "cheap", _run)
+
+
 def degraded_detail(results: list[ProbeResult]) -> str:
     """One line naming what is unavailable, or "" when all is well.
 

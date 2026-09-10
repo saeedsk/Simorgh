@@ -198,3 +198,37 @@ class PuppeteerProbeTestCase(unittest.IsolatedAsyncioTestCase):
         ok, detail = await self._probe()
         self.assertTrue(ok, "a corrupt manifest is not proof the package is absent")
         self.assertIn("version unreadable", detail)
+
+
+class ConnectorProbeTestCase(unittest.IsolatedAsyncioTestCase):
+    """`connector_probe`: every account-backed integration
+    (contracts/connector.py) is listed by `capabilities` next to Node
+    and Docker, with the same yes/NO and the same what-to-set detail."""
+
+    async def test_a_ready_connector_is_a_passing_cheap_probe(self):
+        from simorgh.contracts.connector import FakeConnector
+        from simorgh.execution.capabilities import connector_probe
+
+        probe = connector_probe(FakeConnector("caldav", detail="fastmail reachable"))
+        self.assertEqual((probe.name, probe.cost), ("connector:caldav", "cheap"))
+        results = await run_probes((probe,))
+        self.assertTrue(results[0].ok)
+        self.assertEqual(results[0].detail, "fastmail reachable")
+
+    async def test_a_connector_that_cannot_run_names_what_is_missing(self):
+        from simorgh.contracts.connector import FakeConnector
+        from simorgh.execution.capabilities import connector_probe
+
+        probe = connector_probe(FakeConnector(
+            "imap", ok=False, detail="no credential", missing=("IMAP_PASSWORD", "imapclient")))
+        results = await run_probes((probe,))
+        self.assertFalse(results[0].ok)
+        self.assertIn("IMAP_PASSWORD", results[0].detail)
+        self.assertIn("imapclient", results[0].detail)
+
+    async def test_a_cheap_connector_probe_never_degrades_health(self):
+        from simorgh.contracts.connector import FakeConnector
+        from simorgh.execution.capabilities import connector_probe
+
+        results = await run_probes((connector_probe(FakeConnector("x", ok=False)),))
+        self.assertEqual(degraded_detail(results), "")
