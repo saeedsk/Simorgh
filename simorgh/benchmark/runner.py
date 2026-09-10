@@ -60,6 +60,7 @@ class Runner:
                 expected=case.answer, error=f"needs the attached file {case.attachment!r}",
             )
         started = time.monotonic()
+        cost_usd = 0.0
         # Listen *before* asking. A fast pipeline can complete the task
         # between the create reply and a later subscribe, and the answer
         # would land on nobody -- the case would then time out and score
@@ -110,6 +111,9 @@ class Runner:
                           f"case's question -- never actually asked",
                 )
             answer_text, steps, error = await watch.wait(task_id, self._config.case_timeout_s)
+            # Read before `watch.stop()`, and after the outcome, so a
+            # cancelled or blocked case still reports what it spent.
+            cost_usd = watch.cost(task_id)
             if not answer_text and error:
                 # A case we gave up on used to keep its worker. The
                 # worker takes one task at a time, so case 1 timing out
@@ -127,7 +131,7 @@ class Runner:
         seconds = time.monotonic() - started
         if error and not answer_text:
             return CaseResult(case_id=case.id, level=case.level, correct=False, expected=case.answer,
-                              seconds=seconds, steps=steps, error=error)
+                              seconds=seconds, steps=steps, cost_usd=cost_usd, error=error)
         # There is an answer even though something of ours stopped it.
         # Score it: GAIA scores the answer, and our verifier is not part
         # of GAIA. Record the block, so "our verifier rejected a right
@@ -135,7 +139,7 @@ class Runner:
         correct, extracted = score_case(answer_text, case.answer, mode=case.mode)
         return CaseResult(
             case_id=case.id, level=case.level, correct=correct, answer=extracted,
-            expected=case.answer, seconds=seconds, steps=steps,
+            expected=case.answer, seconds=seconds, steps=steps, cost_usd=cost_usd,
             blocked_by=error, error=error,
         )
 
@@ -184,14 +188,22 @@ class _AnswerWatch:
         self._bus = bus
         self._subs: list = []
         self._steps: dict[str, int] = {}
+        # What each case's task spent. `task.step` carries it now, and
+        # nothing was reading it -- so every benchmark run reported a
+        # cost of $0.00 for real, billed model calls.
+        self._cost: dict[str, float] = {}
         self._outcomes: dict[str, tuple[str, dict]] = {}
         self._waiters: dict[str, asyncio.Future] = {}
 
     async def start(self) -> None:
         async def _on_step(message: Message) -> None:
             payload = message.payload
+            task_id = payload.get("task_id", "")
+            if payload.get("cost_usd"):
+                # Counted on EVERY step, including the ones with no `ok`
+                # -- a think that failed was still billed.
+                self._cost[task_id] = self._cost.get(task_id, 0.0) + float(payload["cost_usd"])
             if payload.get("ok") is not None:
-                task_id = payload.get("task_id", "")
                 self._steps[task_id] = self._steps.get(task_id, 0) + 1
 
         def _finisher(kind: str):
@@ -216,6 +228,9 @@ class _AnswerWatch:
         for sub in self._subs:
             await sub.unsubscribe()
         self._subs = []
+
+    def cost(self, task_id: str) -> float:
+        return round(self._cost.get(task_id, 0.0), 6)
 
     async def wait(self, task_id: str, timeout_s: float) -> tuple[str, int, str]:
         if task_id not in self._outcomes:

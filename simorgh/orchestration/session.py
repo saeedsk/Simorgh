@@ -680,6 +680,11 @@ class SessionRunner:
             trace_id=session.task_id, clock=self._clock,
         )
         reply = await self._bus.request_or_error(req, timeout=self._think_timeout_s)
+        # Every think is billed, and `cognition.think.reply` says what it
+        # cost. Accumulating here is what puts a real number on
+        # `task.step` and, downstream, on a benchmark run.
+        session.spent_usd += float(reply.payload.get("cost_usd") or 0.0)
+        session.spent_tokens += int(reply.payload.get("tokens") or 0)
         if reply.payload.get("ok") is False:
             # Live-caught (v2 live trial, 2026-09-06): this used to just
             # return None, and every caller collapsed that into a silent,
@@ -1032,6 +1037,12 @@ class SessionRunner:
     # -- ledger + bus plumbing -----------------------------------------------------------------
 
     async def _record_step(self, session: Session, step: Step) -> None:
+        # The spend since the previous step, so a task's steps SUM to the
+        # task's cost instead of each repeating the running total.
+        already = sum(s.cost_usd for s in session.steps if s is not step)
+        step.cost_usd = max(0.0, round(session.spent_usd - already, 6))
+        step.tokens = max(0, session.spent_tokens
+                          - sum(s.tokens for s in session.steps if s is not step))
         payload = {
             "task_id": session.task_id, "step_no": step.no, "phase": step.phase, "summary": step.summary,
         }
@@ -1039,6 +1050,10 @@ class SessionRunner:
             payload["tool"] = step.tool
         if step.ok is not None:
             payload["ok"] = step.ok
+        if step.cost_usd:
+            payload["cost_usd"] = step.cost_usd
+        if step.tokens:
+            payload["tokens"] = step.tokens
         await self._append(session, topics.TASK_STEP, payload)
         await self._publish(session, topics.TASK_STEP, payload)
 

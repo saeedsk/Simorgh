@@ -92,6 +92,13 @@ class Session:
     parent_id: str | None = None
     steps: list[Step] = field(default_factory=list)
     budget: Budget = field(default_factory=lambda: Budget(max_steps=6))
+    # What this session's thinking has cost so far. `Step.cost_usd` has
+    # existed since the beginning and nothing ever set it, so
+    # `task.step` carried no cost, so a benchmark run summed its cases
+    # to $0.00 and reported that as the price of the run -- a number
+    # whose whole job is to be true.
+    spent_usd: float = 0.0
+    spent_tokens: int = 0
     messages: list[dict] = field(default_factory=list)  # the running cognition.think transcript
     # Files this session wrote and has not committed. A session that
     # ends with anything left here put a change in the tree and
