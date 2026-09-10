@@ -243,6 +243,21 @@ class Service:
                         f"{why} -- each case is scored by running its repository's own tests "
                         f"in the container image the dataset names")))
                 return
+        if level:
+            # "no such level" and "no cases at that level" are different
+            # answers and used not to be. The creator typed `level=1`
+            # through `level=4` at SWE-bench Verified and got
+            # `no_cases` four times (live, 2026-09-10): its levels are
+            # named by duration, and nothing in the refusal said so.
+            resolved = suite.match_level(level)
+            if resolved is None:
+                await self._ctx.bus.reply(message, type=topics.BENCHMARK_RUN_REPLY,
+                                          payload=error_reply_payload("no_such_level", (
+                                              f"{name} has no level {level!r}. Its levels, easiest first: "
+                                              + " · ".join(f"{i}={lv}" for i, lv in enumerate(suite.levels(), 1))
+                                              + " -- the number or the name works.")))
+                return
+            level = resolved
         chosen = suite.sample(limit, level=level)
         if not len(chosen):
             await self._ctx.bus.reply(message, type=topics.BENCHMARK_RUN_REPLY,
@@ -257,7 +272,7 @@ class Service:
         self._task = asyncio.create_task(self._run(chosen, record), name=f"benchmark-{record.run_id}")
         await self._ctx.bus.reply(message, type=topics.BENCHMARK_RUN_REPLY, payload={
             "ok": True, "run_id": record.run_id, "suite": chosen.name, "cases": len(chosen),
-            "model": self._model, "suite_version": chosen.version,
+            "model": self._model, "suite_version": chosen.version, "level": level,
         })
 
     # -- the run -------------------------------------------------------

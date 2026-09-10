@@ -45,9 +45,15 @@ def _records(payload: dict) -> list[dict]:
 
 
 def started(payload: dict) -> str:
+    # The level is echoed because it may have been RESOLVED: `level=1`
+    # at SWE-bench Verified means "<15 min fix", and a run that quietly
+    # picked a different level than the one typed is a run whose number
+    # means something else.
+    level = payload.get("level") or ""
     return (
         f"benchmark started: {payload.get('suite')} · {payload.get('cases')} cases · "
-        f"as {payload.get('model')} · run {payload.get('run_id')}\n"
+        + (f"level {level} · " if level else "")
+        + f"as {payload.get('model')} · run {payload.get('run_id')}\n"
         "  progress is narrated as it goes; `benchmark` shows the result when it lands"
     )
 
@@ -56,10 +62,23 @@ def stopped(payload: dict) -> str:
     return payload.get("detail") or ("stopped" if payload.get("stopped") else "nothing to stop")
 
 
+def _levels_line(levels: list) -> str:
+    """Levels, easiest first, numbered when their names are not already
+    numbers -- `level=2` is typed off this line, and SWE-bench
+    Verified's levels are durations, so without the ordinal there was
+    nothing on screen connecting the two."""
+    names = [str(level) for level in levels if str(level)]
+    if not names:
+        return "none"
+    if all(name.isdigit() for name in names):
+        return ", ".join(names)
+    return " · ".join(f"{i}={name}" for i, name in enumerate(names, 1))
+
+
 def loaded(payload: dict) -> str:
     lines = [
         f"{payload.get('suite')}: {payload.get('cases')} cases  ·  revision {payload.get('suite_version')}",
-        f"  levels: {', '.join(payload.get('levels') or []) or 'none'}",
+        f"  levels: {_levels_line(payload.get('levels') or [])}",
     ]
     needs = int(payload.get("needs_attachment") or 0)
     if needs:

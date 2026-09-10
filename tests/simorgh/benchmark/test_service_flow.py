@@ -360,6 +360,35 @@ class StopAndBusyTestCase(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.01)
         return reply.payload
 
+    async def test_a_level_that_names_nothing_lists_the_levels_there_are(self) -> None:
+        """`no_such_level`, not `no_cases`. The creator asked SWE-bench
+        Verified for level 1 through 4 and was told four times that it
+        had no cases at that level, while it had 500 across four levels
+        named by duration (live, 2026-09-10)."""
+        durations = Suite(name="toy", version="v1", cases=tuple(
+            Case(id=f"c{i}", question="q", answer="x", suite="toy",
+                 level=level)
+            for i, level in enumerate(("<15 min fix", "1-4 hours", ">4 hours"))
+        ))
+        mock.patch.object(datasets_mod, "load", return_value=durations).start()
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.dict(datasets_mod.SOURCES, {"toy": datasets_mod.Source(
+            name="toy", dataset="local/toy", config="default", split="test")}).start()
+
+        missing = await self.kernel.bus.request(self.kernel.bus.new(
+            topics.BENCHMARK_RUN_REQUEST, {"suite": "toy", "limit": 1, "level": "9"}), timeout=15)
+        error = missing.payload.get("error") or {}
+        self.assertEqual(error.get("code"), "no_such_level", missing.payload)
+        detail = error.get("detail", "")
+        for level in ("<15 min fix", "1-4 hours", ">4 hours"):
+            self.assertIn(level, detail)
+
+        started = await self.kernel.bus.request(self.kernel.bus.new(
+            topics.BENCHMARK_RUN_REQUEST, {"suite": "toy", "limit": 1, "level": "2"}), timeout=15)
+        self.assertTrue(started.payload.get("ok"), started.payload)
+        self.assertEqual(started.payload.get("level"), "1-4 hours")
+        self.assertEqual(started.payload.get("cases"), 1)
+
     async def test_a_second_run_is_refused_with_progress_and_a_way_out(self) -> None:
         await self._start_a_run()
         reply = await self.kernel.bus.request(self.kernel.bus.new(

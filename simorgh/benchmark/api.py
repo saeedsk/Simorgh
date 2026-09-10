@@ -20,11 +20,53 @@ and any suite without levels simply reports one.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 import json
 
 from dataclasses import dataclass, field, replace
+
+#: Minutes per unit, for the duration-shaped level names SWE-bench
+#: Verified uses. Longest spellings first so `minutes` is not matched
+#: by the `min` inside it.
+_UNIT_MINUTES = (("hours", 60.0), ("hour", 60.0), ("minutes", 1.0), ("min", 1.0), ("days", 1440.0), ("day", 1440.0))
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _level_key(level: str) -> tuple[int, float, str]:
+    """Sort key that puts a suite's levels in order of difficulty.
+
+    Three families, kept apart by the leading rank so they never
+    interleave: a bare number (GAIA's "1".."3"), a duration
+    ("<15 min fix", "1-4 hours"), and anything else, which falls back
+    to its own text.
+
+    A duration sorts on its FIRST number, in minutes, with `<` before
+    and `>` after an equal one -- which is what separates
+    "<15 min fix" from "15 min - 1 hour". Both start at 15.
+    """
+    text = (level or "").strip()
+    if not text:
+        return (3, 0.0, "")
+    try:
+        return (0, float(text), "")
+    except ValueError:
+        pass
+    match = _NUMBER.search(text)
+    lowered = text.casefold()
+    if match and any(unit in lowered for unit, _ in _UNIT_MINUTES):
+        # The unit that follows the number, by POSITION: "15 min - 1
+        # hour" contains both "min" and "hour", and reading it as an
+        # hour puts it after "1-4 hours".
+        after = lowered[match.end():]
+        found = [(after.index(unit), per) for unit, per in _UNIT_MINUTES if unit in after]
+        if not found:
+            found = [(lowered.index(unit), per) for unit, per in _UNIT_MINUTES if unit in lowered]
+        minutes = float(match.group()) * min(found)[1]
+        edge = -1 if text.lstrip().startswith("<") else (1 if text.lstrip().startswith(">") else 0)
+        return (1, minutes, str(edge))
+    return (2, 0.0, lowered)
 
 
 @dataclass(frozen=True)
@@ -93,7 +135,46 @@ class Suite:
         return len(self.cases)
 
     def levels(self) -> tuple[str, ...]:
-        return tuple(sorted({c.level for c in self.cases}))
+        """The suite's levels, easiest first.
+
+        Sorted by difficulty, not alphabetically. GAIA's are "1".."3"
+        and sort the same either way, but SWE-bench Verified's are
+        durations -- `<15 min fix`, `15 min - 1 hour`, `1-4 hours`,
+        `>4 hours` -- and `sorted()` put a four-hour task second
+        (live, 2026-09-10). A list whose order means nothing is worse
+        than no order at all, because `level=2` is read off it.
+        """
+        return tuple(sorted({c.level for c in self.cases}, key=_level_key))
+
+    def match_level(self, token: str) -> str | None:
+        """The level `token` names, or None if it names none.
+
+        `level=2` has to keep working. GAIA taught it -- its levels
+        really are called "1", "2", "3" -- and a user who learned it
+        there typed `level=1` at SWE-bench Verified four times in a row
+        and was told four times that the suite has no such level, while
+        `suites` was printing the four levels it does have (live,
+        2026-09-10). Exact match still wins, so GAIA is untouched;
+        a bare number falls back to an ORDINAL into `levels()`, which
+        is why that order had to become meaningful first.
+        """
+        token = (token or "").strip()
+        if not token:
+            return None
+        levels = self.levels()
+        if token in levels:
+            return token
+        folded = token.casefold()
+        for level in levels:
+            if level.casefold() == folded:
+                return level
+        if token.isdigit():
+            index = int(token)
+            if 1 <= index <= len(levels):
+                return levels[index - 1]
+            return None
+        matches = [level for level in levels if folded in level.casefold()]
+        return matches[0] if len(matches) == 1 else None
 
     def sample(self, limit: int, *, level: str = "") -> "Suite":
         """The first `limit` cases, optionally of one level.
@@ -101,7 +182,12 @@ class Suite:
         First rather than random: a run you can repeat is worth more
         here than an unbiased one, because the point is to see movement
         between two runs of the same thing. `shuffle` is deliberately
-        not offered."""
+        not offered.
+
+        `level` is matched exactly here. Callers that take the token
+        from a human resolve it through `match_level` first, so that
+        "no cases" and "no such level" stay different answers.
+        """
         cases = tuple(c for c in self.cases if not level or c.level == level)
         return replace(self, cases=cases[:limit] if limit > 0 else cases)
 
