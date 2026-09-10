@@ -184,7 +184,13 @@ class Kernel:
         # makes a typo in simorgh.toml indistinguishable from a setting
         # that works: the file changes, the system does not, and nothing
         # says so. Report it once, at boot, and never refuse to start.
-        configcheck.report(self.config, make_logger("kernel"))
+        dead_sections = configcheck.report(self.config, make_logger("kernel"))
+        # Those warnings scroll past once, at boot, and are then gone.
+        # The Kernel is the only place that holds every subsystem's
+        # config object at the same time, so it is the only place that
+        # can write down what is actually in force -- which is what the
+        # `config` command reads back.
+        await self._record_effective_config(dead_sections)
         factories = build_factories(
             bus_client=self.bus, ledger_client=self.ledger, run_repl=self._interactive,
             execution_config=ExecutionConfig.from_mapping(self.config.section("execution")),
@@ -419,6 +425,69 @@ class Kernel:
     async def wait_for_stop(self) -> None:
         await self._stop_event.wait()
 
+    CONFIG_STREAM = "config:effective"
+
+    async def _record_effective_config(self, dead_sections) -> None:
+        """Write the settings actually in force to the Ledger.
+
+        Every subsystem's `Config.from_mapping` silently ignores a key
+        it does not recognise, so a typo in simorgh.toml is
+        indistinguishable from a setting that works: the file changes,
+        the system does not, and nothing says so. The boot warning says
+        it once; this makes it answerable later, from the terminal, by
+        anyone who was not watching the boot.
+
+        Best effort throughout. A diagnostic that can stop a boot is a
+        worse problem than the one it diagnoses.
+        """
+        import dataclasses
+
+        from simorgh.execution.config import Config as ExecutionConfigModel
+        from simorgh.guardian.config import Config as GuardianConfigModel
+        from simorgh.interface.config import Config as InterfaceConfigModel
+
+        models = {"execution": ExecutionConfigModel, "guardian": GuardianConfigModel,
+                  "interface": InterfaceConfigModel}
+        sections: dict = {}
+        for name, model in models.items():
+            written = self.config.section(name)
+            try:
+                effective = model.from_mapping(written)
+            except Exception:  # noqa: BLE001 -- a section that will not parse is still worth listing
+                sections[name] = {"error": "this section could not be parsed"}
+                continue
+            fields = {}
+            for field in dataclasses.fields(effective):
+                value = getattr(effective, field.name)
+                fields[field.name] = {
+                    "value": _config_scalar(value),
+                    # Where it came from. "It is the default" and "you
+                    # set it to the same thing as the default" look
+                    # identical in the value alone, and only one of them
+                    # means a config line is doing nothing.
+                    "source": "file" if field.name in written else "default",
+                }
+            sections[name] = fields
+
+        payload = {
+            "sections": sections,
+            "dead_sections": list(dead_sections or ()),
+            "dead_fields": [f"{section}.{field}"
+                            for section, field in configcheck.dead_fields(self.config)],
+            "path": str(self.config.path) if self.config.path else "",
+            "hash": self.config.hash,
+        }
+        try:
+            import uuid
+
+            from simorgh.contracts.envelope import Event
+
+            await self.ledger.append(self.CONFIG_STREAM, Event(
+                stream=self.CONFIG_STREAM, type="effective", ts=self._clock.now(),
+                trace_id=str(uuid.uuid4()), causation_id=None, payload=payload))
+        except Exception as exc:  # noqa: BLE001 -- see the docstring
+            make_logger("kernel").warning("config.effective_not_recorded", error=repr(exc))
+
     async def shutdown(self) -> None:
         for sub in self._subs:
             await sub.unsubscribe()
@@ -581,3 +650,19 @@ class _WallClock:
 
 
 __all__ = ["Kernel", "KernelBootError", "VERSION", "WorkerKernel"]
+
+
+def _config_scalar(value):
+    """A config value the Ledger will accept. Paths and tuples are the
+    two shapes that appear constantly and do not survive JSON."""
+    from pathlib import Path as _Path
+
+    if isinstance(value, _Path):
+        return str(value)
+    if isinstance(value, (tuple, set, frozenset)):
+        return [_config_scalar(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _config_scalar(v) for k, v in value.items()}
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return repr(value)

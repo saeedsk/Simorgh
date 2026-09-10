@@ -189,15 +189,25 @@ class Service:
         self._probe_task = asyncio.create_task(self._probe_capabilities())
 
     def _register_configured_connectors(self, ctx) -> None:
+        try:
+            from .domainstatus import domain_connectors
+
+            self._connectors.extend(domain_connectors(self._config, secrets=ctx.secrets))
+        except Exception as exc:  # noqa: BLE001 -- diagnostics may not break the boot they diagnose
+            ctx.logger.warning("domain_connectors_failed", error=repr(exc))
+
         accounts = getattr(self._config, "pim_accounts", ())
         if not accounts:
             return
         try:
             from .pim.accounts import build_all
 
+            # One connector per ACCOUNT rather than one for `pim`: a
+            # mailbox failing while another works is exactly what a
+            # single row would hide.
             for connector in build_all(accounts, secrets=ctx.secrets).values():
                 self._connectors.append(connector)
-        except Exception as exc:  # noqa: BLE001 -- diagnostics may not break the boot they diagnose
+        except Exception as exc:  # noqa: BLE001
             ctx.logger.warning("pim_connectors_failed", error=repr(exc))
 
     def register_connector(self, connector) -> None:

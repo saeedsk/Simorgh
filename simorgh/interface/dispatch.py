@@ -58,6 +58,8 @@ SCHEDULE_STREAM = "schedule"
 # `reflection/service.py::Service.ALERTS_STREAM`, same agreement.
 TOOLS_STREAM = "execution:tools"
 ALERTS_STREAM = "reflection:alerts"
+# And `kernel/service.py::Kernel.CONFIG_STREAM`.
+CONFIG_STREAM = "config:effective"
 # `simorgh.toml`'s primary search location (`kernel/config.py::find_
 # config_path`'s first candidate, `./simorgh.toml`) -- this command
 # targets the same file a normal `sim.sh` boot would read next, but
@@ -289,6 +291,15 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 
     if name == "tool":
         return await _tool_command(args, bus=bus, ledger=ledger, session_id=session_id)
+
+    if name == "config":
+        return await _config_command(ledger, args)
+
+    if name == "domains":
+        return await _domains_command(ledger)
+
+    if name == "alerts":
+        return await _alerts_command(ledger, args)
 
     if name == "capabilities":
         return await _capabilities_command(ledger)
@@ -747,6 +758,198 @@ async def _run_tool(*, bus: BusClient, ledger: LedgerClient, tool: str, raw: str
     took = payload.get("duration_ms")
     suffix = f"  ({took} ms)" if isinstance(took, int) and took > 50 else ""
     return Outcome((body or f"{tool} finished with no output") + suffix)
+
+
+#: Domain -> what it is for, in the words a person would use. The order
+#: is the order they are printed in.
+_DOMAIN_BLURB: tuple[tuple[str, str], ...] = (
+    ("knowledge", "your own documents, searchable"),
+    ("pim", "calendar, mail and reminders"),
+    ("home", "the house, through Home Assistant"),
+    ("energy", "what the house uses and what it costs"),
+    ("media", "what is playing, and running it"),
+    ("security", "this machine's own exposure"),
+)
+
+
+async def _domains_command(ledger: LedgerClient) -> Outcome:
+    """Which domains are set up, which answer, and what to set.
+
+    Reads the same capability probes `capabilities` does. Two states are
+    kept apart on purpose: "nothing configured yet" is not a fault and
+    must not read like one, while "configured and not answering" is,
+    and is the thing a person is actually looking for.
+    """
+    try:
+        events = await ledger.read(CAPABILITIES_STREAM)
+    except Exception as exc:  # noqa: BLE001 -- a diagnostic must not raise
+        return Outcome(f"could not read the capability probes: {exc!r}")
+    latest: dict[str, dict] = {}
+    for event in events:
+        payload = event.payload or {}
+        name = str(payload.get("name") or "")
+        if name.startswith("connector:"):
+            latest[name[len("connector:"):]] = payload
+    if not latest:
+        return Outcome("no domain probes recorded yet -- they run just after boot, so try "
+                       "again in a moment.")
+
+    lines: list[str] = []
+    working = 0
+    for domain, blurb in _DOMAIN_BLURB:
+        if domain == "pim":
+            rows = {name: row for name, row in latest.items()
+                    if name.startswith(("imap:", "caldav:"))}
+            if not rows:
+                lines.append(f"  [--]  {domain:10} {blurb}")
+                lines.append("            no account configured -- add one under "
+                             "[[execution.pim_accounts]], then `simorgh vault add imap:<name>`")
+                continue
+            for name, row in sorted(rows.items()):
+                mark = "ok" if row.get("ok") else "--"
+                working += 1 if row.get("ok") else 0
+                lines.append(f"  [{mark}]  {domain:10} {blurb}  ({name})")
+                lines.append(f"            {str(row.get('detail') or '').strip()}")
+            continue
+        row = latest.get(domain)
+        if row is None:
+            lines.append(f"  [??]  {domain:10} {blurb}")
+            lines.append("            not probed yet")
+            continue
+        mark = "ok" if row.get("ok") else "--"
+        working += 1 if row.get("ok") else 0
+        lines.append(f"  [{mark}]  {domain:10} {blurb}")
+        detail = str(row.get("detail") or "").strip()
+        if detail:
+            lines.append(f"            {detail}")
+
+    header = (f"{working} of {len(_DOMAIN_BLURB)} domains working. `[--]` means nothing is set "
+              f"up yet, not that something is broken.")
+    return Outcome(header + "\n" + "\n".join(lines))
+
+
+async def _alerts_command(ledger: LedgerClient, args: str = "") -> Outcome:
+    """What the monitors have raised.
+
+    The alert framework produces all of this and nothing displayed it,
+    so a `warn` held back by the rate limit or by quiet hours was
+    invisible until the digest went out -- and the digest is exactly
+    where a person is least likely to be looking when something is
+    wrong now.
+    """
+    try:
+        events = await ledger.read(ALERTS_STREAM)
+    except Exception as exc:  # noqa: BLE001
+        return Outcome(f"could not read the alerts: {exc!r}")
+    if not events:
+        return Outcome("nothing has been raised. Monitors run on idle ticks; with none "
+                       "registered yet this stays empty, which is the honest answer rather "
+                       "than a clean bill of health.")
+
+    open_alerts: dict[tuple[str, str], dict] = {}
+    cleared = 0
+    for event in events:
+        payload = event.payload or {}
+        key = (str(payload.get("monitor") or ""), str(payload.get("key") or ""))
+        if event.type == "cleared":
+            open_alerts.pop(key, None)
+            cleared += 1
+        else:
+            open_alerts[key] = {**payload, "at": event.ts}
+
+    if args.strip().lower() in ("all", "history"):
+        lines = [f"  {event.type:8} {(event.payload or {}).get('monitor', ''):14} "
+                 f"{(event.payload or {}).get('message', '')}" for event in events[-40:]]
+        return Outcome(f"{len(events)} alert event(s), most recent last:\n" + "\n".join(lines))
+
+    if not open_alerts:
+        return Outcome(f"nothing open. {cleared} alert(s) have been raised and resolved.")
+
+    order = {"critical": 0, "warn": 1, "info": 2}
+    rows = sorted(open_alerts.values(),
+                  key=lambda row: (order.get(str(row.get("severity")), 3),
+                                    str(row.get("monitor"))))
+    lines = []
+    for row in rows:
+        severity = str(row.get("severity") or "info")
+        again = " REGRESSED" if float(row.get("reopened") or 0) else ""
+        lines.append(f"  [{severity}]{again} {row.get('monitor')}: {row.get('message')}")
+        # Where it went, and why. "Why didn't I hear about this" has an
+        # answer, and this is it.
+        channel, reason = row.get("channel"), str(row.get("reason") or "")
+        if channel and channel != "notify":
+            lines.append(f"        held for the {channel}: {reason}")
+    held = sum(1 for row in rows if row.get("channel") == "digest")
+    header = f"{len(rows)} open alert(s)"
+    if held:
+        header += f", {held} waiting for the daily digest"
+    return Outcome(header + ":\n" + "\n".join(lines) + "\n(`alerts all` for the full history)")
+
+
+async def _config_command(ledger: LedgerClient, args: str = "") -> Outcome:
+    """The settings actually in force, and any that nothing reads.
+
+    Every subsystem's `from_mapping` silently ignores a key it does not
+    recognise, so a typo in simorgh.toml is indistinguishable from a
+    setting that works: the file changes, the system does not, and
+    nothing says so. The Kernel warns about it once at boot, where it
+    scrolls past; this makes it answerable afterwards.
+
+    `source` matters as much as the value. "It is the default" and "you
+    set it to the same thing as the default" look identical in the
+    value alone, and only one of them means a config line is doing
+    nothing.
+    """
+    try:
+        events = await ledger.read(CONFIG_STREAM)
+    except Exception as exc:  # noqa: BLE001 -- a diagnostic must not raise
+        return Outcome(f"could not read the config record: {exc!r}")
+    if not events:
+        return Outcome("no config has been recorded yet -- the Kernel writes it at boot, so "
+                       "this is empty until the next start.")
+    payload = events[-1].payload or {}
+    sections = payload.get("sections") or {}
+
+    wanted = args.strip().lower()
+    lines: list[str] = []
+    where = payload.get("path") or "(no simorgh.toml found -- every value is a default)"
+    lines.append(f"config from {where}")
+
+    for name in sorted(sections):
+        if wanted and not name.startswith(wanted):
+            continue
+        fields = sections[name] or {}
+        if "error" in fields:
+            lines.append(f"\n[{name}]  {fields['error']}")
+            continue
+        from_file = {k: v for k, v in fields.items() if v.get("source") == "file"}
+        if wanted:
+            lines.append(f"\n[{name}]  {len(fields)} setting(s), {len(from_file)} from the file")
+            for key in sorted(fields):
+                mark = "*" if fields[key].get("source") == "file" else " "
+                lines.append(f"  {mark} {key:34} {_short(fields[key].get('value'))}")
+        elif from_file:
+            lines.append(f"\n[{name}]  {len(from_file)} of {len(fields)} setting(s) set in the file")
+            for key in sorted(from_file):
+                lines.append(f"  * {key:34} {_short(from_file[key].get('value'))}")
+        else:
+            lines.append(f"\n[{name}]  all {len(fields)} setting(s) at their defaults")
+
+    dead_sections = payload.get("dead_sections") or []
+    dead_fields = payload.get("dead_fields") or []
+    if dead_sections:
+        lines.append("\nsections nothing reads: " + ", ".join(dead_sections))
+    if dead_fields:
+        lines.append("settings nothing reads: " + ", ".join(dead_fields))
+    if not wanted:
+        lines.append("\n`config <section>` shows every setting in one section; "
+                     "`*` marks the ones your file sets.")
+    return Outcome("\n".join(lines))
+
+
+def _short(value, width: int = 60) -> str:
+    text = json.dumps(value) if not isinstance(value, str) else value
+    return text if len(text) <= width else text[: width - 1] + "\u2026"
 
 
 async def _capabilities_command(ledger: LedgerClient) -> Outcome:
