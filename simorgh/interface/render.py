@@ -443,6 +443,222 @@ def _domain_wrap(text: str, indent: int, width: int, *, colour: str = "",
     return [style(line, colour, enabled=enabled) for line in lines]
 
 
+# -- status panel -----------------------------------------------------------
+#
+# The first version printed one line per subsystem, an ASCII bar, and
+# then every registered tool name in one comma-run. On this machine that
+# is sixteen near-identical "ok" lines burying the one that said
+# "degraded", followed by fifty names nobody reads. A status panel is
+# read at a glance or not at all.
+
+#: Health glyphs. A filled ring for well, a half ring for degraded, a
+#: cross for down -- distinguishable by SHAPE, so the panel still works
+#: with no colour and for anyone who cannot tell green from amber.
+_HEALTH = {"ok": ("\u25cf", "green", "o"), "degraded": ("\u25d0", "yellow", "~"),
+           "down": ("\u2715", "red", "x")}
+
+_BAR_FULL, _BAR_EMPTY = "\u2588", "\u2591"
+
+
+def meter(value: float, *, width: int = 10, lo: float = -1.0, hi: float = 1.0,
+          unicode: bool = True) -> str:
+    """A proportion, as a bar. Solid blocks rather than `#` and `-`:
+    at a glance the eye reads a filled length, and hashes read as text
+    to be parsed."""
+    span = (hi - lo) or 1.0
+    frac = max(0.0, min(1.0, (value - lo) / span))
+    filled = round(frac * width)
+    # Anything above the floor gets at least one block. 27 calls out of
+    # 1500 rounds to nothing, and an empty bar beside a non-zero number
+    # reads as a broken bar rather than as a small one.
+    if filled == 0 and value > lo:
+        filled = 1
+    if not unicode:
+        return "#" * filled + "-" * (width - filled)
+    return _BAR_FULL * filled + _BAR_EMPTY * (width - filled)
+
+
+def _duration(seconds: float) -> str:
+    seconds = int(max(seconds, 0))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s"
+    if seconds < 86400:
+        return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+    return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
+
+
+def status_panel(*, health: dict | None, snapshot, posture: dict | None,
+                 tools: list | None, git: dict | None, width: int | None = None,
+                 enabled: bool = True, unicode: str = "auto") -> str:
+    """Everything `status` knows, on one screen.
+
+    Takes the raw payloads rather than pre-rendered strings, because the
+    layout decisions -- which subsystems to name, what to put in the
+    second column, how much of a commit subject fits -- can only be made
+    with the numbers in hand. Each piece is optional and its absence is
+    said plainly: a panel that silently omits the part that failed is
+    worse than one that admits it.
+    """
+    width = width or terminal_width()
+    glyphs = unicode_mode(unicode) != "off"
+    dim = lambda text: style(text, "dim", enabled=enabled)  # noqa: E731 -- one short local
+    # Every non-ASCII character the panel can emit has a fallback. A
+    # terminal that cannot encode one does not print a `?`; it gets a
+    # plainer panel that still lines up.
+    sep = " \u00b7 " if glyphs else " - "
+    rule = "\u2500" if glyphs else "-"
+    dots = "\u2026" if glyphs else "..."
+    out: list[str] = []
+
+    # -- header ----------------------------------------------------------
+    right = ""
+    if health:
+        right = sep.join(x for x in (
+            str(health.get("state", "")), str(health.get("mode", "")),
+            f"up {_duration(health.get('uptime_seconds', 0.0))}") if x)
+    title = style("simorgh", "bold", enabled=enabled)
+    pad = max(1, width - display_width("simorgh") - display_width(right))
+    out.append(f"{title}{' ' * pad}{dim(right)}")
+    out.append(dim(rule * width))
+    out.append("")
+
+    label = 12
+
+    def row(name: str, value: str) -> None:
+        out.append(f"  {dim(name.ljust(label))}{value}")
+
+    # -- subsystems ------------------------------------------------------
+    if health is None:
+        row("subsystems", dim("no answer from the Kernel"))
+    else:
+        subsystems = health.get("subsystems", []) or []
+        counts: dict[str, int] = {}
+        strip = []
+        for entry in subsystems:
+            status_name = str(entry.get("status", "down"))
+            counts[status_name] = counts.get(status_name, 0) + 1
+            glyph, colour, ascii_glyph = _HEALTH.get(status_name, _HEALTH["down"])
+            strip.append(style(glyph if glyphs else ascii_glyph, colour, enabled=enabled))
+        summary = sep.join(f"{n} {name}" for name, n in sorted(counts.items()))
+        row("subsystems", "".join(strip) + "  " + dim(summary))
+        # Only the ones that are NOT well get named. Fifteen lines saying
+        # "ok" is fifteen lines hiding the one that does not.
+        for entry in subsystems:
+            if entry.get("status") == "ok":
+                continue
+            glyph, colour, ascii_glyph = _HEALTH.get(str(entry.get("status")), _HEALTH["down"])
+            detail = str(entry.get("detail") or "").strip()
+            line = f"{style(glyph if glyphs else ascii_glyph, colour, enabled=enabled)} " \
+                   f"{entry.get('name', '?')}"
+            if detail:
+                line += dim(f"  {detail}")
+            out.append("  " + " " * label + fit(line, width - label - 4, ellipsis=dots))
+
+    # -- vitals ----------------------------------------------------------
+    if snapshot is not None and not getattr(snapshot, "stale", True):
+        out.append("")
+        for name, value, lo, hi, note in (
+            ("mood", snapshot.mood, -1.0, 1.0, snapshot.mood_phrase),
+            ("energy", snapshot.energy, -1.0, 1.0, ""),
+            ("load", snapshot.load, 0.0, 1.0, ""),
+        ):
+            bar = meter(value, lo=lo, hi=hi, unicode=glyphs)
+            # Mood and energy run -1..+1 and the sign is the point; load
+            # runs 0..1 and a `+` in front of it is noise.
+            number = f"{value:+.2f}" if lo < 0 else f" {value:.2f}"
+            row(name, f"{bar}  {number}" + (dim(f"   {note}") if note else ""))
+
+    # -- counters, two columns -------------------------------------------
+    left_items: list[tuple[str, str]] = []
+    right_items: list[tuple[str, str]] = []
+    if posture:
+        left_items.append(("guardian", f"{posture.get('mode', '?')}{sep}"
+                                        f"trust {posture.get('trust_score', 0.0):.1f}"))
+    if snapshot is not None and not getattr(snapshot, "stale", True):
+        if snapshot.workers_total:
+            left_items.append(("workers", f"{snapshot.workers_busy} of "
+                                           f"{snapshot.workers_total} busy"))
+        if snapshot.bus_published:
+            left_items.append(("bus", f"{snapshot.bus_published} sent{sep}"
+                                       f"{snapshot.bus_delivered} delivered"))
+        right_items.append(("memory", f"{snapshot.memory_records} records"))
+        right_items.append(("backlog", f"{snapshot.backlog} tasks"))
+        right_items.append(("interests", str(snapshot.interests)))
+    if tools is not None:
+        # A count and where to see them, not fifty names. The list was
+        # the longest thing on the screen and the least read.
+        right_items.append(("tools", f"{len(tools)} registered" + (
+            dim(f"{sep}`tool` lists them") if tools else "")))
+    if left_items or right_items:
+        out.append("")
+        # Measured from the longest left cell rather than guessed at
+        # half the width: guessing put "1357 sent - 582 delivered" flush
+        # against the word beside it, with no gap at all.
+        right_label = max((len(name) for name, _ in right_items), default=0) + 1
+        gutter = max((label + display_width(_strip_ansi(value)) for _, value in left_items),
+                     default=0) + 3
+        # Measured from the widest right-hand VALUE, not a guess. Guessing
+        # 24 columns let a 33-column cell ("50 registered - `tool` lists
+        # them") push the line five columns past the terminal.
+        right_value = max((display_width(_strip_ansi(value)) for _, value in right_items),
+                          default=0)
+        two_columns = bool(right_items) and width >= 2 + gutter + right_label + right_value
+        for index in range(max(len(left_items), len(right_items))):
+            left = left_items[index] if index < len(left_items) else None
+            right_pair = right_items[index] if index < len(right_items) else None
+            if not two_columns:
+                # A narrow terminal gets one column: a second column
+                # that wraps is worse than no second column.
+                for pair in (left, right_pair):
+                    if pair:
+                        out.append(f"  {dim(pair[0].ljust(label))}{pair[1]}")
+                continue
+            cell = f"{dim(left[0].ljust(label))}{left[1]}" if left else ""
+            visible = display_width(_strip_ansi(cell))
+            line = "  " + cell + (" " * max(0, gutter - visible) if right_pair else "")
+            if right_pair:
+                line += f"{dim(right_pair[0].ljust(right_label))}{right_pair[1]}"
+            out.append(line.rstrip())
+
+    # -- budgets ---------------------------------------------------------
+    budgets = dict(getattr(snapshot, "budget", {}) or {}) if snapshot is not None else {}
+    if budgets:
+        out.append("")
+        name_width = max(len(name) for name in budgets)
+        first = True
+        for name, entry in sorted(budgets.items(),
+                                   key=lambda kv: -(kv[1].get("calls") or 0)):
+            calls = entry.get("calls", 0)
+            cap = entry.get("max_calls")
+            bar = meter(calls / cap if cap else 0.0, lo=0.0, hi=1.0, unicode=glyphs)
+            used = f"{calls}/{cap}" if cap is not None else str(calls)
+            flag = style("  exhausted", "red", enabled=enabled) if entry.get("exhausted") else ""
+            row("budgets" if first else "", f"{name.ljust(name_width)}  {bar}  {used}{flag}")
+            first = False
+
+    # -- git -------------------------------------------------------------
+    if git is not None:
+        out.append("")
+        if not git.get("available", False):
+            row("git", dim("no repository here"))
+        else:
+            dirty = (style(f"{git.get('changed_files', 0)} uncommitted", "yellow", enabled=enabled)
+                     if git.get("dirty") else style("clean", "green", enabled=enabled))
+            row("git", f"{git.get('branch', '?')} @ {str(git.get('head', ''))[:7]}  {dirty}")
+            for line in (git.get("recent_commits") or [])[:3]:
+                out.append("  " + " " * label
+                           + dim(fit(str(line), width - label - 4, ellipsis=dots)))
+    return "\n".join(out)
+
+
+def _strip_ansi(text: str) -> str:
+    import re as _re
+
+    return _re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 def unicode_mode(setting: str = "auto") -> str:
     """Resolve the `[interface] unicode` setting to `off | auto | full`.
     `auto` degrades to `off` when stdout isn't UTF-8 (a redirected file

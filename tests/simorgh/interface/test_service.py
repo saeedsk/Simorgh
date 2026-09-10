@@ -216,11 +216,19 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         for sub in subs:
             await sub.unsubscribe()
         self.assertIn("running", out)
-        self.assertIn("kernel", out)
-        self.assertIn("posture: guarded", out)
-        self.assertIn("read_file", out)
-        self.assertIn("git: main", out)
+        self.assertIn("guarded", out)
+        self.assertIn("git", out)
+        self.assertIn("main @ deadbee", out)
         self.assertIn("clean", out)
+        # The tool COUNT, not fifty names. The list was the longest
+        # thing on the screen and the least read.
+        self.assertIn("1 registered", out)
+        self.assertNotIn("read_file", out)
+        # A healthy subsystem is a glyph in the strip, not a line of its
+        # own: fifteen lines saying "ok" is fifteen lines hiding the one
+        # that does not.
+        self.assertIn("1 ok", out)
+        self.assertNotIn("kernel", out)
 
     async def test_status_git_piece_degrades_honestly_when_git_is_unavailable(self):
         async def _status_responder(message: Message) -> None:
@@ -251,7 +259,7 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         out = await self._line("status")
         for sub in subs:
             await sub.unsubscribe()
-        self.assertIn("git: unavailable", out)
+        self.assertIn("no repository here", out)
 
     async def test_unwired_command_gives_an_honest_no_response(self):
         out = await self._line("research nothing will answer this")

@@ -439,28 +439,35 @@ async def _panel_piece(bus: BusClient, type_: str, payload: dict, *, timeout: fl
     return render(reply.payload)
 
 
+async def _payload_of(bus: BusClient, type_: str, payload: dict, *, timeout: float = 3.0):
+    """One panel piece's raw payload, or None if it did not answer.
+
+    Raw rather than pre-rendered: the layout decisions -- which
+    subsystems to name, what goes in the second column, how much of a
+    commit subject fits -- can only be made with the numbers in hand.
+    """
+    try:
+        reply = await bus.request(bus.new(type_, payload), timeout=timeout)
+    except Exception:  # noqa: BLE001 -- one piece failing never breaks the panel
+        return None
+    return reply.payload
+
+
 async def _status_panel(bus: BusClient, vitals: VitalsCache) -> str:
     """07-post-cutover-review.md §3.8: `status` absorbs `vitals`/
     `budget`/`skills` into one panel, not sub-args -- health, vitals,
     posture, and registered tools together, each piece degrading
-    honestly on its own if that subsystem doesn't answer in time."""
+    honestly on its own if that subsystem does not answer in time."""
     from . import render as render_mod
 
-    health = await _panel_piece(bus, topics.SYSTEM_STATUS_REQUEST, {}, timeout=3.0, label="state", render=lambda p: (
-        f"state: {p['state']}   mode: {p['mode']}   uptime: {p['uptime_seconds']:.1f}s\n"
-        + "\n".join(f"  {s['name']:14s} {s['status']}" for s in p.get("subsystems", []))
-    ))
-    posture = await _panel_piece(bus, topics.GUARDIAN_POSTURE_REQUEST, {}, timeout=3.0, label="posture", render=lambda p: (
-        f"posture: {p.get('mode', 'unknown')}   trust: {p.get('trust_score', 0.0):.1f}"
-        + (("\n  tightened by: " + "; ".join(p["tightened_by"])) if p.get("tightened_by") else "")
-    ))
-    skills = await _panel_piece(bus, topics.WORLD_ENV_QUERY, {"what": "tools", "args": {}}, timeout=3.0, label="skills",
-                                 render=lambda p: (
-        "skills: " + ", ".join(t["name"] for t in p.get("tools", [])) if p.get("tools") else "no tools registered yet"
-    ))
-    git = await _panel_piece(bus, topics.WORLD_ENV_QUERY, {"what": "git_state", "args": {}}, timeout=3.0, label="git",
-                              render=_render_git_state)
-    return "\n\n".join([health, render_mod.vitals(vitals.snapshot()), posture, skills, git])
+    health = await _payload_of(bus, topics.SYSTEM_STATUS_REQUEST, {})
+    posture = await _payload_of(bus, topics.GUARDIAN_POSTURE_REQUEST, {})
+    tools_payload = await _payload_of(bus, topics.WORLD_ENV_QUERY, {"what": "tools", "args": {}})
+    git = await _payload_of(bus, topics.WORLD_ENV_QUERY, {"what": "git_state", "args": {}})
+    return render_mod.status_panel(
+        health=health, snapshot=vitals.snapshot(), posture=posture,
+        tools=(tools_payload or {}).get("tools") if tools_payload is not None else None,
+        git=git, enabled=render_mod.color_enabled())
 
 
 def _render_git_state(p: dict) -> str:
