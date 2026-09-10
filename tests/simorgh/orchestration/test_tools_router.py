@@ -614,3 +614,137 @@ class TestPimMarkersReachTheTools(unittest.TestCase):
                 self.assertIn(tool.name, _ACTION_TIMEOUTS)
                 self.assertIn(tool.name, scaffolds._TOOL_NOTES)
                 self.assertEqual(_TOOL_POLICY[tool.name][0], tool.reversibility)
+
+
+class TestSecurityMarkersReachTheTools(unittest.TestCase):
+    """The `sec_*` tools through the marker layer. `sec_self` and
+    `sec_posture` take no arguments, which is its own trap: a stray
+    empty-string argument fails schema validation and the tool is
+    unusable from the model's side."""
+
+    MARKERS = ("SEC_SELF", "SEC_POSTURE", "SEC_FINDINGS", "SEC_SHOW", "SEC_ACCEPT")
+
+    def _walk(self, reply: str) -> dict:
+        from simorgh.cognition.parser import parse_marker
+
+        name, argument = parse_marker(reply, self.MARKERS)
+        return to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": name, "args": {"argument": argument}}, rationale="r",
+        )
+
+    def test_the_argument_less_tools_send_no_arguments(self):
+        for marker, tool in (("SEC_SELF:", "sec_self"), ("SEC_POSTURE:", "sec_posture")):
+            with self.subTest(tool=tool):
+                payload = self._walk(marker)
+                self.assertEqual(payload["tool"], tool)
+                self.assertEqual(payload["args"], {})
+
+    def test_a_finding_id_arrives_as_a_finding(self):
+        self.assertEqual(self._walk("SEC_SHOW: 3f9a1c2b")["args"], {"finding": "3f9a1c2b"})
+
+    def test_accepting_splits_the_id_from_the_reason(self):
+        payload = self._walk("SEC_ACCEPT: 3f9a1c2b\nthe box is only reachable over Tailscale")
+        self.assertEqual(payload["args"]["finding"], "3f9a1c2b")
+        self.assertEqual(payload["args"]["reason"], "the box is only reachable over Tailscale")
+
+    def test_a_severity_filter_arrives_as_a_severity(self):
+        payload = self._walk("SEC_FINDINGS: critical")
+        self.assertEqual(payload["args"]["severity"], "critical")
+
+    def test_a_severity_filter_with_json_options(self):
+        payload = self._walk('SEC_FINDINGS: high\n{"status": "open"}')
+        self.assertEqual(payload["args"]["severity"], "high")
+        self.assertEqual(payload["args"]["status"], "open")
+
+    def test_none_of_them_claims_the_network(self):
+        """The domain is advisory and inspects this machine only. A
+        tool declaring `network` would be gated as though it reached
+        out, which is the opposite of what it does."""
+        for marker in ("SEC_SELF:", "SEC_POSTURE:", "SEC_FINDINGS: high", "SEC_SHOW: a",
+                       "SEC_ACCEPT: a\nreason"):
+            with self.subTest(marker=marker):
+                self.assertFalse(self._walk(marker)["scope"]["network"])
+
+    def test_the_reading_tools_are_read_only_and_the_writing_ones_are_reversible(self):
+        for marker, expected in (("SEC_POSTURE:", "read_only"), ("SEC_FINDINGS: high", "read_only"),
+                                 ("SEC_SHOW: a", "read_only"), ("SEC_SELF:", "reversible"),
+                                 ("SEC_ACCEPT: a\nr", "reversible")):
+            with self.subTest(marker=marker):
+                self.assertEqual(self._walk(marker)["reversibility"], expected)
+
+    def test_every_security_tool_has_a_policy_row_a_timeout_and_a_note(self):
+        from simorgh.execution.config import Config
+        from simorgh.execution.security.tools import security_tools
+        from simorgh.orchestration import scaffolds
+        from simorgh.orchestration.session import _ACTION_TIMEOUTS
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        for tool in security_tools(Config()):
+            with self.subTest(tool=tool.name):
+                self.assertIn(tool.name, _TOOL_POLICY)
+                self.assertIn(tool.name, _ACTION_TIMEOUTS)
+                self.assertIn(tool.name, scaffolds._TOOL_NOTES)
+                self.assertEqual(_TOOL_POLICY[tool.name][0], tool.reversibility)
+
+
+class TestEveryBuiltinToolIsFullyWired(unittest.TestCase):
+    """The ten-step checklist, asserted for the whole registry rather
+    than per domain. Missing a step means the tool exists but the model
+    cannot call it, or calls it with the wrong argument key, or is never
+    told it is there -- each of which has actually happened here."""
+
+    def test_every_registered_tool_has_a_policy_row_and_a_note(self):
+        """A missing `_TOOL_POLICY` row is how `browse_page` crashed; a
+        missing note means the model is offered a tool it is never told
+        about. `_ACTION_TIMEOUTS` is deliberately sparse -- the fast
+        local tools (read_file, search_code, the git ones) share the
+        session default, and only the ones that can genuinely take
+        minutes are listed."""
+        from simorgh.execution.config import Config
+        from simorgh.execution.tools import builtin_tools
+        from simorgh.orchestration import scaffolds
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        for tool in builtin_tools(Config()):
+            with self.subTest(tool=tool.name):
+                self.assertIn(tool.name, _TOOL_POLICY, "no _TOOL_POLICY row -- Guardian would "
+                                                        "treat it as irreversible")
+                self.assertIn(tool.name, scaffolds._TOOL_NOTES, "no note -- the model is never "
+                                                                 "told what it does")
+
+    def test_the_declared_policy_matches_what_each_tool_says_about_itself(self):
+        """Two sources of truth for reversibility, and Guardian trusts
+        the table. A tool that calls itself read_only while the table
+        calls it irreversible is gated wrongly in one direction or the
+        other."""
+        from simorgh.execution.config import Config
+        from simorgh.execution.tools import builtin_tools
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        for tool in builtin_tools(Config()):
+            if tool.name not in _TOOL_POLICY:
+                continue
+            with self.subTest(tool=tool.name):
+                self.assertEqual(_TOOL_POLICY[tool.name][0], tool.reversibility)
+
+    def test_every_offered_tool_in_every_profile_actually_exists(self):
+        """A profile offering a tool that is not registered wastes a
+        step: the model calls it and is refused."""
+        from simorgh.execution.config import Config
+        from simorgh.execution.tools import builtin_tools
+        from simorgh.orchestration.profiles import BY_KIND
+
+        registered = {tool.name for tool in builtin_tools(Config(shell=True, remote=True))}
+        for kind, profile in BY_KIND.items():
+            for name in profile.tools:
+                with self.subTest(profile=kind, tool=name):
+                    self.assertIn(name, registered)
+
+    def test_a_read_only_profile_offers_only_read_only_tools(self):
+        from simorgh.orchestration.profiles import PLAN
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        for name in PLAN.tools:
+            with self.subTest(tool=name):
+                self.assertEqual(_TOOL_POLICY.get(name, ("irreversible",))[0], "read_only")

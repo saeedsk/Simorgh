@@ -23,6 +23,8 @@ CHAT = Profile(
            # "what's on today", "did the plumber reply", "remind me at
            # 8" -- all chat questions, and all unanswerable from the web.
            "cal_list", "mail_search", "mail_read", "remind",
+           # "am I exposed?" is a question a person asks in chat.
+           "sec_posture", "sec_findings", "sec_show",
            "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
@@ -81,7 +83,10 @@ RESEARCH = Profile(
            # `kb_sources` is here and nowhere else: research is the one
            # profile that may reasonably need to index something first.
            "kb_search", "kb_ask", "kb_open", "kb_status", "kb_sources",
-           "cal_list", "mail_search", "mail_read"),
+           "cal_list", "mail_search", "mail_read",
+           # The one profile that should be able to actually run the
+           # check, not just read what it found.
+           "sec_self", "sec_posture", "sec_findings", "sec_show", "sec_accept"),
     # 6 predates web_search/web_fetch. A question with a repo half and a
     # web half needs search + fetch + two repo steps + an answer, and
     # died on step 6 every time (observer, 2026-09-08).

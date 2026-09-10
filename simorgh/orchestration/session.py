@@ -186,6 +186,13 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "notify": 25.0,
     # A calendar or mailbox is a network round trip to somebody else's
     # server, and a mailbox with thousands of messages is a slow SEARCH.
+    # `sec_self` walks the workspace looking for credential-shaped
+    # strings, which on a large tree is seconds, not milliseconds.
+    "sec_self": 120.0,
+    "sec_posture": 20.0,
+    "sec_findings": 20.0,
+    "sec_show": 20.0,
+    "sec_accept": 20.0,
     "cal_list": 45.0,
     "mail_search": 60.0,
     "mail_read": 45.0,

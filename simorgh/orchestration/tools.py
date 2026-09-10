@@ -74,6 +74,16 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "mail_search": ("read_only", True),
     "mail_read": ("read_only", True),
     "remind": ("reversible", False),
+    # -- security posture (domains/04-security-posture.md). All local:
+    # `sec_self` inspects this machine and nothing else, which is why it
+    # declares no network. It writes findings, so it is `reversible`
+    # rather than `read_only` -- the honest label for something that
+    # changes a database, even one only it reads.
+    "sec_self": ("reversible", False),
+    "sec_posture": ("read_only", False),
+    "sec_findings": ("read_only", False),
+    "sec_show": ("read_only", False),
+    "sec_accept": ("reversible", False),
     # Runs on a machine this process cannot inspect, snapshot or roll
     # back -- the strongest case for `irreversible` in the table.
     "run_remote": ("irreversible", True),
@@ -110,6 +120,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 # real tool call from a marker reply failed with a bare `KeyError` on its
 # own required arg (e.g. `web_fetch` needs `url`, not `argument`).
 _MARKER_ARG_KEY: dict[str, str] = {
+    "sec_show": "finding",
     "cal_list": "range",
     "mail_search": "query",
     "mail_read": "message",
@@ -215,6 +226,8 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     # "REMIND: 20m\ntake the laundry out" -- when on the first line,
     # what to say on every line after it.
     "remind": ("when", "text"),
+    "sec_accept": ("finding", "reason"),
+    "sec_findings": ("severity", "spec"),
 }
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
@@ -293,6 +306,20 @@ _MARKER_ARG_HINT.update({
         "what (if anything) needs them; do not send a routine progress note. Example:\n"
         "NOTIFY: benchmark regressed\nGAIA dropped from 41% to 29% on commit 4f24467.\n"
     ),
+    "sec_show": (
+        "the id of a finding from SEC_FINDINGS or SEC_SELF, to read its evidence and what to do "
+        "about it."
+    ),
+    "sec_findings": (
+        "first line: a severity to filter by (critical, high, medium, low, info) or empty for "
+        "all. Second line, optional: a JSON object like {\"status\": \"open\"}."
+    ),
+    "sec_accept": (
+        "first line: the finding id. Every following line: WHY this risk is acceptable -- it is "
+        "what lets the next person judge whether it still holds, and an acceptance with no "
+        "reason is indistinguishable from forgetting about it. It expires after 90 days.\n"
+        "Example:\nSEC_ACCEPT: 3f9a1c2b\nthe box is only reachable over Tailscale\n"
+    ),
     "cal_list": (
         "a date range on one line: \"today\", \"tomorrow\", \"this week\", \"next week\", "
         "\"7 days\" or an ISO date. Reads the creator's real calendar."
@@ -341,7 +368,7 @@ _MARKER_ARG_HINT.update({
     ),
 })
 # Tools whose marker takes no argument at all.
-_MARKER_NO_ARGS = frozenset({"git_revert", "kb_status"})
+_MARKER_NO_ARGS = frozenset({"git_revert", "kb_status", "sec_self", "sec_posture"})
 # Two-part markers whose SECOND part is a JSON object of extra arguments,
 # merged into `args`, rather than one more string.
 #
@@ -370,7 +397,7 @@ _MARKER_NO_ARGS = frozenset({"git_revert", "kb_status"})
 # worked from the model's side, exactly the failure mode this set exists
 # to prevent for `search_listings`/`install_package`.
 _MARKER_JSON_REST = frozenset({"search_listings", "install_package", "browse_page", "run_container",
-                               "kb_sources"})
+                               "kb_sources", "sec_findings"})
 
 
 def _json_rest(rest: str, second: str) -> dict:

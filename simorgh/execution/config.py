@@ -339,6 +339,18 @@ class Config:
     # a cloud model's context. Add it to opt in.
     pim_cloud_llm_may_see: tuple[str, ...] = ("public", "personal")
 
+    # -- security posture (execution/security/,
+    # domains/04-security-posture.md). Advisory and read-only: it
+    # inspects and reports, never attempts entry. Step 1 is the part
+    # that needs no network -- Sim's own exposure.
+    security_findings_path: str = "workspace/security/findings.db"
+    security_secrets_paths: tuple[str, ...] = ("workspace", "results")
+    # Explicit path to the simorgh.toml to audit. Empty means "find it":
+    # the repo root, then ~/.simorgh/.
+    security_config_path: str = ""
+    security_posture_weights: dict = field(default_factory=lambda: {
+        "critical": 25, "high": 10, "medium": 3, "low": 1, "info": 0})
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a
@@ -417,7 +429,8 @@ class Config:
         if "repo_root" in kwargs:
             kwargs["repo_root"] = Path(kwargs["repo_root"])
         for key in ("readable_roots", "write_scopes_source", "write_scopes_skills",
-                    "knowledge_cloud_llm_may_see", "pim_cloud_llm_may_see", "pim_accounts"):
+                    "knowledge_cloud_llm_may_see", "pim_cloud_llm_may_see", "pim_accounts",
+                    "security_secrets_paths"):
             if key in kwargs:
                 kwargs[key] = tuple(kwargs[key])
         if "mcp_servers" in kwargs:

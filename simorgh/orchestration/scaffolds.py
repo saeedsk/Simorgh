@@ -82,6 +82,13 @@ _TOOL_NOTES: dict[str, str] = {
                "something they would want to know while not watching: work finished, a benchmark "
                "regressed, you are blocked. There is no unsend, and no provider may be configured, "
                "in which case it refuses and names what to set",
+    "sec_self": "check your own security posture -- is the API exposed, do irreversible actions "
+                 "run unattended, has a credential been written into a working file, what is this "
+                 "machine listening on. Entirely local",
+    "sec_posture": "the current security score out of 100 and what is dragging it down",
+    "sec_findings": "list security findings by severity, status or asset",
+    "sec_show": "the evidence and remediation for one finding",
+    "sec_accept": "record that a finding is a known, accepted risk, with the reason and an expiry",
     "cal_list": "what is on the creator's real calendar for a range like today, tomorrow or "
                  "this week",
     "mail_search": "search the creator's real mailbox -- subjects, senders and dates, never "

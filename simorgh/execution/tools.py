@@ -65,6 +65,7 @@ from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
 from .knowledge.tools import knowledge_tools
 from .pim.tools import pim_tools
+from .security.tools import security_tools
 from .notify import NotifyTool
 from .remote import RunRemoteTool
 from .container import RunContainerTool
@@ -1556,6 +1557,10 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         # cannot write at all is a stronger guarantee than a policy
         # saying it should not.
         *pim_tools(config, secrets=secrets),
+        # Sim's own security posture (execution/security/,
+        # domains/04-security-posture.md). Guardian audits the code Sim
+        # writes; nothing audited what Sim *is*.
+        *security_tools(config, secrets=secrets),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),
