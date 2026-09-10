@@ -349,6 +349,100 @@ _QUICK_COMMANDS: tuple[tuple[str, str], ...] = (
 )
 
 
+#: Domain status glyphs. Three states, not two: "nothing set up yet" and
+#: "set up and not answering" are different facts, and showing them the
+#: same way makes a fresh install look like a system on fire.
+_DOMAIN_GLYPHS = {
+    "ready": ("\u25cf", "green", "[+]"),
+    "todo": ("\u25cb", "dim", "[ ]"),
+    "broken": ("\u2715", "red", "[x]"),
+}
+
+_DOMAIN_SECTIONS = (
+    ("broken", "not working"),
+    ("ready", "ready"),
+    ("todo", "to set up"),
+)
+
+
+def domains_panel(rows: list[dict], *, width: int | None = None, enabled: bool = True,
+                  unicode: str = "auto") -> str:
+    """`domains`, laid out.
+
+    Grouped by state rather than listed flat, because on a fresh install
+    five of six rows say the same thing and the one that does not is
+    what the person is looking for. Anything broken comes first: it is
+    the only group that needs acting on today.
+
+    `row`: `{name, blurb, state, detail, fix}`.
+    """
+    width = width or terminal_width()
+    glyphs = unicode_mode(unicode) != "off"
+    label_width = max((display_width(row["name"]) for row in rows), default=8)
+    label_width = max(label_width, 8)
+    # Where the blurb starts, so a wrapped detail line sits under it
+    # rather than under the glyph. Derived from the glyph's real width
+    # because the ASCII fallback is three columns wide and the unicode
+    # one is a single column.
+    mark_width = 1 if glyphs else 3
+    indent = 2 + mark_width + 2 + label_width + 2
+
+    counts = {state: sum(1 for row in rows if row["state"] == state)
+              for state, _ in _DOMAIN_SECTIONS}
+    summary = " \u00b7 ".join(
+        f"{counts[state]} {title}" for state, title in _DOMAIN_SECTIONS if counts[state])
+    out = [style(f"domains  {summary}", "dim", enabled=enabled)]
+
+    for state, title in _DOMAIN_SECTIONS:
+        group = [row for row in rows if row["state"] == state]
+        if not group:
+            continue
+        glyph, colour, ascii_glyph = _DOMAIN_GLYPHS[state]
+        mark = glyph if glyphs else ascii_glyph
+        out.append("")
+        out.append(style(f"  {title}", "dim", enabled=enabled))
+        for row in group:
+            name = row["name"].ljust(label_width)
+            out.append(f"  {style(mark, colour, enabled=enabled)}  "
+                       f"{style(name, 'bold', enabled=enabled)}  {row.get('blurb', '')}".rstrip())
+            # A domain that is simply not set up yet does not need its
+            # status spelled out -- "no documents indexed yet" under a
+            # heading that already says "to set up" is the same sentence
+            # twice. What it needs is the one thing to do.
+            detail = str(row.get("detail") or "").strip()
+            if detail and state != "todo":
+                out.extend(_domain_wrap(detail, indent, width))
+            fix = str(row.get("fix") or "").strip()
+            if fix:
+                arrow = "\u2192" if glyphs else "->"
+                out.extend(_domain_wrap(f"{arrow} {fix}", indent, width,
+                                        colour="cyan", enabled=enabled))
+    return "\n".join(out)
+
+
+def _domain_wrap(text: str, indent: int, width: int, *, colour: str = "",
+                 enabled: bool = True) -> list[str]:
+    """Wrap to the real terminal width, hanging-indented under the name.
+
+    `textwrap` is given BOTH indents rather than being handed a bare
+    width with the indent added afterwards -- doing it the second way
+    left the two-space hanging indent outside the budget, so every
+    continuation line was two columns too long. Sized from
+    `terminal_width()` rather than a constant: the reason the first
+    version of this ran off the screen is that its longest line was
+    written for whatever window it happened to be tested in.
+    """
+    import textwrap
+
+    lead = " " * indent
+    room = max(24, width)
+    lines = textwrap.wrap(text, width=room, initial_indent=lead,
+                          subsequent_indent=lead + "  ") or [lead]
+    if not colour:
+        return lines
+    return [style(line, colour, enabled=enabled) for line in lines]
+
+
 def unicode_mode(setting: str = "auto") -> str:
     """Resolve the `[interface] unicode` setting to `off | auto | full`.
     `auto` degrades to `off` when stdout isn't UTF-8 (a redirected file

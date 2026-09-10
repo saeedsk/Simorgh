@@ -140,10 +140,15 @@ class ClientTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(client.configured)
 
     async def test_probe_names_both_variables_when_neither_is_set(self):
+        """`detail` says what is true and `fix` says what to do. They
+        used to be one run-on string, which left every renderer able
+        only to print the whole thing."""
         status = await HomeAssistantClient().probe()
         self.assertFalse(status.ok)
-        self.assertIn("HOME_ASSISTANT_URL", status.detail)
-        self.assertIn("HOME_ASSISTANT_TOKEN", status.detail)
+        self.assertTrue(status.unconfigured, "not set up is not the same as broken")
+        self.assertIn("HOME_ASSISTANT_URL", status.fix)
+        self.assertIn("HOME_ASSISTANT_TOKEN", status.fix)
+        self.assertEqual(set(status.missing), {"HOME_ASSISTANT_URL", "HOME_ASSISTANT_TOKEN"})
 
     async def test_a_refused_token_says_where_to_get_one(self):
         import urllib.error

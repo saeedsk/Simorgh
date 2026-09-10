@@ -46,6 +46,14 @@ class ProbeResult:
     detail: str
     cost: Cost
     at: float = 0.0
+    #: What to do about it, when there is one thing to do. Separate from
+    #: `detail` so a renderer can put it on its own line instead of
+    #: printing one run-on sentence.
+    fix: str = ""
+    #: Names of what is missing. Non-empty means "not set up yet", which
+    #: is not a fault; empty on a failed probe means "set up and not
+    #: working", which is.
+    missing: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -160,11 +168,21 @@ async def run_probes(probes: tuple[Probe, ...] = PROBES, *, include: tuple[Cost,
     for probe in probes:
         if probe.cost not in include:
             continue
+        fix, missing = "", ()
         try:
-            ok, detail = await probe.run()
+            answer = await probe.run()
+            # A probe may answer `(ok, detail)` or, when it has more to
+            # say, `(ok, detail, fix, missing)`. Both shapes on purpose:
+            # the simple probes are the majority and should stay simple.
+            ok, detail = answer[0], answer[1]
+            if len(answer) > 2:
+                fix = answer[2] or ""
+            if len(answer) > 3:
+                missing = tuple(answer[3] or ())
         except Exception as exc:  # noqa: BLE001 -- a probe is diagnostics; it may not break the thing it checks
             ok, detail = False, f"probe raised: {exc!r}"
-        results.append(ProbeResult(probe.name, ok, str(detail)[:300], probe.cost, now))
+        results.append(ProbeResult(probe.name, ok, str(detail)[:300], probe.cost, now,
+                                   fix=str(fix)[:200], missing=missing))
     return results
 
 
@@ -176,12 +194,15 @@ def connector_probe(connector) -> Probe:
     required to be side-effect-free and never a paid call, but it may
     do a free HEAD/whoami, which is more than an import check."""
 
-    async def _run() -> tuple[bool, str]:
+    async def _run():
         status = await connector.probe()
         detail = status.detail or ("ready" if status.ok else "unavailable")
-        if not status.ok and status.missing:
-            detail += " -- missing: " + ", ".join(status.missing)
-        return bool(status.ok), detail
+        # The missing list is NOT appended to the detail any more. Every
+        # connector's detail already names what to set, so the result was
+        # "set HOME_ASSISTANT_URL and HOME_ASSISTANT_TOKEN -- missing:
+        # HOME_ASSISTANT_URL, HOME_ASSISTANT_TOKEN" -- the same words
+        # twice in one line.
+        return bool(status.ok), detail, status.fix, tuple(status.missing)
 
     return Probe(f"connector:{connector.name}", "cheap", _run)
 

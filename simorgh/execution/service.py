@@ -227,7 +227,8 @@ class Service:
         self._probe_results = results
         for result in results:
             payload = {"name": result.name, "ok": result.ok, "detail": result.detail,
-                       "cost": result.cost, "tools": list(_probe_tools(result.name))}
+                       "cost": result.cost, "tools": list(_probe_tools(result.name)),
+                       "fix": result.fix, "missing": list(result.missing)}
             with contextlib.suppress(Exception):
                 await self._ctx.bus.publish(Message.new(
                     topics.TOOL_PROBED, source="execution", payload=payload))

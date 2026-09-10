@@ -66,10 +66,9 @@ class HomeAssistantClient:
         missing = self.missing()
         if missing:
             return ConnectorStatus(
-                False,
-                "Home Assistant is not configured: set " + " and ".join(missing)
-                + " (a long-lived access token from your HA profile page)",
-                missing)
+                False, "not configured", missing,
+                fix="set " + " and ".join(missing)
+                    + " (a long-lived access token from your HA profile page)")
         try:
             payload = await self._get("/api/")
         except HomeUnavailable as exc:

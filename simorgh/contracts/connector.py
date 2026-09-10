@@ -45,10 +45,27 @@ class ConnectorStatus:
     `vault add google:me oauth2`", not "KeyError")."""
 
     ok: bool
+    #: What is TRUE right now, in one short clause. Not what to do about
+    #: it -- that is `fix`. Keeping them in one string meant every
+    #: renderer got a run-on sentence it could only print whole.
     detail: str = ""
     # The packages / credential ids / env vars this connector needs but
     # does not have, so `capabilities` can list them without re-deriving.
+    #
+    # It also separates the two failures a person must not confuse:
+    # non-empty means "nothing is set up", which is not a fault; empty
+    # while `ok` is false means "set up and not answering", which is.
     missing: tuple[str, ...] = ()
+    #: The one thing to do next -- a command to run or a setting to add.
+    #: Short enough to read at the end of a line.
+    fix: str = ""
+
+    @property
+    def unconfigured(self) -> bool:
+        """Nothing has been set up. Distinct from broken, and a view
+        that shows them the same way makes a fresh install look like a
+        system on fire."""
+        return not self.ok and bool(self.missing)
 
 
 @runtime_checkable

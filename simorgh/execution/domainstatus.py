@@ -62,10 +62,8 @@ class KnowledgeConnector(_DomainConnector):
             path = self._repo_root() / path
         if not path.exists():
             return ConnectorStatus(
-                False,
-                "no documents indexed yet -- add a folder with "
-                '`tool kb_sources add {"path": "~/Documents"}` then `tool kb_sources scan`',
-                ("a document source",))
+                False, "no documents indexed yet", ("a document source",),
+                fix='tool kb_sources add {"path": "~/Documents"}')
         try:
             from .knowledge.index import Index
 
@@ -74,11 +72,15 @@ class KnowledgeConnector(_DomainConnector):
         except Exception as exc:  # noqa: BLE001 -- a probe never raises
             return ConnectorStatus(False, f"the index at {path} could not be opened ({exc!r})")
         if not stats["sources"]:
-            return ConnectorStatus(False, "no document sources are configured -- "
-                                          "`tool kb_sources add ...`", ("a document source",))
+            return ConnectorStatus(
+                False, "no document sources configured", ("a document source",),
+                fix='tool kb_sources add {"path": "~/Documents"}')
         if not stats["chunks"]:
-            return ConnectorStatus(False, f"{stats['sources']} source(s) configured but nothing "
-                                          f"indexed yet -- run `tool kb_sources scan`")
+            # Configured and empty is a REAL fault, not an unconfigured
+            # one -- so no `missing`, and it shows up as needing
+            # attention rather than as something still to set up.
+            return ConnectorStatus(False, f"{stats['sources']} source(s) configured, nothing "
+                                          f"indexed yet", fix="tool kb_sources scan")
         return ConnectorStatus(True, f"{stats['documents']} document(s), {stats['chunks']} "
                                      f"passage(s) from {stats['sources']} source(s)")
 
@@ -125,14 +127,17 @@ class EnergyConnector(_DomainConnector):
             missing.append("a tariff")
         if missing:
             return ConnectorStatus(
-                False,
-                "not set up: " + " and ".join(missing) + " -- `tool energy_tariff show` has an "
-                "example, and `tool home_find energy` finds your meters",
-                tuple(missing))
+                False, "no " + " and no ".join(
+                    {"[execution.energy_meters]": "meters", "a tariff": "tariff"}[m]
+                    for m in missing),
+                tuple(missing),
+                fix=("tool energy_tariff show" if "a tariff" in missing
+                     else "tool home_find energy"))
         gaps = tariff.gaps()
         if gaps:
-            return ConnectorStatus(False, f"{len(meters)} meter(s) and the {tariff.name!r} "
-                                          f"tariff, but no rate covers hour(s) {gaps}")
+            return ConnectorStatus(
+                False, f"the {tariff.name!r} tariff leaves hour(s) {gaps} unpriced",
+                fix="tool energy_tariff show")
         return ConnectorStatus(True, f"{len(meters)} meter(s), tariff {tariff.name!r} "
                                      f"in {tariff.currency}")
 
@@ -152,16 +157,18 @@ class MediaConnector(_DomainConnector):
 
         client = _HomeTool(self._config, secrets=self._secrets, env=self._env)._client()
         if not client.configured:
-            return ConnectorStatus(False, "media runs through Home Assistant, which is not "
-                                          "configured -- see the `home` row",
-                                   client.missing())
+            return ConnectorStatus(
+                False, "needs Home Assistant, which is not configured", client.missing(),
+                fix="set up `home` first")
         try:
             entities = await client.states()
         except Exception as exc:  # noqa: BLE001
-            return ConnectorStatus(False, f"home assistant is not answering ({exc})")
+            return ConnectorStatus(False, f"Home Assistant is not answering ({exc})",
+                                   fix="check that Home Assistant is running")
         players = [e for e in entities if e.entity_id.startswith("media_player.")]
         if not players:
-            return ConnectorStatus(False, "Home Assistant has no media_player entities")
+            return ConnectorStatus(False, "Home Assistant has no media players",
+                                   fix="tool home_describe")
         return ConnectorStatus(True, f"{len(players)} player(s)")
 
 
@@ -178,7 +185,7 @@ class SecurityConnector(_DomainConnector):
         if not path.is_absolute():
             path = self._repo_root() / path
         if not path.exists():
-            return ConnectorStatus(True, "ready, nothing checked yet -- run `tool sec_self`")
+            return ConnectorStatus(True, "nothing checked yet", fix="tool sec_self")
         try:
             from .security.findings import FindingStore
 
@@ -189,7 +196,7 @@ class SecurityConnector(_DomainConnector):
             return ConnectorStatus(False, f"the findings store could not be opened ({exc!r})")
         recorded = sum(n for status, n in counts.items() if status != "by_severity")
         if not recorded:
-            return ConnectorStatus(True, "ready, nothing checked yet -- run `tool sec_self`")
+            return ConnectorStatus(True, "nothing checked yet", fix="tool sec_self")
         return ConnectorStatus(True, f"{open_now} open finding(s) of {recorded} recorded")
 
 

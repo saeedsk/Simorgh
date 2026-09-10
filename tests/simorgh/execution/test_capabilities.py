@@ -215,7 +215,10 @@ class ConnectorProbeTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(results[0].ok)
         self.assertEqual(results[0].detail, "fastmail reachable")
 
-    async def test_a_connector_that_cannot_run_names_what_is_missing(self):
+    async def test_a_connector_that_cannot_run_carries_what_is_missing(self):
+        """`missing` travels as a list rather than being glued onto the
+        detail. It was appended there, so a connector whose detail
+        already named the variables printed them twice in one line."""
         from simorgh.contracts.connector import FakeConnector
         from simorgh.execution.capabilities import connector_probe
 
@@ -223,8 +226,13 @@ class ConnectorProbeTestCase(unittest.IsolatedAsyncioTestCase):
             "imap", ok=False, detail="no credential", missing=("IMAP_PASSWORD", "imapclient")))
         results = await run_probes((probe,))
         self.assertFalse(results[0].ok)
-        self.assertIn("IMAP_PASSWORD", results[0].detail)
-        self.assertIn("imapclient", results[0].detail)
+        self.assertEqual(results[0].detail, "no credential")
+        self.assertEqual(results[0].missing, ("IMAP_PASSWORD", "imapclient"))
+
+    async def test_a_probe_may_answer_with_only_ok_and_detail(self):
+        """The simple probes are the majority and stay simple."""
+        results = await run_probes((_probe("node", True, "found"),))
+        self.assertEqual((results[0].ok, results[0].detail, results[0].fix), (True, "found", ""))
 
     async def test_a_cheap_connector_probe_never_degrades_health(self):
         from simorgh.contracts.connector import FakeConnector

@@ -773,12 +773,16 @@ _DOMAIN_BLURB: tuple[tuple[str, str], ...] = (
 
 
 async def _domains_command(ledger: LedgerClient) -> Outcome:
-    """Which domains are set up, which answer, and what to set.
+    """Which domains are set up, which answer, and what to do next.
 
-    Reads the same capability probes `capabilities` does. Two states are
-    kept apart on purpose: "nothing configured yet" is not a fault and
-    must not read like one, while "configured and not answering" is,
-    and is the thing a person is actually looking for.
+    Reads the same capability probes `capabilities` does, and hands the
+    rows to `render.domains_panel` rather than formatting here -- so it
+    wraps to the real terminal and so the layout is testable without a
+    Ledger.
+
+    Three states, not two. "Nothing set up yet" and "set up and not
+    answering" are different facts, and a view that showed them the same
+    way made a fresh install look like a system on fire.
     """
     try:
         events = await ledger.read(CAPABILITIES_STREAM)
@@ -794,38 +798,46 @@ async def _domains_command(ledger: LedgerClient) -> Outcome:
         return Outcome("no domain probes recorded yet -- they run just after boot, so try "
                        "again in a moment.")
 
-    lines: list[str] = []
-    working = 0
+    rows: list[dict] = []
     for domain, blurb in _DOMAIN_BLURB:
         if domain == "pim":
-            rows = {name: row for name, row in latest.items()
-                    if name.startswith(("imap:", "caldav:"))}
-            if not rows:
-                lines.append(f"  [--]  {domain:10} {blurb}")
-                lines.append("            no account configured -- add one under "
-                             "[[execution.pim_accounts]], then `simorgh vault add imap:<name>`")
+            accounts = {name: row for name, row in latest.items()
+                        if name.startswith(("imap:", "caldav:"))}
+            if not accounts:
+                rows.append({"name": domain, "blurb": blurb, "state": "todo", "detail": "",
+                             "fix": "add [[execution.pim_accounts]], then "
+                                    "`simorgh vault add imap:<name>`"})
                 continue
-            for name, row in sorted(rows.items()):
-                mark = "ok" if row.get("ok") else "--"
-                working += 1 if row.get("ok") else 0
-                lines.append(f"  [{mark}]  {domain:10} {blurb}  ({name})")
-                lines.append(f"            {str(row.get('detail') or '').strip()}")
+            for name, row in sorted(accounts.items()):
+                rows.append({**_domain_row(row), "name": name, "blurb": blurb})
             continue
         row = latest.get(domain)
         if row is None:
-            lines.append(f"  [??]  {domain:10} {blurb}")
-            lines.append("            not probed yet")
+            rows.append({"name": domain, "blurb": blurb, "state": "todo",
+                         "detail": "", "fix": "not probed yet"})
             continue
-        mark = "ok" if row.get("ok") else "--"
-        working += 1 if row.get("ok") else 0
-        lines.append(f"  [{mark}]  {domain:10} {blurb}")
-        detail = str(row.get("detail") or "").strip()
-        if detail:
-            lines.append(f"            {detail}")
+        rows.append({**_domain_row(row), "name": domain, "blurb": blurb})
 
-    header = (f"{working} of {len(_DOMAIN_BLURB)} domains working. `[--]` means nothing is set "
-              f"up yet, not that something is broken.")
-    return Outcome(header + "\n" + "\n".join(lines))
+    # `color_enabled()` rather than a bare True: it honours NO_COLOR,
+    # which is what a person piping this into a file or a log expects.
+    return Outcome(render_mod.domains_panel(rows, enabled=render_mod.color_enabled()))
+
+
+def _domain_row(payload: dict) -> dict:
+    """A probe payload as a panel row.
+
+    `missing` is what separates the two failures: non-empty means
+    nothing has been set up, which is not a fault; empty on a failed
+    probe means it IS set up and is not answering, which is.
+    """
+    if payload.get("ok"):
+        state = "ready"
+    elif payload.get("missing"):
+        state = "todo"
+    else:
+        state = "broken"
+    return {"state": state, "detail": str(payload.get("detail") or "").strip(),
+            "fix": str(payload.get("fix") or "").strip()}
 
 
 async def _alerts_command(ledger: LedgerClient, args: str = "") -> Outcome:

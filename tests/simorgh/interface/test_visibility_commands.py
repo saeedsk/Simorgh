@@ -10,6 +10,7 @@ a person set to that value on purpose."""
 from __future__ import annotations
 
 import unittest
+import unittest.mock
 
 from simorgh.bus.config import Config as BusConfig
 from simorgh.bus.factory import make_backend, make_client
@@ -50,34 +51,74 @@ class _CommandTestCase(unittest.IsolatedAsyncioTestCase):
             ledger=self.ledger)
         return outcome.text
 
-    async def _probe(self, name: str, ok: bool, detail: str) -> None:
+    async def _probe(self, name: str, ok: bool, detail: str, *, missing=(), fix: str = "") -> None:
         await self._append(dispatch_module.CAPABILITIES_STREAM, "probed", {
             "name": f"connector:{name}", "ok": ok, "detail": detail, "cost": "cheap",
-            "tools": []})
+            "tools": [], "missing": list(missing), "fix": fix})
 
 
 class DomainsTestCase(_CommandTestCase):
+    """The panel groups by state. Assertions are on the words and the
+    grouping rather than on glyphs, which change with the terminal."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        # NO_COLOR so these read the text, not the escape codes.
+        self._no_color = unittest.mock.patch.dict("os.environ", {"NO_COLOR": "1"})
+        self._no_color.start()
+        self.addCleanup(self._no_color.stop)
+
     async def test_before_any_probe_it_says_so(self):
         self.assertIn("no domain probes recorded yet", await self._run("domains"))
 
-    async def test_a_working_domain_is_marked_ok(self):
+    async def test_a_working_domain_is_listed_under_ready(self):
         await self._probe("security", True, "3 open finding(s)")
         answer = await self._run("domains")
-        self.assertIn("[ok]", answer)
+        self.assertIn("ready", answer)
         self.assertIn("3 open finding(s)", answer)
+        self.assertIn("security", answer)
 
-    async def test_an_unconfigured_domain_does_not_read_as_broken(self):
+    async def test_an_unconfigured_domain_is_to_set_up_not_broken(self):
         """"Nothing set up yet" and "set up and failing" are different
-        facts, and a person needs them kept apart."""
-        await self._probe("home", False, "set HOME_ASSISTANT_URL and HOME_ASSISTANT_TOKEN")
+        facts, and showing them the same way makes a fresh install look
+        like a system on fire."""
+        await self._probe("home", False, "not configured",
+                          missing=["HOME_ASSISTANT_URL"], fix="set HOME_ASSISTANT_URL")
         answer = await self._run("domains")
-        self.assertIn("nothing is set up yet, not that something is broken", answer)
-        self.assertIn("HOME_ASSISTANT_URL", answer)
+        self.assertIn("to set up", answer)
+        self.assertNotIn("not working", answer)
+        self.assertIn("set HOME_ASSISTANT_URL", answer)
 
-    async def test_it_counts_how_many_work(self):
+    async def test_a_configured_domain_that_fails_is_not_working(self):
+        """Nothing `missing` on a failed probe means it IS set up and is
+        not answering, which is the row that needs acting on today."""
+        await self._probe("home", False, "Home Assistant is not answering",
+                          fix="check that Home Assistant is running")
+        answer = await self._run("domains")
+        self.assertIn("not working", answer)
+        self.assertIn("is not answering", answer)
+
+    async def test_the_summary_counts_each_group(self):
         await self._probe("security", True, "ready")
-        await self._probe("home", False, "not configured")
-        self.assertIn("1 of 6 domains working", await self._run("domains"))
+        await self._probe("home", False, "not answering")
+        answer = await self._run("domains")
+        self.assertIn("1 ready", answer)
+        self.assertIn("1 not working", answer)
+
+    async def test_what_is_broken_comes_before_what_is_merely_unset(self):
+        await self._probe("security", True, "ready")
+        await self._probe("home", False, "not answering")
+        answer = await self._run("domains")
+        self.assertLess(answer.index("not working"), answer.index("to set up"))
+
+    async def test_a_domain_still_to_set_up_shows_the_fix_and_not_the_obvious_status(self):
+        """"no documents indexed yet" under a heading that already says
+        "to set up" is the same sentence twice."""
+        await self._probe("knowledge", False, "no documents indexed yet",
+                          missing=["a document source"], fix="tool kb_sources add ...")
+        answer = await self._run("domains")
+        self.assertIn("tool kb_sources add", answer)
+        self.assertNotIn("no documents indexed yet", answer)
 
     async def test_mail_accounts_are_listed_one_by_one(self):
         """One mailbox failing while another works is exactly what a
@@ -94,6 +135,20 @@ class DomainsTestCase(_CommandTestCase):
         answer = await self._run("domains")
         self.assertIn("execution.pim_accounts", answer)
         self.assertIn("simorgh vault add", answer)
+
+    async def test_no_line_runs_past_the_terminal(self):
+        """The first version of this was written for whatever window it
+        happened to be tested in, and ran off the screen everywhere
+        else."""
+        await self._probe("home", False, "not configured", missing=["HOME_ASSISTANT_URL"],
+                          fix="set HOME_ASSISTANT_URL and HOME_ASSISTANT_TOKEN "
+                              "(a long-lived access token from your Home Assistant profile "
+                              "page, which you make under your own user)")
+        answer = await self._run("domains")
+        from simorgh.interface.render import display_width, terminal_width
+
+        for line in answer.splitlines():
+            self.assertLessEqual(display_width(line), terminal_width(), line)
 
     async def test_the_newest_probe_wins(self):
         await self._probe("home", False, "not configured")
