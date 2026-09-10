@@ -211,15 +211,34 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "improve":
         args, steps = _pop_steps(args)
         if not args:
-            return Outcome("usage: improve <path> <description> [steps=N]  |  improve <topic> [steps=N]")
+            return Outcome("usage: improve [path] <description> [steps=N]   "
+                           "(`skill <topic>` drafts a new skill instead)")
         first, _, rest = args.partition(" ")
+        # A path in the first word names what to change. Without one it
+        # is still a change -- the model works out which file.
+        #
+        # `improve <anything with no path>` used to create a SKILL task,
+        # so "improve, the game freezes after a second" became "write a
+        # reusable skill module" and three rounds of verification asked
+        # whether a skill had been produced (creator, 2026-09-09: "why
+        # human ask became a skill? it should have been categorized as a
+        # task"). Drafting a skill is now something you ask for by name.
+        payload = {"kind": "patch", "origin": "human", "mode": "execute"}
         if rest and _PATH_HINT.search(first):
-            return await _request(bus, topics.TASK_CREATE, _with_steps({
-                "kind": "patch", "description": rest.strip(), "subject": first, "origin": "human", "mode": "execute",
-            }, steps), timeout=5.0, render=_render_created(), watch=True)
+            payload.update(description=rest.strip(), subject=first)
+        else:
+            payload.update(description=args)
+        return await _request(bus, topics.TASK_CREATE, _with_steps(payload, steps),
+                              timeout=5.0, render=_render_created(), watch=True)
+
+    if name == "skill":
+        args, steps = _pop_steps(args)
+        if not args:
+            return Outcome("usage: skill <topic> [steps=N]  -- drafts a new reusable skill. "
+                           "To change something that already exists, use `improve`.")
         return await _request(bus, topics.TASK_CREATE, _with_steps({
             "kind": "skill", "description": args, "origin": "human", "mode": "execute",
-        }, steps), timeout=5.0, render=_render_created(), watch=True)
+        }, steps), timeout=5.0, render=_render_created("skill task"), watch=True)
 
     if name == "plan":
         args, steps = _pop_steps(args)

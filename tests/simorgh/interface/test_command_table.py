@@ -84,3 +84,101 @@ class ArgumentTestCase(unittest.TestCase):
 
     def test_a_bare_command_parses_with_no_argument(self):
         self.assertEqual(parse("domains").args, "")
+
+
+class ImproveMeansImproveTestCase(unittest.IsolatedAsyncioTestCase):
+    """`improve <anything with no path>` used to create a SKILL task.
+
+    So "improve, the game freezes after a second" became "write a
+    reusable skill module", and three rounds of verification asked
+    whether a skill had been produced. The creator, seeing it in the
+    task list: "why human ask became a skill? it should have been
+    categorized as a task".
+
+    Drafting a skill is a real thing to want; it is now something you
+    ask for by name."""
+
+    async def asyncSetUp(self):
+        import asyncio
+
+        from simorgh.bus.config import Config as BusConfig
+        from simorgh.bus.factory import make_backend, make_client
+        from simorgh.contracts import topics
+        from simorgh.ledger.factory import make_ledger
+
+        from tests.simorgh.helpers import FakeClock
+
+        self.clock = FakeClock()
+        self.ledger = make_ledger({"backend": "memory"}, clock=self.clock.now)
+        await self.ledger.start()
+        backend = make_backend(BusConfig(backend="memory"), clock=self.clock.now)
+        self.bus = make_client(backend, source="interface", ledger=self.ledger,
+                               clock=self.clock.now)
+        await self.bus.start()
+        self.other = make_client(backend, source="planning", ledger=self.ledger,
+                                 clock=self.clock.now)
+        await self.other.start()
+        self.created: list = []
+
+        async def _on_create(message) -> None:
+            self.created.append(message.payload)
+            await self.other.reply(message, type=topics.TASK_CREATE_REPLY,
+                                   payload={"task_id": "t-1"})
+
+        self._sub = await self.other.subscribe(topics.TASK_CREATE, _on_create)
+
+    async def asyncTearDown(self):
+        await self._sub.unsubscribe()
+        await self.other.stop()
+        await self.bus.stop()
+        await self.ledger.stop()
+
+    async def _run(self, line: str) -> dict:
+        from simorgh.interface.dispatch import dispatch
+        from simorgh.interface.vitals import VitalsCache
+
+        command = parse(line)
+        await dispatch(command, bus=self.bus, clock=self.clock, session_id="s1",
+                       vitals=VitalsCache(), ledger=self.ledger)
+        return self.created[-1] if self.created else {}
+
+    async def test_improve_with_prose_makes_a_patch_task(self):
+        payload = await self._run("improve the game freezes after a second")
+        self.assertEqual(payload["kind"], "patch")
+        self.assertEqual(payload["description"], "the game freezes after a second")
+
+    async def test_improve_with_prose_names_no_subject_rather_than_a_wrong_one(self):
+        payload = await self._run("improve the game freezes after a second")
+        self.assertNotIn("subject", payload)
+
+    async def test_improve_with_a_path_still_names_it(self):
+        payload = await self._run("improve workspace/g.html fix the freeze")
+        self.assertEqual(payload["kind"], "patch")
+        self.assertEqual(payload["subject"], "workspace/g.html")
+        self.assertEqual(payload["description"], "fix the freeze")
+
+    async def test_a_skill_is_asked_for_by_name(self):
+        payload = await self._run("skill a day trading advisor")
+        self.assertEqual(payload["kind"], "skill")
+        self.assertEqual(payload["description"], "a day trading advisor")
+
+    async def test_a_step_budget_still_works_on_both(self):
+        self.assertEqual((await self._run("improve fix it steps=30"))["max_steps"], 30)
+        self.assertEqual((await self._run("skill a thing steps=25"))["max_steps"], 25)
+
+    async def test_improve_with_nothing_says_what_to_type(self):
+        from simorgh.interface.dispatch import dispatch
+        from simorgh.interface.vitals import VitalsCache
+
+        outcome = await dispatch(parse("improve"), bus=self.bus, clock=self.clock,
+                                 session_id="s1", vitals=VitalsCache(), ledger=self.ledger)
+        self.assertIn("usage: improve", outcome.text)
+        self.assertIn("skill", outcome.text)
+
+    async def test_skill_with_nothing_points_back_at_improve(self):
+        from simorgh.interface.dispatch import dispatch
+        from simorgh.interface.vitals import VitalsCache
+
+        outcome = await dispatch(parse("skill"), bus=self.bus, clock=self.clock,
+                                 session_id="s1", vitals=VitalsCache(), ledger=self.ledger)
+        self.assertIn("improve", outcome.text)
