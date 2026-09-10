@@ -31,10 +31,25 @@ DEFAULT_PRIORITY_WEIGHTS = Config().priority_weights
 
 
 def select_ready(store: TaskStore, *, priority_weights: dict[str, int], limit: int = 1) -> list[Task]:
-    """Highest `priority_weights[origin]` first, then oldest -- spec
-    section 12 Q3's default (humans first)."""
+    """Highest `priority_weights[origin]` first, then fewest attempts,
+    then oldest -- spec section 12 Q3's default (humans first).
+
+    `attempts` sits in the middle of that key because oldest-first alone
+    starves fresh work. A task that verification blocks comes straight
+    back to the queue, and it was created before everything still
+    waiting, so it wins the next dispatch -- and the one after that. A
+    GAIA run on 2026-09-10 measured it: two tasks were re-claimed nine
+    and ten times, took 68% of the run's steps and 71% of its wall
+    clock, and four questions were never started at all. They sat on the
+    queue for their full 600s timeout and scored zero without the system
+    ever reading them.
+
+    Fewest-attempts-first is the whole fix: a retry still runs, and it
+    runs after the work that has never had a turn. Within one attempt
+    count the order is unchanged, so nothing else about dispatch moves.
+    """
     candidates = store.ready(limit=1000)
-    candidates.sort(key=lambda t: (-priority_weights.get(t.origin, 0), t.created_at))
+    candidates.sort(key=lambda t: (-priority_weights.get(t.origin, 0), t.attempts, t.created_at))
     return candidates[:limit]
 
 

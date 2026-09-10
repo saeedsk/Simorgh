@@ -208,7 +208,13 @@ class Config:
     # say so.
     web_fetch_extract_text: bool = True
     web_fetch_max_bytes: int = 200_000
+    # Per HOST, in `web_fetch_window_s`. Politeness to one site.
     web_fetch_max_calls: int = 30
+    # Across every host together: a guard against a runaway loop, not a
+    # research budget. Eight times the per-host number, because a real
+    # question is answered by reading several sites, not one site eight
+    # times.
+    web_fetch_max_total_calls: int = 240
     web_fetch_window_s: float = 3600.0
     web_fetch_allow_private_networks: bool = False
     web_fetch_user_agent: str = "Simorgh/2.0 (personal AI assistant; +https://github.com/saeedsk/Simorgh)"

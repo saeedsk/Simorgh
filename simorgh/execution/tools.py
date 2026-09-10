@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from collections import deque
@@ -507,13 +508,15 @@ class WebFetchTool:
         self._config = config
         self._opener = opener or urllib.request.urlopen
         self._resolver = resolver or socket.getaddrinfo
+        # Per host, plus a whole-tool ceiling. See `_enforce_rate_limit`.
         self._recent_calls: deque[float] = deque()
+        self._recent_by_host: dict[str, deque[float]] = {}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         url = args["url"]
         try:
             self._validate_url(url)
-            self._enforce_rate_limit(ctx)
+            self._enforce_rate_limit(ctx, url)
         except FetchRefused as exc:
             return ToolResult(ok=False, error=str(exc))
 
@@ -662,17 +665,67 @@ class WebFetchTool:
         validate_public_http_url(
             url, allow_private=self._config.web_fetch_allow_private_networks, resolver=self._resolver)
 
-    def _enforce_rate_limit(self, ctx: ToolContext) -> None:
+    def _enforce_rate_limit(self, ctx: ToolContext, url: str = "") -> None:
+        """Polite to each site, and not a straitjacket across all of them.
+
+        The limit used to be one bucket for the whole internet: 30
+        fetches an hour, whatever they were of. That is far stricter
+        than politeness needs -- 30 requests an hour to one host is
+        courteous, 30 across every host there is means one thorough
+        piece of research locks the tool for everything that comes
+        after it. Measured on a GAIA run, 2026-09-10: 103 of 682 steps
+        were fetches this limiter refused, and questions late in the run
+        met a bucket that questions early in the run had emptied.
+
+        So the per-host limit keeps the old number and the old promise,
+        and a separate, much larger ceiling still bounds the tool as a
+        whole so a runaway loop cannot hammer the network.
+        """
         now = ctx.clock.now()
-        cutoff = now - self._config.web_fetch_window_s
-        while self._recent_calls and self._recent_calls[0] < cutoff:
-            self._recent_calls.popleft()
-        if len(self._recent_calls) >= self._config.web_fetch_max_calls:
+        host = ""
+        try:
+            host = (urllib.parse.urlsplit(url).hostname or "").lower()
+        except ValueError:
+            host = ""
+
+        def _trim(calls) -> None:
+            cutoff = now - self._config.web_fetch_window_s
+            while calls and calls[0] < cutoff:
+                calls.popleft()
+
+        per_host = self._recent_by_host.setdefault(host, deque())
+        _trim(per_host)
+        _trim(self._recent_calls)
+
+        if len(per_host) >= self._config.web_fetch_max_calls:
             raise FetchRefused(
-                f"rate limit exceeded: {len(self._recent_calls)}/{self._config.web_fetch_max_calls} "
-                f"fetches in the last {self._config.web_fetch_window_s:.0f}s"
+                f"rate limit exceeded: {len(per_host)}/{self._config.web_fetch_max_calls} fetches "
+                f"of {host or 'this host'} in the last {self._config.web_fetch_window_s:.0f}s. "
+                f"{_wait_note(per_host[0] + self._config.web_fetch_window_s - now)} "
+                f"Retrying the same fetch before then will be refused the same way -- read a "
+                f"different source, or answer from what you already have."
             )
+        if len(self._recent_calls) >= self._config.web_fetch_max_total_calls:
+            raise FetchRefused(
+                f"rate limit exceeded: {len(self._recent_calls)}/"
+                f"{self._config.web_fetch_max_total_calls} fetches in the last "
+                f"{self._config.web_fetch_window_s:.0f}s across every host. "
+                f"{_wait_note(self._recent_calls[0] + self._config.web_fetch_window_s - now)} "
+                f"Answer from what you have already read."
+            )
+        per_host.append(now)
         self._recent_calls.append(now)
+        # Hosts that have fallen out of the window are just noise.
+        for name in [h for h, calls in self._recent_by_host.items() if not calls]:
+            self._recent_by_host.pop(name, None)
+
+
+def _wait_note(seconds: float) -> str:
+    """How long until the oldest call falls out of the window."""
+    seconds = max(0.0, seconds)
+    if seconds < 90:
+        return f"The next one is allowed in about {seconds:.0f}s."
+    return f"The next one is allowed in about {seconds / 60:.0f} minutes."
 
 
 MCP_PROPOSALS_STREAM = "mcp:proposals"

@@ -342,9 +342,15 @@ class WebSearchTool:
         while self._recent_calls and self._recent_calls[0] < cutoff:
             self._recent_calls.pop(0)
         if len(self._recent_calls) >= self._config.web_search_max_calls:
+            # Say how long the door stays shut. Without it the model
+            # reads a refusal as a transient failure and re-issues the
+            # same search: 26 steps of one GAIA run, 2026-09-10.
+            wait = max(0.0, self._recent_calls[0] + self._config.web_search_window_s - now)
             raise SearchUnavailable(
                 f"refused: {self._config.web_search_max_calls} searches already in the last "
-                f"{self._config.web_search_window_s / 60:.0f} minutes"
+                f"{self._config.web_search_window_s / 60:.0f} minutes. The next one is allowed in "
+                f"about {wait / 60:.0f} minutes, and searching again before then will be refused "
+                f"the same way -- work from the results you already have."
             )
         self._recent_calls.append(now)
 

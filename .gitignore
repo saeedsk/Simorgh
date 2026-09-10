@@ -22,17 +22,24 @@ secrets/
 # Structured data a tool fetched, written by execution/service.py so
 # `read_file` and a script can load it. Real data, not source.
 results/
+
 .sim-quarantine/
 
 # Persistent scratch: notes, intermediates and working files a long
 # piece of work needs somewhere to keep. Deliberately NOT source -- it
 # survives across sessions (unlike results/, which is pruned) and is
 # never committed or reviewed. See execution/config.py::workspace_dir.
-workspace/
+#
+# `workspace/` + `!workspace/` was the rule here until 2026-09-10, and
+# it ignored nothing at all: un-ignoring the directory lets git descend
+# into it again, so every scratch file inside was untracked-and-
+# committable while three comments in the source promised the opposite.
+# Ignoring the CONTENTS and re-including the one file we do want is the
+# form that actually holds.
+workspace/*
 # ...except the README, so the directory exists in a fresh clone and
 # Sim has somewhere to write on its first run rather than discovering
 # the path is missing.
-!workspace/
 !workspace/README.md
 
 # Scripts run_script stages before running them. Transient.

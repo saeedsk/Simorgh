@@ -30,6 +30,7 @@ class TestAutoOffActuallyStopsAutonomousWork(unittest.IsolatedAsyncioTestCase):
                 self.origin = origin
                 self.id = origin
                 self.kind = "patch"
+                self.attempts = 0
                 self.created_at = 0.0
                 self.updated_at = 0.0
 

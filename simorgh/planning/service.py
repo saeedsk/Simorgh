@@ -117,6 +117,12 @@ class Service:
         # part of `changes_since` (spec 5.5: "learn.self_patch.applied
         # subjects touching the child's subject").
         self._recent_self_patches: list[tuple[str, float]] = []
+        # The answer each blocked task last offered, so a retry that
+        # reproduces it can be stopped instead of run again. In memory
+        # rather than on the Task: it only ever decides whether to spend
+        # the NEXT attempt, and `attempts` -- which is persisted -- still
+        # bounds the task after a restart.
+        self._last_blocked_answer: dict[str, str] = {}
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -451,9 +457,57 @@ class Service:
         task = await self._store.get(p["task_id"])
         if task is None or task.status in (BLOCKED, FAILED):
             return
-        await self._retry_or_block(task, p.get("reason", ""))
+        await self._retry_or_block(task, p.get("reason", ""),
+                                   answer=str(p.get("result_summary") or ""))
 
-    async def _retry_or_block(self, task: Task, reason: str) -> None:
+    def _made_no_progress(self, task: Task, answer: str) -> bool:
+        """True when this attempt ended with the answer the last one was
+        blocked for.
+
+        A retry is worth running because the next attempt can be
+        different -- it carries the objection, the kept edits and the
+        memory of what was tried. When it comes back with the same
+        answer anyway, the same reviewer will make the same objection,
+        and every further attempt is the same round trip again.
+
+        Measured on a GAIA run, 2026-09-10: 18 tasks were retried, 8 of
+        them re-produced an identical answer, and retrying past the
+        first repeat never once turned a wrong answer into a right one.
+        Meanwhile the retries took 68% of the run's steps."""
+        stripped = " ".join(answer.split())
+        if not stripped:
+            # An outcome with no answer says nothing about repetition,
+            # and must not erase what the last real one said.
+            return False
+        seen = self._last_blocked_answer.get(task.id)
+        self._last_blocked_answer[task.id] = stripped
+        return stripped == seen
+
+    async def _retry_or_block(self, task: Task, reason: str, *, answer: str = "") -> None:
+        if self._made_no_progress(task, answer):
+            note = (f"stopped after {task.attempts + 1} attempts: the retry produced the same "
+                    f"answer that was already rejected ({reason})")
+            # `available -> failed` and `pending -> failed` are illegal,
+            # and an outcome can arrive for a task the queue has already
+            # taken back. Raising here would be swallowed by the bus and
+            # leave the task cycling forever -- the exact shape that made
+            # a cancelled task loop in 2026-09-07. BLOCKED is the legal
+            # way through and is also true: it is parked before it ends.
+            if task.status in (AVAILABLE, PENDING):
+                await self._store.transition(task.id, BLOCKED, note=note)
+            await self._store.transition(task.id, FAILED, attempt=True, note=note)
+            self._mark_sibling_failure(task)
+            await self._ctx.bus.publish(Message.new(
+                topics.TASK_FAILED, source=self._ctx.source,
+                partition_key=f"task:{task.id}",
+                payload={"task_id": task.id, "terminal": True, "attempts": task.attempts + 1,
+                         "result_summary": answer,
+                         "reason": f"{reason} -- and the retry produced the same answer again, "
+                                   f"so a further attempt would repeat it"},
+            ))
+            await self._propagate_failure(task.id)
+            await self._maybe_finish_project(task.parent_id)
+            return
         if task.attempts + 1 >= self.config.max_blocked_retries:
             await self._store.transition(
                 task.id, FAILED, note=f"gave up after {task.attempts + 1} attempts: {reason}", attempt=True,

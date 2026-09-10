@@ -911,6 +911,54 @@ class TestWebFetchTool(unittest.IsolatedAsyncioTestCase):
         self.clock.advance(61.0)
         self.assertTrue((await tool.run({"url": "https://example.com/c"}, ctx=ctx)).ok)
 
+    async def test_one_site_does_not_use_up_every_other_site(self):
+        """The limit is politeness to a host, not a research budget.
+
+        It used to be one bucket for the whole internet, so a thorough
+        piece of work locked the tool for everything that followed. A
+        GAIA run on 2026-09-10 spent 103 of 682 steps on fetches this
+        limiter refused, most of them for hosts never touched before."""
+        config = Config(web_fetch_max_calls=2, web_fetch_window_s=3600.0)
+        tool = WebFetchTool(
+            config, resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(b"ok"),
+        )
+        ctx = self._ctx()
+        self.assertTrue((await tool.run({"url": "https://example.com/a"}, ctx=ctx)).ok)
+        self.assertTrue((await tool.run({"url": "https://example.com/b"}, ctx=ctx)).ok)
+        self.assertFalse((await tool.run({"url": "https://example.com/c"}, ctx=ctx)).ok)
+        # A different host has its own allowance.
+        self.assertTrue((await tool.run({"url": "https://other.example.org/a"}, ctx=ctx)).ok)
+
+    async def test_a_whole_tool_ceiling_still_bounds_a_runaway_loop(self):
+        config = Config(web_fetch_max_calls=5, web_fetch_max_total_calls=3,
+                        web_fetch_window_s=3600.0)
+        tool = WebFetchTool(
+            config, resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(b"ok"),
+        )
+        ctx = self._ctx()
+        for index in range(3):
+            self.assertTrue((await tool.run({"url": f"https://h{index}.example.com/"}, ctx=ctx)).ok)
+        stopped = await tool.run({"url": "https://h9.example.com/"}, ctx=ctx)
+        self.assertFalse(stopped.ok)
+        self.assertIn("across every host", stopped.error)
+
+    async def test_a_refusal_says_how_long_the_door_stays_shut(self):
+        """A refusal that says only "30/30" reads as a transient failure,
+        and the model answers it by trying the same fetch again."""
+        config = Config(web_fetch_max_calls=1, web_fetch_window_s=3600.0)
+        tool = WebFetchTool(
+            config, resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(b"ok"),
+        )
+        ctx = self._ctx()
+        await tool.run({"url": "https://example.com/a"}, ctx=ctx)
+        refused = await tool.run({"url": "https://example.com/b"}, ctx=ctx)
+        self.assertFalse(refused.ok)
+        self.assertIn("60 minutes", refused.error)
+        self.assertIn("refused the same way", refused.error)
+
     async def test_allow_private_networks_skips_the_ssrf_guard(self):
         config = Config(web_fetch_allow_private_networks=True)
 

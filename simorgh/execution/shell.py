@@ -168,7 +168,11 @@ def refusal_for(command: str, refusals: dict[str, str] | None = None) -> str | N
 
 class RunShellTool:
     name = "run_shell"
-    description = "Run a shell command in the repository and return its output."
+    description = (
+        "Run a shell command in the repository and return its output. "
+        "Write any file you want to read back under workspace/ -- the file tools refuse paths "
+        "elsewhere, so a file this command leaves in the repository root cannot be opened again."
+    )
     read_only = False
     # Guardian's ReversibilityRule gates every call on this. A shell can
     # do anything, so it is never quietly waved through as "reversible".
