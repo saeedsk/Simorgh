@@ -511,10 +511,11 @@ optional and refused by name when absent -- the full version is
 
 1. **Frigate** already classifies person/car/package/animal on every
    camera locally; `home_camera what=last_event` returns that.
-2. **A local VLM** through the Ollama cognition provider
-   (`voice-design.md §0`, a prerequisite): `qwen2.5vl:7b` or
-   `moondream`; `cognition/vision.py::describe_image` uses it by
-   default.
+2. **A VLM** -- the configured cloud vision model, or `qwen2.5vl:7b` /
+   `moondream` via Ollama as the fallback, per the creator's provider
+   policy in `voice-design.md §0` (cloud primary for the LLM, local as
+   fallback); `[cognition] vision_provider` decides and the daily cap
+   applies to the cloud one.
 3. **Task-specific local models** for a repeated question:
    `ultralytics` YOLO, `open_clip`, `EasyOCR`/`tesseract`,
    `insightface` (household members, enrolled, opt-in).

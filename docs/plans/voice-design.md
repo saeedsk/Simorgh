@@ -20,21 +20,33 @@ real-estate portal was the first instance; today's designs repeated
 the shape in three places. Named here so the pattern is on the record
 and the fixes are in the docs, not just in this one:
 
-1. **Cognition itself is cloud-only.** `simorgh/cognition/providers/`
-   holds `claude_code`, `gemini`, `together` -- no local provider --
-   while `ollama` is installed on this very machine. Every "ask
-   cognition" in every design is therefore a cloud call by
-   construction. **Fix, and a prerequisite for this document:**
-   `providers/ollama.py` (OpenAI-compatible `/v1/chat/completions`
-   against `http://localhost:11434`, which also covers llama.cpp's
-   server, vLLM, LM Studio and any other OpenAI-shaped local server),
-   selectable per task class in `[cognition]`: `provider = "ollama"`
-   for voice turns, rule explanations, device identification, the
-   daily digest; a cloud provider stays available for the hard
-   reasoning tasks the creator chooses to spend on. Default models:
-   `qwen2.5:7b-instruct` / `llama3.1:8b` for text, `qwen2.5vl:7b` or
-   `moondream` for images (section 7). Latency, not cost, is why voice
-   needs this: a cloud round trip is 1–3 s before the first token.
+1. **Cognition has no local provider at all.** `simorgh/cognition/
+   providers/` holds `claude_code`, `gemini`, `together` -- nothing
+   that runs on the machine -- so when there is no API access there is
+   no brain. **Fix:** `providers/ollama.py` (OpenAI-compatible
+   `/v1/chat/completions` against `http://localhost:11434`, which also
+   covers llama.cpp's server, vLLM and LM Studio).
+
+   **But the creator's decision on its role is explicit (2026-09-09):
+   a cloud model is the PRIMARY brain; Ollama is the FALLBACK, used
+   only when no LLM/API access exists.** Running a 7B model slows the
+   laptop and the results have not been good. So the provider policy
+   is: the configured cloud provider first; Ollama automatically when
+   the cloud provider is unreachable, rate-limited or has no key
+   (health-checked, with a ledgered `cognition.provider.fallback`
+   event and a spoken/printed "running on the local model" so nobody
+   is surprised by worse answers); never the other way round. This is
+   the one capability where "local first" does NOT apply, and the
+   reason is stated: the local option is worse, and the creator has
+   chosen to pay for the better one. For voice specifically, the
+   primary should be a *fast* cloud model (Haiku 4.5, Gemini Flash) --
+   latency, not reasoning depth, is what a spoken turn needs.
+
+   Per-task-class selection stays (`[cognition] voice_provider`,
+   `vision_provider`, `digest_provider`, each `"default"` unless set),
+   so a person can route one class to Ollama deliberately without
+   moving the rest.
+
 2. **Vision was specified as key-gated only** (`home-automation-design
    §8`: "GEMINI_API_KEY or ANTHROPIC_API_KEY, else 'vision is not
    configured'"). Wrong order. Corrected in that document: Frigate's
@@ -143,9 +155,11 @@ class Config:
     wake_threshold: float = 0.6
     follow_up_window_s: float = 6.0   # after a reply, listen again without the wake word
     barge_in: bool = True             # speech during playback stops playback
-    # Cognition: which provider answers voice turns (section 5)
-    cognition_provider: str = "ollama"
-    cognition_model: str = "qwen2.5:7b-instruct"
+    # Cognition: which provider answers voice turns (section 5).
+    # "default" = [cognition]'s primary (cloud); Ollama is the automatic
+    # fallback when that is unreachable, never the primary by default.
+    cognition_provider: str = "default"
+    cognition_model: str = ""                # "" = the provider's fast model
     fast_path_intents: bool = True    # device control / state without the LLM (section 5.2)
     # Speakers
     speaker_id: bool = True
@@ -174,7 +188,7 @@ speech to first audio**; ≤ 0.6 s with a GPU. Budget:
 |---|---|---|
 | endpointing | 700 ms (the silence itself) | Silero VAD on 30 ms frames; adaptive: shorten to 400 ms after a question-shaped utterance |
 | STT final | ≤ 250 ms | streaming: partial transcripts every 500 ms during speech, so the final pass only covers the tail |
-| route + LLM first token | ≤ 200 ms (fast path) / ≤ 600 ms (Ollama 7B on M-series) | section 5 |
+| route + LLM first token | ≤ 200 ms (fast path) / ≤ 700 ms (a fast cloud model, streaming) / ≤ 600 ms (Ollama 7B on M-series, fallback) | section 5 -- the fast path exists because the LLM leg is the largest and least controllable |
 | TTS first audio | ≤ 150 ms | sentence-split the LLM stream; synthesise sentence 1 while the LLM is still writing sentence 2; Kokoro ONNX ~100 ms/sentence |
 | playback start | immediate | 24 kHz PCM ring buffer |
 
@@ -211,9 +225,10 @@ sentence.
 
 ## 5. Routing: what answers a voice turn
 
-### 5.1 Cognition, local
+### 5.1 Cognition
 
-The Ollama provider (§0) with `cognition_model`. The voice scaffold is
+The configured cloud provider (a fast model), Ollama only as the
+fallback (§0). The voice scaffold is
 short: reply in one or two spoken sentences; no markdown, no lists, no
 code; say numbers as words when small; ask one question if ambiguous;
 tools available = the `home_*` set plus `notify`, `schedule`, memory.
@@ -373,10 +388,13 @@ Local first, in this order; each optional, probed, refused by name:
 
 ## 10. Build order and acceptance
 
-0. **Prerequisites**: `cognition/providers/ollama.py` + per-task-class
-   provider selection; HTTP API `POST` + bearer token. Acceptance: a
-   typed `research` task runs entirely on `qwen2.5:7b` with no network
-   (assert by running with `HTTPS_PROXY=http://127.0.0.1:1` set).
+0. **Prerequisites**: `cognition/providers/ollama.py` as the
+   FALLBACK provider + health-checked failover + per-task-class
+   selection; HTTP API `POST` + bearer token. Acceptance: with the
+   cloud key present a `research` task uses it; with the key removed
+   (or `HTTPS_PROXY=http://127.0.0.1:1`) the same task completes on
+   Ollama and the ledger shows one `cognition.provider.fallback`
+   event; with both absent it fails honestly naming both.
 1. **Engines + `sim voice`**: faster-whisper, Silero, Kokoro, the local
    client, `voice test/listen`. Acceptance on this laptop: say
    "what time is it" → spoken answer ≤ 1.2 s after silence, measured
