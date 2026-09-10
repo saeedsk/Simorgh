@@ -88,6 +88,12 @@ class _TaskMeta:
     scope_paths: tuple[str, ...] = ()
     tracker: DriftTracker | None = None
     started_ts: float = 0.0
+    # For the stall check (`stall_idle_seconds`): when this task last
+    # showed a sign of life, and whether the current silence has
+    # already been reported. Reset by every `task.step`, so a task that
+    # stalls, recovers and stalls again is reported twice, not once.
+    last_step_ts: float = 0.0
+    stall_reported: bool = False
     # Which tools this task actually used, for distillation.py: a task
     # that reached outside the repo and got somewhere is a technique
     # worth keeping, and the tool list is how that shows.
@@ -149,6 +155,7 @@ class Service:
         self._router: AlertRouter | None = None
         self._digest: Digest | None = None
         self._alert_tick_running = False
+        self._reflect_loop: asyncio.Task | None = None
 
     def _rebuild_from_config(self) -> None:
         """Re-make the pieces that were built from config defaults."""
@@ -193,9 +200,18 @@ class Service:
             await ctx.bus.subscribe(topics.ACTION_DENIED, self._on_action_denied),
             await ctx.bus.subscribe(topics.SYSTEM_TICK_IDLE, self._on_idle_tick),
         ]
+        if self.config.reflect_after_start_s > 0:
+            self._reflect_loop = asyncio.create_task(self._reflect_periodically(), name="reflection-pass")
         ctx.logger.info("reflection.started")
 
     async def stop(self) -> None:
+        if self._reflect_loop is not None:
+            self._reflect_loop.cancel()
+            try:
+                await self._reflect_loop
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise from a background pass
+                pass
+            self._reflect_loop = None
         for sub in self._subs:
             await sub.unsubscribe()
         self._subs = []
@@ -225,7 +241,8 @@ class Service:
     async def _on_task_created(self, message: Message) -> None:
         p = message.payload
         scope = p.get("scope") or {}
-        meta = _TaskMeta(kind=p["kind"], description=p["description"], scope_paths=tuple(scope.get("paths", [])), started_ts=message.ts)
+        meta = _TaskMeta(kind=p["kind"], description=p["description"], scope_paths=tuple(scope.get("paths", [])), started_ts=message.ts,
+                         last_step_ts=message.ts)
         meta.tracker = DriftTracker(p["task_id"], p["description"], list(meta.scope_paths), self.config)
         self._tasks[p["task_id"]] = meta
         await self._append(f"{DRIFT_STREAM_PREFIX}{p['task_id']}", "goal_registered", {"goal": p["description"], "scope": list(meta.scope_paths)})
@@ -241,6 +258,8 @@ class Service:
             return
         if p.get("tool"):
             meta.tools_used.add(str(p["tool"]))
+        meta.last_step_ts = message.ts
+        meta.stall_reported = False
         meta.tracker.observe_step(p.get("tool"), p.get("summary", ""))
         await self._append(f"{DRIFT_STREAM_PREFIX}{p['task_id']}", "step_seen", {"step_no": p["step_no"], "tool": p.get("tool")})
 
@@ -255,7 +274,7 @@ class Service:
 
             confidence = p.get("confidence")
             if isinstance(confidence, (int, float)):
-                self._calibration.record(meta.kind, float(confidence), succeeded)
+                self._record_calibration(meta.kind, confidence, succeeded)
 
             if meta.tracker is not None:
                 await self._run_drift_close(message, meta)
@@ -329,7 +348,7 @@ class Service:
             "tags": ["self_critique", f"task:{task_id}"], "source_ref": f"reflect:critique:{task_id}",
         })
         if critique.confidence is not None:
-            self._calibration.record(meta.kind, critique.confidence, succeeded)
+            self._record_calibration(meta.kind, critique.confidence, succeeded)
         await self._maybe_distil(message, task_id, meta, succeeded)
 
     async def _maybe_distil(self, message: Message, task_id: str, meta: _TaskMeta, succeeded: bool) -> None:
@@ -375,13 +394,29 @@ class Service:
         except OSError:
             return set()
 
+    def _record_calibration(self, task_type: str, stated, hit: bool) -> None:
+        """One calibration sample, with the unusable ones said out loud.
+
+        `CalibrationTable.record` refuses a confidence that is not a
+        probability (NaN, inf, -3.0) instead of folding it into the
+        figures. Refusing silently would be the other half of the same
+        honesty problem, so it is logged: a producer sending garbage
+        confidence is a bug someone has to see.
+        """
+        if self._calibration.record(task_type, float(stated), hit):
+            return
+        if self._ctx is not None:
+            self._ctx.logger.warning(
+                "reflection.calibration_sample_unusable", task_type=task_type, stated=repr(stated),
+            )
+
     # -- calibration inputs from elsewhere --------------------------------------------------
 
     async def _on_verify_result(self, message: Message) -> None:
         p = message.payload
         confidence = p.get("confidence")
         if isinstance(confidence, (int, float)):
-            self._calibration.record("verify", float(confidence), p["verdict"] == "pass")
+            self._record_calibration("verify", confidence, p["verdict"] == "pass")
 
     async def _on_plan_revised(self, message: Message) -> None:
         # Known simplification: plan_id isn't guaranteed to equal the
@@ -403,7 +438,7 @@ class Service:
         self._patterns.add(p["task_type"], p["succeeded"], p.get("strategy"), message.ts)
         confidence = p.get("confidence")
         if isinstance(confidence, (int, float)):
-            self._calibration.record(p["task_type"], float(confidence), p["succeeded"])
+            self._record_calibration(p["task_type"], confidence, p["succeeded"])
 
     # -- self.observation from learn.* / system.* -------------------------------------------
 
@@ -476,9 +511,57 @@ class Service:
             "patterns": [{"kind": "repeated_denial", "rate": 1.0, "proposal": pattern.proposal}],
         })
 
-    # -- sleep tick: pattern mining + calibration emission -----------------------------------
+    # -- the reflection pass: pattern mining + calibration emission ---------------------------
+    #
+    # Reached two ways, and the second one is why the first was not
+    # enough. `system.tick.sleep` is the six-hourly tick, and the
+    # Kernel's sleep loop waits a full `sleep_every_s` before its FIRST
+    # tick -- so a session shorter than six hours ran this pass zero
+    # times, and every pattern mined, every calibration snapshot and
+    # every `self.observation{kind:limitation}` in it reached nobody
+    # (observer bulk5-02, 2026-09-10; a real Kernel boot with twelve
+    # failed `patch` outcomes at stated confidence 0.9 published
+    # nothing at all until a sleep tick was fired by hand). The
+    # `reflect_after_start_s`/`reflect_every_s` loop below is the same
+    # fix `[ledger] compact_after_start_s` and `[memory]
+    # consolidate_after_start_s` already carry for the same reason.
+
+    async def _reflect_periodically(self) -> None:
+        """The pass on a real cadence, not only on the six-hourly tick.
+
+        Deliberately not run inside `start()`: at boot there is nothing
+        to mine yet, and boot is not the place to wait. A failure is
+        logged and dropped -- reflection that cannot mine this minute
+        still mines next minute.
+        """
+        assert self._ctx is not None
+        delay = self.config.reflect_after_start_s
+        while True:
+            try:
+                # Wall-clock `asyncio.sleep`, not `ctx.clock.sleep`, and
+                # for the same reason `ledger`/`memory`'s equivalent
+                # loops use it: this is a real-time cadence, and a test
+                # `FakeClock` whose `sleep` returns instantly would turn
+                # it into a hot loop republishing the same mined
+                # patterns thousands of times.
+                await asyncio.sleep(delay)
+                if not self._paused:
+                    await self._run_pass(Message.new(
+                        topics.SYSTEM_TICK_SLEEP, source=self._ctx.source,
+                        payload={"window_seconds": delay}, clock=self._ctx.clock.now,
+                    ))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                self._ctx.logger.warning("reflection.pass_failed", error=repr(exc))
+            if self.config.reflect_every_s <= 0:
+                return
+            delay = self.config.reflect_every_s
 
     async def _on_sleep(self, message: Message) -> None:
+        await self._run_pass(message)
+
+    async def _run_pass(self, message: Message) -> None:
         now = self._ctx.clock.now() if self._ctx is not None else message.ts
         patterns = self._patterns.mine(now)
         if patterns:
@@ -586,7 +669,13 @@ class Service:
         self._ad_hoc.append(alert)
 
     async def _on_idle_tick(self, message: Message) -> None:
-        if self._paused or not self.config.monitors_enabled or self._router is None:
+        if self._paused:
+            return
+        # Deliberately ahead of, and independent of, the monitor gate:
+        # the stall check is not a monitor and must still run when
+        # `monitors_enabled` is off.
+        await self._check_stalls(message)
+        if not self.config.monitors_enabled or self._router is None:
             return
         # An idle tick can arrive while the previous one is still
         # checking. Overlapping runs would double-send every alert the
@@ -601,6 +690,45 @@ class Service:
                 self._ctx.logger.warning("reflection.monitor_tick_failed", error=repr(exc))
         finally:
             self._alert_tick_running = False
+
+    async def _check_stalls(self, cause: Message) -> None:
+        """An in-progress task that has shown no sign of life for
+        `stall_idle_seconds` is `behavior` drift, recommendation `note`.
+
+        12-reflection.md section 3.5 has specified this since the
+        subsystem was designed -- "In-progress task with no step for
+        this long -> `behavior` drift `note`" -- and nothing read the
+        field. `kernel/configcheck.py` carried it in
+        `KNOWN_DEAD_FIELDS`, which is honest about it being dead but
+        does not make the stall visible to anyone. It is now built, on
+        the tick that is exactly right for it: `system.tick.idle` fires
+        only when nothing is happening, which is the definition of the
+        condition being looked for (observer bulk5-02, 2026-09-10).
+
+        Reported once per stall episode. A task that produces a step
+        and goes quiet again is a second stall and is reported again;
+        one that simply stays quiet is not re-reported every three
+        seconds.
+        """
+        if self.config.stall_idle_seconds <= 0 or not self._tasks:
+            return
+        now = self._ctx.clock.now() if self._ctx is not None else cause.ts
+        for task_id, meta in list(self._tasks.items()):
+            if meta.stall_reported or meta.last_step_ts <= 0:
+                continue
+            idle_for = now - meta.last_step_ts
+            if idle_for < self.config.stall_idle_seconds:
+                continue
+            meta.stall_reported = True
+            evidence = (
+                f"no step for {idle_for:.0f}s (threshold {self.config.stall_idle_seconds:.0f}s); "
+                f"goal: {' '.join((meta.description or '').split())[:200]}"
+            )
+            await self._append(f"{DRIFT_STREAM_PREFIX}{task_id}", "stalled",
+                               {"idle_seconds": idle_for, "threshold": self.config.stall_idle_seconds})
+            await self._publish(cause, topics.REFLECT_DRIFT_DETECTED, {
+                "kind": "behavior", "evidence": evidence, "recommendation": "note", "task_id": task_id,
+            })
 
     async def _run_monitors(self, cause: Message) -> None:
         assert self._router is not None and self._ctx is not None

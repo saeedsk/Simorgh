@@ -134,6 +134,16 @@ class SelfDiffer(Protocol):
 | `pattern.min_samples` | int | 3 | |
 | `calibration.bins` | int | 10 | |
 | `calibration.min_samples` | int | 10 | Below this no `reflect.calibration.updated` is emitted (avoid noise) |
+| `reflect_after_start_s` | float | 120 | Seconds after start before the FIRST reflection pass (mining + calibration). 0 disables the loop |
+| `reflect_every_s` | float | 3600 | Cadence of every pass after the first. 0 = the one pass after start, then only `system.tick.sleep` |
+
+The last two exist because until 2026-09-10 the pass ran *only* on
+`system.tick.sleep`, and the Kernel's sleep loop waits a full
+`sleep_every_s` (6h) before its first tick: every session shorter than
+six hours mined no patterns, published no calibration and produced no
+`self.observation{kind:limitation}` at all. Proved on a real Kernel
+boot (observer bulk5-02); the same shape `[ledger] compact_after_
+start_s` and `[memory] consolidate_after_start_s` already carry.
 
 ## 4. Data model and Ledger streams
 

@@ -98,3 +98,42 @@ Filed in full in the spec's own §12.4. Summary:
   by `learn.outcome.recorded(succeeded=false, confidence=0.9)` producing
   a `reflect.calibration.updated` whose empirical accuracy is honestly
   below its stated confidence.
+
+### Observer wave, 2026-09-10 (bulk5-02)
+
+- **The whole periodic pass never ran in a real session.** Pattern
+  mining, calibration emission and `self.observation{kind:limitation}`
+  hung off `system.tick.sleep` alone, whose Kernel loop waits a full
+  `sleep_every_s` (6h) before its *first* tick. On a real Kernel boot,
+  twelve failed `patch` outcomes at stated confidence 0.9 produced zero
+  events in three seconds and all three the moment a sleep tick was
+  fired by hand — the pipeline downstream was fine (Planning queued a
+  real task off it), the trigger was unreachable. `service.py` now runs
+  the same pass on a `reflect_after_start_s`/`reflect_every_s` loop,
+  mirroring `[ledger] compact_after_start_s` and `[memory]
+  consolidate_after_start_s`.
+- **Three `[reflection]` keys the code reads were dropped by
+  `Config.from_mapping`**: `distillation_enabled`,
+  `max_distillations_per_day`, `skill_dir` — the same bug this file's
+  own config already records for `review_timeout_s`/
+  `max_concurrent_reviews`. `tests/simorgh/reflection/test_config.py`
+  now fails if any field of `Config` has no mapping key, so there
+  cannot be a fourth round of this.
+- **A confidence that is not a probability took the pass down.** NaN,
+  `inf` and `-3.0` all satisfy the `isinstance(x, (int, float))` check
+  at the three non-critique record sites and then died inside
+  `summary()` (`ValueError`, `OverflowError`, `bins[-30]`). Because the
+  pass loops over task types, every type after the bad one silently
+  never published, on that tick and every tick after.
+  `CalibrationTable.record` now refuses such a sample, counts it in
+  `unusable()` and the Service logs
+  `reflection.calibration_sample_unusable` — discarded rather than
+  clamped, so a producer's bug cannot become a confident-looking
+  calibration figure.
+- **`stall_idle_seconds` is built.** It was specified in §3.5 from the
+  start, read by nothing, and whitelisted in `kernel/configcheck.py`'s
+  `KNOWN_DEAD_FIELDS`. `_check_stalls` now runs on `system.tick.idle` —
+  the tick that fires exactly when nothing is happening, which is the
+  condition — and publishes `behavior`/`note` drift for an in-progress
+  task with no step for that long, once per stall episode. The
+  whitelist entry went with it.

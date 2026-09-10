@@ -64,6 +64,35 @@ class Config:
     review_timeout_s: float = 8.0
     max_concurrent_reviews: int = 2
 
+    # -- when the reflection pass (pattern mining, calibration
+    # emission, `self.observation{kind:limitation}`) actually runs.
+    #
+    # Until 2026-09-10 the answer was "only on `system.tick.sleep`",
+    # and the Kernel's sleep loop waits a full `sleep_every_s` (6h,
+    # `kernel/api.py`) before its FIRST tick. So in every session
+    # shorter than six hours -- which is nearly all of them -- Sim
+    # mined no patterns, published no calibration, and produced no
+    # `kind:limitation` observation: reflection noticed things and
+    # told nobody. Proved on a real Kernel boot: twelve failed `patch`
+    # outcomes at stated confidence 0.9 produced zero events in three
+    # seconds, and one hand-fired sleep tick produced all three
+    # immediately (observer bulk5-02).
+    #
+    # The Ledger hit this exact shape on 2026-09-07
+    # (`compact_after_start_s`) and Memory on 2026-09-10
+    # (`consolidate_after_start_s`); this is the same fix for the
+    # subsystem whose entire job is telling someone something.
+    #: Seconds after start before the first pass. 0 disables the loop
+    #: entirely (leaving only the six-hourly sleep tick).
+    reflect_after_start_s: float = 120.0
+    #: Cadence of every pass after the first. 0 means "the one pass
+    #: after start, then only the sleep tick". Hourly rather than
+    #: something tighter on purpose: a mined pattern becomes a real
+    #: Planning task, and Planning's fuzzy dedupe -- not this cadence
+    #: -- is what stops a repeat becoming a second task, so there is
+    #: nothing to buy by re-mining the same window every minute.
+    reflect_every_s: float = 3600.0
+
     @classmethod
     def from_mapping(cls, data: dict | None) -> "Config":
         data = data or {}
@@ -83,6 +112,21 @@ class Config:
             drift_emit_threshold=float(data.get("drift_emit_threshold", 0.6)),
             stall_idle_seconds=float(data.get("stall_idle_seconds", 1800.0)),
             critique_max_tokens=int(data.get("critique_max_tokens", 400)),
+            # These three were missed by the same 2026-09-08 sweep the
+            # comment at the bottom of this call describes. `service.py`
+            # reads all of them at runtime (`_maybe_distil`,
+            # `_existing_skills`), but none was ever passed to
+            # `cls(...)`, so writing any of them in simorgh.toml changed
+            # nothing at all -- `max_distillations_per_day = 99` still
+            # capped at 3, `distillation_enabled = false` still
+            # distilled (observer bulk5-02, 2026-09-10). The
+            # completeness test in `tests/simorgh/reflection/
+            # test_config.py` now fails if a field is added to this
+            # dataclass without a key here, so this cannot recur
+            # silently a third time.
+            distillation_enabled=bool(data.get("distillation_enabled", cls.distillation_enabled)),
+            max_distillations_per_day=int(data.get("max_distillations_per_day", cls.max_distillations_per_day)),
+            skill_dir=str(data.get("skill_dir", cls.skill_dir)),
             pattern_window_seconds=float(pattern.get("window_seconds", 86400.0)),
             pattern_min_rate=float(pattern.get("min_rate", 0.5)),
             pattern_min_samples=int(pattern.get("min_samples", 3)),
@@ -104,4 +148,6 @@ class Config:
             # the running semaphore at the default of 2.
             review_timeout_s=float(data.get("review_timeout_s", cls.review_timeout_s)),
             max_concurrent_reviews=int(data.get("max_concurrent_reviews", cls.max_concurrent_reviews)),
+            reflect_after_start_s=float(data.get("reflect_after_start_s", cls.reflect_after_start_s)),
+            reflect_every_s=float(data.get("reflect_every_s", cls.reflect_every_s)),
         )

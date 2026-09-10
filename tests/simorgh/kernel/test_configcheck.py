@@ -170,11 +170,14 @@ class TestTheWholeConfigAudit(unittest.TestCase):
     def test_planning_max_blocked_retries_a_live_field_is_not_flagged(self) -> None:
         self.assertEqual(dead_fields(_Config({"planning": {"max_blocked_retries": 2}})), [])
 
-    def test_reflection_stall_idle_seconds_is_flagged(self) -> None:
-        self.assertEqual(
-            dead_fields(_Config({"reflection": {"stall_idle_seconds": 60.0}})),
-            [("reflection", "stall_idle_seconds")],
-        )
+    def test_reflection_stall_idle_seconds_is_no_longer_dead(self) -> None:
+        """It was on the whitelist from the day the check was written,
+        and 12-reflection.md had specified the behaviour from the day
+        the subsystem was designed. `reflection/service.py::
+        _check_stalls` now reads it on every `system.tick.idle`, so the
+        whitelist entry -- a statement that a field is unreachable --
+        had to go with it (observer bulk5-02, 2026-09-10)."""
+        self.assertEqual(dead_fields(_Config({"reflection": {"stall_idle_seconds": 60.0}})), [])
 
 
 class TestANestedFieldThatParsesButNoOneReads(unittest.TestCase):

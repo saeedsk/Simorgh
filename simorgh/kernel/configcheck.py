@@ -145,10 +145,14 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
     # config.leader` -- the gate the docstring describes was never
     # wired to the field.
     "planning": frozenset({"max_task_attempts", "leader"}),
-    # No file under `simorgh/reflection/` reads `stall_idle_seconds`
-    # outside `config.py` -- grep for `stall`/`idle` in the package
-    # turns up nothing else that would use a stall-detection threshold.
-    "reflection": frozenset({"stall_idle_seconds"}),
+    # `[reflection] stall_idle_seconds` used to live here: nothing read
+    # it, and 12-reflection.md section 3.5 had specified it since the
+    # subsystem was designed. It is now really read, by
+    # `reflection/service.py::_check_stalls` on `system.tick.idle`
+    # (observer bulk5-02, 2026-09-10), so it is no longer dead and no
+    # longer belongs in this list. A whitelist entry is a statement
+    # that a field is unreachable; leaving one behind after the field
+    # is wired would suppress the warning for a key that works.
 }
 
 # Same standard of evidence as `KNOWN_DEAD_FIELDS`, for a field whose
