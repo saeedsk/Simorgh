@@ -61,6 +61,10 @@ class Source:
     # but `benchmark run` refuses rather than inventing a number.
     scorable: bool = True
     why_not_scorable: str = ""
+    # A tool the machine needs before this suite can be scored at all,
+    # named so `benchmark suites` can say it before someone starts a
+    # hundred-case run that would skip every case.
+    needs: str = ""
 
 
 SOURCES: dict[str, Source] = {
@@ -80,12 +84,12 @@ SOURCES: dict[str, Source] = {
     "swebench-verified": Source(
         name="swebench-verified", dataset="SWE-bench/SWE-bench_Verified", config="default", split="test",
         description="500 human-validated GitHub issues with test-verified patches",
-        scorable=False,
-        why_not_scorable=(
-            "scoring SWE-bench means applying the patch and running FAIL_TO_PASS tests in the "
-            "instance's own container; `benchmark load swebench-verified` fetches the cases, "
-            "and a real evaluator is the next piece of work"
-        ),
+        needs="docker",
+        # Scorable since 2026-09-10: `benchmark/swebench.py` copies the
+        # instance's checkout out of its own image, lets the system edit
+        # it, then applies the resulting diff in a fresh container and
+        # runs the dataset's eval script there. Needs Docker; a run
+        # without it is refused case by case, not silently zeroed.
     ),
 }
 
@@ -197,16 +201,29 @@ def _gaia_case(row: dict, source: Source) -> Case:
 
 
 def _swebench_case(row: dict, source: Source) -> Case:
+    """One instance, with everything the container evaluator needs.
+
+    The gold patch stays in `answer` for reading and comparison, and is
+    NOT what the case is scored against: the score comes from running
+    the instance's own tests, so a different but working fix counts."""
     return Case(
         id=str(row.get("instance_id") or "")[:80],
         question=str(row.get("problem_statement") or "").strip(),
-        # The "answer" is a patch verified by tests, not a string to
-        # match. Kept so the case is complete; scoring it means running
-        # the tests, which is why this suite is not `scorable` yet.
         answer=str(row.get("patch") or "").strip(),
         level=str(row.get("difficulty") or "").strip(),
         suite=source.name,
+        mode="swebench",
         tools_hint=str(row.get("repo") or ""),
+        data=json.dumps({
+            "instance_id": str(row.get("instance_id") or ""),
+            "image": str(row.get("image") or ""),
+            "eval_script": str(row.get("eval_script") or ""),
+            "log_parser": str(row.get("log_parser") or ""),
+            "repo": str(row.get("repo") or ""),
+            "base_commit": str(row.get("base_commit") or ""),
+            "FAIL_TO_PASS": row.get("FAIL_TO_PASS"),
+            "PASS_TO_PASS": row.get("PASS_TO_PASS"),
+        }),
     )
 
 

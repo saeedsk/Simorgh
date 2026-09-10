@@ -221,17 +221,33 @@ def score_calls(reply: str, expected_json: str) -> tuple[bool, str]:
 
 
 def score_case(reply: str, expected: str, *, mode: str = "gaia") -> tuple[bool, str]:
-    """Score one reply the way its suite says to."""
+    """Score one reply the way its suite says to.
+
+    `swebench` is absent on purpose: it is not scored from a reply at
+    all, and the runner never routes it here. Falling through to
+    quasi-exact match would compare a chat message against a gold diff
+    and report 0% for work that may well have fixed the bug."""
     if mode == "bfcl":
         return score_calls(reply, expected)
     return score(reply, expected)
 
 
+#: SWE-bench asks for a code change, not an answer line, so there is no
+#: answer format for it -- the "answer" is whatever the checkout looks
+#: like when the task ends, and the score comes from running the
+#: repository's own tests against it.
+SWEBENCH_ANSWER_FORMAT = ""
+
+
 def answer_format(mode: str = "gaia") -> str:
-    return BFCL_ANSWER_FORMAT if mode == "bfcl" else ANSWER_FORMAT
+    if mode == "bfcl":
+        return BFCL_ANSWER_FORMAT
+    if mode == "swebench":
+        return SWEBENCH_ANSWER_FORMAT
+    return ANSWER_FORMAT
 
 
 __all__ = [
-    "ANSWER_FORMAT", "BFCL_ANSWER_FORMAT", "FINAL_ANSWER_PREFIX", "answer_format", "final_answer",
+    "ANSWER_FORMAT", "BFCL_ANSWER_FORMAT", "SWEBENCH_ANSWER_FORMAT", "FINAL_ANSWER_PREFIX", "answer_format", "final_answer",
     "matches", "normalise", "normalise_string", "parse_calls", "score", "score_calls", "score_case",
 ]

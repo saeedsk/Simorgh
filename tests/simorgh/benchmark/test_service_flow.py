@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -261,7 +262,8 @@ class SubsystemWiringTestCase(unittest.IsolatedAsyncioTestCase):
             self.kernel.bus.new(topics.BENCHMARK_SUITES_REQUEST, {}), timeout=10)
         by_name = {s["name"]: s for s in reply.payload["suites"]}
         self.assertTrue(by_name["gaia"]["gated"])
-        self.assertFalse(by_name["swebench-verified"]["scorable"])
+        # Scorable since the container evaluator landed (2026-09-10).
+        self.assertTrue(by_name["swebench-verified"]["scorable"])
         self.assertTrue(by_name["bfcl-parallel"]["scorable"])
 
     async def test_a_gated_suite_without_a_token_says_what_to_do(self) -> None:
@@ -272,12 +274,37 @@ class SubsystemWiringTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("HF_TOKEN", reply.payload["error"]["detail"])
 
     async def test_an_unscorable_suite_is_refused_rather_than_faked(self) -> None:
-        with mock.patch.object(datasets_mod, "load", return_value=SUITE):
+        """Every shipped suite is scorable today, so this uses a
+        stand-in. The refusal is the point and it stays tested: a suite
+        we cannot score must say so rather than report a number."""
+        source = datasets_mod.SOURCES["bfcl-parallel"]
+        unscorable = replace(source, scorable=False,
+                             why_not_scorable="scoring it needs a container we do not have")
+        with mock.patch.dict(datasets_mod.SOURCES, {"bfcl-parallel": unscorable}), \
+                mock.patch.object(datasets_mod, "load", return_value=SUITE):
             reply = await self.kernel.bus.request(self.kernel.bus.new(
-                topics.BENCHMARK_RUN_REQUEST, {"suite": "swebench-verified", "limit": 1}), timeout=20)
+                topics.BENCHMARK_RUN_REQUEST, {"suite": "bfcl-parallel", "limit": 1}), timeout=20)
         self.assertFalse(reply.payload["ok"])
         self.assertEqual(reply.payload["error"]["code"], "not_scorable")
         self.assertIn("container", reply.payload["error"]["detail"])
+
+    async def test_a_swebench_run_without_docker_is_refused_before_the_first_case(self) -> None:
+        """Every case would be skipped, and a run of nothing but skips
+        reads like a run that happened. Check once, refuse once."""
+        from simorgh.benchmark import service as service_mod
+
+        container_suite = replace(SUITE, cases=(
+            Case(id="astropy__astropy-12907", question="fix it", answer="", suite="swebench-verified",
+                 mode="swebench", data='{"image": "img", "eval_script": "true"}'),
+        ))
+        with mock.patch.object(datasets_mod, "load", return_value=container_suite), \
+                mock.patch.object(service_mod.swebench, "available",
+                                  return_value=(False, "the Docker daemon is not running")):
+            reply = await self.kernel.bus.request(self.kernel.bus.new(
+                topics.BENCHMARK_RUN_REQUEST, {"suite": "swebench-verified", "limit": 1}), timeout=20)
+        self.assertFalse(reply.payload["ok"])
+        self.assertEqual(reply.payload["error"]["code"], "needs_docker")
+        self.assertIn("Docker daemon", reply.payload["error"]["detail"])
 
     async def test_an_unknown_suite_names_the_ones_that_exist(self) -> None:
         reply = await self.kernel.bus.request(self.kernel.bus.new(

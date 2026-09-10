@@ -30,6 +30,20 @@ class Config:
     # a cache inside a git tree is one `git add -A` from being published.
     cache_dir: str = ""
     history_limit: int = 200
+    # -- SWE-bench. Each case gets a real checkout of the instance's
+    # repository, copied out of its own container image, under Sim's
+    # workspace (the one directory that is both readable and writable
+    # by the file tools). Removed again once the patch has been read:
+    # a Django checkout is ~300 MB and a 100-case run would be 30 GB.
+    swebench_checkout_dir: str = "workspace/swebench"
+    # Where each case's test log is kept. This is the evidence behind
+    # the score, and the only place a disputed result can be settled.
+    swebench_log_dir: str = "results/swebench"
+    # A full Django suite under amd64 emulation on an arm64 host takes
+    # about ten minutes; the cap is generous because a timeout here is
+    # recorded as unmeasured, not as a wrong answer.
+    swebench_eval_timeout_s: float = 3600.0
+    swebench_setup_timeout_s: float = 1800.0
 
     @classmethod
     def from_mapping(cls, data: dict | None) -> "Config":

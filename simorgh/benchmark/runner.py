@@ -14,23 +14,35 @@ step cap, and the run is recorded whether it finishes or is interrupted.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import time
+from pathlib import Path
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 
+from . import swebench
 from .api import Case, CaseResult, RunRecord, Suite
 from .config import Config
 from .scoring import answer_format, score_case
 
+#: Prefix on the errors that mean the case was never actually put to
+#: the system. Those are unmeasured, not wrong.
+_UNASKED = "never asked --"
+
 
 class Runner:
     def __init__(self, bus, *, config: Config | None = None, clock=None,
-                 on_progress=None) -> None:
+                 on_progress=None, repo_root: Path | None = None) -> None:
         self._bus = bus
         self._config = config or Config()
         self._clock = clock
         self._on_progress = on_progress or (lambda **_: None)
+        # SWE-bench checkouts and logs are written relative to this, the
+        # same root the file tools resolve their paths against -- a
+        # checkout Sim cannot address by the path we give it is a
+        # checkout it cannot fix.
+        self._repo_root = Path(repo_root or Path.cwd())
 
     def _now(self) -> float:
         if self._clock is None:
@@ -50,7 +62,31 @@ class Runner:
         parts.append(answer_format(case.mode))
         return "\n\n".join(parts)
 
+    def patch_prompt(self, case: Case, checkout: str) -> str:
+        """A SWE-bench case as a piece of work, not a question.
+
+        The system is given the issue and a real checkout, and is scored
+        on whether the repository's own tests pass afterwards -- so the
+        instruction that matters is where the code is, and that editing
+        the tests is not a fix."""
+        return "\n\n".join([
+            f"Fix this bug in the repository checked out at `{checkout}`.",
+            case.question,
+            "\n".join([
+                f"The whole project is under `{checkout}` -- read it, find the cause, and change "
+                f"the source files there.",
+                "Do not edit or add tests. The project's own test suite decides whether this is "
+                "fixed, it is restored before it runs, and any change you make to it is discarded.",
+                "Its dependencies are not installed here, so running the suite yourself will not "
+                "work -- read the code and make the smallest change that fixes the issue.",
+                "There is no answer to write out. The change you leave in those files IS the "
+                "answer, so finish by saving your edits.",
+            ]),
+        ])
+
     async def run_case(self, case: Case) -> CaseResult:
+        if case.mode == "swebench":
+            return await self._run_swebench(case)
         if case.needs_attachment:
             # Honest rather than convenient: a question about a
             # spreadsheet we never downloaded is unanswerable, and
@@ -60,7 +96,29 @@ class Runner:
                 expected=case.answer, error=f"needs the attached file {case.attachment!r}",
             )
         started = time.monotonic()
-        cost_usd = 0.0
+        answer_text, steps, cost_usd, error = await self._ask(case, self.prompt(case))
+        seconds = time.monotonic() - started
+        if error and not answer_text:
+            return CaseResult(case_id=case.id, level=case.level, correct=False, expected=case.answer,
+                              seconds=seconds, steps=steps, cost_usd=cost_usd, error=error,
+                              skipped=error.startswith(_UNASKED))
+        # There is an answer even though something of ours stopped it.
+        # Score it: GAIA scores the answer, and our verifier is not part
+        # of GAIA. Record the block, so "our verifier rejected a right
+        # answer" is visible rather than indistinguishable from "wrong".
+        correct, extracted = score_case(answer_text, case.answer, mode=case.mode)
+        return CaseResult(
+            case_id=case.id, level=case.level, correct=correct, answer=extracted,
+            expected=case.answer, seconds=seconds, steps=steps, cost_usd=cost_usd,
+            blocked_by=error, error=error,
+        )
+
+    async def _ask(self, case: Case, prompt: str, *, kind: str = "research") -> tuple[str, int, float, str]:
+        """Ask the real system one thing. `(answer, steps, cost, error)`.
+
+        Shared by every mode, because what is being measured is this
+        path -- Guardian, Planning, the tool loop and the step budget --
+        and a second way of asking would measure a second system."""
         # Listen *before* asking. A fast pipeline can complete the task
         # between the create reply and a later subscribe, and the answer
         # would land on nobody -- the case would then time out and score
@@ -71,7 +129,7 @@ class Runner:
             try:
                 reply = await self._bus.request(
                     Message.new(topics.TASK_CREATE, source=self._bus.source, payload={
-                        "kind": "research", "description": self.prompt(case),
+                        "kind": kind, "description": prompt,
                         # NOT "human". A benchmark case is not something
                         # the human typed, and claiming it was had two
                         # costs: every case landed permanently in their
@@ -85,12 +143,10 @@ class Runner:
                     timeout=15.0,
                 )
             except Exception as exc:  # noqa: BLE001 -- a harness failure is not a wrong answer
-                return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
-                                  expected=case.answer, error=f"could not create the task: {exc!r}")
+                return "", 0, 0.0, f"{_UNASKED} could not create the task: {exc!r}"
             task_id = reply.payload.get("task_id", "")
             if not task_id:
-                return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
-                                  expected=case.answer, error="planning created no task")
+                return "", 0, 0.0, f"{_UNASKED} planning created no task"
             dup_of = reply.payload.get("deduplicated_against")
             if dup_of:
                 # Belt-and-suspenders: `origin="benchmark"` is now exempt
@@ -105,11 +161,8 @@ class Runner:
                 # immediately with an honest reason instead of blocking
                 # the full case_timeout_s waiting for an outcome that
                 # already happened to a different case.
-                return CaseResult(
-                    case_id=case.id, level=case.level, correct=False, skipped=True, expected=case.answer,
-                    error=f"planning handed back an existing task ({dup_of!r}) instead of asking this "
-                          f"case's question -- never actually asked",
-                )
+                return "", 0, 0.0, (f"{_UNASKED} planning handed back an existing task ({dup_of!r}) "
+                                    f"instead of asking this case's question")
             answer_text, steps, error = await watch.wait(task_id, self._config.case_timeout_s)
             # Read before `watch.stop()`, and after the outcome, so a
             # cancelled or blocked case still reports what it spent.
@@ -128,19 +181,66 @@ class Runner:
                 ))
         finally:
             await watch.stop()
+        return answer_text, steps, cost_usd, error
+
+    async def _run_swebench(self, case: Case) -> CaseResult:
+        """One SWE-bench instance, scored by running its own tests.
+
+        Every early return here is `skipped=True`, and that distinction
+        is the whole point: "we could not run the tests" and "the patch
+        did not fix the bug" are different facts, and only the second
+        one is about the system under test."""
+        instance = case.payload()
+        started = time.monotonic()
+        ok, why = await asyncio.to_thread(swebench.available)
+        if not ok:
+            return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
+                              expected=case.answer, error=why)
+        if not instance.get("image") or not instance.get("eval_script"):
+            return CaseResult(
+                case_id=case.id, level=case.level, correct=False, skipped=True, expected=case.answer,
+                error="this case carries no container image or eval script -- reload the suite "
+                      "(`benchmark load swebench-verified`), which now stores both")
+
+        relative = f"{self._config.swebench_checkout_dir}/{case.id}"
+        checkout = self._repo_root / relative
+        problem = await asyncio.to_thread(
+            swebench.materialize, instance, checkout,
+            timeout=self._config.swebench_setup_timeout_s)
+        if problem:
+            return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
+                              expected=case.answer, error=problem)
+        try:
+            # The reply text is deliberately dropped: this case is
+            # scored by running tests, and nothing the system says about
+            # its own work is evidence.
+            _said, steps, cost_usd, error = await self._ask(
+                case, self.patch_prompt(case, relative), kind="patch")
+            patch, trouble = await asyncio.to_thread(swebench.diff_of, checkout)
+        finally:
+            # The checkout has done its job the moment the diff is read;
+            # the patch is re-applied to a pristine container anyway.
+            await asyncio.to_thread(shutil.rmtree, checkout, True)
+
         seconds = time.monotonic() - started
-        if error and not answer_text:
-            return CaseResult(case_id=case.id, level=case.level, correct=False, expected=case.answer,
-                              seconds=seconds, steps=steps, cost_usd=cost_usd, error=error)
-        # There is an answer even though something of ours stopped it.
-        # Score it: GAIA scores the answer, and our verifier is not part
-        # of GAIA. Record the block, so "our verifier rejected a right
-        # answer" is visible rather than indistinguishable from "wrong".
-        correct, extracted = score_case(answer_text, case.answer, mode=case.mode)
+        if trouble:
+            return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
+                              expected=case.answer, seconds=seconds, steps=steps,
+                              cost_usd=cost_usd, error=trouble)
+        verdict, _log = await asyncio.to_thread(
+            swebench.evaluate, instance, patch,
+            timeout=self._config.swebench_eval_timeout_s,
+            log_path=self._repo_root / self._config.swebench_log_dir / f"{case.id}.log")
+        detail = verdict.detail
+        if error and not verdict.resolved:
+            # What stopped the task is part of why the patch is what it
+            # is -- a case that ran out of steps half way through a fix
+            # should not read as "the model was wrong".
+            detail = f"{detail}; the task itself {error}"
         return CaseResult(
-            case_id=case.id, level=case.level, correct=correct, answer=extracted,
-            expected=case.answer, seconds=seconds, steps=steps, cost_usd=cost_usd,
-            blocked_by=error, error=error,
+            case_id=case.id, level=case.level, correct=verdict.resolved, skipped=verdict.skipped,
+            answer=patch[:4000], expected=case.answer, seconds=time.monotonic() - started,
+            steps=steps, cost_usd=cost_usd, blocked_by=error, error="" if verdict.resolved else detail,
         )
 
     async def run(self, suite: Suite, *, model: str = "unknown", note: str = "",

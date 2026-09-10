@@ -21,6 +21,7 @@ from simorgh.contracts.protocols import Context, Health
 from simorgh.contracts.registry import error_reply_payload
 
 from . import datasets as datasets_mod
+from . import swebench
 from .api import RunRecord
 from .config import Config
 from .runner import Runner
@@ -110,7 +111,7 @@ class Service:
             cached = datasets_mod.load_cached(source, self._cache_dir())
             suites.append({
                 "name": source.name, "dataset": source.dataset, "description": source.description,
-                "gated": source.gated, "scorable": source.scorable,
+                "gated": source.gated, "scorable": source.scorable, "needs": source.needs,
                 "why_not_scorable": source.why_not_scorable,
                 "cached_cases": len(cached) if cached else 0,
                 "levels": list(cached.levels()) if cached else [],
@@ -230,6 +231,18 @@ class Service:
             payload["cases"] = len(suite)
             await self._ctx.bus.reply(message, type=topics.BENCHMARK_RUN_REPLY, payload=payload)
             return
+        if any(case.mode == "swebench" for case in suite.cases):
+            # Checked once, here, rather than discovered a hundred times
+            # in a row: without Docker every case would be skipped, and
+            # a run of nothing but skips reads as a run that happened.
+            ok, why = await asyncio.to_thread(swebench.available)
+            if not ok:
+                await self._ctx.bus.reply(
+                    message, type=topics.BENCHMARK_RUN_REPLY,
+                    payload=error_reply_payload("needs_docker", (
+                        f"{why} -- each case is scored by running its repository's own tests "
+                        f"in the container image the dataset names")))
+                return
         chosen = suite.sample(limit, level=level)
         if not len(chosen):
             await self._ctx.bus.reply(message, type=topics.BENCHMARK_RUN_REPLY,

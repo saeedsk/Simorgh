@@ -78,6 +78,8 @@ def suites(payload: dict) -> str:
             marks.append("gated")
         if not suite.get("scorable"):
             marks.append("load-only")
+        if suite.get("needs"):
+            marks.append(f"needs {suite['needs']}")
         cached = suite.get("cached_cases") or 0
         marks.append(f"{cached} cached" if cached else "not downloaded")
         lines.append(f"  {suite['name']:<20} {suite.get('description', '')}")

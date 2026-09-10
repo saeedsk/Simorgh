@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import time
 import uuid
+import json
+
 from dataclasses import dataclass, field, replace
 
 
@@ -51,6 +53,23 @@ class Case:
     mode: str = "gaia"
     # For a tool-calling case: the function schemas the system is given.
     functions: str = ""
+    # Everything a scorer needs that is not a string to compare. A
+    # SWE-bench case is scored by running its own tests, so it carries
+    # the container image, the eval script, the log parser's name and
+    # the two test lists as JSON here. Kept as text so a cached suite is
+    # still plain JSON and a `Case` stays comparable and hashable.
+    data: str = ""
+
+    def payload(self) -> dict:
+        """`data` decoded, or `{}`. Never raises: a cache written by an
+        older version simply has nothing here."""
+        if not self.data:
+            return {}
+        try:
+            loaded = json.loads(self.data)
+        except ValueError:
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
 
     @property
     def needs_attachment(self) -> bool:
