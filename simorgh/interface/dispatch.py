@@ -17,6 +17,8 @@ Interface never fakes a result.
 
 from __future__ import annotations
 
+import difflib
+import json
 import re
 import uuid
 import subprocess
@@ -25,6 +27,11 @@ from pathlib import Path
 
 from simorgh.bus.client import BusClient
 from simorgh.contracts import topics
+from simorgh.contracts.toolargs import (
+    MARKER_SPLIT_FIRST_LINE,
+    args_from_text,
+    describe_arguments,
+)
 from simorgh.contracts.envelope import Event
 from simorgh.ledger.client import LedgerClient
 
@@ -47,6 +54,10 @@ MCP_PROPOSALS_STREAM = "mcp:proposals"
 CAPABILITIES_STREAM = "capabilities"
 # And for `kernel/scheduler.py::SCHEDULE_STREAM`, same agreement again.
 SCHEDULE_STREAM = "schedule"
+# `execution/service.py::TOOLS_STREAM` and
+# `reflection/service.py::Service.ALERTS_STREAM`, same agreement.
+TOOLS_STREAM = "execution:tools"
+ALERTS_STREAM = "reflection:alerts"
 # `simorgh.toml`'s primary search location (`kernel/config.py::find_
 # config_path`'s first candidate, `./simorgh.toml`) -- this command
 # targets the same file a normal `sim.sh` boot would read next, but
@@ -275,6 +286,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 
     if name == "mcp":
         return await _mcp_command(args, bus=bus, ledger=ledger, clock=clock)
+
+    if name == "tool":
+        return await _tool_command(args, bus=bus, ledger=ledger, session_id=session_id)
 
     if name == "capabilities":
         return await _capabilities_command(ledger)
@@ -527,6 +541,212 @@ async def _schedule_list(ledger: LedgerClient) -> Outcome:
         when = f"every {int(every)}s" if every else f"at {payload.get('fire_at')}"
         lines.append(f"  {schedule_id}  {when}  {payload.get('label', '')}")
     return Outcome(f"{len(live)} scheduled:\n" + "\n".join(lines), exit_repl=False)
+
+
+async def _tool_command(args: str, *, bus: BusClient, ledger: LedgerClient,
+                        session_id: str, timeout: float = 300.0) -> Outcome:
+    """Run any registered tool, from the terminal, through Guardian.
+
+    Fifty tools and sixteen commands: adding a command per tool would
+    make the help screen unreadable and still not answer the question a
+    person actually has. One command reaching all of them is the better
+    trade, and it costs nothing in safety -- this publishes
+    `action.proposed` exactly as a Worker does, so Guardian sees it, an
+    irreversible call still stops at the approval prompt, and the whole
+    thing is ledgered like any other action. The CLI is not a back door
+    around the gate; it is another caller in front of it.
+    """
+    args = (args or "").strip()
+    if not args:
+        return await _tool_list(ledger)
+
+    name, _, rest = args.partition(" ")
+    name = name.strip()
+    rest = rest.strip()
+    known = await _known_tools(ledger)
+    if known and name not in known:
+        near = difflib.get_close_matches(name, sorted(known), n=3, cutoff=0.5)
+        hint = f"; did you mean {', '.join(near)}?" if near else " -- `tool` lists them all"
+        return Outcome(f"no tool called {name!r}{hint}")
+
+    if not rest and name not in _NO_ARG_TOOLS:
+        return Outcome(f"{name} takes {describe_arguments(name)}\n"
+                       f"  tool {name} {describe_arguments(name)}")
+
+    return await _run_tool(bus=bus, ledger=ledger, tool=name, raw=rest,
+                           session_id=session_id, timeout=timeout)
+
+
+async def _tool_list(ledger: LedgerClient) -> Outcome:
+    known = await _known_tools(ledger)
+    if not known:
+        return Outcome("no tools registered yet -- they announce themselves just after boot.")
+    groups: dict[str, list[str]] = {}
+    for tool_name, row in sorted(known.items()):
+        groups.setdefault(_tool_group(tool_name), []).append(
+            f"  {tool_name:22} {row.get('reversibility', '')}")
+    lines = [f"{len(known)} tools. `tool <name> <args>` runs one; Guardian gates it the same "
+             f"way it gates the model."]
+    for group in sorted(groups):
+        lines.append(f"\n{group}:")
+        lines.extend(groups[group])
+    return Outcome("\n".join(lines))
+
+
+#: Prefix -> the heading it is listed under. A flat list of fifty names
+#: is not something anyone reads.
+_TOOL_GROUPS: tuple[tuple[str, str], ...] = (
+    ("kb_", "documents"), ("cal_", "calendar and mail"), ("mail_", "calendar and mail"),
+    ("remind", "calendar and mail"), ("sec_", "security"), ("home_", "the house"),
+    ("energy_", "energy"), ("media_", "media"), ("git_", "source control"),
+    ("run_", "running things"), ("web_", "the web"), ("apply_", "changing code"),
+    ("mcp_", "mcp servers"),
+)
+
+
+def _tool_group(name: str) -> str:
+    for prefix, group in _TOOL_GROUPS:
+        if name.startswith(prefix):
+            return group
+    return "everything else"
+
+
+_NO_ARG_TOOLS = frozenset({"kb_status", "sec_self", "sec_posture", "energy_status",
+                           "home_describe", "media_now", "self_map", "git_revert"})
+
+
+async def _known_tools(ledger: LedgerClient) -> dict[str, dict]:
+    """The latest registration per tool name, from the Ledger.
+
+    The Ledger rather than a bus query because a registration is an
+    append-only fact that survives a restart, and because `capabilities`
+    already reads its own stream the same way.
+    """
+    try:
+        events = await ledger.read(TOOLS_STREAM)
+    except Exception:  # noqa: BLE001 -- a diagnostic must not raise
+        return {}
+    latest: dict[str, dict] = {}
+    for event in events:
+        payload = event.payload or {}
+        if payload.get("name"):
+            latest[str(payload["name"])] = payload
+    return latest
+
+
+def cli_tool_args(tool: str, raw: str) -> dict:
+    """What a person typed, as tool arguments.
+
+    The model writes a two-part marker across two lines. A person types
+    one line, so a two-part tool splits on the first space instead --
+    `tool remind 20m take the bins out` means what it looks like. JSON
+    is accepted whole for anything with a fiddly shape.
+    """
+    raw = (raw or "").strip()
+    if raw.startswith("{"):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"__error__": "that is not valid JSON"}
+        if isinstance(parsed, dict):
+            return parsed
+    if "\n" not in raw and tool in MARKER_SPLIT_FIRST_LINE:
+        head, _, tail = raw.partition(" ")
+        raw = f"{head}\n{tail.strip()}"
+    args = args_from_text(tool, raw)
+    if args:
+        return args
+    if "=" in raw:
+        out: dict = {}
+        for token in _KEY_VALUE.finditer(raw):
+            out[token.group(1)] = _coerce(token.group(2).strip().strip('"\''))
+        if out:
+            return out
+    return {}
+
+
+_KEY_VALUE = re.compile(r"""([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)""")
+#: The quoted alternatives come FIRST. With `\S+` leading, it won
+#: matched `"two` out of `note="two words"` and the rest of the
+#: value was silently dropped.
+
+
+def _coerce(value: str):
+    lowered = value.lower()
+    if lowered in ("true", "false"):
+        return lowered == "true"
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+async def _run_tool(*, bus: BusClient, ledger: LedgerClient, tool: str, raw: str,
+                    session_id: str, timeout: float) -> Outcome:
+    import asyncio
+
+    args = cli_tool_args(tool, raw)
+    if "__error__" in args:
+        return Outcome(f"error: {args['__error__']}")
+
+    action_id = uuid.uuid4().hex[:12]
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future = loop.create_future()
+
+    async def _on_result(message) -> None:
+        if not done.done() and message.payload.get("action_id") == action_id:
+            done.set_result(("result", message.payload))
+
+    async def _on_denied(message) -> None:
+        if not done.done() and message.payload.get("action_id") == action_id:
+            done.set_result(("denied", message.payload))
+
+    # Subscribed BEFORE the proposal: a fast tool can answer before a
+    # subscription made afterwards exists, and the command would hang
+    # for its whole timeout on a call that had already succeeded.
+    subs = [await bus.subscribe(topics.ACTION_RESULT, _on_result),
+            await bus.subscribe(topics.ACTION_DENIED, _on_denied)]
+    try:
+        await bus.publish(bus.new(topics.ACTION_PROPOSED, {
+            "action_id": action_id, "tool": tool, "args": args,
+            "scope": {"paths": [], "network": False},
+            # The floor. Guardian recomputes the real class itself and
+            # never trusts a proposer's label, so understating here
+            # cannot widen anything.
+            "reversibility": "reversible",
+            "rationale": f"asked for at the terminal by cli:{session_id}",
+            "proposed_by": f"interface:{session_id}",
+        }))
+        try:
+            kind, payload = await asyncio.wait_for(done, timeout=timeout)
+        except asyncio.TimeoutError:
+            return Outcome(f"{tool} did not finish within {timeout:.0f}s "
+                           f"(action {action_id}; it may still be running)")
+    finally:
+        for sub in subs:
+            await sub.unsubscribe()
+
+    if kind == "denied":
+        reasons = ", ".join(payload.get("reasons") or ()) or "no reason given"
+        return Outcome(f"Guardian denied {tool} ({payload.get('layer', 'policy')}): {reasons}")
+
+    body = payload.get("stdout_preview") or ""
+    ref = payload.get("output_ref") or ""
+    if ref:
+        try:
+            body = (await ledger.get_blob(ref)).decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001 -- the preview is still worth printing
+            pass
+    if not payload.get("ok"):
+        error = payload.get("error") or "failed"
+        return Outcome(f"{tool} failed: {error}" + (f"\n{body}" if body else ""))
+    took = payload.get("duration_ms")
+    suffix = f"  ({took} ms)" if isinstance(took, int) and took > 50 else ""
+    return Outcome((body or f"{tool} finished with no output") + suffix)
 
 
 async def _capabilities_command(ledger: LedgerClient) -> Outcome:

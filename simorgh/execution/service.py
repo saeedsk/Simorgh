@@ -139,6 +139,10 @@ class Service:
             await ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
                 "name": tool.name, "provider": getattr(tool, "provider", "builtin"),
                 "reversibility": tool.reversibility, "read_only": tool.read_only,
+                # The description was on the bus message and not in the
+                # Ledger, so anything reading the stream back -- the CLI's
+                # `tool` listing -- had names and no idea what they do.
+                "description": tool.description,
             }))
 
         # Skills already on disk get ANNOUNCED, not loaded. Loading stays

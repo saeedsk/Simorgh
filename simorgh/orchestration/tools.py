@@ -14,6 +14,15 @@ from __future__ import annotations
 import json
 import re
 
+from simorgh.contracts.toolargs import (
+    MARKER_ARG_KEY,
+    MARKER_JSON_REST,
+    MARKER_NO_ARGS,
+    MARKER_SPLIT_FIRST_LINE,
+    json_rest,
+    strip_code_fence,
+)
+
 # (reversibility, network) per known tool name -- conservative default
 # for anything unlisted: irreversible, so an unrecognized tool never
 # accidentally gets read_only's lighter Guardian scrutiny.
@@ -140,61 +149,10 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 # key before Execution ever sees it -- live-caught: without this, every
 # real tool call from a marker reply failed with a bare `KeyError` on its
 # own required arg (e.g. `web_fetch` needs `url`, not `argument`).
-_MARKER_ARG_KEY: dict[str, str] = {
-    "energy_report": "range",
-    "media_now": "where",
-    "home_find": "query",
-    "home_state": "target",
-    "home_describe": "query",
-    "sec_show": "finding",
-    "cal_list": "range",
-    "mail_search": "query",
-    "mail_read": "message",
-    "kb_search": "query",
-    "kb_ask": "question",
-    "kb_open": "citation",
-    "read_file": "path",
-    "list_dir": "path",
-    "search_code": "query",
-    # Its one optional argument -- see execution/tools.py::SelfMapTool. A
-    # bare `SELF_MAP:` marker with no argument still works: `args.get`
-    # treats an empty string the same as "no area given".
-    "self_map": "area",
-    "web_fetch": "url",
-    "web_search": "query",
-    "render_page": "target",
-    "geocode": "address",
-    "find_package": "query",
-    "run_script": "code",
-    "run_python_sandboxed": "code",
-    "run_js_sandboxed": "code",
-    "run_tests": "target",
-    # Absent until 2026-09-08, so every `RUN_SHELL:` marker arrived as
-    # `{"argument": ...}` while the tool reads `command`, and answered
-    # "refused: no command given". The tool had never once run from the
-    # model's side; two observers found it independently.
-    "run_shell": "command",
-    "run_remote": "command",
-    # Same defect as run_shell, found by the audit the same day:
-    # `GIT_DISCARD: path` arrived as `{"argument": ...}` while the tool
-    # reads `path`, so it answered "refused: name the path to discard".
-    # It is the tool that backs out a bad uncommitted edit -- the
-    # "never leave a broken change in the tree" net -- and it had never
-    # once worked from the model's side.
-    "git_discard": "path",
-    "draft_candidate": "code",
-    # ddg_search/ddg_get_answer's own `inputSchema`s each have one
-    # required string field, `query` -- see `_TOOL_POLICY`'s comment on
-    # the same tools.
-    "mcp_ddg_search_ddg_search": "query",
-    "mcp_ddg_search_ddg_get_answer": "query",
-    # `propose_mcp_server` has a genuinely multi-field schema (name,
-    # command, args, ...), but its one `args_schema` property is a
-    # single free-form text block the tool parses itself
-    # (`_parse_mcp_proposal_text`), so it's still single-argument at the
-    # marker layer -- see the tool's own docstring.
-    "propose_mcp_server": "proposal",
-}
+#: The shape of a one-string tool call. Shared with the CLI's `tool`
+#: command through contracts/toolargs.py -- two subsystems that
+#: disagreed about this would build calls the tool cannot read.
+_MARKER_ARG_KEY = MARKER_ARG_KEY
 
 # Live-caught (the creator, real use): told to use `propose_mcp_server`,
 # the model wrote `PROPOSE_MCP_SERVER: {"name": "...", "description":
@@ -239,27 +197,7 @@ _MARKER_ARG_HINT: dict[str, str] = {
 # first line of the payload is the first key, everything after it the
 # second. `cognition/parser.py::_CODE_BEARING_MARKERS` keeps the payload
 # multi-line for exactly these names.
-_MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
-    "apply_source_patch": ("subject", "code"),
-    "apply_skill": ("subject", "code"),
-    "git_commit": ("path", "message"),
-    "search_listings": ("location", "filters"),
-    "browse_page": ("target", "actions"),
-    "run_container": ("image", "command"),
-    "install_package": ("manager", "spec"),
-    "notify": ("subject", "body"),
-    "kb_sources": ("op", "spec"),
-    # "REMIND: 20m\ntake the laundry out" -- when on the first line,
-    # what to say on every line after it.
-    "remind": ("when", "text"),
-    "sec_accept": ("finding", "reason"),
-    "sec_findings": ("severity", "spec"),
-    "home_call": ("service", "spec"),
-    "home_undo": ("entity", "spec"),
-    "energy_tariff": ("op", "spec"),
-    "media_control": ("op", "spec"),
-    "media_play": ("what", "spec"),
-}
+_MARKER_SPLIT_FIRST_LINE = MARKER_SPLIT_FIRST_LINE
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
         "first line: the repo-relative file path to write -- simorgh/, simorgh_skills/, "
@@ -451,8 +389,7 @@ _MARKER_ARG_HINT.update({
     ),
 })
 # Tools whose marker takes no argument at all.
-_MARKER_NO_ARGS = frozenset({"git_revert", "kb_status", "sec_self", "sec_posture",
-                             "energy_status"})
+_MARKER_NO_ARGS = MARKER_NO_ARGS
 # Two-part markers whose SECOND part is a JSON object of extra arguments,
 # merged into `args`, rather than one more string.
 #
@@ -480,31 +417,11 @@ _MARKER_NO_ARGS = frozenset({"git_revert", "kb_status", "sec_self", "sec_posture
 # `shlex.split` then chopped into garbage tokens -- both had never once
 # worked from the model's side, exactly the failure mode this set exists
 # to prevent for `search_listings`/`install_package`.
-_MARKER_JSON_REST = frozenset({"search_listings", "install_package", "browse_page", "run_container",
-                               "kb_sources", "sec_findings", "home_call", "home_undo",
-                               "energy_tariff", "media_control", "media_play"})
+_MARKER_JSON_REST = MARKER_JSON_REST
 
 
-def _json_rest(rest: str, second: str) -> dict:
-    stripped = (rest or "").strip()
-    if not stripped:
-        return {}
-    if stripped.startswith("{") or stripped.startswith("["):
-        try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, dict):
-            # An object's keys merge straight into `args` -- the
-            # `search_listings`/`install_package`/`run_container` shape,
-            # where the second part carries several named options.
-            return parsed
-        if isinstance(parsed, list):
-            # `browse_page`'s `actions` IS a JSON array, not a dict of
-            # extra options -- assign it to the one field it belongs to
-            # rather than trying (and failing) to merge a list.
-            return {second: parsed}
-    return {second: rest}
+_json_rest = json_rest
+
 
 # Filled at runtime from Execution's `tool.registered` announcements
 # (`orchestration/service.py::_on_tool_registered`) -- MCP servers,
@@ -614,29 +531,7 @@ def marker_hint(tool: str) -> str | None:
     return _MARKER_ARG_HINT.get(tool)
 
 
-_FENCE_OPEN = re.compile(r"^\s*```[A-Za-z0-9_+-]*\s*\n")
-_FENCE_CLOSE = re.compile(r"\n\s*```\s*$")
-
-
-def _strip_code_fence(code: str) -> str:
-    """Take a markdown fence off a file body before it is written.
-
-    Live-caught 2026-09-07, asking Sim for its first skill: it replied
-    with its code wrapped in ```python ... ```, and `apply_skill` wrote
-    the fence into the file, so `simorgh_skills/word_count.py` began with
-    a literal "```python" and was not valid Python at all.
-
-    Models fence code; that is what they are trained to do, and the
-    parser already has `extract_code` for exactly this, used only on the
-    `draft_candidate` path. A file body is the one place a stray fence
-    turns a working answer into a broken file, so it is stripped here,
-    where the body becomes a real write.
-    """
-    stripped = code.strip("\n")
-    if not _FENCE_OPEN.search(stripped):
-        return code
-    stripped = _FENCE_OPEN.sub("", stripped, count=1)
-    return _FENCE_CLOSE.sub("", stripped, count=1)
+_strip_code_fence = strip_code_fence
 
 
 def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: str,
