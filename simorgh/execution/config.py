@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
+from simorgh.contracts.scratch import SCRATCH_PREFIX
+
 from .external import ExternalToolSpec
 from .shell import DEFAULT_SHELL_REFUSALS
 from .mcp import McpServerConfig
@@ -69,10 +71,10 @@ class Config:
         # not list it, so Sim can read the data it fetched and cannot
         # commit it.
         "results",
-        # Persistent scratch (`workspace_dir` below). Readable so Sim can
-        # pick up where it left off; writable too -- the one directory
-        # that is both -- and never committed.
-        "workspace",
+        # Persistent scratch. Readable so Sim can pick up where it left
+        # off; writable too (`write_scopes_source` below) -- the one
+        # directory that is both -- and never committed.
+        SCRATCH_PREFIX.rstrip("/"),
     )
     # Files at the repo root. `readable_roots` holds directories only, so
     # README.md, requirements.txt, simloader.py and sim.sh were readable
@@ -105,7 +107,7 @@ class Config:
         # Scratch, not source. Writable so a long piece of work has
         # somewhere to keep notes and intermediates; gitignored, so
         # nothing written here is ever committed or reviewed.
-        "workspace/",
+        SCRATCH_PREFIX,
     )
     sandbox_cpu_seconds: int = 5
     sandbox_memory_mb: int = 256
@@ -244,7 +246,16 @@ class Config:
     # finishing a task is not blocked by scratch, and cleanup does not
     # delete it), and it is still recorded as written (so the
     # verification checks that read files can see it).
-    workspace_dir: str = "workspace"
+    #
+    # The NAME is not a setting. It was one -- `workspace_dir` sat here
+    # as a settable key that nothing read, so `[execution] workspace_dir
+    # = "scratch"` produced a directory that was neither writable nor
+    # scratch, silently. It cannot become a real setting either:
+    # Orchestration and Verification decide "is this scratch?" through
+    # `contracts.scratch`, which is stdlib-only and may not reach into
+    # this config, and a settable name would let `workspace_dir =
+    # "simorgh"` mark the entire source tree as never-committed,
+    # never-reviewed. One constant, in Contracts, read by everyone.
 
     # -- find_package / install_package (packages.py). The tools that
     # turn "no capability for this" into "there is a library for this".

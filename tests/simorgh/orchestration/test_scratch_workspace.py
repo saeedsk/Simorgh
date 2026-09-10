@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import unittest
 
+from simorgh.contracts.scratch import SCRATCH_PREFIX
 from simorgh.execution.config import Config
 from simorgh.orchestration.session import is_scratch, record_side_effects
 
@@ -48,6 +49,18 @@ class ConfigurationTestCase(unittest.TestCase):
         config = Config()
         self.assertIn("workspace", config.readable_roots)
         self.assertIn("workspace/", config.write_scopes_source)
+
+    def test_the_scratch_name_is_not_a_settable_key(self):
+        # `[execution] workspace_dir = "scratch"` used to be accepted and
+        # read by nothing: the scopes below and `contracts.scratch` both
+        # said `workspace/` regardless, so the setting produced a
+        # directory that was neither writable nor scratch. The name has
+        # one definition now, and no key advertises otherwise.
+        self.assertFalse(hasattr(Config(), "workspace_dir"))
+        self.assertNotIn("workspace_dir", Config.__dataclass_fields__)
+        config = Config()
+        self.assertIn(SCRATCH_PREFIX.rstrip("/"), config.readable_roots)
+        self.assertIn(SCRATCH_PREFIX, config.write_scopes_source)
 
     def test_no_other_write_scope_is_scratch(self):
         # If a second scratch scope is ever added, `is_scratch` has to
