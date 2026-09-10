@@ -71,8 +71,15 @@ class Service:
         )
         await self._ctx.bus.reply(message, type=topics.MEMORY_RETRIEVE_REPLY, payload={
             "items": [
+                # `score` is how well this matched the query; the decayed
+                # confidence is reported beside it under a name that says
+                # what it is. Until 2026-09-10 `score` WAS the decay, so a
+                # no-hit query answered with two identical 1.0000s and
+                # nothing downstream could tell relevant from recent.
                 {"ref": i.ref, "kind": i.kind, "content": i.content,
-                 "score": i.score_confidence(now=self._ctx.clock.now(), half_life_seconds=self._config.half_life_seconds),
+                 "score": i.score,
+                 "confidence_now": i.score_confidence(
+                     now=self._ctx.clock.now(), half_life_seconds=self._config.half_life_seconds),
                  "confidence": i.confidence, "ts": i.ts}
                 for i in items
             ],

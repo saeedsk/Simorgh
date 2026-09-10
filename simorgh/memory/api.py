@@ -17,6 +17,14 @@ class MemoryItem:
     confidence: float
     ts: float
     source_ref: str = ""
+    # How well this item matched the query it was retrieved for, as
+    # `MemoryStore._score` computed it. Set by `retrieve`, 0.0 when the
+    # item did not come from a query. It used to be discarded the moment
+    # after it was computed, while the reply reported decay-from-creation
+    # under the name "score" -- so every fresh record scored 1.0 however
+    # irrelevant, and a no-hit query answered with two perfect scores
+    # (observer, 2026-09-10).
+    score: float = 0.0
 
     def score_confidence(self, *, now: float, half_life_seconds: float, penalty: float = 1.0) -> float:
         """Exponential decay from creation, times any contradiction

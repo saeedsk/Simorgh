@@ -20,6 +20,7 @@ from .config import Config
 from .decomposer import decompose, parse_steps
 from .intake import Intake
 from .model import (
+    DEPENDENCY_FAILED_NOTE,
     AVAILABLE,
     BLOCKED,
     CLAIMED,
@@ -596,7 +597,8 @@ class Service:
                     continue
                 await self._store.record_dependency_event(dep_id, satisfied_by=None, failed_by=failed_id)
                 if dependent.status != BLOCKED:
-                    await self._store.transition(dep_id, BLOCKED, note=f"dependency_failed:{failed_id}")
+                    await self._store.transition(
+                        dep_id, BLOCKED, note=f"{DEPENDENCY_FAILED_NOTE}{failed_id}")
                 # This dependent is now BLOCKED and will never COMPLETE,
                 # so anything depending on IT must be blocked too --
                 # queue it for the same treatment.

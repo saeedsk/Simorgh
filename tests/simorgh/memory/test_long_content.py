@@ -107,3 +107,55 @@ class LongContentTestCase(_MemoryTestCase):
         ref = await self.engine.store(kind="episodic", content=self.LONG, tags=[],
                                        source_ref="", confidence=None)
         self.assertTrue(ref, "a truncated memory beats a lost one")
+
+
+class APartialRecallSaysSoTestCase(LongContentTestCase):
+    """A memory system that quietly shortens what it remembers is the
+    worst place for "succeeds while saying nothing true".
+
+    `content_chars` has been written at store time since the blob split
+    landed, and nothing ever read it. Both partial paths -- a blob that
+    could not be WRITTEN, and a blob that cannot now be READ -- returned
+    a 3,500-character prefix cut mid-sentence, indistinguishable from a
+    memory that was genuinely that short. Observed 2026-09-10: a 6,513
+    character record recalled as 3,500 characters ending "...Per-case
+    detail line with scoring,".
+    """
+
+    async def test_an_unreadable_blob_admits_the_memory_is_partial(self):
+        await self.engine.store(kind="episodic", content=self.LONG, tags=[], source_ref="",
+                                confidence=None)
+
+        async def _broken(ref):
+            raise RuntimeError("blob is gone")
+
+        self.ledger.get_blob = _broken
+        items = await self._recall("architecture")
+        self.assertIn("memory truncated", items[0].content)
+        self.assertIn(str(len(self.LONG)), items[0].content)
+
+    async def test_a_memory_that_never_got_its_blob_admits_it_too(self):
+        async def _broken(data):
+            raise RuntimeError("no blobs today")
+
+        self.ledger.put_blob = _broken
+        await self.engine.store(kind="episodic", content=self.LONG, tags=[], source_ref="",
+                                confidence=None)
+        items = await self._recall("architecture")
+        self.assertIn("memory truncated", items[0].content)
+
+    async def test_a_whole_memory_says_nothing_extra(self):
+        """The notice must appear only when something is actually
+        missing -- a marker on every recall would be noise, and noise
+        gets ignored."""
+        await self.engine.store(kind="episodic", content=self.LONG, tags=[], source_ref="",
+                                confidence=None)
+        items = await self._recall("architecture")
+        self.assertNotIn("memory truncated", items[0].content)
+        self.assertEqual(items[0].content, self.LONG)
+
+    async def test_a_short_memory_is_untouched(self):
+        await self.engine.store(kind="episodic", content="a short note about boilers", tags=[],
+                                source_ref="", confidence=None)
+        items = await self._recall("boilers")
+        self.assertEqual(items[0].content, "a short note about boilers")

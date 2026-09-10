@@ -84,6 +84,23 @@ class Service:
         self._subs: list = []
         self._lock_expiry: asyncio.Task | None = None
         self._degraded_detail = ""
+        # One decision per action id. The gate had none, so a duplicate
+        # `action.proposed` -- which an at-least-once bus is entitled to
+        # deliver -- was decided twice and minted a second token. The
+        # second token then failed Execution's replay guard, so a real,
+        # successful action was ALSO reported as `action.denied` with
+        # reason "signature replayed", and Execution marked itself
+        # degraded over a redelivery. Orchestration takes whichever of
+        # result and denial lands first, so the model could be told the
+        # action it had just run was refused for a token-integrity
+        # failure (observer, 2026-09-10). Nothing wrong ever executed --
+        # Execution pins the args from the FIRST proposal and fails
+        # closed -- but a tamper alarm that fires on ordinary
+        # redelivery is worse than no alarm.
+        #
+        # In memory and per process: a Guardian restart forgets, and so
+        # does Execution's own replay guard, so the two stay consistent.
+        self._decided: dict[str, str] = {}
         self.charter_text = ""
 
     async def start(self, ctx) -> None:
@@ -371,9 +388,52 @@ class Service:
                 spilled[key] = value
         return {**proposal, "args": spilled}
 
+    @staticmethod
+    def _fingerprint(payload: dict) -> str:
+        """What makes two proposals the same action."""
+        from simorgh.contracts import security
+
+        try:
+            args_hash = security.canonical_args_sha256(payload.get("args") or {})
+        except Exception:  # noqa: BLE001 -- an unhashable payload is still comparable by repr
+            args_hash = repr(payload.get("args"))
+        return f"{payload.get('tool', '')}:{args_hash}"
+
+    async def _record_duplicate(self, action_id: str, why: str) -> None:
+        stream = f"action:{action_id}"
+        try:
+            await self._ctx.ledger.append(stream, self._event(stream, "duplicate", {"why": why}))
+        except Exception:  # noqa: BLE001 -- a note about a duplicate must never break the gate
+            pass
+
     async def _on_proposed(self, message: Message) -> None:
         p = message.payload
         action_id = p["action_id"]
+        fingerprint = self._fingerprint(p)
+        seen = self._decided.get(action_id)
+        if seen is not None:
+            if seen == fingerprint:
+                # The same proposal again: already decided, already
+                # answered. Recorded so the stream shows what happened,
+                # and NOT re-answered, because the answer is already on
+                # its way to whoever asked.
+                await self._record_duplicate(action_id, "identical proposal redelivered")
+                return
+            # A different action wearing an id that has already been
+            # decided. Denied at the gate rather than left to fail as a
+            # token mismatch downstream, which reads as tampering.
+            await self._record_duplicate(action_id, "same id, different action")
+            await self._ctx.bus.publish(message.caused(
+                topics.ACTION_DENIED,
+                {"action_id": action_id, "layer": "policy", "tool": p.get("tool", ""),
+                 "reasons": ["this action id has already been decided; an id may not be reused "
+                             "for a different call"]},
+                source="guardian",
+            ))
+            return
+        # Claimed before the first await, so two deliveries racing each
+        # other cannot both get through.
+        self._decided[action_id] = fingerprint
         task = self._tasks.get(p.get("task_id") or "", _TaskInfo())
         proposal = Proposal(
             action_id=action_id, tool=p["tool"], args=p["args"], scope=p["scope"],
@@ -422,6 +482,8 @@ class Service:
         try:
             await self._ctx.ledger.append(stream, self._event(stream, "received", {"proposal": recorded}))
         except Exception as exc:  # noqa: BLE001 -- a proposal Guardian cannot record is refused, never lost
+            # Undecided after all: let a genuine retry be heard.
+            self._decided.pop(action_id, None)
             await self._ctx.bus.publish(message.caused(
                 topics.ACTION_DENIED,
                 {"action_id": action_id, "reasons": [f"could not record the proposal: {exc}"],

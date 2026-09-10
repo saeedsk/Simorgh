@@ -26,6 +26,12 @@ FAILED = "failed"
 TERMINAL_STATUSES = frozenset({COMPLETED, FAILED})
 
 KINDS = ("chat", "patch", "skill", "research", "project")
+
+#: Note prefix on a child parked because something it depends on failed
+#: terminally. Written by `service.py::_propagate_failure` and read by
+#: `rollup.py` to tell a child that is merely waiting from one that can
+#: never run again -- two sides of one fact, so it lives in one place.
+DEPENDENCY_FAILED_NOTE = "dependency_failed:"
 MODES = ("plan", "execute")
 RISKS = ("low", "medium", "high")
 ORIGINS = ("human", "curiosity", "reflection", "research", "project", "planner", "benchmark")

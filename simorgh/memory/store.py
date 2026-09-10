@@ -35,6 +35,13 @@ def stream_for(kind: str) -> str:
     return f"memory:{kind}"
 
 
+#: Appended to a memory that came back shorter than it was stored.
+#: Said in the content itself because that is the only part of a recall
+#: that reaches the model.
+TRUNCATION_NOTICE = ("\n\n[memory truncated: {have} of {want} characters recovered; "
+                     "the rest is not available]")
+
+
 class WorkingMemory:
     """Per-session bounded rolling window -- the working-memory kind,
     kept in-process (never durable), ported from v1 `ShortTermMemory`.
@@ -96,6 +103,10 @@ class MemoryEngine:
         # ref -> blob ref, for items whose content was too long to sit
         # inline. Filled while scanning, read only for what is returned.
         self._content_refs: dict[str, str] = {}
+        # How long each blobbed memory really is, by ref. Read back at
+        # recall so a partial recovery can say so -- see
+        # `_resolve_content`.
+        self._content_chars: dict[str, int] = {}
 
     # -- store -----------------------------------------------------------------------
     #: The Ledger refuses any string longer than this inline
@@ -141,24 +152,36 @@ class MemoryEngine:
         return f"{stream}:{seq}"
 
     async def _resolve_content(self, items: list) -> list:
-        """Swap each item's preview for its full text.
+        """Swap each item's preview for its full text, and say so when
+        only part of it came back.
 
         Only for the items actually being returned. Doing it during
         scoring would mean a blob read per candidate, which is a
         hundred reads to answer one question.
+
+        `content_chars` has been written at store time since the blob
+        split landed and nothing ever read it, so both partial paths --
+        a blob that could not be written, and a blob that cannot now be
+        read -- returned a 3,500-character prefix cut mid-sentence and
+        indistinguishable from a memory that was genuinely that short.
+        A memory system that quietly shortens what it remembers is the
+        "succeeds while saying nothing true" failure in the one place it
+        is hardest to notice (observer, 2026-09-10).
         """
         out = []
         for item in items:
             ref = self._content_refs.get(item.ref)
-            if not ref:
-                out.append(item)
-                continue
-            try:
-                full = (await self._ledger.get_blob(ref)).decode("utf-8", "replace")
-            except Exception:  # noqa: BLE001 -- the preview is still worth returning
-                out.append(item)
-                continue
-            out.append(replace(item, content=full))
+            full = None
+            if ref:
+                try:
+                    full = (await self._ledger.get_blob(ref)).decode("utf-8", "replace")
+                except Exception:  # noqa: BLE001 -- the preview is still worth returning
+                    full = None
+            content = full if full is not None else item.content
+            expected = self._content_chars.get(item.ref, 0)
+            if expected and len(content) < expected:
+                content += TRUNCATION_NOTICE.format(have=len(content), want=expected)
+            out.append(replace(item, content=content) if content != item.content else item)
         return out
 
     # -- retrieve --------------------------------------------------------------------
@@ -204,6 +227,8 @@ class MemoryEngine:
                 content_ref = event.payload.get("content_ref")
                 if content_ref:
                     self._content_refs[ref] = str(content_ref)
+                if event.payload.get("content_chars"):
+                    self._content_chars[ref] = int(event.payload["content_chars"])
                 item = MemoryItem(ref=ref, kind=kind, content=event.payload.get("content", ""), tags=tags,
                                   confidence=float(event.payload.get("confidence", 1.0)), ts=event.ts,
                                   source_ref=event.payload.get("source_ref", ""))
@@ -211,7 +236,10 @@ class MemoryEngine:
 
         candidates.sort(key=lambda pair: pair[0], reverse=True)
         truncated = len(candidates) > k
-        chosen = [item for _, item in candidates[:k]]
+        # The relevance number travels with the item. Computing it and
+        # throwing it away was why the reply had to report something
+        # else under the name "score".
+        chosen = [replace(item, score=score) for score, item in candidates[:k]]
         return await self._resolve_content(chosen), truncated
 
     def _score(self, query_pair, content: str, item: MemoryItem, now: float, penalty: float) -> float:

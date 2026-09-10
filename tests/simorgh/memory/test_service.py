@@ -228,3 +228,47 @@ class MemoryServiceTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheReportedScoreIsAboutTheQueryTestCase(MemoryServiceTestCase):
+    async def _store(self, content: str) -> None:
+        await self._store_and_wait({"kind": "semantic", "content": content, "tags": [],
+                                    "source_ref": ""})
+
+    async def _retrieve(self, query: str):
+        return await self.bus.request(Message.new(
+            topics.MEMORY_RETRIEVE, source="test",
+            payload={"query": query, "kinds": ["semantic"], "k": 5}), timeout=5.0)
+
+    """`memory.retrieve.reply`'s `score` was decay-from-creation, so
+    every fresh record scored 1.0 however irrelevant, and a query
+    matching nothing came back with two perfect scores. The relevance
+    number was computed in `retrieve` and thrown away one line later.
+
+    Observed 2026-09-10: 'zzz quantum llama farming in antarctica'
+    returned two unrelated records, both `score=1.0000`.
+    """
+
+    async def test_a_matching_record_outscores_an_unrelated_one(self):
+        await self._store("the boiler service is due in March")
+        await self._store("the ledger stream for benchmark runs is benchmark:runs")
+        reply = await self._retrieve("which stream holds benchmark runs?")
+        items = reply.payload["items"]
+        self.assertGreaterEqual(len(items), 2)
+        best = max(items, key=lambda i: i["score"])
+        self.assertIn("benchmark", best["content"])
+
+    async def test_two_records_do_not_share_one_score(self):
+        await self._store("the boiler service is due in March")
+        await self._store("the ledger stream for benchmark runs is benchmark:runs")
+        reply = await self._retrieve("benchmark runs")
+        scores = [i["score"] for i in reply.payload["items"]]
+        self.assertGreater(len(set(scores)), 1, "identical scores mean the number says nothing")
+
+    async def test_the_decayed_confidence_is_still_reported_under_its_own_name(self):
+        await self._store("something worth keeping")
+        reply = await self._retrieve("something")
+        item = reply.payload["items"][0]
+        self.assertIn("confidence_now", item)
+        self.assertGreater(item["confidence_now"], 0.0)
+        self.assertLessEqual(item["confidence_now"], 1.0 + 1e-9)

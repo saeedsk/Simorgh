@@ -9,7 +9,30 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from .model import BLOCKED, COMPLETED, FAILED, IN_PROGRESS, PENDING, TERMINAL_STATUSES, Task
+from .model import (
+    BLOCKED, COMPLETED, DEPENDENCY_FAILED_NOTE, FAILED, IN_PROGRESS, PENDING,
+    TERMINAL_STATUSES, Task,
+)
+
+
+def is_dead(child: Task) -> bool:
+    """Whether this child can never run again.
+
+    A terminal status is the obvious case. The other one is a child
+    parked because a dependency failed terminally: BLOCKED is not a
+    terminal status, so a project whose remaining work was all
+    dependency-blocked reported IN_PROGRESS forever -- nothing could
+    move, `project.failed` was never published, and the project sat
+    there indefinitely. Live-caught by an observer over a real Kernel,
+    2026-09-10: three children, one completed, one failed, one blocked
+    on the failure, `rollup=in_progress done=1/3` and no project event
+    ever emitted.
+
+    A child BLOCKED for any other reason -- out of step budget, waiting
+    on a human -- is still alive, because Planning re-offers those."""
+    if child.status in TERMINAL_STATUSES:
+        return True
+    return child.status == BLOCKED and (child.note or "").startswith(DEPENDENCY_FAILED_NOTE)
 
 
 def project_status(children: Sequence[Task]) -> str:
@@ -18,9 +41,10 @@ def project_status(children: Sequence[Task]) -> str:
     statuses = [c.status for c in children]
     if all(s == COMPLETED for s in statuses):
         return COMPLETED
-    if all(s in TERMINAL_STATUSES for s in statuses):
-        # every child finished, but not all succeeded (the DONE check
-        # above already caught "all completed") -- at least one FAILED.
+    if all(is_dead(c) for c in children):
+        # Nothing left that can move, and not everything succeeded (the
+        # check above already caught that) -- at least one failed, or
+        # was parked forever behind one that did.
         return FAILED
     if any(s == IN_PROGRESS for s in statuses):
         return IN_PROGRESS
