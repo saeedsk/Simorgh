@@ -182,3 +182,62 @@ class TestDefaultSecrets(unittest.TestCase):
             factory = _factory(tmp, secrets=EnvSecretStore({"SIM_API_TOKEN": "tok"}),
                                default_secrets=DEFAULT_SECRETS)
             self.assertEqual(factory.build("interface").secrets.get("SIM_API_TOKEN"), "tok")
+
+
+class TestScopedSecretGlobs(unittest.TestCase):
+    """A trailing `*` allows a family of names. The vault names
+    credentials by account (`imap:home`, `caldav:work`), and a person
+    adding a second mailbox should not also have to add a line to
+    simorgh.toml before the tools can see it -- without this the scoping
+    rule quietly becomes "one account only", which is not a security
+    property, just a limit nobody chose."""
+
+    def _store(self, allowed):
+        from simorgh.kernel.secrets import ScopedSecretStore
+
+        backing = EnvSecretStore({
+            "vault:imap:home:password": "p1",
+            "vault:caldav:work:password": "p2",
+            "GEMINI_API_KEY": "k",
+        })
+        return ScopedSecretStore(backing, frozenset(allowed))
+
+    def test_a_prefix_allows_the_whole_family(self):
+        store = self._store({"vault:*"})
+        self.assertEqual(store.get("vault:imap:home:password"), "p1")
+        self.assertEqual(store.get("vault:caldav:work:password"), "p2")
+
+    def test_a_prefix_allows_nothing_outside_it(self):
+        self.assertIsNone(self._store({"vault:*"}).get("GEMINI_API_KEY"))
+
+    def test_a_narrower_prefix_is_honoured(self):
+        store = self._store({"vault:imap:*"})
+        self.assertEqual(store.get("vault:imap:home:password"), "p1")
+        self.assertIsNone(store.get("vault:caldav:work:password"))
+
+    def test_exact_names_still_work_beside_a_prefix(self):
+        store = self._store({"vault:*", "GEMINI_API_KEY"})
+        self.assertEqual(store.get("GEMINI_API_KEY"), "k")
+
+    def test_require_refuses_outside_the_prefix(self):
+        with self.assertRaises(MissingSecret):
+            self._store({"vault:*"}).require("GEMINI_API_KEY")
+
+    def test_a_bare_star_is_not_a_wildcard(self):
+        """It would read as "allow everything" while looking like a
+        typo. A subsystem that wants everything says so with a prefix
+        that means it."""
+        self.assertIsNone(self._store({"*"}).get("GEMINI_API_KEY"))
+
+    def test_execution_really_does_receive_vault_names(self):
+        """The wire from `registry.DEFAULT_SECRETS` to a live Context --
+        without it, every account-backed tool is credential-less and
+        every one of them reports the account as unconfigured."""
+        from simorgh.kernel.registry import DEFAULT_SECRETS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            factory = _factory(
+                tmp, secrets=EnvSecretStore({"vault:imap:home:password": "p1"}),
+                default_secrets=DEFAULT_SECRETS)
+            self.assertEqual(factory.build("execution").secrets.get("vault:imap:home:password"), "p1")
+            self.assertIsNone(factory.build("cognition").secrets.get("vault:imap:home:password"))

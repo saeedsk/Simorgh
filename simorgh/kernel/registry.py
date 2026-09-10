@@ -63,6 +63,13 @@ NEEDS_HMAC_SECRET: frozenset[str] = frozenset({"guardian", "execution"})
 # behaves exactly as it always has -- local and unauthenticated.
 DEFAULT_SECRETS: dict[str, frozenset[str]] = {
     "interface": frozenset({"SIM_API_TOKEN"}),
+    # Execution is where credentials are actually used: every
+    # account-backed tool runs here. `vault:*` covers the encrypted
+    # store's own namespace (`vault:imap:fastmail:password`) and nothing
+    # else -- an ordinary env secret still has to be declared. The
+    # alternative is a `simorgh.toml` line per mailbox, which is a line
+    # people forget and then report the feature as broken.
+    "execution": frozenset({"vault:*"}),
 }
 
 

@@ -97,19 +97,37 @@ class ScopedSecretStore:
     """What a `Service.start()` actually receives: only `allowed` names
     are ever visible, so a subsystem that never declared a need for a
     secret cannot read it even if it tried (`require`/`get` both scoped,
-    not just `require`)."""
+    not just `require`).
+
+    An entry may end in `*` to allow a family: `vault:imap:*` permits
+    `vault:imap:fastmail:password` and nothing outside that prefix. The
+    vault (kernel/vault.py) names credentials by account -- `imap:home`,
+    `caldav:work`, `google:me` -- and a person adding a second mailbox
+    should not also have to add a line to `simorgh.toml` before the
+    tools can see it. Without this, the scoping rule quietly becomes
+    "one account only", which is not a security property, just a
+    limit nobody chose.
+
+    A bare `*` is deliberately NOT special: it would read as "allow
+    everything" while looking like a typo, and a subsystem that wants
+    everything should say so with a prefix that means it.
+    """
 
     def __init__(self, backing: SecretStore, allowed: frozenset[str]) -> None:
         self._backing = backing
-        self._allowed = allowed
+        self._exact = frozenset(name for name in allowed if not name.endswith("*"))
+        self._prefixes = tuple(name[:-1] for name in allowed if name.endswith("*") and len(name) > 1)
+
+    def _permitted(self, name: str) -> bool:
+        return name in self._exact or any(name.startswith(prefix) for prefix in self._prefixes)
 
     def get(self, name: str) -> str | None:
-        if name not in self._allowed:
+        if not self._permitted(name):
             return None
         return self._backing.get(name)
 
     def require(self, name: str) -> str:
-        if name not in self._allowed:
+        if not self._permitted(name):
             raise MissingSecret(f"{name} (not scoped to this subsystem)")
         return self._backing.require(name)
 

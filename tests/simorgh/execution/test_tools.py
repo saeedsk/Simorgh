@@ -764,6 +764,7 @@ class TestBuiltinTools(unittest.TestCase):
             "find_package", "install_package", "run_script",
             "browse_page", "run_container", "notify",
             "kb_search", "kb_ask", "kb_open", "kb_sources", "kb_status",
+            "cal_list", "mail_search", "mail_read", "remind",
             "propose_mcp_server", "run_shell",
         })
 

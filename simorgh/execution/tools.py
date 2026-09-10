@@ -64,6 +64,7 @@ from .pdftext import looks_like_pdf, pdf_to_text
 from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
 from .knowledge.tools import knowledge_tools
+from .pim.tools import pim_tools
 from .notify import NotifyTool
 from .remote import RunRemoteTool
 from .container import RunContainerTool
@@ -1530,7 +1531,10 @@ class SkillTool:
             )
 
 
-def builtin_tools(config: Config) -> list:
+def builtin_tools(config: Config, *, secrets=None) -> list:
+    """`secrets` is the subsystem's scoped secret store. Only the
+    account-backed tools use it, and they take the value at call time so
+    a rotated credential is picked up without a restart."""
     return [
         ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), SelfMapTool(config),
         RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
@@ -1546,6 +1550,12 @@ def builtin_tools(config: Config) -> list:
         # add, which beats the tool not existing on the day somebody
         # points it at ~/Documents.
         *knowledge_tools(config),
+        # Calendar and mail (execution/pim/,
+        # domains/02-calendar-mail-tasks.md). Read-only: sending is
+        # irreversible and gets a human gate, and a connector that
+        # cannot write at all is a stronger guarantee than a policy
+        # saying it should not.
+        *pim_tools(config, secrets=secrets),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

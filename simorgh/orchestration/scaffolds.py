@@ -82,6 +82,13 @@ _TOOL_NOTES: dict[str, str] = {
                "something they would want to know while not watching: work finished, a benchmark "
                "regressed, you are blocked. There is no unsend, and no provider may be configured, "
                "in which case it refuses and names what to set",
+    "cal_list": "what is on the creator's real calendar for a range like today, tomorrow or "
+                 "this week",
+    "mail_search": "search the creator's real mailbox -- subjects, senders and dates, never "
+                    "bodies",
+    "mail_read": "open one message from mail_search and read its body",
+    "remind": "set a reminder that fires even when nobody is at the terminal -- \"20m\", "
+               "\"tomorrow 9am\", \"friday at 15:00\"",
     "kb_search": "search the creator's OWN documents -- their files, PDFs, notes, scans -- and "
                   "get the matching passages back with citations. For anything about their life, "
                   "house, contracts, finances or past work, look here before the web",

@@ -542,3 +542,75 @@ class TestKnowledgeMarkersReachTheTools(unittest.TestCase):
         for tool in knowledge_tools(Config()):
             with self.subTest(tool=tool.name):
                 self.assertEqual(_TOOL_POLICY[tool.name][0], tool.reversibility)
+
+
+class TestPimMarkersReachTheTools(unittest.TestCase):
+    """Calendar, mail and reminders through the marker layer. `remind`
+    is the one that matters most: it is two-part (when, then what), and
+    a reminder whose text was truncated to its first line is the useless
+    message this whole path exists to avoid."""
+
+    MARKERS = ("CAL_LIST", "MAIL_SEARCH", "MAIL_READ", "REMIND")
+
+    def _walk(self, reply: str) -> dict:
+        from simorgh.cognition.parser import parse_marker
+
+        name, argument = parse_marker(reply, self.MARKERS)
+        return to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": name, "args": {"argument": argument}}, rationale="r",
+        )
+
+    def test_a_range_arrives_as_a_range(self):
+        payload = self._walk("CAL_LIST: this week")
+        self.assertEqual(payload["tool"], "cal_list")
+        self.assertEqual(payload["args"], {"range": "this week"})
+
+    def test_a_mail_query_arrives_as_a_query(self):
+        self.assertEqual(self._walk("MAIL_SEARCH: invoice from the plumber")["args"],
+                         {"query": "invoice from the plumber"})
+
+    def test_a_message_reference_arrives_intact(self):
+        self.assertEqual(self._walk("MAIL_READ: [fastmail:INBOX:4471]")["args"],
+                         {"message": "[fastmail:INBOX:4471]"})
+
+    def test_a_reminder_splits_the_time_from_the_text(self):
+        payload = self._walk("REMIND: tomorrow 8am\ncall the plumber back about the boiler")
+        self.assertEqual(payload["args"]["when"], "tomorrow 8am")
+        self.assertEqual(payload["args"]["text"], "call the plumber back about the boiler")
+
+    def test_a_multi_line_reminder_keeps_every_line(self):
+        payload = self._walk("REMIND: 20m\ntake the bins out\nand the recycling")
+        self.assertEqual(payload["args"]["text"], "take the bins out\nand the recycling")
+
+    def test_reading_is_read_only_and_reminding_is_reversible(self):
+        for marker, expected in (("CAL_LIST: today", "read_only"),
+                                 ("MAIL_SEARCH: x", "read_only"),
+                                 ("MAIL_READ: 1", "read_only"),
+                                 ("REMIND: 20m\nx", "reversible")):
+            with self.subTest(marker=marker):
+                self.assertEqual(self._walk(marker)["reversibility"], expected)
+
+    def test_a_reminder_does_not_claim_the_network(self):
+        """It publishes to the Kernel's own scheduler and reaches
+        nothing outside this machine."""
+        self.assertFalse(self._walk("REMIND: 20m\nx")["scope"]["network"])
+
+    def test_calendar_and_mail_do_claim_the_network(self):
+        for marker in ("CAL_LIST: today", "MAIL_SEARCH: x", "MAIL_READ: 1"):
+            with self.subTest(marker=marker):
+                self.assertTrue(self._walk(marker)["scope"]["network"])
+
+    def test_every_pim_tool_has_a_policy_row_a_timeout_and_a_note(self):
+        from simorgh.execution.config import Config
+        from simorgh.execution.pim.tools import pim_tools
+        from simorgh.orchestration import scaffolds
+        from simorgh.orchestration.session import _ACTION_TIMEOUTS
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        for tool in pim_tools(Config()):
+            with self.subTest(tool=tool.name):
+                self.assertIn(tool.name, _TOOL_POLICY)
+                self.assertIn(tool.name, _ACTION_TIMEOUTS)
+                self.assertIn(tool.name, scaffolds._TOOL_NOTES)
+                self.assertEqual(_TOOL_POLICY[tool.name][0], tool.reversibility)

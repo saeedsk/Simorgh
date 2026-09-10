@@ -315,6 +315,30 @@ class Config:
     # the passage is rather than what it says.
     knowledge_cloud_llm_may_see: tuple[str, ...] = ("public", "personal")
 
+    # -- pim (execution/pim/, domains/02-calendar-mail-tasks.md):
+    # calendar and mail, both over stdlib -- no pip install before they
+    # can be tried. An account row carries a hostname and a username and
+    # nothing worth stealing; the password comes from the vault by
+    # `cred_id` (default `<kind>:<name>`), or from
+    # `PIM_<NAME>_PASSWORD` for someone trying it out first.
+    #
+    #   [[execution.pim_accounts]]
+    #   name = "fastmail"
+    #   kind = "imap"                       # imap | caldav
+    #   url = "imap.fastmail.com"           # host[:port], or the CalDAV URL
+    #   username = "you@example.com"
+    #   privacy = "personal"
+    pim_accounts: tuple = ()
+    pim_timeout_s: float = 20.0
+    pim_max_results: int = 50
+    pim_body_max_chars: int = 20_000
+    pim_max_reminder_days: int = 365
+    # Mail BODIES are `sensitive` (platform section 10); subjects and
+    # senders are `personal`. `sensitive` is absent here on purpose, so
+    # `mail_read` says where the message is rather than quoting it into
+    # a cloud model's context. Add it to opt in.
+    pim_cloud_llm_may_see: tuple[str, ...] = ("public", "personal")
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a
@@ -393,7 +417,7 @@ class Config:
         if "repo_root" in kwargs:
             kwargs["repo_root"] = Path(kwargs["repo_root"])
         for key in ("readable_roots", "write_scopes_source", "write_scopes_skills",
-                    "knowledge_cloud_llm_may_see"):
+                    "knowledge_cloud_llm_may_see", "pim_cloud_llm_may_see", "pim_accounts"):
             if key in kwargs:
                 kwargs[key] = tuple(kwargs[key])
         if "mcp_servers" in kwargs:

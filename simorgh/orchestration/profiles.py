@@ -20,6 +20,9 @@ CHAT = Profile(
            # archetypal chat question, and answering it from the web is
            # the archetypal wrong answer. Read-only and entirely local.
            "kb_search", "kb_ask", "kb_open",
+           # "what's on today", "did the plumber reply", "remind me at
+           # 8" -- all chat questions, and all unanswerable from the web.
+           "cal_list", "mail_search", "mail_read", "remind",
            "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
@@ -77,7 +80,8 @@ RESEARCH = Profile(
            # research question whose sources are on this machine.
            # `kb_sources` is here and nowhere else: research is the one
            # profile that may reasonably need to index something first.
-           "kb_search", "kb_ask", "kb_open", "kb_status", "kb_sources"),
+           "kb_search", "kb_ask", "kb_open", "kb_status", "kb_sources",
+           "cal_list", "mail_search", "mail_read"),
     # 6 predates web_search/web_fetch. A question with a repo half and a
     # web half needs search + fetch + two repo steps + an answer, and
     # died on step 6 every time (observer, 2026-09-08).
@@ -87,7 +91,9 @@ PLAN = Profile(
     name="plan",
     tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch",
            # Read-only, so the searching three but not `kb_sources`.
-           "kb_search", "kb_ask", "kb_open"),
+           "kb_search", "kb_ask", "kb_open",
+           # Planning around what is actually in the diary.
+           "cal_list"),
     # `verify=False`: a plan session's product is a plan, and the task
     # verifier asks "was the change implemented?" -- to which the honest
     # answer is always no. With `max_revisions=0` that `fail` blocked the

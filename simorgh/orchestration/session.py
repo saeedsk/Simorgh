@@ -184,6 +184,12 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "install_package": 330.0,
     "run_script": 200.0,
     "notify": 25.0,
+    # A calendar or mailbox is a network round trip to somebody else's
+    # server, and a mailbox with thousands of messages is a slow SEARCH.
+    "cal_list": 45.0,
+    "mail_search": 60.0,
+    "mail_read": 45.0,
+    "remind": 15.0,
     "kb_search": 30.0,
     "kb_ask": 30.0,
     "kb_open": 20.0,

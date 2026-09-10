@@ -68,6 +68,12 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # reads files -- reversible (remove undoes add, a rescan rebuilds),
     # never read_only.
     "kb_sources": ("reversible", False),
+    # -- calendar and mail (domains/02-calendar-mail-tasks.md). Reading
+    # only; `remind` writes, but only to the Kernel's own scheduler.
+    "cal_list": ("read_only", True),
+    "mail_search": ("read_only", True),
+    "mail_read": ("read_only", True),
+    "remind": ("reversible", False),
     # Runs on a machine this process cannot inspect, snapshot or roll
     # back -- the strongest case for `irreversible` in the table.
     "run_remote": ("irreversible", True),
@@ -104,6 +110,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 # real tool call from a marker reply failed with a bare `KeyError` on its
 # own required arg (e.g. `web_fetch` needs `url`, not `argument`).
 _MARKER_ARG_KEY: dict[str, str] = {
+    "cal_list": "range",
+    "mail_search": "query",
+    "mail_read": "message",
     "kb_search": "query",
     "kb_ask": "question",
     "kb_open": "citation",
@@ -203,6 +212,9 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "install_package": ("manager", "spec"),
     "notify": ("subject", "body"),
     "kb_sources": ("op", "spec"),
+    # "REMIND: 20m\ntake the laundry out" -- when on the first line,
+    # what to say on every line after it.
+    "remind": ("when", "text"),
 }
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
@@ -280,6 +292,24 @@ _MARKER_ARG_HINT.update({
         "it as if it will be read by someone who was not watching. Say what happened and "
         "what (if anything) needs them; do not send a routine progress note. Example:\n"
         "NOTIFY: benchmark regressed\nGAIA dropped from 41% to 29% on commit 4f24467.\n"
+    ),
+    "cal_list": (
+        "a date range on one line: \"today\", \"tomorrow\", \"this week\", \"next week\", "
+        "\"7 days\" or an ISO date. Reads the creator's real calendar."
+    ),
+    "mail_search": (
+        "the search terms, on one line, or empty for the most recent messages. Returns subjects "
+        "and senders only -- bodies are sensitive and come from MAIL_READ, one at a time."
+    ),
+    "mail_read": (
+        "an [account:folder:uid] reference exactly as MAIL_SEARCH printed it, to read that one "
+        "message's body."
+    ),
+    "remind": (
+        "first line: when -- \"20m\", \"tomorrow 9am\", \"friday at 15:00\", or an ISO "
+        "datetime. Every following line: what to say. It fires even if nobody is at the "
+        "terminal. A time it cannot read is refused rather than guessed at.\nExample:\n"
+        "REMIND: tomorrow 8am\ncall the plumber back about the boiler\n"
     ),
     "kb_search": (
         "the search terms, as a single line. Searches the creator's OWN documents -- their "

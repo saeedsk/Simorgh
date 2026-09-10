@@ -114,10 +114,18 @@ class Service:
         self._verifier = ApprovalVerifier(self._secret)
         self._semaphore = asyncio.Semaphore(self._config.max_concurrent_actions)
 
+        # Every configured account-backed integration is registered as a
+        # connector, so `capabilities` answers "why can't Sim reach my
+        # mail" in one command instead of a stack trace at boot
+        # (contracts/connector.py). Building them never raises: a broken
+        # row in simorgh.toml becomes a connector whose probe explains
+        # itself.
+        self._register_configured_connectors(ctx)
+
         # External adapters (external.py) load last so a hand-built tool of
         # the same name is never shadowed by an optional package's.
         external = load_external_tools(self._config.external_tools, logger=ctx.logger)
-        for tool in builtin_tools(self._config) + self._extra_tools + external:
+        for tool in builtin_tools(self._config, secrets=ctx.secrets) + self._extra_tools + external:
             if tool.name in self._registry:
                 ctx.logger.warning("tool_name_collision", name=tool.name, provider=getattr(tool, "provider", "builtin"))
                 continue
@@ -175,6 +183,18 @@ class Service:
         if self._probe_task is not None and not self._probe_task.done():
             return  # one already running; its results will be fresher
         self._probe_task = asyncio.create_task(self._probe_capabilities())
+
+    def _register_configured_connectors(self, ctx) -> None:
+        accounts = getattr(self._config, "pim_accounts", ())
+        if not accounts:
+            return
+        try:
+            from .pim.accounts import build_all
+
+            for connector in build_all(accounts, secrets=ctx.secrets).values():
+                self._connectors.append(connector)
+        except Exception as exc:  # noqa: BLE001 -- diagnostics may not break the boot they diagnose
+            ctx.logger.warning("pim_connectors_failed", error=repr(exc))
 
     def register_connector(self, connector) -> None:
         """Add a connector after construction (a tool module that builds
