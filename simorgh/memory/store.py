@@ -23,6 +23,7 @@ from simorgh.contracts.protocols import Clock, Ledger
 from .api import MemoryItem, Turn
 from .config import Config
 from .embed import cosine_similarity, embed_text
+from .embedders import Embedder, comparable
 
 KINDS = ("episodic", "semantic", "procedural")
 TOMBSTONE_STREAM = "memory:tombstones"
@@ -81,10 +82,15 @@ class WorkingMemory:
 
 
 class MemoryEngine:
-    def __init__(self, ledger: Ledger, config: Config, *, clock: Clock) -> None:
+    def __init__(self, ledger: Ledger, config: Config, *, clock: Clock, embedder=None) -> None:
         self._ledger = ledger
         self._config = config
         self._clock = clock
+        # `embed.py`'s hashing trick unless something better is
+        # configured (`embedders.py`). Constructed once: choosing the
+        # provider reads the environment, and the instance holds the
+        # cache that stops one `retrieve` re-embedding the whole store.
+        self._embedder = embedder or Embedder(config.embedder)
         self.working = WorkingMemory(max_turns=config.working_max_turns, max_chars=config.working_max_chars)
 
     # -- store -----------------------------------------------------------------------
@@ -102,7 +108,9 @@ class MemoryEngine:
         filters = filters or {}
         tombstoned = await self._tombstoned_refs()
         penalties = await self._contradiction_penalties()
-        query_vec = embed_text(query) if query else None
+        # `(provider, vector)`, because a vector is only comparable to
+        # another from the same embedder -- see `_score`.
+        query_pair = (*self._embedder.embed(query), query) if query else None
         candidates: list[tuple[float, MemoryItem]] = []
         now = self._clock.now()
 
@@ -114,7 +122,7 @@ class MemoryEngine:
                         content = f"{turn.request_text}\n{turn.response_text}"
                         item = MemoryItem(ref=f"working:{session_id}:{i}", kind="working", content=content,
                                           tags=(), confidence=1.0, ts=turn.ts)
-                        candidates.append((self._score(query_vec, content, item, now, penalties.get(item.ref, 1.0)), item))
+                        candidates.append((self._score(query_pair, content, item, now, penalties.get(item.ref, 1.0)), item))
                 continue
             for event in await self._ledger.read(stream_for(kind)):
                 ref = f"{stream_for(kind)}:{event.seq}"
@@ -138,18 +146,42 @@ class MemoryEngine:
                 item = MemoryItem(ref=ref, kind=kind, content=event.payload.get("content", ""), tags=tags,
                                   confidence=float(event.payload.get("confidence", 1.0)), ts=event.ts,
                                   source_ref=event.payload.get("source_ref", ""))
-                candidates.append((self._score(query_vec, item.content, item, now, penalties.get(ref, 1.0)), item))
+                candidates.append((self._score(query_pair, item.content, item, now, penalties.get(ref, 1.0)), item))
 
         candidates.sort(key=lambda pair: pair[0], reverse=True)
         truncated = len(candidates) > k
         return [item for _, item in candidates[:k]], truncated
 
-    def _score(self, query_vec, content: str, item: MemoryItem, now: float, penalty: float) -> float:
-        similarity = cosine_similarity(query_vec, embed_text(content)) if query_vec is not None else 1.0
+    def _score(self, query_pair, content: str, item: MemoryItem, now: float, penalty: float) -> float:
+        similarity = self._similarity(query_pair, content) if query_pair is not None else 1.0
         confidence = item.score_confidence(now=now, half_life_seconds=self._config.half_life_seconds, penalty=penalty)
         age_days = max(0.0, now - item.ts) / 86400.0
         recency_bonus = 1.0 / (1.0 + age_days)
         return similarity * confidence + self._config.recency_weight * recency_bonus
+
+    def _similarity(self, query_pair, content: str) -> float:
+        """Cosine similarity, but only ever between two vectors from the
+        SAME embedder.
+
+        The trap this exists for: a provider is allowed to fail one call
+        and fall back to hashing (`Embedder.embed` degrades rather than
+        raising, because a memory subsystem that throws is worse than
+        one that recalls poorly). So within a single `retrieve`, the
+        query can be a 1536-dim OpenAI vector while one item's content
+        falls back to a 256-dim hashed one. `zip()` would compare them
+        happily, over the first 256 components, and return a number that
+        means nothing -- silently wrong recall rather than an error.
+
+        When the two disagree, both sides are re-embedded with hashing.
+        That is the one embedder guaranteed to be available and
+        deterministic, so the comparison is at worst crude, never
+        meaningless.
+        """
+        query_provider, query_vec, query_text = query_pair
+        content_provider, content_vec = self._embedder.embed(content)
+        if not comparable(query_provider, content_provider):
+            return cosine_similarity(embed_text(query_text), embed_text(content))
+        return cosine_similarity(query_vec, content_vec)
 
     # -- contradiction / forgetting ----------------------------------------------------
     async def flag_contradictions(self, *, kind: str = "semantic") -> list[tuple[str, str, str]]:

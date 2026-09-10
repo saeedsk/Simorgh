@@ -36,6 +36,16 @@ class Config:
     # cannot (the field parses into a real, different value -- it is
     # just never read).
     default_k: int = 5
+    # Which embedder scores recall (`embedders.py`). "auto" uses a real
+    # model when one is reachable -- a local sentence-transformers
+    # install, or an OpenAI/Voyage/Gemini key -- and the dependency-free
+    # hashing trick otherwise, so memory works with nothing configured.
+    # It matters more than it looks: hashing matches VOCABULARY, so
+    # "how do I stop the loop" and "halting a runaway iteration" score
+    # 0.000 against each other (measured 2026-09-09) -- recall finds
+    # what Sim already knows how to say and misses what it phrased
+    # differently.
+    embedder: str = "auto"  # auto | local | openai | voyage | gemini | hashing
     recency_weight: float = 0.1  # scoring: similarity*confidence + recency_weight*recency_bonus
 
     @classmethod
