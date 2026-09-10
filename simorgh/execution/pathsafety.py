@@ -134,6 +134,23 @@ def resolve_safe_path(
             return None, f"refused: {raw_path!r} resolves outside the repository"
     except OSError as exc:
         return None, f"refused: could not resolve {raw_path!r}: {exc!r}"
+    # And the name it RESOLVES to, not only the name that was typed. The
+    # check above reads the path as written, so a symlink with an
+    # innocent name walked straight through it: `ln -s .env
+    # workspace/notes.txt` and then `read_file workspace/notes.txt`
+    # returned the secret, while `workspace/.env` was refused by name
+    # (observer, 2026-09-10). `run_shell` can create that link, so the
+    # system can reach it without anyone else's help -- and narrowing
+    # the name guard earlier the same day made it EASIER to reach,
+    # because fewer names are refused and so more names are free to
+    # point at one that is.
+    try:
+        relative_target = target.relative_to(resolved_root)
+    except ValueError:      # pragma: no cover -- the containment check above already ran
+        relative_target = None
+    if relative_target is not None and looks_like_credential_path(relative_target.parts):
+        return None, (f"refused: {raw_path!r} resolves to "
+                      f"{relative_target.as_posix()!r}, which looks like a credentials path")
     return target, None
 
 

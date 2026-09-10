@@ -241,3 +241,62 @@ class EveryTwoPartMarkerKeepsBothPartsTestCase(unittest.TestCase):
             parsed = OutputParser().parse(text, {"kind": "markers", "markers": (tool,)})
             argument = parsed.tool_calls[0]["args"]["argument"]
             self.assertEqual(args_from_text(tool, argument), expected)
+
+
+class ACodeBearingPayloadEndsAtTheNextMarkerTestCase(unittest.TestCase):
+    """A marker's payload ran to the end of the reply and nothing ever
+    ended it, so everything the model said afterwards went into the
+    file.
+
+    Live-caught 2026-09-10: a page was written with two further tool
+    markers and an invented tool result pasted after `</html>`. A
+    browser ignores trailing text after `</html>`, so every later check
+    reported the page fine and the task completed claiming "a single
+    self-contained file". `count_markers` was already counting those
+    lines as dropped calls, so the count and the payload disagreed.
+    """
+
+    MARKERS = ("apply_source_patch", "render_page", "browse_page", "notify")
+
+    def _payload(self, reply: str) -> dict:
+        from simorgh.cognition.parser import OutputParser
+
+        parsed = OutputParser().parse(reply, {"kind": "markers", "markers": self.MARKERS})
+        return parsed.tool_calls[0]
+
+    def test_the_file_stops_before_the_next_marker(self):
+        call = self._payload("APPLY_SOURCE_PATCH: workspace/p.html\n"
+                             "<html><body>hi</body></html>\n"
+                             "RENDER_PAGE: workspace/p.html\n"
+                             "It loaded cleanly.\n")
+        self.assertNotIn("RENDER_PAGE", call["args"]["argument"])
+        self.assertNotIn("It loaded cleanly", call["args"]["argument"])
+        self.assertIn("<html>", call["args"]["argument"])
+
+    def test_the_cut_is_reported_not_silent(self):
+        """So a line that really was part of the file can be re-sent."""
+        call = self._payload("APPLY_SOURCE_PATCH: workspace/p.html\nbody\nNOTIFY: hi\n")
+        self.assertTrue(call.get("payload_cut_at_marker"))
+
+    def test_a_payload_with_no_later_marker_is_untouched(self):
+        body = "APPLY_SOURCE_PATCH: workspace/p.html\nline one\nline two\nline three"
+        call = self._payload(body)
+        self.assertEqual(call["args"]["argument"], "workspace/p.html\nline one\nline two\nline three")
+        self.assertNotIn("payload_cut_at_marker", call)
+
+    def test_a_lowercase_mention_inside_a_document_is_content(self):
+        """Cutting a real file short is worse than leaving a stray line
+        in one, so only the uppercase form ends a payload."""
+        call = self._payload("APPLY_SOURCE_PATCH: docs/guide.md\n"
+                             "# Guide\n\nCall it like `notify: subject` on its own line.\n")
+        self.assertIn("notify: subject", call["args"]["argument"])
+        self.assertNotIn("payload_cut_at_marker", call)
+
+    def test_the_first_line_is_never_a_cut_point(self):
+        """For a two-part marker that line IS the payload's first
+        field."""
+        from simorgh.cognition.parser import cut_at_next_marker
+
+        cut, was_cut = cut_at_next_marker("NOTIFY: subject\nbody text", self.MARKERS)
+        self.assertFalse(was_cut)
+        self.assertEqual(cut, "NOTIFY: subject\nbody text")

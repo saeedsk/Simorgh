@@ -944,6 +944,26 @@ class TestWebFetchTool(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stopped.ok)
         self.assertIn("across every host", stopped.error)
 
+    async def test_a_refused_host_does_not_stay_in_the_table_forever(self):
+        """The row was created with `setdefault` BEFORE both limit
+        checks, and both raise -- so every refused fetch of an unseen
+        host left a permanent empty row the cleanup never reached. An
+        observer measured 5,000 refusals of 5,000 hosts leaving 5,240
+        rows, 5,000 of them empty: the limiter growing the table it
+        refuses from (2026-09-10)."""
+        config = Config(web_fetch_max_calls=1, web_fetch_max_total_calls=1,
+                        web_fetch_window_s=3600.0)
+        tool = WebFetchTool(
+            config, resolver=self._public_resolver,
+            opener=lambda req, timeout: _FakeFetchResponse(b"ok"),
+        )
+        ctx = self._ctx()
+        self.assertTrue((await tool.run({"url": "https://first.example.com/"}, ctx=ctx)).ok)
+        for index in range(50):
+            await tool.run({"url": f"https://h{index}.example.com/"}, ctx=ctx)
+        self.assertEqual(len(tool._recent_by_host), 1,
+                         "a refused fetch must not leave a row behind")
+
     async def test_a_refusal_says_how_long_the_door_stays_shut(self):
         """A refusal that says only "30/30" reads as a transient failure,
         and the model answers it by trying the same fetch again."""

@@ -263,10 +263,21 @@ class TestNeedsHumanIsActuallyAnswerable(unittest.IsolatedAsyncioTestCase):
         ))
         self.assertIsNotNone(await _wait_for(collector.events, "human-4", topics.UI_PROMPT))
 
-        for answer in ("yes", "no"):  # the second answer, whatever it is, must be a no-op
-            await kernel.bus.publish(Message.new(
-                topics.UI_PROMPT_ANSWERED, source="test", payload={"prompt_id": "human-4", "answer": answer},
-            ))
+        await kernel.bus.publish(Message.new(
+            topics.UI_PROMPT_ANSWERED, source="test", payload={"prompt_id": "human-4", "answer": "yes"},
+        ))
+        # WAIT for the first answer to land before sending the second.
+        # A fixed 0.1s sleep for both was enough on an idle machine and
+        # not enough on a loaded one: the whole suite running in
+        # parallel made this fail intermittently by measuring zero
+        # outcomes rather than two (2026-09-10).
+        first = await _wait_for(collector.events, "human-4", topics.ACTION_RESULT)
+        if first is None:
+            first = await _wait_for(collector.events, "human-4", topics.ACTION_DENIED)
+        self.assertIsNotNone(first, "the first answer must resolve the action")
+        await kernel.bus.publish(Message.new(
+            topics.UI_PROMPT_ANSWERED, source="test", payload={"prompt_id": "human-4", "answer": "no"},
+        ))
         await asyncio.sleep(0.1)
         results = [m for m in collector.events if m.payload.get("action_id") == "human-4" and m.type == topics.ACTION_RESULT]
         denials = [m for m in collector.events if m.payload.get("action_id") == "human-4" and m.type == topics.ACTION_DENIED]

@@ -7,10 +7,11 @@ stream name is always a safe filename, DynamoDB key, and log line.
 
 from __future__ import annotations
 
-import re
+from simorgh.contracts.streamnames import MAX_STREAM_NAME, is_valid_stream  # noqa: F401 -- re-export
 
-MAX_STREAM_NAME = 128
-_NAME = re.compile(r"^[a-z0-9_.:-]{1,128}$")
+# The grammar itself lives in `contracts/streamnames.py`: Interface has
+# to check a caller-supplied id against it before starting work, and a
+# subsystem may not import the Ledger to ask (2026-09-10).
 
 # Prefix -> owning subsystem. Informational (the Ledger does not enforce
 # writers -- the Kernel's topology rules do that at the message level);
@@ -39,10 +40,6 @@ KNOWN_PREFIXES: dict[str, str] = {
 }
 
 COMPACTION_STREAM = "ledger:compaction"
-
-
-def is_valid_stream(name: str) -> bool:
-    return isinstance(name, str) and bool(_NAME.match(name))
 
 
 def validate_stream(name: str) -> str:

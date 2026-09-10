@@ -493,3 +493,39 @@ class UndoSaysWhatActuallyWentBackTestCase(unittest.IsolatedAsyncioTestCase):
             ctx=_ctx())
         self.assertEqual(result.metadata["restored"], 0)
         self.assertIn("dry run", result.output or "")
+
+
+class UndoNeedsEvidenceNotTheAbsenceOfContradictionTestCase(unittest.IsolatedAsyncioTestCase):
+    """The first version of the state check asked whether the state was
+    WRONG, which is not the same as asking whether it went back.
+
+    An entity the house has never heard of returns no state at all, fell
+    through both conditions, and was reported as restored: `home_undo`
+    on `light.ghost` answered `ok=True, "put back: light.ghost -> off"`
+    (observer, 2026-09-10). Evidence of success, not absence of evidence
+    of failure.
+    """
+
+    def _undo(self, house: FakeHomeAssistant):
+        tools = {t.name: t for t in home_tools(Config(home_settle_s=0.0), client=house)}
+        return tools["home_undo"]
+
+    async def test_an_entity_the_house_does_not_have_is_not_restored(self):
+        import json
+
+        result = await self._undo(FakeHomeAssistant()).run(
+            {"op": "undo", "before": json.dumps({"light.ghost": {"state": "off"}})}, ctx=_ctx())
+        self.assertFalse(result.ok)
+        self.assertEqual(result.metadata["restored"], 0)
+        self.assertIn("no state came back", result.output or "")
+
+    async def test_a_device_that_really_went_back_still_counts(self):
+        import json
+
+        house = FakeHomeAssistant()
+        await house.call("light.turn_on", entity_ids=("light.living_room",))
+        result = await self._undo(house).run(
+            {"op": "undo", "before": json.dumps({"light.living_room": {"state": "off"}})},
+            ctx=_ctx())
+        self.assertTrue(result.ok)
+        self.assertEqual(result.metadata["restored"], 1)

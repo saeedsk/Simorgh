@@ -176,6 +176,36 @@ def count_markers(text: str, markers: tuple[str, ...]) -> int:
     return sum(1 for line in stripped.splitlines() if line.strip().upper().startswith(prefixes))
 
 
+def cut_at_next_marker(payload: str, markers: tuple[str, ...]) -> tuple[str, bool]:
+    """`(payload, was cut)` -- a code-bearing payload ends where the next
+    marker begins.
+
+    A marker's payload runs to the end of the reply and nothing ever
+    ended it, so everything the model said afterwards became part of the
+    file. Live-caught 2026-09-10: a page was written with two further
+    tool markers and an invented tool result pasted after `</html>` --
+    and because a browser ignores trailing text after `</html>`, every
+    later check reported the page fine and the task completed saying it
+    had produced "a single self-contained file". For a `.py` target the
+    syntax check catches it; for HTML, Markdown or CSV nothing did.
+
+    `count_markers` was already counting those later lines as dropped
+    tool calls, so the count and the payload disagreed with each other.
+
+    UPPERCASE only, deliberately: `parse_marker` is case-insensitive
+    when finding a call, but a lowercase `notify:` line inside a
+    document is content, and cutting a real file short is worse than
+    leaving a stray line in it. Line 0 is never a cut point -- for a
+    two-part marker that line IS the payload's first field.
+    """
+    lines = payload.split("\n")
+    prefixes = tuple(f"{m.upper()}:" for m in markers)
+    for index in range(1, len(lines)):
+        if lines[index].strip().startswith(prefixes):
+            return "\n".join(lines[:index]).rstrip(), True
+    return payload, False
+
+
 def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
     """Find a tool call in `text`. Returns (marker.lower(), payload), or
     (None, text) meaning "final answer, no tool call".
@@ -279,7 +309,11 @@ class OutputParser:
         # full tool names, e.g. `draft_candidate`/`run_python_sandboxed`),
         # so every code-bearing call silently lost everything past its
         # first line.
-        arg = payload if marker.upper() in _CODE_BEARING_MARKERS else first_line_argument(payload)
+        cut = False
+        if marker.upper() in _CODE_BEARING_MARKERS:
+            arg, cut = cut_at_next_marker(payload, markers)
+        else:
+            arg = first_line_argument(payload)
         # One action per step is deliberate (16 section 7), but the extra
         # markers used to vanish without trace: a reply carrying
         # SEARCH_CODE + WEB_SEARCH ran only the first, so a whole half of
@@ -287,6 +321,10 @@ class OutputParser:
         # session can tell the model what it dropped (observer round,
         # 2026-09-08 -- three observers hit this independently).
         call = {"tool": marker, "args": {"argument": arg}}
+        if cut:
+            # Never a silent cut: the model is told, so a line that was
+            # really part of the file can be re-sent.
+            call["payload_cut_at_marker"] = True
         extra = count_markers(text, markers) - 1
         if extra > 0:
             # Only when it means something, so an ordinary call keeps its
@@ -312,6 +350,7 @@ class OutputParser:
 
 
 __all__ = [
+    "cut_at_next_marker",
     "OutputParser", "extract_code", "first_line_argument", "is_valid_python",
     "parse_marker", "parse_search_replace_blocks", "preview", "scan_verdict",
 ]

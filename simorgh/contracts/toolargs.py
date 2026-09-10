@@ -160,7 +160,19 @@ def json_rest(rest: str, second: str) -> dict:
         return {}
     if stripped.startswith("{") or stripped.startswith("["):
         try:
-            parsed = json.loads(stripped)
+            # `raw_decode`, not `loads`: a model routinely closes with a
+            # sentence after its JSON --
+            #     HOME_CALL: light.turn_on
+            #     {"entity_id": "light.kitchen"}
+            #     That should do it.
+            # -- and `loads` raised on the trailing line, so the whole
+            # second part fell through to the raw-text branch and
+            # `home_call` reached its tool with a service and no target.
+            # That is the same silent failure the marker-truncation fix
+            # ended this morning, reached by a different reply shape
+            # (observer, 2026-09-10). The narration after the value is
+            # dropped, which is what it is.
+            parsed, _end = json.JSONDecoder().raw_decode(stripped)
         except json.JSONDecodeError:
             parsed = None
         if isinstance(parsed, dict):

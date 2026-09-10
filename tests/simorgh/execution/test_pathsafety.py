@@ -170,3 +170,50 @@ class SimCanReadItsOwnSourceTestCase(unittest.TestCase):
     def test_a_credential_directory_protects_whatever_is_inside_it(self):
         for path in ("secrets/anything.txt", "home/.ssh/config", "home/.aws/config"):
             self.assertTrue(self._refused(path), path)
+
+
+class ASymlinkCannotLaunderACredentialTestCase(unittest.TestCase):
+    """The guard read the path as WRITTEN, and a symlink has whatever
+    name you give it.
+
+    Observed 2026-09-10: `ln -s .env workspace/notes.txt` and then
+    `read_file workspace/notes.txt` returned `SECRET=hunter2`, while
+    `workspace/.env` was refused by name one line earlier. `run_shell`
+    can create that link, so the system can reach this without anyone
+    else's help -- and narrowing the name guard earlier the same day
+    made it easier to reach, because fewer names are refused and so more
+    names are free to point at one that is.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        (self.root / "workspace").mkdir()
+        (self.root / "workspace" / ".env").write_text("SECRET=hunter2\n")
+        (self.root / "workspace" / "ordinary.txt").write_text("nothing secret\n")
+
+    def _read(self, relative: str) -> str:
+        from simorgh.execution.config import Config
+
+        return str(pathsafety.safe_read_file(self.root, relative,
+                                             readable_roots=Config().readable_roots))
+
+    def test_a_link_pointing_at_a_dotenv_is_refused(self):
+        (self.root / "workspace" / "notes.txt").symlink_to(".env")
+        out = self._read("workspace/notes.txt")
+        self.assertIn("refused", out)
+        self.assertNotIn("hunter2", out)
+
+    def test_the_refusal_names_what_it_resolved_to(self):
+        """Otherwise the refusal is a mystery: the path the caller typed
+        looks perfectly ordinary."""
+        (self.root / "workspace" / "notes2.txt").symlink_to(".env")
+        self.assertIn("workspace/.env", self._read("workspace/notes2.txt"))
+
+    def test_a_link_to_an_ordinary_file_still_reads(self):
+        (self.root / "workspace" / "alias.txt").symlink_to("ordinary.txt")
+        self.assertIn("nothing secret", self._read("workspace/alias.txt"))
+
+    def test_an_ordinary_file_is_unaffected(self):
+        self.assertIn("nothing secret", self._read("workspace/ordinary.txt"))

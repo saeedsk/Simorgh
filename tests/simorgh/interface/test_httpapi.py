@@ -839,3 +839,58 @@ class RateLimitTestCase(unittest.IsolatedAsyncioTestCase):
             return resp.status
 
         self.assertEqual([await asyncio.to_thread(_do) for _ in range(6)], [200] * 6)
+
+
+class TheOpenRouteDoesNotBypassTheTokenTestCase(AuthTestCase):
+    """`/api/status` stays unauthenticated so a viewer can see the
+    system is alive. Its comment claimed it revealed "only what the boot
+    banner already prints"; on a token-gated server it returned process
+    memory, the host's load averages, every bus counter and queue depth,
+    and the worker table including the running task's id -- the same
+    observe-tier numbers `/api/history` answers with a 401 (observer,
+    2026-09-10).
+    """
+
+    FULL = {"state": "running", "version": "1", "uptime_s": 12.0,
+            "metrics": {"rss_mb": 210, "load": [4.1, 3.0, 2.2]},
+            "workers": [{"worker_id": "w1", "task_id": "t-secret"}]}
+
+    async def _api(self, token: str) -> HttpApi:
+        api = HttpApi(_FakeBus(dict(self.FULL)),
+                      host="127.0.0.1", port=0, token=token)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        return api
+
+    async def test_without_the_token_the_metrics_are_withheld(self):
+        api = await self._api(self.TOKEN)
+        status, body = await self._request(api, "GET", "/api/status")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload.get("state"), "running")
+        self.assertNotIn("metrics", payload)
+        self.assertNotIn("workers", payload)
+        self.assertNotIn("t-secret", body.decode())
+
+    async def test_with_the_token_nothing_is_withheld(self):
+        api = await self._api(self.TOKEN)
+        _status, body = await self._request(api, "GET", "/api/status", token=self.TOKEN)
+        self.assertIn("metrics", json.loads(body))
+
+    async def test_liveness_is_still_open(self):
+        """The point of the route survives: a viewer with no token can
+        still see that the system is up."""
+        api = await self._api(self.TOKEN)
+        _status, body = await self._request(api, "GET", "/api/status")
+        payload = json.loads(body)
+        self.assertEqual(payload["state"], "running")
+        self.assertIn("uptime_s", payload)
+
+    async def test_with_no_token_configured_nothing_changes(self):
+        """There is no gate to get around on a local dashboard."""
+        api = HttpApi(_FakeBus(dict(self.FULL)),
+                      host="127.0.0.1", port=0)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        _status, body = await self._request(api, "GET", "/api/status")
+        self.assertIn("metrics", json.loads(body))

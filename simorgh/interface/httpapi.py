@@ -51,6 +51,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
+from simorgh.contracts.streamnames import is_valid_stream, stream_name_rule
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -163,8 +164,20 @@ class HttpApi:
 
             return _handler
 
-        async def _status(_query, _body, _headers):
-            return 200, await self._status_json(), "application/json"
+        async def _status(_query, _body, headers):
+            # Open, but not a way around the gate. This route stays
+            # unauthenticated so a viewer can see the system is alive --
+            # its comment says it reveals "only what the boot banner
+            # already prints". It did not: on a token-gated server an
+            # unauthenticated caller got process memory, this host's
+            # load averages, every bus counter and queue depth, and the
+            # worker table INCLUDING the running task's id -- the same
+            # observe-tier numbers `/api/history` answers with a 401
+            # (observer, 2026-09-10). Liveness stays open; the metrics
+            # need the token. With no token configured nothing changes,
+            # because then there is no gate to get around.
+            full = self._token and not self._authorized(headers)
+            return 200, await self._status_json(public_only=bool(full)), "application/json"
 
         self.register_route("GET", "/", _page, auth=False)
         self.register_route("GET", "/api/status", _status, auth=False)
@@ -290,7 +303,18 @@ class HttpApi:
             del activity[: len(activity) - self._ACTIVITY_MAX]
 
     async def _activity_json(self, query: dict) -> bytes:
-        limit = min(int(self._q1(query, "limit", "50") or 50), self._ACTIVITY_MAX)
+        # The only unguarded `int()` on this server: `?limit=abc` raised
+        # ValueError and answered HTTP 500 with the raw Python message
+        # as the body, while `/api/logs` and `/api/history` both fall
+        # back. And the clamp had no floor, so `?limit=0` sliced
+        # `items[-0:]` -- the whole ring -- and `?limit=-2` sliced
+        # `items[2:]`, returning everything EXCEPT the two oldest
+        # (observer, 2026-09-10).
+        try:
+            requested = int(self._q1(query, "limit", "50") or 50)
+        except ValueError:
+            requested = 50
+        limit = max(1, min(requested, self._ACTIVITY_MAX))
         items = list(getattr(self, "_activity", []))[-limit:]
         items.reverse()  # newest first
         pending = sorted(self._pending_chats)
@@ -401,13 +425,20 @@ class HttpApi:
             body = {"runs": [], "error": {"code": "benchmarks_unavailable", "detail": str(exc)}}
         return json.dumps(body, default=str).encode("utf-8")
 
-    async def _status_json(self) -> bytes:
+    #: What an unauthenticated caller may see of the status reply when a
+    #: token is configured: that the system is up, and what it is doing
+    #: at the coarsest level. Never counters, never task ids.
+    _PUBLIC_STATUS_KEYS = ("state", "version", "uptime_s", "started_at", "error")
+
+    async def _status_json(self, *, public_only: bool = False) -> bytes:
         req = Message.new(topics.SYSTEM_STATUS_REQUEST, source="interface", payload={}, clock=self._clock)
         try:
             reply = await self._bus.request_or_error(req, timeout=self._timeout)
             payload = reply.payload
         except Exception as exc:  # noqa: BLE001 -- an unreachable kernel is data for the page, not a crash
             payload = {"state": "unknown", "error": {"code": "status_unavailable", "detail": str(exc)}}
+        if public_only:
+            payload = {k: v for k, v in payload.items() if k in self._PUBLIC_STATUS_KEYS}
         return json.dumps(payload, default=str).encode("utf-8")
 
     def _origin_allowed(self, headers: dict[str, str]) -> bool:
@@ -455,6 +486,21 @@ class HttpApi:
             return 400, b'{"error":"invalid json"}', "application/json"
         if not text:
             return 400, b'{"error":"empty message"}', "application/json"
+        if client_session_id and not is_valid_stream(f"task:{client_session_id}"):
+            # Refused at the door, because the failure downstream is
+            # silent. A session id the Ledger cannot make a stream name
+            # from -- a slash, a space, an uppercase letter, anything
+            # over the length cap -- ran the whole turn, got a real
+            # answer, and then raised inside the worker's `_report`
+            # where nothing retrieves the exception: `turn.completed`
+            # was never published and the caller waited out the full
+            # chat timeout to be told "no response in time" (observer,
+            # 2026-09-10). A client sending uppercase UUIDs would meet
+            # a two-minute silence in production config.
+            return 400, json.dumps({"error": {
+                "code": "invalid_session_id",
+                "detail": f"session_id must be usable as a stream name: {stream_name_rule()}",
+            }}).encode("utf-8"), "application/json"
 
         payload = await self._chat(text, session_id=client_session_id)
         status = 409 if payload.get("error") == "turn already in flight" else 200

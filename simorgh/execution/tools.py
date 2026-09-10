@@ -709,7 +709,15 @@ class WebFetchTool:
             while calls and calls[0] < cutoff:
                 calls.popleft()
 
-        per_host = self._recent_by_host.setdefault(host, deque())
+        # `.get`, not `setdefault`: the row used to be created before
+        # both limit checks, and both checks RAISE -- so every refused
+        # fetch of a host never seen before left a permanent empty row
+        # that the cleanup at the end of this method never reached.
+        # Measured by an observer, 2026-09-10: with the ceiling
+        # saturated, 5,000 refused fetches of 5,000 distinct hosts left
+        # 5,240 rows, 5,000 of them empty. The limiter was growing the
+        # table it refuses from.
+        per_host = self._recent_by_host.get(host) or deque()
         _trim(per_host)
         _trim(self._recent_calls)
 
@@ -729,7 +737,9 @@ class WebFetchTool:
                 f"{wait_note(self._recent_calls[0] + self._config.web_fetch_window_s - now)} "
                 f"Answer from what you have already read."
             )
+        # Recorded only once the call is actually allowed.
         per_host.append(now)
+        self._recent_by_host[host] = per_host
         self._recent_calls.append(now)
         # Forget hosts whose calls have all fallen out of the window.
         # This used to test `if not calls`, which could never be true:

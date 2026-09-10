@@ -349,7 +349,14 @@ class HomeUndoTool(_HomeTool):
                 skipped.append(f"{entity_id} (was {state!r}, which cannot be re-applied)")
                 continue
             try:
-                result = await client.call(service, entity_ids=(entity_id,), data=data, settle_s=0.0)
+                # The same settle `home_call` gives a device to actually
+                # change (`home_settle_s`), not zero. Zero was harmless
+                # while the result was thrown away; now the result IS
+                # the verdict, so reading back too early reports a
+                # device that did go back as "still on".
+                result = await client.call(
+                    service, entity_ids=(entity_id,), data=data,
+                    settle_s=float(getattr(self._config, "home_settle_s", 1.0)))
             except HomeUnavailable as exc:
                 skipped.append(f"{entity_id} ({exc})")
                 continue
@@ -365,7 +372,18 @@ class HomeUndoTool(_HomeTool):
                 skipped.append(f"{entity_id} (dry run: nothing was sent)")
                 continue
             after = (result.after or {}).get(entity_id)
-            if after is not None and after.state != state:
+            if after is None:
+                # No state came back at all, so nothing here says the
+                # device went anywhere. The first version of this check
+                # asked whether the state was WRONG, which let an entity
+                # the house has never heard of fall through to "put
+                # back": `home_undo` on `light.ghost` answered
+                # `ok=True, "put back: light.ghost -> off"` (observer,
+                # 2026-09-10). Evidence of success, not absence of
+                # evidence of failure.
+                skipped.append(f"{entity_id} (no state came back, so nothing confirms it moved)")
+                continue
+            if after.state != state:
                 skipped.append(f"{entity_id} (still {after.state!r}, not {state!r})")
                 continue
             restored.append(f"{entity_id} -> {state}")
