@@ -195,6 +195,12 @@ def _gaia_case(row: dict, source: Source) -> Case:
         level=str(row.get("Level") or "").strip(),
         suite=source.name,
         attachment=str(attachment),
+        # The repo-relative path the file lives at, which is not the
+        # same as its name: `2023/validation/<name>`. Kept so the file
+        # can actually be fetched -- without it a case knows a file
+        # exists and not where, which is how 11 of 53 questions in the
+        # 2026-09-10 run were skipped rather than answered.
+        data=json.dumps({"file_path": str(row.get("file_path") or "")}),
         tools_hint=str(metadata.get("Tools") or "") if isinstance(metadata, dict) else "",
         steps_hint=steps_hint,
     )
@@ -255,6 +261,60 @@ def to_suite(source: Source, rows: list[dict], *, version: str = "unknown") -> S
 
 
 # --------------------------------------------------------------- caching
+#: Where a dataset's own files live. `resolve` serves the bytes; the
+#: rows API only ever names them.
+FILE_URL = "https://huggingface.co/datasets/{dataset}/resolve/main/{path}"
+
+
+def fetch_attachment(source: Source, case, *, dest: Path, token: str | None = None,
+                     timeout: float = 60.0) -> tuple[Path | None, str]:
+    """Download the file a question is about. `(path, problem)`.
+
+    A GAIA question like "what is the total in this spreadsheet" is
+    unanswerable without the spreadsheet, and 11 of the 53 cases in the
+    2026-09-10 run were skipped for exactly that reason -- a fifth of
+    the suite unreachable by construction. The rows carry the path; this
+    fetches it.
+
+    Written under `dest` with mode 0600 and never inside the repository
+    tree by default, for the same reason the row cache is: GAIA's terms
+    forbid resharing the set.
+    """
+    path = ""
+    payload = getattr(case, "payload", None)
+    if callable(payload):
+        path = str((payload() or {}).get("file_path") or "")
+    if not path:
+        return None, ("this case names an attached file but not where it lives -- reload the "
+                      f"suite (`benchmark load {source.name}`), which now records the path")
+    token = os.environ.get("HF_TOKEN", "") if token is None else token
+    if source.gated and not token:
+        return None, f"{source.name} is gated: set HF_TOKEN to fetch the file this question is about"
+
+    target = Path(dest) / Path(path).name
+    if target.is_file() and target.stat().st_size:
+        return target, ""      # already fetched, by an earlier run or an earlier case
+    url = FILE_URL.format(dataset=urllib.parse.quote(source.dataset),
+                          path=urllib.parse.quote(path))
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"} if token else {})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read()
+    except urllib.error.HTTPError as exc:
+        return None, f"the attached file could not be fetched (HTTP {exc.code})"
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        return None, f"the attached file could not be fetched ({exc!r})"
+    if not body:
+        return None, "the attached file came back empty"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+        target.chmod(0o600)
+    except OSError as exc:
+        return None, f"the attached file could not be written ({exc!r})"
+    return target, ""
+
+
 def cache_path(source: Source, cache_dir: Path | None = None) -> Path:
     root = Path(cache_dir) if cache_dir else DEFAULT_CACHE
     return root / f"{source.name}.json"
@@ -314,6 +374,7 @@ def known() -> list[Source]:
 
 
 __all__ = [
-    "DEFAULT_CACHE", "DatasetUnavailable", "SOURCES", "Source", "cache_path", "fetch_rows",
+    "DEFAULT_CACHE", "FILE_URL", "DatasetUnavailable", "SOURCES", "Source", "cache_path",
+    "fetch_attachment", "fetch_rows",
     "known", "load", "load_cached", "revision", "save", "to_suite",
 ]

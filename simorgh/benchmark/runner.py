@@ -21,7 +21,7 @@ from pathlib import Path
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 
-from . import swebench
+from . import datasets, swebench
 from .api import Case, CaseResult, RunRecord, Suite
 from .config import Config
 from .scoring import answer_format, score_case
@@ -49,7 +49,7 @@ class Runner:
             return time.time()
         return self._clock() if callable(self._clock) else self._clock.now()
 
-    def prompt(self, case: Case) -> str:
+    def prompt(self, case: Case, attachment: str = "") -> str:
         """The question as the system is asked it.
 
         The answer-format instruction is part of GAIA, not our
@@ -57,6 +57,8 @@ class Runner:
         own prompt asks for it. Asking without it and then scoring
         strictly would measure formatting, not capability."""
         parts = [case.question]
+        if attachment:
+            parts.append(f"The file this question is about is at `{attachment}`. Read it.")
         if case.functions:
             parts.append(f"Functions you may call:\n{case.functions}")
         parts.append(answer_format(case.mode))
@@ -87,16 +89,19 @@ class Runner:
     async def run_case(self, case: Case) -> CaseResult:
         if case.mode == "swebench":
             return await self._run_swebench(case)
+        attachment = ""
         if case.needs_attachment:
-            # Honest rather than convenient: a question about a
-            # spreadsheet we never downloaded is unanswerable, and
-            # scoring it wrong would flatter nothing and mislead us.
-            return CaseResult(
-                case_id=case.id, level=case.level, correct=False, skipped=True,
-                expected=case.answer, error=f"needs the attached file {case.attachment!r}",
-            )
+            attachment, problem = await self._fetch_attachment(case)
+            if problem:
+                # Still honest, and now rare: a question about a
+                # spreadsheet we could not download is unanswerable, and
+                # scoring it wrong would flatter nothing and mislead us.
+                return CaseResult(
+                    case_id=case.id, level=case.level, correct=False, skipped=True,
+                    expected=case.answer, error=problem,
+                )
         started = time.monotonic()
-        answer_text, steps, cost_usd, error = await self._ask(case, self.prompt(case))
+        answer_text, steps, cost_usd, error = await self._ask(case, self.prompt(case, attachment))
         seconds = time.monotonic() - started
         if error and not answer_text:
             return CaseResult(case_id=case.id, level=case.level, correct=False, expected=case.answer,
@@ -112,6 +117,30 @@ class Runner:
             expected=case.answer, seconds=seconds, steps=steps, cost_usd=cost_usd,
             blocked_by=error, error=error,
         )
+
+    async def _fetch_attachment(self, case: Case) -> tuple[str, str]:
+        """`(path Sim can open, problem)`.
+
+        The file lands under the workspace because that is the one
+        directory the file tools may both read and write -- a file
+        anywhere else is one the answering system cannot open, which
+        would leave the case just as unanswerable as not fetching it.
+        The path handed to the model is repo-relative for the same
+        reason: that is what `read_file` resolves."""
+        source = datasets.SOURCES.get(case.suite)
+        if source is None:
+            return "", (f"needs the attached file {case.attachment!r}, and {case.suite!r} is not a "
+                        f"suite this system knows how to fetch files for")
+        relative = f"{self._config.attachment_dir}/{case.id}"
+        path, problem = await asyncio.to_thread(
+            datasets.fetch_attachment, source, case,
+            dest=self._repo_root / relative, timeout=self._config.fetch_timeout_s)
+        if problem or path is None:
+            # The file's name belongs in the reason: "could not fetch a
+            # file" is not something anyone can act on.
+            return "", f"needs the attached file {case.attachment!r} -- " + (
+                problem or "it could not be fetched")
+        return f"{relative}/{path.name}", ""
 
     async def _ask(self, case: Case, prompt: str, *, kind: str = "research") -> tuple[str, int, float, str]:
         """Ask the real system one thing. `(answer, steps, cost, error)`.

@@ -63,10 +63,31 @@ class ConfigurationTestCase(unittest.TestCase):
         self.assertNotIn("results/", config.write_scopes_source)
 
     def test_it_is_gitignored(self):
+        """Asked of git, not of the file's text.
+
+        This test used to assert that the line `workspace/` appeared in
+        `.gitignore`, and it passed for months while git ignored nothing
+        at all: a later `!workspace/` un-ignored the directory, which
+        lets git descend back into it, so every scratch file inside was
+        untracked and one `git add -A` from being committed. The line
+        was there; the behaviour was the opposite of what the line
+        promised. Only asking git can tell the difference."""
+        import subprocess
         from pathlib import Path
 
-        ignored = Path(__file__).resolve().parents[3] / ".gitignore"
-        self.assertIn("workspace/", ignored.read_text().splitlines())
+        root = Path(__file__).resolve().parents[3]
+
+        def _ignored(relative: str) -> bool:
+            done = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", relative],
+                                  capture_output=True)
+            return done.returncode == 0
+
+        self.assertTrue(_ignored("workspace/scratch-note.md"),
+                        "a file written to the scratch workspace must never be committable")
+        self.assertTrue(_ignored("workspace/nested/deep/thing.json"))
+        # ...and the README stays tracked, so a fresh clone still has
+        # the directory and Sim has somewhere to write on its first run.
+        self.assertFalse(_ignored("workspace/README.md"))
 
 
 class SideEffectRoutingTestCase(unittest.TestCase):
