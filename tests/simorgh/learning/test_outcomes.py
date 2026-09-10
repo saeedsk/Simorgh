@@ -123,3 +123,51 @@ class TestOutcomeRecorder(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheRecordedCostIsTheRealCostTestCase(TestOutcomeRecorder):
+    """`cost_usd` and `duration_s` were hardcoded 0.0 at all three call
+    sites, and both are REQUIRED fields of `learn.outcome.recorded`.
+
+    So `CompetenceTable.cost_sum` and `dur_sum` could only ever be zero,
+    and Learning's whole picture of what work costs was a fabricated
+    number. An observer watched a real patch task spend $0.000589 over
+    1.56 seconds and be recorded as $0.0 over 0.0s (2026-09-10).
+
+    Nothing was missing: the recorder already read this same stream for
+    the kind and the subject, with `limit=1`.
+    """
+
+    async def _seed_run(self, task_id: str) -> None:
+        stream = f"task:{task_id}"
+        await self.ledger.append(stream, Event(
+            stream=stream, type="created", ts=100.0, trace_id=task_id, causation_id=None,
+            payload={"kind": "patch", "subject": "simorgh/x.py"}))
+        for n, cost in enumerate((0.000475, 0.000114), start=1):
+            await self.ledger.append(stream, Event(
+                stream=stream, type="task.step", ts=100.0 + n, trace_id=task_id, causation_id=None,
+                payload={"task_id": task_id, "step_no": n, "ok": True, "cost_usd": cost}))
+        await self.ledger.append(stream, Event(
+            stream=stream, type="task.completed", ts=101.56, trace_id=task_id, causation_id=None,
+            payload={"task_id": task_id, "result_summary": "done"}))
+
+    async def _record(self, task_id: str) -> dict:
+        await self.recorder.on_task_completed(Message.new(
+            "task.completed", source="orchestration",
+            payload={"task_id": task_id, "result_summary": "ok", "artifacts": [],
+                     "verification_ref": None}))
+        return dict(self.published)["learn.outcome.recorded"]
+
+    async def test_the_cost_is_the_sum_of_what_the_steps_spent(self):
+        await self._seed_run("c1")
+        self.assertAlmostEqual((await self._record("c1"))["cost_usd"], 0.000589, places=6)
+
+    async def test_the_duration_is_measured_from_created_to_finished(self):
+        await self._seed_run("c2")
+        self.assertAlmostEqual((await self._record("c2"))["duration_s"], 1.56, places=2)
+
+    async def test_a_task_with_no_steps_records_zero_honestly(self):
+        """Zero is the right answer when nothing was spent -- what was
+        wrong was zero when something was."""
+        await self._seed_task("c3")
+        self.assertEqual((await self._record("c3"))["cost_usd"], 0.0)

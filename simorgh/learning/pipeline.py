@@ -145,6 +145,22 @@ class PatchPipeline:
             reversibility="reversible", rationale="commit the applied change",
             correlator=self._action_correlator, timeout=self._config.action_timeout_seconds,
         )
+        # The apply step checks `denied`/`ok`; this one did not, so a
+        # Guardian denial, a failed commit or a timeout fell straight
+        # through to activation and the pipeline published
+        # `learn.self_patch.applied` with an empty commit. The edit
+        # stays in the working tree -- the "uncommitted self-edits"
+        # shape this project has paid for before -- and the candidate
+        # was activated on the strength of a commit that never happened
+        # (observer, 2026-09-10; the `commit_ok=False` flag its own test
+        # harness already had was never passed by any test).
+        if commit is None or commit.get("denied") or not commit.get("ok"):
+            why = "denied" if (commit or {}).get("denied") else "failed or timed out"
+            return await self._finish(
+                "rejected",
+                f"the commit was {why}, so the candidate is applied but UNCOMMITTED and not "
+                f"activated -- the change is in the working tree",
+                verification_ref=None)
         commit_sha = (commit or {}).get("stdout_preview") or None
         tests = {"baseline": verify.get("mechanical", {}).get("baseline") or 0,
                  "patched": verify.get("mechanical", {}).get("patched") or 0}

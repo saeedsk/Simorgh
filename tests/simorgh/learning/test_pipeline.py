@@ -255,3 +255,42 @@ class TestPatchPipelineTimeoutAndCheckpoints(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ADeniedCommitIsNotAnAppliedPatchTestCase(unittest.IsolatedAsyncioTestCase):
+    """The apply step checks `denied`/`ok`; the commit step did not.
+
+    So a Guardian denial, a failed commit or a timeout fell straight
+    through to activation: the pipeline reported `applied`, published
+    `learn.self_patch.applied` with an empty commit, and proposed
+    activation -- while the edit sat uncommitted in the working tree.
+    That is the "uncommitted self-edits" shape this project has paid for
+    before, reached from the other end.
+
+    The `commit_ok=False` flag this harness already had was never passed
+    by any test (observer, 2026-09-10).
+    """
+
+    async def _run(self, **kwargs):
+        harness = _Harness(**kwargs)
+        ledger = await _memory_ledger()
+        return await harness.pipeline(ledger=ledger).run(), harness
+
+    async def test_a_denied_commit_rejects_the_candidate(self):
+        result, harness = await self._run(commit_ok=False)
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertNotIn("relaunch", [p["tool"] for p in harness.proposed])
+
+    async def test_the_reason_says_the_change_is_in_the_tree(self):
+        result, _harness = await self._run(commit_ok=False)
+        detail = " ".join(str(v) for v in result.values())
+        self.assertIn("UNCOMMITTED", detail)
+        self.assertIn("working tree", detail)
+
+    async def test_nothing_claims_the_patch_was_applied(self):
+        _result, harness = await self._run(commit_ok=False)
+        self.assertNotIn("learn.self_patch.applied", [t for t, _ in harness.published])
+
+    async def test_a_good_commit_still_applies(self):
+        result, _harness = await self._run(commit_ok=True)
+        self.assertEqual(result["outcome"], "applied")
