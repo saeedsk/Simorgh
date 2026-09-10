@@ -501,15 +501,27 @@ cognition for the rest, with a "let me look into that" + follow-up
 `X-Sim-Token` header = `HOME_WEBHOOK_TOKEN` env). Both behind
 `Tailscale`/reverse proxy; never bound to `0.0.0.0` by default.
 
-**Vision**: cognition has no image path today (checked: nothing in
-`simorgh/cognition/` handles images). Add `cognition/vision.py`:
-`describe_image(path, question) -> str`, key-gated exactly like
-`notify`/embedders -- `GEMINI_API_KEY` (present on this machine) or
-`ANTHROPIC_API_KEY`, else "vision is not configured; set …". Used by
-`home_camera` and by the `frigate_detection` monitor for `package`/
-`person` ("a person in a blue jacket at the door holding a box"). Cost
-control: one call per Frigate event, never per frame; per-day cap in
-config (`vision_max_calls_per_day = 200`).
+**Vision** -- CORRECTED 2026-09-09 after the creator's review. The
+first version of this paragraph specified vision as key-gated only
+("GEMINI_API_KEY or ANTHROPIC_API_KEY, else not configured"), which is
+the reach-for-a-paid-API pattern the creator has already corrected
+once (`feedback_resourcefulness`). Local first, in this order, each
+optional and refused by name when absent -- the full version is
+`voice-design.md §8`:
+
+1. **Frigate** already classifies person/car/package/animal on every
+   camera locally; `home_camera what=last_event` returns that.
+2. **A local VLM** through the Ollama cognition provider
+   (`voice-design.md §0`, a prerequisite): `qwen2.5vl:7b` or
+   `moondream`; `cognition/vision.py::describe_image` uses it by
+   default.
+3. **Task-specific local models** for a repeated question:
+   `ultralytics` YOLO, `open_clip`, `EasyOCR`/`tesseract`,
+   `insightface` (household members, enrolled, opt-in).
+4. **Cloud vision** only when named in `[cognition] vision_provider`,
+   with the daily cap.
+
+Cost control is unchanged: one call per Frigate event, never per frame.
 
 ## 9. Tests -- what is not optional
 

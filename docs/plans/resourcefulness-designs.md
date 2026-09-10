@@ -719,6 +719,24 @@ directory; capability probes never re-ran after an install; and
 reached. `capabilities` and `schedule` are the CLI surface for the last
 two.
 
+10. **Reaching for a paid API before exhausting open source -- the
+    creator's correction, a second time (2026-09-09, on the day's
+    designs).** Three instances in one afternoon: cognition has no
+    local provider at all (`providers/` = claude_code, gemini, together)
+    while `ollama` is installed on the machine; vision was specified as
+    key-gated only; `notify` shipped with Slack/Resend/Twilio and not one
+    open-source or self-hosted provider. Fixes: `voice-design.md §0`
+    (Ollama provider as a prerequisite, per-task-class selection),
+    `home-automation-design.md §8` (vision local-first), and for
+    `notify` -- **to be built**: `ntfy` (self-hosted push, has phone
+    apps, the obvious first provider for a home), `gotify`, Home
+    Assistant's own `notify` (the companion app is already on the
+    phones), Matrix, and `apprise` as the one adapter that covers ~100
+    services so the hand-written senders collapse into it; `auto`
+    prefers ntfy/HA when configured. The rule, for every future design:
+    local first; cloud as a *named* opt-in tier; never a refusal where
+    a library exists.
+
 ## What is genuinely still open
 
 - The known flaky interface test (`test_a_dispatch_created_task_prints_
@@ -738,5 +756,8 @@ two.
   (writing both the call and an invented result) rather than emitting a
   marker. Nothing detects this.
 - The `grants-d1` branch remains unmerged, awaiting review.
+- `notify`'s open-source providers (correction 10) and the Ollama
+  cognition provider (`voice-design.md §0`) -- both are small and both
+  are prerequisites for the home/voice work.
 - OCR is wired but needs a `tesseract` binary nobody has installed
   here; audio transcription was specified and deliberately not built.
