@@ -372,6 +372,30 @@ class Config:
     # contracts/home/policy.py's own list.
     home_always_human_services: tuple[str, ...] = ()
 
+    # -- energy (execution/energy/, domains/03-energy-climate.md).
+    # Home Assistant's Energy dashboard is the record of what the house
+    # did; what it does not know is what any of it cost.
+    #
+    #   [execution.energy_meters]
+    #   grid_import = "sensor.grid_import"
+    #   grid_export = "sensor.grid_export"
+    #   solar = "sensor.solar_generation"
+    energy_meters: dict = field(default_factory=dict)
+    energy_tariff_path: str = "workspace/energy/tariff.json"
+    # An inline tariff wins over the file, for a deployment that keeps
+    # everything in one place.
+    energy_tariff: dict = field(default_factory=dict)
+    energy_currency: str = "USD"
+    energy_cycle_days: int = 30
+
+    # -- media (execution/media/, domains/05-media.md). Volume is the
+    # part worth being careful about: a model that means well and sends
+    # full volume at 2am has done something a person cannot undo by
+    # being told it was a mistake.
+    media_max_volume_unattended: int = 60
+    media_quiet_hours: str = "22:00-07:00"
+    media_quiet_hours_max_volume: int = 20
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a

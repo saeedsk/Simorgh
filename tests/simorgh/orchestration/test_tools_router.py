@@ -824,3 +824,56 @@ class TestHomeMarkersReachTheTools(unittest.TestCase):
                 self.assertIn(tool.name, _TOOL_POLICY)
                 self.assertIn(tool.name, _ACTION_TIMEOUTS)
                 self.assertIn(tool.name, scaffolds._TOOL_NOTES)
+
+
+class TestEnergyAndMediaMarkersReachTheTools(unittest.TestCase):
+    MARKERS = ("ENERGY_STATUS", "ENERGY_REPORT", "ENERGY_TARIFF",
+               "MEDIA_NOW", "MEDIA_CONTROL", "MEDIA_PLAY")
+
+    def _walk(self, reply: str) -> dict:
+        from simorgh.cognition.parser import parse_marker
+
+        name, argument = parse_marker(reply, self.MARKERS)
+        return to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": name, "args": {"argument": argument}}, rationale="r",
+        )
+
+    def test_status_takes_no_arguments(self):
+        payload = self._walk("ENERGY_STATUS:")
+        self.assertEqual((payload["tool"], payload["args"]), ("energy_status", {}))
+
+    def test_a_report_range_arrives_as_a_range(self):
+        self.assertEqual(self._walk("ENERGY_REPORT: week")["args"], {"range": "week"})
+
+    def test_a_tariff_splits_the_op_from_its_json(self):
+        payload = self._walk(
+            'ENERGY_TARIFF: set\n{"name": "tou", "rates": [{"name": "flat", "price": 0.2}]}')
+        self.assertEqual(payload["args"]["op"], "set")
+        self.assertEqual(payload["args"]["name"], "tou")
+        self.assertEqual(len(payload["args"]["rates"]), 1)
+
+    def test_media_now_takes_a_room(self):
+        self.assertEqual(self._walk("MEDIA_NOW: kitchen")["args"], {"where": "kitchen"})
+
+    def test_media_control_splits_the_op_from_its_json(self):
+        payload = self._walk('MEDIA_CONTROL: volume\n{"where": "kitchen", "value": 30}')
+        self.assertEqual(payload["args"]["op"], "volume")
+        self.assertEqual(payload["args"]["where"], "kitchen")
+        self.assertEqual(payload["args"]["value"], 30)
+
+    def test_media_play_splits_what_from_where(self):
+        payload = self._walk(
+            'MEDIA_PLAY: http://stream.example/radio.mp3\n{"where": "kitchen", "volume": 25}')
+        self.assertEqual(payload["args"]["what"], "http://stream.example/radio.mp3")
+        self.assertEqual(payload["args"]["where"], "kitchen")
+
+    def test_reading_is_read_only_and_acting_is_reversible(self):
+        for marker, expected in (("ENERGY_STATUS:", "read_only"),
+                                 ("ENERGY_REPORT: week", "read_only"),
+                                 ("MEDIA_NOW: kitchen", "read_only"),
+                                 ("ENERGY_TARIFF: show", "reversible"),
+                                 ("MEDIA_CONTROL: pause", "reversible"),
+                                 ("MEDIA_PLAY: x\n{}", "reversible")):
+            with self.subTest(marker=marker):
+                self.assertEqual(self._walk(marker)["reversibility"], expected)

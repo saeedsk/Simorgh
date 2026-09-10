@@ -82,6 +82,13 @@ _TOOL_NOTES: dict[str, str] = {
                "something they would want to know while not watching: work finished, a benchmark "
                "regressed, you are blocked. There is no unsend, and no provider may be configured, "
                "in which case it refuses and names what to set",
+    "energy_status": "what the house is using right now and what today has cost",
+    "energy_report": "what the house used and what it cost over a period, by hour and by rate",
+    "energy_tariff": "show or set what the electricity costs -- nothing can be priced until "
+                      "this is set",
+    "media_now": "what is playing and where",
+    "media_control": "pause, resume, skip, stop or set the volume on a player",
+    "media_play": "play a URL or a stream on a player",
     "home_find": "find things in the house by name and get their entity ids",
     "home_state": "what one thing in the house is doing right now",
     "home_describe": "what is in the house and what each kind of thing can do",

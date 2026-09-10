@@ -189,6 +189,13 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     # `sec_self` walks the workspace looking for credential-shaped
     # strings, which on a large tree is seconds, not milliseconds.
     # A service call waits for the house to settle before re-reading.
+    # An energy report pulls hours of history out of HA's recorder.
+    "energy_status": 45.0,
+    "energy_report": 90.0,
+    "energy_tariff": 20.0,
+    "media_now": 30.0,
+    "media_control": 45.0,
+    "media_play": 45.0,
     "home_find": 30.0,
     "home_state": 30.0,
     "home_describe": 30.0,

@@ -767,6 +767,8 @@ class TestBuiltinTools(unittest.TestCase):
             "cal_list", "mail_search", "mail_read", "remind",
             "sec_self", "sec_posture", "sec_findings", "sec_show", "sec_accept",
             "home_find", "home_state", "home_describe", "home_call", "home_undo",
+            "energy_status", "energy_report", "energy_tariff",
+            "media_now", "media_control", "media_play",
             "propose_mcp_server", "run_shell",
         })
 

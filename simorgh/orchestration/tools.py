@@ -95,6 +95,16 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "home_describe": ("read_only", True),
     "home_call": ("reversible", True),
     "home_undo": ("reversible", True),
+    # -- what the house costs (domains/03) and what it is playing
+    # (domains/05). Reading is free; the two that act do so through the
+    # same `media_player` services `home_call` would use, with the
+    # volume limits enforced before the call rather than after.
+    "energy_status": ("read_only", True),
+    "energy_report": ("read_only", True),
+    "energy_tariff": ("reversible", False),
+    "media_now": ("read_only", True),
+    "media_control": ("reversible", True),
+    "media_play": ("reversible", True),
     # Runs on a machine this process cannot inspect, snapshot or roll
     # back -- the strongest case for `irreversible` in the table.
     "run_remote": ("irreversible", True),
@@ -131,6 +141,8 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 # real tool call from a marker reply failed with a bare `KeyError` on its
 # own required arg (e.g. `web_fetch` needs `url`, not `argument`).
 _MARKER_ARG_KEY: dict[str, str] = {
+    "energy_report": "range",
+    "media_now": "where",
     "home_find": "query",
     "home_state": "target",
     "home_describe": "query",
@@ -244,6 +256,9 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "sec_findings": ("severity", "spec"),
     "home_call": ("service", "spec"),
     "home_undo": ("entity", "spec"),
+    "energy_tariff": ("op", "spec"),
+    "media_control": ("op", "spec"),
+    "media_play": ("what", "spec"),
 }
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
@@ -321,6 +336,33 @@ _MARKER_ARG_HINT.update({
         "it as if it will be read by someone who was not watching. Say what happened and "
         "what (if anything) needs them; do not send a routine progress note. Example:\n"
         "NOTIFY: benchmark regressed\nGAIA dropped from 41% to 29% on commit 4f24467.\n"
+    ),
+    "energy_status": (
+        "no argument. What the house is using right now, what rate it is on, and what today has "
+        "cost so far."
+    ),
+    "energy_report": (
+        "a period on one line: today, yesterday, week, month, or a number of days. Costs it "
+        "hour by hour against the tariff, which is the point of a time-of-use rate."
+    ),
+    "energy_tariff": (
+        "first line: show or set. Second line, for set: a JSON tariff, e.g.\n"
+        'ENERGY_TARIFF: set\n{"name": "tou", "currency": "GBP", "rates": '
+        '[{"name": "off_peak", "price": 0.09, "hours": [0, 7]}, '
+        '{"name": "day", "price": 0.24, "hours": [7, 24]}]}\n'
+        "Nothing else in the energy tools can price anything until this is set."
+    ),
+    "media_now": (
+        "a room or player name on one line, or empty for every player in the house."
+    ),
+    "media_control": (
+        "first line: pause, resume, stop, next, previous, volume, mute, unmute, on or off. "
+        'Second line, optional: {"where": "kitchen", "value": 30} -- volume is 0-100. Loud is '
+        "refused unattended, and refused outright during quiet hours."
+    ),
+    "media_play": (
+        "first line: what to play -- a URL, a radio stream, or a media id the player "
+        'understands. Second line: {"where": "kitchen", "volume": 25}.'
     ),
     "home_find": (
         "a name or a word to look for in the house -- \"kitchen\", \"thermostat\", "
@@ -409,7 +451,8 @@ _MARKER_ARG_HINT.update({
     ),
 })
 # Tools whose marker takes no argument at all.
-_MARKER_NO_ARGS = frozenset({"git_revert", "kb_status", "sec_self", "sec_posture"})
+_MARKER_NO_ARGS = frozenset({"git_revert", "kb_status", "sec_self", "sec_posture",
+                             "energy_status"})
 # Two-part markers whose SECOND part is a JSON object of extra arguments,
 # merged into `args`, rather than one more string.
 #
@@ -438,7 +481,8 @@ _MARKER_NO_ARGS = frozenset({"git_revert", "kb_status", "sec_self", "sec_posture
 # worked from the model's side, exactly the failure mode this set exists
 # to prevent for `search_listings`/`install_package`.
 _MARKER_JSON_REST = frozenset({"search_listings", "install_package", "browse_page", "run_container",
-                               "kb_sources", "sec_findings", "home_call", "home_undo"})
+                               "kb_sources", "sec_findings", "home_call", "home_undo",
+                               "energy_tariff", "media_control", "media_play"})
 
 
 def _json_rest(rest: str, second: str) -> dict:

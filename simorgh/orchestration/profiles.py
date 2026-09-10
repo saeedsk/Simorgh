@@ -28,6 +28,9 @@ CHAT = Profile(
            # "turn the kitchen light off" is the most ordinary chat
            # request there is.
            "home_find", "home_state", "home_describe", "home_call", "home_undo",
+           # "what's it costing me" and "pause the telly" are the same
+           # kind of question as "turn the light off".
+           "energy_status", "energy_report", "media_now", "media_control", "media_play",
            "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
@@ -90,7 +93,8 @@ RESEARCH = Profile(
            # The one profile that should be able to actually run the
            # check, not just read what it found.
            "sec_self", "sec_posture", "sec_findings", "sec_show", "sec_accept",
-           "home_find", "home_state", "home_describe"),
+           "home_find", "home_state", "home_describe",
+           "energy_status", "energy_report", "energy_tariff", "media_now"),
     # 6 predates web_search/web_fetch. A question with a repo half and a
     # web half needs search + fetch + two repo steps + an answer, and
     # died on step 6 every time (observer, 2026-09-08).
