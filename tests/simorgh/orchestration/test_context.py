@@ -113,7 +113,12 @@ class TestRequestsInheritTheTaskTraceId(unittest.TestCase):
             await assembler._memory_block("query", session)  # noqa: SLF001
             await sub.unsubscribe()
 
-            self.assertEqual(seen, ["trace-t1"])
+            # Two requests now (the matched recall and the recent-turns
+            # recall -- see `_MEMORY_RECENT_K`); the property under test
+            # is that BOTH join the task's trace rather than minting
+            # their own, so a second call site must not silently
+            # reintroduce the fragmentation this test exists for.
+            self.assertEqual(seen, ["trace-t1", "trace-t1"])
 
     @run
     async def test_world_facet_request_carries_a_given_trace_id(self):

@@ -114,7 +114,13 @@ class TestRunConsolidation(unittest.IsolatedAsyncioTestCase):
         seen_messages = []
 
         async def _answer_think(message: Message) -> None:
-            seen_messages.append(message.payload["messages"][0]["content"])
+            # `[-1]`, not `[0]`: the window is the LAST message now.
+            # `run_consolidation` prepends a system instruction telling
+            # the model this is a transcript to summarise rather than a
+            # question to answer -- without it the model answered the
+            # transcript and the answer was stored as a memory
+            # (observer, 2026-09-10; see `DISTILL_INSTRUCTION`).
+            seen_messages.append(message.payload["messages"][-1]["content"])
             await self.bus.reply(message, type=topics.COGNITION_THINK_REPLY, payload={
                 "text": "ok", "tool_calls": [], "provider": "fake", "cost_usd": 0.0, "tokens": 1,
                 "floor": False, "non_answer": False,
