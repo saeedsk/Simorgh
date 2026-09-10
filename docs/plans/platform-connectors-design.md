@@ -91,6 +91,26 @@ Rules:
   a tool argument), `vault remove <id>`, `vault rotate <id>`.
 - `secrets` audit: `vault list` shows which credentials no subsystem
   has used in 90 days.
+- **Sources** (the creator's question, 2026-09-09): `vault import <id>
+  <source>` copies a value in ONCE from a password manager or cloud
+  store and never reads it live: `op://vault/item/field` (1Password
+  CLI), `bw:<item>` (Bitwarden / self-hosted Vaultwarden CLI),
+  `aws-sm:<name>` (AWS Secrets Manager), `ssm:<path>` (SSM Parameter
+  Store), `env:NAME`, `file:<path>`. Each source is optional and
+  refuses naming the CLI/package it needs.
+- **Config in git**: `simorgh.secrets.toml` encrypted with **SOPS +
+  age** (the same age key), for secrets the creator wants versioned and
+  shared between the laptop and the HA box; loaded into the chain
+  after env and before the vault. `sops` is optional; absent = the
+  file is ignored with a warning if present.
+- **Not used, and why**: GitHub Secrets (only Actions runners can read
+  them -- right for CI, unusable by a daemon on a home box);
+  HashiCorp Vault / OpenBao (a server with TLS and unseal ceremonies;
+  far too heavy for one household); plaintext `.env` beyond
+  development. Env vars stay as the dev/CI override layer only: they
+  leak to every child process (`script_env_passthrough` exists for
+  exactly that reason), show in `ps e`, and cannot hold a refreshing
+  OAuth token.
 
 ## 2. OAuth2 (`simorgh/kernel/oauth.py`)
 

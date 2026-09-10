@@ -49,8 +49,10 @@ def embed_text(text: str, dim: int = _EMBED_DIM) -> tuple[float, ...]:
     """
     vector = [0.0] * dim
     for token in _tokenize(text):
-        bucket = int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % dim
-        vector[bucket] += 1.0
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        bucket = int.from_bytes(digest[:8], "big") % dim
+        sign = 1.0 if digest[8] & 1 else -1.0
+        vector[bucket] += sign
     norm = math.sqrt(sum(component * component for component in vector))
     if norm == 0.0:
         return tuple(vector)
