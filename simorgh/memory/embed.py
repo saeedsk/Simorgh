@@ -36,4 +36,44 @@ def cosine_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-__all__ = ["EMBED_DIM", "cosine_similarity", "embed_text"]
+def sparse_embed_text(text: str, dim: int = EMBED_DIM) -> tuple[tuple[int, float], ...]:
+    """The same vector as `embed_text`, as `((bucket, weight), ...)` in
+    ASCENDING bucket order, with the zero buckets left out.
+
+    Why this exists, and why the ordering is part of the contract: the
+    hashing vector is overwhelmingly zeros (a 30-word memory touches at
+    most 30 of 256 buckets), so a cosine between two of them only ever
+    needs the buckets they share. `recall.py` uses that to score a whole
+    memory store from an inverted index instead of materialising and
+    multiplying N dense vectors -- the difference between 1,000 ms and
+    20 ms at 10,000 records.
+
+    Ascending order makes the answer BIT-IDENTICAL to the dense path,
+    not merely close. `cosine_similarity` sums `a[i]*b[i]` for i in
+    0..dim-1; every term this skips is exactly `0.0`, and adding 0.0 to
+    a float is exact, so summing the surviving terms in the same
+    (ascending) order yields the same float. That is what lets recall
+    get faster without any argument about whether the ranking moved.
+    """
+    # Deliberately NOT `lru_cache`d, unlike `embed_text`: every caller
+    # is either indexing a record (each text seen exactly once, so a
+    # cache is pure overhead and 4,096 retained vectors of pure waste)
+    # or embedding a query, which is one call per recall.
+    counts: dict[int, float] = {}
+    for token in _tokenize(text):
+        bucket = int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % dim
+        counts[bucket] = counts.get(bucket, 0.0) + 1.0
+    norm = math.sqrt(sum(c * c for c in counts.values()))
+    if norm == 0.0:
+        return ()
+    return tuple((bucket, counts[bucket] / norm) for bucket in sorted(counts))
+
+
+def sparse_cosine(query: tuple[tuple[int, float], ...], other: tuple[tuple[int, float], ...]) -> float:
+    """Cosine between two `sparse_embed_text` vectors -- for the one-off
+    comparison; `recall.py` accumulates over an inverted index instead."""
+    lookup = dict(other)
+    return sum(weight * lookup[bucket] for bucket, weight in query if bucket in lookup)
+
+
+__all__ = ["EMBED_DIM", "cosine_similarity", "embed_text", "sparse_cosine", "sparse_embed_text"]

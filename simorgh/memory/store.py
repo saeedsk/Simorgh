@@ -25,6 +25,7 @@ from .api import MemoryItem, Turn
 from .config import Config
 from .embed import cosine_similarity, embed_text
 from .embedders import Embedder, comparable
+from .recall import RecallIndex
 
 KINDS = ("episodic", "semantic", "procedural")
 TOMBSTONE_STREAM = "memory:tombstones"
@@ -104,6 +105,13 @@ class MemoryEngine:
         # provider reads the environment, and the instance holds the
         # cache that stops one `retrieve` re-embedding the whole store.
         self._embedder = embedder or Embedder(config.embedder)
+        # What stops `retrieve` being O(whole store) per call -- see
+        # `recall.py`'s module docstring for the measurement that forced
+        # it. Built here, not per call: it is the thing that remembers
+        # what has already been read and embedded.
+        self._index = RecallIndex(
+            ledger, self._embedder, streams=stream_for,
+            tombstone_stream=TOMBSTONE_STREAM, contradiction_stream=CONTRADICTION_STREAM)
         self.working = WorkingMemory(max_turns=config.working_max_turns, max_chars=config.working_max_chars)
         # ref -> blob ref, for items whose content was too long to sit
         # inline. Filled while scanning, read only for what is returned.
@@ -156,6 +164,20 @@ class MemoryEngine:
         ))
         return f"{stream}:{seq}"
 
+    async def warm(self, kinds=KINDS) -> int:
+        """Build the recall index before anything asks a question of it.
+
+        The indexed path costs ~22 ms at 10,000 records per kind, but
+        the call that BUILDS the index still reads and hashes the whole
+        store -- 640 ms measured at that size -- and
+        `orchestration/context.py` allows 0.25 s. Without this the very
+        first recall of a process still lost its memory block; the work
+        is the same either way, so it belongs at boot rather than in
+        front of somebody's first question.
+        """
+        await self._index.sync(kinds, on_record=self._note_content_ref)
+        return sum(len(self._index.index_for(kind)) for kind in kinds)
+
     async def _resolve_content(self, items: list) -> list:
         """Swap each item's preview for its full text, and say so when
         only part of it came back.
@@ -206,14 +228,33 @@ class MemoryEngine:
 
     # -- retrieve --------------------------------------------------------------------
     async def retrieve(self, *, query: str, kinds: list[str], k: int, filters: dict | None) -> tuple[list[MemoryItem], bool]:
+        """Rank what is remembered against `query`, and say whether more
+        matched than fit.
+
+        Every live record of every requested kind still gets a score --
+        this does not prefilter, sample or shortlist, because a recall
+        that quietly drops a record is worse than a slow one. What it no
+        longer does is re-read the Ledger and re-embed the whole store on
+        every call: `recall.py` holds both, and the hashing embedder's
+        cosine is accumulated from an inverted index over the buckets the
+        query actually touches, which is the same float by construction.
+        Measured on a jsonl ledger, 10,000 records per kind, two kinds:
+        1,012 ms before, 21 ms after, same top-8 in the same order.
+        """
         filters = filters or {}
-        tombstoned = await self._tombstoned_refs()
-        penalties = await self._contradiction_penalties()
+        durable = [kind for kind in kinds if kind != "working"]
+        await self._index.sync(durable, on_record=self._note_content_ref)
+        tombstoned = self._index.tombstoned
+        penalties = self._index.penalties
         # `(provider, vector)`, because a vector is only comparable to
         # another from the same embedder -- see `_score`.
         query_pair = (*self._embedder.embed(query), query) if query else None
         candidates: list[tuple[float, MemoryItem]] = []
         now = self._clock.now()
+        wanted_tags = set(filters["tags"]) if filters.get("tags") else None
+        since = filters.get("since")
+        half_life = self._config.half_life_seconds
+        recency_weight = self._config.recency_weight
 
         for kind in kinds:
             if kind == "working":
@@ -225,11 +266,15 @@ class MemoryEngine:
                                           tags=(), confidence=1.0, ts=turn.ts)
                         candidates.append((self._score(query_pair, content, item, now, penalties.get(item.ref, 1.0)), item))
                 continue
-            for event in await self._ledger.read(stream_for(kind)):
-                ref = f"{stream_for(kind)}:{event.seq}"
-                if ref in tombstoned:
+            index = self._index.index_for(kind)
+            # `{position: cosine}`; anything absent scored exactly 0.0,
+            # which is what the dense path computes for a record that
+            # shares no bucket with the query. An empty query scores
+            # every record 1.0, exactly as before.
+            sims = index.similarities(query) if (query and self._index.hashing) else {}
+            for position, record in enumerate(index.records):
+                if record.ref in tombstoned:
                     continue
-                tags = tuple(event.payload.get("tags", []))
                 # `filters["tags"]` is a MUST-HAVE-ALL set, not "any of" --
                 # an intersection check here let a shared tag (every skill's
                 # procedural record carries "skill" alongside its own name)
@@ -240,30 +285,68 @@ class MemoryEngine:
                 # acquired in one session, `_skill_description("greet")`
                 # returned `farewell`'s record because it happened to be
                 # the more recent one and lexical similarity was a tie).
-                if filters.get("tags") and not set(filters["tags"]) <= set(tags):
+                if wanted_tags is not None and not wanted_tags <= set(record.tags):
                     continue
-                if filters.get("since") is not None and event.ts < filters["since"]:
+                if since is not None and record.ts < since:
                     continue
-                content_ref = event.payload.get("content_ref")
-                if content_ref:
-                    self._content_refs[ref] = str(content_ref)
-                if event.payload.get("content_chars"):
-                    self._content_chars[ref] = int(event.payload["content_chars"])
-                item = MemoryItem(ref=ref, kind=kind, content=event.payload.get("content", ""), tags=tags,
-                                  confidence=float(event.payload.get("confidence", 1.0)), ts=event.ts,
-                                  source_ref=event.payload.get("source_ref", ""))
-                candidates.append((self._score(query_pair, item.content, item, now, penalties.get(ref, 1.0)), item))
+                if query_pair is None:
+                    similarity = 1.0
+                elif self._index.hashing:
+                    similarity = sims.get(position, 0.0)
+                else:
+                    similarity = index.dense_similarity(position, query_pair)
+                # The `MemoryItem` for a record that will not be
+                # returned is built and thrown away, and at 20,000
+                # records that was ~40 ms of the remaining call. Score
+                # from the record's own fields -- the same arithmetic
+                # `_score_with` does, on the same numbers -- and
+                # construct only the k that come back. `kind` rides
+                # along because the record does not carry it.
+                penalty = penalties.get(record.ref, 1.0)
+                confidence = record.confidence * penalty
+                if half_life > 0:
+                    confidence *= 0.5 ** (max(0.0, now - record.ts) / half_life)
+                # `w * (1.0 / x)`, NOT `w / x`: they differ in the last
+                # bit, and the whole claim about this path is that it
+                # produces the same float `_score_with` did.
+                recency_bonus = 1.0 / (1.0 + max(0.0, now - record.ts) / 86400.0)
+                score = similarity * confidence + recency_weight * recency_bonus
+                candidates.append((score, (kind, record)))
 
         candidates.sort(key=lambda pair: pair[0], reverse=True)
         truncated = len(candidates) > k
         # The relevance number travels with the item. Computing it and
         # throwing it away was why the reply had to report something
         # else under the name "score".
-        chosen = [replace(item, score=score) for score, item in candidates[:k]]
+        chosen: list[MemoryItem] = []
+        for score, entry in candidates[:k]:
+            if isinstance(entry, MemoryItem):  # working memory, already an item
+                chosen.append(replace(entry, score=score))
+                continue
+            kind_name, record = entry
+            chosen.append(MemoryItem(
+                ref=record.ref, kind=kind_name, content=record.content, tags=record.tags,
+                confidence=record.confidence, ts=record.ts, source_ref=record.source_ref, score=score))
         return await self._resolve_content(chosen), truncated
+
+    def _note_content_ref(self, ref: str, payload: dict) -> None:
+        """Long content lives in a blob; the stream keeps a preview plus
+        the ref and the real length. Recorded once, when the record is
+        first indexed, instead of on every scan of every retrieve."""
+        content_ref = payload.get("content_ref")
+        if content_ref:
+            self._content_refs[ref] = str(content_ref)
+        if payload.get("content_chars"):
+            self._content_chars[ref] = int(payload["content_chars"])
 
     def _score(self, query_pair, content: str, item: MemoryItem, now: float, penalty: float) -> float:
         similarity = self._similarity(query_pair, content) if query_pair is not None else 1.0
+        return self._score_with(similarity, item, now, penalty)
+
+    def _score_with(self, similarity: float, item: MemoryItem, now: float, penalty: float) -> float:
+        """The scoring rule itself, split out from `_score` so the
+        indexed path can supply a similarity it already has without
+        re-deriving it from the text."""
         confidence = item.score_confidence(now=now, half_life_seconds=self._config.half_life_seconds, penalty=penalty)
         age_days = max(0.0, now - item.ts) / 86400.0
         recency_bonus = 1.0 / (1.0 + age_days)
@@ -355,14 +438,15 @@ class MemoryEngine:
         """Live (non-tombstoned) record count per durable kind -- a
         dashboard's "what does Sim remember" view (02-system-architecture.md
         section 6.2), not anything `retrieve()`'s own scoring/truncation
-        needs, so kept as its own cheap pass over each kind's stream."""
-        tombstoned = await self._tombstoned_refs()
-        counts: dict[str, int] = {}
-        for kind in KINDS:
-            stream = stream_for(kind)
-            events = await self._ledger.read(stream)
-            counts[kind] = sum(1 for e in events if f"{stream}:{e.seq}" not in tombstoned)
-        return counts
+        needs -- but read off the same index, which already knows."""
+        # Through the same index `retrieve` uses, so the 30-second
+        # metrics tick stops re-reading and re-parsing every stream in
+        # full (~100 ms per tick at 10,000 records per kind) to answer a
+        # question the index already knows.
+        await self._index.sync(KINDS, on_record=self._note_content_ref)
+        tombstoned = self._index.tombstoned
+        return {kind: sum(1 for r in self._index.index_for(kind).records if r.ref not in tombstoned)
+                for kind in KINDS}
 
     async def _tombstoned_refs(self) -> set[str]:
         refs: set[str] = set()

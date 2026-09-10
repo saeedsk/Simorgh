@@ -50,6 +50,18 @@ class Config:
     # differently.
     embedder: str = "auto"  # auto | local | openai | voyage | gemini | hashing
     recency_weight: float = 0.1  # scoring: similarity*confidence + recency_weight*recency_bonus
+    # Seconds after start before the first consolidation pass (flag
+    # contradictions, prune each kind to its keep count). Consolidation
+    # otherwise runs only on `system.tick.sleep`, whose loop waits a
+    # full `sleep_every_s` (6h) before its FIRST tick and skips it
+    # entirely if the system is not RUNNING at that instant -- so a
+    # session shorter than six hours pruned nothing, and the 2,000-per-
+    # kind steady state `service.py::DEFAULT_KEEP_PER_KIND` describes
+    # was never reached (2026-09-10). The Ledger learned exactly this
+    # lesson on 2026-09-07 and carries the same field under the same
+    # name shape (`[ledger] compact_after_start_s`); this is that fix
+    # for the other stream that grows without bound. 0 disables.
+    consolidate_after_start_s: float = 120.0
 
     @classmethod
     def from_mapping(cls, raw: Mapping) -> "Config":

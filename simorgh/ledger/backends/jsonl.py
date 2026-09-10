@@ -68,6 +68,8 @@ class JsonlBackend:
         self.root = Path(root)
         self._fsync = fsync
         self._meta: dict[str, _StreamMeta] = {}
+        # stream -> (file size when built, {seq: byte offset}); see `read`.
+        self._offsets: dict[str, tuple[int, dict[int, int]]] = {}
         self._idem = IdempotencyIndex()
         self._locks: dict[str, asyncio.Lock] = {}
         self._blobs = LocalBlobStore(self.root / "blobs", fsync=fsync)
@@ -181,6 +183,11 @@ class JsonlBackend:
         """Rebuild head/bytes/last_ts and the idempotency cache from the
         file itself, truncating a trailing partial line (a crash
         mid-write) rather than failing on it."""
+        # Any rewrite of the file makes the read-offset index
+        # (`read`) meaningless -- the size check there would catch it,
+        # but a rewrite is exactly where a stale byte offset must be
+        # thrown away rather than relied on to look wrong.
+        self._offsets.pop(stream, None)
         head = 0
         last_ts: float | None = None
         good_end = 0
@@ -272,6 +279,19 @@ class JsonlBackend:
                             os.fsync(fh.fileno())
                 except OSError as exc:
                     raise LedgerUnavailable(f"append to {event.stream} failed: {exc}") from None
+                # Keep the read-offset index (`read`) in step rather than
+                # discarding it on every append: an appender that
+                # invalidates its own index leaves an incremental reader
+                # parsing the whole file on every poll, which is the cost
+                # the index exists to remove.
+                cached = self._offsets.get(event.stream)
+                if cached is not None:
+                    size_when_built, offsets = cached
+                    if size_when_built == meta.bytes:
+                        offsets[stored.seq] = meta.bytes
+                        self._offsets[event.stream] = (meta.bytes + len(line), offsets)
+                    else:  # somebody else wrote to this file; our offsets may be nonsense
+                        self._offsets.pop(event.stream, None)
                 meta.head = stored.seq
                 meta.bytes += len(line)
                 meta.last_ts = stored.ts
@@ -316,23 +336,112 @@ class JsonlBackend:
             if key and seq.isdigit():
                 self._idem.record(stream, key, int(seq))
 
+    #: Streams shorter than this never get an offset index: parsing a
+    #: couple of hundred lines is cheaper than the bookkeeping, and the
+    #: creator's ledger has ~190k one-event `trace:` streams that would
+    #: otherwise each carry a dict for nothing.
+    _OFFSET_INDEX_MIN_EVENTS = 256
+
     async def read(self, stream: str, *, from_seq: int, limit: int | None) -> list[Event]:
+        """Every event of `stream` from `from_seq` on.
+
+        `from_seq` used to cost the same as reading the whole stream:
+        the loop opened the file, JSON-parsed every line, and threw away
+        the ones below the cursor. Anything keeping an incremental view
+        of a stream therefore paid full price per poll -- Memory's
+        recall index reads two streams per recall and that was 58 ms of
+        an 86 ms call at 10,000 records each (2026-09-10).
+
+        So a full pass records the byte offset of each seq, and a later
+        `from_seq` seeks straight to it. The index is in-process only,
+        keyed by the file size it was built at, and DISCARDED if the
+        file has changed length -- appends only ever grow the file, and
+        a shrink or a rewrite (`truncate_below`) puts the stream back on
+        the full-scan path. Belt and braces: the first event read after
+        a seek must actually be `from_seq`, or the seek is abandoned and
+        the whole file is parsed. A wrong offset can therefore cost a
+        redundant read, never a wrong answer.
+        """
         path = self._stream_path(stream)
         if not path.exists():
             return []
+        if from_seq > 1:
+            seeked = self._read_from_offset(stream, path, from_seq, limit)
+            if seeked is not None:
+                return seeked
         out: list[Event] = []
+        offsets: dict[int, int] = {}
+        position = 0
         with open(path, "r", encoding="utf-8") as fh:
             for line in fh:
+                start = position
+                position += len(line.encode("utf-8"))
                 if not line.endswith("\n"):
                     break  # partial trailing line: not yet durable
                 try:
                     event = Event.from_dict(json.loads(line))
                 except Exception:  # noqa: BLE001
                     break
+                offsets[event.seq] = start
                 if event.seq >= from_seq:
                     out.append(event)
                     if limit is not None and len(out) >= limit:
-                        break
+                        # A partial pass indexes only what it saw; it must
+                        # not be recorded as covering the whole file.
+                        return out
+        if len(offsets) >= self._OFFSET_INDEX_MIN_EVENTS:
+            try:
+                self._offsets[stream] = (path.stat().st_size, offsets)
+            except OSError:
+                self._offsets.pop(stream, None)
+        return out
+
+    def _read_from_offset(self, stream: str, path, from_seq: int, limit: int | None):
+        """`[Event]` read by seeking to `from_seq`, or None to say the
+        caller should parse the file itself."""
+        cached = self._offsets.get(stream)
+        if cached is None:
+            return None
+        size_when_built, offsets = cached
+        # A tail poll asks for `head + 1` -- one past the last event --
+        # far more often than for an exact interior seq: that is what an
+        # incremental reader does every time it checks for new records.
+        # Seeking to the highest seq we know and skipping forward from
+        # there answers it for the cost of one line, where insisting on
+        # an exact hit sent the commonest call of all down the full-parse
+        # path and the index bought nothing (measured: no change at all
+        # in Memory's 86 ms recall until this case was handled).
+        start_seq = from_seq if from_seq in offsets else max(offsets)
+        if start_seq > from_seq:
+            return None
+        start = offsets[start_seq]
+        try:
+            if path.stat().st_size < size_when_built:
+                self._offsets.pop(stream, None)  # rewritten or truncated: the offsets are meaningless
+                return None
+        except OSError:
+            return None
+        out: list[Event] = []
+        with open(path, "r", encoding="utf-8") as fh:
+            fh.seek(start)
+            first = True
+            for line in fh:
+                if not line.endswith("\n"):
+                    break
+                try:
+                    event = Event.from_dict(json.loads(line))
+                except Exception:  # noqa: BLE001
+                    break
+                if first:
+                    first = False
+                    if event.seq != start_seq:
+                        self._offsets.pop(stream, None)
+                        return None  # the offset did not point where it claimed: parse it properly
+                if event.seq < from_seq:
+                    continue
+                out.append(event)
+                if limit is not None and len(out) >= limit:
+                    break
         return out
 
     async def streams(self, prefix: str) -> list[str]:
@@ -381,6 +490,11 @@ class JsonlBackend:
     async def truncate_below(self, stream: str, seq: int) -> int:
         """Rewrite the stream keeping only events with `seq >= seq`,
         atomically (tmp -> fsync -> replace), exactly v1's `_rewrite`."""
+        # Any rewrite of the file makes the read-offset index
+        # (`read`) meaningless -- the size check there would catch it,
+        # but a rewrite is exactly where a stale byte offset must be
+        # thrown away rather than relied on to look wrong.
+        self._offsets.pop(stream, None)
         async with self._lock_for(stream):
             with self._file_lock():
                 self._refresh_if_grown(stream)
@@ -401,6 +515,11 @@ class JsonlBackend:
         return removed
 
     async def delete_stream(self, stream: str) -> None:
+        # Any rewrite of the file makes the read-offset index
+        # (`read`) meaningless -- the size check there would catch it,
+        # but a rewrite is exactly where a stale byte offset must be
+        # thrown away rather than relied on to look wrong.
+        self._offsets.pop(stream, None)
         async with self._lock_for(stream):
             with self._file_lock():
                 for path in (self._stream_path(stream), self._snapshot_path(stream), self._idem_path(stream)):

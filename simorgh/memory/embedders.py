@@ -57,6 +57,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+from collections import OrderedDict
 
 from .embed import EMBED_DIM, embed_text
 
@@ -225,7 +226,7 @@ class Embedder:
         self._encoder = encoder
         self._logger = logger
         self._degraded = ""
-        self._cache: dict[str, tuple[str, tuple[float, ...]]] = {}
+        self._cache: OrderedDict[str, tuple[str, tuple[float, ...]]] = OrderedDict()
         self._cache_max = 4096
         try:
             self.provider = choose_provider(provider, self._env, local_check=local_check)
@@ -249,10 +250,20 @@ class Embedder:
         key = (text or "").strip()
         hit = self._cache.get(key)
         if hit is not None:
+            # Least-RECENTLY-USED, not first-in-first-out. Eviction used
+            # to take `next(iter(...))` -- the oldest insertion -- with
+            # no regard for use, so a working set larger than 4,096
+            # evicted in exactly the order it was about to be asked for
+            # again and the hit rate went to zero at the moment a cache
+            # mattered most. Measured at 6,000 records, when `retrieve`
+            # still embedded every one of them: 306 ms for the first
+            # call and 455 ms for the second, i.e. the warm path was
+            # SLOWER than the cold one (observer, 2026-09-10).
+            self._cache.move_to_end(key)
             return hit
         answer = self._embed_uncached(key)
         if len(self._cache) >= self._cache_max:
-            self._cache.pop(next(iter(self._cache)))
+            self._cache.popitem(last=False)
         self._cache[key] = answer
         return answer
 

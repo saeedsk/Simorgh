@@ -4,6 +4,8 @@ sections 5, 9): wires `memory.retrieve`/`.store` and consolidation on
 
 from __future__ import annotations
 
+import asyncio
+
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
@@ -33,6 +35,8 @@ class Service:
         self._config = config or Config()
         self._keep_per_kind = keep_per_kind or dict(DEFAULT_KEEP_PER_KIND)
         self._tick_seconds = 0
+        self._first_consolidation: asyncio.Task | None = None
+        self._warm: asyncio.Task | None = None
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -55,10 +59,70 @@ class Service:
         self._sub_sleep = await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep)
         self._sub_turn = await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
         self._sub_tick = await ctx.bus.subscribe(topics.SYSTEM_TICK_SECOND, self._on_tick)
+        # Boot is the right place to pay for the recall index -- see
+        # `MemoryEngine.warm`. Not awaited: a large store takes a
+        # noticeable moment and start() must not hold the Kernel up for
+        # it. A recall that arrives first simply waits on the same work.
+        self._warm = asyncio.create_task(self._warm_index(), name="memory-index-warm")
+        if self._config.consolidate_after_start_s > 0:
+            self._first_consolidation = asyncio.create_task(
+                self._consolidate_after_start(), name="memory-first-consolidation")
+
+    async def _warm_index(self) -> None:
+        try:
+            records = await self.engine.warm()
+            self._ctx.logger.info("memory.index_warmed", records=records)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- an unwarmed index is slow, not broken
+            self._ctx.logger.warning("memory.index_warm_failed", error=repr(exc))
 
     async def stop(self) -> None:
+        if self._warm is not None:
+            self._warm.cancel()
+            try:
+                await self._warm
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            self._warm = None
+        if self._first_consolidation is not None:
+            self._first_consolidation.cancel()
+            try:
+                await self._first_consolidation
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise from a background pass
+                pass
+            self._first_consolidation = None
         for sub in (self._sub_retrieve, self._sub_store, self._sub_sleep, self._sub_turn, self._sub_tick):
             await sub.unsubscribe()
+
+    async def _consolidate_after_start(self) -> None:
+        """One consolidation pass shortly after boot.
+
+        `DEFAULT_KEEP_PER_KIND` describes a steady state of 2,000
+        records per kind, and `retrieve`'s cost is a function of exactly
+        that number -- but nothing reached it. The only caller of
+        `run_consolidation` was `system.tick.sleep`, and the Kernel's
+        sleep loop waits a full `sleep_every_s` (6 hours, `kernel/api.py`)
+        before its first tick and then `continue`s past it if the system
+        is not RUNNING at that moment. Every session shorter than six
+        hours -- which is nearly all of them -- pruned nothing and
+        flagged no contradictions, so memory only ever grew. The Ledger
+        hit the identical bug on 2026-09-07 (190,865 expired streams
+        still on disk) and fixed it with `compact_after_start_s`; this
+        is the same fix for the same reason.
+
+        Deliberately not inside `start()`: the pass reads every durable
+        stream and may ask Cognition for a distillation, and boot is not
+        the place to wait for either. A failure is logged and dropped --
+        memory that cannot consolidate still recalls.
+        """
+        try:
+            await asyncio.sleep(self._config.consolidate_after_start_s)
+            await self._consolidate(window=None)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self._ctx.logger.warning("memory.first_consolidation_failed", error=repr(exc))
 
     async def health(self) -> Health:
         return Health.ok()
@@ -142,7 +206,9 @@ class Service:
         ))
 
     async def _on_sleep(self, message: Message) -> None:
-        window = message.payload.get("window_seconds")
+        await self._consolidate(window=message.payload.get("window_seconds"))
+
+    async def _consolidate(self, *, window: float | None) -> None:
         since = self._ctx.clock.now() - window if window else None
         report = await run_consolidation(
             self.engine, bus=self._ctx.bus, source=self._ctx.source, keep_per_kind=self._keep_per_kind, since=since,
