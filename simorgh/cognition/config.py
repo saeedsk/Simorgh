@@ -81,6 +81,21 @@ class Config:
     snip_keep_last_segments: int = 4
     microcompact_trigger_fraction: float = 0.95
     collapse_keep_full_segments: int = 4
+    # Layer 4 collapses every older turn to a one-line headline. It used
+    # to run at any fill level, which is what the spec's "read-time
+    # projection" reads like -- and at 10% of budget it throws away the
+    # file the model read two steps ago for no gain at all. Observed
+    # 2026-09-10: 25 think calls of 3.1k-6.5k tokens against a 40k
+    # limit, `compaction=['4']` on nearly all of them, and the task
+    # re-read the same two documents five times before blocking with
+    # nothing written.
+    #
+    # The threshold keeps the blueprint's own worked example intact: S1
+    # (04-cognition.md section 12) assembles 5,800 tokens against a 12k
+    # limit -- 0.483 -- and is described as collapsing turns 1-2, so any
+    # trigger at or below that still behaves as specified. Below it,
+    # there is room to spare and nothing to gain by forgetting.
+    collapse_trigger_fraction: float = 0.45
     availability_poll_seconds: float = 30.0
     assembly_request_timeout: float = 2.0  # persona.voice / self.summary -- omitted on timeout, not fatal
 
@@ -103,6 +118,7 @@ class Config:
         for key in (
             "tool_result_max_tokens", "snip_trigger_fraction", "snip_target_fraction",
             "snip_keep_last_segments", "microcompact_trigger_fraction", "collapse_keep_full_segments",
+            "collapse_trigger_fraction",
             "availability_poll_seconds", "assembly_request_timeout",
         ):
             if key in raw:

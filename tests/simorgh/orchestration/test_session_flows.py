@@ -9,7 +9,7 @@ from simorgh.contracts import topics
 from simorgh.contracts.registry import error_reply_payload
 from simorgh.orchestration import profiles
 from simorgh.orchestration.api import Session
-from simorgh.orchestration.session import SessionRunner
+from simorgh.orchestration.session import SessionRunner, unhonoured_marker
 
 from .fakes import FakeCognition, FakeGuardianExecution, FakeVerification
 from .harness import Harness, run
@@ -339,3 +339,36 @@ class TestPauseMidSession(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AMarkerBuriedMidSentenceIsCorrectedNotAcceptedTestCase(unittest.TestCase):
+    """A marker only counts when it starts its own line, or any reply
+    discussing a tool would run it. That rule is right and stays. What
+    was missing is anyone SAYING so.
+
+    Observed 2026-09-10: a reply reading "I'll read all five design
+    docs. Starting with the first two. READ_FILE: docs/plans/..." was
+    filed as a final answer, failed verification for describing work it
+    had not done, and spent one of the task's attempts. Three times in
+    seven seconds, while the model was still saying "three docs left to
+    read". One corrective step costs a step; the silent version costs a
+    whole attempt.
+    """
+
+    OFFERED = ("read_file", "search_code", "web_fetch")
+
+    def test_a_marker_after_prose_on_the_same_line_is_spotted(self):
+        text = "I'll read all five docs. Starting with the first two. READ_FILE: docs/x.md"
+        self.assertEqual(unhonoured_marker(text, self.OFFERED), "read_file")
+
+    def test_a_marker_that_owns_its_line_is_left_alone(self):
+        """Those already run -- correcting them would be nonsense."""
+        for text in ("READ_FILE: docs/x.md", "Let me look first.\nREAD_FILE: docs/x.md"):
+            self.assertEqual(unhonoured_marker(text, self.OFFERED), "")
+
+    def test_an_ordinary_answer_is_not_disturbed(self):
+        self.assertEqual(unhonoured_marker("The Ledger is the append-only record.", self.OFFERED), "")
+
+    def test_a_tool_that_was_not_offered_is_not_reported(self):
+        text = "I would run GIT_COMMIT: something here"
+        self.assertEqual(unhonoured_marker(text, self.OFFERED), "")

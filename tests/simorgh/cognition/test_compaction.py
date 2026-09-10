@@ -193,8 +193,18 @@ class TestCompactorLayer4ReadTimeCollapse(unittest.IsolatedAsyncioTestCase):
     """Layer 4 (docs/blueprint/subsystems/04-cognition.md section 5):
     a read-time *projection* -- older segments become one-line headlines,
     the newest stay in full, and the caller's own message objects are
-    never mutated. Trigger is "always" (S1's own worked example: it
-    fires at 5.8k/12k tokens, well under any percentage threshold)."""
+    never mutated.
+
+    It ran at ANY fill level until 2026-09-10, which is what "read-time
+    projection" reads like -- and at a tenth of the budget it discarded
+    the file the model had read two steps ago for no gain. An observer
+    measured 25 think calls of 3.1k-6.5k tokens against a 40k limit with
+    layer 4 applied on nearly all of them, while the task re-read the
+    same two documents five times and blocked with nothing written.
+
+    The trigger sits below the blueprint's own worked example (S1:
+    5,800 of 12,000 tokens, 0.483, described as collapsing turns 1-2),
+    so the one fill level the spec actually pins down is unchanged."""
 
     async def asyncSetUp(self):
         self.ledger = make_ledger({"backend": "memory"})
@@ -207,21 +217,36 @@ class TestCompactorLayer4ReadTimeCollapse(unittest.IsolatedAsyncioTestCase):
             {"role": "tool", "name": "read", "content": "line1\nline2\nline3"},
             {"role": "user", "content": "the newest message, kept in full"},
         ]
-        result = await compactor.compact(messages, limit_tokens=1_000_000)
+        # A limit these messages genuinely fill, so the trigger is met.
+        result = await compactor.compact(messages, limit_tokens=10)
         self.assertIn(4, result.layers_applied)
         self.assertIn("[step 0: tool read", result.text)
         self.assertIn("the newest message, kept in full", result.text)
         self.assertNotIn("line1\nline2\nline3", result.text)
 
-    async def test_fires_even_when_comfortably_under_budget(self):
-        # S1's own worked example: layers 1-3 no-op at 5.8k/12k tokens,
-        # but layer 4 still collapses the older turns. Trigger is
-        # "always," not a percentage threshold.
+    async def test_it_fires_at_the_fill_level_the_blueprint_pins_down(self):
+        """S1 (04-cognition.md section 12): 5,800 tokens assembled
+        against a 12k limit, layers 1-3 no-op, layer 4 collapses turns
+        1-2. 0.483 of the budget, and it must still collapse."""
         config = Config(collapse_keep_full_segments=1)
         compactor = Compactor(config, self.ledger)
-        messages = [{"role": "user", "content": f"turn {i}"} for i in range(3)]
-        result = await compactor.compact(messages, limit_tokens=1_000_000_000)
+        filler = "word " * 1_400          # ~1,400 tokens per turn
+        messages = [{"role": "user", "content": filler} for _ in range(4)]
+        result = await compactor.compact(messages, limit_tokens=12_000)
         self.assertIn(4, result.layers_applied)
+
+    async def test_it_does_not_fire_with_the_budget_barely_touched(self):
+        """The observed waste: at a tenth of the budget there is nothing
+        to reclaim and a file the model just read to lose."""
+        config = Config(collapse_keep_full_segments=1)
+        compactor = Compactor(config, self.ledger)
+        messages = [
+            {"role": "tool", "name": "read", "content": "the document it just read\n" * 20},
+            {"role": "user", "content": "now answer"},
+        ]
+        result = await compactor.compact(messages, limit_tokens=40_000)
+        self.assertNotIn(4, result.layers_applied)
+        self.assertIn("the document it just read", result.text)
 
     async def test_original_message_dicts_are_never_mutated(self):
         config = Config(collapse_keep_full_segments=1)

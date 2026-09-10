@@ -100,6 +100,11 @@ class Session:
     spent_usd: float = 0.0
     spent_tokens: int = 0
     messages: list[dict] = field(default_factory=list)  # the running cognition.think transcript
+    # Whether this session has already told the model that a marker
+    # buried mid-sentence is not a tool call. Once is a correction; a
+    # second time would mean the reply really is prose about a tool, and
+    # correcting it again would loop.
+    marker_corrected: bool = False
     # Files this session wrote and has not committed. A session that
     # ends with anything left here put a change in the tree and
     # walked away from it; `SessionRunner` cleans up before it

@@ -135,9 +135,11 @@ class Compactor:
                 layers.append(3)
 
         pre_collapse = segments
-        segments, changed = self._layer4_read_time_collapse(segments)
-        if changed:
-            layers.append(4)
+        total = sum(s.tokens for s in segments)
+        if total > limit_tokens * self._config.collapse_trigger_fraction:
+            segments, changed = self._layer4_read_time_collapse(segments)
+            if changed:
+                layers.append(4)
 
         total = sum(s.tokens for s in segments)
         if total > limit_tokens and allow_summarize:
@@ -236,11 +238,23 @@ class Compactor:
     def _layer4_read_time_collapse(self, segments: list[_Segment]) -> tuple[list[_Segment], bool]:
         """A read-time *projection*: builds a new list of new `_Segment`
         objects and never edits `segments` in place, so the caller's
-        stored messages are never mutated (04 section 5). Always runs
-        (per-spec trigger is "always", not a percentage threshold -- see
-        the worked example S1, which collapses turns even at 5.8k/12k
-        tokens); only counted in `layers_applied` when it actually
-        collapses something."""
+        stored messages are never mutated (04 section 5).
+
+        Gated on `collapse_trigger_fraction` since 2026-09-10. It ran at
+        any fill level before, which is what "read-time projection"
+        reads like -- and at a tenth of the budget it discards the file
+        the model read two steps ago to save tokens nobody needed. An
+        observer measured the cost: 25 think calls of 3.1k-6.5k tokens
+        against a 40k limit, layer 4 applied on nearly every one, and
+        the task re-read the same two documents five times before
+        blocking with nothing written.
+
+        The default threshold is below the blueprint's own worked
+        example (S1: 5,800 of 12,000 tokens, described as collapsing
+        turns 1-2), so the specified behaviour is unchanged where the
+        spec actually pins it down.
+
+        Only counted in `layers_applied` when it collapses something."""
         keep_full = self._config.collapse_keep_full_segments
         if keep_full <= 0 or len(segments) <= keep_full:
             return segments, False

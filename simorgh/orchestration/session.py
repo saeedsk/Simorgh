@@ -147,6 +147,31 @@ def _transcript_echo(text: str) -> str:
         if pattern.search(text or ""):
             return why
     return ""
+
+
+def unhonoured_marker(text: str, offered: tuple[str, ...]) -> str:
+    """A tool the model asked for in the middle of a sentence, or "".
+
+    A marker must own its line -- a mention inside a sentence stays
+    prose, or any reply discussing a tool would run it
+    (`cognition/parser.py::parse_marker`). That rule is right and stays.
+    What was missing is anyone saying so: a reply like "I'll read all
+    five docs. Starting with the first two. READ_FILE: docs/x.md" was
+    filed as a final answer, failed verification for describing work it
+    had not done, and spent one of the task's few attempts -- three
+    times in seven seconds, in a run an observer watched on 2026-09-10.
+    One corrective step costs a step; the silent version costs an
+    attempt."""
+    body = text or ""
+    for tool in offered:
+        prefix = f"{tool.upper()}:"
+        position = body.upper().find(prefix)
+        if position <= 0:
+            continue        # absent, or at the very start where it IS honoured
+        line_start = body.rfind("\n", 0, position) + 1
+        if body[line_start:position].strip():
+            return tool
+    return ""
 # An attempt below this number may leave its edits for the next; the
 # one at it discards. Planning gives up after nine blocks, so the chain
 # always ends with a clean-up before that.
@@ -590,6 +615,22 @@ class SessionRunner:
                 session.record(step)
                 await self._record_step(session, step)
                 return Outcome("blocked", reason=f"{CONTINUATION_REASON} before the task was finished")
+            stray = unhonoured_marker(text, offered_tools(session.profile.tools))
+            if stray and not is_last and not session.marker_corrected:
+                # Once per session: if it does it again, that is an
+                # answer about a tool and not a request for one.
+                session.marker_corrected = True
+                step = Step(step_no, "act", f"a {stray} marker mid-sentence was not run", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                session.messages.append({"role": "assistant", "content": text})
+                session.messages.append({"role": "user", "content": (
+                    f"Nothing ran: your {stray.upper()}: marker had text before it on the same "
+                    f"line, and a marker is only a tool call when it starts its own line. Write it "
+                    f"again on a line of its own if you still want it -- or, if you are finished, "
+                    f"give your final answer with no marker in it at all."
+                )})
+                continue
             echo = _transcript_echo(text)
             if echo and not is_last:
                 # It claimed results it never got. Do not record that as

@@ -136,10 +136,18 @@ class TestCognitionCompactionPipelineBoot(unittest.IsolatedAsyncioTestCase):
 
     async def test_layer_4_read_time_collapse_fires_through_a_real_think_call(self):
         # Roadmap 4.2's "read-time collapse" layer: older turns become
-        # headlines, the newest turn is untouched -- and per S1's own
-        # worked example, this fires even comfortably under budget.
+        # headlines, the newest turn is untouched.
+        #
+        # Sized to the blueprint's own worked example rather than to a
+        # near-empty context: S1 assembles 5,800 tokens against this 12k
+        # budget (0.483) and collapses turns 1-2. Layer 4 stopped firing
+        # below `collapse_trigger_fraction` on 2026-09-10, because at a
+        # tenth of the budget it was discarding the file the model had
+        # just read for tokens nobody needed -- measured on a real run
+        # that re-read the same two documents five times.
         await self._boot()
-        messages = [{"role": "user", "content": f"turn {i}"} for i in range(6)] + [
+        turn = " ".join(f"w{i}" for i in range(900))      # ~900 tokens each
+        messages = [{"role": "user", "content": f"turn {i}: {turn}"} for i in range(6)] + [
             {"role": "user", "content": "the newest message must stay in full"},
         ]
         request = Message.new(topics.COGNITION_THINK, source="test", payload={
