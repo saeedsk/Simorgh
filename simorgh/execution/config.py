@@ -229,6 +229,21 @@ class Config:
         "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
     )
 
+    # -- notify (notify.py): how autonomous work reaches a person who is
+    # not watching the REPL. Every provider is switched on by an
+    # environment variable and off by its absence, so the tool exists and
+    # is registered before any credential does -- it refuses cleanly and
+    # names the variable to set, rather than being absent when needed.
+    # "auto" picks the first fully-configured provider in notify.PROVIDERS.
+    notify_provider: str = "auto"  # auto | slack | email | sms
+    notify_timeout_s: float = 15.0
+    notify_max_chars: int = 4000
+    # A notifier that can spam is a notifier nobody reads -- and an
+    # autonomous loop that discovers `notify` is exactly the thing that
+    # would send four hundred of them.
+    notify_max_calls: int = 20
+    notify_window_s: float = 3600.0
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a

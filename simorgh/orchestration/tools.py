@@ -50,6 +50,13 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "install_package": ("irreversible", True),
     "run_script": ("irreversible", True),
     "run_container": ("irreversible", True),
+    # `notify` reaches a PERSON, which nothing else in this table does.
+    # Irreversible in the strongest sense available: there is no unsend,
+    # so a message sent in error cannot be walked back the way
+    # `git_revert` walks back a commit. With
+    # `irreversible_requires_human` set, every message waits for
+    # approval; a deployment that auto-approves has chosen that.
+    "notify": ("irreversible", True),
     # -- MCP (execution/mcp.py's own module docstring): a human adds an
     # entry here, by the server's registered tool name
     # (`mcp_<server>_<tool>`), for every MCP tool they want the model to
@@ -176,6 +183,7 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "browse_page": ("target", "actions"),
     "run_container": ("image", "command"),
     "install_package": ("manager", "spec"),
+    "notify": ("subject", "body"),
 }
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
@@ -239,6 +247,13 @@ _MARKER_ARG_HINT.update({
         '[{"type": ["#q", "hello"]}, {"click": "#go"}, {"wait": "#results"}, '
         '{"screenshot": "after"}]. Allowed: click, type, press, wait, scroll, screenshot. '
         "There is deliberately no way to run your own JavaScript here."
+    ),
+    "notify": (
+        "first line: a short subject, one line. Every following line: the message body. "
+        "This reaches a real person on Slack, email or SMS -- there is no unsend, so write "
+        "it as if it will be read by someone who was not watching. Say what happened and "
+        "what (if anything) needs them; do not send a routine progress note. Example:\n"
+        "NOTIFY: benchmark regressed\nGAIA dropped from 41% to 29% on commit 4f24467.\n"
     ),
     "run_container": (
         "first line: the image (e.g. `python:3.12-slim`). Second line: a JSON object like "

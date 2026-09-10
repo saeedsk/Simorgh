@@ -40,7 +40,14 @@ PATCH = Profile(
            # is far broader than either.
            "web_search", "web_fetch", "search_listings", "geocode",
            # A missing capability is not a denial: find a library, install it, use it.
-           "find_package", "install_package", "run_script", "browse_page", "run_container"),
+           "find_package", "install_package", "run_script", "browse_page", "run_container",
+           # The one profile that runs unattended for a long time is the
+           # one that needs a way to reach a person. Registered whether
+           # or not any provider is configured: an absent credential
+           # makes the tool refuse and say which variable to set, which
+           # is a far better answer than the tool not existing on the
+           # day somebody adds the key.
+           "notify"),
     # 8 left no room: read, apply, run_tests, git_commit is already four
     # tool calls before a single wrong turn, and the last step is spent
     # on the forced final answer. Live-caught 2026-09-07.

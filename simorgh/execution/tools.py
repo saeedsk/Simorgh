@@ -63,6 +63,7 @@ from .packages import FindPackageTool, InstallPackageTool
 from .pdftext import looks_like_pdf, pdf_to_text
 from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
+from .notify import NotifyTool
 from .container import RunContainerTool
 from .render import BrowsePageTool, RenderPageTool
 
@@ -1536,7 +1537,7 @@ def builtin_tools(config: Config) -> list:
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),
-        BrowsePageTool(config), RunContainerTool(config),
+        BrowsePageTool(config), RunContainerTool(config), NotifyTool(config),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

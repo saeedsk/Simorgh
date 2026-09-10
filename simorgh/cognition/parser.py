@@ -91,6 +91,10 @@ _CODE_BEARING_MARKERS = {
     # day and left off this set -- same live-caught defect: only the
     # first line of the script ever reached the tool.
     "RUN_SCRIPT",
+    # `NOTIFY: <subject>\n<body>` -- the same two-field shape, and a
+    # notification whose body is truncated to its first line is exactly
+    # the useless message this tool exists to avoid.
+    "NOTIFY",
 }
 
 

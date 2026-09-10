@@ -415,3 +415,37 @@ class TestTheWriteScopeHintIsTrue(unittest.TestCase):
         self.assertNotIn("src/", Config().write_scopes_source)
         hint = marker_hint("apply_source_patch") or ""
         self.assertIn("NOT src/", hint)
+
+
+class TestNotifyMarkerReachesTheTool(unittest.TestCase):
+    """`notify` is wired through the same one-string marker layer that
+    silently swallowed five other tools' arguments (RUN_CONTAINER,
+    SEARCH_LISTINGS, BROWSE_PAGE, INSTALL_PACKAGE, RUN_SCRIPT -- each
+    unusable from the model's side for days). This walks the whole path
+    -- reply text, parser, router -- so the same defect cannot land here
+    unnoticed."""
+
+    def _walk(self, reply: str) -> dict:
+        from simorgh.cognition.parser import parse_marker
+
+        name, argument = parse_marker(reply, ("NOTIFY",))
+        return to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": name, "args": {"argument": argument}}, rationale="r",
+        )
+
+    def test_the_subject_splits_off_and_the_body_keeps_every_line(self):
+        payload = self._walk(
+            "NOTIFY: benchmark regressed\nGAIA fell to 29%.\nWorth a look before the next run."
+        )
+        self.assertEqual(payload["tool"], "notify")
+        self.assertEqual(payload["args"]["subject"], "benchmark regressed")
+        self.assertEqual(
+            payload["args"]["body"],
+            "GAIA fell to 29%.\nWorth a look before the next run.",
+            "a notification truncated to its first line is the useless message this tool exists to avoid",
+        )
+
+    def test_it_is_declared_irreversible_so_guardian_gates_every_message(self):
+        payload = self._walk("NOTIFY: subject\nbody")
+        self.assertEqual(payload["reversibility"], "irreversible")

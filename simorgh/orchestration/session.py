@@ -131,6 +131,7 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "find_package": 30.0,
     "install_package": 330.0,
     "run_script": 200.0,
+    "notify": 25.0,
     "geocode": 15.0,
     "apply_source_patch": 60.0,
     "apply_skill": 60.0,
