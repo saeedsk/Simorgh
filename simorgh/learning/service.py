@@ -91,10 +91,38 @@ class Service:
             await sub.unsubscribe()
         self._subs.clear()
 
+    #: Why this subsystem cannot currently do the thing it exists for.
+    #: Two independent reasons, both verified 2026-09-09 (wave-21
+    #: observer W21-12), either of which alone is fatal:
+    #:
+    #: 1. Nothing anywhere publishes `learn.pipeline.run` or
+    #:    `learn.strategy.suggest`. `PatchPipeline` is only ever built
+    #:    inside the handler for a message no subsystem sends. The real
+    #:    `improve <path> <description>` path goes through
+    #:    `TASK_CREATE` to Orchestration's ordinary agent loop and never
+    #:    touches Learning at all.
+    #: 2. Even if something did publish it, `PatchPipeline` proposes a
+    #:    `draft_candidate` action, and no such tool is registered --
+    #:    its drafting tools were never built (`fullsuiteran.py`'s own
+    #:    docstring records the same gap from the other side).
+    #:
+    #: Reporting `ok` here was the thing worth fixing first: a
+    #: subsystem that answers "0 pipelines running" is saying something
+    #: technically true and entirely misleading, and `status` showed
+    #: Learning green while its whole purpose was unreachable. Whether
+    #: to wire it up or retire it is a real decision with a real cost
+    #: either way; saying so out loud is not.
+    UNREACHABLE = (
+        "no publisher for learn.pipeline.run, and draft_candidate is not a registered tool -- "
+        "PatchPipeline cannot run; `improve` uses Orchestration's agent loop instead"
+    )
+
     async def health(self) -> Health:
         if self._degraded:
             return Health.degraded(self._degraded)
-        return Health.ok(f"{len(self._running_pipelines)} pipeline(s) running")
+        if self._running_pipelines:
+            return Health.ok(f"{len(self._running_pipelines)} pipeline(s) running")
+        return Health.degraded(self.UNREACHABLE)
 
     # -- publish helper --------------------------------------------------------
     async def _publish(self, type_: str, payload: dict) -> None:

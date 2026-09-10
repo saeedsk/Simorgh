@@ -64,6 +64,55 @@ def _script_type(attrs: str) -> str:
     return (match.group("dq") or match.group("sq") or match.group("bare") or "").strip().lower()
 
 
+# A `</script>` inside a JS string literal ends the tag as far as the
+# HTML parser -- and this regex -- is concerned; that is genuinely how
+# HTML works, which is why the idiom for embedding one is `<\/script>`.
+# But a page that writes the literal anyway (inside a template string,
+# say) has its body cut mid-string, and this check reported perfectly
+# fine JavaScript as broken (W21-03).
+#
+# The discriminator is deliberately NOT "do the braces balance". An
+# unclosed IIFE -- the live 2026-09-09 `snake.html` failure this whole
+# check exists to catch -- is unbalanced too, so skipping on that would
+# switch the check off for exactly its founding case. What truncation at
+# a `</script>` leaves behind and a genuinely-unclosed function does not
+# is an UNTERMINATED STRING LITERAL: the cut lands inside the quotes.
+# snake.html's strings were all closed; it just ran out of braces.
+#
+# So: skip a body that ends inside an open quote, judge everything else.
+# Scanning is single-pass and quote-aware enough to not be fooled by
+# escapes or by quotes inside comments, which is as far as this check
+# needs to go (a real answer needs a tokenizer, and the cost of being
+# wrong here is one skipped check, not a wrong verdict).
+def ends_inside_a_string(body: str) -> bool:
+    quote = ""          # the character that would close the open literal
+    comment = ""        # "" | "//" | "/*"
+    index, length = 0, len(body)
+    while index < length:
+        char = body[index]
+        if comment == "//":
+            if char == "\n":
+                comment = ""
+        elif comment == "/*":
+            if char == "*" and body[index + 1: index + 2] == "/":
+                comment, index = "", index + 1
+        elif quote:
+            if char == "\\":
+                index += 1                      # whatever follows is escaped
+            elif char == quote:
+                quote = ""
+            elif quote != "`" and char == "\n":
+                # Only a template literal may span lines; a broken '...'
+                # or "..." ends at the newline rather than staying open.
+                quote = ""
+        elif char in "\"'`":
+            quote = char
+        elif char == "/" and body[index + 1: index + 2] in ("/", "*"):
+            comment, index = "/" + body[index + 1], index + 1
+        index += 1
+    return bool(quote)
+
+
 def script_bodies(html: str) -> list[str]:
     """Every inline `<script>` body in the document this check can form
     an opinion about. A `src=` script has no body of ours to check (it
@@ -79,7 +128,7 @@ def script_bodies(html: str) -> list[str]:
         if _script_type(attrs) not in _JS_TYPES:
             continue
         body = (match.group("body") or "").strip()
-        if body:
+        if body and not ends_inside_a_string(body):
             bodies.append(body)
     return bodies
 

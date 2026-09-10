@@ -60,6 +60,24 @@ INFLIGHT_STREAM = "execution:inflight"
 TOOLS_STREAM = "execution:tools"
 
 
+
+def metadata_for_blob(metadata: dict) -> dict:
+    """A tool's metadata with the bulk row list replaced by a pointer.
+
+    `_store_rows` already writes every row to `results/<id>.json` and
+    caps that file at `results_max_rows`. Blobbing the SAME list again
+    here made the cap decorative -- one `search_listings` call could
+    write an unbounded blob into the Ledger, a second uncapped copy of
+    data that already had a home (W21-07). Everything else in the
+    metadata is small and is kept exactly as the tool reported it.
+    """
+    out = dict(metadata or {})
+    rows = out.get("rows")
+    if isinstance(rows, list):
+        out["rows"] = f"<{len(rows)} rows -- see the results file named in the output>"
+    return out
+
+
 class Service:
     name = "execution"
     version = "0.1.0"
@@ -467,8 +485,13 @@ class Service:
             # it.
             metadata_ref = ""
             if result.metadata:
+                # `rows` is already written in full to `results/` and
+                # capped there; blobbing the SAME uncapped list again
+                # made `results_max_rows` decorative and let one tool
+                # call write an unbounded blob (W21-07). The ref keeps
+                # a pointer to the file instead.
                 metadata_ref = await self._ctx.ledger.put_blob(
-                    json.dumps(result.metadata, default=str).encode("utf-8"),
+                    json.dumps(metadata_for_blob(result.metadata), default=str).encode("utf-8"),
                     content_type="application/json",
                 )
             await self._publish_result(

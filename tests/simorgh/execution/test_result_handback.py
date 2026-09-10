@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 
 from simorgh.execution.config import Config
-from simorgh.execution.service import Service
+from simorgh.execution.service import Service, metadata_for_blob
 
 
 class _Logger:
@@ -128,3 +128,25 @@ class ListingsRowsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["returned"], 1)  # one rendered
         self.assertEqual(len(result.metadata["rows"]), len(ROWS))  # all handed back
         self.assertEqual(result.metadata["rows"][0]["address"], "20791 Via Corta")
+
+
+class MetadataBlobTestCase(unittest.TestCase):
+    """W21-07: `results_max_rows` capped the results FILE while the same
+    uncapped list went into the Ledger blob beside it."""
+
+    def test_the_row_list_becomes_a_pointer_not_a_second_copy(self):
+        meta = metadata_for_blob({"rows": [{"i": i} for i in range(900)], "count": 900})
+        self.assertEqual(meta["rows"], "<900 rows -- see the results file named in the output>")
+        self.assertEqual(meta["count"], 900)
+
+    def test_everything_that_is_not_rows_survives_untouched(self):
+        original = {"url": "https://x", "sha256": "ab", "low_confidence": True}
+        self.assertEqual(metadata_for_blob(original), original)
+
+    def test_the_callers_metadata_is_not_mutated(self):
+        original = {"rows": [{"i": 1}]}
+        metadata_for_blob(original)
+        self.assertEqual(original["rows"], [{"i": 1}])
+
+    def test_a_non_list_rows_value_is_left_alone(self):
+        self.assertEqual(metadata_for_blob({"rows": 5})["rows"], 5)

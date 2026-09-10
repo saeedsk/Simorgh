@@ -18,7 +18,7 @@ import unittest.mock
 from pathlib import Path
 
 from simorgh.verification.api import CheckContext, VerifyRequest
-from simorgh.verification.checks import _files
+from simorgh.verification.checks import _files, js_syntax
 from simorgh.verification.checks.js_syntax import JsSyntaxCheck, script_bodies
 from simorgh.verification.checks.render import RenderCheck
 from simorgh.verification.checks.trailing_narration import (
@@ -287,3 +287,77 @@ class TestRenderCheck(_RepoFixture):
         result = await RenderCheck().run(_req([path]), _ctx(act))
         self.assertEqual(result.status, "failed")
         self.assertIn("canvas missing", result.detail)
+
+
+class TestSyntaxCheckReachesRealTasks(_RepoFixture):
+    """`SyntaxCheck` applied only when the subject carried a
+    `candidate`/`code` string, which only Learning's unreachable
+    `PatchPipeline` ever sets. So the check that catches a syntax error
+    in Sim's own source had never once run on a real patch -- while the
+    JavaScript equivalent added the same day checked every page
+    (wave-21 observer W21-03)."""
+
+    async def test_broken_python_written_by_a_real_task_now_fails(self):
+        from simorgh.verification.checks import SyntaxCheck
+
+        path = self.write("tools/broken.py", "def f(:\n    return 1\n")
+        req = _req([path])
+        self.assertTrue(SyntaxCheck().applies(req))
+        result = await SyntaxCheck().run(req, _ctx())
+        self.assertEqual(result.status, "failed")
+        self.assertIn("broken.py", result.detail)
+
+    async def test_valid_python_passes(self):
+        from simorgh.verification.checks import SyntaxCheck
+
+        path = self.write("tools/fine.py", "def f():\n    return 1\n")
+        result = await SyntaxCheck().run(_req([path]), _ctx())
+        self.assertEqual(result.status, "passed")
+
+    async def test_the_candidate_path_still_works_for_the_pipeline(self):
+        from simorgh.verification.api import VerifyRequest
+        from simorgh.verification.checks import SyntaxCheck
+
+        req = VerifyRequest(verification_id="v", task_id="t", kind="self_patch",
+                            subject={"candidate": "x = (", "kind": "self_patch"})
+        self.assertTrue(SyntaxCheck().applies(req))
+        result = await SyntaxCheck().run(req, _ctx())
+        self.assertEqual(result.status, "failed")
+
+    async def test_a_task_that_wrote_no_python_is_not_judged(self):
+        from simorgh.verification.checks import SyntaxCheck
+
+        self.assertFalse(SyntaxCheck().applies(_req(["docs/games/x.html"])))
+
+
+class TestScriptTagTruncation(unittest.TestCase):
+    """W21-03: a literal `</script>` inside a JS string cut the body in
+    half, and the check failed a page whose JavaScript was fine."""
+
+    def test_a_body_cut_mid_string_is_not_judged(self):
+        html = '<script>const tag = `<script>alert(1)</script>`;</script>'
+        # The regex necessarily stops at the first `</script>`, leaving
+        # `const tag = ` + an open backtick. Nothing here is judgeable.
+        self.assertEqual(js_syntax.script_bodies(html), [])
+
+    def test_the_founding_bug_is_still_caught(self):
+        """The whole point of the escape hatch is that it must NOT fire
+        for snake.html -- an unclosed IIFE whose strings all close."""
+        body = "(function(){ var s = 'ok'; setInterval(step,110);"
+        self.assertFalse(js_syntax.ends_inside_a_string(body))
+        self.assertEqual(js_syntax.script_bodies(f"<script>{body}</script>"), [body])
+
+    def test_quotes_that_do_not_open_a_literal(self):
+        for body in (
+            r'var a = "he said \"hi\"";',      # escaped quotes inside a string
+            "// don't stop at this apostrophe\nvar a = 1;",
+            "/* it's fine */ var a = 1;",
+            "var a = 'unclosed but newline-terminated\nvar b = 2;",
+        ):
+            with self.subTest(body=body):
+                self.assertFalse(js_syntax.ends_inside_a_string(body))
+
+    def test_a_later_intact_script_still_gets_checked(self):
+        html = ('<script>const t = `x</script>`;</script>'
+                '<script>var ok = 1;</script>')
+        self.assertEqual(js_syntax.script_bodies(html), ["var ok = 1;"])

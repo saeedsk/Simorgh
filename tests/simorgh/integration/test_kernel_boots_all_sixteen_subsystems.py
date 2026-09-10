@@ -27,6 +27,7 @@ from simorgh.kernel.registry import LAYERS
 from simorgh.kernel.secrets import EnvSecretStore
 from simorgh.kernel.service import Kernel
 from simorgh.kernel.state import RUNNING
+from simorgh.learning.service import Service as LearningService
 from tests.simorgh.helpers import FakeClock
 
 ALL_SIXTEEN = frozenset(name for layer in LAYERS for name in layer)
@@ -55,7 +56,25 @@ class TestKernelBootsAllSixteenSubsystems(unittest.IsolatedAsyncioTestCase):
                     "every subsystem named in registry.LAYERS must actually have booted",
                 )
                 unhealthy = {name: svc.status for name, svc in services.items() if svc.status != "ok"}
-                self.assertEqual(unhealthy, {}, "every real Service must report healthy after boot")
+                # `learning` is knowingly degraded and says so: nothing
+                # publishes `learn.pipeline.run` and `draft_candidate` is
+                # not a registered tool, so `PatchPipeline` cannot run at
+                # all (2026-09-09). It used to report "ok" while being
+                # unreachable, which is the failure mode the honesty rule
+                # exists to forbid -- a subsystem must never claim health
+                # it does not have. Pinning the exact reason here means
+                # the day somebody wires the pipeline up, this test fails
+                # and makes them delete the exemption.
+                self.assertEqual(
+                    unhealthy, {"learning": "degraded"},
+                    "every real Service must report healthy after boot, except the one "
+                    "honestly reporting that it cannot run",
+                )
+                self.assertEqual(services["learning"].last_health.detail, LearningService.UNREACHABLE)
+                self.assertNotIn(
+                    "down", [svc.status for svc in services.values()],
+                    "degraded is a description of a wiring gap; down is a boot problem",
+                )
             finally:
                 await kernel.shutdown()
 
