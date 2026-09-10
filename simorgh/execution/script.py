@@ -30,6 +30,7 @@ from pathlib import Path
 
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
+from . import writewatch
 from .config import Config
 
 try:  # pragma: no cover -- POSIX only, same guard as tools.py
@@ -67,6 +68,11 @@ class RunScriptTool:
         timeout = min(ctx.constraints.get("timeout_s", self._config.script_timeout_s),
                       self._config.script_timeout_s)
         start = time.monotonic()
+        # What the script writes is found the same way run_shell's is
+        # (writewatch.py) -- a script that saves a file through pandas
+        # is writing just as surely as a heredoc is, and the
+        # verification checks need to know either way.
+        before = writewatch.snapshot(self._config.repo_root)
         # Not an empty environment: a script's whole reason to exist here
         # is to use an installed library, and a library that reaches the
         # network needs PATH/HOME/proxy settings to do it. Still a
@@ -93,11 +99,14 @@ class RunScriptTool:
             return ToolResult(ok=False, error=f"could not run the script: {exc!r}")
         cap = self._config.script_output_max_chars
         ok = completed.returncode == 0
+        after = writewatch.snapshot(self._config.repo_root)
+        written = writewatch.written_between(before, after)
         return ToolResult(
             ok=ok, output=completed.stdout[-cap:],
             error=None if ok else f"exit_code={completed.returncode}",
+            side_effects=writewatch.side_effects_for(written, before, after),
             metadata={"stderr": completed.stderr[-cap:], "exit_code": completed.returncode,
-                      "duration_s": time.monotonic() - start},
+                      "duration_s": time.monotonic() - start, "written_paths": written},
         )
 
     def _prune(self, directory: Path) -> None:

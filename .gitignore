@@ -23,3 +23,6 @@ secrets/
 # `read_file` and a script can load it. Real data, not source.
 results/
 .sim-quarantine/
+
+# Scripts run_script stages before running them. Transient.
+.simorgh_scripts/

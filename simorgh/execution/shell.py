@@ -45,6 +45,11 @@ from typing import TYPE_CHECKING
 
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
+# Safe to import at runtime: `writewatch` depends on nothing in this
+# package, so it cannot join the config<->shell import cycle the
+# TYPE_CHECKING guard below exists for.
+from . import writewatch
+
 if TYPE_CHECKING:  # `config` imports the refusal table from here
     from .config import Config
 
@@ -192,6 +197,7 @@ class RunShellTool:
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["DEBIAN_FRONTEND"] = "noninteractive"
         started = time.monotonic()
+        before = writewatch.snapshot(self._config.repo_root)
         try:
             completed = subprocess.run(
                 command, shell=True, cwd=self._config.repo_root, capture_output=True, text=True,
@@ -226,13 +232,19 @@ class RunShellTool:
             # empty program and exits 0), once from a command that
             # genuinely printed nothing. Say which happened.
             output = f"exited 0 with no output (the command produced nothing on stdout or stderr)"
+        # What it wrote, found by asking git rather than by trusting the
+        # command to say (writewatch.py). Without this a heredoc that
+        # writes a page produced no `written_paths`, and every
+        # file-reading verification check skipped it.
+        after = writewatch.snapshot(self._config.repo_root)
+        written = writewatch.written_between(before, after)
         return ToolResult(
             ok=ok, output=output,
             error=None if ok else f"exit_code={completed.returncode}",
-            side_effects=(f"run_shell:{_head(command)}",),
+            side_effects=(f"run_shell:{_head(command)}",) + writewatch.side_effects_for(written, before, after),
             metadata={
                 "command": command, "exit_code": completed.returncode,
-                "duration_s": time.monotonic() - started,
+                "duration_s": time.monotonic() - started, "written_paths": written,
             },
         )
 
