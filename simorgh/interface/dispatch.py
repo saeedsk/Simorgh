@@ -589,9 +589,30 @@ async def _live_schedules(ledger: LedgerClient) -> dict[str, dict]:
         if not schedule_id:
             continue
         if event.type == "schedule.added":
-            live[schedule_id] = payload
+            live[schedule_id] = dict(payload)
         elif event.type == "schedule.cancelled":
             live.pop(schedule_id, None)
+        elif event.type == "schedule.fired":
+            # A one-shot that has already fired is not live, and the
+            # Kernel's own projection has always known it
+            # (`kernel/scheduler.py::ScheduleView.apply` sets `fired`
+            # and `active()` drops it). This reader did not, so
+            # `schedule` listed every reminder ever set as still
+            # pending and `schedule cancel <that id>` answered
+            # "cancelled <label>" -- the cheerful lie about a stopped
+            # timer that the id check below it exists to prevent, for
+            # the id shape most likely to be typed at it (observer,
+            # 2026-09-10).
+            entry = live.get(schedule_id)
+            if entry is None:
+                continue
+            next_fire_at = payload.get("next_fire_at")
+            if next_fire_at is None:
+                live.pop(schedule_id, None)
+            else:
+                # Recurring: still live, and now due at its next time
+                # rather than the one it was armed with hours ago.
+                entry["fire_at"] = next_fire_at
     return live
 
 

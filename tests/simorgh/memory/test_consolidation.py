@@ -106,6 +106,43 @@ class TestRunConsolidation(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(report.pruned["episodic"], 3)
 
+    async def test_a_second_pass_prunes_nothing_and_says_so(self):
+        """Pruning has to be idempotent, and it was not.
+
+        `prune` ranked EVERY record in the stream, tombstoned or not, so
+        each pass re-tombstoned the same records: a fresh
+        `memory:tombstones` event listing all of them, and a report
+        claiming to have pruned records that were forgotten passes ago.
+        Nobody noticed while consolidation only ran on a six-hourly
+        sleep tick that no session lived to see; `consolidate_after_
+        start_s` made it run at every boot, so the claim and the write
+        both became routine (observer, 2026-09-10).
+        """
+        from simorgh.memory.store import TOMBSTONE_STREAM
+
+        for i in range(5):
+            await self.engine.store(kind="episodic", content=f"e{i}", tags=[], source_ref="", confidence=1.0)
+        first = await run_consolidation(
+            self.engine, bus=self.bus, source="memory", keep_per_kind={"episodic": 2}, cognition_timeout=0.05)
+        second = await run_consolidation(
+            self.engine, bus=self.bus, source="memory", keep_per_kind={"episodic": 2}, cognition_timeout=0.05)
+        self.assertEqual(first.pruned["episodic"], 3)
+        self.assertEqual(second.pruned["episodic"], 0, "nothing was left to forget")
+        self.assertEqual(len(await self.ledger.read(TOMBSTONE_STREAM)), 1,
+                         "a pass that forgot nothing must not write a tombstone")
+        self.assertEqual((await self.engine.counts())["episodic"], 2)
+
+    async def test_a_forgotten_record_does_not_hold_a_keep_slot(self):
+        """`keep` counts what Sim still remembers. Counting tombstoned
+        records towards it prunes live ones to make room for the dead."""
+        for i in range(4):
+            await self.engine.store(kind="episodic", content=f"e{i}", tags=[], source_ref="", confidence=1.0)
+        refs = [f"memory:episodic:{seq}" for seq in (1, 2)]
+        await self.engine.forget(refs, reason="by hand")
+        pruned = await self.engine.prune(kind="episodic", keep=2)
+        self.assertEqual(pruned, 0)
+        self.assertEqual((await self.engine.counts())["episodic"], 2)
+
     async def test_since_scopes_which_episodic_records_feed_distillation(self):
         await self.engine.store(kind="episodic", content="old irrelevant event", tags=[], source_ref="", confidence=1.0)
         self.clock.advance(1000.0)

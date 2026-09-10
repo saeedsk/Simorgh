@@ -421,9 +421,23 @@ class MemoryEngine:
         order) -- a "forgotten" event, never a physical delete."""
         now = self._clock.now()
         penalties = await self._contradiction_penalties()
+        # Already-forgotten records take no part in this: not in the
+        # ranking, where they used to occupy `keep` slots that belong to
+        # things Sim still remembers, and not in the tombstone either.
+        # Pruning was written when it ran once a session at most and
+        # nothing noticed that it re-forgot the same records on every
+        # pass; `consolidate_after_start_s` (2026-09-10) made it run at
+        # every boot, and each pass then appended a fresh tombstone
+        # event listing every record ever pruned and reported "pruned N"
+        # for work it had not done -- 4 records pruned, three passes,
+        # three tombstone events, twelve prunings claimed, nothing
+        # forgotten after the first (observer, 2026-09-10).
+        tombstoned = await self._tombstoned_refs()
         scored = []
         for event in await self._ledger.read(stream_for(kind)):
             ref = f"{stream_for(kind)}:{event.seq}"
+            if ref in tombstoned:
+                continue
             item = MemoryItem(ref=ref, kind=kind, content=event.payload.get("content", ""),
                               tags=tuple(event.payload.get("tags", [])), confidence=float(event.payload.get("confidence", 1.0)),
                               ts=event.ts)

@@ -36,7 +36,22 @@ _MAX_IDS = 40
 # pytest's short summary lines, both `-q` and `-n auto` (xdist prints
 # the same shape). `ERROR tests/x.py` (a collection error) has no
 # `::test`, and is still a real failing target worth naming.
-_SUMMARY_LINE = re.compile(r"^(?:FAILED|ERROR)\s+(\S+?)(?:\s+-\s.*)?$", re.MULTILINE)
+#
+# `(.+?)`, not `(\S+?)`: a parametrized node id may contain SPACES --
+# `test_p[hello world]` is what pytest prints for
+# `@pytest.mark.parametrize("x", ["hello world"])`. Against `\S+?` that
+# line matched NOTHING at all (the optional ` - <reason>` tail cannot
+# start mid-token, so the whole alternation failed), so the failure was
+# silently absent from the marker while the ones beside it were listed
+# -- a list that read back as complete and was not. Observed here
+# 2026-09-10: three failures, a marker naming two.
+_SUMMARY_LINE = re.compile(r"^(?:FAILED|ERROR)\s+(.+?)(?:\s+-\s.*)?$", re.MULTILINE)
+
+# pytest's last line: "3 failed in 0.02s", "= 3 failed, 2 passed in
+# 1.2s =", "1 failed, 1 error in 0.5s". The authority on HOW MANY
+# failed -- see `reported_failures`.
+_TAIL = re.compile(r"\bin\s[\d.]+s")
+_COUNT = re.compile(r"(\d+)\s+(failed|error|errors)\b")
 
 
 def failing_nodeids(output: str) -> tuple[str, ...]:
@@ -51,18 +66,93 @@ def failing_nodeids(output: str) -> tuple[str, ...]:
     return tuple(found)
 
 
-def format_marker(nodeids: tuple[str, ...]) -> str:
+def reported_failures(output: str) -> int | None:
+    """How many tests pytest itself says failed, or None if it did not say.
+
+    The count comes from pytest's own tail line rather than from how
+    many summary lines were parsed, because those are two different
+    numbers whenever a node id does not survive parsing -- and the
+    difference is exactly what makes a short list dangerous. A reader
+    handed `[failed 2: a b]` when three tests failed will conclude that
+    the third one's redness belongs to somebody else. Passing this into
+    `format_marker` turns that case into "unattributable", which is the
+    only honest reading of a list that is missing something.
+    """
+    for line in reversed((output or "").strip().splitlines()):
+        line = line.strip().strip("=").strip()
+        if not line or not _TAIL.search(line):
+            continue
+        return sum(int(m.group(1)) for m in _COUNT.finditer(line))
+    return None
+
+
+def marker_for(output: str) -> str:
+    """The marker for one pytest run's whole output.
+
+    The one entry point a caller with the complete stdout should use: it
+    reconciles the ids it could parse against the number pytest itself
+    reported, so a run whose summary contains a line this module cannot
+    read emits a marker that says "unattributable" rather than a shorter
+    list that reads as complete.
+
+    Lines, not unique ids, are what the count is compared against. One
+    test can print two summary lines (a failure plus an error in its own
+    teardown) and pytest counts both; deduping those to one id is
+    correct and must not be mistaken for a lost one.
+    """
+    ids = failing_nodeids(output)
+    if not ids:
+        return ""
+    reported = reported_failures(output)
+    lines = sum(1 for m in _SUMMARY_LINE.finditer(output or "")
+                if m.group(1).strip() and not m.group(1).strip().startswith("-"))
+    return format_marker(ids, reported if reported is not None and reported != lines else None)
+
+
+def format_marker(nodeids: tuple[str, ...], total: int | None = None) -> str:
     """The head line for a failing run, or "" when nothing was parsed.
 
     An empty result means pytest failed without naming a single node id
     (a crash, a usage error, an internal error). That is exactly the
     case a reader must treat as unattributable, and the honest way to
     say it is to emit no marker at all.
+
+    `total` is pytest's own failure count (`reported_failures`) when the
+    caller has the whole output to read it from. It is what the marker
+    claims, so a list that lost an id -- one whose text this module
+    could not parse -- reads back as unattributable rather than as a
+    complete, shorter truth. Omitted, the count falls back to the number
+    of ids, which is what every caller before this parameter existed
+    meant by it.
     """
     if not nodeids:
         return ""
     shown = nodeids[:_MAX_IDS]
-    return f"{_PREFIX}{len(nodeids)}: {' '.join(shown)}]"
+    return f"{_PREFIX}{len(nodeids) if total is None else total}: {' '.join(shown)}]"
+
+
+def _marker_span(text: str) -> tuple[int, int] | None:
+    """`(start, end)` of the marker, `end` being its closing bracket.
+
+    The marker ends at the LAST `]` on its own line, not the first.
+    Almost every real node id ends in one -- `test_p[plain]` is what
+    pytest prints for any parametrized test -- so a first-`]` scan cut
+    `[failed 2: tests/x.py::test_p[plain] tests/x.py::test_y]` down to
+    `2: tests/x.py::test_p[plain`, whose one id did not match the count
+    and so read back as None. Attribution therefore switched itself off
+    whenever a parametrized test was among the failures, which in this
+    suite is most of the time, and the red-suite budget burn it was
+    written to stop came straight back (observer, 2026-09-10).
+    """
+    start = (text or "").find(_PREFIX)
+    if start < 0:
+        return None
+    line_end = text.find("\n", start)
+    line = text[start:line_end if line_end >= 0 else len(text)]
+    end = line.rfind("]")
+    if end < 0:
+        return None
+    return start, start + end
 
 
 def parse_marker(text: str) -> tuple[str, ...] | None:
@@ -73,12 +163,10 @@ def parse_marker(text: str) -> tuple[str, ...] | None:
     capped and so is not the whole truth. Every caller must treat None
     as "cannot attribute", never as "nothing failed".
     """
-    start = (text or "").find(_PREFIX)
-    if start < 0:
+    span = _marker_span(text)
+    if span is None:
         return None
-    end = text.find("]", start)
-    if end < 0:
-        return None
+    start, end = span
     body = text[start + len(_PREFIX):end]
     count, _, ids = body.partition(":")
     try:
@@ -108,12 +196,10 @@ def hoist_marker(text: str) -> str:
     Moving it rather than copying it: the budget this exists to fit
     inside is the same budget a duplicate would eat.
     """
-    start = (text or "").find(_PREFIX)
-    if start < 0:
+    span = _marker_span(text)
+    if span is None:
         return text
-    end = text.find("]", start)
-    if end < 0:
-        return text
+    start, end = span
     marker = text[start:end + 1]
     rest = (text[:start] + text[end + 1:]).lstrip("\n")
     return f"{marker}\n{rest}"

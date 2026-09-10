@@ -206,5 +206,82 @@ class TestEveryUnknownBlamesTheChange(unittest.IsolatedAsyncioTestCase):
         self.assertIn("FAILED", result.detail)
 
 
+class TestOneUnrunnableIdDoesNotBlindTheWholeRun(unittest.IsolatedAsyncioTestCase):
+    """A test the change ADDED must not carry every other failure with it.
+
+    pytest treats a node id it cannot resolve as a USAGE error: exit 4,
+    and nothing runs -- not the other arguments either. So a baseline
+    run asked about `[an old failure, a test this change added]` ran
+    neither, came back with no failures named, and every failure was
+    scored as introduced. Since this project asks for a regression test
+    with every fix, "the change added a test" is the ordinary case, and
+    the escape hatch was therefore shut almost exactly when it was
+    needed -- the same budget burn against a red suite, one layer down
+    (observer, 2026-09-10).
+    """
+
+    async def _run(self, req: VerifyRequest):
+        ctx = CheckContext(act=None, think=None, review=None, clock=None, config=VerificationConfig())
+        return await FullSuiteRanCheck().run(req, ctx)
+
+    async def test_an_added_test_does_not_make_an_old_failure_the_changes_fault(self) -> None:
+        with _Lab() as lab:
+            (lab.repo / "tests_fake" / "test_brand_new.py").write_text(_FAIL)
+            result = await self._run(_request(
+                lab.base_ref,
+                ("tests_fake/test_unrelated.py::test_it", "tests_fake/test_brand_new.py::test_it"),
+                ["subject.py"],
+            ))
+        self.assertEqual(result.status, "failed")
+        # The added test is this change's own; the pre-existing failure
+        # is not, and used to be blamed alongside it.
+        self.assertEqual(result.evidence["introduced"], ["tests_fake/test_brand_new.py::test_it"])
+
+    async def test_a_test_added_to_an_existing_file_is_the_same_case(self) -> None:
+        with _Lab() as lab:
+            (lab.repo / "tests_fake" / "test_subject.py").write_text(
+                _PASS + "\ndef test_added_by_this_change():\n    assert False\n")
+            result = await self._run(_request(
+                lab.base_ref,
+                ("tests_fake/test_unrelated.py::test_it",
+                 "tests_fake/test_subject.py::test_added_by_this_change"),
+                ["subject.py"],
+            ))
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.evidence["introduced"],
+                         ["tests_fake/test_subject.py::test_added_by_this_change"])
+
+
+class TestAFailureThatCannotBeNamedIsNotExcused(unittest.IsolatedAsyncioTestCase):
+    """The marker is the only thing this check knows about a red suite.
+
+    A parametrized node id with a space in it -- `test_p[hello world]` --
+    did not match the summary-line pattern at all, so the marker named
+    the failures beside it and not that one, and said its count was the
+    whole truth. Attribution then excused every id it was given, found
+    nothing introduced, and PASSED a change that had broken a test:
+    the exact false pass this check exists to make impossible. The
+    marker now carries pytest's own count, so a list that lost an id
+    reads back as unattributable (`contracts/pytestfailures.py`).
+    """
+
+    async def _run(self, req: VerifyRequest):
+        ctx = CheckContext(act=None, think=None, review=None, clock=None, config=VerificationConfig())
+        return await FullSuiteRanCheck().run(req, ctx)
+
+    async def test_a_lost_node_id_is_not_a_pass(self) -> None:
+        from simorgh.contracts.pytestfailures import marker_for
+
+        output = ("FAILED tests_fake/test_unrelated.py::test_it - assert False\n"
+                  "FAILED tests_fake/test_subject.py::test_p[hello world] - assert False\n"
+                  "2 failed in 0.05s\n")
+        with _Lab() as lab:
+            req = _request(lab.base_ref, ("tests_fake/test_unrelated.py::test_it",), ["subject.py"])
+            req.subject["steps"][1]["summary"] = f"[ran target='tests']\n{marker_for(output)}"
+            result = await self._run(req)
+        self.assertEqual(result.status, "failed", result.detail)
+        self.assertIn("FAILED", result.detail)
+
+
 if __name__ == "__main__":
     unittest.main()

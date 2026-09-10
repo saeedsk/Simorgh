@@ -19,6 +19,7 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event
 from simorgh.interface.dispatch import (
     SCHEDULE_STREAM,
+    _live_schedules,
     _schedule_command,
     _schedule_list,
     parse_delay,
@@ -327,3 +328,80 @@ class ItReallyFiresTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class AFiredScheduleIsNotLiveTestCase(unittest.IsolatedAsyncioTestCase):
+    """The listing and the Kernel have to agree about what is armed.
+
+    `_live_schedules`'s own docstring says it is "one reader for
+    `schedule` and `schedule cancel`, so the two can never disagree
+    about what is live" -- but it read only `schedule.added` and
+    `schedule.cancelled`, while the Kernel's projection
+    (`kernel/scheduler.py::ScheduleView.apply`) also marks a one-shot
+    `fired` and drops it from `active()`. So every reminder that had
+    already gone off stayed in the listing forever, and `schedule
+    cancel <id>` on one answered "cancelled <label>" while nothing was
+    stopped -- exactly the cheerful lie the id check in
+    `_schedule_cancel` was written to prevent.
+    """
+
+    async def _ledger(self, events):
+        ledger = make_ledger({"backend": "memory"}, clock=FakeClock())
+        await ledger.start()
+        for event in events:
+            await ledger.append(SCHEDULE_STREAM, event)
+        return ledger
+
+    def _event(self, kind, schedule_id, **payload):
+        return Event(
+            stream=SCHEDULE_STREAM, type=kind, ts=0.0, trace_id="", causation_id=None,
+            idempotency_key=f"{kind}-{schedule_id}",
+            payload={"schedule_id": schedule_id, **payload},
+        )
+
+    async def test_a_one_shot_that_fired_is_no_longer_listed(self):
+        ledger = await self._ledger([
+            self._event("schedule.added", "a1", fire_at=50.0, label="water the plants"),
+            self._event("schedule.fired", "a1", next_fire_at=None),
+        ])
+        self.assertIn("nothing scheduled", (await _schedule_list(ledger)).text)
+
+    async def test_cancelling_a_fired_one_shot_publishes_nothing(self):
+        bus = _Bus()
+        ledger = await self._ledger([
+            self._event("schedule.added", "a1", fire_at=50.0, label="water the plants"),
+            self._event("schedule.fired", "a1", next_fire_at=None),
+        ])
+        outcome = await _schedule_command("cancel a1", bus=bus, ledger=ledger, clock=_Clock())
+        self.assertEqual(bus.published, [])
+        self.assertIn("nothing scheduled with id", outcome.text)
+
+    async def test_a_recurring_one_stays_live_and_shows_its_next_time(self):
+        ledger = await self._ledger([
+            self._event("schedule.added", "a1", fire_at=50.0, label="build",
+                        recurrence={"every_s": 3600}),
+            self._event("schedule.fired", "a1", next_fire_at=3650.0),
+        ])
+        text = (await _schedule_list(ledger)).text
+        self.assertIn("1 scheduled", text)
+        self.assertIn("build", text)
+        bus = _Bus()
+        outcome = await _schedule_command("cancel a1", bus=bus, ledger=ledger, clock=_Clock())
+        self.assertEqual(len(bus.published), 1)
+        self.assertIn("a1", outcome.text)
+
+    async def test_the_listing_agrees_with_the_kernels_own_projection(self):
+        from simorgh.kernel.scheduler import ScheduleView
+
+        events = [
+            self._event("schedule.added", "one", fire_at=50.0, label="one-shot"),
+            self._event("schedule.fired", "one", next_fire_at=None),
+            self._event("schedule.added", "rep", fire_at=50.0, label="repeating",
+                        recurrence={"every_s": 3600}),
+            self._event("schedule.fired", "rep", next_fire_at=3650.0),
+        ]
+        view = ScheduleView()
+        for event in events:
+            view.apply(event)
+        live = await _live_schedules(await self._ledger(events))
+        self.assertEqual(sorted(live), sorted(s.schedule_id for s in view.active()))

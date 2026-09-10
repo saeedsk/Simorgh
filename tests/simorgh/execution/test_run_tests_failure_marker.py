@@ -22,7 +22,14 @@ import unittest
 from pathlib import Path
 
 from simorgh.contracts.protocols import ToolContext
-from simorgh.contracts.pytestfailures import failing_nodeids, format_marker, hoist_marker, parse_marker
+from simorgh.contracts.pytestfailures import (
+    failing_nodeids,
+    format_marker,
+    hoist_marker,
+    marker_for,
+    parse_marker,
+    reported_failures,
+)
 from simorgh.execution.config import Config
 from simorgh.execution.tools import RunTestsTool
 
@@ -123,6 +130,96 @@ class TestTheStderrTailDoesNotBuryIt(unittest.TestCase):
 
     def test_text_with_no_marker_is_untouched(self) -> None:
         self.assertEqual(hoist_marker("3 failed, 10 passed"), "3 failed, 10 passed")
+
+
+class TestANodeIdTheParserCannotRead(unittest.IsolatedAsyncioTestCase):
+    """A list that lost an id must not read back as a complete, shorter one.
+
+    Both halves of this were live in the first version of the marker,
+    and both were found by running pytest and reading what it actually
+    printed (observer, 2026-09-10):
+
+    * `test_p[hello world]` -- a parametrized id with a SPACE in it, which
+      `@pytest.mark.parametrize("x", ["hello world"])` produces -- matched
+      the summary-line pattern not at all. Three tests failed, the marker
+      named two, and `full_suite_ran` would have read that as the whole
+      truth: attribute the two, find they also fail at the base revision,
+      and PASS a change that had broken the third. A false pass, in the
+      one check written to make false passes impossible.
+    * `parse_marker` ended the marker at its first `]`, and nearly every
+      parametrized node id ends in one, so `[failed 2: a::test_p[plain]
+      b::test_y]` parsed as one id against a count of two and read back as
+      "unattributable". Attribution therefore switched itself off whenever
+      a parametrized test was among the failures -- and the budget burn
+      against a red suite that it exists to stop came back with it.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "tests").mkdir()
+        (self.root / "tests" / "test_params.py").write_text(
+            "import pytest\n\n"
+            "@pytest.mark.parametrize('x', ['hello world', 'plain'])\n"
+            "def test_p(x):\n"
+            "    assert False\n\n"
+            "def test_normal():\n"
+            "    assert False\n"
+        )
+        self.config = Config(repo_root=self.root, test_timeout_s=60.0)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    async def test_a_run_whose_ids_cannot_all_be_written_is_unattributable(self) -> None:
+        result = await RunTestsTool(self.config).run({"target": "tests"}, ctx=_ctx(self.config))
+        self.assertFalse(result.ok)
+        # Every failure is named -- the spaced one included, so nothing
+        # is hidden from the model reading the output...
+        self.assertIn("test_p[hello world]", result.output)
+        # ...and because a space-separated list cannot carry it back,
+        # the mechanical reader is told it cannot attribute this run
+        # rather than handed two of three failures as though they were all.
+        self.assertIsNone(parse_marker(result.output))
+
+    def test_a_spaced_id_is_parsed_not_skipped(self) -> None:
+        output = ("FAILED tests/a.py::test_p[hello world] - assert False\n"
+                  "FAILED tests/a.py::test_normal - assert False\n"
+                  "2 failed in 0.02s\n")
+        self.assertEqual(failing_nodeids(output),
+                         ("tests/a.py::test_p[hello world]", "tests/a.py::test_normal"))
+
+    def test_the_count_is_pytests_own_not_the_parsers(self) -> None:
+        # One summary line this module cannot read: pytest says three,
+        # the parser found two, and the marker says three so it reads
+        # back as unattributable.
+        output = ("FAILED tests/a.py::test_b - assert False\n"
+                  "FAILED tests/a.py::test_c - assert False\n"
+                  "3 failed in 0.02s\n")
+        self.assertEqual(reported_failures(output), 3)
+        self.assertIsNone(parse_marker(marker_for(output)))
+
+    def test_a_full_list_still_reads_back(self) -> None:
+        output = ("FAILED tests/a.py::test_b - assert False\n"
+                  "FAILED tests/a.py::test_c - assert False\n"
+                  "2 failed, 5 passed in 0.02s\n")
+        self.assertEqual(parse_marker(marker_for(output)),
+                         ("tests/a.py::test_b", "tests/a.py::test_c"))
+
+    def test_one_test_named_twice_is_not_mistaken_for_a_lost_one(self) -> None:
+        # A test that fails and then errors in its own teardown prints
+        # two summary lines for one id and pytest counts both. Deduping
+        # them is right, and must not read as a missing id.
+        output = ("FAILED tests/a.py::test_b - assert False\n"
+                  "ERROR tests/a.py::test_b - RuntimeError: teardown\n"
+                  "1 failed, 1 error in 0.02s\n")
+        self.assertEqual(parse_marker(marker_for(output)), ("tests/a.py::test_b",))
+
+    def test_a_parametrized_id_survives_the_round_trip(self) -> None:
+        ids = ("tests/a.py::test_p[plain]", "tests/b.py::test_y")
+        self.assertEqual(parse_marker(f"[ran target='tests']\n{format_marker(ids)}\nnoise"), ids)
+        hoisted = hoist_marker("noise\n" + format_marker(ids) + "\ntail")
+        self.assertEqual(parse_marker(hoisted), ids)
 
 
 if __name__ == "__main__":

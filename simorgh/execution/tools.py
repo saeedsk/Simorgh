@@ -51,7 +51,7 @@ except ImportError:  # POSIX-only
     resource = None  # type: ignore[assignment]
 
 from simorgh.contracts import topics
-from simorgh.contracts.pytestfailures import failing_nodeids, format_marker
+from simorgh.contracts.pytestfailures import failing_nodeids, marker_for
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
@@ -1195,7 +1195,14 @@ class RunTestsTool:
             # `contracts/pytestfailures.py`.
             failing = failing_nodeids(completed.stdout) if not ok else ()
             output = completed.stdout[-cap:]
-            marker = format_marker(failing)
+            # The count is pytest's own, not `len(failing)`: a node id
+            # this module cannot parse out of the summary (one with a
+            # space in a parameter, say) would otherwise shorten the
+            # list silently, and a short list reads as "the rest of the
+            # suite is somebody else's problem". Disagreeing counts make
+            # the marker unattributable instead, which is the honest
+            # answer to a list that is missing something.
+            marker = marker_for(completed.stdout) if not ok else ""
             if marker:
                 output = f"{marker}\n{output}"
             if no_tests:

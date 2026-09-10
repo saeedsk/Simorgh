@@ -235,6 +235,20 @@ class Service:
             with contextlib.suppress(Exception):
                 await self._ctx.ledger.append(
                     CAPABILITIES_STREAM, self._event(CAPABILITIES_STREAM, "probed", payload))
+        # Every `tool.probed` first, every `tool.unavailable` after --
+        # not interleaved per result. A tool can need TWO probes
+        # (`render_page` needs both `node` and `puppeteer`), and the
+        # World Model reads a passing probe as "this tool works again"
+        # (`_on_tool_probed`). Interleaved, a machine with no Node but a
+        # leftover global puppeteer install published `node` failing,
+        # marked `render_page` unavailable, and then published
+        # `puppeteer` passing, which put it straight back to available
+        # -- "every tool reported itself working on a machine with no
+        # Node", the exact latch this pair of messages was added to
+        # break, one probe order over (observer, 2026-09-10). A failing
+        # dependency wins over a passing one within a single pass, which
+        # is the only reading that can never overstate a capability.
+        for result in results:
             await self._announce_unavailable(result)
 
     async def _announce_unavailable(self, result) -> None:

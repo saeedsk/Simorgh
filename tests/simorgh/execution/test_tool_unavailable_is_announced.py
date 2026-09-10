@@ -126,5 +126,80 @@ class ToolsFacetTestCase(unittest.TestCase):
         self.assertNotIn("nope", facet._tools)  # noqa: SLF001
 
 
+class OneFailingProbeBeatsAPassingOneTestCase(unittest.IsolatedAsyncioTestCase):
+    """`render_page` needs BOTH `node` and `puppeteer`.
+
+    The announcement half only fires for a FAILED FREE probe; the
+    recovery half (`WorldModel._on_tool_probed`) puts a tool back on ANY
+    passing probe that covers it. Interleaved per result -- publish
+    `tool.probed{node, ok:false}`, announce `render_page` unavailable,
+    then publish `tool.probed{puppeteer, ok:true}` -- the last word
+    belonged to the passing probe, and `render_page` came out available
+    on a machine with no Node at all. That is the latch this pair of
+    messages was added to break, restored one probe order over
+    (observer, 2026-09-10).
+    """
+
+    def _service(self, results):
+        from simorgh.execution import service as service_module
+
+        service = service_module.Service.__new__(service_module.Service)
+        service._ctx = _Ctx()  # noqa: SLF001
+        service._connectors = []  # noqa: SLF001
+
+        async def _fake_run_probes(probes, **kwargs):
+            return results
+
+        self._original = service_module.run_probes
+        service_module.run_probes = _fake_run_probes
+        self.addCleanup(setattr, service_module, "run_probes", self._original)
+        return service
+
+    async def test_render_page_stays_unavailable_when_node_is_missing(self):
+        from simorgh.worldmodel.facets.registry_facets import ToolsFacet
+
+        service = self._service([
+            ProbeResult(name="node", ok=False, detail="node is not installed", cost="free"),
+            ProbeResult(name="puppeteer", ok=True, detail="puppeteer 24.1.0", cost="cheap"),
+        ])
+        await service._probe_capabilities()  # noqa: SLF001
+
+        facet = ToolsFacet()
+        for name in ("run_js_sandboxed", "render_page"):
+            facet.on_registered(name, {"read_only": True})
+        # Exactly what `worldmodel/service.py` does with each message, in
+        # the order Execution published them.
+        for message in service._ctx.bus.published:  # noqa: SLF001
+            if message.type == topics.TOOL_PROBED and message.payload.get("ok"):
+                for tool in message.payload.get("tools") or []:
+                    facet.on_available(str(tool))
+            elif message.type == topics.TOOL_UNAVAILABLE:
+                facet.on_unavailable(message.payload["name"], message.payload["reason"])
+
+        entry = facet._tools["render_page"]  # noqa: SLF001
+        self.assertFalse(entry["available"], "a passing probe must not overrule a failing dependency")
+        self.assertEqual(entry["reason"], "node is not installed")
+        self.assertFalse(facet._tools["run_js_sandboxed"]["available"])  # noqa: SLF001
+
+    async def test_a_pass_on_every_probe_leaves_everything_available(self):
+        from simorgh.worldmodel.facets.registry_facets import ToolsFacet
+
+        service = self._service([
+            ProbeResult(name="node", ok=True, detail="node v22", cost="free"),
+            ProbeResult(name="puppeteer", ok=True, detail="puppeteer 24.1.0", cost="cheap"),
+        ])
+        await service._probe_capabilities()  # noqa: SLF001
+        facet = ToolsFacet()
+        facet.on_registered("render_page", {"read_only": True})
+        facet.on_unavailable("render_page", "stale from an earlier pass")
+        for message in service._ctx.bus.published:  # noqa: SLF001
+            if message.type == topics.TOOL_PROBED and message.payload.get("ok"):
+                for tool in message.payload.get("tools") or []:
+                    facet.on_available(str(tool))
+            elif message.type == topics.TOOL_UNAVAILABLE:
+                facet.on_unavailable(message.payload["name"], message.payload["reason"])
+        self.assertTrue(facet._tools["render_page"]["available"])  # noqa: SLF001
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

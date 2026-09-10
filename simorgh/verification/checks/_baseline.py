@@ -58,6 +58,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 
 from simorgh.contracts.pytestfailures import failing_nodeids
@@ -130,12 +131,58 @@ def _export(root: Path, base_ref: str, dest: Path) -> bool:
         archive.unlink(missing_ok=True)
 
 
+_PYTEST_USAGE_ERROR = 4
+
+
+def _present_at_base(dest: Path, nodeids: tuple[str, ...]) -> tuple[str, ...] | None:
+    """The subset of `nodeids` that the base tree can actually run.
+
+    This exists because of how pytest treats an argument it cannot
+    resolve: `pytest tests/a.py::test_old tests/new.py::test_new`, where
+    the second was added by the change and does not exist at the base
+    revision, is a USAGE error (exit 4) and runs NOTHING -- not the
+    first one either. `_baseline`'s own docstring says such an id "is
+    simply not in the returned set"; what actually happened was that
+    every other failure came back unexamined and therefore blamed on the
+    change too. Since this project's tasks are asked to land a
+    regression test with every fix, "the change added a test" is the
+    normal case, so the escape hatch this module exists to be was shut
+    almost exactly when it was needed (observer, 2026-09-10).
+
+    One extra `--collect-only` pass answers it for every id at once,
+    which a retry loop around exit 4 could not: pytest names only the
+    FIRST unresolvable argument before giving up.
+
+    An id whose file will not even import at base collects nothing and
+    so is dropped here -- it counts as introduced, the safe direction.
+    """
+    files = sorted({n.split("::", 1)[0] for n in nodeids})
+    on_disk = [f for f in files if (dest / f).exists()]
+    known = {n for n in nodeids if n.split("::", 1)[0] in set(on_disk) and "::" not in n}
+    if not on_disk:
+        return ()
+    try:
+        done = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+             "--collect-only", "--continue-on-collection-errors", *on_disk],
+            capture_output=True, text=True, cwd=dest, timeout=BASELINE_TIMEOUT_S / 2,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    collected = {line.strip() for line in done.stdout.splitlines() if "::" in line}
+    known.update(n for n in nodeids if n in collected)
+    return tuple(n for n in nodeids if n in known)
+
+
 def failing_at_base(base_ref: str, nodeids: tuple[str, ...]) -> frozenset[str] | None:
     """Which of `nodeids` ALSO fail at `base_ref`, or None for no opinion.
 
     A node id that does not exist at the base revision (a test the
-    change itself added) is simply not in the returned set, so it counts
-    as introduced -- which is what it is.
+    change itself added) is dropped by `_present_at_base` before the run
+    and so is not in the returned set, which counts it as introduced --
+    which is what it is. Dropping it before the run rather than letting
+    pytest choke on it is the whole point: see that function.
     """
     if not base_ref or not nodeids:
         return None
@@ -146,14 +193,37 @@ def failing_at_base(base_ref: str, nodeids: tuple[str, ...]) -> frozenset[str] |
         dest = Path(workdir) / "repo"
         if not _export(root, base_ref, dest):
             return None
+        started = time.monotonic()
+        runnable = _present_at_base(dest, nodeids)
+        if runnable is None:
+            return None
+        if not runnable:
+            # Nothing that failed now even exists at the base revision:
+            # every one of these failures is this change's own.
+            return frozenset()
+        # The collect pass comes out of the SAME budget, not on top of
+        # it: `BASELINE_TIMEOUT_S` is sized against orchestration's
+        # 300-second verification ceiling, past which a task is accepted
+        # unverified -- so two runs that each get the whole ceiling
+        # would turn this check's caution into the false pass it exists
+        # to prevent.
+        remaining = BASELINE_TIMEOUT_S - (time.monotonic() - started)
+        if remaining <= 0:
+            return None
         try:
             done = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                 "--continue-on-collection-errors", *nodeids],
-                capture_output=True, text=True, cwd=dest, timeout=BASELINE_TIMEOUT_S,
+                 "--continue-on-collection-errors", *runnable],
+                capture_output=True, text=True, cwd=dest, timeout=remaining,
                 stdin=subprocess.DEVNULL,
             )
         except (OSError, subprocess.SubprocessError):
+            return None
+        if done.returncode == _PYTEST_USAGE_ERROR:
+            # An argument pytest still could not resolve: nothing ran,
+            # so there is nothing to attribute and no opinion to give.
+            # Never an empty set here -- that reads as "all of them are
+            # new", which is a verdict this run did not earn.
             return None
         if done.returncode == 0:
             # Everything asked for ran and passed at the base revision:

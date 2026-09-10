@@ -20,6 +20,7 @@ from simorgh.ledger.factory import make_ledger
 from simorgh.memory.api import MemoryItem
 from simorgh.memory.config import Config
 from simorgh.memory.embed import cosine_similarity, embed_text, sparse_cosine, sparse_embed_text
+from simorgh.memory.recall import KindIndex, Record
 from simorgh.memory.store import MemoryEngine, stream_for
 from tests.simorgh.helpers import FakeClock
 
@@ -269,3 +270,51 @@ class EmbedderCacheTestCase(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class TheIndexedScoreIsTheFullScanScoreTestCase(unittest.TestCase):
+    """Not `sparse_cosine` -- the accumulation `retrieve` actually uses.
+
+    `test_the_sparse_cosine_is_the_dense_cosine_exactly` pins
+    `embed.sparse_cosine`, which sums its terms with the builtin `sum()`
+    exactly as `cosine_similarity` does, and so could never have caught
+    this: `KindIndex.similarities`, the function on the real recall
+    path, accumulated with `+=` instead. Since CPython 3.12 `sum()`
+    over floats carries a Neumaier compensation term, so the identical
+    terms in the identical order come to a DIFFERENT float. Measured on
+    20,000 hashed records against one query: 44 of them off by one ULP,
+    which is enough to swap two near-tied records -- while the module's
+    docstring, the commit message and a regression test all said the
+    indexed score IS the full-scan score (observer, 2026-09-10).
+
+    `rec 312 ...` below is one of the 44, kept verbatim so this stays a
+    reproduction rather than a rule.
+    """
+
+    def _similarity(self, content: str, query: str) -> float:
+        index = KindIndex("memory:episodic", hashing=True)
+        index.add(Record(ref="memory:episodic:1", ts=0.0, tags=(), confidence=1.0,
+                         content=content, source_ref=""), embedder=None)
+        return index.similarities(query).get(0, 0.0)
+
+    def test_a_known_one_ulp_disagreement(self):
+        content = "rec 312 vector prune curiosity café vector prune ledger naive ünicode"
+        query = "ledger vector prune"
+        self.assertEqual(self._similarity(content, query),
+                         cosine_similarity(embed_text(query), embed_text(content)))
+
+    def test_every_record_of_a_corpus_scores_identically(self):
+        query = "ledger vector prune"
+        for i in range(400):
+            content = _content(i)
+            with self.subTest(content=content):
+                self.assertEqual(self._similarity(content, query),
+                                 cosine_similarity(embed_text(query), embed_text(content)))
+
+    def test_the_adversarial_shapes_agree_too(self):
+        query = "ledger vector prune"
+        for content in ("", "!!! ???", "LEDGER Ledger ledger", "ledger " * 200,
+                        "café naïve ünicode ledger", "vector"):
+            with self.subTest(content=content):
+                self.assertEqual(self._similarity(content, query),
+                                 cosine_similarity(embed_text(query), embed_text(content)))

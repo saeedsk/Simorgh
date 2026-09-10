@@ -79,10 +79,24 @@ class KindIndex:
     an inverted index from bucket to the records that touch it.
 
     Append-only is what makes this safe. A record's text, tags, ts and
-    confidence never change once written, so nothing here can go stale
-    -- only incomplete, and the cursor fixes that on the next sync.
-    Forgetting is a tombstone in another stream, not a mutation of this
-    one, so it is applied at query time rather than by editing the index.
+    confidence never change once written, so a record already read can
+    never be wrong -- only incomplete, and the cursor fixes that on the
+    next sync. Forgetting is a tombstone in another stream, not a
+    mutation of this one, so it is applied at query time rather than by
+    editing the index.
+
+    The one way a stream is NOT append-only is compaction
+    (`ledger/compaction.py` truncating below a retention window), and
+    this index does not see it: a record read before the truncation
+    keeps being recalled by this process afterwards, while a restart
+    stops returning it (measured on a jsonl ledger, 2026-09-10 -- five
+    records, three truncated, all five still recalled). No default
+    retention covers `memory:` and nothing writes memory snapshots, so
+    nothing truncates these streams today; a `[ledger.retention]` entry
+    for `memory:` would turn "forgotten by policy" into "still recalled
+    until the next boot". Said here rather than guarded against,
+    because the cheap guard -- re-reading the stream to check its floor
+    -- is the exact per-recall cost this index exists to remove.
     """
 
     def __init__(self, stream: str, *, hashing: bool) -> None:
@@ -138,15 +152,36 @@ class KindIndex:
         each record then accumulates its terms in the same order the
         dense `cosine_similarity` sums them, so the float is identical
         rather than approximately equal.
+
+        Same order is necessary and was not sufficient. The terms are
+        collected and handed to the SAME `sum()` the dense path uses,
+        because CPython's `sum()` over floats is not a running `+=`: since
+        3.12 it carries a Neumaier compensation term, so summing the
+        identical terms in the identical order with `+=` gives a
+        DIFFERENT float. Measured here on 20,000 hashed records against
+        one query: 44 of them, each off by one ULP, enough to swap two
+        near-tied records in the ranking -- while the module claimed, and
+        a regression test pinned, that the two paths agree exactly
+        (observer, 2026-09-10). Going through `sum()` keeps the property
+        true by construction on any Python, compensated or not, instead
+        of by an argument about how the interpreter adds.
+
+        Every term this still leaves out is exactly `0.0`, which no
+        summation -- compensated or naive -- can change the answer by.
         """
-        sims: dict[int, float] = {}
+        terms: dict[int, list[float]] = {}
         for bucket, query_weight in sparse_embed_text(query):
             posting = self.postings.get(bucket)
             if posting is None:
                 continue
             for position, weight in zip(posting[0], posting[1]):
-                sims[position] = sims.get(position, 0.0) + query_weight * weight
-        return sims
+                product = query_weight * weight
+                bucketed = terms.get(position)
+                if bucketed is None:
+                    terms[position] = [product]
+                else:
+                    bucketed.append(product)
+        return {position: sum(values) for position, values in terms.items()}
 
     def dense_similarity(self, position: int, query_pair) -> float:
         """The dense path, using the vector stored at index time.
