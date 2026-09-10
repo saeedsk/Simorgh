@@ -449,3 +449,96 @@ class TestNotifyMarkerReachesTheTool(unittest.TestCase):
     def test_it_is_declared_irreversible_so_guardian_gates_every_message(self):
         payload = self._walk("NOTIFY: subject\nbody")
         self.assertEqual(payload["reversibility"], "irreversible")
+
+
+class TestKnowledgeMarkersReachTheTools(unittest.TestCase):
+    """The `kb_*` tools go through the same one-string marker layer that
+    silently swallowed five other tools' arguments (RUN_CONTAINER,
+    SEARCH_LISTINGS, BROWSE_PAGE, INSTALL_PACKAGE, RUN_SCRIPT -- each
+    unusable from the model's side for days). This walks the whole path
+    for each of them: reply text, parser, router, argument names."""
+
+    MARKERS = ("KB_SEARCH", "KB_ASK", "KB_OPEN", "KB_SOURCES", "KB_STATUS")
+
+    def _walk(self, reply: str) -> dict:
+        from simorgh.cognition.parser import parse_marker
+
+        name, argument = parse_marker(reply, self.MARKERS)
+        return to_action_payload(
+            action_id="a1", task_id="t1",
+            call={"tool": name, "args": {"argument": argument}}, rationale="r",
+        )
+
+    def test_a_search_arrives_as_a_query(self):
+        payload = self._walk("KB_SEARCH: flood cover on the house policy")
+        self.assertEqual(payload["tool"], "kb_search")
+        self.assertEqual(payload["args"], {"query": "flood cover on the house policy"})
+
+    def test_a_question_arrives_as_a_question(self):
+        payload = self._walk("KB_ASK: what is my household excess?")
+        self.assertEqual(payload["args"], {"question": "what is my household excess?"})
+
+    def test_a_citation_arrives_as_a_citation(self):
+        payload = self._walk("KB_OPEN: [a1b2c3d4e5f60000:3]")
+        self.assertEqual(payload["args"], {"citation": "[a1b2c3d4e5f60000:3]"})
+
+    def test_status_takes_no_arguments_rather_than_an_empty_string_one(self):
+        payload = self._walk("KB_STATUS:")
+        self.assertEqual(payload["tool"], "kb_status")
+        self.assertEqual(payload["args"], {}, "a stray empty arg fails schema validation")
+
+    def test_adding_a_source_splits_the_op_from_its_json(self):
+        payload = self._walk(
+            'KB_SOURCES: add\n{"path": "~/Documents", "privacy": "personal"}')
+        self.assertEqual(payload["tool"], "kb_sources")
+        self.assertEqual(payload["args"]["op"], "add")
+        self.assertEqual(payload["args"]["path"], "~/Documents")
+        self.assertEqual(payload["args"]["privacy"], "personal")
+
+    def test_a_bare_op_with_no_json_still_routes(self):
+        payload = self._walk("KB_SOURCES: scan")
+        self.assertEqual(payload["args"]["op"], "scan")
+
+    def test_the_reading_tools_are_read_only_so_a_plan_session_may_use_them(self):
+        for marker, tool in (("KB_SEARCH: x", "kb_search"), ("KB_ASK: x", "kb_ask"),
+                             ("KB_OPEN: x", "kb_open"), ("KB_STATUS:", "kb_status")):
+            with self.subTest(tool=tool):
+                payload = self._walk(marker)
+                self.assertEqual(payload["reversibility"], "read_only")
+
+    def test_managing_sources_is_reversible_not_read_only(self):
+        payload = self._walk("KB_SOURCES: scan")
+        self.assertEqual(payload["reversibility"], "reversible")
+
+    def test_none_of_them_claims_to_use_the_network(self):
+        """The whole point of the domain is that the documents never
+        leave the machine; a tool declaring `network` would be gated as
+        though they might."""
+        for marker in ("KB_SEARCH: x", "KB_ASK: x", "KB_OPEN: x", "KB_STATUS:", "KB_SOURCES: scan"):
+            with self.subTest(marker=marker):
+                self.assertFalse(self._walk(marker)["scope"]["network"])
+
+    def test_every_kb_tool_has_a_policy_row_and_a_timeout_and_a_note(self):
+        """The missing `_TOOL_POLICY` row is how `browse_page` crashed;
+        a missing timeout is the stale-5-second bug; a missing note
+        means the model is offered a tool it is never told about."""
+        from simorgh.execution.config import Config
+        from simorgh.execution.knowledge.tools import knowledge_tools
+        from simorgh.orchestration import scaffolds
+        from simorgh.orchestration.session import _ACTION_TIMEOUTS
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        for tool in knowledge_tools(Config()):
+            with self.subTest(tool=tool.name):
+                self.assertIn(tool.name, _TOOL_POLICY)
+                self.assertIn(tool.name, _ACTION_TIMEOUTS)
+                self.assertIn(tool.name, scaffolds._TOOL_NOTES)
+
+    def test_the_declared_policy_matches_what_the_tool_says_about_itself(self):
+        from simorgh.execution.config import Config
+        from simorgh.execution.knowledge.tools import knowledge_tools
+        from simorgh.orchestration.tools import _TOOL_POLICY
+
+        for tool in knowledge_tools(Config()):
+            with self.subTest(tool=tool.name):
+                self.assertEqual(_TOOL_POLICY[tool.name][0], tool.reversibility)

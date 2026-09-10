@@ -57,6 +57,17 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # `irreversible_requires_human` set, every message waits for
     # approval; a deployment that auto-approves has chosen that.
     "notify": ("irreversible", True),
+    # -- the creator's own documents (domains/01-knowledge.md). All
+    # local: the index is a sqlite file on this machine and nothing
+    # leaves it, which is the entire point of the domain.
+    "kb_search": ("read_only", False),
+    "kb_ask": ("read_only", False),
+    "kb_open": ("read_only", False),
+    "kb_status": ("read_only", False),
+    # Adding or removing a source changes what is indexed, and a scan
+    # reads files -- reversible (remove undoes add, a rescan rebuilds),
+    # never read_only.
+    "kb_sources": ("reversible", False),
     # Runs on a machine this process cannot inspect, snapshot or roll
     # back -- the strongest case for `irreversible` in the table.
     "run_remote": ("irreversible", True),
@@ -93,6 +104,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 # real tool call from a marker reply failed with a bare `KeyError` on its
 # own required arg (e.g. `web_fetch` needs `url`, not `argument`).
 _MARKER_ARG_KEY: dict[str, str] = {
+    "kb_search": "query",
+    "kb_ask": "question",
+    "kb_open": "citation",
     "read_file": "path",
     "list_dir": "path",
     "search_code": "query",
@@ -188,6 +202,7 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "run_container": ("image", "command"),
     "install_package": ("manager", "spec"),
     "notify": ("subject", "body"),
+    "kb_sources": ("op", "spec"),
 }
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
@@ -266,6 +281,28 @@ _MARKER_ARG_HINT.update({
         "what (if anything) needs them; do not send a routine progress note. Example:\n"
         "NOTIFY: benchmark regressed\nGAIA dropped from 41% to 29% on commit 4f24467.\n"
     ),
+    "kb_search": (
+        "the search terms, as a single line. Searches the creator's OWN documents -- their "
+        "files, PDFs, notes -- not the web. Every result comes back with a [id:page] citation "
+        "you can pass to KB_OPEN to read more around it."
+    ),
+    "kb_ask": (
+        "a question, as a single line, answered from the creator's own documents. You get the "
+        "passages back with citations; quote the [id:page] label after each fact you use, and "
+        "say the answer is not in their documents rather than filling the gap from what you "
+        "already know."
+    ),
+    "kb_open": (
+        "a [id:page] citation from KB_SEARCH or KB_ASK (the brackets are optional), to read the "
+        "passages around it."
+    ),
+    "kb_sources": (
+        "first line: list, add, remove or scan. Second line, for add: a JSON object like "
+        '{"path": "~/Documents", "privacy": "personal"}; for remove/scan: {"name": "<source>"}. '
+        "Adding a source reads nothing until a scan runs. Use `personal` for ordinary papers and "
+        "`sensitive` for health, finance or anything you would not want quoted into a cloud "
+        "model.\nExample:\nKB_SOURCES: add\n{\"path\": \"~/Documents\", \"privacy\": \"personal\"}\n"
+    ),
     "run_container": (
         "first line: the image (e.g. `python:3.12-slim`). Second line: a JSON object like "
         '{"command": ["python", "-c", "print(1)"], "network": false, '
@@ -274,7 +311,7 @@ _MARKER_ARG_HINT.update({
     ),
 })
 # Tools whose marker takes no argument at all.
-_MARKER_NO_ARGS = frozenset({"git_revert"})
+_MARKER_NO_ARGS = frozenset({"git_revert", "kb_status"})
 # Two-part markers whose SECOND part is a JSON object of extra arguments,
 # merged into `args`, rather than one more string.
 #
@@ -302,7 +339,8 @@ _MARKER_NO_ARGS = frozenset({"git_revert"})
 # `shlex.split` then chopped into garbage tokens -- both had never once
 # worked from the model's side, exactly the failure mode this set exists
 # to prevent for `search_listings`/`install_package`.
-_MARKER_JSON_REST = frozenset({"search_listings", "install_package", "browse_page", "run_container"})
+_MARKER_JSON_REST = frozenset({"search_listings", "install_package", "browse_page", "run_container",
+                               "kb_sources"})
 
 
 def _json_rest(rest: str, second: str) -> dict:

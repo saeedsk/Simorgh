@@ -63,6 +63,7 @@ from .packages import FindPackageTool, InstallPackageTool
 from .pdftext import looks_like_pdf, pdf_to_text
 from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
+from .knowledge.tools import knowledge_tools
 from .notify import NotifyTool
 from .remote import RunRemoteTool
 from .container import RunContainerTool
@@ -1539,6 +1540,12 @@ def builtin_tools(config: Config) -> list:
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),
         BrowsePageTool(config), RunContainerTool(config), NotifyTool(config),
+        # The creator's own documents (execution/knowledge/,
+        # domains/01-knowledge.md). Registered whether or not a source is
+        # configured: an unconfigured knowledge base answers with what to
+        # add, which beats the tool not existing on the day somebody
+        # points it at ~/Documents.
+        *knowledge_tools(config),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

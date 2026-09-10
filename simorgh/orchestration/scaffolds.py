@@ -82,6 +82,14 @@ _TOOL_NOTES: dict[str, str] = {
                "something they would want to know while not watching: work finished, a benchmark "
                "regressed, you are blocked. There is no unsend, and no provider may be configured, "
                "in which case it refuses and names what to set",
+    "kb_search": "search the creator's OWN documents -- their files, PDFs, notes, scans -- and "
+                  "get the matching passages back with citations. For anything about their life, "
+                  "house, contracts, finances or past work, look here before the web",
+    "kb_ask": "ask a question of the creator's own documents and get the passages that answer it, "
+               "each with a citation to quote. Says so plainly when the answer is not in there",
+    "kb_open": "read more around a citation you got from kb_search or kb_ask",
+    "kb_sources": "list, add, remove or scan the folders that feed the knowledge base",
+    "kb_status": "how much is indexed, from where, last scanned when, and what failed",
     "run_python_sandboxed": "run a short Python snippet in a sandbox; no repo access",
     "run_js_sandboxed": "run a short JavaScript snippet with Node in a sandbox; no repo access",
     "apply_source_patch": "write a change to a source file -- or to workspace/, which is scratch: "

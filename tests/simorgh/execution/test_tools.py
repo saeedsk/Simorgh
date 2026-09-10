@@ -763,6 +763,7 @@ class TestBuiltinTools(unittest.TestCase):
             "web_fetch", "web_search", "render_page", "search_listings", "geocode",
             "find_package", "install_package", "run_script",
             "browse_page", "run_container", "notify",
+            "kb_search", "kb_ask", "kb_open", "kb_sources", "kb_status",
             "propose_mcp_server", "run_shell",
         })
 

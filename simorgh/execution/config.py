@@ -289,6 +289,32 @@ class Config:
     notify_max_calls: int = 20
     notify_window_s: float = 3600.0
 
+    # -- knowledge (execution/knowledge/, domains/01-knowledge.md): the
+    # creator's own documents, indexed locally and answered with
+    # citations. The tools are registered whether or not a source is
+    # configured -- an unconfigured knowledge base says what to add,
+    # which is a better answer than the tool not existing on the day
+    # somebody points it at ~/Documents.
+    knowledge_index_path: str = "workspace/knowledge/index.db"
+    # "auto" takes the local sentence-transformers model when it is
+    # installed and the stdlib hashing embedder otherwise. The hashing
+    # one is NOT semantic -- it matches shared words -- and every tool
+    # that uses it says so rather than implying a paraphrase would have
+    # been found.
+    knowledge_embedder: str = "auto"
+    knowledge_chunk_tokens: int = 400
+    knowledge_chunk_overlap: float = 0.15
+    knowledge_max_file_mb: int = 100
+    knowledge_max_results: int = 25
+    knowledge_max_chars: int = 6000
+    # Which privacy classes a passage may be shown to the model in this
+    # session (platform-connectors-design.md section 10). `sensitive`
+    # is deliberately absent: a medical letter or a bank statement
+    # retrieved into a cloud model's context is exactly the exposure
+    # that section exists to prevent. `kb_ask` then answers with where
+    # the passage is rather than what it says.
+    knowledge_cloud_llm_may_see: tuple[str, ...] = ("public", "personal")
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a
@@ -366,7 +392,8 @@ class Config:
             )
         if "repo_root" in kwargs:
             kwargs["repo_root"] = Path(kwargs["repo_root"])
-        for key in ("readable_roots", "write_scopes_source", "write_scopes_skills"):
+        for key in ("readable_roots", "write_scopes_source", "write_scopes_skills",
+                    "knowledge_cloud_llm_may_see"):
             if key in kwargs:
                 kwargs[key] = tuple(kwargs[key])
         if "mcp_servers" in kwargs:

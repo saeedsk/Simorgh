@@ -16,6 +16,10 @@ CHAT = Profile(
     # retired v1 tree left readable for reference (observer, 2026-09-08).
     tools=("self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch",
            "render_page", "search_listings", "geocode", "run_python_sandboxed", "run_js_sandboxed",
+           # "what does my policy say about flood cover" is the
+           # archetypal chat question, and answering it from the web is
+           # the archetypal wrong answer. Read-only and entirely local.
+           "kb_search", "kb_ask", "kb_open",
            "propose_mcp_server"),
     read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
 )
@@ -39,6 +43,9 @@ PATCH = Profile(
            # are read-only and Guardian-gated, and run_shell (already here)
            # is far broader than either.
            "web_search", "web_fetch", "search_listings", "geocode",
+           # The creator's own documents are context a build task often
+           # needs and cannot get anywhere else.
+           "kb_search", "kb_ask", "kb_open",
            # A missing capability is not a denial: find a library, install it, use it.
            "find_package", "install_package", "run_script", "browse_page", "run_container",
            # The one profile that runs unattended for a long time is the
@@ -65,14 +72,22 @@ RESEARCH = Profile(
     # (observer, 2026-09-08). Guardian gates it the same as anywhere.
     name="research",
     tools=("self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch",
-           "search_listings", "geocode", "find_package", "run_tests", "run_shell"),
+           "search_listings", "geocode", "find_package", "run_tests", "run_shell",
+           # "go and find out X" about the creator's own life is a
+           # research question whose sources are on this machine.
+           # `kb_sources` is here and nowhere else: research is the one
+           # profile that may reasonably need to index something first.
+           "kb_search", "kb_ask", "kb_open", "kb_status", "kb_sources"),
     # 6 predates web_search/web_fetch. A question with a repo half and a
     # web half needs search + fetch + two repo steps + an answer, and
     # died on step 6 every time (observer, 2026-09-08).
     read_only=False, max_steps=14, max_revisions=0, scaffold="research", verify=True,
 )
 PLAN = Profile(
-    name="plan", tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch"),
+    name="plan",
+    tools=("read_file", "list_dir", "search_code", "web_search", "web_fetch",
+           # Read-only, so the searching three but not `kb_sources`.
+           "kb_search", "kb_ask", "kb_open"),
     # `verify=False`: a plan session's product is a plan, and the task
     # verifier asks "was the change implemented?" -- to which the honest
     # answer is always no. With `max_revisions=0` that `fail` blocked the
