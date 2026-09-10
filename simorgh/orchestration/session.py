@@ -33,6 +33,58 @@ ACTION_TIMEOUT_S = 30.0
 CONTINUATION_REASON = "step budget exhausted"
 VERIFICATION_REASON = "verification failed"
 CANCELLED_REASON = "the task was cancelled"
+
+# `workspace/` is the one directory that is both readable and writable
+# and never committed (execution/config.py::workspace_dir). Matched by
+# prefix here rather than imported, because Orchestration may not reach
+# into Execution's config (tests/simorgh/test_module_boundaries.py).
+SCRATCH_PREFIX = "workspace/"
+
+
+def is_scratch(path: str) -> bool:
+    normalised = (path or "").strip().lstrip("./")
+    return normalised.startswith(SCRATCH_PREFIX)
+
+
+
+def record_side_effects(session, effects) -> None:
+    """Route a tool's reported `side_effects` into the session's sets.
+
+    A free function rather than an inline loop so it can be tested for
+    what it actually does -- the sets it fills decide whether cleanup
+    deletes a file and whether a finished task is blocked, which is too
+    much consequence to leave only reachable through a full session.
+    """
+    for effect in effects:
+        kind, _, path = str(effect).partition(":")
+        if not path:
+            continue
+        if kind in ("file_write", "file_create"):
+            session.wrote.add(path)
+            # Scratch is written, never "uncommitted". A file under
+            # `workspace/` is gitignored by design, so there is no
+            # commit to make and no change for anybody to review --
+            # but treating it like source would (a) block the task
+            # with "finished with uncommitted changes" over a scratch
+            # note, and (b) have cleanup DELETE it on a failed
+            # attempt, which defeats the entire point of a workspace
+            # that persists. It still joins `wrote`, so the
+            # verification checks that read files can see it.
+            if is_scratch(path):
+                continue
+            session.uncommitted.add(path)
+            if kind == "file_create":
+                # A file this session brought into existence. If it is
+                # never committed, cleanup removes it outright:
+                # `git_discard` rightly refuses an untracked path, which
+                # used to leave every abandoned new file behind as a
+                # dirty tree (watched trials, 2026-09-07).
+                session.created.add(path)
+        elif kind in ("git_commit", "git_discard"):
+            session.uncommitted.discard(path)
+            session.created.discard(path)
+
+
 # An attempt that says it finished while its edit is still uncommitted.
 UNCOMMITTED_REASON = "finished with uncommitted changes"
 FABRICATED_REASON = "the answer claims work the step log does not show"
@@ -707,23 +759,7 @@ class SessionRunner:
         if result.type == topics.ACTION_RESULT:
             ok = result.payload.get("ok", False)
             if ok:
-                for effect in result.payload.get("side_effects") or ():
-                    kind, _, path = str(effect).partition(":")
-                    if kind == "file_write" and path:
-                        session.uncommitted.add(path)
-                        session.wrote.add(path)
-                    elif kind == "file_create" and path:
-                        # A file this session brought into existence. If it
-                        # is never committed, cleanup removes it outright:
-                        # `git_discard` rightly refuses an untracked path,
-                        # which used to leave every abandoned new file
-                        # behind as a dirty tree (watched trials, 2026-09-07).
-                        session.uncommitted.add(path)
-                        session.created.add(path)
-                        session.wrote.add(path)
-                    elif kind in ("git_commit", "git_discard") and path:
-                        session.uncommitted.discard(path)
-                        session.created.discard(path)
+                record_side_effects(session, result.payload.get("side_effects") or ())
             full = result.payload.get("stdout_preview", "")
             error = result.payload.get("error") or ""
             if not ok:

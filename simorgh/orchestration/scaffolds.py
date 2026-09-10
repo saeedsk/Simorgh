@@ -83,7 +83,9 @@ _TOOL_NOTES: dict[str, str] = {
                "provider may be configured, in which case it refuses and names what to set",
     "run_python_sandboxed": "run a short Python snippet in a sandbox; no repo access",
     "run_js_sandboxed": "run a short JavaScript snippet with Node in a sandbox; no repo access",
-    "apply_source_patch": "write a change to a source file",
+    "apply_source_patch": "write a change to a source file -- or to workspace/, which is scratch: "
+                           "not committed, not reviewed, and still there next session, so it is where "
+                           "notes and half-finished work belong",
     "apply_skill": "install or update a skill",
     "git_commit": "commit what you have applied, with a message",
     "git_revert": "undo your last commit if it turned out wrong",

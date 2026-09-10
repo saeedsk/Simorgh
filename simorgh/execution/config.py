@@ -69,6 +69,10 @@ class Config:
         # not list it, so Sim can read the data it fetched and cannot
         # commit it.
         "results",
+        # Persistent scratch (`workspace_dir` below). Readable so Sim can
+        # pick up where it left off; writable too -- the one directory
+        # that is both -- and never committed.
+        "workspace",
     )
     # Files at the repo root. `readable_roots` holds directories only, so
     # README.md, requirements.txt, simloader.py and sim.sh were readable
@@ -98,6 +102,10 @@ class Config:
     # is effort spent on a tree nobody will ever run again.
     write_scopes_source: tuple[str, ...] = (
         "simorgh/", "simorgh_skills/", "tests/", "tools/", "docs/",
+        # Scratch, not source. Writable so a long piece of work has
+        # somewhere to keep notes and intermediates; gitignored, so
+        # nothing written here is ever committed or reviewed.
+        "workspace/",
     )
     sandbox_cpu_seconds: int = 5
     sandbox_memory_mb: int = 256
@@ -216,6 +224,21 @@ class Config:
     results_dir: str = "results"
     results_max_rows: int = 500
     results_keep_files: int = 50
+
+    # -- persistent scratch (`workspace/`). The gap: every writable
+    # directory Sim had was source -- anything written there is a change
+    # somebody has to review, so an intermediate file, a scratch note, a
+    # half-finished dataset had nowhere to live. `results/` is the
+    # tool-written twin and is PRUNED (results_keep_files), so it cannot
+    # hold anything meant to survive.
+    #
+    # Two properties make this a workspace rather than another source
+    # directory, and both are enforced in orchestration/session.py:
+    # a file written here is never treated as an uncommitted change (so
+    # finishing a task is not blocked by scratch, and cleanup does not
+    # delete it), and it is still recorded as written (so the
+    # verification checks that read files can see it).
+    workspace_dir: str = "workspace"
 
     # -- find_package / install_package (packages.py). The tools that
     # turn "no capability for this" into "there is a library for this".

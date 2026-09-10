@@ -192,7 +192,9 @@ _MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
 _MARKER_ARG_HINT.update({
     "apply_source_patch": (
         "first line: the repo-relative file path to write -- simorgh/, simorgh_skills/, "
-        "tests/, tools/ or docs/ (NOT src/, which is the retired v1 tree and is read-only); "
+        "tests/, tools/ or docs/ (NOT src/, which is the retired v1 tree and is read-only), "
+        "or workspace/ for scratch that is never committed and survives to your next session "
+        "(notes, intermediates, a dataset you are still working on); "
         "a refusal names the writable areas. Every "
         "following line: the COMPLETE new content of that file -- it replaces "
         "the whole file, so anything you leave out is deleted. Read the whole "

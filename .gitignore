@@ -24,5 +24,11 @@ secrets/
 results/
 .sim-quarantine/
 
+# Persistent scratch: notes, intermediates and working files a long
+# piece of work needs somewhere to keep. Deliberately NOT source -- it
+# survives across sessions (unlike results/, which is pruned) and is
+# never committed or reviewed. See execution/config.py::workspace_dir.
+workspace/
+
 # Scripts run_script stages before running them. Transient.
 .simorgh_scripts/
