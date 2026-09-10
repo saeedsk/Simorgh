@@ -101,6 +101,38 @@ def looks_like_credential_path(parts: Iterable[str]) -> bool:
     return name in _CREDENTIAL_DIRECTORIES
 
 
+def hides_a_credential(repo_root: Path, path: Path, *, readable_roots: tuple[str, ...]) -> bool:
+    """Whether reading this file would return something a direct
+    `read_file` on it would refuse.
+
+    `search_code` walks the tree itself rather than going through
+    `resolve_safe_path`, so it had only the credential-NAME half of the
+    rule and grepped straight through a link: an observer got
+    `workspace/notes.txt:1:SECRET=hunter2` out of it while `read_file`
+    on the same path was refused (2026-09-10). One helper, so the two
+    readers cannot drift apart again."""
+    try:
+        relative = path.relative_to(repo_root)
+    except ValueError:
+        return True
+    if looks_like_credential_path(relative.parts):
+        return True
+    try:
+        resolved = path.resolve()
+        resolved_root = repo_root.resolve()
+        target = resolved.relative_to(resolved_root)
+    except (OSError, ValueError):
+        return True     # resolves outside the repository, or cannot be resolved
+    parts = target.parts
+    inside = (len(parts) == 1 and parts[0] in ROOT_FILES) or (parts and parts[0] in readable_roots)
+    if not inside or looks_like_credential_path(parts):
+        return True
+    try:
+        return path.is_file() and path.stat().st_nlink > 1
+    except OSError:
+        return True
+
+
 def resolve_safe_path(
     repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...], max_path_chars: int = _MAX_PATH_CHARS
 ) -> tuple[Path | None, str | None]:
@@ -148,9 +180,34 @@ def resolve_safe_path(
         relative_target = target.relative_to(resolved_root)
     except ValueError:      # pragma: no cover -- the containment check above already ran
         relative_target = None
-    if relative_target is not None and looks_like_credential_path(relative_target.parts):
-        return None, (f"refused: {raw_path!r} resolves to "
-                      f"{relative_target.as_posix()!r}, which looks like a credentials path")
+    if relative_target is not None:
+        # The RESOLVED path has to satisfy everything the typed one did.
+        # Only the credential-name half was re-checked, so a link out of
+        # the readable areas walked through: `ln -s ../.git/config
+        # workspace/notes.txt` and then reading it returned
+        # `https://user:ghp_TOKEN@github.com/x` -- `.git/config` is not
+        # credential-SHAPED by name, it is simply somewhere Sim may not
+        # read (observer, 2026-09-10).
+        parts = relative_target.parts
+        inside = (len(parts) == 1 and parts[0] in ROOT_FILES) or (parts and parts[0] in readable_roots)
+        if not inside:
+            return None, (f"refused: {raw_path!r} resolves to {relative_target.as_posix()!r}, "
+                          f"which is outside the readable areas")
+        if looks_like_credential_path(parts):
+            return None, (f"refused: {raw_path!r} resolves to "
+                          f"{relative_target.as_posix()!r}, which looks like a credentials path")
+    # A HARD link has no target to resolve -- the same inode under a
+    # second, innocent name -- so every check above passes and the
+    # content comes back anyway: `ln workspace/.env workspace/notes.txt`
+    # returned `SECRET=hunter2` (observer, 2026-09-10). Nothing in this
+    # repository is hardlinked (measured: 0 of 1,675 readable files), so
+    # refusing extra links costs nothing and closes the door.
+    try:
+        if target.is_file() and target.stat().st_nlink > 1:
+            return None, (f"refused: {raw_path!r} is one of several names for the same file, "
+                          f"and a second name is how a refused path gets read under an allowed one")
+    except OSError:
+        pass
     return target, None
 
 

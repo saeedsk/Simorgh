@@ -330,3 +330,37 @@ class PytestIdsSurviveTheirOwnPunctuationTestCase(unittest.TestCase):
             "PASSED tests/t.py::test_one[a b]\nFAILED tests/t.py::test_two - boom\n")
         self.assertEqual(results, {"tests/t.py::test_one[a b]": "PASSED",
                                    "tests/t.py::test_two": "FAILED"})
+
+
+class OneLogSayingTwoThingsTakesTheWorseTestCase(unittest.TestCase):
+    """A later PASSED overwrote an earlier FAILED, and the case then
+    resolved on a test the log had recorded as failing.
+
+    A rerun plugin, a flaky retry, or the same result printed in both
+    line shapes all produce this. Observed 2026-09-10, the day after
+    this evaluator was written: `FAILED tests/a.py::t1` followed by
+    `PASSED tests/a.py::t1` gave `resolved=True, "all 1 fail-to-pass
+    ... pass"`. If a run ever said a required test failed, it failed.
+    """
+
+    def _judge(self, log: str):
+        return swebench.judge(log, {"log_parser": "parse_log_pytest",
+                                    "FAIL_TO_PASS": json.dumps(["tests/a.py::t1"]),
+                                    "PASS_TO_PASS": "[]"})
+
+    def test_a_failure_then_a_pass_is_a_failure(self):
+        self.assertFalse(self._judge("FAILED tests/a.py::t1 - boom\nPASSED tests/a.py::t1\n").resolved)
+
+    def test_a_pass_then_a_failure_is_a_failure(self):
+        self.assertFalse(self._judge("PASSED tests/a.py::t1\nFAILED tests/a.py::t1 - boom\n").resolved)
+
+    def test_the_two_line_shapes_cannot_launder_each_other(self):
+        self.assertFalse(self._judge("PASSED tests/a.py::t1\ntests/a.py::t1 FAILED\n").resolved)
+
+    def test_a_clean_pass_is_still_a_pass(self):
+        self.assertTrue(self._judge("PASSED tests/a.py::t1\n").resolved)
+
+    def test_a_skip_does_not_hide_a_failure(self):
+        verdict = self._judge("FAILED tests/a.py::t1 - boom\nSKIPPED tests/a.py::t1\n")
+        self.assertFalse(verdict.resolved)
+        self.assertEqual(verdict.failed, ("tests/a.py::t1",))

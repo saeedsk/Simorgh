@@ -217,3 +217,64 @@ class ASymlinkCannotLaunderACredentialTestCase(unittest.TestCase):
 
     def test_an_ordinary_file_is_unaffected(self):
         self.assertIn("nothing secret", self._read("workspace/ordinary.txt"))
+
+
+class ASecondNameIsNotAWayInTestCase(unittest.TestCase):
+    """The first symlink fix checked only the credential-NAME half of
+    the rule against the resolved path, and a hardlink has no target to
+    resolve at all.
+
+    Observed 2026-09-10, both against a real tree:
+      `ln -s ../.git/config workspace/notes.txt` -> read it and get
+        `https://user:ghp_TOKEN@github.com/x`. `.git/config` is not
+        credential-shaped by NAME; it is simply somewhere Sim may not
+        read, and only the typed path was checked for that.
+      `ln workspace/.env workspace/notes.txt` -> `SECRET=hunter2`, via
+        `read_file` AND both search backends.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        (self.root / "workspace").mkdir()
+        (self.root / ".git").mkdir()
+        (self.root / ".git" / "config").write_text("url = https://user:ghp_TOKEN@x\n")
+        (self.root / "workspace" / ".env").write_text("SECRET=hunter2\n")
+        (self.root / "workspace" / "plain.txt").write_text("nothing secret\n")
+
+    def _read(self, relative: str) -> str:
+        from simorgh.execution.config import Config
+
+        return str(pathsafety.safe_read_file(self.root, relative,
+                                             readable_roots=Config().readable_roots))
+
+    def test_a_link_out_of_the_readable_areas_is_refused(self):
+        (self.root / "workspace" / "notes.txt").symlink_to("../.git/config")
+        out = self._read("workspace/notes.txt")
+        self.assertIn("refused", out)
+        self.assertNotIn("ghp_TOKEN", out)
+        self.assertIn(".git/config", out)
+
+    def test_a_hardlink_to_a_refused_file_is_refused(self):
+        import os
+
+        os.link(self.root / "workspace" / ".env", self.root / "workspace" / "second.txt")
+        out = self._read("workspace/second.txt")
+        self.assertIn("refused", out)
+        self.assertNotIn("hunter2", out)
+
+    def test_an_ordinary_file_is_still_read(self):
+        self.assertIn("nothing secret", self._read("workspace/plain.txt"))
+
+    def test_the_shared_guard_agrees_with_the_reader(self):
+        """`search_code` walks the tree itself, so it needs the same
+        answer or the two drift apart again."""
+        from simorgh.execution.config import Config
+
+        roots = Config().readable_roots
+        (self.root / "workspace" / "notes.txt").symlink_to("../.git/config")
+        self.assertTrue(pathsafety.hides_a_credential(
+            self.root, self.root / "workspace" / "notes.txt", readable_roots=roots))
+        self.assertFalse(pathsafety.hides_a_credential(
+            self.root, self.root / "workspace" / "plain.txt", readable_roots=roots))

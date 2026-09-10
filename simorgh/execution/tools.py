@@ -280,15 +280,24 @@ def _no_match_note(config) -> str:
             f"specific document, or LIST_DIR to see what is there.")
 
 
-def _rg_line_is_credential(line: str) -> bool:
+def _rg_line_is_credential(line: str, root: Path | None = None,
+                           readable_roots: tuple[str, ...] = ()) -> bool:
     """`ripgrep` output is `path:lineno:text`; check the path prefix
-    against the same credential-name filter `resolve_safe_path` (and
-    `read_file`) already enforce, so `search_code` cannot grep a
-    `.env`/`credentials.json`/etc. that a direct `read_file` on the same
-    path would refuse. `rg`'s own default hidden-file skip masked the
-    dotfile case (`.env`) by accident but never covered a non-hidden
-    name like `credentials.json` -- found live, 2026-09-08."""
+    against the same rule `resolve_safe_path` (and `read_file`) enforce,
+    so `search_code` cannot grep a `.env`/`credentials.json`/etc. that a
+    direct `read_file` on the same path would refuse. `rg`'s own default
+    hidden-file skip masked the dotfile case (`.env`) by accident but
+    never covered a non-hidden name like `credentials.json` -- found
+    live, 2026-09-08.
+
+    The name alone was not enough: a link is named whatever you like.
+    With a root, this asks the full question -- resolution, containment
+    and extra names -- because an observer got
+    `workspace/notes.txt:1:SECRET=hunter2` out of this backend while
+    `read_file` on the same path was refused (2026-09-10)."""
     path_part = line.split(":", 1)[0]
+    if root is not None:
+        return pathsafety.hides_a_credential(root, root / path_part, readable_roots=readable_roots)
     return pathsafety.looks_like_credential_path(Path(path_part).parts)
 
 
@@ -371,7 +380,8 @@ class SearchCodeTool:
 
         lines = [
             ln for ln in completed.stdout.splitlines()
-            if "__pycache__" not in ln and not _rg_line_is_credential(ln)
+            if "__pycache__" not in ln and not _rg_line_is_credential(
+                ln, root, self._config.readable_roots)
         ]
         truncated = len(lines) > self._config.search_max_matches
         lines = lines[: self._config.search_max_matches]
@@ -392,7 +402,8 @@ class SearchCodeTool:
             for path in sorted(base_path.rglob("*")):
                 if "__pycache__" in path.parts or not path.is_file():
                     continue
-                if pathsafety.looks_like_credential_path(path.relative_to(root).parts):
+                if pathsafety.hides_a_credential(root, path,
+                                                 readable_roots=self._config.readable_roots):
                     continue
                 try:
                     if path.stat().st_size > self._config.search_max_file_bytes:

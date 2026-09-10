@@ -172,15 +172,29 @@ _GOOD = {"PASSED", "ok"}
 _BAD = {"FAILED", "ERROR", "FAIL"}
 
 
+#: Worst wins when one log says two things about one test. A later
+#: PASSED used to overwrite an earlier FAILED -- from a rerun plugin, a
+#: flaky retry, or the same result printed in both line shapes -- and
+#: the case then resolved on a test the log had recorded as failing
+#: (observer, 2026-09-10). If a run ever said it failed, it failed.
+_SEVERITY = {"PASSED": 0, "SKIPPED": 1, AMBIGUOUS: 2, "ERROR": 3, "FAILED": 3}
+
+
+def _record(out: dict[str, str], test: str, status: str) -> None:
+    seen = out.get(test)
+    if seen is None or _SEVERITY.get(status, 3) > _SEVERITY.get(seen, 3):
+        out[test] = status
+
+
 def parse_pytest(log: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for match in _PYTEST_LINE.finditer(log):
         rest = match.group("rest")
         if _PYTEST_SKIP_COUNT.match(rest):
             continue        # a skip tally, not a test result
-        out[_nodeid(rest)] = match.group("status")
+        _record(out, _nodeid(rest), match.group("status"))
     for match in _PYTEST_TRAILING.finditer(log):
-        out.setdefault(match.group("test").strip(), match.group("status"))
+        _record(out, match.group("test").strip(), match.group("status"))
     return out
 
 
