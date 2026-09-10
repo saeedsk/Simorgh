@@ -63,6 +63,11 @@ class Task:
     id: str
     kind: str
     description: str
+    #: When the description was too long to live inline in the Ledger,
+    #: `description` is a preview and this is the blob holding all of
+    #: it. `Worker` reads it back before prompting, so the model sees
+    #: the whole brief; a listing shows the preview and says so.
+    description_ref: str = ""
     subject: str | None = None
     mode: str = "execute"
     risk: str = "low"

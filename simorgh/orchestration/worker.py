@@ -174,7 +174,7 @@ class Worker:
 
         task = reply.payload.get("task") or {}
         mode = task.get("mode", "execute")
-        description = task.get("description", "")
+        description = await self._full_description(task)
         profile = profiles.for_task(kind, mode)
         session = Session(
             task_id=task_id, kind=kind, mode=mode, profile=profile,
@@ -206,6 +206,30 @@ class Worker:
             # accident).
             return
         await self._report(session, outcome)
+
+    async def _full_description(self, task: dict) -> str:
+        """The task's brief, whole.
+
+        A description longer than the Ledger's inline limit is stored as
+        a blob and the wire carries a preview (`planning/store.py::
+        _inline_or_blob`). Prompting with the preview would mean working
+        from an instruction that stops mid-sentence, with nothing in the
+        session saying so -- so the ref is read back here, and if it
+        cannot be read the preview is used AND the failure is on the
+        record, rather than the model quietly getting less than it was
+        sent."""
+        description = task.get("description", "")
+        ref = task.get("description_ref") or ""
+        if not ref or self._ledger is None:
+            return description
+        try:
+            return (await self._ledger.get_blob(ref)).decode("utf-8")
+        except Exception as exc:  # noqa: BLE001 -- a readable preview beats no task
+            logger = getattr(self._bus, "logger", None)
+            if logger is not None:
+                logger.warning("orchestration.description_ref_unreadable",
+                               task_id=task.get("task_id"), ref=ref, error=repr(exc))
+            return description
 
     async def _heartbeat_loop(self, task_id: str, lease_seconds: float) -> None:
         """Keeps a claimed task's lease alive for as long as we are still

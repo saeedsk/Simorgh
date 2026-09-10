@@ -18,6 +18,7 @@ from typing import Iterable
 
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import Clock, Ledger
+from simorgh.ledger.blobs import is_ref
 from simorgh.ledger.client import ConflictError
 
 from .model import (
@@ -60,7 +61,8 @@ class TaskIndex:
         p = event.payload
         if event.type == "created":
             self.tasks[task_id] = Task(
-                id=task_id, kind=p["kind"], description=p["description"], subject=p.get("subject"),
+                id=task_id, kind=p["kind"], description=p["description"],
+                description_ref=p.get("description_ref", ""), subject=p.get("subject"),
                 mode=p.get("mode", "execute"), risk=p.get("risk", "low"), origin=p.get("origin", "human"),
                 parent_id=p.get("parent_id"), depends_on=tuple(p.get("depends_on") or ()),
                 status=p.get("status", PENDING), created_at=event.ts, updated_at=event.ts,
@@ -114,7 +116,8 @@ class TaskIndex:
 
 def _task_to_dict(t: Task) -> dict:
     return {
-        "kind": t.kind, "description": t.description, "subject": t.subject, "mode": t.mode, "risk": t.risk,
+        "kind": t.kind, "description": t.description, "description_ref": t.description_ref,
+        "subject": t.subject, "mode": t.mode, "risk": t.risk,
         "origin": t.origin, "parent_id": t.parent_id, "depends_on": list(t.depends_on), "status": t.status,
         "attempts": t.attempts, "note": t.note,
         "lease": {"worker_id": t.lease.worker_id, "until": t.lease.until} if t.lease else None,
@@ -126,7 +129,8 @@ def _task_to_dict(t: Task) -> dict:
 def _task_from_dict(task_id: str, d: dict) -> Task:
     lease = Lease(d["lease"]["worker_id"], d["lease"]["until"]) if d.get("lease") else None
     return Task(
-        id=task_id, kind=d["kind"], description=d["description"], subject=d.get("subject"),
+        id=task_id, kind=d["kind"], description=d["description"],
+        description_ref=d.get("description_ref", ""), subject=d.get("subject"),
         mode=d.get("mode", "execute"), risk=d.get("risk", "low"), origin=d.get("origin", "human"),
         parent_id=d.get("parent_id"), depends_on=tuple(d.get("depends_on") or ()), status=d["status"],
         attempts=d.get("attempts", 0), note=d.get("note", ""), lease=lease,
@@ -176,8 +180,10 @@ class TaskStore:
         tid = task_id or uuid.uuid4().hex[:12]
         now = self._clock.now()
         stream = f"task:{tid}"
+        description, description_ref = await self._inline_or_blob(description)
         payload = {
-            "kind": kind, "description": description, "subject": subject, "mode": mode, "risk": risk,
+            "kind": kind, "description": description, "description_ref": description_ref,
+            "subject": subject, "mode": mode, "risk": risk,
             "origin": origin, "parent_id": parent_id, "depends_on": list(depends_on),
             "status": initial_status, "priority": priority,
             "scope": scope.to_payload() if scope else None, "plan_id": plan_id, "max_steps": max_steps,
@@ -187,6 +193,45 @@ class TaskStore:
         self.index.apply(stream, replace(event, seq=seq))
         await self._maybe_snapshot()
         return self.index.tasks[tid]
+
+    async def _inline_or_blob(self, text: str) -> tuple[str, str]:
+        """A description short enough to live inline, and a ref to the rest.
+
+        Live-caught 2026-09-10: `task.create` with a 5,564-character
+        description raised out of the Bus handler --
+
+            ValidationError: $.description: 5564 chars inline exceeds
+            4096; store it with put_blob and reference it
+
+        -- so no task was created, and because the Bus logs a raising
+        handler rather than answering, the session that asked for it
+        went on to report `final answer ok`. A task the system said it
+        had made and had not.
+
+        The Ledger's rule is right: a long string belongs in a blob.
+        Nothing on the Planning side had ever obeyed it, and a long
+        description is the ordinary case for a decomposed step or a
+        pasted brief, not an abuse. So the full text goes to a blob and
+        the event keeps a preview that SAYS it is one; `Worker` reads
+        the ref back before it prompts, so the model still sees all of
+        it (`orchestration/worker.py`).
+
+        Truncating quietly was the alternative and is the thing this
+        project keeps calling a lie: the preview names the cut and
+        where the rest is.
+        """
+        limit = int(getattr(self._ledger, "inline_threshold", 4096) or 4096)
+        if len(text) <= limit or is_ref(text):
+            return text, ""
+        try:
+            ref = await self._ledger.put_blob(text.encode("utf-8"), content_type="text/plain")
+        except Exception as exc:  # noqa: BLE001 -- a task that cannot blob is still worth having
+            ref = ""
+            note = f"\n\n[{len(text)} chars; the rest could not be stored: {exc!r}]"
+        else:
+            note = f"\n\n[{len(text)} chars in total; the full text is at {ref}]"
+        keep = max(0, limit - len(note))
+        return text[:keep] + note, ref
 
     async def get(self, task_id: str) -> Task | None:
         return self.index.tasks.get(task_id)

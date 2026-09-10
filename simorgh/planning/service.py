@@ -260,6 +260,7 @@ class Service:
     async def _announce_created(self, task: Task) -> None:
         payload = {
             "task_id": task.id, "kind": task.kind, "description": task.description,
+            "description_ref": task.description_ref,
             "depends_on": list(task.depends_on), "mode": task.mode, "origin": task.origin,
             "risk": task.risk, "subject": task.subject, "parent_id": task.parent_id,
             "scope": task.scope.to_payload() if task.scope else None,
@@ -1133,7 +1134,11 @@ UNCOMMITTED_REASON = "finished with uncommitted changes"
 
 def _task_payload(task: Task) -> dict:
     return {
-        "task_id": task.id, "kind": task.kind, "description": task.description, "subject": task.subject,
+        "task_id": task.id, "kind": task.kind, "description": task.description,
+        # The whole brief, when the description on the wire is a preview.
+        # A worker that prompts with the preview is working from a
+        # truncated instruction and cannot tell.
+        "description_ref": task.description_ref, "subject": task.subject,
         "status": task.status, "mode": task.mode, "risk": task.risk, "origin": task.origin,
         "parent_id": task.parent_id, "depends_on": list(task.depends_on), "attempts": task.attempts,
         "note": task.note, "max_steps": task.max_steps,
