@@ -36,6 +36,33 @@ def _build_parser() -> argparse.ArgumentParser:
     trace_p.add_argument("trace_id")
     migrate_p = sub.add_parser("migrate-v1", help="import ~/.simorgh/memory.jsonl into the Ledger")
     migrate_p.add_argument("--path", default=str(DEFAULT_V1_MEMORY_PATH))
+
+    # The vault is a CLI subcommand and NOT a REPL command on purpose.
+    # Adding a secret means typing it, and the REPL's line reader echoes
+    # what it is given and keeps it in history -- so a password typed
+    # there would end up on the screen and in a file. `getpass` here
+    # reads it with the terminal's echo off and it never becomes an
+    # argument, which is what `platform-connectors-design.md` section 1
+    # means by "never a tool argument".
+    vault_p = sub.add_parser("vault", help="manage stored credentials (never prints a value)")
+    vault_sub = vault_p.add_subparsers(dest="vault_command")
+    vault_sub.add_parser("list", help="ids, kinds and ages -- never values")
+    add_p = vault_sub.add_parser("add", help="store a credential, prompting with echo off")
+    add_p.add_argument("cred_id", help="e.g. imap:fastmail, caldav:home, home_assistant")
+    add_p.add_argument("--kind", default="password",
+                       help="password | token | oauth2 | keyfile | cookie_jar")
+    add_p.add_argument("--field", default="password",
+                       help="which field of the credential this is")
+    remove_p = vault_sub.add_parser("remove", help="delete a credential")
+    remove_p.add_argument("cred_id")
+    import_p = vault_sub.add_parser(
+        "import", help="copy a value in ONCE from elsewhere (env:NAME, file:PATH)")
+    import_p.add_argument("cred_id")
+    import_p.add_argument("source")
+    import_p.add_argument("--kind", default="password")
+    import_p.add_argument("--field", default="password")
+    stale_p = vault_sub.add_parser("stale", help="credentials nothing has used lately")
+    stale_p.add_argument("--days", type=float, default=90.0)
     return parser
 
 
@@ -148,6 +175,104 @@ async def _cmd_migrate_v1(config_path: str | None, path: str) -> int:
     return 0
 
 
+def _vault_for(config_path: str | None):
+    """The vault this machine uses.
+
+    `[secrets] vault_path` wins, then `SIMORGH_VAULT_PATH`, then
+    `~/.simorgh/vault.bin`. A broken config must not make the vault
+    unreachable -- being locked out of your credentials because a TOML
+    key has a typo is a bad afternoon -- so a config that will not load
+    falls back to the default path rather than failing.
+    """
+    from .vault import Vault, default_vault_path
+
+    raw = ""
+    try:
+        raw = str(load_config(config_path).section("secrets").get("vault_path", "") or "")
+    except Exception:  # noqa: BLE001 -- see the docstring
+        raw = ""
+    return Vault(Path(raw) if raw else default_vault_path())
+
+
+def _cmd_vault(args) -> int:
+    """Never prints a stored value. `list` shows ids and ages, `add`
+    prompts with echo off, and nothing here has a code path that writes
+    a secret to stdout -- which is the property that makes it safe to
+    run over someone's shoulder."""
+    import getpass
+    import time
+
+    command = getattr(args, "vault_command", None) or "list"
+    try:
+        vault = _vault_for(args.config)
+    except Exception as exc:  # noqa: BLE001
+        print(f"vault unavailable: {exc}", file=sys.stderr)
+        return 2
+
+    if command == "list":
+        rows = vault.list()
+        print(f"vault at {vault.path} (key from {vault.key_source})")
+        if not rows:
+            print("  empty -- add one with `simorgh vault add <id>`, e.g.")
+            print("  simorgh vault add imap:fastmail")
+            return 0
+        for credential in rows:
+            used = (time.strftime("%Y-%m-%d", time.localtime(credential.last_used_at))
+                    if credential.last_used_at else "never")
+            print(f"  {credential.id:28} {credential.kind:10} last used {used}")
+        return 0
+
+    if command == "add":
+        value = getpass.getpass(f"value for {args.cred_id} ({args.field}): ")
+        if not value:
+            print("nothing entered; nothing stored", file=sys.stderr)
+            return 1
+        existing = {}
+        try:
+            existing = dict(vault.open(args.cred_id))
+        except Exception:  # noqa: BLE001 -- a new credential has nothing to merge
+            pass
+        existing[args.field] = value
+        vault.put(args.cred_id, args.kind, existing)
+        print(f"stored {args.cred_id} ({args.field}). The value was never echoed and is not "
+              f"in your shell history.")
+        return 0
+
+    if command == "remove":
+        vault.delete(args.cred_id)
+        print(f"removed {args.cred_id}")
+        return 0
+
+    if command == "import":
+        from .vault import ImportSourceError, resolve_import_source
+
+        try:
+            value = resolve_import_source(args.source)
+        except ImportSourceError as exc:
+            print(f"could not read {args.source}: {exc}", file=sys.stderr)
+            return 1
+        vault.put(args.cred_id, args.kind, {args.field: value})
+        # Deliberately not the value, and deliberately saying the copy
+        # is a copy: `import` reads once and never again, so rotating
+        # the source does not rotate this.
+        print(f"copied {args.source} into {args.cred_id} ({args.field}). It is a copy -- "
+              f"rotating the source will not rotate this.")
+        return 0
+
+    if command == "stale":
+        rows = vault.stale(days=args.days)
+        if not rows:
+            print(f"nothing unused for {args.days:.0f} days")
+            return 0
+        print(f"{len(rows)} credential(s) unused for {args.days:.0f} days:")
+        for credential in rows:
+            print(f"  {credential.id}")
+        return 0
+
+    print(f"unknown vault command {command!r}", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -164,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_cmd_status(args.config, args.timeout))
         if args.command == "trace":
             return asyncio.run(_cmd_trace(args.config, args.trace_id))
+        if args.command == "vault":
+            return _cmd_vault(args)
         if args.command == "migrate-v1":
             return asyncio.run(_cmd_migrate_v1(args.config, args.path))
     except ConfigError as exc:

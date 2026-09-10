@@ -114,12 +114,24 @@ def _decrypt(key: bytes, blob: bytes) -> bytes:
     return _aesgcm()(key).decrypt(nonce, ciphertext, None)
 
 
+def _keyring_disabled() -> bool:
+    """`SIMORGH_VAULT_NO_KEYRING=1` keeps the key in a 0600 file beside
+    the vault instead of the OS keychain.
+
+    For containers and CI, where there is either no keychain or one
+    nobody wants written to. It also stops this project's own test
+    suite leaving a real entry on a developer's machine -- which has
+    happened once already, from nothing more than running the tests.
+    """
+    return (os.environ.get("SIMORGH_VAULT_NO_KEYRING") or "").strip() not in ("", "0", "false", "no")
+
+
 def _load_or_create_key(path: Path, *, keyring_module=None) -> tuple[bytes, str]:
     """The 32-byte vault key, and where it came from ("keyring" or
     "file") for the one-time startup notice. Tries keyring first;
     never raises for keyring being unusable, only for a genuinely
     unsafe key FILE."""
-    if keyring_module is not None:
+    if keyring_module is not None and not _keyring_disabled():
         try:
             stored = keyring_module.get_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
         except Exception:  # noqa: BLE001 -- any backend failure means "try the file"
@@ -172,6 +184,13 @@ class Vault:
                 "vault_key_fallback_to_file",
                 detail="no working keyring backend; vault key stored in a 0600 file instead",
             )
+
+    @property
+    def path(self) -> Path:
+        """Where the encrypted blob lives. `vault list` prints it, so a
+        person can tell which file they are looking at when
+        `SIMORGH_VAULT_PATH` is set."""
+        return self._path
 
     @property
     def key_source(self) -> str:
