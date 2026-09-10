@@ -34,20 +34,22 @@ Two things worth saying plainly, and said in every result's own text
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time
+import urllib.request
 from collections import deque
 from dataclasses import asdict, dataclass
 
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
+from . import listingsources
 from .config import Config
 
-_DISCLAIMER = (
-    "via homeharvest (reads Realtor.com's own site backend -- an unofficial, actively-maintained "
-    "open-source scraper, NOT a licensed data API and NOT Zillow-sourced; can break or rate-limit "
-    "without warning; verify anything important directly against Realtor.com/Zillow)"
-)
+# Kept as a name for the tests and callers that already import it; the
+# real source of truth is `listingsources.disclaimer_for(provider)`,
+# because the caveat has to change when the data does.
+_DISCLAIMER = listingsources.SCRAPER_DISCLAIMER
 
 
 class ListingsUnavailable(Exception):
@@ -143,7 +145,7 @@ def zip_in(location: str) -> str:
 
 
 def render(listings: list[Listing], location: str, matched: int, total: int,
-           *, zip_code: str = "", implied_zip: bool = False) -> str:
+           *, zip_code: str = "", implied_zip: bool = False, disclaimer: str = "") -> str:
     header = f"{matched} listing(s) for {location!r}"
     if zip_code:
         header += f", filtered to ZIP {zip_code}"
@@ -151,7 +153,7 @@ def render(listings: list[Listing], location: str, matched: int, total: int,
             header += " (taken from the location -- pass zip_code to override)"
     if matched != total:
         header += f" (of {total} fetched before filtering)"
-    header += f" -- {_DISCLAIMER}"
+    header += f" -- {disclaimer or _DISCLAIMER}"
     if not listings:
         return header
     body = "\n".join(listing.render(index) for index, listing in enumerate(listings, start=1))
@@ -177,9 +179,11 @@ class RealEstateListingsTool:
         },
     }
 
-    def __init__(self, config: Config, *, scraper=None) -> None:
+    def __init__(self, config: Config, *, scraper=None, opener=None, env=None) -> None:
         self._config = config
         self._scraper = scraper
+        self._opener = opener or urllib.request.urlopen
+        self._env = env if env is not None else os.environ
         self._recent_calls: deque[float] = deque()
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
@@ -206,28 +210,37 @@ class RealEstateListingsTool:
         except ListingsUnavailable as exc:
             return ToolResult(ok=False, error=str(exc))
 
-        scraper = self._scraper
-        if scraper is None:
-            try:
-                from homeharvest import scrape_property as scraper
-            except ImportError:
-                return ToolResult(
-                    ok=False,
-                    error="refused: the `homeharvest` package is not installed (pip install homeharvest)",
-                )
-
+        # Which source answers is a configuration question, not the
+        # model's. `auto` prefers a licensed API when a key is set and
+        # falls back to the scraper otherwise, so this tool works with
+        # no account and gets better the day somebody adds one.
         try:
-            df = await asyncio.wait_for(
-                asyncio.to_thread(scraper, location=location, listing_type="for_sale", past_days=60,
-                                   limit=max(self._config.real_estate_max_results * 10, 200)),
-                timeout=self._config.real_estate_timeout_s,
-            )
+            provider = listingsources.choose_provider(self._config.real_estate_provider, self._env)
+        except listingsources.NoSuchProvider as exc:
+            return ToolResult(ok=False, error=f"refused: {exc}")
+
+        limit = max(self._config.real_estate_max_results * 10, 200)
+        try:
+            if provider == listingsources.HOMEHARVEST:
+                rows = await asyncio.wait_for(
+                    asyncio.to_thread(self._scrape, location, limit),
+                    timeout=self._config.real_estate_timeout_s,
+                )
+            else:
+                rows = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        listingsources.FETCHERS[provider], self._opener, self._env,
+                        location=location, limit=limit,
+                        timeout=self._config.real_estate_timeout_s,
+                    ),
+                    timeout=self._config.real_estate_timeout_s + 5.0,
+                )
         except asyncio.TimeoutError:
             return ToolResult(ok=False, error="timeout")
-        except Exception as exc:  # noqa: BLE001 -- a scraper failure is a result, never a crash
-            return ToolResult(ok=False, error=f"search failed: {exc!r}")
-
-        rows = df.to_dict("records") if hasattr(df, "to_dict") else list(df or [])
+        except ListingsUnavailable as exc:
+            return ToolResult(ok=False, error=str(exc))
+        except Exception as exc:  # noqa: BLE001 -- a source failure is a result, never a crash
+            return ToolResult(ok=False, error=f"search failed via {provider}: {exc!r}")
         total = len(rows)
         listings = rows_to_listings(rows)
         # An explicit filter wins; otherwise a ZIP written into the
@@ -246,10 +259,12 @@ class RealEstateListingsTool:
 
         return ToolResult(
             ok=True, output=render(listings, location, len(listings), total,
-                                   zip_code=zip_code, implied_zip=implied_zip),
+                                   zip_code=zip_code, implied_zip=implied_zip,
+                                   disclaimer=listingsources.disclaimer_for(provider)),
             metadata={
                 "location": location, "total_fetched": total, "matched": matched,
-                "returned": len(listings), "source": "homeharvest (unofficial, Realtor.com-derived)",
+                "returned": len(listings), "provider": provider,
+                "source": listingsources.disclaimer_for(provider),
                 "zip_code": zip_code, "zip_from_location": implied_zip,
                 # Every match, not just the rendered page of them:
                 # Execution writes these to a file under `results/` and
@@ -259,6 +274,21 @@ class RealEstateListingsTool:
                 "rows": [asdict(listing) for listing in matched_listings],
             },
         )
+
+    def _scrape(self, location: str, limit: int) -> list[dict]:
+        scraper = self._scraper
+        if scraper is None:
+            try:
+                from homeharvest import scrape_property as scraper
+            except ImportError:
+                raise ListingsUnavailable(
+                    "refused: the `homeharvest` package is not installed (pip install homeharvest) "
+                    "-- or configure a licensed provider: "
+                    + "; ".join(f"{name} ({', '.join(keys)})"
+                                for name, keys, _ in listingsources.PROVIDERS if keys)
+                ) from None
+        df = scraper(location=location, listing_type="for_sale", past_days=60, limit=limit)
+        return df.to_dict("records") if hasattr(df, "to_dict") else list(df or [])
 
     def _enforce_rate_limit(self, ctx: ToolContext) -> None:
         now = ctx.clock.now() if ctx.clock else time.monotonic()

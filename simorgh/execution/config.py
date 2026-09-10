@@ -286,6 +286,14 @@ class Config:
     # a single query can return 1000+ rows city-wide (live-tested,
     # 2026-09-09), so this caps what comes back and how often it can be
     # called at all, on top of homeharvest's own request pacing.
+    # Which source answers `search_listings`. "auto" prefers a licensed
+    # API when its key is set (see listingsources.PROVIDERS) and falls
+    # back to the keyless homeharvest scraper otherwise, so the tool
+    # works with no account and improves the day somebody adds one.
+    # Naming a provider whose key is missing is an error, not a silent
+    # fallback: data from a source the operator did not choose would
+    # arrive wearing the wrong disclaimer.
+    real_estate_provider: str = "auto"  # auto | rentcast | attom | homeharvest
     real_estate_max_results: int = 20
     real_estate_timeout_s: float = 30.0
     real_estate_max_calls: int = 20
