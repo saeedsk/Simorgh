@@ -121,3 +121,54 @@ class GuardianDecidesOncePerActionTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnUnansweredClaimIsReleasedTestCase(GuardianDecidesOncePerActionTestCase):
+    """The claim is taken before the work. If anything between the claim
+    and the verdict raises, the id stayed claimed and the legitimate
+    retry was dropped as a duplicate -- answering nobody.
+
+    The real path an observer hit on 2026-09-10: a ledger whose
+    `put_blob` fails, which is what an oversized-args spill does, and
+    what a real patch proposal takes. Before this dedupe existed the
+    retry was answered; after it, the action simply vanished.
+    """
+
+    async def test_a_proposal_that_could_not_be_recorded_can_be_retried(self):
+        kernel = await self._boot()
+        guardian = kernel._supervisor.services["guardian"].service  # noqa: SLF001
+
+        broken = mock.patch.object(guardian._ctx.ledger, "append",  # noqa: SLF001
+                                   side_effect=RuntimeError("ledger is down"))
+        broken.start()
+        await kernel.bus.publish(_proposal("retryable", args={"path": "README.md"}))
+        await self._settle()
+        broken.stop()
+        self.denials.clear()
+        self.results.clear()
+
+        await kernel.bus.publish(_proposal("retryable", args={"path": "README.md"}))
+        await self._settle()
+        self.assertTrue(self.results or self.denials,
+                        "a retry after a failure must be answered, not swallowed as a duplicate")
+
+    async def test_an_answered_id_is_still_only_answered_once(self):
+        kernel = await self._boot()
+        args = {"path": "README.md"}
+        await kernel.bus.publish(_proposal("answered-once", args=args))
+        await self._settle()
+        first = len(self.results) + len(self.denials)
+        await kernel.bus.publish(_proposal("answered-once", args=args))
+        await self._settle()
+        self.assertEqual(len(self.results) + len(self.denials), first)
+
+    async def test_the_map_does_not_grow_without_bound(self):
+        from simorgh.guardian.service import _MAX_DECIDED
+
+        kernel = await self._boot()
+        guardian = kernel._supervisor.services["guardian"].service  # noqa: SLF001
+        guardian._decided.update(  # noqa: SLF001
+            {f"old-{n}": ("f", True) for n in range(_MAX_DECIDED)})
+        await kernel.bus.publish(_proposal("fresh", args={"path": "README.md"}))
+        await self._settle()
+        self.assertLessEqual(len(guardian._decided), _MAX_DECIDED)  # noqa: SLF001

@@ -117,6 +117,24 @@ def style(text: str, color: str, *, enabled: bool = True) -> str:
     return f"{_COLORS[color]}{text}{_RESET}"
 
 
+def one_safe_line(text: str, *, limit: int = 200) -> str:
+    """Text somebody else wrote, rendered as one harmless line.
+
+    A reminder's label is whatever a person or a model typed, and it was
+    printed to the terminal verbatim: `\x1b[2J` cleared the screen,
+    newlines printed a paragraph where one line was expected, and 20,000
+    characters printed 20,000 (observer, 2026-09-10). Anything the
+    system echoes back from outside itself belongs here."""
+    cleaned = "".join(
+        ch if ch.isprintable() or ch == " " else " "
+        for ch in (text or "")
+    )
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > limit:
+        cleaned = cleaned[: limit - 1] + "…"
+    return cleaned
+
+
 def notice(level: str, text: str, source: str, *, enabled: bool = True) -> str:
     tag = style(f"[{level}]", _LEVEL_COLOR.get(level, "cyan"), enabled=enabled)
     src = style(f"({source})", "dim", enabled=enabled) if source else ""

@@ -35,13 +35,44 @@ def is_dead(child: Task) -> bool:
     return child.status == BLOCKED and (child.note or "").startswith(DEPENDENCY_FAILED_NOTE)
 
 
+def doomed_ids(children: Sequence[Task]) -> set[str]:
+    """Children that can never run, from the dependency graph itself.
+
+    `is_dead` reads the `dependency_failed:` note, and that note is only
+    written when the child's status CHANGES to blocked -- a child
+    already BLOCKED for another reason (out of step budget, say) never
+    gets it, because BLOCKED -> BLOCKED is not a legal transition. That
+    is the commoner case, and the project then reported `blocked`
+    forever with nothing able to move (observer, 2026-09-10, on the
+    rollup fix from the same morning).
+
+    Walking the edges answers it without depending on a note being
+    written. Cycle-safe: a child already in the set is not re-expanded.
+    """
+    by_id = {c.id: c for c in children}
+    doomed = {c.id for c in children if c.status == FAILED}
+    changed = True
+    while changed:
+        changed = False
+        for child in children:
+            if child.id in doomed or child.status == COMPLETED:
+                continue
+            if any(dep in doomed for dep in (child.depends_on or ())):
+                doomed.add(child.id)
+                changed = True
+    # A dependency on something outside this project cannot be judged
+    # here, so it is left alone rather than assumed dead.
+    return {cid for cid in doomed if cid in by_id}
+
+
 def project_status(children: Sequence[Task]) -> str:
     if not children:
         return PENDING
     statuses = [c.status for c in children]
     if all(s == COMPLETED for s in statuses):
         return COMPLETED
-    if all(is_dead(c) for c in children):
+    doomed = doomed_ids(children)
+    if all(is_dead(c) or c.id in doomed for c in children):
         # Nothing left that can move, and not everything succeeded (the
         # check above already caught that) -- at least one failed, or
         # was parked forever behind one that did.

@@ -115,3 +115,44 @@ class TheProjectReportsItselfFailedTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheCommonerCaseIsAChildAlreadyBlockedTestCase(unittest.TestCase):
+    """The `dependency_failed:` note is written only when the child's
+    status CHANGES to blocked.
+
+    A child already BLOCKED for another reason -- out of step budget,
+    most often -- never gets it, because BLOCKED -> BLOCKED is not a
+    legal transition. So the note-reading fix from the same morning
+    missed the commoner case, and the project reported `blocked`
+    forever with nothing able to move (observer, 2026-09-10).
+    """
+
+    def _task(self, id_: str, status: str, note: str = "", deps=()) -> Task:
+        return Task(id=id_, kind="patch", description="d", status=status, note=note,
+                    depends_on=deps)
+
+    def test_a_child_blocked_for_another_reason_behind_a_failure_is_dead(self):
+        children = [self._task("a", FAILED),
+                    self._task("b", BLOCKED, "step budget exhausted", ("a",))]
+        self.assertEqual(project_status(children), FAILED)
+
+    def test_the_note_path_still_works(self):
+        children = [self._task("a", FAILED),
+                    self._task("b", BLOCKED, f"{DEPENDENCY_FAILED_NOTE}a", ("a",))]
+        self.assertEqual(project_status(children), FAILED)
+
+    def test_a_chain_two_deep_is_dead_all_the_way_down(self):
+        children = [self._task("a", FAILED),
+                    self._task("b", BLOCKED, "out of steps", ("a",)),
+                    self._task("c", PENDING, deps=("b",))]
+        self.assertEqual(project_status(children), FAILED)
+
+    def test_an_independent_child_still_keeps_the_project_alive(self):
+        children = [self._task("a", FAILED),
+                    self._task("b", IN_PROGRESS)]
+        self.assertEqual(project_status(children), IN_PROGRESS)
+
+    def test_a_dependency_cycle_does_not_hang(self):
+        children = [self._task("a", BLOCKED, "", ("b",)), self._task("b", BLOCKED, "", ("a",))]
+        self.assertEqual(project_status(children), BLOCKED)

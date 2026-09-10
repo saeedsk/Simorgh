@@ -773,7 +773,9 @@ class Service:
         self._out(render_mod.notice(level, p.get("text", ""), p.get("source", ""), enabled=self._color))
 
     async def _on_schedule_fired(self, message: Message) -> None:
-        label = str(message.payload.get("label") or "").strip()
+        # Somebody else's text, echoed to a terminal: escape codes,
+        # newlines and length all have to be taken out of it first.
+        label = render_mod.one_safe_line(str(message.payload.get("label") or ""))
         if not label:
             # A schedule with nothing to say is bookkeeping, not a
             # reminder; printing a blank line would be worse than

@@ -321,3 +321,36 @@ class AFiredReminderReachesThePersonTestCase(TestTheServiceNarratesAutonomousWor
         before = len(self.printed)
         await self._emit(topics.PERCEPT_TIME_SCHEDULED, {"schedule_id": "s2", "label": "  "})
         self.assertEqual(len(self.printed), before)
+
+
+class AReminderLabelIsSomebodyElsesTextTestCase(TestTheServiceNarratesAutonomousWork):
+    """A reminder's label is whatever a person or a model typed, and it
+    was printed to the terminal verbatim: `\\x1b[2J` cleared the screen,
+    newlines printed a paragraph where one line was expected, and 20,000
+    characters printed 20,000 (observer, 2026-09-10, on the reminder fix
+    from the same morning).
+    """
+
+    async def test_an_escape_code_never_reaches_the_terminal(self):
+        await self._emit(topics.PERCEPT_TIME_SCHEDULED,
+                         {"schedule_id": "s1", "label": "bins\x1b[2J out"})
+        # The renderer's own colour codes are fine; the label's are not.
+        self.assertNotIn("\x1b[2J", self._out())
+        self.assertIn("bins", self._out())
+
+    async def test_a_multiline_label_prints_as_one_line(self):
+        await self._emit(topics.PERCEPT_TIME_SCHEDULED,
+                         {"schedule_id": "s2", "label": "feed\nthe\ncat"})
+        printed = [line for line in self.printed if "feed" in line]
+        self.assertEqual(len(printed), 1)
+        self.assertIn("feed the cat", printed[0])
+
+    async def test_a_huge_label_is_cut(self):
+        await self._emit(topics.PERCEPT_TIME_SCHEDULED,
+                         {"schedule_id": "s3", "label": "x" * 20_000})
+        self.assertLess(len(self._out()), 1_000)
+
+    async def test_a_label_of_only_control_characters_prints_nothing(self):
+        before = len(self.printed)
+        await self._emit(topics.PERCEPT_TIME_SCHEDULED, {"schedule_id": "s4", "label": "\x1b\x00"})
+        self.assertEqual(len(self.printed), before)

@@ -159,3 +159,48 @@ class APartialRecallSaysSoTestCase(LongContentTestCase):
                                 source_ref="", confidence=None)
         items = await self._recall("boilers")
         self.assertEqual(items[0].content, "a short note about boilers")
+
+
+class TheNoticeReachesTheReaderTestCase(LongContentTestCase):
+    """The notice was appended to the tail, and the only consumer trims
+    each recalled item to 800 characters -- so it was cut off the end of
+    every memory long enough to need it.
+
+    The fix was invisible exactly where it mattered. And a blob cut
+    mid-character decoded with `errors="replace"` came back at the SAME
+    character count, so the length check saw nothing wrong and the
+    memory read as whole, ending in a replacement character (observer,
+    2026-09-10, on the fix from the same morning).
+    """
+
+    async def test_the_notice_survives_a_reader_that_trims_the_tail(self):
+        from simorgh.orchestration.context import _MEMORY_ITEM_MAX_CHARS
+
+        await self.engine.store(kind="episodic", content=self.LONG, tags=[], source_ref="",
+                                confidence=None)
+
+        async def _broken(ref):
+            raise RuntimeError("blob is gone")
+
+        self.ledger.get_blob = _broken
+        items = await self._recall("architecture")
+        self.assertIn("memory truncated", items[0].content[:_MEMORY_ITEM_MAX_CHARS])
+
+    async def test_a_blob_cut_mid_character_is_not_read_as_whole(self):
+        stored = await self.engine.store(kind="episodic", content=self.LONG + "é" * 200,
+                                         tags=[], source_ref="", confidence=None)
+        self.assertTrue(stored)
+        whole = (self.LONG + "é" * 200).encode("utf-8")
+
+        async def _cut(ref):
+            return whole[:-1]       # ends mid-character
+
+        self.ledger.get_blob = _cut
+        items = await self._recall("architecture")
+        self.assertIn("memory truncated", items[0].content)
+
+    async def test_a_whole_memory_still_says_nothing(self):
+        await self.engine.store(kind="episodic", content=self.LONG, tags=[], source_ref="",
+                                confidence=None)
+        items = await self._recall("architecture")
+        self.assertNotIn("memory truncated", items[0].content)

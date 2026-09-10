@@ -45,6 +45,11 @@ class _TaskInfo:
     origin: str = "human"
 
 
+#: How many decided action ids to remember. Enough that a redelivery
+#: minutes later is still recognised, small enough that a long-running
+#: process does not grow a map nobody prunes.
+_MAX_DECIDED = 50_000
+
 #: Argument names whose VALUE must never be printed in a question, even
 #: truncated. The name is shown so the person knows a secret is in play.
 _SECRET_ARG = ("token", "secret", "password", "passwd", "key", "credential", "api_key")
@@ -141,7 +146,15 @@ class Service:
         #
         # In memory and per process: a Guardian restart forgets, and so
         # does Execution's own replay guard, so the two stay consistent.
-        self._decided: dict[str, str] = {}
+        # action_id -> (fingerprint, answered). `answered` matters: the
+        # claim is taken before the work, and if anything between the
+        # claim and the verdict raises -- an oversized-args spill whose
+        # `put_blob` fails is the path a real patch takes -- the id
+        # stayed claimed and the legitimate retry was then dropped as a
+        # duplicate, answering nobody. Before this dedupe existed, that
+        # retry was answered (observer, 2026-09-10, on the fix from the
+        # same morning).
+        self._decided: dict[str, tuple[str, bool]] = {}
         self.charter_text = ""
 
     async def start(self, ctx) -> None:
@@ -452,8 +465,13 @@ class Service:
         action_id = p["action_id"]
         fingerprint = self._fingerprint(p)
         seen = self._decided.get(action_id)
+        if seen is not None and not seen[1]:
+            # Claimed and never answered: whatever went wrong last time
+            # left nobody a reply. Let this delivery through.
+            self._decided.pop(action_id, None)
+            seen = None
         if seen is not None:
-            if seen == fingerprint:
+            if seen[0] == fingerprint:
                 # The same proposal again: already decided, already
                 # answered. Recorded so the stream shows what happened,
                 # and NOT re-answered, because the answer is already on
@@ -473,8 +491,13 @@ class Service:
             ))
             return
         # Claimed before the first await, so two deliveries racing each
-        # other cannot both get through.
-        self._decided[action_id] = fingerprint
+        # other cannot both get through. Bounded, oldest first: an
+        # unbounded map is a leak in a process meant to run for months
+        # (`security.ReplayGuard` beside it evicts at 10,000).
+        if len(self._decided) >= _MAX_DECIDED:
+            for stale in list(self._decided)[: max(1, _MAX_DECIDED // 10)]:
+                self._decided.pop(stale, None)
+        self._decided[action_id] = (fingerprint, False)
         task = self._tasks.get(p.get("task_id") or "", _TaskInfo())
         proposal = Proposal(
             action_id=action_id, tool=p["tool"], args=p["args"], scope=p["scope"],
@@ -533,6 +556,8 @@ class Service:
             ))
             return
         verdict = await self._pipeline.decide(proposal, ctx)
+        # Answered from here on: every branch below publishes something.
+        self._decided[action_id] = (fingerprint, True)
         decided = {"kind": verdict.kind, "layer": verdict.layer}
         if verdict.notes:
             # What a rule noticed and chose not to act on -- shellcheck's

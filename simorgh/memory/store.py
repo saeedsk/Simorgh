@@ -38,8 +38,13 @@ def stream_for(kind: str) -> str:
 #: Appended to a memory that came back shorter than it was stored.
 #: Said in the content itself because that is the only part of a recall
 #: that reaches the model.
-TRUNCATION_NOTICE = ("\n\n[memory truncated: {have} of {want} characters recovered; "
-                     "the rest is not available]")
+#: A PREFIX, not a suffix. On the tail it never survived: the only
+#: consumer (`orchestration/context.py`) trims each recalled item to 800
+#: characters, so the notice was cut off the end of every memory long
+#: enough to need it -- the fix was invisible exactly where it mattered
+#: (observer, 2026-09-10, on the fix from the same morning).
+TRUNCATION_NOTICE = ("[memory truncated: {have} of {want} characters recovered; "
+                     "the rest is not available]\n\n")
 
 
 class WorkingMemory:
@@ -170,17 +175,32 @@ class MemoryEngine:
         """
         out = []
         for item in items:
+            truncated_bytes = False
             ref = self._content_refs.get(item.ref)
             full = None
             if ref:
                 try:
-                    full = (await self._ledger.get_blob(ref)).decode("utf-8", "replace")
+                    raw = await self._ledger.get_blob(ref)
                 except Exception:  # noqa: BLE001 -- the preview is still worth returning
-                    full = None
+                    raw = None
+                full = None
+                if raw is not None:
+                    try:
+                        # Strictly first: `errors="replace"` turns a blob
+                        # cut mid-character into a same-length string
+                        # with a replacement char in it, so the length
+                        # check below saw nothing wrong and the memory
+                        # came back looking whole, ending in a "?"
+                        # (observer, 2026-09-10).
+                        full = raw.decode("utf-8")
+                    except UnicodeDecodeError:
+                        full = raw.decode("utf-8", "replace")
+                        truncated_bytes = True
             content = full if full is not None else item.content
             expected = self._content_chars.get(item.ref, 0)
-            if expected and len(content) < expected:
-                content += TRUNCATION_NOTICE.format(have=len(content), want=expected)
+            if truncated_bytes or (expected and len(content) < expected):
+                content = TRUNCATION_NOTICE.format(
+                    have=len(content), want=expected or len(content)) + content
             out.append(replace(item, content=content) if content != item.content else item)
         return out
 
