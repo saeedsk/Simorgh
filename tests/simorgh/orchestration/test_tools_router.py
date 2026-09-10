@@ -877,3 +877,61 @@ class TestEnergyAndMediaMarkersReachTheTools(unittest.TestCase):
                                  ("MEDIA_PLAY: x\n{}", "reversible")):
             with self.subTest(marker=marker):
                 self.assertEqual(self._walk(marker)["reversibility"], expected)
+
+
+class TestChatCanActuallyMakeThings(unittest.TestCase):
+    """Chat could turn the kitchen light on and read the mail, and could
+    not save a text file.
+
+    Asked for a PowerPoint deck on 2026-09-09, Sim correctly reported
+    that it had no way to write one and handed back a script to paste
+    and run. The honesty was right; the capability set was wrong.
+    """
+
+    def test_chat_can_write_a_file(self):
+        from simorgh.orchestration.profiles import CHAT
+
+        self.assertIn("apply_source_patch", CHAT.tools)
+
+    def test_chat_can_install_a_library_and_run_it(self):
+        """"here is a script that would build it" is not an answer to
+        "build it"."""
+        from simorgh.orchestration.profiles import CHAT
+
+        self.assertIn("install_package", CHAT.tools)
+        self.assertIn("run_script", CHAT.tools)
+
+    def test_chat_has_room_for_write_install_run_and_check(self):
+        from simorgh.orchestration.profiles import CHAT
+
+        self.assertGreaterEqual(CHAT.max_steps, 10)
+
+    def test_the_chat_scaffold_tells_the_model_to_make_the_thing(self):
+        from simorgh.orchestration import scaffolds
+        from simorgh.orchestration.profiles import CHAT
+
+        rendered = scaffolds.render(CHAT)
+        self.assertIn("workspace/", rendered)
+        self.assertIn("not an answer to", rendered)
+
+    def test_a_profile_with_the_install_pair_is_shown_the_resourceful_note(self):
+        """It was gated on `run_shell` alone, so the chat profile -- which
+        now has exactly the install/run pair the note tells the model to
+        reach for -- was never shown it."""
+        from simorgh.orchestration import scaffolds
+        from simorgh.orchestration.profiles import CHAT
+
+        self.assertIn("A missing capability is not a denial", scaffolds.render(CHAT))
+
+    def test_the_workspace_directory_exists_in_the_repository(self):
+        """Sim's one writable directory has to be there before it tries
+        to write to it."""
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[3]
+        self.assertTrue((root / "workspace").is_dir())
+
+    def test_workspace_is_a_write_scope(self):
+        from simorgh.execution.config import Config
+
+        self.assertIn("workspace/", Config().write_scopes_source)

@@ -31,8 +31,27 @@ CHAT = Profile(
            # "what's it costing me" and "pause the telly" are the same
            # kind of question as "turn the light off".
            "energy_status", "energy_report", "media_now", "media_control", "media_play",
+           # Chat could turn the kitchen light on and read the mail, and
+           # could not save a text file. Asked for a PowerPoint deck,
+           # Sim correctly reported that it had no way to write one and
+           # handed back a script to paste and run -- honest, and a
+           # hopeless answer to "make me a deck" (creator, 2026-09-09:
+           # "I expect sim to have write access to its workspace
+           # directory ... and perform the requested file creation ...
+           # including installing necessary packages by itself").
+           #
+           # `apply_source_patch` writes, and `workspace/` is in its
+           # write scopes; `install_package` and `run_script` are how a
+           # library that does the job gets used rather than described.
+           # Guardian still sees every one of them, and the package
+           # tool keeps its own daily cap.
+           "apply_source_patch", "install_package", "run_script",
            "propose_mcp_server"),
-    read_only=False, max_steps=6, max_revisions=0, scaffold="chat", verify=False,
+    # 6 was right for a profile that could only read. Writing a file
+    # costs a step, installing what it needs costs another, running it a
+    # third, and checking the result a fourth -- before a single wrong
+    # turn, and with the last step spent on the forced final answer.
+    read_only=False, max_steps=12, max_revisions=0, scaffold="chat", verify=False,
 )
 # The creator, 2026-09-07: "gives sim more freedom in autonomously
 # working and evolving without too much gate". Until then the patch/

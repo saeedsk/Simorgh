@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict, deque
+from dataclasses import replace
 
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import Clock, Ledger
@@ -92,16 +93,73 @@ class MemoryEngine:
         # cache that stops one `retrieve` re-embedding the whole store.
         self._embedder = embedder or Embedder(config.embedder)
         self.working = WorkingMemory(max_turns=config.working_max_turns, max_chars=config.working_max_chars)
+        # ref -> blob ref, for items whose content was too long to sit
+        # inline. Filled while scanning, read only for what is returned.
+        self._content_refs: dict[str, str] = {}
 
     # -- store -----------------------------------------------------------------------
+    #: The Ledger refuses any string longer than this inline
+    #: (`ledger/client.py::inline_threshold`). A little under it, so a
+    #: preview plus the other payload fields still fits.
+    _INLINE_CONTENT_MAX = 3500
+
     async def store(self, *, kind: str, content: str, tags: list[str], source_ref: str, confidence: float | None) -> str:
+        """Remember one item, however long it is.
+
+        Long content goes to a blob and the payload keeps a preview plus
+        a `content_ref`. Before this, `store` appended the whole string
+        inline and the Ledger refused anything over 4096 characters --
+        so **the longer and more useful an answer was, the more certain
+        it was to be forgotten**, and the refusal surfaced as an
+        unhandled `ValidationError` out of the `turn.completed` handler
+        rather than as anything a person could act on. Caught live
+        2026-09-09 on a 5,165-character reply.
+
+        The preview is kept inline on purpose rather than blobbing
+        everything: `retrieve` scores every candidate by its text, and
+        fetching a blob per candidate would turn one recall into
+        hundreds of reads. Score on the preview, return the whole thing.
+        """
         stream = stream_for(kind)
+        payload = {"tags": list(tags), "source_ref": source_ref,
+                   "confidence": confidence if confidence is not None else 1.0}
+        if len(content) > self._INLINE_CONTENT_MAX:
+            try:
+                payload["content_ref"] = await self._ledger.put_blob(content.encode("utf-8"))
+                payload["content"] = content[: self._INLINE_CONTENT_MAX]
+                payload["content_chars"] = len(content)
+            except Exception:  # noqa: BLE001 -- a truncated memory beats a lost one
+                payload["content"] = content[: self._INLINE_CONTENT_MAX]
+                payload["content_chars"] = len(content)
+        else:
+            payload["content"] = content
         seq = await self._ledger.append(stream, Event(
             stream=stream, type="item.stored", ts=self._clock.now(), trace_id="", causation_id=None,
             idempotency_key=f"{stream}:{uuid.uuid4().hex}",
-            payload={"content": content, "tags": list(tags), "source_ref": source_ref, "confidence": confidence if confidence is not None else 1.0},
+            payload=payload,
         ))
         return f"{stream}:{seq}"
+
+    async def _resolve_content(self, items: list) -> list:
+        """Swap each item's preview for its full text.
+
+        Only for the items actually being returned. Doing it during
+        scoring would mean a blob read per candidate, which is a
+        hundred reads to answer one question.
+        """
+        out = []
+        for item in items:
+            ref = self._content_refs.get(item.ref)
+            if not ref:
+                out.append(item)
+                continue
+            try:
+                full = (await self._ledger.get_blob(ref)).decode("utf-8", "replace")
+            except Exception:  # noqa: BLE001 -- the preview is still worth returning
+                out.append(item)
+                continue
+            out.append(replace(item, content=full))
+        return out
 
     # -- retrieve --------------------------------------------------------------------
     async def retrieve(self, *, query: str, kinds: list[str], k: int, filters: dict | None) -> tuple[list[MemoryItem], bool]:
@@ -143,6 +201,9 @@ class MemoryEngine:
                     continue
                 if filters.get("since") is not None and event.ts < filters["since"]:
                     continue
+                content_ref = event.payload.get("content_ref")
+                if content_ref:
+                    self._content_refs[ref] = str(content_ref)
                 item = MemoryItem(ref=ref, kind=kind, content=event.payload.get("content", ""), tags=tags,
                                   confidence=float(event.payload.get("confidence", 1.0)), ts=event.ts,
                                   source_ref=event.payload.get("source_ref", ""))
@@ -150,7 +211,8 @@ class MemoryEngine:
 
         candidates.sort(key=lambda pair: pair[0], reverse=True)
         truncated = len(candidates) > k
-        return [item for _, item in candidates[:k]], truncated
+        chosen = [item for _, item in candidates[:k]]
+        return await self._resolve_content(chosen), truncated
 
     def _score(self, query_pair, content: str, item: MemoryItem, now: float, penalty: float) -> float:
         similarity = self._similarity(query_pair, content) if query_pair is not None else 1.0

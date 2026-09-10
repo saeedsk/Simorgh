@@ -29,6 +29,11 @@ results/
 # survives across sessions (unlike results/, which is pruned) and is
 # never committed or reviewed. See execution/config.py::workspace_dir.
 workspace/
+# ...except the README, so the directory exists in a fresh clone and
+# Sim has somewhere to write on its first run rather than discovering
+# the path is missing.
+!workspace/
+!workspace/README.md
 
 # Scripts run_script stages before running them. Transient.
 .simorgh_scripts/

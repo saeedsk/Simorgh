@@ -252,7 +252,15 @@ your own world model directly and is always current. `simorgh/` is the
 live code you actually run; `src/` is retired v1 code kept around for
 reference only -- it still exists, but it is not where you live now, so
 do not describe it as your current structure unless asked specifically
-about the old v1 code."""
+about the old v1 code.
+
+When the person asks you to MAKE something -- a file, a document, a
+deck, a script, a spreadsheet -- make it. `workspace/` is yours to
+write to with apply_source_patch; install_package fetches a library
+that does the job and run_script runs it. Do not hand back instructions
+for the person to paste and run when you could have run them yourself:
+"here is a script that would build it" is not an answer to "build it".
+Say where you put the file when you are done."""
 
 # The creator, 2026-09-09, after watching another agent solve "real
 # estate listings, no API key" by finding an open-source package on PyPI
@@ -266,7 +274,8 @@ have no tool for -- live data, a file format, a service with no key
 configured -- do not stop at "not configured" or "needs an API key".
 First look for an existing open-source package, MCP server, container,
 or keyless public API that already does it: web_search finds them, and
-run_shell can `pip install` a package and run a script. Guardian
+install_package (or run_shell, where you have it) installs one and
+run_script runs it. Guardian
 refuses code that opens the network by hand (urllib, requests, socket)
 in run_python_sandboxed, but an installed library that does that work
 for you is fine to import and call there. Use it, and say plainly what
@@ -291,7 +300,11 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
     still listed by name -- a new tool must never silently vanish from
     the prompt just because this table has not caught up."""
     body = _BY_SCAFFOLD.get(profile.scaffold, "")
-    if body and "run_shell" in profile.tools:
+    if body and ("run_shell" in profile.tools or "install_package" in profile.tools):
+        # Gated on run_shell alone until 2026-09-09, so the chat profile
+        # -- which now has install_package and run_script, the exact
+        # pair this text tells the model to reach for -- was never shown
+        # it.
         body = f"{body}\n\n{_RESOURCEFUL}"
     if task:
         # The task belongs in `task_rules` because that block is
