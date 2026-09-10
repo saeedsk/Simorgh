@@ -1168,7 +1168,25 @@ async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock
         for proposal_id, proposal in pending.items():
             command_line = " ".join([proposal.get("command", ""), *proposal.get("args", [])])
             lines.append(f"  {proposal_id}  {proposal.get('name', '')}  ({command_line})")
-            lines.append(f"    reason: {proposal.get('reason', '')}")
+            lines.append(f"    reason: {render_mod.one_safe_line(proposal.get('reason', ''))}")
+            # The two fields that decide what approving this GRANTS, and
+            # neither was shown. `read_only_tools` is not a label:
+            # `execution/mcp.py` registers each named tool with
+            # `reversibility="read_only"`, and Guardian allows a
+            # read-only tool in EVERY posture, `locked` included. So the
+            # person was granting a permanent gate exemption they had
+            # never seen, to tools they had never been told the names of
+            # (observer, 2026-09-10). The reason is rendered as one line
+            # for the same reason: a multi-line reason could pad itself
+            # out to look like more listing entries.
+            granted = [str(t) for t in (proposal.get("read_only_tools") or ())]
+            if granted:
+                lines.append("    GRANTS (Guardian never gates these, even when locked): "
+                             + render_mod.one_safe_line(", ".join(granted)))
+            wanted = [str(k) for k in (proposal.get("env_keys") or ())]
+            if wanted:
+                lines.append("    wants these secrets: "
+                             + render_mod.one_safe_line(", ".join(wanted)))
         lines.append("  `mcp approve <id>` or `mcp reject <id> [reason]`")
     else:
         lines.append("no pending MCP server proposals")

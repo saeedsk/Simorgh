@@ -89,3 +89,44 @@ class AnEnglishNoIsNotAVerdictTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnOptionalItemIsNotRequiredTestCase(unittest.TestCase):
+    """The tag pattern accepted exactly `[optional]`, lowercase, at the
+    start.
+
+    So `[Optional]`, `[OPTIONAL]`, `**[optional]**`, `(optional)`,
+    `optional:` and a trailing `[optional]` -- six of seven realistic
+    spellings -- all became REQUIRED, and the tag text stayed inside the
+    question the reviewer was then asked. That silently inverts the
+    generator prompt's own rule ("work the task did not ask for may be
+    [optional], never [required]"), so a "no" on an admittedly optional
+    extra failed the whole task (observer, 2026-09-10).
+    """
+
+    def test_every_spelling_the_model_actually_uses(self):
+        from simorgh.verification.checklist import split_tag
+
+        for text in ("[optional] is there a test?", "[Optional] is there a test?",
+                     "[OPTIONAL] is there a test?", "**[optional]** is there a test?",
+                     "(optional) is there a test?", "optional: is there a test?",
+                     "is there a test? [optional]"):
+            question, required = split_tag(text)
+            self.assertFalse(required, text)
+            self.assertEqual(question, "is there a test?", text)
+
+    def test_required_and_untagged_both_stay_required(self):
+        from simorgh.verification.checklist import split_tag
+
+        self.assertEqual(split_tag("[required] does it work?"), ("does it work?", True))
+        self.assertEqual(split_tag("does it work?"), ("does it work?", True))
+
+    def test_a_bare_leading_word_is_part_of_the_question(self):
+        """"Required imports present?" asks about imports. Stripping it
+        would trade one wrong answer for another."""
+        from simorgh.verification.checklist import split_tag
+
+        self.assertEqual(split_tag("Required imports present?"),
+                         ("Required imports present?", True))
+        self.assertEqual(split_tag("Optional arguments documented?"),
+                         ("Optional arguments documented?", True))

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import unittest
+import unittest.mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -218,8 +219,12 @@ class InstallPackageTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("typosquat", result.error)
         self.assertFalse(self.calls)
 
+        # The override needs a reason as well as the flag -- that is
+        # what this test's own docstring means by "the reason is
+        # stated", and until 2026-09-10 only the flag was enforced.
         allowed = await tool.run(
-            {"manager": "pip", "spec": "homeharvest", "allow_new": True}, ctx=_ctx())
+            {"manager": "pip", "spec": "homeharvest", "allow_new": True,
+             "reason": "named in the vendor's own migration guide"}, ctx=_ctx())
         self.assertTrue(allowed.ok, allowed.error)
 
     async def test_a_package_with_no_homepage_needs_allow_new(self):
@@ -356,3 +361,46 @@ class TheRegistryPageTooBigToReadTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.ok)
         self.assertNotIn("no package named", (result.output or "") + (result.error or ""))
         self.assertIn("larger than", result.error)
+
+
+class TheOverrideNeedsAReasonTestCase(unittest.IsolatedAsyncioTestCase):
+    """The module docstring has always said this override "needs
+    `allow_new: true` AND a reason". Only the flag was enforced.
+
+    So the refusal was talked past by re-asking with the flag and
+    nothing else: an observer watched a nonexistent package be refused,
+    then installed on the very next call with no `reason` key at all,
+    and the single audit line read `reason=-` (2026-09-10). An override
+    nobody has to justify is not an override, it is a delay.
+    """
+
+    def _tool(self):
+        return packages.InstallPackageTool(Config(repo_root=Path(tempfile.mkdtemp())))
+
+    async def _run(self, args: dict):
+        tool = self._tool()
+        with unittest.mock.patch.object(tool, "_install", return_value=None):
+            return await tool.run(args, ctx=_ctx())
+
+    async def test_the_override_without_a_reason_is_refused(self):
+        result = await self._run({"manager": "pip", "spec": "zzz-not-real-9x", "allow_new": True})
+        self.assertFalse(result.ok)
+        self.assertIn("needs a reason", result.error)
+
+    async def test_a_token_reason_does_not_count(self):
+        result = await self._run({"manager": "pip", "spec": "zzz-not-real-9x",
+                                  "allow_new": True, "reason": "ok"})
+        self.assertFalse(result.ok)
+        self.assertIn("needs a reason", result.error)
+
+    async def test_a_real_reason_gets_through_the_check(self):
+        """It still has to install; this only proves the guard let it
+        past."""
+        result = await self._run({"manager": "pip", "spec": "zzz-not-real-9x", "allow_new": True,
+                                  "reason": "documented in the vendor's migration guide"})
+        self.assertNotIn("needs a reason", result.error or "")
+
+    async def test_without_the_override_the_typosquat_guard_still_runs(self):
+        result = await self._run({"manager": "pip", "spec": "zzz-not-real-9x"})
+        self.assertFalse(result.ok)
+        self.assertIn("could not find", result.error)

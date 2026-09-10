@@ -17,7 +17,45 @@ from dataclasses import dataclass
 from .api import CheckContext, ThinkReply, VerifyRequest
 from .parsing import parse_verdict
 
-_ITEM_LINE = re.compile(r"^\s*\d+[.):]\s*(?:\[(required|optional)\]\s*)?(.+)$")
+_ITEM_LINE = re.compile(r"^\s*\d+[.):]\s*(.+)$")
+
+#: A tag the model wrote, in the spellings it actually uses. The old
+#: pattern accepted exactly `[optional]` in lowercase, so `[Optional]`,
+#: `[OPTIONAL]`, `**[optional]**`, `(optional)`, `optional:` and a
+#: trailing `[optional]` -- 6 of 7 realistic spellings -- all became
+#: REQUIRED, and the tag text stayed inside the question the reviewer
+#: was then asked. That silently inverts the generator prompt's own
+#: rule ("work the task did not ask for may be [optional], never
+#: [required]"), so a "no" on an admittedly optional extra failed the
+#: whole task (observer, 2026-09-10).
+#:
+#: Delimited only: `Required imports present?` is a question, not a tag.
+#: Delimited, always: either brackets around the word, or the word
+#: followed by a colon or a dash. A bare leading word is part of the
+#: question -- "Required imports present?" asks about imports.
+_LEADING_TAG = re.compile(
+    r"^[*_\s]*(?:[\[(<]\s*(required|optional)\s*[\])>]|(required|optional)\s*[:\-–])[*_]*\s*",
+    re.IGNORECASE)
+_TRAILING_TAG = re.compile(r"\s*[*_]*[\[(<]\s*(required|optional)\s*[\])>][*_]*\s*$", re.IGNORECASE)
+
+
+def split_tag(text: str) -> tuple[str, bool]:
+    """`(question, required)` -- the tag taken off, wherever it sits.
+
+    Untagged is required, which is the safe direction: an item the model
+    forgot to mark is treated as one that must pass."""
+    body = (text or "").strip()
+    tag = None
+    found = _LEADING_TAG.match(body)
+    if found is not None and found.end() > 0:
+        tag = (found.group(1) or found.group(2)).lower()
+        body = body[found.end():].strip()
+    else:
+        found = _TRAILING_TAG.search(body)
+        if found is not None:
+            tag = found.group(1).lower()
+            body = body[: found.start()].strip()
+    return body, tag != "optional"
 
 _CHECKLIST_PROMPT = """A change was made to address this task:
 
@@ -162,8 +200,10 @@ async def generate_checklist(think, req: VerifyRequest, config, max_items: int |
         match = _ITEM_LINE.match(line)
         if not match:
             continue
-        required = match.group(1) != "optional"
-        items.append(ChecklistItem(question=match.group(2).strip(), required=required))
+        question, required = split_tag(match.group(1))
+        if not question:
+            continue
+        items.append(ChecklistItem(question=question, required=required))
         if len(items) >= max_items:
             break
     return items

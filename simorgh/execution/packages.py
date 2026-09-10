@@ -59,6 +59,10 @@ _SPEC_RE = re.compile(r"^(?P<name>@?[A-Za-z0-9][A-Za-z0-9._/-]{0,127})(?P<pin>(=
 # was `allow_new: true` -- the typosquat guard talked out of the way by
 # one of the most legitimate packages on the index (observer, 2026-09-10;
 # matplotlib's page is 2,447,559 bytes).
+#: Long enough that "ok" or "yes" will not do, short enough that a real
+#: sentence clears it.
+_MIN_OVERRIDE_REASON_CHARS = 12
+
 _PACKAGE_JSON_MAX_BYTES = 32_000_000
 
 #: A page too big to read is not a package that does not exist. Read
@@ -276,6 +280,21 @@ class InstallPackageTool:
             return ToolResult(ok=False, error=f"refused: {used}/{cap} installs already today")
 
         allow_new = bool(args.get("allow_new"))
+        reason = " ".join(str(args.get("reason") or "").split())
+        if allow_new and len(reason) < _MIN_OVERRIDE_REASON_CHARS:
+            # The docstring above has always said this override "needs
+            # `allow_new: true` AND a reason". Only the flag was
+            # enforced, so the refusal was talked past by re-asking with
+            # the flag and nothing else: an observer watched a
+            # nonexistent package be refused, then installed on the very
+            # next call with no `reason` key at all, and the single
+            # audit line read `reason=-` (2026-09-10). An override
+            # nobody has to justify is not an override, it is a delay.
+            return ToolResult(
+                ok=False,
+                error=(f"refused: allow_new switches the typosquat check off, so it needs a "
+                       f"reason saying why you are sure of {name!r} -- at least "
+                       f"{_MIN_OVERRIDE_REASON_CHARS} characters, and it goes into the install log"))
         if not allow_new:
             refusal = await asyncio.to_thread(self._vet, name, manager)
             if refusal:
@@ -292,7 +311,7 @@ class InstallPackageTool:
                 output=(completed.stdout or "")[-cap_chars:],
                 metadata={"stderr": (completed.stderr or "")[-cap_chars:]},
             )
-        self._record(manager, spec, ctx, str(args.get("reason") or ""))
+        self._record(manager, spec, ctx, reason)
         return ToolResult(
             ok=True, output=(completed.stdout or "")[-cap_chars:] + f"\n\ninstalled {spec} with {manager}",
             metadata={"manager": manager, "spec": spec, "name": name},
