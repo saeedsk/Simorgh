@@ -42,7 +42,7 @@ in their systems.
 | **`tcpdump`** (present) / **`scapy`** | L2 passive | ARP, DHCP, mDNS, SSDP, LLDP/CDP frames as they happen | `net_listen` -- the "listen to the network" half | root / `CAP_NET_RAW` |
 | **`arp-scan`** or scapy `arping` | L2 active | every host on the segment in ~2s, with MAC, even ones that ignore ping | `net_scan arp` | root |
 | **IEEE OUI registry** (`oui.csv`, via `manuf` or a direct download) | L2 | MAC prefix → vendor ("Amazon Technologies", "Ring LLC", "Hangzhou Hikvision") | first classification signal | none |
-| **`nmap`** (+ `python-nmap`) | L3/L4 | ping sweep, port scan, service banners, OS guess | `net_scan ping|ports|deep` | root for SYN/OS; unprivileged `-sT` works |
+| **a standard OSS port scanner** (e.g. `nmap` + `python-nmap`) | L3/L4 | reachability sweep, open-port enumeration, service banners, OS guess | `net_scan ping|ports|deep` | root for SYN/OS; unprivileged connect-scan works |
 | **`python-zeroconf`** | app: mDNS / DNS-SD | `_hue._tcp`, `_googlecast._tcp`, `_hap._tcp`, `_esphomelib._tcp`, `_shelly._tcp`, `_ipp._tcp`, `_airplay._tcp`, `_matter._tcp`, `_meshcop._udp`, `_sonos._tcp`, `_rtsp._tcp`… with TXT records | the richest single source for smart devices | none |
 | **`async-upnp-client`** (`ssdp`) | app: SSDP / UPnP | M-SEARCH `ssdp:all`: device type, friendly name, manufacturer, model, presentation URL -- Echos, TVs, Sonos, routers, NAS, Hue bridge | | none |
 | **`WSDiscovery`** (`python-ws-discovery`) | app: WS-Discovery | every ONVIF camera/NVR announces here; gives the device service URL | cameras specifically | none |
@@ -59,7 +59,7 @@ in their systems.
 
 **Not used**: `fingerbank`/`Fing` (API key, cloud, proprietary
 fingerprints); `Zeek`/`Suricata` (a full NIDS is a different product);
-`nmap --script vuln` or any exploitation/credential-guessing module --
+vulnerability-probing or credential-guessing scripts of any kind --
 **Sim never attempts a login it was not given**; `netdisco` (archived,
 superseded by HA's own discovery).
 
@@ -96,7 +96,7 @@ simorgh/network/
 class Config:
     enabled: bool = False
     # REQUIRED for any active scan. Never inferred silently: a wrong
-    # CIDR is a port scan of somebody else's network. `interfaces.py`
+    # CIDR is an unwanted probe of somebody else's network. `interfaces.py`
     # proposes the RFC1918 subnets it sees; `net_scan` refuses until
     # one is written here or passed with `confirm: true`.
     allowed_cidrs: tuple[str, ...] = ()
@@ -106,7 +106,7 @@ class Config:
     sweep_every_s: float = 3600.0             # scheduled arp+mdns+ssdp sweep (Kernel scheduler)
     deep_sweep_every_s: float = 86400.0       # + ports/http/rtsp, at 03:00 local
     # Active-scan politeness. A home router can be knocked over by an
-    # enthusiastic nmap; these are the defaults, not the ceiling.
+    # an enthusiastic port sweep; these are the defaults, not the ceiling.
     ports_profile: str = "iot"                # iot | common | full (full = human)
     max_hosts_per_scan: int = 256
     max_rate_pps: int = 200
@@ -133,7 +133,7 @@ class Config:
   5000 5353 5683 6666 6667 8000 8080 8081 8443 8554 8883 9000 9999
   37777 (Dahua) 34567 (XM cameras) 40317 55442 55443 (Echo) 49152-49155
   (UPnP) 62078 (iOS) 5900 3389 445 139
-- `common`: nmap's top 200
+- `common`: the scanner's top ~200 ports
 - `full`: 1-65535 → **human-approved only**, and one host at a time.
 
 ## 3. Sensing
@@ -196,11 +196,11 @@ observations from six scanners and they have to merge.
 | scanner | method | evidence emitted |
 |---|---|---|
 | `arp` | `arp-scan --localnet` if present, else scapy `arping`, else a *ping sweep followed by reading the ARP cache* (`ip neigh` / `arp -a`) -- the unprivileged fallback that always works | mac, ip, vendor(oui) |
-| `ping` | ICMP sweep via nmap `-sn` or async raw ping (`icmplib`, unprivileged mode) | ip alive, ttl (64 = Linux/IoT, 128 = Windows, 255 = network gear) |
+| `ping` | reachability sweep via the port scanner or async ping (`icmplib`, unprivileged mode) | ip alive, ttl (64 = Linux/IoT, 128 = Windows, 255 = network gear) |
 | `mdns` | `zeroconf` `ServiceBrowser` on `_services._dns-sd._udp.local` then each type; 10s | services, TXT (Hue `bridgeid`, HAP `ci` = **HomeKit category code**, `md` = model, `id`; Chromecast `md`/`fn`; ESPHome `mac`/`board`; Shelly `app`/`gen`) |
 | `ssdp` | M-SEARCH `ssdp:all` ×3, then GET each `LOCATION` XML | deviceType, friendlyName, manufacturer, modelName, modelNumber, serialNumber, presentationURL, `SERVER` header |
 | `wsd` | WS-Discovery Probe | ONVIF `XAddrs`, `Scopes` (name/hardware/location), type `NetworkVideoTransmitter` |
-| `ports` | nmap `-sT` (unprivileged) with `ports_profile`, `--max-rate`, `-T2`; fallback: asyncio `open_connection` per port | open ports |
+| `ports` | the port scanner (unprivileged connect mode) with `ports_profile`, `--max-rate`, `-T2`; fallback: asyncio `open_connection` per port | open ports |
 | `http` | GET `/` on 80/81/443/8080/8081/8443/8000: `Server` header, `<title>`, `WWW-Authenticate` realm (`Hikvision`, `Dahua`, `Reolink`, `TP-LINK`, `NETGEAR`…), favicon mmh3 hash vs a bundled table of ~60 known IoT favicons, `/onvif/device_service`, `/cgi-bin/`, `/api/system/info` (Frigate/HA/Shelly probes) | vendor/model/role hints, **auth_required: bool** |
 | `rtsp` | `OPTIONS rtsp://ip:554/` | RTSP present, `Server:` header, 401 vs 200 (**a 200 means an unauthenticated stream**) |
 | `onvif` | `GetDeviceInformation` unauthenticated (many cameras answer), `GetCapabilities` | manufacturer, model, firmware, serial |
@@ -379,7 +379,7 @@ cameras):
   `net_register --accept`; never silently.
 - **Devices with no system** (phones, laptops, watches): registered as
   HA `device_tracker` presence sources via the `router` integration
-  (UniFi/OPNsense) or `nmap_tracker` -- so `home.presence` gets them --
+  (UniFi/OPNsense) or the router/`nmap_tracker` integration -- so `home.presence` gets them --
   and nothing else.
 
 Every registration is a ledger event on `network:registrations` with
@@ -533,7 +533,7 @@ unknown -- are the acceptance).
 - HTTP probing a camera's `/` with the wrong path can lock some
   Hikvision firmware into "illegal login" for 30 min. Only GET `/`
   and the ONVIF path; never POST; never retry a 401.
-- nmap OS detection (`-O`) needs root and is wrong about IoT most of
+- OS detection needs root and is wrong about IoT most of
   the time; use TTL + DHCP fingerprint + banners instead.
 - WS-Discovery multicast (239.255.255.250:3702) is often blocked by
   Wi-Fi client isolation; when `wsd` finds nothing and `http` finds
