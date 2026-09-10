@@ -14,6 +14,7 @@ from simorgh.cognition.api import ProviderUnavailable
 from simorgh.cognition.providers.together import (
     DEFAULT_MODEL,
     DEFAULT_REASONING_EFFORT,
+    MIN_REASONING_MAX_TOKENS,
     PRICE_CACHED_IN,
     PRICE_IN,
     PRICE_OUT,
@@ -68,7 +69,11 @@ class TestTheRequest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Simorgh", t.headers["User-Agent"])
         self.assertNotIn("urllib", t.headers["User-Agent"])
         self.assertEqual(t.request["model"], "zai-org/GLM-5.3-Flash")
-        self.assertEqual(t.request["max_tokens"], 512)
+        # Raised to the reasoning floor. 512 tokens does not buy a short
+        # answer from a reasoning model, it buys no answer at all --
+        # thinking comes out of the same budget (see
+        # `MIN_REASONING_MAX_TOKENS`).
+        self.assertEqual(t.request["max_tokens"], MIN_REASONING_MAX_TOKENS)
 
     async def test_system_messages_stay_system_messages(self):
         """Cognition's assembler puts the constitution, the voice, the

@@ -1412,18 +1412,26 @@ class ReplaceInFileTool:
         applied = []
         for index, (find, replace) in enumerate(blocks, start=1):
             count = updated.count(find)
+            # Whether the EARLIER blocks were fine is the most useful
+            # thing this refusal can say. Without it the model resends
+            # the whole set blind and gets refused on the same block
+            # again -- watched twice in a row on 2026-09-09, six steps
+            # spent re-reading a file whose first block had matched
+            # perfectly both times.
+            good = (f" Blocks 1-{index - 1} matched and can be sent again unchanged;"
+                    f" only block {index} needs fixing." if index > 1 else "")
             if count == 0:
                 return ToolResult(
                     ok=False,
-                    error=(f"refused: block {index}'s SEARCH text is not in {subject}. Nothing was "
-                           f"changed. READ_FILE the part you mean to change and copy the text "
-                           f"exactly, including its indentation."))
+                    error=(f"refused: block {index}'s SEARCH text is not in {subject}. Nothing "
+                           f"was changed.{good} READ_FILE the part you mean to change and copy "
+                           f"the text exactly, including its indentation and any blank lines."))
             if count > 1:
                 return ToolResult(
                     ok=False,
                     error=(f"refused: block {index}'s SEARCH text appears {count} times in "
-                           f"{subject}, so which one you mean is a guess. Nothing was changed. "
-                           f"Add a line or two either side to make it unique."))
+                           f"{subject}, so which one you mean is a guess. Nothing was "
+                           f"changed.{good} Add a line or two either side to make it unique."))
             updated = updated.replace(find, replace, 1)
             applied.append((find, replace))
 

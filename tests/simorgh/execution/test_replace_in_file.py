@@ -314,3 +314,43 @@ class RefusalPointsAtTheRightToolTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_it_still_allows_a_deliberate_shortening(self):
         self.assertIn("really do mean", await self._refusal())
+
+
+class PartialMatchReportingTestCase(_ToolTestCase):
+    """A refusal that says which blocks were fine.
+
+    Without it the model resends the whole set blind and is refused on
+    the same block again -- watched twice in a row on 2026-09-09, six
+    steps spent re-reading a file whose first block had matched
+    perfectly both times."""
+
+    def setUp(self):
+        super().setUp()
+        self._write("g.html", "alpha\nbeta\ngamma\n")
+
+    async def test_a_failing_second_block_says_the_first_was_fine(self):
+        result = await self._run("g.html", _block("alpha", "ALPHA") + "\n" + _block("nope", "x"))
+        self.assertFalse(result.ok)
+        self.assertIn("Blocks 1-1 matched", result.error)
+        self.assertIn("only block 2 needs fixing", result.error)
+
+    async def test_a_failing_first_block_says_nothing_about_earlier_ones(self):
+        result = await self._run("g.html", _block("nope", "x"))
+        self.assertFalse(result.ok)
+        self.assertNotIn("matched and can be sent again", result.error)
+
+    async def test_an_ambiguous_later_block_also_says_which_were_fine(self):
+        self._write("h.html", "alpha\nsame\nbeta\nsame\n")
+        result = await self._run("h.html", _block("alpha", "A") + "\n" + _block("same", "S"))
+        self.assertFalse(result.ok)
+        self.assertIn("Blocks 1-1 matched", result.error)
+
+    async def test_the_file_is_still_untouched(self):
+        path = self._write("g.html", "alpha\nbeta\ngamma\n")
+        await self._run("g.html", _block("alpha", "ALPHA") + "\n" + _block("nope", "x"))
+        self.assertEqual(path.read_text(), "alpha\nbeta\ngamma\n")
+
+    async def test_it_mentions_blank_lines_as_a_thing_to_copy_exactly(self):
+        """The commonest reason a SEARCH misses by one character."""
+        result = await self._run("g.html", _block("nope", "x"))
+        self.assertIn("blank lines", result.error)

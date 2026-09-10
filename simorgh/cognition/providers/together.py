@@ -49,6 +49,22 @@ from ..api import ProviderUnavailable
 DEFAULT_MODEL = "zai-org/GLM-5.3-Flash"
 DEFAULT_BASE_URL = "https://api.together.ai/v1"
 DEFAULT_REASONING_EFFORT = "low"
+
+#: The smallest `max_tokens` worth sending to a reasoning model.
+#:
+#: Thinking tokens come out of the same budget as the answer, so a small
+#: cap does not produce a short answer -- it produces NO answer, and the
+#: call fails with `finish_reason='length'` having already been billed.
+#: `review` asks for 1,000, which made that failure certain rather than
+#: occasional: live on 2026-09-09, every verification round of a blocked
+#: task died this way.
+#:
+#: A floor is cheaper than the alternative in plain arithmetic. A
+#: truncated call is billed in full and returns nothing, so the retry
+#: costs strictly more than having asked for enough room the first
+#: time. It is a ceiling, not a target: a model that finishes in 200
+#: tokens is billed for 200.
+MIN_REASONING_MAX_TOKENS = 4_000
 USER_AGENT = "Simorgh/2.0 (+https://github.com/saeedsk/Simorgh)"
 
 # Per 1M tokens (Together's published GLM-5.3-Flash pricing). Mirrored in
@@ -107,7 +123,7 @@ class TogetherProvider:
             ] or [{"role": "user", "content": ""}],
         }
         if max_tokens:
-            body["max_tokens"] = int(max_tokens)
+            body["max_tokens"] = self._room_to_answer(int(max_tokens))
         if self._reasoning_effort:
             body["reasoning_effort"] = self._reasoning_effort
 
@@ -201,6 +217,13 @@ class TogetherProvider:
             metadata={"model": data.get("model") or self._model},
         )
 
+    def _room_to_answer(self, max_tokens: int) -> int:
+        """Never ask a reasoning model for less room than it needs to
+        reach an answer. See `MIN_REASONING_MAX_TOKENS`."""
+        if not self._reasoning_effort:
+            return max_tokens
+        return max(max_tokens, MIN_REASONING_MAX_TOKENS)
+
     @staticmethod
     def _cached_tokens(usage: dict) -> int:
         """Together reports the cache hit as `prompt_tokens_details.
@@ -223,5 +246,6 @@ class TogetherProvider:
 
 __all__ = [
     "TogetherProvider", "DEFAULT_MODEL", "DEFAULT_BASE_URL", "DEFAULT_REASONING_EFFORT",
+    "MIN_REASONING_MAX_TOKENS",
     "USER_AGENT", "PRICE_IN", "PRICE_OUT", "PRICE_CACHED_IN",
 ]

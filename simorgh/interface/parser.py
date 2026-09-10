@@ -74,16 +74,59 @@ def parse(line: str) -> Command | None:
     if stripped.startswith("!"):
         return Command(name="!", args=stripped[1:].strip(), raw=raw)
 
-    body = stripped[1:] if stripped.startswith("/") else stripped
+    explicit = stripped.startswith("/")
+    body = stripped[1:] if explicit else stripped
     first, _, rest = body.partition(" ")
+    # A trailing full stop or comma is typing, not syntax: `status.` is
+    # still `status`. But only when the punctuation is all that stood in
+    # the way -- `benchmark, how did it go?` is a question about the
+    # benchmark, not a request to run one.
     lowered = first.lower()
-
     if lowered in COMMAND_NAMES:
         return Command(name=lowered, args=rest.strip(), raw=raw)
+    trimmed = lowered.rstrip(_SENTENCE_PUNCTUATION)
+    if trimmed in COMMAND_NAMES and (explicit or not _looks_like_prose(first, rest)):
+        return Command(name=trimmed, args=rest.strip(), raw=raw)
+    lowered = trimmed
 
-    if len(lowered) >= 4:
+    if len(lowered) >= 4 and (explicit or not _looks_like_prose(first, rest)):
         match = difflib.get_close_matches(lowered, COMMAND_NAMES, n=1, cutoff=_AUTOCORRECT_CUTOFF)
         if match:
             return Command(name=match[0], args=rest.strip(), raw=raw, guessed_from=first)
 
     return Command(name=None, args=stripped, raw=raw)
+
+
+#: Punctuation a command never ends in, and a sentence often does.
+_SENTENCE_PUNCTUATION = ",.;:!?"
+
+
+def _looks_like_prose(first: str, rest: str) -> bool:
+    """Whether a near-miss first word is a typo or just a sentence.
+
+    Live-caught 2026-09-09. The creator typed
+
+        improvment, now the game works for one second, then it freezes
+
+    meaning it as a remark. `improvment,` is close enough to `improve`
+    to clear the cutoff, so it became `improve <topic>` -- which, with
+    no path in it, creates a *skill* task. A bug report about a game
+    became "write a skill", and three rounds of verification then asked
+    whether a skill had been produced.
+
+    An exact command is still a command however it is punctuated. This
+    only holds back the GUESS, and only without a leading `/`: typing
+    the slash is a person saying "this is a command", and their typo
+    should still be corrected.
+    """
+    if not rest.strip():
+        # A word on its own is not a sentence, whatever it ends in.
+        # `status.` is somebody typing `status` and a full stop.
+        return False
+    if first.rstrip(_SENTENCE_PUNCTUATION) != first:
+        # `improve` never ends in a comma. A sentence often does.
+        return True
+    # A guessed command carrying a comma'd clause after it is a sentence
+    # far more often than an argument: real arguments are paths, ids and
+    # topics, not prose with punctuation in the middle.
+    return "," in rest
