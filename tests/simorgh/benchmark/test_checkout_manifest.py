@@ -60,7 +60,6 @@ class ManifestFromEvalScriptTestCase(unittest.TestCase):
         self.assertEqual(m.target_style, TARGET_PATH)
         self.assertEqual(m.test_command, "pytest -rA -vv -o console_output_style=classic --tb=no")
         self.assertIn("conda activate testbed", m.setup)
-        self.assertIn("python -m pip install -e .[test] --verbose", m.setup)
 
     def test_the_hidden_test_patch_is_not_in_the_setup(self):
         m = swebench.checkout_manifest({"image": "img", "eval_script": ASTROPY})
@@ -73,6 +72,13 @@ class ManifestFromEvalScriptTestCase(unittest.TestCase):
         for noise in ("git show", "git status", "core.fileMode"):
             self.assertNotIn(noise, m.setup)
         self.assertNotIn("#!", m.setup)
+
+    def test_the_reinstall_is_not_in_the_setup(self):
+        # The image already has the project installed in editable mode;
+        # under emulation the reinstall alone outran a tool call's 180s.
+        m = swebench.checkout_manifest({"image": "img", "eval_script": ASTROPY})
+        self.assertNotIn("pip install", m.setup)
+        self.assertIn("conda activate testbed", m.setup, "the environment itself must stay")
 
     def test_django_shape(self):
         m = swebench.checkout_manifest({"image": "img", "eval_script": DJANGO})

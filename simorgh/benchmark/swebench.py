@@ -430,6 +430,15 @@ def _run(args: list[str], *, timeout: float) -> tuple[int, str]:
 _HEREDOC_OPEN = re.compile(r"^git apply -v - <<'(?P<tag>\w+)'\s*$")
 _TEST_RESTORE = re.compile(r"^git checkout [0-9a-f]{7,40} ")
 _NOISE = ("git status", "git show", "git -c core.fileMode=false diff ")
+# The image already carries the project installed in editable mode at
+# its base commit; the eval script re-runs `pip install -e .` anyway,
+# defensively. Under amd64 emulation that step alone outran the 180s a
+# tool call is given -- run four's first in-container `run_tests` timed
+# out before pytest started (2026-09-10). A `.py` change is live in an
+# editable install without it. What this gives up: a fix to compiled
+# sources is not rebuilt for Sim's own test run. The scorer's run still
+# executes the full script, so a verdict is never affected.
+_REINSTALL = ("pip install", "python -m pip install", "python setup.py")
 _PATHLIKE = re.compile(r"(/|::|\.py$)")
 _LABEL = re.compile(r"^[A-Za-z_][\w.]*$")
 
@@ -467,6 +476,8 @@ def checkout_manifest(instance: dict) -> ContainerCheckout:
             skipping_until = opened.group("tag")
             continue
         if _TEST_RESTORE.match(stripped) or stripped.startswith(_NOISE):
+            continue
+        if any(marker in stripped for marker in _REINSTALL):
             continue
         if stripped.startswith("#!") or stripped.startswith(": '"):
             continue
