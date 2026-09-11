@@ -73,3 +73,28 @@ class DownloadModelTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DownloadKokoroTestCase(unittest.TestCase):
+    def test_files_already_present_are_not_fetched_again(self):
+        from simorgh.voice.tts.kokoro import download_kokoro
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("kokoro-v1.0.onnx", "voices-v1.0.bin"):
+                (Path(tmp) / name).write_bytes(b"x" * 2_000_000)
+            with mock.patch("urllib.request.urlopen", side_effect=AssertionError("no network call expected")):
+                path, problem = download_kokoro(Path(tmp))
+        self.assertEqual(path, Path(tmp) / "kokoro-v1.0.onnx")
+        self.assertEqual(problem, "")
+
+    def test_a_failed_fetch_leaves_no_part_file(self):
+        import urllib.error
+        from simorgh.voice.tts.kokoro import download_kokoro
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("offline")):
+                path, problem = download_kokoro(Path(tmp))
+            self.assertIsNone(path)
+            self.assertIn("offline", problem)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+

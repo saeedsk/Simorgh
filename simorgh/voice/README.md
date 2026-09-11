@@ -42,7 +42,9 @@ OpenAI-compatible endpoint for Home Assistant, the PWA, Alexa.
 
 ## On this machine, today
 
-`whisper-cli` (whisper.cpp), `say`, `ffmpeg` capture, `afplay`. Homebrew's
+`whisper-cli` (whisper.cpp) with `base.en`, **Kokoro** (`kokoro-onnx`, 54 voices,
+24 kHz, ~1 s per sentence on CPU; `voice models kokoro` fetches its two files,
+~340 MB), `ffmpeg` capture, `afplay`. `say` remains the fallback. Homebrew's
 bundled `for-tests-ggml-tiny.bin` is a fixture that hears silence; `voice
 models base.en` fetches a real model (148 MB, ~5 s) and the JFK sample
 then transcribes in 0.5 s. Better: `pip install faster-whisper

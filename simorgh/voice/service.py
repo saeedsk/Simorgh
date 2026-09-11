@@ -328,23 +328,31 @@ class Service:
         that arrived after boot is not ignored until a restart."""
         from .stt.whisper_cli import KNOWN_MODELS, download_model
 
+        from .tts.kokoro import download_kokoro
+
         name = str(message.payload.get("name") or "base.en").strip()
         model_dir = Path(self.config.model_dir)
-        path, problem = await asyncio.to_thread(download_model, name, model_dir)
+        available = [*KNOWN_MODELS, "kokoro"]
+        if name == "kokoro":
+            path, problem = await asyncio.to_thread(download_kokoro, model_dir)
+        else:
+            path, problem = await asyncio.to_thread(download_model, name, model_dir)
         if path is None:
             await self._reply(message, topics.VOICE_MODELS_REPLY, {"ok": False, "detail": problem,
-                                                                   "available": list(KNOWN_MODELS)})
+                                                                   "available": available})
             return
         if self._pipeline is not None:
             await self._pipeline.stop()
             self._pipeline = None
-        if self.config.stt_model != name:
-            from dataclasses import replace
-            self.config = replace(self.config, stt_model=name)
+        from dataclasses import replace
+        if name == "kokoro":
+            detail = "kokoro ready; it is picked over `say` from now on (`[voice] tts = \"kokoro\"` pins it)"
+        else:
+            detail = f"{name} ready; `[voice] stt_model = \"{name}\"` keeps it across restarts"
+            if self.config.stt_model != name:
+                self.config = replace(self.config, stt_model=name)
         await self._reply(message, topics.VOICE_MODELS_REPLY, {
-            "ok": True, "path": str(path), "bytes": path.stat().st_size,
-            "detail": f"{name} ready; `[voice] stt_model = \"{name}\"` keeps it across restarts",
-            "available": list(KNOWN_MODELS)})
+            "ok": True, "path": str(path), "bytes": path.stat().st_size, "detail": detail, "available": available})
 
     # ------------------------------------------------------------- probes
     async def _write_probes(self) -> None:
