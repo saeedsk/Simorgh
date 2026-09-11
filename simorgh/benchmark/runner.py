@@ -79,8 +79,11 @@ class Runner:
                 f"the source files there.",
                 "Do not edit or add tests. The project's own test suite decides whether this is "
                 "fixed, it is restored before it runs, and any change you make to it is discarded.",
-                "Its dependencies are not installed here, so running the suite yourself will not "
-                "work -- read the code and make the smallest change that fixes the issue.",
+                "To run that project's tests, call run_tests with a path inside the checkout "
+                f"(for example `{checkout}/path/to/test_file.py`): it runs inside the project's "
+                "own container, where its dependencies are installed. Running the whole suite is "
+                "slow; name the test file nearest the code you changed.",
+                "git_commit with a path inside the checkout commits there, not in this repository.",
                 "There is no answer to write out. The change you leave in those files IS the "
                 "answer, so finish by saving your edits.",
             ]),

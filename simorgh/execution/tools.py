@@ -51,7 +51,10 @@ except ImportError:  # POSIX-only
     resource = None  # type: ignore[assignment]
 
 from simorgh.contracts import topics
-from simorgh.contracts.pytestfailures import failing_nodeids, marker_for
+from simorgh.contracts.checkout import (
+    TARGET_DJANGO_LABEL, ContainerCheckout, container_run_line, django_label, find_enclosing,
+)
+from simorgh.contracts.pytestfailures import failing_nodeids, marker_for, strip_ansi
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
@@ -1100,6 +1103,63 @@ _PYTEST_NO_TESTS_COLLECTED = 5
 _PYTEST_USAGE_ERROR = 4
 
 
+def nested_git_root(root: Path, relative: str) -> tuple[Path, str] | None:
+    """`(repo, path relative to it)` when `root/relative` sits inside a git
+    repository nested strictly below `root`; else None.
+
+    `workspace/swebench/<id>/` is a whole other project, `.git` and all,
+    and `workspace/` is gitignored -- so from Simorgh's repository a
+    change in there does not exist. `git_commit` on such a path answered
+    `nothing_to_commit` (2026-09-10) and Sim, which had been told by the
+    verifier to commit, went round again. A path belongs to the nearest
+    repository above it, and that is where git runs.
+    """
+    root = root.resolve()
+    target = (root / relative).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return None
+    for candidate in [target, *target.parents]:
+        if candidate == root:
+            return None
+        if (candidate / ".git").exists():
+            return candidate, target.relative_to(candidate).as_posix()
+    return None
+
+
+def _docker_run(args: list[str], *, timeout: float) -> tuple[int, str]:
+    """`(exit code, merged output)` of one docker command. A seam, so a
+    test can stand in for the daemon."""
+    try:
+        done = subprocess.run(args, capture_output=True, text=True, timeout=timeout,
+                              stdin=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    except subprocess.TimeoutExpired as exc:
+        return 124, (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+    except OSError as exc:
+        return 127, repr(exc)
+    return done.returncode, done.stdout or ""
+
+
+def _checkout_patch(checkout: Path, base: str, *, timeout: float = 120.0) -> tuple[str, str]:
+    """`(patch, problem)`: everything the checkout differs from `base` by,
+    committed or not, tests included -- this is for RUNNING the tests,
+    not scoring them, so nothing is excluded here."""
+    git = shutil.which("git")
+    if not git:
+        return "", "git is not installed"
+    run = lambda *cmd: subprocess.run(  # noqa: E731
+        [git, "-C", str(checkout), *cmd], capture_output=True, text=True, timeout=timeout,
+        stdin=subprocess.DEVNULL)
+    if run("add", "-A").returncode != 0:
+        return "", "could not stage the checkout"
+    against = [base] if base and run("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode == 0 else []
+    diff = run("diff", "--cached", "--binary", *against)
+    if diff.returncode != 0:
+        return "", f"could not read the checkout's diff: {(diff.stderr or '').strip()[:300]}"
+    return diff.stdout, ""
+
+
 class RunTestsTool:
     """The `isolated_test_suite` gap `execution/README.md`'s "Deliberate
     scope cuts" names as deferred -- built here as the standalone
@@ -1135,6 +1195,13 @@ class RunTestsTool:
         start = time.monotonic()
         root = self._config.repo_root.resolve()
         cap = self._config.test_output_max_chars
+        nested = find_enclosing(root, target)
+        if nested is not None:
+            checkout, inner = nested
+            manifest = ContainerCheckout.read(checkout)
+            if manifest is not None:
+                return await asyncio.to_thread(
+                    self._run_in_container, checkout, inner, manifest, timeout=timeout, start=start)
         with tempfile.TemporaryDirectory(prefix="simorgh-tests-") as workdir:
             dest = Path(workdir) / "repo"
             try:
@@ -1220,6 +1287,80 @@ class RunTestsTool:
                           "no_tests_collected": no_tests,
                           "duration_s": time.monotonic() - start},
             )
+
+    def _run_in_container(self, checkout: Path, inner: str, manifest: ContainerCheckout, *,
+                          timeout: float, start: float) -> ToolResult:
+        """Run `inner` (a path inside `checkout`) with the project's own
+        test command, inside the project's own container.
+
+        The checkout is somebody else's project whose dependencies live
+        only in its image (`contracts/checkout.py`). What Sim changed --
+        committed or not -- is carried in as a diff against the manifest's
+        base commit and applied to the image's pristine `/testbed`, the
+        same way the scorer does it; the image's own environment prelude
+        runs; then its own test command with Sim's target. Nothing here
+        can touch the checkout on the host or the image itself: the
+        container is thrown away.
+        """
+        cap = self._config.test_output_max_chars
+        docker = shutil.which("docker")
+        if not docker:
+            return ToolResult(ok=False, error=(
+                f"refused: {inner!r} is inside a checkout whose tests run in a container, "
+                f"and Docker is not installed on this machine"))
+        patch, problem = _checkout_patch(checkout, manifest.base_commit)
+        if problem:
+            return ToolResult(ok=False, error=f"could not read the checkout's changes: {problem}")
+        target = django_label(inner) if manifest.target_style == TARGET_DJANGO_LABEL else inner
+        with tempfile.TemporaryDirectory(prefix="simorgh-checkout-tests-") as raw:
+            stage = Path(raw)
+            (stage / "patch.diff").write_text(patch if patch.endswith("\n") else patch + "\n")
+            script = "\n".join([
+                "set -o pipefail",
+                manifest.setup.rstrip(),
+                f"cd {manifest.workdir}",
+                # Empty when the checkout is untouched: still a real run.
+                "if [ -s /eval/patch.diff ]; then git apply -v /eval/patch.diff "
+                "|| patch --batch --fuzz=5 -p1 -i /eval/patch.diff "
+                "|| { echo 'SIMORGH_PATCH_FAILED'; exit 90; }; fi",
+                ": '>>>>> Start Test Output'",
+                f"{manifest.test_command} {target}",
+                "",
+            ])
+            (stage / "run.sh").write_text(script)
+            args = [docker, "run", "--rm"]
+            if manifest.platform:
+                args += ["--platform", manifest.platform]
+            args += ["-v", f"{stage}:/eval:ro", manifest.image, "bash", "/eval/run.sh"]
+            code, raw_out = _docker_run(args, timeout=timeout)
+        duration = time.monotonic() - start
+        out = strip_ansi(raw_out)
+        marker_start = out.find(">>>>> Start Test Output")
+        test_run = out[marker_start:] if marker_start >= 0 else out
+        where = container_run_line(inner, manifest.image)
+        if code == 124:
+            return ToolResult(ok=False, output=test_run[-cap:], error="timeout",
+                              metadata={"duration_s": duration, "container": manifest.image})
+        if "SIMORGH_PATCH_FAILED" in out:
+            return ToolResult(ok=False, error=(
+                "the checkout's changes do not apply to the project's pristine tree -- "
+                "the diff is malformed or edits files the project does not have"),
+                output=out[-cap:], metadata={"duration_s": duration, "container": manifest.image})
+        no_tests = code == _PYTEST_NO_TESTS_COLLECTED
+        ok = code == 0 or no_tests
+        failing = failing_nodeids(test_run) if not ok else ()
+        output = f"{where}\n{test_run[-cap:]}"
+        marker = marker_for(test_run) if not ok else ""
+        if marker:
+            output = f"{marker}\n{output}"
+        if no_tests:
+            output = (output + "\n\n[no tests cover this target yet -- nothing was run]").strip()
+        return ToolResult(
+            ok=ok, output=output, error=None if ok else f"exit_code={code}",
+            metadata={"failing_nodeids": list(failing), "exit_code": code,
+                      "no_tests_collected": no_tests, "duration_s": duration,
+                      "container": manifest.image, "target": target},
+        )
 
 
 def _python_syntax_problem(subject: str, code: str) -> str | None:
@@ -1745,6 +1886,12 @@ class GitCommitTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         path, message = args["path"], args["message"]
         root = self._config.repo_root
+        # A path inside a nested repository (a materialised SWE-bench
+        # checkout under `workspace/`) is committed THERE: from here it
+        # is gitignored and `status` says nothing to commit.
+        nested = nested_git_root(root, path)
+        if nested is not None:
+            root, path = nested
         run = lambda cmd: subprocess.run(
             cmd, cwd=root, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
         )
@@ -1775,8 +1922,9 @@ class GitCommitTool:
             return ToolResult(ok=False, error=f"git commit failed: {detail}")
         new_head = run(["git", "rev-parse", "HEAD"])
         return ToolResult(
-            ok=True, output=commit.stdout.strip(), side_effects=(f"git_commit:{path}",),
-            metadata={"commit": new_head.stdout.strip() if new_head.returncode == 0 else ""},
+            ok=True, output=commit.stdout.strip(), side_effects=(f"git_commit:{args['path']}",),
+            metadata={"commit": new_head.stdout.strip() if new_head.returncode == 0 else "",
+                      "repository": str(root) if nested is not None else ""},
         )
 
 
@@ -1822,6 +1970,9 @@ class GitDiscardTool:
                 ok=False,
                 error=f"refused: {subject!r} is outside the writable scope ({', '.join(scopes)})")
         root = self._config.repo_root
+        nested = nested_git_root(root, subject)
+        if nested is not None:
+            root, subject = nested
         run = lambda cmd: subprocess.run(  # noqa: E731
             cmd, cwd=root, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
         )

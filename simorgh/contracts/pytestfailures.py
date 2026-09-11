@@ -54,6 +54,26 @@ _TAIL = re.compile(r"\bin\s[\d.]+s")
 _COUNT = re.compile(r"(\d+)\s+(failed|error|errors)\b")
 
 
+#: SGR colour and the other CSI sequences a terminal-facing test runner
+#: prints when its config forces colour (`--color=yes`, a project's
+#: `addopts`) -- which several SWE-bench images do.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def strip_ansi(output: str) -> str:
+    """`output` with terminal escapes removed.
+
+    `\x1b[32mPASSED\x1b[0m a/b.py::\x1b[1mtest_x\x1b[0m` is what a coloured
+    run prints, and every pattern that reads a pytest log expects
+    `PASSED a/b.py::test_x`. A whole passing run parsed to NOTHING that
+    way and was scored "the suite most likely never ran" -- a real
+    SWE-bench fix recorded as unmeasurable (2026-09-10). Here rather than
+    in the benchmark, because `run_tests` inside a container prints the
+    same escapes and its marker is parsed from the same lines.
+    """
+    return _ANSI.sub("", output or "")
+
+
 def failing_nodeids(output: str) -> tuple[str, ...]:
     """Every node id pytest named in its short summary, in order, deduped."""
     found: dict[str, None] = {}

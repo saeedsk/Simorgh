@@ -253,3 +253,46 @@ class TestAFailedSuiteIsNotCalledANarrowedOne(unittest.IsolatedAsyncioTestCase):
         result = await self._run(req)
         self.assertIn("narrower target", result.detail)
         self.assertFalse(result.evidence["whole_suite_failed"])
+
+
+class TestAChangeInSomebodyElsesProjectIsCheckedThere(unittest.IsolatedAsyncioTestCase):
+    """A materialised SWE-bench checkout is another project. Its tests
+    run inside its own image (`contracts/checkout.py`), and that run --
+    not Simorgh's suite -- is what checks a change made in it. On
+    2026-09-10 the check said "no run_tests call in this session at
+    all" to an astropy task, Sim ran Simorgh's 5,000-test suite in
+    reply, it failed on a machine-specific security check, and the case
+    was lost to a suite that could not have covered the change."""
+
+    _RAN = "[ran target='workspace/swebench/x/pkg/tests/test_a.py']\n[ran 'pkg/tests/test_a.py' inside image img:1]\n3 passed"
+
+    async def test_a_passing_container_run_is_enough(self):
+        req = _request("patch", [_step("run_shell"), _step("run_tests", ok=True, summary=self._RAN)])
+        result = await FullSuiteRanCheck().run(req, None)
+        self.assertEqual(result.status, "passed", result.detail)
+        self.assertIn("img:1", result.detail)
+
+    async def test_a_failing_container_run_is_the_objection_not_the_missing_suite(self):
+        failed = self._RAN.replace("3 passed", "[failed 1: pkg/tests/test_a.py::test_x]\n1 failed")
+        req = _request("patch", [_step("run_shell"), _step("run_tests", ok=False, summary=failed)])
+        result = await FullSuiteRanCheck().run(req, None)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("inside its container", result.detail)
+        self.assertNotIn("Simorgh", result.detail)
+        self.assertIn("not Simorgh's own suite", result.feedback.revise_hint)
+
+    async def test_a_refused_host_run_beside_a_passing_container_run_still_passes(self):
+        refused = "[ran target='pkg/tests/test_a.py']\nrefused: 'pkg/tests/test_a.py' does not exist in the repo"
+        req = _request("patch", [
+            _step("run_shell"), _step("run_tests", ok=False, summary=refused),
+            _step("run_tests", ok=True, summary=self._RAN),
+        ])
+        result = await FullSuiteRanCheck().run(req, None)
+        self.assertEqual(result.status, "passed", result.detail)
+
+    async def test_without_a_container_run_nothing_changes(self):
+        req = _request("patch", [_step("run_shell"), _step("run_tests", ok=True, summary="[ran target='tests/x']\nok")])
+        result = await FullSuiteRanCheck().run(req, None)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("narrower target", result.detail)
+

@@ -50,6 +50,11 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from simorgh.contracts.checkout import (
+    TARGET_DJANGO_LABEL, TARGET_PATH, ContainerCheckout,
+)
+from simorgh.contracts.pytestfailures import strip_ansi
+
 #: Where Docker lives when it is not on PATH -- the same fallback
 #: `execution/capabilities.py` already uses for its own probe.
 _DOCKER_FALLBACK = "/Applications/Docker.app/Contents/Resources/bin/docker"
@@ -265,31 +270,6 @@ PARSERS = {
 }
 
 
-#: SGR colour codes. pytest writes them whenever the repo's own config
-#: forces colour (`--color=yes`, or an `addopts` in the project's
-#: setup.cfg), which several SWE-bench images do.
-_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-
-
-def strip_ansi(log: str) -> str:
-    """The log with terminal colour removed.
-
-    `\x1b[32mPASSED\x1b[0m astropy/...::\x1b[1mtest_x\x1b[0m` is what a
-    coloured run prints, and every pattern in this module expects
-    `PASSED astropy/...::test_x`. So a whole run could pass and parse to
-    NOTHING, which `judge` then reports as "the test log had no
-    recognisable results -- the suite most likely never ran".
-
-    Live, 2026-09-10: `astropy__astropy-14309` ended
-    `142 passed, 8 skipped, 5 xfailed in 2.14s`, with the case's one
-    fail-to-pass test (`test_is_fits_gh_14305`) PASSED in the log -- a
-    real fix, scored `skipped` as unmeasurable. Honest about not
-    knowing, and wrong about not knowing: 0 entries parsed with the
-    escapes in, 142 with them out.
-    """
-    return _ANSI.sub("", log or "")
-
-
 def parse_log(log: str, parser: str) -> tuple[dict[str, str], str]:
     """`(results, problem)`. An unknown parser is a refusal, not a
     guess: `pylint`'s runner prints a shape neither of ours reads, and
@@ -445,6 +425,71 @@ def _run(args: list[str], *, timeout: float) -> tuple[int, str]:
     return done.returncode, done.stdout or ""
 
 
+#: The eval script's own fence around its test run (`_START`/`_END`
+#: below read the log by the same lines).
+_HEREDOC_OPEN = re.compile(r"^git apply -v - <<'(?P<tag>\w+)'\s*$")
+_TEST_RESTORE = re.compile(r"^git checkout [0-9a-f]{7,40} ")
+_NOISE = ("git status", "git show", "git -c core.fileMode=false diff ")
+_PATHLIKE = re.compile(r"(/|::|\.py$)")
+_LABEL = re.compile(r"^[A-Za-z_][\w.]*$")
+
+
+def checkout_manifest(instance: dict) -> ContainerCheckout:
+    """What `run_tests` needs to test this checkout inside its image.
+
+    Derived from the dataset's own eval script, which is the only
+    authority on how this image runs its tests: the lines before the
+    test fence are the environment (activate conda, `cd /testbed`,
+    `pip install -e .`), and the line inside it is the test command.
+    Two things are cut out on purpose. The heredoc that applies the
+    HIDDEN test patch, and the `git checkout <base> <test files>` that
+    precedes it: the system under test is not shown the tests it is
+    scored on, here or anywhere. And the `git show`/`git diff` chatter,
+    which prints the whole base commit into a log a model then reads.
+
+    The test command loses its trailing targets so the caller can name
+    its own: a pytest path (`a/b/test_c.py`), or for Django's
+    `runtests.py` a dotted label, which `contracts.checkout.django_label`
+    makes from a path.
+    """
+    script = str(instance.get("eval_script") or "")
+    before, _, after = script.partition(_START)
+    setup_lines: list[str] = []
+    skipping_until: str | None = None
+    for line in before.splitlines():
+        stripped = line.strip()
+        if skipping_until is not None:
+            if stripped == skipping_until:
+                skipping_until = None
+            continue
+        opened = _HEREDOC_OPEN.match(stripped)
+        if opened:
+            skipping_until = opened.group("tag")
+            continue
+        if _TEST_RESTORE.match(stripped) or stripped.startswith(_NOISE):
+            continue
+        if stripped.startswith("#!") or stripped.startswith(": '"):
+            continue
+        setup_lines.append(line)
+    test_line = ""
+    for line in after.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith(":") and stripped != "'":
+            test_line = stripped
+            break
+    tokens = test_line.split()
+    style = TARGET_DJANGO_LABEL if tokens and tokens[0].endswith("runtests.py") else TARGET_PATH
+    is_target = (lambda t: bool(_LABEL.match(t))) if style == TARGET_DJANGO_LABEL else (lambda t: bool(_PATHLIKE.search(t)))
+    while len(tokens) > 1 and is_target(tokens[-1]):
+        tokens.pop()
+    return ContainerCheckout(
+        image=str(instance.get("image") or ""), platform=PLATFORM, workdir="/testbed",
+        base_commit=str(instance.get("base_commit") or ""),
+        setup="\n".join(setup_lines).strip() + "\n", test_command=" ".join(tokens),
+        target_style=style,
+    )
+
+
 def materialize(instance: dict, dest: Path, *, timeout: float = 900.0) -> str:
     """Copy the instance's `/testbed` to `dest`. Returns "" or why not.
 
@@ -477,6 +522,12 @@ def materialize(instance: dict, dest: Path, *, timeout: float = 900.0) -> str:
     if code != 0:
         shutil.rmtree(dest, ignore_errors=True)
         return f"could not copy the checkout out of {image}: {out.strip()[:400]}"
+    # The wire to `run_tests` and the git tools: a manifest at the root
+    # of the checkout saying which image runs its tests and how.
+    try:
+        checkout_manifest(instance).write(dest)
+    except OSError as exc:
+        return f"could not write the checkout manifest: {exc!r}"
     return ""
 
 
@@ -585,5 +636,6 @@ def evaluate(instance: dict, patch: str, *, timeout: float = 3600.0,
     return judge(test_output(log), instance), log
 
 
-__all__ = ["PARSERS", "PLATFORM", "Verdict", "available", "diff_of", "docker_path", "evaluate",
-           "judge", "materialize", "parse_django", "parse_log", "parse_pytest", "test_output"]
+__all__ = ["PARSERS", "PLATFORM", "Verdict", "available", "checkout_manifest", "diff_of",
+           "docker_path", "evaluate", "judge", "materialize", "parse_django", "parse_log",
+           "parse_pytest", "strip_ansi", "test_output"]

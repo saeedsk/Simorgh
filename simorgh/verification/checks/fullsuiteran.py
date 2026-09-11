@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import asyncio
 
+from simorgh.contracts.checkout import container_run
 from simorgh.contracts.pytestfailures import parse_marker
 from simorgh.contracts.scratch import is_scratch
 
@@ -220,6 +221,19 @@ def _touched_python(req: VerifyRequest) -> bool:
     return any(p.lower().endswith(".py") and not is_scratch(p) for p in paths)
 
 
+def _container_runs(steps: list[dict]) -> list[tuple[bool, str, str]]:
+    """`(ok, target, image)` for every `run_tests` that ran inside a
+    checkout's own container (`contracts/checkout.py`)."""
+    found = []
+    for step in steps:
+        if step.get("tool") != "run_tests":
+            continue
+        run = container_run(str(step.get("summary") or ""))
+        if run is not None:
+            found.append((bool(step.get("ok")), run[0], run[1]))
+    return found
+
+
 class FullSuiteRanCheck:
     name = "full_suite_ran"
     # Free in every case but one: reading the step log costs nothing,
@@ -255,6 +269,41 @@ class FullSuiteRanCheck:
 
     async def run(self, req: VerifyRequest, ctx: CheckContext) -> CheckResult:
         steps = _steps(req)
+        in_container = _container_runs(steps)
+        if in_container:
+            # The change lives in somebody else's project (a materialised
+            # SWE-bench checkout under `workspace/`), and `run_tests` ran
+            # THAT project's tests inside THAT project's image. This suite
+            # -- Simorgh's -- has nothing to say about it, and demanding it
+            # anyway is what happened on 2026-09-10: told "no run_tests
+            # call in this session at all", Sim ran the whole Simorgh
+            # suite from inside an astropy task, it failed on a machine-
+            # specific security check, and the case was lost to a suite
+            # that could not possibly have covered the change. A targeted
+            # run in the project's own container is the proportionate
+            # bar: that project's whole suite takes an hour under
+            # emulation, and the scorer itself runs a named subset.
+            passed = [r for r in in_container if r[0]]
+            if passed:
+                _ok, target, image = passed[-1]
+                return CheckResult(
+                    status="passed",
+                    detail=f"the project's own tests ran inside its container ({image}: {target}) and passed",
+                    evidence={"container_runs": [list(r) for r in in_container]},
+                )
+            _ok, target, image = in_container[-1]
+            detail = (f"the project's own tests ran inside its container ({image}: {target}) and FAILED "
+                      f"-- the change is not checked until they pass")
+            return CheckResult(
+                status="failed", detail=detail,
+                evidence={"container_runs": [list(r) for r in in_container]},
+                feedback=Feedback(
+                    mechanical_errors=(detail,),
+                    revise_hint=("read the failures in that run_tests output, fix the change, and run the "
+                                 "same target again -- not Simorgh's own suite, which does not cover this project"),
+                    retryable=True,
+                ),
+            )
         if _ran_whole_suite_and_passed(steps):
             return CheckResult(status="passed", detail="the whole suite ran and passed")
         ran_something = any(s.get("tool") == "run_tests" for s in steps)
