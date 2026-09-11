@@ -24,7 +24,7 @@ from simorgh.contracts.envelope import Event
 from .api import Audio, Utterance, VoiceTurn
 from .audio import write_wav
 from .config import Config
-from .vad import BargeInEndpointer, Endpointer
+from .vad import BargeInEndpointer, CompositeDetector, EnergyDetector, Endpointer
 
 TURNS_STREAM = "voice:turns"
 
@@ -273,8 +273,13 @@ class Pipeline:
             if stopper is not None:
                 loop.call_soon_threadsafe(lambda: loop.create_task(stopper()))
 
+        detector = self._detector_factory()
+        if not hasattr(detector, "raise_floor"):
+            # A voice detector (Silero) alone would fire on Sim's own
+            # voice; pair it with a level gate calibrated to that echo.
+            detector = CompositeDetector(detector, EnergyDetector(self._config.vad_threshold))
         endpointer = BargeInEndpointer(
-            self._detector_factory(), silence_ms=self._config.endpoint_silence_ms,
+            detector, silence_ms=self._config.endpoint_silence_ms,
             max_seconds=audio.seconds + self._config.max_utterance_s,
             speech_ms=self._config.barge_in_speech_ms, on_barge_in=_cut_in,
             calibrate_frames=max(1, self._config.barge_in_calibrate_ms // 30), ratio=self._config.barge_in_ratio,

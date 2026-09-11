@@ -68,6 +68,9 @@ class SileroDetector:
         except ImportError as exc:
             raise ImportError("silero-vad is not installed") from exc
         self._model = load_silero_vad(onnx=True)
+        reset = getattr(self._model, "reset_states", None)
+        if reset is not None:
+            reset()
         self._threshold = threshold
         self._buffer = b""
 
@@ -85,6 +88,44 @@ class SileroDetector:
         samples = array.array("h", window)
         tensor = torch.tensor([s / 32768.0 for s in samples])
         return float(self._model(tensor, SAMPLE_RATE).item()) >= self._threshold
+
+
+class CompositeDetector:
+    """Speech only if the voice detector says so AND the level gate does.
+
+    For barge-in. Silero knows a voice from a keyboard, a clap, a chair
+    -- the creator, 2026-09-11: "if sim is talking and I'm typing or
+    clapping, that should not interrupt sim" -- but Sim's own voice
+    through the speakers is a voice too, so on its own it would fire on
+    every echo. The level gate, calibrated to that echo, is what says
+    "louder than Sim". Both, or it is not a person cutting in.
+    """
+
+    def __init__(self, voice, level) -> None:
+        self._voice = voice
+        self._level = level
+        self.name = f"{voice.name}+{level.name}"
+
+    def is_speech(self, frame: bytes) -> bool:
+        # Evaluate both every frame: the level gate's floor only learns
+        # from frames it sees, and Silero's state must follow the audio.
+        loud = self._level.is_speech(frame)
+        voiced = self._voice.is_speech(frame)
+        return loud and voiced
+
+    def raise_floor(self, rms: float) -> None:
+        raise_floor = getattr(self._level, "raise_floor", None)
+        if raise_floor is not None:
+            raise_floor(rms)
+
+    def set_ratio(self, ratio: float) -> None:
+        set_ratio = getattr(self._level, "set_ratio", None)
+        if set_ratio is not None:
+            set_ratio(ratio)
+
+    @staticmethod
+    def rms(frame: bytes) -> float:
+        return EnergyDetector.rms(frame)
 
 
 class Endpointer:
@@ -207,4 +248,4 @@ def open_detector(preferred: str = "auto", *, threshold: float = 0.5) -> tuple[o
     return EnergyDetector(threshold), ""
 
 
-__all__ = ["BargeInEndpointer", "EnergyDetector", "Endpointer", "SileroDetector", "open_detector"]
+__all__ = ["BargeInEndpointer", "CompositeDetector", "EnergyDetector", "Endpointer", "SileroDetector", "open_detector"]

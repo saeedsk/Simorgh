@@ -97,8 +97,11 @@ class BargeInEndpointerTestCase(unittest.TestCase):
 class InterruptingSimTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_speech_during_playback_stops_the_speaker(self):
         speaker = FakeSpeaker(realtime=True)
-        # 60 frames of "speech" arriving 5 ms apart while a 3 s reply plays
-        mic = FakeMicrophone(silence(1.8), frame_delay=0.005)
+        # A quiet second (the level gate learns Sim's echo as "quiet"), then
+        # 0.8 s of a loud voice, frames arriving 5 ms apart while a 3 s reply
+        # plays. The fake voice detector calls every post-calibration frame
+        # a voice; the level gate needs it louder than the echo -- both.
+        mic = FakeMicrophone(Audio(silence(1.0).pcm + _tone(0.8, 20000).pcm), frame_delay=0.005)
         pipe = _pipeline(mic=mic, speaker=speaker, stt=FakeRecogniser("wait, stop"))
         long_reply = "x" * 60  # the fake synthesiser makes 3 s of audio for this
         started = asyncio.get_running_loop().time()
@@ -112,7 +115,7 @@ class InterruptingSimTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_interruption_becomes_the_next_turn(self):
         speaker = FakeSpeaker(realtime=True)
-        mic = FakeMicrophone(silence(1.8), frame_delay=0.005)
+        mic = FakeMicrophone(Audio(silence(1.0).pcm + _tone(0.8, 20000).pcm), frame_delay=0.005)
         stt = FakeRecogniser("actually never mind")
         pipe = _pipeline(mic=mic, speaker=speaker, stt=stt)
         await pipe.speak("x" * 60)
@@ -191,4 +194,60 @@ class WhisperAnnotationsTestCase(unittest.TestCase):
         from simorgh.voice.stt.whisper_cli import clean_transcript
         self.assertEqual(clean_transcript("call foo (the old one) now"), "call foo (the old one) now",
                          "a parenthetical a person spoke is not an annotation")
+
+
+class _Voice:
+    """A stand-in voice detector: says 'voice' for the frames it is told to."""
+    name = "voice"
+
+    def __init__(self, answers):
+        self._answers = list(answers)
+
+    def is_speech(self, frame):
+        return self._answers.pop(0) if self._answers else False
+
+
+class CompositeDetectorTestCase(unittest.TestCase):
+    """Typing, clapping, a chair: loud but not a voice. Sim's own voice
+    through the speakers: a voice but not louder than the echo floor.
+    Only a voice that is also louder than Sim is a person cutting in."""
+
+    def test_loud_noise_that_is_not_a_voice_is_not_speech(self):
+        from simorgh.voice.vad import CompositeDetector
+        level = EnergyDetector(0.5)
+        for _ in range(5):
+            level.is_speech(silence(0.03).pcm)  # learn a quiet floor
+        det = CompositeDetector(_Voice([False] * 10), level)
+        self.assertFalse(any(det.is_speech(_tone(0.03, 20000).pcm) for _ in range(5)), "a clap is loud, not a voice")
+
+    def test_a_voice_no_louder_than_the_echo_is_not_speech(self):
+        from simorgh.voice.vad import CompositeDetector
+        level = EnergyDetector(0.5)
+        det = CompositeDetector(_Voice([True] * 10), level)
+        det.raise_floor(EnergyDetector.rms(_tone(0.03, 8000).pcm))  # what the mic hears of Sim
+        self.assertFalse(det.is_speech(_tone(0.03, 8000).pcm), "Sim's own voice at its own level")
+
+    def test_a_louder_voice_is_speech(self):
+        from simorgh.voice.vad import CompositeDetector
+        level = EnergyDetector(0.5)
+        det = CompositeDetector(_Voice([True] * 10), level)
+        det.raise_floor(EnergyDetector.rms(_tone(0.03, 3000).pcm))
+        self.assertTrue(det.is_speech(_tone(0.03, 20000).pcm))
+
+    def test_barge_in_uses_the_composite_when_the_detector_is_a_voice_detector(self):
+        from simorgh.voice import pipeline as pipeline_mod
+        import inspect
+        self.assertIn("CompositeDetector(", inspect.getsource(pipeline_mod.Pipeline._play_interruptibly))
+
+
+class SileroSmokeTestCase(unittest.TestCase):
+    def test_silero_tells_a_voice_from_a_tone_when_installed(self):
+        try:
+            from simorgh.voice.vad import SileroDetector
+            det = SileroDetector(0.5)
+        except ImportError as exc:
+            self.skipTest(str(exc))
+        # a pure tone is not a voice
+        flags = [det.is_speech(_tone(0.03, 8000).pcm) for _ in range(20)]
+        self.assertLessEqual(sum(flags), 2)
 
