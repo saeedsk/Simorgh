@@ -38,6 +38,17 @@ from ..router import INBOX_PREFIX, Registered, is_inbox, is_reply_routed
 
 Clock = Callable[[], float]
 
+
+def _handler_timeout(requested: float | None, default: float) -> float | None:
+    """The `wait_for` timeout for one handler: the spec's own, the
+    backend default when it gave none, and NO timeout for
+    `api.UNBOUNDED` -- a handler whose bound is the work's own."""
+    if requested is None or requested <= 0:
+        return default
+    if requested == float("inf"):
+        return None
+    return requested
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages(
   id TEXT PRIMARY KEY, type TEXT NOT NULL, schema_version INTEGER, ts REAL, source TEXT,
@@ -328,7 +339,17 @@ class SqliteBackend:
         m = delivery.message
         self._active[m.id] = delivery
         try:
-            timeout = reg.spec.max_handler_seconds or self._lease
+            # A durable backend's delivery LEASE is its crash detector: a
+            # row still `leased` past `lease_until` is returned to
+            # `pending` and handed to another worker. So a handler here
+            # cannot outlive its lease -- `api.UNBOUNDED` collapses to the
+            # lease -- or the same task would run twice at once. Letting
+            # a long session run unbounded on this backend needs a lease
+            # heartbeat on the delivery, which does not exist yet; until
+            # it does, the lease is the wall budget of a task here, as it
+            # always was. The memory backend has no reaper and honours
+            # UNBOUNDED for real.
+            timeout = _handler_timeout(reg.spec.max_handler_seconds, self._lease) or self._lease
             await asyncio.wait_for(reg.handler(m), timeout=timeout)
             explicit = self._explicit.pop(delivery.delivery_id, None)
             if explicit is None or explicit[0] == "ack" or delivery.group is None:

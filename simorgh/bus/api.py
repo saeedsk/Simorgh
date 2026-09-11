@@ -41,6 +41,22 @@ class BackendUnavailable(RuntimeError):
     boto3). Raised at config time with a clear message, never lazily."""
 
 
+#: `max_handler_seconds` for a handler whose bound is the work's own, not
+#: the bus's. The backend default (300s) is a delivery guard against a
+#: handler that hangs; it was also, silently, the wall-clock budget of
+#: every task Sim ran. `Worker._on_available` runs the WHOLE session
+#: inside the handler on purpose (an unacked delivery is what lets a
+#: crashed worker's task be redelivered), so a task past 300s -- two
+#: slow thinks, or one think and a container test run -- was cancelled
+#: mid-flight by the bus, its work thrown away, its lease left to expire,
+#: and the task re-run from the top. Live-caught in the creator's
+#: terminal, 2026-09-10: `handler for task.available raised
+#: TimeoutError` out of `_verify_then_finish -> _think`, seconds from
+#: done. A session is bounded by its step budget, its think and tool
+#: timeouts, and its lease heartbeat; those are the ceiling, not this.
+UNBOUNDED = float("inf")
+
+
 @dataclass(frozen=True)
 class SubscriptionSpec:
     pattern: str  # "task.*", "action.#", "#", or an exact "_inbox.<source>.<uuid>"
@@ -48,7 +64,7 @@ class SubscriptionSpec:
     durable: bool  # persisted in sqlite/aws; ignored by memory
     source: str  # subscribing subsystem name (policy + metrics)
     max_inflight: int = 16  # per-subscription concurrency cap (partitions still serialized)
-    max_handler_seconds: float | None = None  # per-handler timeout; None = backend default
+    max_handler_seconds: float | None = None  # per-handler timeout; None = backend default; UNBOUNDED = none at all
 
 
 @dataclass

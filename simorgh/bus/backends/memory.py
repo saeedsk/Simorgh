@@ -34,6 +34,17 @@ from ..router import Registered, groups_for, route
 Clock = Callable[[], float]
 
 
+
+def _handler_timeout(requested: float | None, default: float) -> float | None:
+    """The `wait_for` timeout for one handler: the spec's own, the
+    backend default when it gave none, and NO timeout for
+    `api.UNBOUNDED` -- a handler whose bound is the work's own."""
+    if requested is None or requested <= 0:
+        return default
+    if requested == float("inf"):
+        return None
+    return requested
+
 @dataclass(order=True)
 class _Entry:
     sort_key: tuple  # (-priority, seq)
@@ -237,7 +248,7 @@ class InMemoryBackend:
 
     async def _run(self, lane: _Lane, member: Registered, delivery: Delivery, entry: _Entry) -> None:
         m = delivery.message
-        timeout = member.spec.max_handler_seconds or self._handler_timeout
+        timeout = _handler_timeout(member.spec.max_handler_seconds, self._handler_timeout)
         outcome = "ack"
         retry_after: float | None = None
         error: BaseException | None = None

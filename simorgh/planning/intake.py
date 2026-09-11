@@ -15,16 +15,49 @@ from .model import Scope, Task
 from .store import TaskStore
 
 
+_WAITING = frozenset({"pending", "available", "blocked"})
+
+
 @dataclass
 class IntakeResult:
     task: Task | None
     duplicate_of: str | None = None
+    # Why an autonomous candidate was NOT created: the backlog is at
+    # `max_backlog`. Never set for a human's request.
+    deferred: str | None = None
+    # How much work was already waiting when this was accepted, so the
+    # reply can say "queued behind N" instead of nothing.
+    backlog: int = 0
 
 
 class Intake:
-    def __init__(self, store: TaskStore, *, dedupe_threshold: float) -> None:
+    def __init__(self, store: TaskStore, *, dedupe_threshold: float, max_backlog: int = 0,
+                 autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project")) -> None:
         self._store = store
         self._threshold = dedupe_threshold
+        self._max_backlog = max(0, int(max_backlog))
+        self._autonomous = frozenset(autonomous_origins)
+
+    def backlog(self) -> int:
+        """Tasks waiting for a worker: pending, available, or blocked."""
+        return sum(1 for t in self._store.index.tasks.values() if t.status in _WAITING)
+
+    def _deferral(self, origin: str) -> str | None:
+        """Why a candidate from `origin` must wait, or None.
+
+        Only Sim's own origins are held back. A human (or a benchmark
+        driving Sim on a human's behalf) asked for the work; deferring
+        it would be refusing them for the sake of a queue they may not
+        even know about. Live-caught 2026-09-10: 330 tasks queued, three
+        workers, and nothing anywhere asking whether adding a 331st made
+        sense."""
+        if not self._max_backlog or origin not in self._autonomous:
+            return None
+        waiting = self.backlog()
+        if waiting < self._max_backlog:
+            return None
+        return (f"backlog full: {waiting} tasks already waiting, at the [planning] max_backlog of "
+                f"{self._max_backlog} -- a {origin} candidate waits until the queue drains")
 
     def _find_duplicate(
         self, description: str, *, origin: str = "curiosity", distinguish: str | None = None,
@@ -122,12 +155,16 @@ class Intake:
         dup = self._find_duplicate(description, origin=origin, subject=subject)
         if dup:
             return IntakeResult(None, duplicate_of=dup)
+        deferred = self._deferral(origin)
+        if deferred:
+            return IntakeResult(None, deferred=deferred)
+        waiting = self.backlog()
         scope = Scope(paths=(subject,) if subject else (), network=kind == "research") if (subject or kind == "research") else None
         task = await self._store.create(
             kind=kind, description=description, subject=subject, origin=origin, mode="execute",
             risk=risk or "low", scope=scope, initial_status="available", max_steps=max_steps,
         )
-        return IntakeResult(task)
+        return IntakeResult(task, backlog=waiting)
 
     async def on_patterns_found(self, *, patterns: list[dict]) -> list[Task]:
         """Port of v1 `discover_improvements`: each pattern's own
@@ -139,6 +176,8 @@ class Intake:
                 continue
             if self._find_duplicate(proposal, distinguish=pattern.get("task_type")):
                 continue
+            if self._deferral("reflection"):
+                break  # the queue is full; the patterns will be found again
             task = await self._store.create(
                 kind="patch", description=proposal, origin="reflection", mode="execute",
                 risk="low", initial_status="available",
@@ -148,6 +187,8 @@ class Intake:
 
     async def on_research_follow_up(self, *, research_task_id: str, subject: str, description: str) -> Task | None:
         if self._find_duplicate(description, subject=subject):
+            return None
+        if self._deferral("research"):
             return None
         return await self._store.create(
             kind="patch", description=description, subject=subject, origin="research",

@@ -142,7 +142,9 @@ class Service:
             self.config = Config.from_mapping(dict(ctx.config))
         self._store = TaskStore(ctx.ledger, ctx.clock)
         await self._store.rebuild()
-        self._intake = Intake(self._store, dedupe_threshold=self.config.dedupe_similarity_threshold)
+        self._intake = Intake(self._store, dedupe_threshold=self.config.dedupe_similarity_threshold,
+                              max_backlog=self.config.max_backlog,
+                              autonomous_origins=tuple(self.config.autonomous_origins))
         self._scheduler = Scheduler(
             self._store, ctx.bus, ctx.clock, source=ctx.source,
             priority_weights=self.config.priority_weights, lease_seconds=self.config.lease_seconds,
@@ -225,7 +227,11 @@ class Service:
         if result.task is not None:
             await self._announce_created(result.task)
             await self._preempt_for(result.task)
-            payload = {"task_id": result.task.id}
+            payload = {"task_id": result.task.id, "backlog": result.backlog}
+        elif result.deferred:
+            self._ctx.logger.info("planning.candidate_deferred", origin=p.get("origin", "curiosity"),
+                                  reason=result.deferred)
+            payload = {"task_id": None, "deferred": result.deferred}
         else:
             payload = {"task_id": result.duplicate_of, "deduplicated_against": result.duplicate_of}
         # `task.create` is legitimately used both ways: as a request, by

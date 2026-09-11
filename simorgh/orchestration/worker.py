@@ -18,6 +18,7 @@ import uuid
 from collections import OrderedDict
 from dataclasses import replace
 
+from simorgh.bus.api import UNBOUNDED
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
 
@@ -109,8 +110,15 @@ class Worker:
         # finishes, which is what lets a *crashed* worker's task be
         # redelivered to the next one
         # (tests/simorgh/integration/test_local_multi_worker_crash_resume.py).
+        # `UNBOUNDED`: the bus's per-handler default (300s) is a guard
+        # against a hung handler, and it was silently the wall budget of
+        # every task -- a session past 300s was cancelled mid-flight by
+        # the bus, its work discarded, and the task re-run after the
+        # lease expired (live, 2026-09-10). The session's own step
+        # budget, think/tool timeouts and lease heartbeat are the bound.
         self._subs.append(await self._bus.subscribe(
             topics.TASK_AVAILABLE, self._on_available, group="workers", max_inflight=1,
+            max_handler_seconds=UNBOUNDED,
         ))
         self._subs.append(await self._bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
         self._subs.append(await self._bus.subscribe(topics.TASK_CANCEL, self._on_cancel))

@@ -10,6 +10,16 @@ from dataclasses import dataclass, field
 class Config:
     lease_seconds: float = 600.0
     max_task_attempts: int = 3
+    # How much waiting work (pending + available + blocked) the store may
+    # hold before Sim's OWN ideas are deferred. The creator, 2026-09-10,
+    # looking at 330 queued tasks: "why would a system schedule that
+    # many tasks -- shouldn't it wait until the backlog drops, then add
+    # more?" It should. Intake accepted every candidate unconditionally;
+    # dedupe was the only brake. A person's request is never deferred by
+    # this (they asked; the reply tells them how deep the queue is), but
+    # curiosity, reflection, research follow-ups and project steps wait.
+    # 0 disables the cap.
+    max_backlog: int = 40
     max_blocked_retries: int = 9
     blocked_retry_delay_seconds: float = 300.0
     # A task that only ran out of steps comes back this soon, with a

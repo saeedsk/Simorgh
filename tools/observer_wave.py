@@ -51,8 +51,34 @@ def stage_wave(count: int, *, label: str = "observer") -> tuple[str, list[Path]]
     for i in range(1, count + 1):
         workspace = agent_workspace(f"{label}-{i:02d}")
         repo = fast_copy_repo(workspace / "repo")
+        pin_data_dir(repo, workspace / "data")
         sandboxes.append(repo)
     return run_id, sandboxes
+
+
+def pin_data_dir(repo: Path, data_dir: Path) -> Path:
+    """Write a `simorgh.toml` into the sandbox so ANY Sim booted from it
+    -- `sim.sh`, `python -m simorgh run`, an ad-hoc Kernel in a script --
+    keeps its Ledger under the sandbox, not under `~/.simorgh`.
+
+    `kernel/config.py::find_config_path` reads `./simorgh.toml` before it
+    falls back to the default data dir, and the real repo ships no such
+    file, so a Kernel booted inside a sandbox with no config of its own
+    lands in the creator's LIVE ledger. On 2026-09-10 an observer's
+    claim-race experiment did exactly that: 325 synthetic `race N` tasks
+    (origin `human`, workers `wA`/`wC`/`w1`, no percept behind any of
+    them) appeared in the live store, 312 of them `available`, and the
+    creator's own Sim spent an evening offering them to its workers.
+    Telling each observer to export `SIMORGH_RUNTIME_DATA_DIR` is one
+    forgotten line from that; a file in the sandbox is not."""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (repo / "simorgh.toml").write_text(
+        "# Written by tools/observer_wave.py: this sandbox's Sim keeps its data here,\n"
+        "# never in ~/.simorgh.\n"
+        "[runtime]\n"
+        f'data_dir = "{data_dir}"\n'
+    )
+    return repo / "simorgh.toml"
 
 
 def main(argv: list[str] | None = None) -> int:
