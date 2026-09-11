@@ -66,7 +66,27 @@ from ..verdict import _REFUSAL_EVIDENCE
 # `session.py` into the step record, which is more surface than this
 # fix warrants; a false "no write ran" from an over-eager pattern would
 # fail a legitimate session, which is the more expensive mistake.
-WRITE_TOOLS = frozenset({"apply_source_patch", "apply_skill", "git_commit", "git_revert", "run_shell"})
+#
+# `replace_in_file` was missing from this set for its whole life, and it
+# is the tool Sim reaches for most often to edit an existing file --
+# `apply_source_patch` rewrites a whole file, this one changes a piece
+# of it. So a session that made its change the ordinary way was told
+# "this task's product is a change to a file, and no write tool ran in
+# the whole session -- the answer describes work that did not happen",
+# and pushed into revisions it could not satisfy. Caught live on
+# 2026-09-10 in the creator's terminal and again minutes later in a
+# SWE-bench run, where step 3 was a successful
+# `replace_in_file ... 1 change(s) applied` and step 7 was that
+# refusal. The same omission ran the other way in
+# `fullsuiteran.py`, which reads this set to decide whether anything
+# was written ANYWHERE: an edit made with this tool looked like an
+# honest no-op and excused the suite.
+#
+# `git_discard` is deliberately absent: it removes changes rather than
+# making them, so a session whose only write was a discard really has
+# produced nothing.
+WRITE_TOOLS = frozenset({"apply_source_patch", "apply_skill", "git_commit", "git_revert",
+                         "replace_in_file", "run_shell"})
 # Task kinds whose entire product is a change to a file.
 _CHANGE_KINDS = frozenset({"patch", "skill", "self_patch"})
 # Phrases that mean "I deliberately did not write anything", so the
