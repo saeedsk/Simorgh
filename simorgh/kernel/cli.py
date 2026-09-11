@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import subprocess
+import os
 import signal
 import sys
 from pathlib import Path
@@ -72,36 +74,119 @@ async def _cmd_self_check() -> int:
     return 0 if result.passed else 1
 
 
-async def _cmd_run(config_path: str | None) -> int:
-    config = load_config(config_path)
-    kernel = Kernel(config, interactive=True)
-    await kernel.boot()
+# The one way out that cannot be held up. `sys.exit` raises, and what it
+# raises into is `asyncio.run`'s teardown, which joins every worker
+# thread for up to five minutes (`shutdown_default_executor`); the
+# interpreter then joins the non-daemon ones again. A tool mid-run in a
+# thread -- pytest, whisper-cli, a capture loop -- is exactly that, so a
+# busy Sim answered SIGTERM with "stopping" and stayed, and answered the
+# second signal with "exiting immediately" and stayed (reproduced with
+# one sleeping thread, 2026-09-11: alive 90s after two signals). Patched
+# by tests; never called by them.
+_HARD_EXIT = os._exit
 
-    loop = asyncio.get_running_loop()
-    stopped_by_signal = {"sigint_count": 0}
 
-    def _handle_signal() -> None:
-        stopped_by_signal["sigint_count"] += 1
-        if stopped_by_signal["sigint_count"] >= 2:
-            print("second interrupt -- exiting immediately", file=sys.stderr)
-            sys.exit(130)
-        asyncio.ensure_future(kernel.bus.publish(_stop_message()))
+def _terminate_children() -> None:
+    """SIGTERM to Sim's direct children -- a pytest, a whisper-cli, an
+    ffmpeg -- so a hard exit does not leave them running on. Best
+    effort: `pkill -P` is on macOS and Linux; nothing else is assumed."""
+    try:
+        subprocess.run(["pkill", "-TERM", "-P", str(os.getpid())], capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
-    def _stop_message():
+
+def _exit_now(code: int, *, why: str = "") -> None:
+    """Leave the process, whatever threads are doing.
+
+    Called after an orderly `Kernel.shutdown()` too, on purpose: the
+    Ledger is closed and every subsystem stopped by then, and what the
+    interpreter would do next is wait on threads that have nothing left
+    to report to. `stty sane` puts the terminal back if the prompt did
+    not get to; harmless when it did."""
+    if why:
+        print(f"[kernel] {why}", file=sys.stderr)
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except (OSError, ValueError):
+            pass
+    _terminate_children()
+    if sys.stdin is not None and hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
+        try:
+            subprocess.run(["stty", "sane"], stdin=sys.stdin, capture_output=True, timeout=2)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    _HARD_EXIT(code)
+
+
+class Stopper:
+    """What a signal does: the first asks the system to stop and starts
+    a clock; the second, or the clock running out, leaves at once.
+
+    `hard_exit_s` is how long an orderly stop may take from the first
+    signal -- the supervisor's whole grace plus a margin -- before the
+    process is ended regardless of what is still winding down."""
+
+    def __init__(self, bus, *, hard_exit_s: float, loop=None) -> None:
+        self._bus = bus
+        self._hard_exit_s = hard_exit_s
+        self._loop = loop or asyncio.get_running_loop()
+        self.signals = 0
+        self._watchdog = None
+
+    def on_signal(self) -> None:
+        self.signals += 1
+        if self.signals >= 2:
+            _exit_now(130, why="second interrupt -- exiting now")
+            return
+        asyncio.ensure_future(self._bus.publish(self.stop_message()))
+        self._watchdog = self._loop.call_later(self._hard_exit_s, self._overdue)
+
+    def _overdue(self) -> None:
+        _exit_now(1, why=f"shutdown did not finish within {self._hard_exit_s:.0f}s of the signal -- exiting now")
+
+    def cancel(self) -> None:
+        if self._watchdog is not None:
+            self._watchdog.cancel()
+            self._watchdog = None
+
+    @staticmethod
+    def stop_message():
         from simorgh.contracts.envelope import Message
         from simorgh.contracts import topics
 
         return Message.new(topics.SYSTEM_STOP, source="kernel",
                            payload={"reason": "signal", "requested_by": "signal"}, priority=9)
 
+
+async def _cmd_run(config_path: str | None) -> int:
+    config = load_config(config_path)
+    kernel = Kernel(config, interactive=True)
+    await kernel.boot()
+
+    loop = asyncio.get_running_loop()
+    grace = float(getattr(kernel.runtime, "stop_grace_s", 15.0))
+    stopper = Stopper(kernel.bus, hard_exit_s=grace + 10.0, loop=loop)
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, _handle_signal)
+            loop.add_signal_handler(sig, stopper.on_signal)
         except (NotImplementedError, RuntimeError):
             pass  # not every platform/loop supports signal handlers (e.g. some test runners)
 
     await kernel.wait_for_stop()
-    await kernel.shutdown()
+    # A stop asked for from inside (Ctrl-D, `stop`) never went through
+    # the signal handler; it gets the same clock so a hung subsystem
+    # cannot hold the process either.
+    if stopper.signals == 0:
+        stopper._watchdog = loop.call_later(grace + 10.0, stopper._overdue)
+    try:
+        await asyncio.wait_for(kernel.shutdown(), timeout=grace + 5.0)
+    except asyncio.TimeoutError:
+        _exit_now(1, why=f"shutdown did not finish within {grace + 5.0:.0f}s -- exiting now")
+    stopper.cancel()
+    _exit_now(0)
     return 0
 
 

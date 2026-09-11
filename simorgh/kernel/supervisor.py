@@ -9,6 +9,7 @@ path" is enforced here, not hoped for.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Awaitable, Callable
 
 from simorgh.contracts.protocols import Clock, Context, Health, Logger, Subsystem
@@ -123,12 +124,21 @@ class Supervisor:
         # construction is subsystem-specific and lives in `context.py`.
 
     async def stop_all(self, layers_reversed: list[tuple[str, ...]], *, grace_s: float) -> None:
+        """Stop every layer, top down, within `grace_s` IN TOTAL.
+
+        The grace used to be per layer, so a stop that hung in each of
+        five layers took 75 seconds before the process could leave --
+        a Ctrl-C the creator gave up waiting on (2026-09-11). One
+        budget, shared: a layer gets what is left of it, and never less
+        than a moment to try."""
+        deadline = time.monotonic() + max(0.0, grace_s)
         for layer in layers_reversed:
             stops = [self.services[name].service.stop() for name in layer if name in self.services]
             if not stops:
                 continue
+            remaining = max(0.5, deadline - time.monotonic())
             try:
-                await asyncio.wait_for(asyncio.gather(*stops, return_exceptions=True), timeout=grace_s)
+                await asyncio.wait_for(asyncio.gather(*stops, return_exceptions=True), timeout=remaining)
             except asyncio.TimeoutError:
                 self._logger.warning("kernel.stop.grace_exceeded", layer=layer)
             for name in layer:
