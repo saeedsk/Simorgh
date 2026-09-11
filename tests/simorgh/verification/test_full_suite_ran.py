@@ -296,3 +296,26 @@ class TestAChangeInSomebodyElsesProjectIsCheckedThere(unittest.IsolatedAsyncioTe
         self.assertEqual(result.status, "failed")
         self.assertIn("narrower target", result.detail)
 
+
+
+class TestADeniedWriteNeedsNoSuite(unittest.TestCase):
+    """The mirror of `test_did_anything`'s denied case: a session whose
+    only write tool call was refused by the Guardian changed nothing,
+    so there is nothing for the suite to say (2026-09-11)."""
+
+    def test_a_denied_write_does_not_make_the_check_apply(self) -> None:
+        req = _request("patch", [
+            {"tool": "read_file", "ok": True, "phase": "act", "summary": ""},
+            {"tool": "replace_in_file", "ok": False, "phase": "act", "denied": True,
+             "summary": "denied: simorgh/contracts/ is protected"},
+        ])
+        req.subject["written_paths"] = []
+        req.subject["subject"] = "simorgh/contracts/scratch.py"
+        self.assertFalse(FullSuiteRanCheck().applies(req))
+
+    def test_a_write_that_ran_still_applies(self) -> None:
+        req = _request("patch", [
+            {"tool": "replace_in_file", "ok": True, "phase": "act", "summary": ""},
+        ])
+        req.subject["subject"] = "simorgh/util/x.py"
+        self.assertTrue(FullSuiteRanCheck().applies(req))

@@ -66,7 +66,7 @@ from simorgh.contracts.scratch import is_scratch
 from ..api import CheckContext, CheckResult, Feedback, VerifyRequest
 from . import _baseline
 from ._files import REPO_ROOT, written_paths
-from .didanything import WRITE_TOOLS
+from .didanything import WRITE_TOOLS, write_steps
 
 # Kinds whose product is a change to real source. `skill` is excluded --
 # a skill's own test is `apply_skill`'s sandbox smoke run, a different
@@ -335,7 +335,7 @@ class FullSuiteRanCheck:
             req.subject.get("kind") in _CHANGE_KINDS
             and bool(steps)
             and req.subject.get("complete_log", True)
-            and any(s.get("tool") in WRITE_TOOLS for s in steps)
+            and bool(write_steps(steps))
             and _touched_python(req)
         )
 

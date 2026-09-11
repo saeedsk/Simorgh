@@ -87,6 +87,19 @@ from ..verdict import _REFUSAL_EVIDENCE
 # produced nothing.
 WRITE_TOOLS = frozenset({"apply_source_patch", "apply_skill", "git_commit", "git_revert",
                          "replace_in_file", "run_shell"})
+
+
+def write_steps(steps: list[dict]) -> list[dict]:
+    """The steps that could have written something: a write tool that
+    the Guardian let run. A denied call never reached the tool, so it
+    wrote nothing -- counting it made an honest "the file is protected,
+    no change made" answer look like a session that had edited, and
+    `full_suite_ran` then demanded a suite run for an edit that never
+    happened and blocked the task when none came (two observers,
+    2026-09-11). A write that ran and FAILED still counts: that is a
+    different, already visible problem, and this check is only about
+    work that never started."""
+    return [s for s in steps if s.get("tool") in WRITE_TOOLS and not s.get("denied")]
 # Task kinds whose entire product is a change to a file.
 _CHANGE_KINDS = frozenset({"patch", "skill", "self_patch"})
 # Phrases that mean "I deliberately did not write anything", so the
@@ -212,9 +225,11 @@ class DidAnythingCheck:
         )
 
     async def run(self, req: VerifyRequest, ctx: CheckContext) -> CheckResult:
-        used = {str(s.get("tool") or "") for s in _steps(req)}
-        if used & WRITE_TOOLS:
+        steps = _steps(req)
+        used = {str(s.get("tool") or "") for s in steps}
+        if write_steps(steps):
             return CheckResult(status="passed", detail="the session used a write tool")
+        denied = sorted({str(s.get("tool")) for s in steps if s.get("tool") in WRITE_TOOLS and s.get("denied")})
 
         answer = str(req.subject.get("result") or "").lower()
         if any(phrase in answer for phrase in _DECLINED):
@@ -225,8 +240,13 @@ class DidAnythingCheck:
                 detail="no write tool ran, and the answer says the change was not made",
             )
 
-        detail = ("this task's product is a change to a file, and no write tool ran in the whole "
-                  "session -- the answer describes work that did not happen")
+        if denied:
+            detail = (f"this task's product is a change to a file, and the only write tool calls "
+                      f"({', '.join(denied)}) were denied by the Guardian -- nothing was written, "
+                      f"and the answer describes work that did not happen")
+        else:
+            detail = ("this task's product is a change to a file, and no write tool ran in the whole "
+                      "session -- the answer describes work that did not happen")
         return CheckResult(
             status="failed", detail=detail,
             evidence={"tools_used": sorted(t for t in used if t)},

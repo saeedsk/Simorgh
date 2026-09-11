@@ -29,6 +29,15 @@ from .context import DEFAULT_TIMEOUT_S, Assembler
 from .claims import unsupported_claims
 from .tools import is_read_only, marker_hint, offered_tools, to_action_payload
 
+# What a Guardian refusal looks like on a step, in one place. The step's
+# `denied` flag is set from it, and Verification reads the flag rather
+# than this string, so the prefix may change without the checks noticing.
+DENIED_PREFIX = "denied: "
+
+
+def was_denied(detail: str) -> bool:
+    return (detail or "").startswith(DENIED_PREFIX)
+
 ACTION_TIMEOUT_S = 30.0
 # The reason an attempt gives when it spends its whole step budget with
 # a tool call still pending. Planning matches it by prefix to re-offer
@@ -532,7 +541,7 @@ class SessionRunner:
                 # redrafting it from nothing.
                 call = tool_calls[0]
                 ok, summary, detail = await self._propose_and_await(session, call, step_no)
-                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok)
+                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
                 session.record(step)
                 await self._record_step(session, step)
                 return Outcome(
@@ -549,7 +558,7 @@ class SessionRunner:
                 # step -- the model answers straight after.
                 call = tool_calls[0]
                 ok, summary, detail = await self._propose_and_await(session, call, step_no)
-                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok)
+                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
                 session.record(step)
                 await self._record_step(session, step)
                 if ok:
@@ -572,7 +581,7 @@ class SessionRunner:
                 # `detail` (narration/Ledger, generously bounded) vs `summary`
                 # (the model's own next-turn context, tightly bounded) are
                 # deliberately different lengths -- see `_propose_and_await`.
-                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok)
+                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
                 session.record(step)
                 await self._record_step(session, step)
                 # Two turns, not one. This used to append a single
@@ -918,7 +927,7 @@ class SessionRunner:
             return ok, self._bound_for_model(full), full[: self._DETAIL_CHARS]
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
-            text = f"denied: {reasons}"
+            text = f"{DENIED_PREFIX}{reasons}"
             return False, text, text
         text = f"needs human: {result.payload.get('question', '')}"
         return False, text, text
@@ -1011,7 +1020,7 @@ class SessionRunner:
             # of having a revision loop at all.
             for call in (think_reply.payload.get("tool_calls") or ())[:1]:
                 ok, summary, detail = await self._propose_and_await(session, call, session.next_step_no())
-                step = Step(session.next_step_no(), "act", detail, tool=call.get("tool"), ok=ok)
+                step = Step(session.next_step_no(), "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
                 session.record(step)
                 await self._record_step(session, step)
                 if ok and call.get("tool") in FINISHING_TOOLS:
@@ -1058,7 +1067,7 @@ class SessionRunner:
         # invents a fact ("0.") that was never actually said.
         steps = [
             {
-                "tool": step.tool, "ok": step.ok, "phase": step.phase,
+                "tool": step.tool, "ok": step.ok, "phase": step.phase, "denied": step.denied,
                 "summary": _trim_evidence(
                     step.summary or "",
                     _VERIFY_PATCH_SUMMARY_CHARS if step.tool in ("apply_source_patch", "apply_skill")

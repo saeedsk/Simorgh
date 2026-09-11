@@ -49,6 +49,12 @@ class Step:
     confidence: float | None = None
     cost_usd: float = 0.0
     tokens: int = 0
+    # The Guardian refused the call before the tool ran. Distinct from
+    # `ok=False`, which also covers a tool that ran and failed: a denied
+    # write wrote nothing, and Verification must not count it as one
+    # (two observers, 2026-09-11 -- an honest no-op after a refusal was
+    # told to run the whole suite, then blocked for not having run it).
+    denied: bool = False
 
 
 @dataclass

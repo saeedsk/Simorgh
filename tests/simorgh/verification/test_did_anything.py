@@ -191,3 +191,42 @@ class TestABookkeepingStepIsNotAnAction(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestADeniedWriteWroteNothing(unittest.IsolatedAsyncioTestCase):
+    """Two observers, 2026-09-11: a `replace_in_file` the Guardian
+    refused (protected path) was counted as "the session used a write
+    tool". The honest "no change made" answer passed here for the wrong
+    reason, and `full_suite_ran` then demanded a suite run for an edit
+    that never happened."""
+
+    async def _run(self, req: VerifyRequest):
+        ctx = CheckContext(act=None, think=None, review=None, clock=None, config=VerificationConfig())
+        return await DidAnythingCheck().run(req, ctx)
+
+    def _req(self, result: str) -> VerifyRequest:
+        return VerifyRequest(
+            verification_id="v1", task_id="t1", kind="task",
+            subject={"kind": "patch", "description": "d", "result": result,
+                     "steps": [
+                         {"tool": "read_file", "ok": True, "phase": "act", "summary": ""},
+                         {"tool": "replace_in_file", "ok": False, "phase": "act", "denied": True,
+                          "summary": "denied: simorgh/contracts/ is protected"},
+                     ]},
+        )
+
+    async def test_a_denied_write_is_not_a_write(self) -> None:
+        result = await self._run(self._req("Added the helper and committed it."))
+        self.assertEqual(result.status, "failed")
+        self.assertIn("denied by the Guardian", result.detail)
+        self.assertIn("replace_in_file", result.detail)
+
+    async def test_an_answer_that_says_it_was_denied_passes(self) -> None:
+        result = await self._run(self._req("The edit was denied by the Guardian: the path is protected."))
+        self.assertEqual(result.status, "passed")
+
+    async def test_a_failed_but_not_denied_write_still_counts(self) -> None:
+        req = self._req("done")
+        req.subject["steps"][1] = {"tool": "replace_in_file", "ok": False, "phase": "act",
+                                   "summary": "anchor not found"}
+        self.assertEqual((await self._run(req)).status, "passed")
