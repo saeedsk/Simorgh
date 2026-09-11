@@ -54,7 +54,7 @@ class Worker:
     def __init__(
         self, bus, ledger, *, clock=None, worker_id: str | None = None,
         assemble_timeout_s: float = DEFAULT_TIMEOUT_S, think_timeout_s: float | None = None,
-        heartbeat_s: float = 30.0,
+        heartbeat_s: float = 30.0, worktrees: bool = False,
     ) -> None:
         self._bus = bus
         self._ledger = ledger
@@ -87,7 +87,7 @@ class Worker:
         self._runner = SessionRunner(
             bus, ledger, clock=clock, worker_id=self.worker_id, is_paused=lambda: self._paused,
             is_cancelled=self._is_cancelled,
-            assemble_timeout_s=assemble_timeout_s, **runner_kwargs,
+            assemble_timeout_s=assemble_timeout_s, worktrees=worktrees, **runner_kwargs,
         )
         self._subs: list = []
         # Task ids somebody has asked to stop -> whether that cancel was

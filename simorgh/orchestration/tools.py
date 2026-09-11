@@ -28,6 +28,13 @@ from simorgh.contracts.toolargs import (
 # accidentally gets read_only's lighter Guardian scrutiny.
 _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "read_file": ("read_only", False),
+    # Proposed by the session runner, never by the model (no marker):
+    # a task's own worktree, and its landing on main. Landing is the
+    # one that changes main, so it is the one an approval gate may
+    # ask a human about.
+    "worktree_open": ("reversible", False),
+    "worktree_land": ("irreversible", False),
+    "worktree_close": ("reversible", False),
     "list_dir": ("read_only", False),
     "search_code": ("read_only", False),
     "self_map": ("read_only", False),

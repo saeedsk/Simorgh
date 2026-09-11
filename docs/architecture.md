@@ -62,6 +62,11 @@ Full package paths and specs: [`blueprint/00-README.md`](blueprint/00-README.md#
 5. Guaranteed floors under any richer/networked layer -- a real LLM
    provider being unreachable degrades to a deterministic fallback, never
    a hang or a crash.
+6. Sim changes its own code the way its maintainer does (since
+   2026-09-11): a patch or skill task works in its own git worktree,
+   commits there, and lands on main only after a rebase and a
+   whole-suite gate. The live checkout is never edited by a task.
+   `docs/plans/worktree-landing-design.md`.
 
 ## Running it
 

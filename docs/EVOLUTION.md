@@ -4621,3 +4621,34 @@ Still ahead, roughly in order:
     the real system prompt only for a tool actually offered that turn),
     and `test_render.py` (markdown stripping/styling/fenced-block
     isolation, 10 new cases). Full suite green.
+
+147. **Sim changes its own code the way its maintainer does: in a
+    worktree of its own, landed only when green (2026-09-11).** The
+    creator asked whether Sim should follow the same discipline the
+    assistant uses on Sim -- copy, modify, test, and only then commit.
+    Until now a patch task edited the live checkout: the tree the
+    running process was imported from, shared with every other task and
+    with the creator's own uncommitted work. Two tasks collided in it,
+    a half-written module sat under a live process, and nothing ran the
+    whole suite before a commit reached main (the "nothing gates a
+    commit on the whole suite" blocker, open since wave 5).
+
+    Now `execution/worktree.py` gives a patch or skill task its own
+    `git worktree` under the runtime data directory, branched from
+    HEAD. Every path tool -- read, search, patch, replace, test, commit,
+    shell -- resolves against it through a new `ToolContext.root`,
+    which Execution sets from the *recorded proposal's* task id, never
+    from the model's arguments. Scratch (`workspace/`) stays on the live
+    tree. After verification passes, `SessionRunner` proposes
+    `worktree_land`: refuse a dirty tree, rebase onto main, run the
+    whole suite in a copy of the rebased tree, `git merge --ff-only`,
+    remove the worktree. A conflict, a red gate or a live checkout in
+    the way blocks the attempt with `landing failed: <why>` and keeps
+    the tree for the next one. Off (`[execution] worktrees = false`, no
+    `.git`, a harness) records "working in the live tree" as the first
+    step and behaves as before. Verification's file-reading checks now
+    read from the tree the subject names (`repo_root`), which the
+    morning's observer wave had found they could not.
+
+    Design and decisions: `docs/plans/worktree-landing-design.md`.
+    Tests: 20 against real git, 6 session flows, 3 for the checks.

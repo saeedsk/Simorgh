@@ -19,7 +19,7 @@ from __future__ import annotations
 import ast
 
 from ..api import CheckContext, CheckResult, VerifyRequest
-from ._files import read_repo_file, written_paths
+from ._files import read_repo_file, repo_root_of, written_paths
 
 
 _PY_SUFFIXES = (".py",)
@@ -34,7 +34,7 @@ def _written_python(req: VerifyRequest) -> list[tuple[str, str]]:
     can still be read back."""
     out = []
     for path in written_paths(req, suffixes=_PY_SUFFIXES):
-        text = read_repo_file(path)
+        text = read_repo_file(path, root=repo_root_of(req))
         if text is not None:
             out.append((path, text))
     return out

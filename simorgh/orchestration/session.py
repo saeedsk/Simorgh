@@ -27,7 +27,7 @@ from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
 from .claims import unsupported_claims
-from .tools import is_read_only, marker_hint, offered_tools, to_action_payload
+from .tools import is_read_only, known_tools, marker_hint, offered_tools, to_action_payload
 
 # What a Guardian refusal looks like on a step, in one place. The step's
 # `denied` flag is set from it, and Verification reads the flag rather
@@ -45,6 +45,13 @@ ACTION_TIMEOUT_S = 30.0
 # the packages may not import each other).
 CONTINUATION_REASON = "step budget exhausted"
 VERIFICATION_REASON = "verification failed"
+# The task's branch could not be put on main: a rebase conflict, a red
+# whole-suite gate, or a live checkout in the way. The worktree stays,
+# and the next attempt starts from it with the reason in hand.
+LANDING_REASON = "landing failed"
+# Task kinds whose product is a change to the repository, and so work
+# in their own worktree (execution/worktree.py) when one can be opened.
+WORKTREE_KINDS = frozenset({"patch", "skill"})
 CANCELLED_REASON = "the task was cancelled"
 
 # `workspace/` is the one directory that is both readable and writable
@@ -207,6 +214,11 @@ KEEP_EDITS_UNTIL_ATTEMPT = 6
 # while the tests were still running, and the task sat in_progress.
 _ACTION_TIMEOUTS: dict[str, float] = {
     "run_tests": 330.0,
+    # Landing runs the whole suite as its gate; `RunTestsTool` allows
+    # 300s for that, and the tool's own bound adds a minute.
+    "worktree_land": 400.0,
+    "worktree_open": 60.0,
+    "worktree_close": 60.0,
     "run_python_sandboxed": 45.0,
     "run_js_sandboxed": 45.0,
     "web_fetch": 45.0,
@@ -350,8 +362,13 @@ class SessionRunner:
         self, bus, ledger, *, clock=None, worker_id: str = "w1", is_paused=None, is_cancelled=None,
         think_timeout_s: float = 5.0, action_timeout_s: float = ACTION_TIMEOUT_S,
         verify_timeout_s: float = VERIFY_TIMEOUT_S, assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
+        worktrees: bool = False,
     ) -> None:
         self._bus = bus
+        # Off here, on in production (`[orchestration] worktrees`, the
+        # default): a harness that stands in for Execution would
+        # otherwise be asked to fake three more tools in every flow.
+        self._worktrees = worktrees
         self._ledger = ledger
         self._clock = clock
         self._worker_id = worker_id
@@ -379,6 +396,8 @@ class SessionRunner:
         request the model has to remember, so the cleanup happens here
         whichever way the session ended.
         """
+        if self._uses_worktree(session) and not session.worktree:
+            await self._open_worktree(session)
         if not session.base_ref:
             # Captured here, before the first step, and only here: both
             # `Session` construction sites in `worker.py` and every
@@ -436,12 +455,96 @@ class SessionRunner:
                 "blocked", reason=f"{UNCOMMITTED_REASON}: {', '.join(sorted(session.uncommitted))}",
                 result_summary=outcome.result_summary, verification_ref=outcome.verification_ref,
             )
+        if session.worktree:
+            if outcome.kind == "completed":
+                # Verified, committed on its own branch: now the part that
+                # touches main. A refusal here is an unfinished attempt,
+                # not a failure -- the worktree stays and the next attempt
+                # inherits the reason.
+                outcome = await self._land(session, outcome)
+            if session.worktree and outcome.kind != "paused" and not self._continues(session, outcome):
+                await self._close_worktree(session)
         if session.uncommitted and outcome.kind != "paused":
             if self._continues(session, outcome):
                 await self._keep_uncommitted(session)
             else:
                 await self._discard_uncommitted(session)
         return outcome
+
+    # -- the task's own worktree ---------------------------------------------------------------
+
+    def _uses_worktree(self, session: Session) -> bool:
+        if not self._worktrees or session.kind not in WORKTREE_KINDS or session.mode != "execute":
+            return False
+        # Only when Execution has announced the tool. `known_tools()` is
+        # empty in a harness with no Execution (then the switch alone
+        # decides); once anything has registered, an Execution that
+        # never offered `worktree_open` -- worktrees off, a repository
+        # nobody named -- is not asked for one, which would only cost a
+        # Guardian round trip to hear "unknown tool".
+        known = known_tools()
+        return not known or "worktree_open" in known
+
+    async def _open_worktree(self, session: Session) -> None:
+        """Ask Execution for this task's worktree. The tool's first two
+        output lines are the path and the commit it stands at (the
+        same commit on a retry that resumes an earlier attempt's tree).
+        When there is no such tool -- worktrees off, no git, a harness
+        -- the session edits the live tree as before, and the step says
+        so rather than pretending."""
+        call = {"tool": "worktree_open", "args": {}}
+        ok, summary, detail = await self._propose_and_await(session, call, session.next_step_no())
+        lines = [line.strip() for line in (summary or "").splitlines() if line.strip()]
+        if ok and lines and os.path.isabs(lines[0]) and os.path.isdir(lines[0]):
+            session.worktree = lines[0]
+            if len(lines) > 1 and not session.base_ref:
+                session.base_ref = lines[1]
+            how = lines[2] if len(lines) > 2 else "opened"
+            step = Step(session.next_step_no(), "gather",
+                        f"working in this task's own worktree ({how}): {lines[0]}",
+                        tool="worktree_open", ok=True)
+        else:
+            step = Step(session.next_step_no(), "gather",
+                        f"working in the live tree; no worktree: {detail}"[:400],
+                        tool="worktree_open", ok=False, denied=was_denied(detail))
+        session.record(step)
+        await self._record_step(session, step)
+
+    async def _land(self, session: Session, outcome: Outcome) -> Outcome:
+        call = {"tool": "worktree_land", "args": {}}
+        ok, summary, detail = await self._propose_and_await(session, call, session.next_step_no())
+        step = Step(session.next_step_no(), "act",
+                    (f"landed on main: {detail}" if ok else f"landing failed: {detail}")[:2000],
+                    tool="worktree_land", ok=ok, denied=was_denied(detail))
+        session.record(step)
+        await self._record_step(session, step)
+        if ok:
+            # The manager removed the worktree as part of landing.
+            session.worktree = ""
+            first = next((line.strip() for line in (summary or "").splitlines() if line.strip()), "landed")
+            return Outcome(
+                "completed", result_summary=f"{outcome.result_summary}\n\n[{first}]".strip(),
+                verification_ref=outcome.verification_ref, floor=outcome.floor, confidence=outcome.confidence,
+            )
+        reason = " ".join((summary or detail or "no reason given").split())[:1200]
+        return Outcome("blocked", reason=f"{LANDING_REASON}: {reason}",
+                       result_summary=outcome.result_summary, verification_ref=outcome.verification_ref)
+
+    async def _close_worktree(self, session: Session) -> None:
+        """Remove a worktree whose task is over: failed, or blocked
+        for a reason no retry will pick up. Whatever it held that was
+        not landed goes with it -- the same "never leave a change
+        behind" cleanup `_discard_uncommitted` does on the live tree."""
+        call = {"tool": "worktree_close", "args": {}}
+        ok, summary, _detail = await self._propose_and_await(session, call, session.next_step_no())
+        step = Step(session.next_step_no(), "act",
+                    f"closed the worktree: {summary}" if ok else f"could not close the worktree: {summary}",
+                    tool="worktree_close", ok=ok)
+        session.record(step)
+        await self._record_step(session, step)
+        session.worktree = ""
+        session.uncommitted.clear()
+        session.created.clear()
 
     @staticmethod
     def _continues(session: Session, outcome: Outcome) -> bool:
@@ -461,7 +564,7 @@ class SessionRunner:
         # threw away a correct, tested patch that only lacked a commit
         # (watched trial, 2026-09-08) -- the next attempt inherits the
         # edit and the objection, and can finish the job.
-        return reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON))
+        return reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON, LANDING_REASON))
 
     async def _keep_uncommitted(self, session: Session) -> None:
         kept = sorted(session.uncommitted)
@@ -1098,6 +1201,9 @@ class SessionRunner:
             "description": session.user_text, "result": text[:2000], "kind": session.kind, "steps": steps,
             "complete_log": complete_log, "subject": session.subject or "", "written_paths": written,
             "base_ref": session.base_ref,
+            # Where the written files are: the task's worktree, or ""
+            # for the live tree (`verification/checks/_files.py`).
+            "repo_root": session.worktree,
         }).encode("utf-8")
         return await self._ledger.put_blob(payload, content_type="application/json")
 

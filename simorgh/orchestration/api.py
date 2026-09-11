@@ -144,6 +144,11 @@ class Session:
     # Empty when there is no git repo to ask, which every reader must
     # treat as "cannot attribute" rather than "nothing pre-existed".
     base_ref: str = ""
+    # The task's own worktree (execution/worktree.py), as an absolute
+    # path, once `SessionRunner` has opened one. Empty for a session
+    # that edits the live tree: chat and research tasks, and any code
+    # task whose Execution has no worktree tools.
+    worktree: str = ""
 
     def next_step_no(self) -> int:
         return len(self.steps) + 1

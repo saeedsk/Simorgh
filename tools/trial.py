@@ -100,6 +100,12 @@ async def run_trial(task: str, *, kind: str, subject: str | None, root: str, tim
                     max_steps: int = 0, attempts: int = 1) -> int:
     repo = make_lab(root)
     os.chdir(repo)
+    # The environment wins over an explicit config mapping
+    # (`kernel/config.py::_apply_env_overrides`), so an observer's
+    # `SIMORGH_RUNTIME_DATA_DIR` used to point every trial at one shared
+    # ledger and leave `<lab>/data` empty (three observers, 2026-09-11).
+    # A lab is isolated whatever the caller's shell says.
+    os.environ["SIMORGH_RUNTIME_DATA_DIR"] = os.path.join(root, "data")
     kernel = Kernel(
         LoadedConfig({
             "runtime": {"data_dir": os.path.join(root, "data")},
@@ -190,6 +196,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="how many attempts to watch before giving up on a task that keeps "
                              "running out of steps")
     args = parser.parse_args(argv)
+    # Line-buffered even when redirected to a log: an observer polling
+    # `tail` on a background trial saw nothing until the process exited.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
 
     root = tempfile.mkdtemp(prefix="simorgh-trial-")
     try:

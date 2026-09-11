@@ -23,7 +23,7 @@ from __future__ import annotations
 import ast
 
 from ..api import CheckContext, CheckResult, Feedback, VerifyRequest
-from ._files import read_repo_file, written_paths
+from ._files import read_repo_file, repo_root_of, written_paths
 
 _HTML_SUFFIXES = (".html", ".htm")
 _PY_SUFFIXES = (".py",)
@@ -77,7 +77,7 @@ class TrailingNarrationCheck:
         offenders: list[tuple[str, str]] = []
         read_any = False
         for path in written_paths(req, suffixes=_HTML_SUFFIXES + _PY_SUFFIXES):
-            text = read_repo_file(path)
+            text = read_repo_file(path, root=repo_root_of(req))
             if text is None:
                 continue
             read_any = True

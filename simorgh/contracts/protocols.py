@@ -174,6 +174,11 @@ class ToolContext:
     logger: Logger
     ledger: Ledger
     bus: Bus | None = None  # composite tools (drafting loops) may request cognition via the bus
+    # The tree this call's paths resolve against, when the task works in
+    # its own worktree (execution/worktree.py). None means the live
+    # repository, which is every call from a task that has none. Set by
+    # Execution from the task id, never from the model's arguments.
+    root: Path | None = None
 
 
 @dataclass(frozen=True)

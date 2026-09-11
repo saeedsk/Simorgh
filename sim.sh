@@ -14,6 +14,13 @@ cd "$REPO_ROOT"
 
 PYTHON_BIN="${SIMORGH_PYTHON:-python3}"
 
+# Name the repository Sim works on. Execution only ever makes a task's
+# worktree of a repository somebody NAMED (`[execution] repo_root` or
+# this variable); a root merely inferred from the working directory
+# means in-place edits, as before 2026-09-11. Every path through this
+# script -- loader or not -- runs Sim from this checkout, so name it.
+export SIMORGH_EXECUTION_REPO_ROOT="${SIMORGH_EXECUTION_REPO_ROOT:-$REPO_ROOT}"
+
 if [[ "${SIMORGH_NO_LOADER:-0}" == "1" ]]; then
   exec "$PYTHON_BIN" -m simorgh run "$@"
 fi

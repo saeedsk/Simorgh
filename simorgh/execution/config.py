@@ -56,6 +56,16 @@ class Config:
     blob_inline_threshold_bytes: int = 4096
     approval_max_age_s: float = 120.0
     repo_root: Path = field(default_factory=lambda: find_repo_root())
+    # Whether `repo_root` was NAMED (`[execution] repo_root`, or the
+    # `SIMORGH_EXECUTION_REPO_ROOT` environment `sim.sh` sets) rather
+    # than inferred from the working directory. A worktree is only
+    # ever made of a repository somebody named: on 2026-09-11 the
+    # integration tests, which boot a real Kernel from the real
+    # checkout with a temp data dir and no repo named, put 45 stray
+    # task branches on the live repository within one suite run. The
+    # inferred root is fine for reading and for in-place edits, which
+    # is what it always was; it is not fine for branching.
+    repo_root_named: bool = False
     # `papers/` is here because the creator put papers on self-learning
     # AI there for Sim to read (2026-09-08); without the root they were
     # reachable by no tool at all.
@@ -109,6 +119,21 @@ class Config:
         # nothing written here is ever committed or reviewed.
         SCRATCH_PREFIX,
     )
+    # -- one worktree per code task (execution/worktree.py). A patch or
+    # skill task edits its own `git worktree` of the repository, tests
+    # there, commits there, and lands on main only after a rebase and
+    # a whole-suite gate. Off means every task edits the live checkout,
+    # as before 2026-09-11. `worktree_dir` defaults to
+    # `<runtime data_dir>/execution/worktrees`, never anywhere under
+    # the repository.
+    worktrees: bool = True
+    worktree_dir: str = ""
+    # Run the whole suite on the rebased tree before fast-forwarding
+    # main. Off lands on the task's own test runs alone.
+    landing_gate: bool = True
+    # A worktree nothing has touched for this long belongs to a task
+    # that died with its process; pruned at start.
+    worktree_max_age_days: float = 7.0
     sandbox_cpu_seconds: int = 5
     sandbox_memory_mb: int = 256
     sandbox_timeout_s: float = 10.0
@@ -490,6 +515,7 @@ class Config:
             )
         if "repo_root" in kwargs:
             kwargs["repo_root"] = Path(kwargs["repo_root"])
+            kwargs["repo_root_named"] = True
         for key in ("readable_roots", "write_scopes_source", "write_scopes_skills",
                     "knowledge_cloud_llm_may_see", "pim_cloud_llm_may_see", "pim_accounts",
                     "security_secrets_paths"):

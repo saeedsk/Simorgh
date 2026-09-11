@@ -202,7 +202,8 @@ class RunShellTool:
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["DEBIAN_FRONTEND"] = "noninteractive"
         started = time.monotonic()
-        before = writewatch.snapshot(self._config.repo_root)
+        root = getattr(ctx, "root", None) or self._config.repo_root
+        before = writewatch.snapshot(root)
         try:
             # In a worker thread. This coroutine runs on the event loop's
             # own thread, and the synchronous call that was here held
@@ -213,7 +214,7 @@ class RunShellTool:
             # (observer swe-01, 2026-09-10, through the pty).
             completed = await asyncio.to_thread(
                 subprocess.run,
-                command, shell=True, cwd=self._config.repo_root, capture_output=True, text=True,
+                command, shell=True, cwd=root, capture_output=True, text=True,
                 timeout=timeout, stdin=subprocess.DEVNULL, env=env,
             )
         except subprocess.TimeoutExpired as exc:
@@ -249,7 +250,7 @@ class RunShellTool:
         # command to say (writewatch.py). Without this a heredoc that
         # writes a page produced no `written_paths`, and every
         # file-reading verification check skipped it.
-        after = writewatch.snapshot(self._config.repo_root)
+        after = writewatch.snapshot(root)
         written = writewatch.written_between(before, after)
         return ToolResult(
             ok=ok, output=output,

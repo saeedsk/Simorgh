@@ -26,6 +26,21 @@ from simorgh.contracts import security, topics
 from simorgh.contracts.envelope import Message, validate
 from simorgh.contracts.protocols import Health
 from simorgh.execution.config import Config as ExecutionConfig
+from simorgh.kernel.config import _apply_env_overrides
+
+
+def _with_env_overrides(section: str, values: dict, model) -> dict:
+    """`SIMORGH_<SECTION>_<KEY>` over a section, typed by the model's own
+    fields. `kernel/config.py` promised this for every section and
+    delivered it for `[runtime]` alone; `sim.sh` names the repository
+    through `SIMORGH_EXECUTION_REPO_ROOT`, which needs it here."""
+    fields = {}
+    for name, field in getattr(model, "__dataclass_fields__", {}).items():
+        kind = field.type if isinstance(field.type, type) else {
+            "bool": bool, "int": int, "float": float, "str": str,
+        }.get(str(field.type).split("|")[0].strip(), str)
+        fields[name] = kind if kind in (bool, int, float, tuple, list) else str
+    return _apply_env_overrides(section, values, fields)
 from simorgh.guardian.config import Config as GuardianConfig
 from simorgh.ledger.factory import make_ledger
 
@@ -193,7 +208,7 @@ class Kernel:
         await self._record_effective_config(dead_sections)
         factories = build_factories(
             bus_client=self.bus, ledger_client=self.ledger, run_repl=self._interactive,
-            execution_config=ExecutionConfig.from_mapping(self.config.section("execution")),
+            execution_config=ExecutionConfig.from_mapping(_with_env_overrides("execution", self.config.section("execution"), ExecutionConfig)),
             guardian_config=GuardianConfig.from_mapping(guardian_section),
         )
         ctx_factory = ContextFactory(

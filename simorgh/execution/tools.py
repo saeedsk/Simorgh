@@ -56,6 +56,7 @@ from simorgh.contracts.checkout import (staged_diff,
     find_enclosing,
 )
 from simorgh.contracts.pytestfailures import failing_nodeids, marker_for, strip_ansi
+from simorgh.contracts.scratch import is_scratch
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
@@ -102,6 +103,23 @@ from .shell import RunShellTool
 from .websearch import WebSearchTool
 
 
+def tool_root(config: Config, ctx: ToolContext | None, path: str = "") -> Path:
+    """The tree a call's paths resolve against.
+
+    A task working in its own worktree (execution/worktree.py) carries
+    that tree on `ctx.root`, set by the service from the task id, and
+    every source path -- read, search, patch, test, commit -- belongs
+    there. Scratch does not: `workspace/` is the one place a long piece
+    of work keeps notes across tasks, and a worktree is removed the
+    moment its task lands, so scratch stays on the live tree whichever
+    tree the task is editing.
+    """
+    root = getattr(ctx, "root", None) if ctx is not None else None
+    if root is None or (path and is_scratch(path)):
+        return config.repo_root
+    return Path(root)
+
+
 class ReadFileTool:
     name = "read_file"
     description = "Read a file's contents (path-safety bounded)."
@@ -128,13 +146,13 @@ class ReadFileTool:
         if span is None:
             content = await asyncio.to_thread(
                 pathsafety.safe_read_file,
-                self._config.repo_root, path, readable_roots=self._config.readable_roots)
+                tool_root(self._config, ctx, path), path, readable_roots=self._config.readable_roots)
         else:
             # Slice the REAL file, never a pre-capped string: that was the
             # bug that made 61% of this very module unreachable.
             content = await asyncio.to_thread(
                 pathsafety.safe_read_lines,
-                self._config.repo_root, path, start=span[0], end=span[1],
+                tool_root(self._config, ctx, path), path, start=span[0], end=span[1],
                 readable_roots=self._config.readable_roots)
         ok = not content.startswith("[refused:")
         # A refusal is an error, not output. It used to be BOTH, so the
@@ -174,7 +192,9 @@ class ListDirTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        content = pathsafety.safe_list_dir(self._config.repo_root, args.get("path", ""), readable_roots=self._config.readable_roots)
+        content = pathsafety.safe_list_dir(
+            tool_root(self._config, ctx, args.get("path", "")), args.get("path", ""),
+            readable_roots=self._config.readable_roots)
         ok = not content.startswith("[refused:")
         return ToolResult(ok=ok, output=content, error=None if ok else content)
 
@@ -393,7 +413,7 @@ class SearchCodeTool:
         except re.error as exc:
             return ToolResult(ok=False, error=f"refused: {query!r} is not a valid regex: {exc!r}")
 
-        root = self._config.repo_root.resolve()
+        root = tool_root(self._config, ctx).resolve()
         # Both in a worker thread: ripgrep is a subprocess and the pure
         # Python fallback walks the whole tree, and either one run inline
         # here holds the event loop for its duration (observer swe-01,
@@ -1216,7 +1236,7 @@ class RunTestsTool:
 
         timeout = min(ctx.constraints.get("timeout_s", self._config.test_timeout_s), self._config.test_timeout_s)
         start = time.monotonic()
-        root = self._config.repo_root.resolve()
+        root = tool_root(self._config, ctx, target).resolve()
         cap = self._config.test_output_max_chars
         nested = find_enclosing(root, target)
         if nested is not None:
@@ -1237,12 +1257,19 @@ class RunTestsTool:
         # the worker's own session was cancelled mid-verify and a
         # 40-line traceback landed on the prompt. A tool "isolated from
         # the live working tree" was not isolated from the live loop.
-        return await asyncio.to_thread(self._run_isolated, target, timeout=timeout, start=start)
+        return await asyncio.to_thread(self._run_isolated, target, timeout=timeout, start=start, root=root)
 
-    def _run_isolated(self, target: str, *, timeout: float, start: float) -> ToolResult:
+    def gate(self, root: Path) -> ToolResult:
+        """The whole suite against `root`, for `worktree_land`: the same
+        isolated run the model gets, on the tree about to become main.
+        Blocking; the caller threads it."""
+        return self._run_isolated("tests", timeout=self._config.test_timeout_s, start=time.monotonic(),
+                                  root=Path(root).resolve())
+
+    def _run_isolated(self, target: str, *, timeout: float, start: float, root: Path | None = None) -> ToolResult:
         """Copy the repo, run pytest there, read the result. Blocking by
         design: `run` hands it to a worker thread."""
-        root = self._config.repo_root.resolve()
+        root = (root or self._config.repo_root).resolve()
         cap = self._config.test_output_max_chars
         with tempfile.TemporaryDirectory(prefix="simorgh-tests-") as workdir:
             dest = Path(workdir) / "repo"
@@ -1488,7 +1515,8 @@ def _transcript_tail(code: str) -> str | None:
     return line.strip()[:120]
 
 
-def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes: tuple[str, ...]) -> ToolResult:
+def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes: tuple[str, ...],
+                       root: Path | None = None) -> ToolResult:
     """Shared body of `apply_source_patch`/`apply_skill`: write `code` to
     `subject`, refusing anything outside `write_scopes` -- a tool-level
     scope re-check independent of Guardian's own (v1's "two boundaries,
@@ -1503,8 +1531,9 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
         return ToolResult(
             ok=False,
             error=f"refused: {subject!r} is outside the writable scope ({', '.join(write_scopes)})")
-    target = (config.repo_root / subject).resolve()
-    scope_ok = any((config.repo_root / s).resolve() in target.parents or (config.repo_root / s).resolve() == target.parent
+    base = (root or config.repo_root).resolve()
+    target = (base / subject).resolve()
+    scope_ok = any((base / s).resolve() in target.parents or (base / s).resolve() == target.parent
                     for s in write_scopes)
     if not scope_ok:
         return ToolResult(
@@ -1615,7 +1644,8 @@ class ApplySourcePatchTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        return _write_scoped_file(self._config, args["subject"], args["code"], write_scopes=self._config.write_scopes_source)
+        return _write_scoped_file(self._config, args["subject"], args["code"], write_scopes=self._config.write_scopes_source,
+                                  root=tool_root(self._config, ctx, args["subject"]))
 
 
 class StartTaskTool:
@@ -1804,8 +1834,8 @@ class ReplaceInFileTool:
         if problem:
             return ToolResult(ok=False, error=f"refused: {problem}")
 
-        content, refusal = pathsafety.read_source(
-            self._config.repo_root, subject, readable_roots=self._config.readable_roots)
+        root = tool_root(self._config, ctx, subject)
+        content, refusal = pathsafety.read_source(root, subject, readable_roots=self._config.readable_roots)
         if refusal:
             return ToolResult(ok=False, error=refusal)
 
@@ -1843,7 +1873,7 @@ class ReplaceInFileTool:
                               metadata={"changed": False, "blocks": len(blocks)})
 
         result = _write_scoped_file(self._config, subject, updated,
-                                     write_scopes=self._config.write_scopes_source)
+                                     write_scopes=self._config.write_scopes_source, root=root)
         if not result.ok:
             return result
         before = len(content.splitlines())
@@ -1931,7 +1961,8 @@ class ApplySkillTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        return _write_scoped_file(self._config, args["subject"], args["code"], write_scopes=self._config.write_scopes_skills)
+        return _write_scoped_file(self._config, args["subject"], args["code"], write_scopes=self._config.write_scopes_skills,
+                                  root=tool_root(self._config, ctx, args["subject"]))
 
 
 _SIM_GIT_AUTHOR_NAME = "Simorgh"
@@ -1959,7 +1990,7 @@ class GitCommitTool:
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         path, message = args["path"], args["message"]
-        root = self._config.repo_root
+        root = tool_root(self._config, ctx, path)
         # A path inside a nested repository (a materialised SWE-bench
         # checkout under `workspace/`) is committed THERE: from here it
         # is gitignored and `status` says nothing to commit.
@@ -2043,7 +2074,7 @@ class GitDiscardTool:
             return ToolResult(
                 ok=False,
                 error=f"refused: {subject!r} is outside the writable scope ({', '.join(scopes)})")
-        root = self._config.repo_root
+        root = tool_root(self._config, ctx, subject)
         nested = nested_git_root(root, subject)
         if nested is not None:
             root, subject = nested
@@ -2097,7 +2128,7 @@ class GitRevertTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        root = self._config.repo_root
+        root = tool_root(self._config, ctx)
         run = lambda cmd: subprocess.run(
             cmd, cwd=root, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
         )

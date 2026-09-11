@@ -24,7 +24,7 @@ import json
 import re
 
 from ..api import CheckContext, CheckResult, Feedback, VerifyRequest
-from ._files import read_repo_file, written_paths
+from ._files import read_repo_file, repo_root_of, written_paths
 
 _JS_SUFFIXES = (".js", ".mjs")
 _HTML_SUFFIXES = (".html", ".htm")
@@ -148,7 +148,7 @@ class JsSyntaxCheck:
     async def run(self, req: VerifyRequest, ctx: CheckContext) -> CheckResult:
         units: list[tuple[str, str]] = []  # (label, body)
         for path in written_paths(req, suffixes=_JS_SUFFIXES + _HTML_SUFFIXES):
-            text = read_repo_file(path)
+            text = read_repo_file(path, root=repo_root_of(req))
             if text is None:
                 continue
             if path.lower().endswith(_HTML_SUFFIXES):

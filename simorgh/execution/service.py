@@ -46,7 +46,8 @@ from .config import Config
 _BLOB_REF = re.compile(r"^blob:[0-9a-f]{64}$")
 from .external import load_external_tools
 from .mcp import McpClient, McpServerConfig, McpToolProxy, mcp_single_arg_key
-from .tools import SkillTool, builtin_tools
+from .tools import RunTestsTool, SkillTool, builtin_tools
+from .worktree import WorktreeManager, worktree_tools
 from .verifier import ApprovalVerifier
 
 from .capabilities import CAPABILITIES_STREAM, PROBES, connector_probe, degraded_detail, run_probes
@@ -122,6 +123,9 @@ class Service:
         self._capability_detail = ""
         self._probe_task: asyncio.Task | None = None
         self._probe_results: list = []
+        # One worktree per code task (worktree.py); None when the repo
+        # is not a git checkout or `[execution] worktrees = false`.
+        self._worktrees: WorktreeManager | None = None
 
     async def start(self, ctx) -> None:
         self._ctx = ctx
@@ -140,10 +144,15 @@ class Service:
         # itself.
         self._register_configured_connectors(ctx)
 
+        self._worktrees = self._build_worktrees(ctx)
+        system_tools = (
+            worktree_tools(self._worktrees, land_timeout_s=self._config.test_timeout_s + 60.0)
+            if self._worktrees is not None else []
+        )
         # External adapters (external.py) load last so a hand-built tool of
         # the same name is never shadowed by an optional package's.
         external = load_external_tools(self._config.external_tools, logger=ctx.logger)
-        for tool in builtin_tools(self._config, secrets=ctx.secrets) + self._extra_tools + external:
+        for tool in builtin_tools(self._config, secrets=ctx.secrets) + system_tools + self._extra_tools + external:
             if tool.name in self._registry:
                 ctx.logger.warning("tool_name_collision", name=tool.name, provider=getattr(tool, "provider", "builtin"))
                 continue
@@ -188,6 +197,40 @@ class Service:
         # invisible until a task tried and failed. In the background:
         # boot must not wait on a `docker info` that hangs.
         self._probe_task = asyncio.create_task(self._probe_capabilities())
+
+    def _build_worktrees(self, ctx) -> WorktreeManager | None:
+        """Where a task's own worktree lives, and whether the feature is
+        on at all. Never under the repository: the runtime data
+        directory is the home for everything a run produces."""
+        if not getattr(self._config, "worktrees", True):
+            return None
+        if not getattr(self._config, "repo_root_named", False):
+            # Inferred from the cwd, which is what every test that boots
+            # a Kernel from the checkout has -- and what put 45 stray
+            # branches on the live repository (2026-09-11). Editing in
+            # place is what those runs always did; branching is not.
+            ctx.logger.info("worktrees_off", reason="repo_root was inferred from the working directory, "
+                            "not named; set [execution] repo_root (sim.sh does) to work in worktrees")
+            return None
+        home = self._config.worktree_dir or ""
+        data_dir = getattr(ctx, "data_dir", None)
+        if not home:
+            if data_dir is None:
+                return None
+            home = str(Path(data_dir) / "worktrees")
+        gate = RunTestsTool(self._config).gate if getattr(self._config, "landing_gate", True) else None
+        manager = WorktreeManager(self._config.repo_root, Path(home), gate=gate)
+        if not manager.available:
+            ctx.logger.warning("worktrees_unavailable", repo=str(self._config.repo_root))
+            return None
+        try:
+            pruned = manager.prune(self._config.worktree_max_age_days * 86400.0)
+        except OSError as exc:  # a stale directory it cannot read is not a reason to refuse to boot
+            ctx.logger.warning("worktree_prune_failed", error=repr(exc))
+            pruned = []
+        if pruned:
+            ctx.logger.info("worktrees_pruned", count=len(pruned), names=pruned[:10])
+        return manager
 
     def _reprobe_after(self, tool_name: str, ok: bool) -> None:
         """Re-run the capability probes after something that could have
@@ -514,11 +557,21 @@ class Service:
             await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "finished", {"action_id": action_id, "ok": False}))
 
     async def _fetch_proposed_args(self, action_id: str) -> dict | None:
+        args, _task_id = await self._fetch_proposal(action_id)
+        return args
+
+    async def _fetch_proposal(self, action_id: str) -> tuple[dict | None, str | None]:
+        """`(args, task_id)` of the proposal Guardian recorded. The task
+        id is what binds a call to its task's worktree; it comes from
+        the proposal the session runner wrote, never from the model's
+        arguments."""
         events = await self._ctx.ledger.read(f"action:{action_id}")
         for event in events:
             if event.type == "received":
-                return await self._resolve_arg_refs(event.payload["proposal"].get("args"))
-        return None
+                proposal = event.payload["proposal"]
+                task_id = proposal.get("task_id")
+                return await self._resolve_arg_refs(proposal.get("args")), (str(task_id) if task_id else None)
+        return None, None
 
     async def _resolve_arg_refs(self, args: dict | None) -> dict | None:
         """Guardian records an oversized argument (a patch's whole file
@@ -541,7 +594,7 @@ class Service:
         approved = message.payload
         action_id = approved["action_id"]
         now = self._ctx.clock.now()
-        args = await self._fetch_proposed_args(action_id)
+        args, task_id = await self._fetch_proposal(action_id)
         outcome = self._verifier.verify(approved, args, now=now)
 
         await self._ctx.ledger.append(f"action:{action_id}", self._event(
@@ -580,10 +633,11 @@ class Service:
             await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "started", {"action_id": action_id, "tool": tool.name}))
             start = time.monotonic()
             timeout = timeout_for(tool, approved.get("constraints") or {}, self._config.default_timeout_s)
+            root = self._worktrees.root_for(task_id) if self._worktrees is not None else None
             ctx = ToolContext(
-                action_id=action_id, task_id=None, scope={}, constraints=approved.get("constraints") or {},
+                action_id=action_id, task_id=task_id, scope={}, constraints=approved.get("constraints") or {},
                 data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
-                ledger=self._ctx.ledger, bus=self._ctx.bus,
+                ledger=self._ctx.ledger, bus=self._ctx.bus, root=root,
             )
             try:
                 result = await asyncio.wait_for(tool.run(args or {}, ctx=ctx), timeout=timeout)

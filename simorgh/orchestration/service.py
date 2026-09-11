@@ -80,7 +80,7 @@ class Service:
             worker_id = ctx.instance_id if ctx.instance_id else f"{ctx.name}-{i}"
             worker = Worker(ctx.bus, ctx.ledger, clock=ctx.clock.now if hasattr(ctx.clock, "now") else None,
                             worker_id=worker_id, think_timeout_s=self.config.think_timeout_s,
-                            heartbeat_s=self.config.heartbeat_s)
+                            heartbeat_s=self.config.heartbeat_s, worktrees=self.config.worktrees)
             await worker.start()
             self._workers.append(worker)
         self._percept_sub = await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept)

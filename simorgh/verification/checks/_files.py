@@ -28,6 +28,22 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 _MAX_READ_BYTES = 4_000_000
 
 
+def repo_root_of(req: VerifyRequest) -> Path:
+    """The tree this session's files live in. A task working in its
+    own worktree (execution/worktree.py) says so in `repo_root`; every
+    other session, and every producer that predates the field, means
+    the repository this module was imported from. Before this, every
+    file-reading check resolved against the import location alone, so
+    a session in any other tree -- a trial's lab, a worktree -- had its
+    files silently skipped (observer, 2026-09-11)."""
+    raw = req.subject.get("repo_root") if isinstance(req.subject, dict) else None
+    if isinstance(raw, str) and raw:
+        candidate = Path(raw)
+        if candidate.is_absolute() and candidate.is_dir():
+            return candidate
+    return REPO_ROOT
+
+
 def written_paths(req: VerifyRequest, *, suffixes: tuple[str, ...] = ()) -> list[str]:
     """The repo-relative paths this session wrote, optionally filtered to
     a set of suffixes. `subject` is included when the session named one:
@@ -44,7 +60,7 @@ def written_paths(req: VerifyRequest, *, suffixes: tuple[str, ...] = ()) -> list
     return sorted(dict.fromkeys(paths))
 
 
-def read_repo_file(path: str) -> str | None:
+def read_repo_file(path: str, *, root: Path | None = None) -> str | None:
     """The file's whole text, or None when it cannot be read as text --
     it does not exist (a write that never landed), it escapes the repo,
     or it is binary. None always means "no opinion": a check that cannot
@@ -52,9 +68,10 @@ def read_repo_file(path: str) -> str | None:
     module's blind spot."""
     if not path or Path(path).is_absolute() or ".." in Path(path).parts:
         return None
+    base = root or REPO_ROOT
     try:
-        target = (REPO_ROOT / path).resolve()
-        target.relative_to(REPO_ROOT.resolve())
+        target = (base / path).resolve()
+        target.relative_to(base.resolve())
     except (ValueError, OSError):
         return None
     try:

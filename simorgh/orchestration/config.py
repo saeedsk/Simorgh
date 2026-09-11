@@ -62,6 +62,11 @@ class Config:
     # Cognition bounds the whole chain now; this waits for it.
     think_timeout_s: float = 200.0
     needs_human_timeout_s: float = 600.0
+    # A patch or skill task works in its own git worktree and lands on
+    # main through `worktree_land` (execution/worktree.py) instead of
+    # editing the live checkout. Needs Execution's worktree tools; a
+    # session that cannot open one says so and edits the live tree.
+    worktrees: bool = True
     metrics_interval_s: float = 3.0  # 0 disables the periodic `system.metrics` publish
 
     @classmethod
