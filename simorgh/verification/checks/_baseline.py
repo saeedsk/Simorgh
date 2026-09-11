@@ -54,6 +54,7 @@ one that under-blames ships a broken suite.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -232,16 +233,90 @@ def failing_at_base(base_ref: str, nodeids: tuple[str, ...]) -> frozenset[str] |
         return frozenset(failing_nodeids(done.stdout)) & frozenset(nodeids)
 
 
+# A re-run of a handful of tests on the CHANGED tree is the same size
+# of job as the base run, and gets its own share of the verification
+# ceiling for the same reason that one is bounded.
+RERUN_TIMEOUT_S = 60.0
+
+# What `RunTestsTool` leaves out of its isolated copy, for the same
+# reason: nothing a test reads, and most of the bytes.
+_COPY_IGNORE = ("__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info", ".pytest_cache",
+                "papers", "scratchpad", ".simorgh", "results")
+
+
+def still_failing_here(root: Path, nodeids: tuple[str, ...]) -> frozenset[str] | None:
+    """Which of `nodeids` fail when run again, alone and quietly, on the
+    changed tree at `root`; None for no opinion.
+
+    The whole-suite run that produced `nodeids` ran under whatever load
+    the machine was under -- twelve pytest workers, a browser fixture,
+    a real model call in the next task. The base run that follows it
+    runs a handful of tests, alone. A test that only fails under load
+    fails the first and passes the second, and was being reported as
+    "this change made tests fail that pass without it" (live, twice,
+    2026-09-11: a known-flaky interface test and two real-browser
+    tests, over a change that added one standalone module). Asking the
+    same question of the changed tree, under the same quiet conditions
+    as the base run, is the only fair comparison.
+    """
+    if not nodeids:
+        return frozenset()
+    with tempfile.TemporaryDirectory(prefix="simorgh-rerun-") as workdir:
+        dest = Path(workdir) / "repo"
+        try:
+            shutil.copytree(root, dest, ignore=shutil.ignore_patterns(*_COPY_IGNORE))
+        except OSError:
+            return None
+        try:
+            done = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                 "--continue-on-collection-errors", *nodeids],
+                capture_output=True, text=True, cwd=dest, timeout=RERUN_TIMEOUT_S,
+                stdin=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if done.returncode == _PYTEST_USAGE_ERROR:
+            return None
+        if done.returncode == 0:
+            return frozenset()
+        return frozenset(failing_nodeids(done.stdout)) & frozenset(nodeids)
+
+
+def attribute(base_ref: str, nodeids: tuple[str, ...], *,
+              current: Path | None = None) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """`(introduced, flaky)` for a red whole-suite run, or None for no
+    opinion.
+
+    `introduced` are the failures this change is answerable for: red
+    now, green at `base_ref`, and still red when run again alone on the
+    changed tree. `flaky` are the ones that were red in the suite run
+    but green on that quiet re-run -- not the change's doing, and not
+    anyone's to fix here. Without a `current` tree to re-run on, every
+    candidate counts as introduced, as before.
+    """
+    already = failing_at_base(base_ref, nodeids)
+    if already is None:
+        return None
+    candidates = tuple(n for n in nodeids if n not in already)
+    if not candidates or current is None:
+        return candidates, ()
+    still = still_failing_here(current, candidates)
+    if still is None:
+        return candidates, ()
+    return (tuple(n for n in candidates if n in still),
+            tuple(n for n in candidates if n not in still))
+
+
 def introduced(base_ref: str, nodeids: tuple[str, ...]) -> tuple[str, ...] | None:
     """The failures this change is answerable for, or None for no opinion.
 
     Empty tuple is a real answer, and the only one that lets a task off:
     every test that is red now was red before this session started.
+    Base comparison only; `attribute` adds the quiet re-run.
     """
-    already = failing_at_base(base_ref, nodeids)
-    if already is None:
-        return None
-    return tuple(n for n in nodeids if n not in already)
+    verdict = attribute(base_ref, nodeids)
+    return None if verdict is None else verdict[0]
 
 
 def _stem(path: str) -> str:

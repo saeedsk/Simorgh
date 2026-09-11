@@ -26,6 +26,7 @@ whole question is whether a *measurement* can tell the two cases apart:
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -114,6 +115,9 @@ class TestRedSuiteAttribution(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_real_regression_still_fails(self) -> None:
         with _Lab() as lab:
+            # Red on the tree, not only in the marker: a failure the
+            # quiet re-run cannot reproduce is load, not a regression.
+            (lab.repo / "tests_fake" / "test_subject.py").write_text(_FAIL)
             result = await self._run(_request(
                 lab.base_ref,
                 ("tests_fake/test_subject.py::test_it",),
@@ -127,6 +131,7 @@ class TestRedSuiteAttribution(unittest.IsolatedAsyncioTestCase):
         """The case the whole design has to survive: the suite really was
         red before, AND this change really did break something."""
         with _Lab() as lab:
+            (lab.repo / "tests_fake" / "test_subject.py").write_text(_FAIL)
             result = await self._run(_request(
                 lab.base_ref,
                 ("tests_fake/test_unrelated.py::test_it", "tests_fake/test_subject.py::test_it"),
@@ -285,3 +290,48 @@ class TestAFailureThatCannotBeNamedIsNotExcused(unittest.IsolatedAsyncioTestCase
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAFailureThatPassesAlone(unittest.IsolatedAsyncioTestCase):
+    """Live, twice on 2026-09-11: a whole-suite run under heavy load
+    failed a known-flaky interface test and two real-browser tests; the
+    base run, a few tests alone, passed them; and a change that added
+    one standalone module was told it "made tests fail that pass
+    without it". The changed tree gets the same quiet re-run now."""
+
+    async def _run(self, req: VerifyRequest):
+        ctx = CheckContext(act=None, think=None, review=None, clock=None, config=VerificationConfig())
+        return await FullSuiteRanCheck().run(req, ctx)
+
+    async def test_a_test_green_on_the_quiet_rerun_is_flaky_not_introduced(self) -> None:
+        with _Lab() as lab:
+            # `test_subject.py` passes at base AND in the working tree; the
+            # suite run claims it failed. That is load, not the change.
+            req = _request(lab.base_ref, ("tests_fake/test_subject.py::test_it",), ["subject.py"])
+            result = await self._run(req)
+        self.assertEqual(result.status, "passed", result.detail)
+        self.assertEqual(result.evidence["introduced"], [])
+        self.assertEqual(result.evidence["flaky"], ["tests_fake/test_subject.py::test_it"])
+        self.assertIn("passed when run again alone", result.detail)
+
+    async def test_a_test_still_red_on_the_quiet_rerun_is_introduced(self) -> None:
+        with _Lab() as lab:
+            (lab.repo / "tests_fake" / "test_subject.py").write_text(_FAIL)
+            req = _request(lab.base_ref, ("tests_fake/test_subject.py::test_it",), ["subject.py"])
+            result = await self._run(req)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.evidence["introduced"], ["tests_fake/test_subject.py::test_it"])
+        self.assertEqual(result.evidence["flaky"], [])
+
+    async def test_the_rerun_happens_on_the_tree_the_subject_names(self) -> None:
+        """A worktree session names its tree; the quiet re-run must look
+        there, not at the process's cwd."""
+        with _Lab() as lab:
+            other = Path(lab._tmp.name) / "worktree"
+            shutil.copytree(lab.repo, other, ignore=shutil.ignore_patterns(".git"))
+            (other / "tests_fake" / "test_subject.py").write_text(_FAIL)
+            req = _request(lab.base_ref, ("tests_fake/test_subject.py::test_it",), ["subject.py"])
+            req.subject["repo_root"] = str(other)
+            result = await self._run(req)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.evidence["introduced"], ["tests_fake/test_subject.py::test_it"])

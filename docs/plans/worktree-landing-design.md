@@ -133,6 +133,29 @@ an in-place commit did before; `simloader.py` still gates the next boot
 and tags it known-good. The difference is that main now only ever
 receives commits whose whole suite passed on the rebased tree.
 
+## What the first live runs found
+
+Two watched trials with the real model (tools/trial.py, 2026-09-11)
+went open -> edit -> test -> two commits on the branch -> verification
+-> landing, and each stopped one seam short:
+
+1. **The bus deadline cut the landing gate.** Execution's
+   `action.approved` subscription had the bus's default 300s
+   per-handler guard; the whole-suite gate ran past it on a loaded
+   machine, the handler was cancelled mid-land, the approval was
+   redelivered, and Guardian refused the redelivery as an expired
+   token: "landing failed: denied: signature expired" over a green,
+   verified branch. The subscription is `UNBOUNDED` now, as the
+   Worker's already was and for the same reason: every tool is bounded
+   by its own timeout, and the bus was cutting from outside.
+2. **Attribution blamed load on the change.** The whole-suite run under
+   load failed a known-flaky interface test and two real-browser
+   tests; the base run, a few tests alone, passed them; and the change
+   -- one standalone module -- was told it "made tests fail that pass
+   without it". `_baseline.attribute` now re-runs the candidates
+   quietly on the changed tree too, and a test that is green there is
+   reported as flaky, not introduced.
+
 ## What this does not do yet
 
 - **Foreign projects.** `WorktreeManager` takes any repository, but a

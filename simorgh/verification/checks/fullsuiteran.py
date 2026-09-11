@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from pathlib import Path
 
 from simorgh.contracts.checkout import (ContainerCheckout, changed_sources, container_run, covers,
                                         find_enclosing, suggest_target)
@@ -157,8 +158,17 @@ def _whole_suite_failure_ids(steps: list[dict]) -> tuple[str, ...] | None:
     return None
 
 
-async def _attribution(req: VerifyRequest, steps: list[dict]) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
-    """`(introduced, owned)` for a red whole-suite run, or None.
+def _current_tree(req: VerifyRequest, base_ref: str) -> Path | None:
+    """The changed tree: the task's worktree when it has one, else the
+    repository the session ran in (the one holding `base_ref`)."""
+    raw = req.subject.get("repo_root")
+    if isinstance(raw, str) and raw and Path(raw).is_dir():
+        return Path(raw)
+    return _baseline._repo_for(base_ref)
+
+
+async def _attribution(req: VerifyRequest, steps: list[dict]) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+    """`(introduced, owned, flaky)` for a red whole-suite run, or None.
 
     `introduced` are the tests that pass at the session's base revision
     and fail now -- the ones this change is answerable for. `owned` are
@@ -186,11 +196,15 @@ async def _attribution(req: VerifyRequest, steps: list[dict]) -> tuple[tuple[str
     # Blocking git + pytest work; this coroutine runs inside the
     # verification service's own loop, and holding it for a baseline run
     # would stall every other check and every heartbeat with it.
-    new = await asyncio.to_thread(_baseline.introduced, base_ref, nodeids)
-    if new is None:
+    verdict = await asyncio.to_thread(
+        _baseline.attribute, base_ref, nodeids, current=_current_tree(req, base_ref))
+    if verdict is None:
         return None
-    already = tuple(n for n in nodeids if n not in set(new))
-    return new, _baseline.owned_by(already, written)
+    new, flaky = verdict
+    # A test that passed on the quiet re-run is not failing; an
+    # "already red" excuse is neither needed nor refused for it.
+    already = tuple(n for n in nodeids if n not in set(new) and n not in set(flaky))
+    return new, _baseline.owned_by(already, written), flaky
 
 
 def _touched_python(req: VerifyRequest) -> bool:
@@ -426,14 +440,17 @@ class FullSuiteRanCheck:
             # 2026-09-09 and 2026-09-10).
             verdict = await _attribution(req, steps)
             if verdict is not None:
-                introduced, owned = verdict
+                introduced, owned, flaky = verdict
                 evidence = {"introduced": list(introduced), "already_failing_and_owned": list(owned),
-                            "base_ref": req.subject.get("base_ref")}
+                            "flaky": list(flaky), "base_ref": req.subject.get("base_ref")}
                 if not introduced and not owned:
+                    flaky_note = (f"; {len(flaky)} that failed in the suite run passed when run again "
+                                  f"alone on this tree ({', '.join(flaky[:5])})") if flaky else ""
                     return CheckResult(
                         status="passed",
                         detail=("the whole suite ran and failed, but every failing test also fails at "
-                                f"{str(req.subject.get('base_ref'))[:12]} -- this change introduced none of them"),
+                                f"{str(req.subject.get('base_ref'))[:12]} -- this change introduced none of them"
+                                + flaky_note),
                         evidence=evidence,
                     )
                 if introduced:

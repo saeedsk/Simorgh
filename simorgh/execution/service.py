@@ -34,6 +34,7 @@ import re
 import time
 from pathlib import Path
 
+from simorgh.bus.client import UNBOUNDED
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
 from simorgh.contracts.protocols import Health, ToolContext
@@ -188,7 +189,19 @@ class Service:
 
         await self._replay_inflight()
 
-        self._subs.append(await ctx.bus.subscribe(topics.ACTION_APPROVED, self._on_approved, group="execution"))
+        # `UNBOUNDED`, for the same reason the Worker's task
+        # subscription is (orchestration/worker.py): every tool here is
+        # already bounded by its own timeout (`timeout_for`, the
+        # `wait_for` in `_on_approved`), and the bus's 300s per-handler
+        # guard was cutting a longer one from OUTSIDE. Live, 2026-09-11:
+        # `worktree_land`'s whole-suite gate ran past 300s on a loaded
+        # machine, the bus cancelled the handler mid-merge, redelivered
+        # the approval, and Guardian's token had expired by then --
+        # "landing failed: denied: signature expired" over a green,
+        # verified branch.
+        self._subs.append(await ctx.bus.subscribe(
+            topics.ACTION_APPROVED, self._on_approved, group="execution", max_handler_seconds=UNBOUNDED,
+        ))
         self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
         self._subs.append(await ctx.bus.subscribe(topics.LEARN_SKILL_ACQUIRED, self._on_skill_acquired))
         # Half the toolset stands on something outside this repo (Node,

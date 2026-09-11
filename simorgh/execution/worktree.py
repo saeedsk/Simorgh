@@ -210,12 +210,17 @@ class WorktreeManager:
             gate = self.gate(path)
             if not gate.ok:
                 tail = (gate.output or "")[-2000:]
-                return Landed(
-                    False,
-                    f"refused: the whole suite is red on the rebased tree "
-                    f"({gate.error or 'failed'}, {time.monotonic() - started:.0f}s) -- fix it and commit again",
-                    gate_output=tail,
-                )
+                took = time.monotonic() - started
+                if gate.error == "timeout":
+                    # Not red: unfinished. Saying "red" here would send
+                    # the model hunting for a failure that does not exist.
+                    detail = (f"refused: the whole-suite gate did not finish within {took:.0f}s on the "
+                              f"rebased tree -- nothing is known to be broken; try landing again when "
+                              f"the machine is quieter")
+                else:
+                    detail = (f"refused: the whole suite is red on the rebased tree "
+                              f"({gate.error or 'failed'}, {took:.0f}s) -- fix it and commit again")
+                return Landed(False, detail, gate_output=tail)
 
         landed_from = _git(path, "rev-parse", "HEAD").stdout.strip()
         merge = _git(self.repo, "merge", "--ff-only", landed_from)
