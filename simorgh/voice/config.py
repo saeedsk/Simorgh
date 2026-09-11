@@ -20,7 +20,12 @@ class Config:
     # never a cloud engine (section 0: local first for speech).
     stt: str = "auto"                  # auto | faster_whisper | whisper_cli | fake
     stt_model: str = "large-v3-turbo"  # faster_whisper model name; whisper_cli: a ggml file name or path
-    stt_language: str = "en"           # "" = detect
+    # "" = detect. Pinned to "en" until 2026-09-11, which made Farsi
+    # unrecognisable: whisper was told every utterance was English.
+    # `large-v3-turbo` detects the language reliably (measured on a
+    # Persian sample: exact transcript, 1.3-2.0 s with Metal); `base.en`
+    # cannot hear Farsi at all -- `voice models large-v3-turbo`.
+    stt_language: str = ""
     stt_compute: str = "auto"          # faster_whisper: int8 | float16 | auto
     tts: str = "auto"                  # auto | kokoro | piper | say | fake
     tts_voice: str = "af_jessica"      # Kokoro voice id (the creator's pick); a `say -v` name for `say`

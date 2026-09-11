@@ -47,8 +47,10 @@ This package owns only the audio.
   tts_farsi_voice` picks another), English stays with Kokoro. Kokoro had been
   reading Persian letters as English gibberish. A language whose engine is
   missing is excused aloud ("I cannot speak Farsi yet: ...") rather than
-  mangled. Hearing Farsi needs a multilingual whisper model (`voice models
-  small`, not `base.en`) and `stt_language = ""` or `"fa"`.
+  mangled. Hearing Farsi: `stt_language` now defaults to detect, and
+  `voice models large-v3-turbo` fetches the multilingual model that hears
+  it (exact transcript on a Persian sample, 1.3-2 s with Metal); `base.en`
+  hears English only.
 
 ## Not built yet (later slices, in the design)
 
