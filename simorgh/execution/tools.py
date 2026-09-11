@@ -52,7 +52,8 @@ except ImportError:  # POSIX-only
 
 from simorgh.contracts import topics
 from simorgh.contracts.checkout import (
-    TARGET_DJANGO_LABEL, ContainerCheckout, container_run_line, django_label, find_enclosing,
+    MANIFEST_NAME, TARGET_DJANGO_LABEL, ContainerCheckout, container_run_line, django_label,
+    find_enclosing,
 )
 from simorgh.contracts.pytestfailures import failing_nodeids, marker_for, strip_ansi
 from simorgh.contracts.envelope import Event
@@ -1161,7 +1162,8 @@ def _checkout_patch(checkout: Path, base: str, *, timeout: float = 120.0) -> tup
     if run("add", "-A").returncode != 0:
         return "", "could not stage the checkout"
     against = [base] if base and run("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode == 0 else []
-    diff = run("diff", "--cached", "--binary", *against)
+    # Not the manifest: it is ours, and a file the image never had.
+    diff = run("diff", "--cached", "--binary", *against, "--", ".", f":(exclude){MANIFEST_NAME}")
     if diff.returncode != 0:
         return "", f"could not read the checkout's diff: {(diff.stderr or '').strip()[:300]}"
     return diff.stdout, ""

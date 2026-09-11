@@ -209,6 +209,21 @@ class RunTestsInContainerTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[ran 'pkg/tests/test_mod.py' inside image img:latest]", result.output)
         self.assertEqual(result.metadata["container"], "img:latest")
 
+    async def test_the_manifest_does_not_travel_into_the_container(self):
+        captured = {}
+
+        def fake(args, *, timeout):
+            stage = Path(args[args.index("-v") + 1].split(":")[0])
+            captured["patch"] = (stage / "patch.diff").read_text()
+            return 0, "1 passed in 0.1s\n"
+
+        (self.repo.checkout / "pkg" / "mod.py").write_text("X = 4\n")
+        with self._which(), mock.patch.object(tools_module, "_docker_run", side_effect=fake):
+            await RunTestsTool(self.config).run(
+                {"target": "workspace/swebench/case-1/pkg/tests"}, ctx=_ctx(self.config))
+        self.assertIn("X = 4", captured["patch"])
+        self.assertNotIn("simorgh-checkout", captured["patch"])
+
     async def test_a_committed_change_still_travels(self):
         (self.repo.checkout / "pkg" / "mod.py").write_text("X = 3\n")
         _git(self.repo.checkout, "add", "-A")

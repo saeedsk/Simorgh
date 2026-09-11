@@ -88,6 +88,19 @@ class CommittedFixTestCase(unittest.TestCase):
         patch, _ = diff_of(self.repo, base=self.base)
         self.assertNotIn("test_mod.py", patch)
 
+    def test_the_manifest_is_never_part_of_the_patch(self):
+        # `materialize` writes it into the checkout; `git add -A` stages
+        # it; run five's scored patches all began with it (2026-09-10).
+        from simorgh.contracts.checkout import ContainerCheckout
+
+        ContainerCheckout(image="i", platform="", workdir="/testbed", base_commit=self.base,
+                          setup="", test_command="pytest").write(self.repo)
+        self._edit()
+        patch, problem = diff_of(self.repo, base=self.base)
+        self.assertEqual(problem, "")
+        self.assertIn("return 2", patch)
+        self.assertNotIn("simorgh-checkout", patch)
+
     def test_no_change_is_no_patch(self):
         patch, problem = diff_of(self.repo, base=self.base)
         self.assertEqual(problem, "")

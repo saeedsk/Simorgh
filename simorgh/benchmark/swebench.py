@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from simorgh.contracts.checkout import (
-    TARGET_DJANGO_LABEL, TARGET_PATH, ContainerCheckout,
+    MANIFEST_NAME, TARGET_DJANGO_LABEL, TARGET_PATH, ContainerCheckout,
 )
 from simorgh.contracts.pytestfailures import strip_ansi
 
@@ -584,8 +584,14 @@ def diff_of(checkout: Path, *, base: str = "", timeout: float = 120.0) -> tuple[
         # history) falls back to the index-only diff rather than failing:
         # an uncommitted change is still worth scoring, and saying "no
         # patch" because of our own bookkeeping is the mistake above.
+    # The manifest `materialize` wrote is ours, not the system's change:
+    # `git add -A` stages it like anything else, and in run five it led
+    # every scored patch as `diff --git a/.simorgh-checkout.json`
+    # (2026-09-10). It carries nothing that alters a test, but a patch
+    # is the system's answer and must contain only what the system did.
     code, out = _run([git, "-C", str(checkout), "diff", "--cached", "--binary", *against,
-                      "--", ".", ":(exclude)tests", ":(exclude)*/tests/*", ":(exclude)test_*.py"],
+                      "--", ".", f":(exclude){MANIFEST_NAME}",
+                      ":(exclude)tests", ":(exclude)*/tests/*", ":(exclude)test_*.py"],
                      timeout=timeout)
     if code != 0:
         return "", f"could not read the checkout's diff: {out.strip()[:300]}"
