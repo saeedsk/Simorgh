@@ -313,3 +313,42 @@ class BargeToggleTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("barge-in on", on.payload["detail"])
         self.assertTrue(svc.config.barge_in)
 
+
+class BargeInWithAecTestCase(unittest.IsolatedAsyncioTestCase):
+    """The whole loop with AEC on: a reply plays, its echo comes back
+    through the mic, and only when a person is added does barge fire."""
+
+    async def _run(self, add_person: bool):
+        try:
+            import numpy as np
+        except ImportError:
+            self.skipTest("numpy required")
+        from simorgh.voice.api import SAMPLE_RATE
+
+        frame = SAMPLE_RATE * 30 // 1000
+        rng = np.random.default_rng(7)
+        path = np.zeros(200, dtype=np.float32); path[40], path[70] = 0.8, 0.3
+        n = 80  # frames of reply
+        ref = (rng.standard_normal(n * frame).astype(np.float32) * 0.3)
+        mic = np.convolve(ref, path)[: n * frame].copy()
+        if add_person:
+            mic[50 * frame:] += rng.standard_normal(len(mic) - 50 * frame).astype(np.float32) * 0.3
+        reply = Audio((np.clip(ref, -1, 1) * 32767).astype(np.int16).tobytes())
+        mic_audio = Audio((np.clip(mic, -1, 1) * 32767).astype(np.int16).tobytes())
+
+        speaker = FakeSpeaker(realtime=True)
+        pipe = Pipeline(bus=_Bus(), clock=_Clock(), logger=None, ledger=None,
+                        config=Config(barge_in=True, aec=True, aec_taps=512, aec_mu=0.5,
+                                      aec_residual_threshold=0.05, barge_in_speech_ms=300,
+                                      barge_in_calibrate_ms=300, endpoint_silence_ms=300),
+                        microphone=FakeMicrophone(mic_audio, frame_delay=0.0),
+                        speaker=speaker, recogniser=FakeRecogniser("stop"), synthesiser=FakeSynthesiser(),
+                        detector_factory=lambda: _Voice([True] * 100000))
+        return await pipe._play_interruptibly(reply)
+
+    async def test_echo_alone_does_not_barge(self):
+        self.assertFalse(await self._run(add_person=False))
+
+    async def test_a_person_over_the_echo_barges(self):
+        self.assertTrue(await self._run(add_person=True))
+

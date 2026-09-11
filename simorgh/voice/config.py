@@ -54,6 +54,17 @@ class Config:
     # this many times louder than the loudest echo heard (2.0 = 6 dB).
     barge_in_calibrate_ms: int = 1200
     barge_in_ratio: float = 2.8
+    # Acoustic echo cancellation for barge-in (voice/aec.py). When on,
+    # the barge decision is made on the residual after Sim's own voice
+    # -- known exactly, it is what we are playing -- is subtracted from
+    # what the mic hears, so a person is detected by being ABSENT from
+    # the reference, not by being louder than Sim. OFF by default: a
+    # simulated echo is not a promise about a real room, and the level
+    # gate above is the safe fallback. `voice barge aec` toggles it live.
+    aec: bool = True
+    aec_taps: int = 1024
+    aec_mu: float = 0.3
+    aec_residual_threshold: float = 0.02  # a floor; the voice check on the residual is the real gate
     # Speak every reply Sim gives, including replies to TYPED turns.
     # The creator asked Sim itself for this on 2026-09-10 ("add TTS
     # output ... voice af_jessica"), and Sim built a second TTS path

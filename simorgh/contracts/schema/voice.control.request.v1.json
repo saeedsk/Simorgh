@@ -11,7 +11,9 @@
         "mute",
         "unmute",
         "barge_on",
-        "barge_off"
+        "barge_off",
+        "aec_on",
+        "aec_off"
       ],
       "type": "string"
     }

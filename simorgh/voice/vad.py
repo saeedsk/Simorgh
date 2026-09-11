@@ -181,7 +181,7 @@ class BargeInEndpointer(Endpointer):
 
     def __init__(self, detector, *, silence_ms: int, max_seconds: float, speech_ms: int = 400,
                  on_barge_in=None, calibrate_frames: int = 30, ratio: float | None = None,
-                 frame_ms: int = 30) -> None:
+                 reference: list | None = None, frame_ms: int = 30) -> None:
         super().__init__(detector, silence_ms=silence_ms, max_seconds=max_seconds, frame_ms=frame_ms)
         self._need = max(1, speech_ms // frame_ms)
         self._run = 0
@@ -190,8 +190,21 @@ class BargeInEndpointer(Endpointer):
         self._seen = 0
         self._echo = 0.0
         self.barged = False
+        # For an echo-cancelling detector: the reference (what Sim is
+        # playing), one frame per mic frame. Consumed in step with feed.
+        self._reference = reference or []
+        self._ref_i = 0
+        self._silence_frame = b""
         if ratio is not None and hasattr(detector, "set_ratio"):
             detector.set_ratio(ratio)
+
+    def _offer_reference(self) -> None:
+        set_reference = getattr(self._detector, "set_reference", None)
+        if set_reference is None:
+            return
+        ref = self._reference[self._ref_i] if self._ref_i < len(self._reference) else self._silence_frame
+        self._ref_i += 1
+        set_reference(ref)
 
     def _track_echo(self, frame: bytes) -> None:
         """Raise the floor to the loudest of Sim's own voice heard so far.
@@ -214,6 +227,7 @@ class BargeInEndpointer(Endpointer):
 
     def feed(self, frame: bytes) -> bool:
         self._seen += 1
+        self._offer_reference()
         if self._seen <= self._calibrate:
             # Warm-up: learn the echo, and nothing may interrupt yet.
             self._track_echo(frame)

@@ -26,6 +26,12 @@ This package owns only the audio.
   microphone and audio-playback beside Docker and Chromium.
 - The never-guess rule: a hearing below `min_confidence` is asked about
   ("did you say ...?"), never acted on.
+- **Echo cancellation** (`aec.py`, off by default, `voice barge aec on`): an NLMS adaptive
+  filter learns the room's echo of Sim's own voice -- known exactly, it is what is
+  playing -- and subtracts it; barge-in then decides on the residual, so a person is
+  detected by being ABSENT from the reference, not by being louder than Sim. Validated
+  on a synthetic echo (>20 dB ERLE); a real room needs a recording to tune, which is why
+  it is off until then. The level gate is the default and the fallback.
 - **Barge-in**: the mic stays open while Sim speaks; `barge_in_speech_ms` of a
   person's speech, measured over the level the mic hears of Sim's own voice
   (the first frames of each reply calibrate the floor), stops playback at once,

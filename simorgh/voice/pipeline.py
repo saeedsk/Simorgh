@@ -44,6 +44,12 @@ _MARKDOWN = (
 )
 
 
+def _aec_available() -> bool:
+    from .aec import available
+
+    return available()[0]
+
+
 _WORD = re.compile(r"[a-z0-9']+")
 
 
@@ -273,16 +279,33 @@ class Pipeline:
             if stopper is not None:
                 loop.call_soon_threadsafe(lambda: loop.create_task(stopper()))
 
-        detector = self._detector_factory()
-        if not hasattr(detector, "raise_floor"):
+        voice = self._detector_factory()
+        reference: list = []
+        if self._config.aec and _aec_available():
+            # Decide on the residual after Sim's own voice is cancelled
+            # out. Chop the reference into the same 30 ms frames the mic
+            # arrives in; a frame past the end of playback is silence,
+            # which is right -- once Sim stops, the residual is the
+            # person, uncancelled.
+            from .aec import EchoCanceller, EchoCancellingDetector
+            from .audio import FRAME_BYTES
+
+            canceller = EchoCanceller(taps=self._config.aec_taps, mu=self._config.aec_mu)
+            detector = EchoCancellingDetector(voice, canceller,
+                                              residual_threshold=self._config.aec_residual_threshold)
+            reference = [audio.pcm[i:i + FRAME_BYTES] for i in range(0, len(audio.pcm), FRAME_BYTES)]
+        elif hasattr(voice, "raise_floor"):
+            detector = voice
+        else:
             # A voice detector (Silero) alone would fire on Sim's own
             # voice; pair it with a level gate calibrated to that echo.
-            detector = CompositeDetector(detector, EnergyDetector(self._config.vad_threshold))
+            detector = CompositeDetector(voice, EnergyDetector(self._config.vad_threshold))
         endpointer = BargeInEndpointer(
             detector, silence_ms=self._config.endpoint_silence_ms,
             max_seconds=audio.seconds + self._config.max_utterance_s,
             speech_ms=self._config.barge_in_speech_ms, on_barge_in=_cut_in,
             calibrate_frames=max(1, self._config.barge_in_calibrate_ms // 30), ratio=self._config.barge_in_ratio,
+            reference=reference,
         )
         capture = asyncio.create_task(self._mic.capture(
             max_seconds=audio.seconds + self._config.max_utterance_s, endpointer=endpointer))

@@ -21,7 +21,7 @@ _STATE = (
 VoiceStatusRequest = define(t.VOICE_STATUS_REQUEST, [])
 VoiceStatusReply = define(t.VOICE_STATUS_REPLY, [*_STATE])
 VoiceControlRequest = define(t.VOICE_CONTROL_REQUEST, [
-    F("action", Enum("on", "off", "mute", "unmute", "barge_on", "barge_off"))])
+    F("action", Enum("on", "off", "mute", "unmute", "barge_on", "barge_off", "aec_on", "aec_off"))])
 VoiceControlReply = define(t.VOICE_CONTROL_REPLY, [O("detail", Str), *_STATE])
 VoiceSpeakRequest = define(t.VOICE_SPEAK_REQUEST, [F("text", Str), O("voice", Str)])
 VoiceSpeakReply = define(t.VOICE_SPEAK_REPLY, [O("seconds", Float), O("engine", Str), O("detail", Str)])
