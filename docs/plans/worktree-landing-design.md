@@ -156,6 +156,20 @@ went open -> edit -> test -> two commits on the branch -> verification
    quietly on the changed tree too, and a test that is green there is
    reported as flaky, not introduced.
 
+3. **The gate refused a main that was already red.** The third run
+   reached the gate, which refused because the whole suite was red on
+   the rebased tree -- for a self-test red on every main on this
+   machine and for load-only failures. The gate now applies the same
+   rule: still red alone on the branch AND green alone on main is the
+   branch's; everything else is excused and named in the landing note
+   (`WorktreeManager._attribute`, `RunTestsTool.failing_alone`).
+
+The fifth run then went the whole way with the real model, in one
+attempt and 465s: worktree opened, module and test written there,
+whole suite run (six pre-existing or load-only failures, attributed),
+two commits on the branch, verification passed, landing rebased, gated
+and fast-forwarded the lab's main, worktree removed, tree clean.
+
 ## What this does not do yet
 
 - **Foreign projects.** `WorktreeManager` takes any repository, but a
