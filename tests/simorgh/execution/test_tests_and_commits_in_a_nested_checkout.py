@@ -121,6 +121,39 @@ class GitToolsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.repo.checkout / "pkg" / "mod.py").read_text(), "X = 1\n")
 
 
+class TheSeamReallyRunsTestCase(unittest.TestCase):
+    """Every other test here stubs `_docker_run`. This one executes it,
+    because the first version raised `ValueError: stdout and stderr
+    arguments may not be used with capture_output` on every call and no
+    stubbed test could have noticed."""
+
+    def test_the_seam_really_runs(self):
+        import sys
+
+        from simorgh.execution.tools import _docker_run
+
+        code, out = _docker_run([sys.executable, "-c", "import sys; print('out'); print('err', file=sys.stderr)"],
+                                timeout=30)
+        self.assertEqual(code, 0)
+        self.assertIn("out", out)
+        self.assertIn("err", out, "stderr is merged into the one stream the caller reads")
+
+    def test_a_missing_program_is_an_exit_code_not_a_crash(self):
+        from simorgh.execution.tools import _docker_run
+
+        code, out = _docker_run(["/definitely/not/a/program"], timeout=5)
+        self.assertEqual(code, 127)
+        self.assertTrue(out)
+
+    def test_a_timeout_is_124(self):
+        import sys
+
+        from simorgh.execution.tools import _docker_run
+
+        code, _ = _docker_run([sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.5)
+        self.assertEqual(code, 124)
+
+
 class RunTestsInContainerTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

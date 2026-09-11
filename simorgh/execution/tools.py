@@ -1131,11 +1131,18 @@ def nested_git_root(root: Path, relative: str) -> tuple[Path, str] | None:
 def _docker_run(args: list[str], *, timeout: float) -> tuple[int, str]:
     """`(exit code, merged output)` of one docker command. A seam, so a
     test can stand in for the daemon."""
+    # `stdout=PIPE` + `stderr=STDOUT`, not `capture_output` -- the two are
+    # mutually exclusive and `subprocess.run` raises ValueError on the
+    # combination. The first version had both, and every in-container
+    # `run_tests` in run three died with that error before Docker was
+    # ever invoked, unseen by a test that had stubbed this seam (2026-09-10).
+    # `test_the_seam_really_runs` now executes it for real.
     try:
-        done = subprocess.run(args, capture_output=True, text=True, timeout=timeout,
-                              stdin=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        done = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                              timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired as exc:
-        return 124, (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+        out = exc.stdout
+        return 124, out.decode("utf-8", "replace") if isinstance(out, bytes) else (out or "")
     except OSError as exc:
         return 127, repr(exc)
     return done.returncode, done.stdout or ""
