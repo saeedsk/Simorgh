@@ -105,6 +105,29 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("resolved in 10m12s", text)
         self.assertIn("1/1 so far", text)
 
+    async def test_a_voice_turn_shows_both_sides_on_the_console(self):
+        """A spoken turn is not a typed line, so `_handle_chat` prints
+        nothing for it and the reply resolves no pending turn. The
+        creator, 2026-09-10, first evening with voice: "I don't see my
+        recognized voice being typed in the console, also when sim talks
+        I don't see the transcript." Both sides are on the bus."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            await self.other.publish(self.other.new(topics.VOICE_LISTENING, {"state": "listening", "device": "laptop"}))
+            await self.other.publish(self.other.new(topics.VOICE_TRANSCRIPT, {
+                "text": "turn on the kitchen lights", "confidence": 0.93, "seconds": 2.1,
+                "engine": "whisper_cli:base.en", "device": "laptop"}))
+            await self.other.publish(self.other.new(topics.VOICE_LISTENING, {"state": "idle", "device": "laptop"}))
+            await self.other.publish(self.other.new(topics.VOICE_SPOKEN, {
+                "text": "Kitchen lights are on.", "seconds": 1.4, "engine": "kokoro", "device": "laptop"}))
+            await self._pump()
+        text = out.getvalue()
+        self.assertIn("listening", text)
+        self.assertIn("you: turn on the kitchen lights", text)
+        self.assertIn("93%", text)
+        self.assertIn("sim: Kitchen lights are on.", text)
+        self.assertEqual(text.count("listening"), 1, "the idle transition is not a line of its own")
+
     async def test_debug_level_notices_never_reach_the_human(self):
         """Live-caught: planning's own dedup bookkeeping ("duplicate
         candidate, matches task ...", `planning/service.py::_notice`)

@@ -219,6 +219,9 @@ class Service:
             await ctx.bus.subscribe(topics.GUARDIAN_POSTURE_CHANGED, self._on_posture),
             await ctx.bus.subscribe(topics.COGNITION_PROVIDER_STATUS, self._on_provider_status),
             await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed),
+            await ctx.bus.subscribe(topics.VOICE_TRANSCRIPT, self._on_voice_transcript),
+            await ctx.bus.subscribe(topics.VOICE_SPOKEN, self._on_voice_spoken),
+            await ctx.bus.subscribe(topics.VOICE_LISTENING, self._on_voice_listening),
             await ctx.bus.subscribe(topics.TASK_CREATED, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_STARTED, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_STEP, self._on_task_event),
@@ -766,6 +769,36 @@ class Service:
             self._turn_started.pop(session_id, None)
 
     # -- bus handlers -----------------------------------------------------------------
+    # -- voice: the spoken conversation, on the screen ---------------------
+    # A voice turn is `percept.text.received{channel: "voice"}` from the
+    # voice subsystem, not a line typed here, so nothing in `_handle_chat`
+    # prints it -- and the reply resolves nobody's `_pending_turns`. The
+    # creator, 2026-09-10, first evening with it: "I don't see my
+    # recognized voice being typed in the console, also when sim talks I
+    # don't see the transcript." Both sides are announced on the bus for
+    # exactly this; the REPL just had to listen.
+    async def _on_voice_transcript(self, message: Message) -> None:
+        p = message.payload
+        text = str(p.get("text") or "").strip()
+        if not text:
+            self._out(render_mod.style("  🎤 (heard nothing)", "dim", enabled=self._color))
+            return
+        conf = p.get("confidence")
+        tail = f"  ({conf:.0%})" if isinstance(conf, (int, float)) and conf < 0.999 else ""
+        self._out(render_mod.style(f"🎤 you: {text}{tail}", "cyan", enabled=self._color))
+
+    async def _on_voice_spoken(self, message: Message) -> None:
+        text = str(message.payload.get("text") or "").strip()
+        if text:
+            self._out(render_mod.style(f"🔊 sim: {text}", "green", enabled=self._color))
+
+    async def _on_voice_listening(self, message: Message) -> None:
+        # Only the moment the mic opens; `idle` and `speaking` would be
+        # one line of noise per turn, and the transcript already marks
+        # both.
+        if message.payload.get("state") == "listening":
+            self._out(render_mod.style("  🎤 listening...", "dim", enabled=self._color))
+
     async def _on_notice(self, message: Message) -> None:
         p = message.payload
         level = p.get("level", "info")
