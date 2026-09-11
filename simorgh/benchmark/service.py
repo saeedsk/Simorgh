@@ -94,6 +94,51 @@ class Service:
         for topic, handler in handlers.items():
             self._subs.append(await ctx.bus.subscribe(topic, handler))
         ctx.logger.info("benchmark.started", suites=len(datasets_mod.SOURCES))
+        await self._cancel_orphaned_cases()
+
+    async def _cancel_orphaned_cases(self) -> None:
+        """A run does not survive a restart; its tasks used to.
+
+        Every case is a `benchmark`-origin task, and the runner is the
+        only thing that ever waits for one. When Sim stopped mid-run
+        (the creator's `exit`, a crash, a kill) the run was recorded
+        `partial` and the case's task stayed `available` -- and was
+        claimed by the next boot's worker, which ran a full patch session
+        against a checkout the dead run had already deleted, failed on
+        `refused: ... does not exist`, and did it again for the next
+        one. Live, 2026-09-10 22:47: four such tasks from four dead runs
+        (15:28, 15:49, 16:36, 18:37) sat ahead of the case a fresh run
+        had just created -- same weight, older `created_at`, so the
+        scheduler served them first -- and the fresh case's 600s clock
+        ran while the single worker cleared ghosts. The two cases of the
+        18:37 run had died the same way behind 312 synthetic tasks:
+        `steps 0`, `no answer within 600s`, never started.
+
+        So at boot every open benchmark task is cancelled. Nothing can
+        be waiting for it: this service has no run in flight yet, and it
+        is the only one that creates them.
+        """
+        assert self._ctx is not None
+        try:
+            reply = await self._ctx.bus.request(Message.new(
+                topics.TASK_LIST_REQUEST, source=self._ctx.source, payload={}, clock=self._ctx.clock.now,
+            ), timeout=5.0)
+        except Exception as exc:  # noqa: BLE001 -- no Planning yet is not a reason to fail the boot
+            self._ctx.logger.info("benchmark.orphan_sweep_skipped", error=repr(exc))
+            return
+        open_states = {"pending", "available", "blocked", "claimed", "in_progress", "paused"}
+        orphans = [t for t in (reply.payload.get("tasks") or [])
+                   if t.get("origin") == "benchmark" and t.get("status") in open_states]
+        for t in orphans:
+            await self._ctx.bus.publish(Message.new(
+                topics.TASK_CANCEL, source=self._ctx.source, partition_key=f"task:{t['task_id']}",
+                payload={"task_id": t["task_id"],
+                         "reason": "benchmark case from a run that did not survive a restart -- nothing is waiting for it"},
+                clock=self._ctx.clock.now,
+            ))
+        if orphans:
+            self._ctx.logger.info("benchmark.orphaned_cases_cancelled", count=len(orphans),
+                                  task_ids=[t["task_id"] for t in orphans][:20])
 
     async def stop(self) -> None:
         if self._task is not None and not self._task.done():

@@ -15,6 +15,15 @@ class Config:
     # Per case. A GAIA Level 3 question can legitimately take many
     # steps; beyond this it is not going to arrive.
     case_timeout_s: float = 600.0
+    # How long a case may wait for a worker before the run gives up on
+    # it. Separate from `case_timeout_s` because they are different
+    # facts: "never started" is the queue's doing, "started and did not
+    # finish" is the system's. Both cases of the 18:37 run on
+    # 2026-09-10 were `steps 0, no answer within 600s` -- they sat
+    # behind 312 synthetic tasks and were never so much as read -- and
+    # were scored as answers our pipeline stopped. The answer clock now
+    # starts when the task starts.
+    case_claim_timeout_s: float = 1800.0
     # The step cap handed to each benchmark task (task.create.max_steps).
     # Above the patch profile's own 20 because a benchmark question is
     # research with tools, and the point is to measure the ceiling.

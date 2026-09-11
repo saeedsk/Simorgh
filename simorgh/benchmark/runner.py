@@ -203,6 +203,20 @@ class Runner:
                 return "", 0, 0.0, (f"{_UNASKED} planning handed back an existing task ({dup_of!r}) "
                                     f"instead of asking this case's question")
             try:
+                if not await watch.wait_started(task_id, self._config.case_claim_timeout_s):
+                    # The queue never reached it. Not the system's answer,
+                    # not an answer we stopped: nothing was asked. Cancel
+                    # it so a later boot's worker does not run it against
+                    # a checkout this run is about to delete.
+                    await self._bus.publish(Message.new(
+                        topics.TASK_CANCEL, source=self._bus.source,
+                        payload={"task_id": task_id,
+                                 "reason": f"benchmark case {case.id}: not started within "
+                                           f"{self._config.case_claim_timeout_s:.0f}s"},
+                        partition_key=f"task:{task_id}", clock=self._clock,
+                    ))
+                    return "", 0, 0.0, (f"{_UNASKED} not started within "
+                                        f"{self._config.case_claim_timeout_s:.0f}s -- the queue never reached it")
                 answer_text, steps, error = await watch.wait(task_id, self._config.case_timeout_s)
             except asyncio.CancelledError:
                 # `benchmark stop` (or a shutdown) cancelled the RUN, and
@@ -272,6 +286,13 @@ class Runner:
             # its own work is evidence.
             _said, steps, cost_usd, error = await self._ask(
                 case, self.patch_prompt(case, relative), kind="patch")
+            if error.startswith(_UNASKED):
+                # Never started (or never created): there is no patch to
+                # score and scoring the empty one as wrong would flatter
+                # nothing and mislead us.
+                return CaseResult(case_id=case.id, level=case.level, correct=False, skipped=True,
+                                  expected=case.answer, seconds=time.monotonic() - started,
+                                  steps=steps, cost_usd=cost_usd, error=error)
             # Against the tree Sim was handed (`ContainerCheckout.pristine`),
             # not the dataset's base commit: the image's own environment
             # edits are not Sim's answer, and were being scored as it.
@@ -356,6 +377,10 @@ class _AnswerWatch:
         self._cost: dict[str, float] = {}
         self._outcomes: dict[str, tuple[str, dict]] = {}
         self._waiters: dict[str, asyncio.Future] = {}
+        # When each task was first seen running, so the answer clock can
+        # start at the start and not at creation (see `wait_started`).
+        self._started: dict[str, float] = {}
+        self._start_waiters: dict[str, asyncio.Future] = {}
 
     async def start(self) -> None:
         async def _on_step(message: Message) -> None:
@@ -374,12 +399,17 @@ class _AnswerWatch:
                 if not task_id or task_id in self._outcomes:
                     return
                 self._outcomes[task_id] = (kind, message.payload)
+                self._mark_started(task_id)  # finished is as started as it gets
                 waiter = self._waiters.get(task_id)
                 if waiter is not None and not waiter.done():
                     waiter.set_result(None)
             return _on
 
+        async def _on_started(message: Message) -> None:
+            self._mark_started(message.payload.get("task_id", ""))
+
         self._subs = [
+            await self._bus.subscribe(topics.TASK_STARTED, _on_started),
             await self._bus.subscribe(topics.TASK_STEP, _on_step),
             await self._bus.subscribe(topics.TASK_COMPLETED, _finisher("completed")),
             await self._bus.subscribe(topics.TASK_FAILED, _finisher("failed")),
@@ -393,6 +423,41 @@ class _AnswerWatch:
 
     def cost(self, task_id: str) -> float:
         return round(self._cost.get(task_id, 0.0), 6)
+
+    def _mark_started(self, task_id: str) -> None:
+        if not task_id:
+            return
+        self._started.setdefault(task_id, time.monotonic())
+        waiter = self._start_waiters.get(task_id)
+        if waiter is not None and not waiter.done():
+            waiter.set_result(None)
+
+    def started(self, task_id: str) -> bool:
+        return task_id in self._started or task_id in self._outcomes
+
+    async def wait_started(self, task_id: str, timeout_s: float) -> bool:
+        """True once a worker has picked the task up (or finished it),
+        False if nothing had by `timeout_s`.
+
+        The runner's answer clock used to start at creation, so a case
+        that sat on the queue for its whole allowance -- behind a
+        person's tasks, behind ghosts from a dead run, behind a single
+        worker's current job -- was recorded as an answer our pipeline
+        stopped, `steps 0`. It had not been asked. Waiting for the start
+        first keeps "never started" and "started and did not finish"
+        apart, which is the whole difference between a queue problem
+        and a model problem."""
+        if self.started(task_id):
+            return True
+        waiter: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._start_waiters[task_id] = waiter
+        try:
+            await asyncio.wait_for(waiter, timeout=timeout_s)
+        except asyncio.TimeoutError:
+            return self.started(task_id)
+        finally:
+            self._start_waiters.pop(task_id, None)
+        return True
 
     async def wait(self, task_id: str, timeout_s: float) -> tuple[str, int, str]:
         if task_id not in self._outcomes:
