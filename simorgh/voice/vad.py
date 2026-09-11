@@ -188,16 +188,35 @@ class BargeInEndpointer(Endpointer):
         self._on_barge_in = on_barge_in
         self._calibrate = calibrate_frames
         self._seen = 0
+        self._echo = 0.0
         self.barged = False
         if ratio is not None and hasattr(detector, "set_ratio"):
             detector.set_ratio(ratio)
 
+    def _track_echo(self, frame: bytes) -> None:
+        """Raise the floor to the loudest of Sim's own voice heard so far.
+
+        The first version froze the floor after `calibrate_frames`. But
+        Kokoro opens near-silent and swells, so a reply's later, louder
+        syllables sat above a floor learnt from its quiet opening --
+        Sim's own voice cleared the bar and registered as a person, and
+        Sim stopped for no one (the creator, 2026-09-11: "sensitivity to
+        detect human voice causes sim to stop frequently, even when the
+        human is not talking"). The floor is now the running MAXIMUM of
+        every frame that was NOT itself a person cutting in, updated for
+        the whole reply, so a person must beat Sim's loudest moment --
+        not its quietest."""
+        rms = self._detector.rms(frame) if hasattr(self._detector, "rms") else 0.0
+        self._echo = max(self._echo, rms)
+        raise_floor = getattr(self._detector, "raise_floor", None)
+        if raise_floor is not None:
+            raise_floor(self._echo)
+
     def feed(self, frame: bytes) -> bool:
         self._seen += 1
         if self._seen <= self._calibrate:
-            raise_floor = getattr(self._detector, "raise_floor", None)
-            if raise_floor is not None:
-                raise_floor(self._detector.rms(frame) if hasattr(self._detector, "rms") else 0.0)
+            # Warm-up: learn the echo, and nothing may interrupt yet.
+            self._track_echo(frame)
             self._frames += 1
             return False
         speech = self._detector.is_speech(frame)
@@ -209,7 +228,13 @@ class BargeInEndpointer(Endpointer):
                 if self._on_barge_in is not None:
                     self._on_barge_in()
         else:
+            # Not a person: it is Sim or the room, so it teaches the
+            # floor. A brief loud blip that did not reach `_need` frames
+            # thus RAISES the bar for the next one -- a stray clip cannot
+            # nag Sim to a stop.
             self._run = 0
+            if not self.barged:
+                self._track_echo(frame)
         if not self.barged:
             # Nothing decisive yet; keep listening for as long as the
             # playback (the caller's `max_seconds`) allows.

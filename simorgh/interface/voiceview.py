@@ -32,6 +32,9 @@ def status(payload: dict) -> str:
 def controlled(payload: dict) -> str:
     if not payload.get("ok"):
         return f"voice: {payload.get('detail') or 'could not do that'}"
+    detail = payload.get("detail") or ""
+    if detail.startswith("barge-in"):
+        return f"voice: {detail}"
     return status(payload)
 
 

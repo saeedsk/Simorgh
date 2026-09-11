@@ -59,7 +59,7 @@ class _Clock:
 def _pipeline(*, mic, speaker, stt, config=None):
     return Pipeline(bus=_Bus(), clock=_Clock(), logger=None, ledger=None,
                     config=config or Config(barge_in=True, barge_in_speech_ms=300, endpoint_silence_ms=90,
-                                            reply_timeout_s=1.0),
+                                            barge_in_calibrate_ms=150, barge_in_ratio=2.0, reply_timeout_s=1.0),
                     microphone=mic, speaker=speaker, recogniser=stt, synthesiser=FakeSynthesiser(),
                     detector_factory=lambda: FakeDetector(speech_frames=40))
 
@@ -250,4 +250,66 @@ class SileroSmokeTestCase(unittest.TestCase):
         # a pure tone is not a voice
         flags = [det.is_speech(_tone(0.03, 8000).pcm) for _ in range(20)]
         self.assertLessEqual(sum(flags), 2)
+
+
+class EchoFloorTracksTheWholeReplyTestCase(unittest.TestCase):
+    """A reply that swells -- quiet open, loud middle -- must not
+    interrupt itself. The floor follows Sim's loudest moment, so its own
+    later syllables never clear the bar (creator, 2026-09-11)."""
+
+    def test_a_swelling_reply_never_barges_on_itself(self):
+        from simorgh.voice.vad import BargeInEndpointer, CompositeDetector, EnergyDetector
+
+        fired = []
+        voiced_always = _Voice([True] * 10000)
+        det = CompositeDetector(voiced_always, EnergyDetector(0.5))
+        ep = BargeInEndpointer(det, silence_ms=300, max_seconds=100, speech_ms=650,
+                               calibrate_frames=10, ratio=2.8, on_barge_in=lambda: fired.append(True))
+        # quiet opening, then a long loud swell -- all Sim's own voice
+        for _ in range(10):
+            ep.feed(_tone(0.03, 1500).pcm)
+        for amp in range(2000, 16000, 500):       # rising loudness
+            for _ in range(4):
+                ep.feed(_tone(0.03, amp).pcm)
+        self.assertEqual(fired, [], "Sim's own swell must never register as a person")
+
+    def test_a_person_still_clears_the_tracked_floor(self):
+        from simorgh.voice.vad import BargeInEndpointer, CompositeDetector, EnergyDetector
+
+        fired = []
+        det = CompositeDetector(_Voice([True] * 10000), EnergyDetector(0.5))
+        ep = BargeInEndpointer(det, silence_ms=300, max_seconds=100, speech_ms=300,
+                               calibrate_frames=10, ratio=2.8, on_barge_in=lambda: fired.append(True))
+        for _ in range(10):
+            ep.feed(_tone(0.03, 2000).pcm)          # Sim's loudest echo ~2000
+        for _ in range(15):
+            ep.feed(_tone(0.03, 20000).pcm)         # a person, well above 2000*2.8
+        self.assertEqual(fired, [True])
+
+
+class BargeToggleTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_barge_off_then_on_flips_the_live_config(self):
+        import tempfile
+        from pathlib import Path
+        from simorgh.contracts import topics
+        from simorgh.kernel.config import LoadedConfig
+        from simorgh.kernel.secrets import EnvSecretStore
+        from simorgh.kernel.service import Kernel
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        kernel = Kernel(LoadedConfig({
+            "runtime": {"data_dir": str(Path(tmp.name) / "data")},
+            "curiosity": {"autonomy_on_boot": False},
+            "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake", "vad": "fake"},
+        }, None), secrets=EnvSecretStore({}))
+        await kernel.boot()
+        self.addAsyncCleanup(kernel.shutdown)
+        svc = kernel._supervisor.services["voice"].service  # noqa: SLF001
+        off = await kernel.bus.request(kernel.bus.new(topics.VOICE_CONTROL_REQUEST, {"action": "barge_off"}), timeout=10)
+        self.assertIn("barge-in off", off.payload["detail"])
+        self.assertFalse(svc.config.barge_in)
+        on = await kernel.bus.request(kernel.bus.new(topics.VOICE_CONTROL_REQUEST, {"action": "barge_on"}), timeout=10)
+        self.assertIn("barge-in on", on.payload["detail"])
+        self.assertTrue(svc.config.barge_in)
 

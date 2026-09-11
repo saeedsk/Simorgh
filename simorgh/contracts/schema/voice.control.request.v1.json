@@ -9,7 +9,9 @@
         "on",
         "off",
         "mute",
-        "unmute"
+        "unmute",
+        "barge_on",
+        "barge_off"
       ],
       "type": "string"
     }

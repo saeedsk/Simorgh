@@ -263,6 +263,13 @@ class Service:
         elif action == "unmute":
             self._muted = False
             ok, detail = await self._turn_on()
+        elif action in ("barge_on", "barge_off"):
+            from dataclasses import replace
+            want = action == "barge_on"
+            self.config = replace(self.config, barge_in=want)
+            if self._pipeline is not None:
+                self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
+            detail = f"barge-in {'on -- speak to interrupt' if want else 'off -- Sim finishes before it listens'}"
         else:
             ok, detail = False, f"unknown action {action!r} (on | off | mute | unmute)"
         await self._reply(message, topics.VOICE_CONTROL_REPLY, {"ok": ok, "detail": detail, **self._state()})

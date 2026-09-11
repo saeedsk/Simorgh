@@ -394,6 +394,12 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
     if verb in ("on", "off", "mute", "unmute"):
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": verb}, timeout=60.0,
                               render=voiceview.controlled)
+    if verb == "barge":
+        which = rest.strip().lower()
+        if which not in ("on", "off"):
+            return Outcome("usage: voice barge on|off  (whether talking over Sim interrupts it)")
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": f"barge_{which}"}, timeout=10.0,
+                              render=voiceview.controlled)
     if verb in ("test", "say"):
         if not rest:
             return Outcome("usage: voice test <text to speak>")
