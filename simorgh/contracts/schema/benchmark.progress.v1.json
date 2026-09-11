@@ -10,9 +10,33 @@
         "null"
       ]
     },
+    "case_correct": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "case_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "case_id": {
       "type": [
         "string",
+        "null"
+      ]
+    },
+    "case_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "case_skipped": {
+      "type": [
+        "boolean",
         "null"
       ]
     },

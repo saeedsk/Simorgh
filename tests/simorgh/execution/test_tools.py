@@ -2,6 +2,7 @@
 each a port of a v1 tool. Uses throwaway temp directories/git repos --
 never the real project repository."""
 
+import asyncio
 import json
 import shutil
 import subprocess
@@ -203,6 +204,37 @@ class TestRunTestsTool(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(result.ok)
         self.assertIn("exit_code", result.error)
+
+    async def test_the_event_loop_keeps_turning_while_the_suite_runs(self):
+        """Live-caught through the terminal (observer swe-01, 2026-09-10):
+        `run` staged the copy and ran pytest inline, on the event loop's
+        own thread, so for a full-suite run (minutes) the whole process
+        froze -- `benchmark` typed mid-run was answered four minutes
+        later, the Ledger was not written, and bus handler deadlines
+        expired and cancelled the worker mid-task. A ticker that runs on
+        the same loop counts how many times it got a turn while a 1.5s
+        test file ran; with the old inline call that count is 0."""
+        (self.root / "tests" / "test_slow.py").write_text(
+            "import time\n\ndef test_slow():\n    time.sleep(1.5)\n"
+        )
+        turns = 0
+
+        async def _tick() -> None:
+            nonlocal turns
+            while True:
+                await asyncio.sleep(0.05)
+                turns += 1
+
+        ticker = asyncio.create_task(_tick())
+        try:
+            result = await RunTestsTool(self.config).run(
+                {"target": "tests/test_slow.py"}, ctx=_ctx(self.config),
+            )
+        finally:
+            ticker.cancel()
+        self.assertTrue(result.ok, result.output + result.metadata.get("stderr", ""))
+        self.assertGreaterEqual(
+            turns, 10, f"the loop got only {turns} turn(s) during a 1.5s test run: run_tests is blocking it")
 
     async def test_a_non_python_target_reports_nothing_to_run_not_a_failure(self):
         """Live-caught 2026-09-09, second 95120 trial: told to run its

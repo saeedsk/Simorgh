@@ -35,6 +35,7 @@ steps, git operations beyond commit, package tooling, one-off inspection.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import shlex
@@ -203,7 +204,15 @@ class RunShellTool:
         started = time.monotonic()
         before = writewatch.snapshot(self._config.repo_root)
         try:
-            completed = subprocess.run(
+            # In a worker thread. This coroutine runs on the event loop's
+            # own thread, and the synchronous call that was here held
+            # the whole process for the length of the command: a
+            # `find / -name ...` from a model froze the terminal for two
+            # minutes -- `cancel <that task>` typed by the human was
+            # answered only when the command's own timeout expired
+            # (observer swe-01, 2026-09-10, through the pty).
+            completed = await asyncio.to_thread(
+                subprocess.run,
                 command, shell=True, cwd=self._config.repo_root, capture_output=True, text=True,
                 timeout=timeout, stdin=subprocess.DEVNULL, env=env,
             )

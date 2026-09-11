@@ -4,6 +4,12 @@
   "additionalProperties": true,
   "description": "Payload of `task.claim` (catalog v1).",
   "properties": {
+    "accept_better": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "task_id": {
       "type": "string"
     },

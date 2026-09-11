@@ -89,6 +89,14 @@ class TaskIndex:
                 self.tasks[task_id] = replace(
                     current, lease=Lease(current.lease.worker_id, p["until"]), updated_at=event.ts
                 )
+        elif event.type == "deferred":
+            # Still available; only `updated_at` moves, so the scheduler
+            # offers it again -- an offer a worker declined in favour of
+            # higher-weight work would otherwise never be repeated
+            # (`dispatch_ready` keys offers on `updated_at`).
+            current = self.tasks.get(task_id)
+            if current is not None and current.status == AVAILABLE:
+                self.tasks[task_id] = replace(current, updated_at=event.ts)
         elif event.type == "lease_expired":
             current = self.tasks.get(task_id)
             if current is not None:
@@ -298,6 +306,26 @@ class TaskStore:
         self.index.apply(stream, replace(event, seq=seq))
         await self._maybe_snapshot()
         return ClaimResult(True, lease_until=until, task=self.index.tasks[task_id])
+
+    async def defer(self, task_id: str, reason: str = "") -> None:
+        """Note that a worker passed over an available task for better
+        work, so it is offered again. A no-op for a task that is not
+        available."""
+        task = self.index.tasks.get(task_id)
+        if task is None or task.status != AVAILABLE:
+            return
+        stream = f"task:{task_id}"
+        event = Event(
+            stream=stream, type="deferred", ts=self._clock.now(), trace_id=task_id, causation_id=None,
+            payload={"reason": reason},
+        )
+        try:
+            seq = await self._ledger.append(stream, event, expected_seq=self.index.cursors.get(stream, 0))
+        except ConflictError:
+            for fresh in await self._ledger.read(stream, from_seq=self.index.cursors.get(stream, 0)):
+                self.index.apply(stream, fresh)
+            return
+        self.index.apply(stream, replace(event, seq=seq))
 
     async def refresh_lease(self, task_id: str, lease_seconds: float) -> None:
         task = self.index.tasks.get(task_id)

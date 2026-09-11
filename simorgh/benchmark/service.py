@@ -41,6 +41,24 @@ _PRODUCES = (
 )
 
 
+def _compare_candidates(runs: list[dict]) -> list[int]:
+    """Indices of the runs `history` will compare: the last two PER
+    SUITE that scored at least one case.
+
+    The view compares the two most recent scored runs of a suite, and
+    only these carry per-case detail (the rest stay the cheap summary).
+    Choosing the last two by position instead put a run interrupted
+    before any case -- 0 attempted -- in the pair, so the run the view
+    really compared had no cases and `benchmark history` said `over 0
+    shared cases` for two runs of the same two cases (observer swe-01,
+    2026-09-10)."""
+    by_suite: dict[str, list[int]] = {}
+    for i, run in enumerate(runs):
+        if int(run.get("attempted") or 0) > 0:
+            by_suite.setdefault(str(run.get("suite", "")), []).append(i)
+    return [i for indices in by_suite.values() for i in indices[-2:]]
+
+
 class Service:
     name = "benchmark"
     version = VERSION
@@ -183,18 +201,30 @@ class Service:
         # two runs' full detail blobs (store.detail), same lookup
         # `benchmark <run_id>` already uses, and swap them in. Everything
         # else stays the cheap summary the chart plots.
-        by_suite: dict[str, list[int]] = {}
-        for i, run in enumerate(runs):
-            by_suite.setdefault(run.get("suite", ""), []).append(i)
-        for indices in by_suite.values():
-            for i in indices[-2:]:
-                detail = await self._store.detail(runs[i].get("run_id", ""))
-                if detail is not None:
-                    runs[i] = detail.to_payload(with_cases=True)
+        for i in _compare_candidates(runs):
+            detail = await self._store.detail(runs[i].get("run_id", ""))
+            if detail is not None:
+                runs[i] = detail.to_payload(with_cases=True)
         await self._ctx.bus.reply(message, type=topics.BENCHMARK_HISTORY_REPLY, payload={
             "runs": runs, "model": self._model,
-            "running": bool(self._task and not self._task.done()), "progress": dict(self._running),
+            "running": bool(self._task and not self._task.done()), "progress": self._progress_view(),
         })
+
+    def _progress_view(self) -> dict:
+        """`_running`, with its monotonic stamps turned into the elapsed
+        seconds a reader can print. The raw stamps mean nothing outside
+        this process, and the view used to carry them and nothing else
+        about time -- so `benchmark` mid-run could not say how long the
+        run, or the case, had been going (observer, 2026-09-10)."""
+        view = dict(self._running)
+        if not view:
+            return view
+        now = time.monotonic()
+        if "started" in view:
+            view["elapsed_s"] = round(now - view.pop("started"), 1)
+        if "case_started" in view:
+            view["case_elapsed_s"] = round(now - view.pop("case_started"), 1)
+        return view
 
     async def _on_run(self, message: Message) -> None:
         payload = message.payload
@@ -281,19 +311,43 @@ class Service:
         assert ctx is not None
         started = time.monotonic()
 
+        def _starting(*, index: int, total: int, case) -> None:
+            # The case in flight, named as it starts: `benchmark` typed
+            # mid-run answered "0/2  0/0 correct so far" for the whole
+            # first case, because nothing here knew which case that was
+            # until it had been scored (observer, 2026-09-10).
+            self._running.update({"total": total, "case": case.id, "level": case.level,
+                                  "case_started": time.monotonic()})
+
+        # The progress publishes are fire-and-forget (the callback is
+        # synchronous); they are collected so the run's completion
+        # notice can wait for them. Without that the LAST case's line
+        # printed after "2/2 correct" on the terminal (observer,
+        # 2026-09-10) -- a verdict arriving after the summary of it.
+        pending: list[asyncio.Future] = []
+
         def _progress(*, index: int, total: int, case, record: RunRecord) -> None:
             self._running.update({"index": index, "total": total, "case": case.id,
                                   "correct": record.correct, "attempted": record.attempted})
-            asyncio.ensure_future(ctx.bus.publish(Message.new(
+            last = record.results[-1] if record.results else None
+            pending.append(asyncio.ensure_future(ctx.bus.publish(Message.new(
                 topics.BENCHMARK_PROGRESS, source=ctx.source, payload={
                     "run_id": record.run_id, "suite": suite.name, "index": index, "total": total,
                     "case_id": case.id, "level": case.level,
                     "correct": record.correct, "attempted": record.attempted,
                     "elapsed_s": round(time.monotonic() - started, 1),
+                    # This case's own verdict, for the one line per case
+                    # the terminal prints. The totals alone cannot say
+                    # whether the case just scored passed.
+                    "case_correct": bool(last.correct) if last else False,
+                    "case_skipped": bool(last.skipped) if last else False,
+                    "case_seconds": round(last.seconds, 1) if last else 0.0,
+                    "case_error": (last.error or "")[:300] if last else "",
                 }, clock=ctx.clock.now,
-            )))
+            ))))
 
-        runner = Runner(ctx.bus, config=self._config, clock=ctx.clock.now, on_progress=_progress)
+        runner = Runner(ctx.bus, config=self._config, clock=ctx.clock.now,
+                        on_progress=_progress, on_start=_starting)
         try:
             finished = await runner.run(suite, model=self._model, note=record.note, record=record)
         except asyncio.CancelledError:
@@ -311,6 +365,9 @@ class Service:
         finally:
             self._running = {}
         await self._store.append(finished)
+        if pending:
+            # Every case's own line before the run's summary line.
+            await asyncio.gather(*pending, return_exceptions=True)
         await ctx.bus.publish(Message.new(
             topics.BENCHMARK_RUN_COMPLETED, source=ctx.source,
             payload=finished.to_payload(with_cases=False), clock=ctx.clock.now,

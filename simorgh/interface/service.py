@@ -195,6 +195,13 @@ class Service:
             self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
         self._subs = [
             await ctx.bus.subscribe(topics.UI_NOTICE, self._on_notice),
+            # `benchmark run` prints "progress is narrated as it goes",
+            # and the benchmark service does publish a message per
+            # scored case -- to nobody, until 2026-09-10. Observer
+            # swe-01 watched case 1 of a SWE-bench run get scored (142
+            # tests passing in its container) and the terminal say
+            # nothing at all about it.
+            await ctx.bus.subscribe(topics.BENCHMARK_PROGRESS, self._on_benchmark_progress),
             # A reminder that fires and tells nobody is not a reminder.
             # `percept.time.scheduled` was published by the Scheduler and
             # subscribed to by NOTHING -- the whole point of `remind` and
@@ -771,6 +778,12 @@ class Service:
             # for exactly that: never meant for this surface.
             return
         self._out(render_mod.notice(level, p.get("text", ""), p.get("source", ""), enabled=self._color))
+
+    async def _on_benchmark_progress(self, message: Message) -> None:
+        from . import benchmarkview
+
+        self._out(render_mod.notice("info", benchmarkview.progress_line(message.payload), "benchmark",
+                                    enabled=self._color))
 
     async def _on_schedule_fired(self, message: Message) -> None:
         # Somebody else's text, echoed to a terminal: escape codes,

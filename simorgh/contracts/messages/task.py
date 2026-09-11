@@ -47,7 +47,7 @@ TaskAvailable = define(t.TASK_AVAILABLE, [
     F("kind", TASK_KIND),
     F("lease_seconds", Float),
 ], doc="Command; consumer group `workers`.")
-TaskClaim = define(t.TASK_CLAIM, [F("task_id", Str), F("worker_id", Str)])
+TaskClaim = define(t.TASK_CLAIM, [F("task_id", Str), F("worker_id", Str), O("accept_better", Bool)])
 TaskClaimReply = define(t.TASK_CLAIM_REPLY, [
     F("granted", Bool),
     O("lease_until", Float),

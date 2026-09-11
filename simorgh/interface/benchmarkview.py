@@ -44,6 +44,27 @@ def _records(payload: dict) -> list[dict]:
     return list(payload.get("runs") or [])
 
 
+def _scored(records: list[dict]) -> tuple[list[dict], int]:
+    """`(runs that scored at least one case, how many did not)`.
+
+    A run interrupted before any case was scored -- Ctrl-C twenty
+    seconds in -- is recorded as partial with 0 attempted, which is
+    right: it happened. Plotting it is not: `accuracy` of nothing is
+    0.0, and one such run turned `benchmark history` into `0.0%
+    (4 runs)  ▼100.0pt` for a model that had resolved every case it
+    was ever asked (observer swe-01, 2026-09-10). Empty runs are
+    counted and named, never scored."""
+    scored = [r for r in records if int(r.get("attempted") or 0) > 0]
+    return scored, len(records) - len(scored)
+
+
+def _empty_note(count: int) -> str:
+    if not count:
+        return ""
+    return (f"  {count} run{'s' if count != 1 else ''} interrupted before any case was scored "
+            "-- recorded, not plotted")
+
+
 def started(payload: dict) -> str:
     # The level is echoed because it may have been RESOLVED: `level=1`
     # at SWE-bench Verified means "<15 min fix", and a run that quietly
@@ -114,24 +135,84 @@ def _in_flight(payload: dict) -> str:
     progress = payload.get("progress") or {}
     if not payload.get("running") or not progress:
         return ""
-    return (
+    line = (
         f"  in flight: {progress.get('suite')} {progress.get('index', 0)}/{progress.get('total', 0)}"
         f"  {progress.get('correct', 0)}/{progress.get('attempted', 0)} correct so far"
     )
+    # The case actually running, and for how long. Typed mid-run, this
+    # line used to read "0/2  0/0 correct so far" for as long as the
+    # first case took -- true, and useless: nothing named the case or
+    # said whether the run was ninety seconds or nine minutes in
+    # (observer, 2026-09-10).
+    case = str(progress.get("case") or "")
+    if case and int(progress.get("index") or 0) < int(progress.get("total") or 0):
+        level = str(progress.get("level") or "")
+        line += f"\n  now on {case}" + (f" ({level})" if level else "")
+        if "case_elapsed_s" in progress:
+            line += f" for {_span(float(progress['case_elapsed_s']))}"
+    if "elapsed_s" in progress:
+        line += f"\n  run started {_span(float(progress['elapsed_s']))} ago"
+    return line
+
+
+def _span(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, rest = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m{rest:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m"
+
+
+def progress_line(payload: dict) -> str:
+    """One scrolling line per scored case, for `benchmark.progress`.
+
+    `benchmark run` promises "progress is narrated as it goes", and
+    until 2026-09-10 nothing narrated it: the service published this
+    message after every case and no subscriber existed in the
+    interface. A person watching the terminal saw the task's own steps
+    (only because autonomous narration happened to be on) and then
+    nothing -- not the verdict, not the case's time, not the running
+    score (observer, 2026-09-10)."""
+    case = str(payload.get("case_id") or "?")
+    level = str(payload.get("level") or "")
+    if payload.get("case_skipped"):
+        verdict = "skipped"
+    elif payload.get("case_correct"):
+        verdict = "resolved" if payload.get("suite", "").startswith("swebench") else "correct"
+    else:
+        verdict = "unresolved" if payload.get("suite", "").startswith("swebench") else "wrong"
+    seconds = float(payload.get("case_seconds") or 0.0)
+    text = (
+        f"benchmark {payload.get('index', 0)}/{payload.get('total', 0)} · {case}"
+        + (f" ({level})" if level else "")
+        + f" · {verdict} in {_span(seconds)}"
+        + f" · {payload.get('correct', 0)}/{payload.get('attempted', 0)} so far"
+    )
+    error = str(payload.get("case_error") or "")
+    if error and verdict != "resolved" and verdict != "correct":
+        text += f" -- {error[:160]}"
+    return text
 
 
 def latest(payload: dict) -> str:
-    records = _records(payload)
+    records, empty = _scored(_records(payload))
     if not records:
         # A run in flight is not "no runs yet". Both views returned the
         # empty line before ever looking at `running` (observer,
         # 2026-09-08), so `benchmark` during a run said nothing was
         # happening.
-        return _in_flight(payload) or "no benchmark runs yet -- `benchmark run bfcl-parallel 5` makes the first one"
+        return _in_flight(payload) or (
+            _empty_note(empty).strip() or
+            "no benchmark runs yet -- `benchmark run bfcl-parallel 5` makes the first one")
     newest: dict[tuple[str, str], dict] = {}
     for record in sorted(records, key=lambda r: float(r.get("started_at") or 0.0)):
         newest[(record.get("suite", ""), record.get("model", ""))] = record
     lines = [summary(record) for record in newest.values()]
+    if empty:
+        lines.append(_empty_note(empty))
     flight = _in_flight(payload)
     if flight:
         lines.append(flight)
@@ -139,16 +220,26 @@ def latest(payload: dict) -> str:
 
 
 def history(payload: dict) -> str:
-    records = _records(payload)
+    records, empty = _scored(_records(payload))
     if not records:
-        return _in_flight(payload) or "no benchmark runs recorded yet"
+        return _in_flight(payload) or _empty_note(empty).strip() or "no benchmark runs recorded yet"
     text = history_chart(records)
+    if empty:
+        text += "\n" + _empty_note(empty)
     by_suite: dict[str, list[dict]] = {}
     for record in sorted(records, key=lambda r: float(r.get("started_at") or 0.0)):
         by_suite.setdefault(str(record.get("suite", "")), []).append(record)
     for suite, runs in by_suite.items():
         if len(runs) > 1:
             text += "\n\n" + compare(runs[-2], runs[-1])
+            partial = [r for r in runs[-2:] if r.get("partial")]
+            if partial:
+                # A stopped 1-case run against a full 2-case run is not
+                # two measurements of the same thing; say so next to the
+                # comparison rather than leave `[partial]` to `show`.
+                text += "\n  " + " · ".join(
+                    f"{r.get('run_id')} is partial ({int(r.get('attempted') or 0)} case"
+                    f"{'s' if int(r.get('attempted') or 0) != 1 else ''} scored)" for r in partial)
     return text
 
 

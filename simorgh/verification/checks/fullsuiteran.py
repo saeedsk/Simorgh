@@ -55,15 +55,17 @@ never accept a change that broke the suite.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 
-from simorgh.contracts.checkout import container_run
+from simorgh.contracts.checkout import (ContainerCheckout, changed_sources, container_run, covers,
+                                        find_enclosing, suggest_target)
 from simorgh.contracts.pytestfailures import parse_marker
 from simorgh.contracts.scratch import is_scratch
 
 from ..api import CheckContext, CheckResult, Feedback, VerifyRequest
 from . import _baseline
-from ._files import written_paths
+from ._files import REPO_ROOT, written_paths
 from .didanything import WRITE_TOOLS
 
 # Kinds whose product is a change to real source. `skill` is excluded --
@@ -234,6 +236,76 @@ def _container_runs(steps: list[dict]) -> list[tuple[bool, str, str]]:
     return found
 
 
+def _repo_target(summary: str) -> str:
+    """The repo-relative target a `run_tests` step was called with, from
+    the `[ran target='...']` prefix `orchestration/session.py` puts on
+    its summary; "" when the prefix is missing."""
+    if not summary.startswith(_TARGET_MARKER):
+        return ""
+    raw = summary[len(_TARGET_MARKER):].split("]", 1)[0].strip()
+    try:
+        value = ast.literal_eval(raw)
+    except (ValueError, SyntaxError):
+        return raw.strip("'\"")
+    return value if isinstance(value, str) else ""
+
+
+def _coverage(steps: list[dict]) -> tuple[tuple[str, ...], tuple[str, ...], dict[str, str], str]:
+    """`(changed, uncovered, hints, problem)` for the passing container
+    runs in `steps`, judged against the checkout's own git.
+
+    `changed` is every Python source file the checkout differs from its
+    manifest's base commit by; `uncovered` the ones no passing run could
+    have exercised (`contracts.checkout.covers`); `hints` a checkout-
+    relative target per uncovered file. `problem` is set, and the other
+    three empty, when the question cannot be answered -- the checkout is
+    no longer on disk, carries no manifest, or git will not say. That is
+    the one place this errs towards the OLD answer rather than towards
+    blame: a run whose checkout cannot be read happened in a tree the
+    verifier can no longer see, and every real session verifies while
+    its checkout is still there (`benchmark/runner.py` removes it only
+    after the task ends).
+    """
+    passed_by_checkout: dict[Path, list[str]] = {}
+    problem = ""
+    for step in steps:
+        if step.get("tool") != "run_tests" or not step.get("ok"):
+            continue
+        summary = str(step.get("summary") or "")
+        run = container_run(summary)
+        if run is None:
+            continue
+        repo_target = _repo_target(summary)
+        enclosing = find_enclosing(REPO_ROOT, repo_target) if repo_target else None
+        if enclosing is None:
+            problem = problem or f"the checkout for {run[0]!r} could not be found on disk"
+            continue
+        passed_by_checkout.setdefault(enclosing[0], []).append(run[0])
+    if not passed_by_checkout:
+        return (), (), {}, problem or "no passing container run names a checkout"
+    changed_all: list[str] = []
+    uncovered: list[str] = []
+    hints: dict[str, str] = {}
+    for checkout, targets in passed_by_checkout.items():
+        manifest = ContainerCheckout.read(checkout)
+        if manifest is None:
+            return (), (), {}, f"{checkout.name} carries no readable manifest"
+        changed = changed_sources(checkout, manifest.diff_base)
+        if changed is None:
+            return (), (), {}, f"git would not say what changed in {checkout.name}"
+        try:
+            prefix = checkout.relative_to(REPO_ROOT.resolve()).as_posix()
+        except ValueError:
+            prefix = checkout.as_posix()
+        for path in changed:
+            shown = f"{prefix}/{path}"
+            changed_all.append(shown)
+            if not any(covers(target, path, checkout=checkout) for target in targets):
+                uncovered.append(shown)
+                hints[shown] = f"{prefix}/{suggest_target(checkout, path)}"
+    return tuple(changed_all), tuple(uncovered), hints, ""
+
+
 class FullSuiteRanCheck:
     name = "full_suite_ran"
     # Free in every case but one: reading the step log costs nothing,
@@ -286,10 +358,42 @@ class FullSuiteRanCheck:
             passed = [r for r in in_container if r[0]]
             if passed:
                 _ok, target, image = passed[-1]
+                ran = f"the project's own tests ran inside its container ({image}: {target}) and passed"
+                evidence: dict = {"container_runs": [list(r) for r in in_container]}
+                # Passing is not enough on its own. Live, 2026-09-10: Sim
+                # changed one module, ran an unrelated test file, that
+                # file passed, and a change that broke 28 tests in the
+                # module it had edited was accepted. Every source file
+                # the checkout differs from its base by has to sit under
+                # something a passing run could have exercised -- read
+                # from the checkout's own git, so an edit made with
+                # `run_shell` counts the same as one made with a tool
+                # that reports `file_write` (`contracts.checkout`).
+                changed, uncovered, hints, problem = await asyncio.to_thread(_coverage, steps)
+                evidence.update({"changed": list(changed), "uncovered": list(uncovered)})
+                if problem:
+                    evidence["coverage"] = problem
+                    return CheckResult(status="passed", detail=f"{ran}; whether that run covered the change "
+                                                                f"could not be checked: {problem}", evidence=evidence)
+                if not changed:
+                    return CheckResult(status="passed", detail=f"{ran}; the checkout has no source change to cover",
+                                       evidence=evidence)
+                if not uncovered:
+                    return CheckResult(status="passed", detail=f"{ran}, covering {', '.join(changed[:6])}",
+                                       evidence=evidence)
+                targets = sorted(set(hints.values()))
+                detail = (f"{ran} -- but that run could not have exercised {', '.join(uncovered[:6])}, which this "
+                          f"task changed; the change is not checked until a test that covers it passes")
                 return CheckResult(
-                    status="passed",
-                    detail=f"the project's own tests ran inside its container ({image}: {target}) and passed",
-                    evidence={"container_runs": [list(r) for r in in_container]},
+                    status="failed", detail=detail, evidence=evidence,
+                    feedback=Feedback(
+                        mechanical_errors=(detail,),
+                        revise_hint=(f"call run_tests on the tests nearest what you changed -- "
+                                     f"{' or '.join(targets[:3])} -- or on a test file that imports it, "
+                                     "and make it pass; a passing run of an unrelated file proves nothing "
+                                     "about this change"),
+                        retryable=True,
+                    ),
                 )
             _ok, target, image = in_container[-1]
             detail = (f"the project's own tests ran inside its container ({image}: {target}) and FAILED "

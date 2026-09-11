@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+import unittest.mock
 
 from simorgh.benchmark.api import CaseResult, RunRecord
 from simorgh.interface import benchmarkview as view
@@ -45,6 +46,53 @@ class ParsingTestCase(unittest.TestCase):
         self.assertIn("usage", problem)
 
 
+class ProgressViewTestCase(unittest.TestCase):
+    def test_the_in_flight_view_carries_elapsed_seconds_not_monotonic_stamps(self):
+        """The service's `_running` holds `time.monotonic()` stamps,
+        which mean nothing to a reader in another process; the view a
+        `benchmark` reply carries turns them into seconds elapsed, for
+        both the run and the case now in flight."""
+        from simorgh.benchmark.service import Service
+
+        service = Service()
+        self.assertEqual(service._progress_view(), {})
+        with unittest.mock.patch("simorgh.benchmark.service.time.monotonic", return_value=1000.0):
+            service._running = {"run_id": "r", "suite": "gaia", "index": 1, "total": 3, "started": 400.0,
+                                "case": "c2", "level": "2", "case_started": 940.0}
+            view_ = service._progress_view()
+        self.assertEqual(view_["elapsed_s"], 600.0)
+        self.assertEqual(view_["case_elapsed_s"], 60.0)
+        self.assertEqual(view_["case"], "c2")
+        self.assertNotIn("started", view_)
+        self.assertNotIn("case_started", view_)
+
+
+class CompareCandidatesTestCase(unittest.TestCase):
+    def test_the_last_two_scored_runs_per_suite_get_their_cases(self):
+        """`history` compares the two most recent runs that scored
+        something; a run interrupted before any case must not take one
+        of those two slots, or the comparison is against no cases at
+        all -- `over 0 shared cases` for two runs of the same two cases
+        (observer swe-01, 2026-09-10)."""
+        from simorgh.benchmark.service import _compare_candidates
+
+        runs = [
+            {"suite": "s", "attempted": 2}, {"suite": "s", "attempted": 2},
+            {"suite": "s", "attempted": 1, "partial": True}, {"suite": "s", "attempted": 0, "partial": True},
+            {"suite": "t", "attempted": 3},
+        ]
+        self.assertEqual(_compare_candidates(runs), [1, 2, 4])
+        self.assertEqual(_compare_candidates([{"suite": "s", "attempted": 0}]), [])
+
+    def test_a_partial_run_in_the_comparison_is_named(self):
+        full = _run(correct=(True, True), started=1.0)
+        part = _run(correct=(True,), started=2.0)
+        part["partial"] = True
+        text = view.history({"runs": [full, part]})
+        self.assertIn("over 1 shared cases", text)
+        self.assertIn(f"{part['run_id']} is partial (1 case scored)", text)
+
+
 class RenderingTestCase(unittest.TestCase):
     def test_latest_summarises_each_suite_and_model(self):
         text = view.latest({"runs": [_run(model="glm"), _run(model="other", started=2.0)]})
@@ -61,6 +109,71 @@ class RenderingTestCase(unittest.TestCase):
             "progress": {"suite": "gaia", "index": 3, "total": 10, "correct": 2, "attempted": 2},
         })
         self.assertIn("in flight: gaia 3/10", text)
+
+    def test_a_run_in_flight_names_the_case_and_how_long(self):
+        """Typed mid-run through the terminal (observer swe-01,
+        2026-09-10), `benchmark` answered `in flight: swebench-verified
+        0/2  0/0 correct so far` for the whole ten minutes the first
+        case took: true, and useless -- nothing named the case or said
+        how long anything had been going."""
+        text = view.latest({
+            "runs": [_run()], "running": True,
+            "progress": {"suite": "swebench-verified", "index": 0, "total": 2, "correct": 0, "attempted": 0,
+                         "case": "astropy__astropy-14309", "level": "<15 min fix",
+                         "case_elapsed_s": 95.0, "elapsed_s": 641.0},
+        })
+        self.assertIn("in flight: swebench-verified 0/2", text)
+        self.assertIn("now on astropy__astropy-14309 (<15 min fix) for 1m35s", text)
+        self.assertIn("run started 10m41s ago", text)
+
+    def test_after_the_last_case_nothing_is_in_flight_to_name(self):
+        text = view.latest({
+            "runs": [_run()], "running": True,
+            "progress": {"suite": "gaia", "index": 2, "total": 2, "correct": 1, "attempted": 2,
+                         "case": "c2", "elapsed_s": 30.0},
+        })
+        self.assertNotIn("now on", text)
+
+    def test_one_line_per_scored_case(self):
+        """`benchmark run` says progress is narrated as it goes; this is
+        the line that narrates it, and it has to say the verdict of THIS
+        case, not just the running total."""
+        base = {"run_id": "r", "suite": "swebench-verified", "index": 1, "total": 2,
+                "case_id": "astropy__astropy-14309", "level": "<15 min fix", "correct": 1, "attempted": 1}
+        line = view.progress_line({**base, "case_correct": True, "case_seconds": 612.4})
+        self.assertIn("benchmark 1/2 · astropy__astropy-14309 (<15 min fix) · resolved in 10m12s · 1/1 so far", line)
+        line = view.progress_line({**base, "correct": 0, "case_correct": False, "case_seconds": 40.0,
+                                   "case_error": "2 test(s) still failing"})
+        self.assertIn("unresolved in 40s · 0/1 so far -- 2 test(s) still failing", line)
+        line = view.progress_line({**base, "correct": 0, "attempted": 0, "case_skipped": True,
+                                   "case_error": "the Docker daemon is not running"})
+        self.assertIn("skipped", line)
+        self.assertIn("Docker daemon", line)
+        line = view.progress_line({**base, "suite": "gaia", "case_correct": True, "case_seconds": 3.0})
+        self.assertIn("correct in 3s", line)
+
+    def test_a_run_interrupted_before_any_case_is_named_not_plotted_as_zero(self):
+        """Ctrl-C twenty seconds into a run leaves a partial record with
+        0 attempted cases -- rightly. After the restart `benchmark
+        history` read `0.0%  (4 runs)  ▼100.0pt` and the compare block
+        `(100.0%) → (0.0%)  ▼100.0pt over 0 shared cases` for a model
+        that had resolved every case it was ever asked (observer swe-01,
+        2026-09-10). An empty run is counted, never scored."""
+        full = _run(correct=(True, True), started=1.0)
+        empty = _run(correct=(), started=2.0)
+        empty["partial"] = True
+        text = view.history({"runs": [full, empty]})
+        self.assertNotIn("▼100", text)
+        self.assertNotIn("0.0%", text.replace("100.0%", ""))
+        self.assertIn("100.0%", text)
+        self.assertIn("1 run interrupted before any case was scored", text)
+        # And `benchmark` on its own shows the run that scored something.
+        latest = view.latest({"runs": [full, empty]})
+        self.assertIn("2/2", latest)
+        self.assertIn("interrupted before any case was scored", latest)
+        # Nothing but empty runs: say so rather than draw a 0% chart.
+        self.assertIn("interrupted", view.history({"runs": [empty]}))
+        self.assertNotIn("0.0%", view.history({"runs": [empty]}))
 
     def test_history_draws_a_chart_and_a_comparison(self):
         text = view.history({"runs": [

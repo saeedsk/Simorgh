@@ -83,6 +83,28 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
             await self._pump()
         self.assertIn("hi there", out.getvalue())
 
+    async def test_benchmark_progress_is_narrated_one_line_per_case(self):
+        """`benchmark run` prints "progress is narrated as it goes", and
+        the benchmark service publishes `benchmark.progress` after every
+        scored case -- to no subscriber at all, until 2026-09-10.
+        Observer swe-01 watched a SWE-bench case get scored (142 tests
+        passing in its container) through the terminal and saw nothing
+        about it."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            await self.other.publish(self.other.new(topics.BENCHMARK_PROGRESS, {
+                "run_id": "r1", "suite": "swebench-verified", "index": 1, "total": 2,
+                "case_id": "astropy__astropy-14309", "level": "<15 min fix",
+                "correct": 1, "attempted": 1, "elapsed_s": 612.0,
+                "case_correct": True, "case_skipped": False, "case_seconds": 612.0, "case_error": "",
+            }))
+            await self._pump()
+        text = out.getvalue()
+        self.assertIn("benchmark 1/2", text)
+        self.assertIn("astropy__astropy-14309", text)
+        self.assertIn("resolved in 10m12s", text)
+        self.assertIn("1/1 so far", text)
+
     async def test_debug_level_notices_never_reach_the_human(self):
         """Live-caught: planning's own dedup bookkeeping ("duplicate
         candidate, matches task ...", `planning/service.py::_notice`)

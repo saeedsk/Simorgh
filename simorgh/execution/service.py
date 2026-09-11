@@ -78,6 +78,24 @@ def metadata_for_blob(metadata: dict) -> dict:
     return out
 
 
+def timeout_for(tool, constraints: dict, default_s: float) -> float:
+    """How long one call to `tool` may take: a constraint on the approval
+    wins, then the tool's own declared `timeout_s`, then the default.
+
+    Nothing in Guardian or Orchestration sets `constraints.timeout_s`
+    (checked 2026-09-10), so the default was the real bound on every
+    tool -- 60s against `run_tests`' own 300s budget. On a host run the
+    tool froze the event loop and the bound could not fire, which hid
+    it; an in-container run (a thread) was genuinely cut at 60s."""
+    declared = constraints.get("timeout_s")
+    if declared:
+        return float(declared)
+    own = getattr(tool, "timeout_s", None)
+    if isinstance(own, (int, float)) and own > 0:
+        return float(own)
+    return float(default_s)
+
+
 class Service:
     name = "execution"
     version = "0.1.0"
@@ -561,7 +579,7 @@ class Service:
         async with self._semaphore:
             await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "started", {"action_id": action_id, "tool": tool.name}))
             start = time.monotonic()
-            timeout = approved.get("constraints", {}).get("timeout_s") or self._config.default_timeout_s
+            timeout = timeout_for(tool, approved.get("constraints") or {}, self._config.default_timeout_s)
             ctx = ToolContext(
                 action_id=action_id, task_id=None, scope={}, constraints=approved.get("constraints") or {},
                 data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,

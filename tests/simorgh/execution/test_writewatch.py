@@ -96,6 +96,31 @@ class ToolsReportTheirWritesTestCase(_Repo):
         result = await RunShellTool(config).run({"command": "echo hi"}, ctx=_ctx(self.root))
         self.assertTrue(any(s.startswith("run_shell:") for s in result.side_effects))
 
+    async def test_run_shell_does_not_hold_the_event_loop(self):
+        """Live-caught through the terminal (observer swe-01, 2026-09-10):
+        a model's `find / -name ...` ran inline on the event loop's own
+        thread, so for two minutes nothing else in the process moved --
+        `cancel <task>` typed at the prompt was answered only when the
+        command's own timeout expired. A ticker on the same loop counts
+        its turns while a one-second command runs: 0 with the old
+        inline call."""
+        config = Config(repo_root=self.root, shell=True)
+        turns = 0
+
+        async def _tick() -> None:
+            nonlocal turns
+            while True:
+                await asyncio.sleep(0.05)
+                turns += 1
+
+        ticker = asyncio.create_task(_tick())
+        try:
+            result = await RunShellTool(config).run({"command": "sleep 1"}, ctx=_ctx(self.root))
+        finally:
+            ticker.cancel()
+        self.assertTrue(result.ok, result.error)
+        self.assertGreaterEqual(turns, 8, f"the loop got only {turns} turn(s) during `sleep 1`")
+
     async def test_run_script_reports_what_the_script_wrote(self):
         config = Config(repo_root=self.root, script_timeout_s=30.0)
         result = await RunScriptTool(config).run(

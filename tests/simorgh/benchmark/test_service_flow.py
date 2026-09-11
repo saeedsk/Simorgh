@@ -90,6 +90,29 @@ class RunnerTestCase(unittest.IsolatedAsyncioTestCase):
                 await answerer.stop()
             return record, answerer
 
+    async def test_the_case_in_flight_is_announced_before_it_is_asked(self):
+        """`on_start` fires as a case begins -- before its task exists --
+        so the service can name the case in flight. Until 2026-09-10
+        only the post-score `on_progress` existed, and `benchmark`
+        typed mid-run named the last case finished, or none."""
+        seen: list[tuple[int, int, str, int]] = []
+        async with Harness() as h:
+            bus = h.client("benchmark")
+            answerer = _Answerer(h.client("orchestration"))
+            await answerer.start()
+            try:
+                def _on_start(*, index: int, total: int, case) -> None:
+                    seen.append((index, total, case.id, len(answerer.asked)))
+
+                runner = Runner(bus, config=Config(case_timeout_s=5.0), clock=h.clock.now, on_start=_on_start)
+                await runner.run(SUITE, model="glm-test")
+            finally:
+                await answerer.stop()
+        self.assertEqual([s[:3] for s in seen], [(1, 3, "c1"), (2, 3, "c2"), (3, 3, "c3")])
+        # Announced BEFORE the case was asked: at each announcement the
+        # answerer had seen exactly the earlier cases (c3 is never asked).
+        self.assertEqual([s[3] for s in seen], [0, 1, 2])
+
     async def test_each_case_becomes_one_task_and_is_scored(self):
         record, answerer = await self._run()
         self.assertEqual(len(answerer.asked), 2, "the unanswerable case must not become a task")
@@ -162,6 +185,48 @@ class RunnerTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("some-other-cases-task", result.error)
         self.assertLess(elapsed, 1.0, "must not have waited out case_timeout_s")
 
+    async def test_stopping_the_run_cancels_the_case_it_was_asking(self):
+        """`benchmark stop` cancels the run; the task asking the case in
+        flight has to be cancelled with it. It was not (observer swe-01,
+        2026-09-10, through the terminal): after `stopped after 1 of 2
+        cases` the worker went on with case 2, was retried, read files
+        in a checkout the runner had deleted, and spent ~$0.70 of model
+        calls on a case nothing would score."""
+        async with Harness() as h:
+            bus = h.client("benchmark")
+            other = h.client("orchestration")
+            cancelled: list[dict] = []
+            asked = asyncio.Event()
+
+            async def _on_create(message: Message) -> None:
+                # A task that never finishes, so the run is mid-case
+                # when it is stopped.
+                await other.reply(message, type=topics.TASK_CREATE_REPLY, payload={"task_id": "t-slow"})
+                asked.set()
+
+            async def _on_cancel(message: Message) -> None:
+                cancelled.append(dict(message.payload))
+
+            subs = [await other.subscribe(topics.TASK_CREATE, _on_create),
+                    await other.subscribe(topics.TASK_CANCEL, _on_cancel)]
+            try:
+                runner = Runner(bus, config=Config(case_timeout_s=30.0), clock=h.clock.now)
+                run = asyncio.create_task(runner.run(SUITE, model="glm-test"))
+                await asyncio.wait_for(asked.wait(), timeout=5.0)
+                await asyncio.sleep(0.05)   # let the runner reach its wait on the answer
+                run.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await run
+                for _ in range(50):
+                    if cancelled:
+                        break
+                    await asyncio.sleep(0.01)
+            finally:
+                for sub in subs:
+                    await sub.unsubscribe()
+        self.assertEqual([c.get("task_id") for c in cancelled], ["t-slow"])
+        self.assertIn("stopped", cancelled[0].get("reason", ""))
+
     async def test_a_case_prompt_carries_the_function_schemas_when_there_are_any(self):
         async with Harness() as h:
             runner = Runner(h.client("benchmark"), clock=h.clock.now)
@@ -171,6 +236,65 @@ class RunnerTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Functions you may call", prompt)
             self.assertIn('{"name": "book"}', prompt)
             self.assertIn("JSON array", prompt)
+
+
+class ProgressBeforeCompletionTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_every_case_line_lands_before_the_run_summary(self) -> None:
+        """The per-case `benchmark.progress` publishes are fired from a
+        synchronous callback, so they are scheduled, not awaited; the
+        run's completion notice used to go out without waiting for them,
+        and on the terminal the LAST case's verdict line printed after
+        "2/2 correct" (observer swe-01, 2026-09-10). The run must wait
+        for every case line before it summarises them."""
+        from simorgh.benchmark import service as service_mod
+        from simorgh.benchmark.api import CaseResult, RunRecord
+
+        published: list[str] = []
+
+        class _Bus:
+            source = "benchmark"
+
+            async def publish(self, message) -> None:
+                published.append(message.type)
+
+        class _Clock:
+            def now(self) -> float:
+                return 1.0
+
+        class _Store:
+            async def append(self, record) -> str:
+                return ""
+
+        class _Ctx:
+            bus = _Bus()
+            clock = _Clock()
+            source = "benchmark"
+            logger = mock.MagicMock()
+
+        class _FakeRunner:
+            def __init__(self, bus, *, config=None, clock=None, on_progress=None, on_start=None,
+                         repo_root=None) -> None:
+                self._on_progress = on_progress
+                self._on_start = on_start
+
+            async def run(self, suite, *, model="", note="", record=None):
+                for index, case in enumerate(suite.cases, start=1):
+                    self._on_start(index=index, total=len(suite), case=case)
+                    record.results.append(CaseResult(case_id=case.id, level=case.level, correct=True))
+                    self._on_progress(index=index, total=len(suite), case=case, record=record)
+                return record
+
+        service = service_mod.Service()
+        service._ctx = _Ctx()  # noqa: SLF001
+        service._store = _Store()  # noqa: SLF001
+        record = RunRecord(suite="toy", suite_version="v1", model="m")
+        with mock.patch.object(service_mod, "Runner", _FakeRunner):
+            await service._run(SUITE, record)  # noqa: SLF001
+
+        self.assertEqual(published.count(topics.BENCHMARK_PROGRESS), len(SUITE.cases))
+        summary_at = published.index(topics.BENCHMARK_RUN_COMPLETED)
+        late = [i for i, t in enumerate(published) if t == topics.BENCHMARK_PROGRESS and i > summary_at]
+        self.assertEqual(late, [], f"case lines after the summary: {published}")
 
 
 class StoreTestCase(unittest.IsolatedAsyncioTestCase):

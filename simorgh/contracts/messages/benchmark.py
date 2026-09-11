@@ -83,6 +83,13 @@ BenchmarkProgress = define(t.BENCHMARK_PROGRESS, [
     O("correct", Int),
     O("attempted", Int),
     O("elapsed_s", Float),
+    # The case just scored, on its own: the running totals above say
+    # how the run is going, not what happened to THIS case, and the
+    # terminal's one line per case has to say both.
+    O("case_correct", Bool),
+    O("case_skipped", Bool),
+    O("case_seconds", Float),
+    O("case_error", Str),
 ])
 BenchmarkRunCompleted = define(t.BENCHMARK_RUN_COMPLETED, list(_RUN_SUMMARY))
 BenchmarkHistoryRequest = define(t.BENCHMARK_HISTORY_REQUEST, [

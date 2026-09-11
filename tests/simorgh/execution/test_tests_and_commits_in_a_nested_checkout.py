@@ -209,6 +209,24 @@ class RunTestsInContainerTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[ran 'pkg/tests/test_mod.py' inside image img:latest]", result.output)
         self.assertEqual(result.metadata["container"], "img:latest")
 
+    async def test_an_untouched_checkout_sends_an_empty_patch_file_not_a_newline(self):
+        """`[ -s /eval/patch.diff ]` counts bytes. A lone newline is one,
+        and `git apply` rejects it ("No valid patches in input"), so a
+        run before any edit died SIMORGH_PATCH_FAILED on a pristine
+        tree -- measured against the real django image, 2026-09-10."""
+        captured = {}
+
+        def fake(args, *, timeout):
+            stage = Path(args[args.index("-v") + 1].split(":")[0])
+            captured["patch"] = (stage / "patch.diff").read_bytes()
+            return 0, ">>>>> Start Test Output\n1 passed\n"
+
+        with self._which(), mock.patch.object(tools_module, "_docker_run", side_effect=fake):
+            result = await RunTestsTool(self.config).run(
+                {"target": "workspace/swebench/case-1/pkg/tests/test_mod.py"}, ctx=_ctx(self.config))
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(captured["patch"], b"")
+
     async def test_the_manifest_does_not_travel_into_the_container(self):
         captured = {}
 

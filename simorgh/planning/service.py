@@ -34,7 +34,7 @@ from .model import (
     Task,
 )
 from .rollup import is_stalled, project_status
-from .scheduler import Scheduler
+from .scheduler import better_ready, Scheduler
 from .store import TaskStore
 
 NAME = "planning"
@@ -294,7 +294,32 @@ class Service:
 
     async def _on_task_claim(self, message: Message) -> None:
         p = message.payload
-        result = await self._store.claim(p["task_id"], p["worker_id"], self.config.lease_seconds)
+        # The offer a worker answers can be minutes old; the priority
+        # weights are enforced here, where the worker actually becomes
+        # free (`scheduler.better_ready`). A redirected claim hands back
+        # a DIFFERENT task in `task`, and the worker runs that one.
+        # Opt-in. A redirected claim hands back a DIFFERENT task, and only
+        # a claimer that has said it will run whatever comes back can be
+        # given one: `Worker` says so; a test or another subsystem that
+        # claims task A and then reports A's steps must get A. The first
+        # version redirected everyone, and two DAG-cascade tests reported
+        # `task.failed` for a task the store had never handed them
+        # (`illegal transition available -> failed`).
+        better = None
+        if p.get("accept_better"):
+            better = better_ready(self._store, p["task_id"], priority_weights=self._scheduler._priority_weights,  # noqa: SLF001
+                                  now=self._ctx.clock.now())
+        result = None
+        if better is not None:
+            result = await self._store.claim(better.id, p["worker_id"], self.config.lease_seconds)
+            if result.granted:
+                await self._store.defer(p["task_id"], f"{better.origin} task {better.id} was ready ahead of it")
+                self._ctx.logger.info("planning.claim_redirected", offered=p["task_id"], claimed=better.id,
+                                      worker_id=p["worker_id"], origin=better.origin)
+            else:
+                result = None
+        if result is None:
+            result = await self._store.claim(p["task_id"], p["worker_id"], self.config.lease_seconds)
         payload = {"granted": result.granted}
         if result.granted:
             payload["lease_until"] = result.lease_until

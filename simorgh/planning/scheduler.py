@@ -95,6 +95,37 @@ def select_ready(store: TaskStore, *, priority_weights: dict[str, int], limit: i
     return candidates[:limit]
 
 
+
+def better_ready(store: TaskStore, task_id: str, *, priority_weights: dict[str, int],
+                 now: float | None = None) -> "Task | None":
+    """The ready task a worker should take INSTEAD of `task_id`, or None.
+
+    `select_ready` orders what gets offered, but an offer is a bus
+    message and a busy worker's offers queue up in the order they were
+    published: when it frees, it claims the oldest offer, whatever has
+    arrived since. Live, 2026-09-10: a benchmark case (weight 2) was
+    created 18s after a curiosity task (weight 1) had been offered; the
+    one worker finished its current task 5 minutes later, claimed the
+    curiosity task, and the case sat for 591s of its 600s clock before
+    it was so much as read. The priority weights were never consulted at
+    the moment they mattered.
+
+    So the claim is where the order is enforced: if a ready task of a
+    strictly higher weight exists, that is what the worker gets. Only
+    weight, not age or attempts -- among equals the offer order is the
+    scheduler's own and stands.
+    """
+    named = store.index.tasks.get(task_id) if hasattr(store, "index") else None
+    if named is None:
+        return None
+    top = select_ready(store, priority_weights=priority_weights, limit=1, now=now)
+    if not top or top[0].id == task_id:
+        return None
+    best = top[0]
+    if priority_weights.get(best.origin, 0) > priority_weights.get(named.origin, 0):
+        return best
+    return None
+
 class Scheduler:
     def __init__(self, store: TaskStore, bus: Bus, clock: Clock, *, source: str,
                  priority_weights: dict[str, int] | None = None, lease_seconds: float = 600.0,
@@ -203,4 +234,4 @@ class Scheduler:
                 await self._store.expire_lease(task.id)
 
 
-__all__ = ["DEFAULT_PRIORITY_WEIGHTS", "STARVATION_GRACE_SECONDS", "Scheduler", "select_ready"]
+__all__ = ["better_ready", "DEFAULT_PRIORITY_WEIGHTS", "STARVATION_GRACE_SECONDS", "Scheduler", "select_ready"]

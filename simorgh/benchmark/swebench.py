@@ -43,6 +43,7 @@ a Django result from this machine should be read with it in mind.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import re
 import shutil
 import subprocess
@@ -50,7 +51,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from simorgh.contracts.checkout import (
+from simorgh.contracts.checkout import (record_pristine, staged_diff, 
     MANIFEST_NAME, TARGET_DJANGO_LABEL, TARGET_PATH, ContainerCheckout,
 )
 from simorgh.contracts.pytestfailures import strip_ansi
@@ -534,9 +535,11 @@ def materialize(instance: dict, dest: Path, *, timeout: float = 900.0) -> str:
         shutil.rmtree(dest, ignore_errors=True)
         return f"could not copy the checkout out of {image}: {out.strip()[:400]}"
     # The wire to `run_tests` and the git tools: a manifest at the root
-    # of the checkout saying which image runs its tests and how.
+    # of the checkout saying which image runs its tests and how. The
+    # pristine commit is taken FIRST, so the manifest is not in it.
+    pristine = record_pristine(dest, str(instance.get("base_commit") or ""))
     try:
-        checkout_manifest(instance).write(dest)
+        replace(checkout_manifest(instance), pristine=pristine).write(dest)
     except OSError as exc:
         return f"could not write the checkout manifest: {exc!r}"
     return ""
@@ -568,34 +571,25 @@ def diff_of(checkout: Path, *, base: str = "", timeout: float = 120.0) -> tuple[
     running anyway, so a test edit in the diff is dropped here where it
     is visible rather than silently undone later.
     """
-    git = shutil.which("git")
-    if not git:
+    if not shutil.which("git"):
         return "", "git is not installed, and the patch is read as a diff of the checkout"
-    code, out = _run([git, "-C", str(checkout), "add", "-A"], timeout=timeout)
-    if code != 0:
-        return "", f"could not stage the checkout: {out.strip()[:300]}"
-    against: list[str] = []
-    if base:
-        code, _ = _run([git, "-C", str(checkout), "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
-                       timeout=timeout)
-        if code == 0:
-            against = [base]
-        # A base the checkout does not carry (a shallow image, a rewritten
-        # history) falls back to the index-only diff rather than failing:
-        # an uncommitted change is still worth scoring, and saying "no
-        # patch" because of our own bookkeeping is the mistake above.
+    # A base the checkout does not carry (a shallow image, a rewritten
+    # history) falls back to the HEAD-relative diff rather than failing:
+    # an uncommitted change is still worth scoring, and saying "no
+    # patch" because of our own bookkeeping is the mistake above.
     # The manifest `materialize` wrote is ours, not the system's change:
-    # `git add -A` stages it like anything else, and in run five it led
-    # every scored patch as `diff --git a/.simorgh-checkout.json`
-    # (2026-09-10). It carries nothing that alters a test, but a patch
-    # is the system's answer and must contain only what the system did.
-    code, out = _run([git, "-C", str(checkout), "diff", "--cached", "--binary", *against,
-                      "--", ".", f":(exclude){MANIFEST_NAME}",
-                      ":(exclude)tests", ":(exclude)*/tests/*", ":(exclude)test_*.py"],
-                     timeout=timeout)
-    if code != 0:
-        return "", f"could not read the checkout's diff: {out.strip()[:300]}"
-    return out, ""
+    # in run five it led every scored patch as `diff --git
+    # a/.simorgh-checkout.json` (2026-09-10). And `-c core.fileMode=false`
+    # throughout: the second live run scored astropy-14995 with a
+    # 1,110-file patch of `old mode 100644 / new mode 100755`, the one
+    # real hunk buried past the 4,000 characters the record keeps --
+    # that image checks its tree out 777 against an index of 644. The
+    # dataset's own eval script diffs with the same flag for the same
+    # reason. All of it lives in `contracts.checkout.staged_diff`, which
+    # reads through a private index so nothing here touches the
+    # checkout's own.
+    return staged_diff(checkout, base, timeout=timeout, exclude=(
+        MANIFEST_NAME, "tests", "*/tests/*", "test_*.py"))
 
 
 def evaluate(instance: dict, patch: str, *, timeout: float = 3600.0,

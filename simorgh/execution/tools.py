@@ -51,7 +51,7 @@ except ImportError:  # POSIX-only
     resource = None  # type: ignore[assignment]
 
 from simorgh.contracts import topics
-from simorgh.contracts.checkout import (
+from simorgh.contracts.checkout import (staged_diff, 
     MANIFEST_NAME, TARGET_DJANGO_LABEL, ContainerCheckout, container_run_line, django_label,
     find_enclosing,
 )
@@ -394,9 +394,13 @@ class SearchCodeTool:
             return ToolResult(ok=False, error=f"refused: {query!r} is not a valid regex: {exc!r}")
 
         root = self._config.repo_root.resolve()
+        # Both in a worker thread: ripgrep is a subprocess and the pure
+        # Python fallback walks the whole tree, and either one run inline
+        # here holds the event loop for its duration (observer swe-01,
+        # 2026-09-10 -- the same freeze `run_tests` and `run_shell` had).
         if self._rg:
-            return self._run_ripgrep(query, root)
-        return self._run_pure_python(query, root)
+            return await asyncio.to_thread(self._run_ripgrep, query, root)
+        return await asyncio.to_thread(self._run_pure_python, query, root)
 
     def _run_ripgrep(self, query: str, root: Path) -> ToolResult:
         roots = [base for base in self._config.readable_roots if (root / base).is_dir()]
@@ -1012,7 +1016,13 @@ class RunPythonSandboxedTool:
             script.write_text(code)
             preexec = _apply_rlimits(self._config.sandbox_cpu_seconds, self._config.sandbox_memory_mb * 1024 * 1024) if resource else None
             try:
-                completed = subprocess.run(
+                # In a worker thread: a tool's `run` is a coroutine on the
+                # event loop's own thread, and a synchronous `subprocess.run`
+                # here froze the whole process for the length of the child
+                # -- no narration, no reply to anything typed, no Ledger
+                # writes (observer swe-01, 2026-09-10, through the terminal).
+                completed = await asyncio.to_thread(
+                    subprocess.run,
                     [sys.executable, "-I", str(script)], capture_output=True, text=True,
                     cwd=workdir, env={}, timeout=timeout, preexec_fn=preexec,
                     stdin=subprocess.DEVNULL,
@@ -1076,7 +1086,8 @@ class RunJsSandboxedTool:
             script.write_text(code)
             preexec = _apply_rlimits(self._config.sandbox_cpu_seconds, self._config.sandbox_memory_mb * 1024 * 1024) if resource else None
             try:
-                completed = subprocess.run(
+                completed = await asyncio.to_thread(   # off the loop thread, see RunPythonTool
+                    subprocess.run,
                     [self._node, str(script)], capture_output=True, text=True,
                     cwd=workdir, env={}, timeout=timeout, preexec_fn=preexec,
                     stdin=subprocess.DEVNULL,
@@ -1152,21 +1163,11 @@ def _docker_run(args: list[str], *, timeout: float) -> tuple[int, str]:
 def _checkout_patch(checkout: Path, base: str, *, timeout: float = 120.0) -> tuple[str, str]:
     """`(patch, problem)`: everything the checkout differs from `base` by,
     committed or not, tests included -- this is for RUNNING the tests,
-    not scoring them, so nothing is excluded here."""
-    git = shutil.which("git")
-    if not git:
-        return "", "git is not installed"
-    run = lambda *cmd: subprocess.run(  # noqa: E731
-        [git, "-C", str(checkout), *cmd], capture_output=True, text=True, timeout=timeout,
-        stdin=subprocess.DEVNULL)
-    if run("add", "-A").returncode != 0:
-        return "", "could not stage the checkout"
-    against = [base] if base and run("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode == 0 else []
-    # Not the manifest: it is ours, and a file the image never had.
-    diff = run("diff", "--cached", "--binary", *against, "--", ".", f":(exclude){MANIFEST_NAME}")
-    if diff.returncode != 0:
-        return "", f"could not read the checkout's diff: {(diff.stderr or '').strip()[:300]}"
-    return diff.stdout, ""
+    not scoring them, so nothing is excluded here but the manifest,
+    which is ours and a file the image never had. Read through a private
+    index (`contracts.checkout.staged_diff`), so two runs in flight on
+    one checkout never fight over `.git/index.lock`."""
+    return staged_diff(checkout, base, exclude=(MANIFEST_NAME,), timeout=timeout)
 
 
 class RunTestsTool:
@@ -1195,6 +1196,19 @@ class RunTestsTool:
     def __init__(self, config: Config) -> None:
         self._config = config
 
+    @property
+    def timeout_s(self) -> float:
+        """How long the execution service should wait for one call.
+
+        The service bounds every tool with its own `default_timeout_s`
+        (60s) unless the approval carries a constraint, and nothing ever
+        sets one -- so an in-container run under amd64 emulation was
+        being cut at 60s from outside while this tool believed it had
+        `test_timeout_s`. The margin is so this tool's own subprocess
+        timeout fires first and returns real output, not the service's
+        bare "timeout"."""
+        return self._config.test_timeout_s + 30.0
+
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         target = (args.get("target") or "").strip() or "tests"
         if Path(target).is_absolute() or ".." in Path(target).parts:
@@ -1211,6 +1225,25 @@ class RunTestsTool:
             if manifest is not None:
                 return await asyncio.to_thread(
                     self._run_in_container, checkout, inner, manifest, timeout=timeout, start=start)
+        # In a thread, like the container path above -- and unlike this
+        # path until 2026-09-10. `subprocess.run` (and the `copytree`
+        # before it) ran inline in this coroutine, which is to say ON
+        # the event loop's thread: for the whole of a full-suite run
+        # (up to `test_timeout_s`, 300s) nothing else in the process
+        # moved. Seen through the terminal by an observer: `benchmark`
+        # typed mid-run got its reply four minutes later, no narration,
+        # the Ledger not written for the duration, and then -- because
+        # bus handler deadlines had expired while the loop was frozen --
+        # the worker's own session was cancelled mid-verify and a
+        # 40-line traceback landed on the prompt. A tool "isolated from
+        # the live working tree" was not isolated from the live loop.
+        return await asyncio.to_thread(self._run_isolated, target, timeout=timeout, start=start)
+
+    def _run_isolated(self, target: str, *, timeout: float, start: float) -> ToolResult:
+        """Copy the repo, run pytest there, read the result. Blocking by
+        design: `run` hands it to a worker thread."""
+        root = self._config.repo_root.resolve()
+        cap = self._config.test_output_max_chars
         with tempfile.TemporaryDirectory(prefix="simorgh-tests-") as workdir:
             dest = Path(workdir) / "repo"
             try:
@@ -1229,6 +1262,21 @@ class RunTestsTool:
                 return ToolResult(ok=False, error=f"refused: {target!r} does not exist in the repo")
             preexec = _apply_rlimits(self._config.test_cpu_seconds, self._config.test_memory_mb * 1024 * 1024) if resource else None
             try:
+                # Off the event loop. This `subprocess.run` used to sit
+                # directly in the coroutine, and for the whole pytest run
+                # -- 272s measured live, 2026-09-10 -- the Kernel's loop
+                # did not turn: no heartbeat, no bus, no REPL, a 281s
+                # hole in `metrics:history`. It also meant the
+                # execution service's own `wait_for` could never fire on
+                # a host run (the loop it needed was the one frozen),
+                # which hid that its 60s default was the real bound on
+                # every tool; see `timeout_s` below.
+                # Blocking on purpose: `_run_isolated` already runs on a
+                # worker thread (`run` hands it to `asyncio.to_thread`).
+                # Two observers fixed the frozen loop the same afternoon,
+                # one by threading this call and one by threading the
+                # whole method; merged, the inner `await` sat inside a
+                # plain `def`.
                 completed = subprocess.run(
                     [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                      *pytest_parallel_args(dest / target), target],
@@ -1317,13 +1365,21 @@ class RunTestsTool:
             return ToolResult(ok=False, error=(
                 f"refused: {inner!r} is inside a checkout whose tests run in a container, "
                 f"and Docker is not installed on this machine"))
-        patch, problem = _checkout_patch(checkout, manifest.base_commit)
+        patch, problem = _checkout_patch(checkout, manifest.diff_base)
         if problem:
             return ToolResult(ok=False, error=f"could not read the checkout's changes: {problem}")
         target = django_label(inner) if manifest.target_style == TARGET_DJANGO_LABEL else inner
         with tempfile.TemporaryDirectory(prefix="simorgh-checkout-tests-") as raw:
             stage = Path(raw)
-            (stage / "patch.diff").write_text(patch if patch.endswith("\n") else patch + "\n")
+            # An untouched checkout is an EMPTY file, not "\n": the
+            # script's `[ -s ]` guard counts bytes, one newline is a
+            # byte, and `git apply` then rejects the "patch" -- so a
+            # baseline run before any edit answered "the checkout's
+            # changes do not apply to the project's pristine tree" for
+            # a tree that WAS pristine (measured against the real
+            # django image, 2026-09-10; astropy never showed it because
+            # its image's tree already differs from its base commit).
+            (stage / "patch.diff").write_text(patch if not patch or patch.endswith("\n") else patch + "\n")
             script = "\n".join([
                 "set -o pipefail",
                 manifest.setup.rstrip(),
@@ -1909,27 +1965,27 @@ class GitCommitTool:
         # (they're outside what `diff` compares against HEAD at all), so
         # the pre-check uses `status --porcelain` instead, which reports
         # untracked/staged/unstaged changes uniformly.
-        status = run(["git", "status", "--porcelain", "--", path])
-        head = run(["git", "rev-parse", "HEAD"])
+        status = await asyncio.to_thread(run, ["git", "status", "--porcelain", "--", path])
+        head = await asyncio.to_thread(run, ["git", "rev-parse", "HEAD"])
         head_sha = head.stdout.strip() if head.returncode == 0 else ""
         if not status.stdout.strip():
-            path_sha = run(["git", "hash-object", str(root / path)])
+            path_sha = await asyncio.to_thread(run, ["git", "hash-object", str(root / path)])
             return ToolResult(
                 ok=False, error="nothing_to_commit",
                 metadata={"head_sha": head_sha, "path_sha": path_sha.stdout.strip() if path_sha.returncode == 0 else ""},
             )
 
-        add = run(["git", "add", "--", path])
+        add = await asyncio.to_thread(run, ["git", "add", "--", path])
         if add.returncode != 0:
             return ToolResult(ok=False, error=f"git add failed: {add.stderr.strip()}")
-        commit = run([
+        commit = await asyncio.to_thread(run, [
             "git", "-c", f"user.name={_SIM_GIT_AUTHOR_NAME}", "-c", f"user.email={_SIM_GIT_AUTHOR_EMAIL}",
             "commit", "-m", message, "--", path,
         ])
         if commit.returncode != 0:
             detail = commit.stderr.strip() or commit.stdout.strip()
             return ToolResult(ok=False, error=f"git commit failed: {detail}")
-        new_head = run(["git", "rev-parse", "HEAD"])
+        new_head = await asyncio.to_thread(run, ["git", "rev-parse", "HEAD"])
         return ToolResult(
             ok=True, output=commit.stdout.strip(), side_effects=(f"git_commit:{args['path']}",),
             metadata={"commit": new_head.stdout.strip() if new_head.returncode == 0 else "",
@@ -1985,7 +2041,7 @@ class GitDiscardTool:
         run = lambda cmd: subprocess.run(  # noqa: E731
             cmd, cwd=root, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
         )
-        known = run(["git", "ls-files", "--error-unmatch", subject])
+        known = await asyncio.to_thread(run, ["git", "ls-files", "--error-unmatch", subject])
         if known.returncode != 0:
             if args.get("created"):
                 # The caller vouches this session brought the file into
@@ -2009,7 +2065,7 @@ class GitDiscardTool:
                 ok=False,
                 error=f"refused: {subject} is not tracked by git, so there is nothing to restore it to",
             )
-        result = run(["git", "checkout", "--", subject])
+        result = await asyncio.to_thread(run, ["git", "checkout", "--", subject])
         if result.returncode != 0:
             return ToolResult(ok=False, error=(result.stderr or result.stdout).strip()[:400])
         return ToolResult(
@@ -2036,13 +2092,13 @@ class GitRevertTool:
         run = lambda cmd: subprocess.run(
             cmd, cwd=root, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
         )
-        result = run([
+        result = await asyncio.to_thread(run, [
             "git", "-c", f"user.name={_SIM_GIT_AUTHOR_NAME}", "-c", f"user.email={_SIM_GIT_AUTHOR_EMAIL}",
             "revert", "--no-edit", "HEAD",
         ])
         if result.returncode != 0:
             return ToolResult(ok=False, error=f"git revert failed: {result.stderr.strip() or result.stdout.strip()}")
-        new_head = run(["git", "rev-parse", "HEAD"])
+        new_head = await asyncio.to_thread(run, ["git", "rev-parse", "HEAD"])
         return ToolResult(
             ok=True, output=result.stdout.strip(), side_effects=("git_revert",),
             metadata={"commit": new_head.stdout.strip() if new_head.returncode == 0 else ""},
@@ -2144,7 +2200,8 @@ class SkillTool:
             driver.write_text(_SKILL_DRIVER)
             preexec = _apply_rlimits(self._config.sandbox_cpu_seconds, self._config.sandbox_memory_mb * 1024 * 1024) if resource else None
             try:
-                completed = subprocess.run(
+                completed = await asyncio.to_thread(   # off the loop thread, see RunPythonTool
+                    subprocess.run,
                     # `cwd` used to be the throwaway `workdir` (a fresh
                     # tempdir with only the driver + module in it), so a
                     # correctly-invoked skill that took a repo-relative

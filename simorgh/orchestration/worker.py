@@ -175,7 +175,10 @@ class Worker:
         kind = message.payload.get("kind", "chat")
         claim_req = Message.new(
             topics.TASK_CLAIM, source=self._bus.source,
-            payload={"task_id": task_id, "worker_id": self.worker_id},
+            # `accept_better`: this worker runs whatever the claim reply
+            # names, so Planning may hand it a higher-priority ready task
+            # instead of the one it was offered (`scheduler.better_ready`).
+            payload={"task_id": task_id, "worker_id": self.worker_id, "accept_better": True},
             partition_key=f"task:{task_id}", trace_id=task_id, clock=self._clock,
         )
         reply = await self._bus.request_or_error(claim_req, timeout=2.0)
@@ -183,6 +186,13 @@ class Worker:
             return  # another worker claimed it first, or Planning has no Planning subsystem yet in this test
 
         task = reply.payload.get("task") or {}
+        # Planning may hand back a different task than the one offered:
+        # a higher-weight task that became ready while this worker was
+        # busy (`planning/scheduler.py::better_ready`). Everything below
+        # -- the session, the heartbeat, cancel tracking -- belongs to
+        # the task actually claimed.
+        task_id = str(task.get("task_id") or task_id)
+        kind = str(task.get("kind") or kind)
         mode = task.get("mode", "execute")
         description = await self._full_description(task)
         profile = profiles.for_task(kind, mode)

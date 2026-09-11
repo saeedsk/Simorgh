@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from simorgh.contracts import topics
+from simorgh.contracts.checkout import ContainerCheckout
 from simorgh.contracts.envelope import Message
 
 from . import datasets, swebench
@@ -33,11 +34,17 @@ _UNASKED = "never asked --"
 
 class Runner:
     def __init__(self, bus, *, config: Config | None = None, clock=None,
-                 on_progress=None, repo_root: Path | None = None) -> None:
+                 on_progress=None, on_start=None, repo_root: Path | None = None) -> None:
         self._bus = bus
         self._config = config or Config()
         self._clock = clock
         self._on_progress = on_progress or (lambda **_: None)
+        # Fired as a case BEGINS, so whoever answers `benchmark` mid-run
+        # can name the case in flight. `on_progress` fires only once a
+        # case is scored, and the service's "in flight" line was built
+        # from that alone -- so it named the last case finished, or
+        # nothing, never the one actually running (observer, 2026-09-10).
+        self._on_start = on_start or (lambda **_: None)
         # SWE-bench checkouts and logs are written relative to this, the
         # same root the file tools resolve their paths against -- a
         # checkout Sim cannot address by the path we give it is a
@@ -195,7 +202,24 @@ class Runner:
                 # already happened to a different case.
                 return "", 0, 0.0, (f"{_UNASKED} planning handed back an existing task ({dup_of!r}) "
                                     f"instead of asking this case's question")
-            answer_text, steps, error = await watch.wait(task_id, self._config.case_timeout_s)
+            try:
+                answer_text, steps, error = await watch.wait(task_id, self._config.case_timeout_s)
+            except asyncio.CancelledError:
+                # `benchmark stop` (or a shutdown) cancelled the RUN, and
+                # the task that was asking this case has to go with it.
+                # It did not, until 2026-09-10: the cancel below only
+                # existed on the timeout path, so after `stopped after 1
+                # of 2 cases` the worker carried on with case 2 -- was
+                # retried, read files in a checkout the runner had
+                # already deleted, and spent ~$0.70 of model calls in a
+                # minute on a case nothing would ever score (observer
+                # swe-01, through the terminal).
+                await self._bus.publish(Message.new(
+                    topics.TASK_CANCEL, source=self._bus.source,
+                    payload={"task_id": task_id, "reason": f"benchmark case {case.id}: the run was stopped"},
+                    partition_key=f"task:{task_id}", clock=self._clock,
+                ))
+                raise
             # Read before `watch.stop()`, and after the outcome, so a
             # cancelled or blocked case still reports what it spent.
             cost_usd = watch.cost(task_id)
@@ -248,8 +272,12 @@ class Runner:
             # its own work is evidence.
             _said, steps, cost_usd, error = await self._ask(
                 case, self.patch_prompt(case, relative), kind="patch")
-            patch, trouble = await asyncio.to_thread(
-                swebench.diff_of, checkout, base=str(instance.get("base_commit") or ""))
+            # Against the tree Sim was handed (`ContainerCheckout.pristine`),
+            # not the dataset's base commit: the image's own environment
+            # edits are not Sim's answer, and were being scored as it.
+            manifest = ContainerCheckout.read(checkout)
+            diff_base = manifest.diff_base if manifest else str(instance.get("base_commit") or "")
+            patch, trouble = await asyncio.to_thread(swebench.diff_of, checkout, base=diff_base)
         finally:
             # The checkout has done its job the moment the diff is read;
             # the patch is re-applied to a pristine container anyway.
@@ -288,6 +316,7 @@ class Runner:
         record.started_at = self._now()
         try:
             for index, case in enumerate(suite.cases, start=1):
+                self._on_start(index=index, total=len(suite), case=case)
                 result = await self.run_case(case)
                 record.results.append(result)
                 # Fire progress only after the case is scored and
