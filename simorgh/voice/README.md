@@ -13,7 +13,7 @@ This package owns only the audio.
 | `audio.py` | capture (`sounddevice`, else `ffmpeg`), playback (`sounddevice`, else `afplay`/`ffplay`), WAV helpers |
 | `vad.py` | `Endpointer` over Silero (if installed) or an energy detector |
 | `stt/` | `faster_whisper` (primary), `whisper_cli` (whisper.cpp, present via Homebrew) |
-| `tts/` | `kokoro` (primary), `say` (macOS, present) |
+| `tts/` | `kokoro` (primary), `piper` (the languages Kokoro lacks: Farsi), `say` (macOS, present); `open_synthesiser` routes each reply by its script (`lang.py`) |
 | `pipeline.py` | capture -> endpoint -> STT -> percept -> wait for the turn -> TTS -> play; `voice:turns` in the ledger |
 | `service.py` | the Subsystem: presence probes into `capabilities`, the `voice.*` request handlers, the `voice on` loop |
 | `fakes.py` | every engine and device as a deterministic stand-in |
@@ -41,6 +41,14 @@ This package owns only the audio.
   "I'm still working on that", never silence.
 - Privacy defaults from the design: audio is not kept unless
   `keep_audio`; transcripts are ledgered (`voice:turns`).
+
+- **Farsi** (2026-09-11): a reply in the Arabic script is spoken by Piper's
+  `fa_IR-amir-medium` (`voice models piper-fa` fetches it, 63 MB; `[voice]
+  tts_farsi_voice` picks another), English stays with Kokoro. Kokoro had been
+  reading Persian letters as English gibberish. A language whose engine is
+  missing is excused aloud ("I cannot speak Farsi yet: ...") rather than
+  mangled. Hearing Farsi needs a multilingual whisper model (`voice models
+  small`, not `base.en`) and `stt_language = ""` or `"fa"`.
 
 ## Not built yet (later slices, in the design)
 

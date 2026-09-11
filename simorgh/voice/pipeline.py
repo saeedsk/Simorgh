@@ -204,7 +204,8 @@ class Pipeline:
         await self._record(VoiceTurn(
             session_id=session_id, device=self._config.device, speaker=speaker_name, heard=utterance.text,
             confidence=utterance.confidence, said=said, heard_at=heard_at, answered_at=self._clock.now(),
-            engine_stt=utterance.engine, engine_tts=getattr(self._tts, "name", ""),
+            engine_stt=utterance.engine,
+            engine_tts=getattr(self._tts, "last_engine", None) or getattr(self._tts, "name", ""),
         ))
         return utterance, said
 
@@ -256,7 +257,10 @@ class Pipeline:
             await self._announce("idle")
         self.last_said = said
         await self._publish(topics.VOICE_SPOKEN, {
-            "text": said, "seconds": audio.seconds, "engine": getattr(self._tts, "name", ""),
+            "text": said, "seconds": audio.seconds,
+            # The engine that spoke THIS reply: a polyglot synthesiser
+            # picks per language, and `name` is only its primary.
+            "engine": getattr(self._tts, "last_engine", None) or getattr(self._tts, "name", ""),
             "device": self._config.device, "interrupted": interrupted,
             **({"session_id": session_id} if session_id else {}),
         })

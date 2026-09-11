@@ -22,9 +22,14 @@ class Config:
     stt_model: str = "large-v3-turbo"  # faster_whisper model name; whisper_cli: a ggml file name or path
     stt_language: str = "en"           # "" = detect
     stt_compute: str = "auto"          # faster_whisper: int8 | float16 | auto
-    tts: str = "auto"                  # auto | kokoro | say | fake
+    tts: str = "auto"                  # auto | kokoro | piper | say | fake
     tts_voice: str = "af_jessica"      # Kokoro voice id (the creator's pick); a `say -v` name for `say`
     tts_speed: float = 1.0
+    # A reply is spoken by the engine for ITS language (voice/lang.py):
+    # Kokoro has no Persian and read Farsi as English gibberish
+    # (2026-09-11). Off = the one engine above speaks everything.
+    tts_by_language: bool = True
+    tts_farsi_voice: str = "fa_IR-amir-medium"  # a Piper voice id; `voice models piper-fa` fetches it
     # Endpointing (section 4.2).
     vad: str = "auto"                  # auto | silero | energy | fake
     vad_threshold: float = 0.5

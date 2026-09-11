@@ -1,1 +1,6 @@
 2026-09-10T05:10:59+00:00 pip python-pptx task=- reason=-
+2026-09-11T06:47:21+00:00 pip kokoro task=- reason=-
+2026-09-11T06:48:40+00:00 pip sounddevice task=- reason=in-process audio playback backend (PortAudio binding) for the new TTS module; well-known package by Matthias Geier
+2026-09-11T06:48:43+00:00 pip soundfile task=- reason=-
+2026-09-11T07:24:21+00:00 pip hypothesis task=- reason=well-known property-testing library (hypothesis.works, GitHub/HypothesisWorks/hypothesis) required by astropy's conftest to run benchmark tests
+2026-09-11T22:17:22+00:00 pip piper-tts task=- reason=Piper TTS (rhasspy, MIT) for the languages Kokoro lacks; Farsi voice fa_IR-amir-medium under workspace/voice/models

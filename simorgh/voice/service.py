@@ -66,6 +66,8 @@ def presence_probes() -> list[dict]:
     tts = []
     if spec("kokoro_onnx"):
         tts.append("kokoro")
+    if spec("piper"):
+        tts.append("piper")
     if sys.platform == "darwin" and shutil.which("say"):
         tts.append("say")
     mic = []
@@ -367,12 +369,17 @@ class Service:
         from .stt.whisper_cli import KNOWN_MODELS, download_model
 
         from .tts.kokoro import download_kokoro
+        from .tts.piper import PIPER_VOICES, download_piper
 
         name = str(message.payload.get("name") or "base.en").strip()
         model_dir = Path(self.config.model_dir)
-        available = [*KNOWN_MODELS, "kokoro"]
+        piper_names = {f"piper-{lang}": voice for lang, voice in PIPER_VOICES.items()}
+        available = [*KNOWN_MODELS, "kokoro", *piper_names]
         if name == "kokoro":
             path, problem = await asyncio.to_thread(download_kokoro, model_dir)
+        elif name in piper_names or name.startswith("piper-"):
+            voice = piper_names.get(name) or self.config.tts_farsi_voice
+            path, problem = await asyncio.to_thread(download_piper, model_dir, voice=voice)
         else:
             path, problem = await asyncio.to_thread(download_model, name, model_dir)
         if path is None:
@@ -385,6 +392,8 @@ class Service:
         from dataclasses import replace
         if name == "kokoro":
             detail = "kokoro ready; it is picked over `say` from now on (`[voice] tts = \"kokoro\"` pins it)"
+        elif name in piper_names or name.startswith("piper-"):
+            detail = f"piper voice {path.stem} ready; replies in its language are spoken with it from now on"
         else:
             detail = f"{name} ready; `[voice] stt_model = \"{name}\"` keeps it across restarts"
             if self.config.stt_model != name:
