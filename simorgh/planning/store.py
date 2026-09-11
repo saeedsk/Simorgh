@@ -29,6 +29,7 @@ from .model import (
     COMPLETED,
     FAILED,
     IN_PROGRESS,
+    PAUSED,
     PENDING,
     TERMINAL_STATUSES,
     Lease,
@@ -96,8 +97,11 @@ class TaskIndex:
                 # only at the point of expiry because it also governs
                 # replay: a ledger already holding 1,204 of these events
                 # would otherwise resurrect every completed task again on
-                # the next boot, exactly as it had been doing.
-                status = current.status if current.status in TERMINAL_STATUSES else AVAILABLE
+                # the next boot, exactly as it had been doing. A PAUSED
+                # task is kept paused for the same reason: it was parked
+                # on purpose, and a stale lease must not re-open it.
+                keep = current.status in TERMINAL_STATUSES or current.status == PAUSED
+                status = current.status if keep else AVAILABLE
                 self.tasks[task_id] = replace(current, lease=None, status=status, updated_at=event.ts)
         # "dependency_satisfied"/"dependency_failed"/"regrounded" are
         # informational -- the real transition they cause is always a
