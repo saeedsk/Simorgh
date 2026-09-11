@@ -176,3 +176,18 @@ class ScaffoldTestCase(unittest.TestCase):
     def test_the_description_explains_the_difference_that_matters(self):
         description = StartTaskTool(Config()).description
         self.assertIn("resumes", description)
+
+
+class TheTaskIsSimsNotThePersonsTestCase(unittest.IsolatedAsyncioTestCase):
+    """A task the model starts from a chat is origin `assistant`, not
+    `human`. The creator's voice turn "Benchmark" -- one word, possibly
+    misheard -- became a 90-step task that went and fetched the upstream
+    fix for a benchmark case, with `auto off`, because the task inherited
+    the chat's human origin and the autonomy switch never saw it
+    (2026-09-11)."""
+
+    async def test_origin_is_assistant(self):
+        bus = _Bus()
+        await StartTaskTool(Config()).run({"goal": "work the benchmark cases"}, ctx=_ctx(bus))
+        self.assertEqual(bus.requests[0].payload["origin"], "assistant")
+

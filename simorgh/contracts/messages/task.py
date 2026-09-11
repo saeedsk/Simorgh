@@ -9,7 +9,10 @@ from .. import topics as t
 
 TASK_KIND = Enum("chat", "patch", "skill", "research", "project")
 TASK_MODE = Enum("plan", "execute")
-TASK_ORIGIN = Enum("human", "curiosity", "reflection", "research", "project", "benchmark")
+# "assistant": a task the model started from inside a chat turn (`start_task`).
+# Not "human" -- the person did not ask for a task, they said something --
+# so `auto off` holds it and the backlog cap counts it.
+TASK_ORIGIN = Enum("human", "curiosity", "reflection", "research", "project", "benchmark", "assistant")
 TASK_RISK = Enum("low", "medium", "high")
 SCOPE = Obj(F("paths", List(Str)), F("network", Bool))
 

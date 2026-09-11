@@ -43,7 +43,8 @@
         "reflection",
         "research",
         "project",
-        "benchmark"
+        "benchmark",
+        "assistant"
       ],
       "type": "string"
     },

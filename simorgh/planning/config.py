@@ -61,9 +61,9 @@ class Config:
     # root: a subsystem may not import another's internals. "human" is
     # deliberately absent -- pausing autonomy must never stop the work
     # a person just asked for.
-    autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project")
+    autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project", "assistant")
     priority_weights: dict = field(
-        default_factory=lambda: {"human": 3, "benchmark": 2, "reflection": 2, "curiosity": 1}
+        default_factory=lambda: {"human": 3, "benchmark": 2, "reflection": 2, "assistant": 2, "curiosity": 1}
     )
     leader: bool = True
     # A decomposition or re-grounding is a real model call. This was an

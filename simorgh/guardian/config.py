@@ -105,7 +105,7 @@ class Config:
     classifier_enabled: bool = False  # cognition doesn't exist yet this phase (see README)
     classifier_timeout_s: float = 3.0
     human_prompt_timeout_s: float = 1800.0
-    autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project")
+    autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project", "assistant")
     # -- static analysis (rules.py::StaticAnalysisRule): bandit, PyCQA's
     # Python security linter, run over every Python code payload as a
     # principled complement to the hand-maintained `denylist` regexes

@@ -36,7 +36,7 @@ class TestAutoOffActuallyStopsAutonomousWork(unittest.IsolatedAsyncioTestCase):
 
         class _Store:
             def ready(self, limit=1000):
-                return [_Task("curiosity"), _Task("human"), _Task("reflection"), _Task("project")]
+                return [_Task("curiosity"), _Task("human"), _Task("reflection"), _Task("project"), _Task("assistant")]
 
         class _Bus:
             source = "planning"
@@ -52,6 +52,8 @@ class TestAutoOffActuallyStopsAutonomousWork(unittest.IsolatedAsyncioTestCase):
                          autonomous_origins=Config().autonomous_origins)
 
     async def test_autonomous_origins_are_not_offered_while_paused(self):
+        # `assistant` -- a task the model started from a chat -- is held
+        # like Sim's own ideas: the person said a word, Sim made a task.
         sent = []
         scheduler = self._scheduler(sent)
         scheduler.autonomous_paused = True

@@ -1694,7 +1694,16 @@ class StartTaskTool:
         if kind not in ("patch", "research", "project"):
             kind = "patch"
 
-        payload = {"kind": kind, "description": goal, "origin": "human", "mode": "execute",
+        # "assistant", not "human": the person said something and the
+        # model decided it was a task. That decision is Sim's, so the
+        # task is Sim's -- `auto off` holds it, the backlog cap counts
+        # it, and it ranks below what a person asked for by name. The
+        # creator's voice turn "Benchmark" -- one word, possibly
+        # misheard -- became a 90-step task that went and fetched the
+        # upstream fix for a benchmark case, with autonomy off
+        # (2026-09-11), because a task started from a chat inherited the
+        # chat's `human` origin and the switch never saw it.
+        payload = {"kind": kind, "description": goal, "origin": "assistant", "mode": "execute",
                    "max_steps": steps}
         subject = str(args.get("subject") or "").strip()
         if subject:

@@ -32,7 +32,7 @@ class IntakeResult:
 
 class Intake:
     def __init__(self, store: TaskStore, *, dedupe_threshold: float, max_backlog: int = 0,
-                 autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project")) -> None:
+                 autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project", "assistant")) -> None:
         self._store = store
         self._threshold = dedupe_threshold
         self._max_backlog = max(0, int(max_backlog))
