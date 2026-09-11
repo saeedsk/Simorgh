@@ -15,7 +15,7 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Bus, Clock
 
 from .config import Config
-from .model import TERMINAL_STATUSES, Task
+from .model import PAUSED, TERMINAL_STATUSES, Task
 from .store import TaskStore
 
 # The real default lives on `Config.priority_weights` -- this used to be
@@ -193,7 +193,11 @@ class Scheduler:
         worker, which is how 101 tasks generated 1,305 claims."""
         now = self._clock.now()
         for task in list(self._store.index.tasks.values()):
-            if task.status in TERMINAL_STATUSES:
+            # A paused task was parked on purpose (human-approval timeout,
+            # explicit task.paused); its lease outliving the pause is not
+            # abandoned work. Expiring it would flip PAUSED -> AVAILABLE
+            # and re-offer a project someone decided not to run.
+            if task.status in TERMINAL_STATUSES or task.status == PAUSED:
                 continue
             if task.lease is not None and task.lease.until <= now:
                 await self._store.expire_lease(task.id)
