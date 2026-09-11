@@ -18,7 +18,9 @@ import uuid
 from collections import OrderedDict
 from dataclasses import replace
 
-from simorgh.bus.api import UNBOUNDED
+# Through the client, not `bus.api`: a subsystem may import `bus.client`
+# and nothing else of the Bus.
+from simorgh.bus.client import UNBOUNDED
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
 

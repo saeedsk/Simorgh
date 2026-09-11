@@ -25,7 +25,7 @@ from simorgh.contracts.envelope import Event, Message, validate
 from simorgh.contracts.protocols import Ledger, Subscription
 from simorgh.contracts.registry import error_reply_payload
 
-from .api import BusBackend, BusClosed, BusPolicy, BusTimeout, Delivery, Handler, PolicyViolation, SubscriptionSpec
+from .api import BusBackend, BusClosed, BusPolicy, BusTimeout, Delivery, Handler, PolicyViolation, SubscriptionSpec, UNBOUNDED  # noqa: F401 -- UNBOUNDED re-exported for subsystems
 from .config import Config
 from .metrics import Metrics
 from .policy import AllowAllPolicy
