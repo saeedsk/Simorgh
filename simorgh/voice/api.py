@@ -104,6 +104,10 @@ class Speaker(Protocol):
 
     async def play(self, audio: Audio) -> None: ...
 
+    async def stop(self) -> None:
+        """Cut playback short. `play` returns once it has."""
+        ...
+
 
 __all__ = ["Audio", "CHANNELS", "Microphone", "Recogniser", "SAMPLE_RATE", "SAMPLE_WIDTH", "Speaker",
            "Synthesiser", "Utterance", "VoiceState", "VoiceTurn"]

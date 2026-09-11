@@ -29,6 +29,17 @@ class EnergyDetector:
         self._ratio = 10 ** (0.6 * max(0.05, min(1.0, threshold)))
         self._floor: float | None = None
 
+    def raise_floor(self, rms: float) -> None:
+        """Treat `rms` as silence from now on. Used while Sim speaks:
+        the microphone hears the speakers, and that echo must not count
+        as a person talking."""
+        self._floor = max(self._floor or 0.0, rms, 1.0)
+
+    @staticmethod
+    def rms(frame: bytes) -> float:
+        samples = array.array("h", frame)
+        return math.sqrt(sum(s * s for s in samples) / len(samples)) if samples else 0.0
+
     def is_speech(self, frame: bytes) -> bool:
         samples = array.array("h", frame)
         if not samples:
@@ -110,6 +121,70 @@ class Endpointer:
         return False
 
 
+class BargeInEndpointer(Endpointer):
+    """An endpointer that also notices a person cutting in.
+
+    Runs while Sim is speaking. The first `calibrate_frames` frames are
+    taken to be what the microphone hears of Sim's own voice through
+    the speakers, and the detector's floor is raised to that level --
+    the cheapest echo cancellation there is, and enough for a laptop:
+    a person at the keyboard is louder at the mic than the speakers'
+    spill. Then `speech_ms` of continuous speech calls `on_barge_in`
+    once, and the utterance carries on to its normal end, so the words
+    that interrupted Sim are the start of the next turn, not lost.
+    """
+
+    def __init__(self, detector, *, silence_ms: int, max_seconds: float, speech_ms: int = 400,
+                 on_barge_in=None, calibrate_frames: int = 8, frame_ms: int = 30) -> None:
+        super().__init__(detector, silence_ms=silence_ms, max_seconds=max_seconds, frame_ms=frame_ms)
+        self._need = max(1, speech_ms // frame_ms)
+        self._run = 0
+        self._on_barge_in = on_barge_in
+        self._calibrate = calibrate_frames
+        self._seen = 0
+        self.barged = False
+
+    def feed(self, frame: bytes) -> bool:
+        self._seen += 1
+        if self._seen <= self._calibrate:
+            raise_floor = getattr(self._detector, "raise_floor", None)
+            if raise_floor is not None:
+                raise_floor(self._detector.rms(frame) if hasattr(self._detector, "rms") else 0.0)
+            self._frames += 1
+            return False
+        speech = self._detector.is_speech(frame)
+        if speech:
+            self._run += 1
+            if not self.barged and self._run >= self._need:
+                self.barged = True
+                self.heard_speech = True
+                if self._on_barge_in is not None:
+                    self._on_barge_in()
+        else:
+            self._run = 0
+        if not self.barged:
+            # Nothing decisive yet; keep listening for as long as the
+            # playback (the caller's `max_seconds`) allows.
+            self._frames += 1
+            if self._frames >= self._max_frames:
+                self.ended_by = "max_seconds"
+                return True
+            return False
+        # A person is talking over Sim: from here on, an ordinary utterance.
+        self._frames += 1
+        if speech:
+            self._quiet = 0
+        else:
+            self._quiet += 1
+            if self._quiet >= self._silence_frames:
+                self.ended_by = "silence"
+                return True
+        if self._frames >= self._max_frames:
+            self.ended_by = "max_seconds"
+            return True
+        return False
+
+
 def open_detector(preferred: str = "auto", *, threshold: float = 0.5) -> tuple[object, str]:
     """`(detector, note)`. Never fails: the energy detector needs nothing."""
     if preferred in ("auto", "silero"):
@@ -125,4 +200,4 @@ def open_detector(preferred: str = "auto", *, threshold: float = 0.5) -> tuple[o
     return EnergyDetector(threshold), ""
 
 
-__all__ = ["EnergyDetector", "Endpointer", "SileroDetector", "open_detector"]
+__all__ = ["BargeInEndpointer", "EnergyDetector", "Endpointer", "SileroDetector", "open_detector"]

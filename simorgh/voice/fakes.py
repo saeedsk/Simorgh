@@ -24,25 +24,61 @@ class FakeDetector:
 
 
 class FakeMicrophone:
+    """Hands its audio to the endpointer frame by frame, the way a real
+    microphone does, so barge-in and endpointing can be exercised; a
+    `frame_delay` makes the frames arrive over time."""
+
     name = "fake"
 
-    def __init__(self, audio: Audio | None = None) -> None:
+    def __init__(self, audio: Audio | None = None, *, frame_delay: float = 0.0) -> None:
         self._audio = audio or silence(1.0)
+        self._delay = frame_delay
         self.captures = 0
 
     async def capture(self, *, max_seconds: float, endpointer) -> Audio:
+        import asyncio
+
         self.captures += 1
+        frame = SAMPLE_RATE * 30 // 1000 * SAMPLE_WIDTH
+        pcm = self._audio.pcm
+        for i in range(0, len(pcm), frame):
+            if self._delay:
+                await asyncio.sleep(self._delay)
+            if endpointer.feed(pcm[i:i + frame]):
+                return Audio(pcm[:i + frame], self._audio.sample_rate)
         return self._audio
 
 
 class FakeSpeaker:
+    """Records what was played; with `realtime=True` it takes as long
+    as the audio lasts, and `stop()` cuts it short."""
+
     name = "fake"
 
-    def __init__(self) -> None:
+    def __init__(self, *, realtime: bool = False) -> None:
         self.played: list[Audio] = []
+        self.stopped = 0
+        self._realtime = realtime
+        self._stop = None
 
     async def play(self, audio: Audio) -> None:
+        import asyncio
+
         self.played.append(audio)
+        if not self._realtime:
+            return
+        self._stop = asyncio.Event()
+        try:
+            await asyncio.wait_for(self._stop.wait(), timeout=audio.seconds)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            self._stop = None
+
+    async def stop(self) -> None:
+        self.stopped += 1
+        if self._stop is not None:
+            self._stop.set()
 
 
 class FakeRecogniser:

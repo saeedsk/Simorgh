@@ -45,4 +45,4 @@ VoiceTranscript = define(t.VOICE_TRANSCRIPT, [
     O("session_id", Str),
 ])
 VoiceSpoken = define(t.VOICE_SPOKEN, [F("text", Str), F("seconds", Float), F("engine", Str), F("device", Str),
-                                       O("session_id", Str)])
+                                       O("session_id", Str), O("interrupted", Bool)])

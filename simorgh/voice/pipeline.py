@@ -12,6 +12,7 @@ test can watch it without touching audio.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import time
 import uuid
@@ -23,7 +24,7 @@ from simorgh.contracts.envelope import Event
 from .api import Audio, Utterance, VoiceTurn
 from .audio import write_wav
 from .config import Config
-from .vad import Endpointer
+from .vad import BargeInEndpointer, Endpointer
 
 TURNS_STREAM = "voice:turns"
 
@@ -70,6 +71,7 @@ class Pipeline:
         self._pending: dict[str, asyncio.Future] = {}
         self._subs: list = []
         self.turns = 0
+        self.pending_audio: Audio | None = None
         self.last_heard = ""
         self.last_said = ""
         self.speaking = False
@@ -112,20 +114,29 @@ class Pipeline:
 
     # ------------------------------------------------------------- one turn
     async def listen_once(self, *, max_seconds: float | None = None, respond: bool = True,
-                          speaker_name: str = "") -> tuple[Utterance | None, str]:
+                          speaker_name: str = "", pending: Audio | None = None) -> tuple[Utterance | None, str]:
         """Capture one utterance, and unless `respond=False`, ask Sim and
-        speak the answer. Returns `(utterance, what was said)`."""
-        endpointer = Endpointer(self._detector_factory(), silence_ms=self._config.endpoint_silence_ms,
-                                max_seconds=max_seconds or self._config.max_utterance_s)
-        await self._announce("listening")
-        self.listening = True
-        try:
-            audio = await self._mic.capture(max_seconds=max_seconds or self._config.max_utterance_s,
-                                            endpointer=endpointer)
-        finally:
-            self.listening = False
-            await self._announce("idle")
-        if not endpointer.heard_speech and audio.seconds < 0.5:
+        speak the answer. Returns `(utterance, what was said)`.
+
+        `pending` is audio already captured -- the words that interrupted
+        the previous reply (`speak`) -- and stands in for the capture."""
+        self.pending_audio = None
+        if pending is not None:
+            audio = pending
+            heard_speech = True
+        else:
+            endpointer = Endpointer(self._detector_factory(), silence_ms=self._config.endpoint_silence_ms,
+                                    max_seconds=max_seconds or self._config.max_utterance_s)
+            await self._announce("listening")
+            self.listening = True
+            try:
+                audio = await self._mic.capture(max_seconds=max_seconds or self._config.max_utterance_s,
+                                                endpointer=endpointer)
+            finally:
+                self.listening = False
+                await self._announce("idle")
+            heard_speech = endpointer.heard_speech
+        if not heard_speech and audio.seconds < 0.5:
             return None, ""
         if self._config.keep_audio:
             self._keep(audio)
@@ -179,31 +190,81 @@ class Pipeline:
 
     async def speak(self, text: str, *, session_id: str | None = None, voice: str = "") -> str:
         """Say `text` aloud. Returns what was actually spoken (markdown
-        removed); an empty reply is spoken as a short honest line."""
+        removed); an empty reply is spoken as a short honest line.
+
+        With `barge_in` on, the microphone stays open while Sim speaks.
+        The creator, 2026-09-10: "I want sim to stop talking as soon as
+        I start talking." `barge_in_speech_ms` of a person's speech --
+        measured over the level the mic hears of Sim's own voice --
+        stops playback at once, and the interrupting words are kept as
+        the start of the next turn (`self.pending_audio`), not thrown
+        away with the echo."""
         said = spoken_form(text) or "I have nothing to say to that."
         self.speaking = True
+        self.pending_audio = None
+        interrupted = False
         await self._announce("speaking")
         try:
             audio: Audio = await self._tts.synthesise(said, voice=voice or self._config.tts_voice,
                                                       speed=self._config.tts_speed)
-            await self._speaker.play(audio)
+            if self._config.barge_in and self._mic is not None:
+                interrupted = await self._play_interruptibly(audio)
+            else:
+                await self._speaker.play(audio)
         finally:
             self.speaking = False
             await self._announce("idle")
         self.last_said = said
         await self._publish(topics.VOICE_SPOKEN, {
             "text": said, "seconds": audio.seconds, "engine": getattr(self._tts, "name", ""),
-            "device": self._config.device, **({"session_id": session_id} if session_id else {}),
+            "device": self._config.device, "interrupted": interrupted,
+            **({"session_id": session_id} if session_id else {}),
         })
         return said
+
+    async def _play_interruptibly(self, audio: Audio) -> bool:
+        """Play `audio` while listening; True if a person cut in. The
+        interrupting utterance, captured to its end, is left in
+        `self.pending_audio` for the next turn."""
+        play = asyncio.create_task(self._speaker.play(audio))
+        stopper = getattr(self._speaker, "stop", None)
+
+        def _cut_in() -> None:
+            if stopper is not None:
+                asyncio.get_running_loop().create_task(stopper())
+
+        endpointer = BargeInEndpointer(
+            self._detector_factory(), silence_ms=self._config.endpoint_silence_ms,
+            max_seconds=audio.seconds + self._config.max_utterance_s,
+            speech_ms=self._config.barge_in_speech_ms, on_barge_in=_cut_in,
+        )
+        capture = asyncio.create_task(self._mic.capture(
+            max_seconds=audio.seconds + self._config.max_utterance_s, endpointer=endpointer))
+        try:
+            await play
+        finally:
+            if not endpointer.barged:
+                capture.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await capture
+        if not endpointer.barged:
+            return False
+        try:
+            self.pending_audio = await capture
+        except Exception as exc:  # noqa: BLE001 -- the interruption stands even if its tail was lost
+            if self._logger is not None:
+                self._logger.warning("voice.barge_in_capture_failed", error=repr(exc))
+        return True
 
     async def run_loop(self, stop: asyncio.Event) -> None:
         """`voice on`: listen, answer, listen again, until told to stop.
         Without a wake word every capture is open; an empty one (nobody
         spoke for `max_utterance_s`) simply comes round again."""
+        pending: Audio | None = None
         while not stop.is_set():
             try:
-                utterance, _said = await self.listen_once()
+                utterance, _said = await self.listen_once(pending=pending)
+                pending = self.pending_audio  # the words that cut the reply short, if any
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 -- one bad turn must not end the session
@@ -211,6 +272,8 @@ class Pipeline:
                     self._logger.warning("voice.turn_failed", error=repr(exc))
                 await asyncio.sleep(1.0)
                 continue
+            if pending is not None:
+                continue  # answer the interruption before listening afresh
             if utterance is None or not utterance.text.strip():
                 # Nothing heard. A real microphone spent `max_utterance_s`
                 # finding that out; a fake one answers at once, and a loop

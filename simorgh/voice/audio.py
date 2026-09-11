@@ -168,6 +168,13 @@ class SounddeviceSpeaker:
         samples = np.frombuffer(audio.pcm, dtype=np.int16)
         await asyncio.to_thread(sd.play, samples, audio.sample_rate, blocking=True)
 
+    async def stop(self) -> None:
+        try:
+            import sounddevice as sd
+        except ImportError:  # pragma: no cover
+            return
+        await asyncio.to_thread(sd.stop)
+
 
 class CommandSpeaker:
     """Playback through a command that takes a WAV path: `afplay` on
@@ -182,18 +189,28 @@ class CommandSpeaker:
                 return
         raise ImportError("neither afplay nor ffplay is installed")
 
+    _proc = None
+
     async def play(self, audio: Audio) -> None:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(wav_bytes(audio))
             path = tmp.name
         try:
-            proc = await asyncio.create_subprocess_exec(
+            self._proc = await asyncio.create_subprocess_exec(
                 *self._cmd, path, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
                 stdin=asyncio.subprocess.DEVNULL,
             )
-            await proc.wait()
+            await self._proc.wait()
         finally:
+            self._proc = None
             Path(path).unlink(missing_ok=True)
+
+    async def stop(self) -> None:
+        """Kill the player; `play` returns as its process exits."""
+        proc = self._proc
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.terminate()
 
 
 def open_microphone(preferred: str = "auto") -> tuple[object | None, str]:

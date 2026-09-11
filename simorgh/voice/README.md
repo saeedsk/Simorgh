@@ -26,6 +26,11 @@ This package owns only the audio.
   microphone and audio-playback beside Docker and Chromium.
 - The never-guess rule: a hearing below `min_confidence` is asked about
   ("did you say ...?"), never acted on.
+- **Barge-in**: the mic stays open while Sim speaks; `barge_in_speech_ms` of a
+  person's speech, measured over the level the mic hears of Sim's own voice
+  (the first frames of each reply calibrate the floor), stops playback at once,
+  and the interrupting words become the next turn. Headphones make it
+  bulletproof; on a laptop's speakers the echo calibration carries it.
 - A reply that is not back within `reply_timeout_s` is spoken as
   "I'm still working on that", never silence.
 - Privacy defaults from the design: audio is not kept unless
@@ -35,7 +40,8 @@ This package owns only the audio.
 
 Wake word (openWakeWord; today is push-to-talk: `voice listen`, or
 `voice on` for an open mic), streaming STT and sentence-streamed TTS
-(today's turn is capture-then-transcribe-then-speak), speaker
+(today's turn is capture-then-transcribe-then-speak; barge-in is built,
+resuming a false-alarm interruption is not), speaker
 identification and per-speaker permissions, the fast intent path, the
 voice scaffold for short spoken replies, Wyoming satellites, the
 OpenAI-compatible endpoint for Home Assistant, the PWA, Alexa.

@@ -10,6 +10,12 @@
     "engine": {
       "type": "string"
     },
+    "interrupted": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "seconds": {
       "type": "number"
     },

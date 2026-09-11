@@ -23,7 +23,7 @@ class Config:
     stt_language: str = "en"           # "" = detect
     stt_compute: str = "auto"          # faster_whisper: int8 | float16 | auto
     tts: str = "auto"                  # auto | kokoro | say | fake
-    tts_voice: str = "af_heart"        # Kokoro voice id; a `say -v` voice name for `say`
+    tts_voice: str = "af_bella"        # Kokoro voice id; a `say -v` voice name for `say`
     tts_speed: float = 1.0
     # Endpointing (section 4.2).
     vad: str = "auto"                  # auto | silero | energy | fake
@@ -34,7 +34,12 @@ class Config:
     # `space` key in `sim voice`. "" = push-to-talk only.
     wake_word: str = ""
     follow_up_window_s: float = 6.0
+    # Speech during playback stops playback (section 4.1). The mic stays
+    # open while Sim speaks; this much continuous speech, measured
+    # against the level the mic hears of Sim's own voice, is a person
+    # cutting in. Below it is an echo, a cough, a chair.
     barge_in: bool = True
+    barge_in_speech_ms: int = 400
     # How long a spoken turn may wait for Sim's answer before the
     # pipeline says so aloud instead of nothing.
     reply_timeout_s: float = 60.0
