@@ -745,6 +745,10 @@ class Service:
             self._live.clear()
             if reply_text:
                 print(render_mod.markdown(reply_text, enabled=self._color))
+                from simorgh.interface import tts as tts_mod
+
+                if tts_mod.enabled() and tts_mod.available():
+                    tts_mod.say(reply_text)
             else:
                 # An honest-floor completion (no real provider answered in
                 # time) resolves the future with "", same as a real reply
@@ -790,7 +794,8 @@ class Service:
     async def _on_voice_spoken(self, message: Message) -> None:
         text = str(message.payload.get("text") or "").strip()
         if text:
-            self._out(render_mod.style(f"🔊 sim: {text}", "green", enabled=self._color))
+            tail = "  (interrupted)" if message.payload.get("interrupted") else ""
+            self._out(render_mod.style(f"🔊 sim: {text}{tail}", "green", enabled=self._color))
 
     async def _on_voice_listening(self, message: Message) -> None:
         # Only the moment the mic opens; `idle` and `speaking` would be
