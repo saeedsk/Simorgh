@@ -100,6 +100,13 @@ class WorktreeManager:
     repo: Path
     home: Path
     gate: Callable[[Path], ToolResult] | None = None
+    # `rerun(root, nodeids)` -> the subset still failing when run alone
+    # on a copy of `root`, or None for no opinion. Asked of the rebased
+    # tree and of main after a red gate; without it every red gate
+    # refuses, which on a machine whose main is already red (one
+    # self-test here fails on every main since 2026-09-10) would mean
+    # nothing ever lands.
+    rerun: Callable[[Path, tuple[str, ...]], frozenset[str] | None] | None = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def __post_init__(self) -> None:
@@ -205,6 +212,7 @@ class WorktreeManager:
                 conflicts=names,
             )
 
+        gate_note = ""
         if self.gate is not None:
             started = time.monotonic()
             gate = self.gate(path)
@@ -214,13 +222,22 @@ class WorktreeManager:
                 if gate.error == "timeout":
                     # Not red: unfinished. Saying "red" here would send
                     # the model hunting for a failure that does not exist.
-                    detail = (f"refused: the whole-suite gate did not finish within {took:.0f}s on the "
-                              f"rebased tree -- nothing is known to be broken; try landing again when "
-                              f"the machine is quieter")
-                else:
-                    detail = (f"refused: the whole suite is red on the rebased tree "
-                              f"({gate.error or 'failed'}, {took:.0f}s) -- fix it and commit again")
-                return Landed(False, detail, gate_output=tail)
+                    return Landed(False, (
+                        f"refused: the whole-suite gate did not finish within {took:.0f}s on the "
+                        f"rebased tree -- nothing is known to be broken; try landing again when "
+                        f"the machine is quieter"), gate_output=tail)
+                verdict = self._attribute(path, gate)
+                if verdict is None:
+                    return Landed(False, (
+                        f"refused: the whole suite is red on the rebased tree "
+                        f"({gate.error or 'failed'}, {took:.0f}s) -- fix it and commit again"), gate_output=tail)
+                introduced, excused = verdict
+                if introduced:
+                    return Landed(False, (
+                        f"refused: this branch makes tests fail that pass on main: "
+                        f"{', '.join(introduced[:10])} -- fix it and commit again"), gate_output=tail)
+                gate_note = (f"; the suite had {len(excused)} failure(s) that also fail on main or pass "
+                             f"when run alone ({', '.join(excused[:5])})")
 
         landed_from = _git(path, "rev-parse", "HEAD").stdout.strip()
         merge = _git(self.repo, "merge", "--ff-only", landed_from)
@@ -230,8 +247,39 @@ class WorktreeManager:
         count = _git(self.repo, "rev-list", "--count", f"{main_sha}..{new_main}")
         landed = int(count.stdout.strip() or 0) if count.returncode == 0 else 0
         self._remove(path, branch)
-        return Landed(True, f"landed {landed} commit(s) on main: {main_sha[:12]} -> {new_main[:12]}",
+        return Landed(True, f"landed {landed} commit(s) on main: {main_sha[:12]} -> {new_main[:12]}{gate_note}",
                       commit=new_main, landed=landed)
+
+    def _attribute(self, path: Path, gate: ToolResult) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+        """`(introduced, excused)` for a red gate, or None for no opinion.
+
+        The same rule Verification applies to the model's own suite run
+        (`verification/checks/_baseline.py`): a failure is the branch's
+        only if it is still red when run alone on the rebased tree AND
+        green when run alone on main. A whole-suite run under load
+        fails tests that pass alone, and a main that is already red
+        for its own reasons is not this branch's to fix. No opinion --
+        no `rerun`, no failure ids, a re-run that could not happen --
+        errs towards refusing, as every unknown in that module does.
+        """
+        if self.rerun is None:
+            return None
+        ids = tuple(str(n) for n in (gate.metadata or {}).get("failing_nodeids") or () if n)
+        if not ids:
+            return None
+        still = self.rerun(path, ids)
+        if still is None:
+            return None
+        flaky = tuple(n for n in ids if n not in still)
+        candidates = tuple(n for n in ids if n in still)
+        if not candidates:
+            return (), flaky
+        on_main = self.rerun(self.repo, candidates)
+        if on_main is None:
+            return None
+        introduced = tuple(n for n in candidates if n not in on_main)
+        excused = flaky + tuple(n for n in candidates if n in on_main)
+        return introduced, excused
 
     # -- close ---------------------------------------------------------------------------------
 

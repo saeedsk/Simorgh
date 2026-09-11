@@ -1190,6 +1190,13 @@ def _checkout_patch(checkout: Path, base: str, *, timeout: float = 120.0) -> tup
     return staged_diff(checkout, base, exclude=(MANIFEST_NAME,), timeout=timeout)
 
 
+# What an isolated test copy leaves out: nothing a test reads, and most
+# of the bytes. NOT "ledger": that pattern would also drop the
+# `simorgh/ledger` package and its tests.
+_ISOLATED_COPY_IGNORE = ("__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info", ".pytest_cache",
+                         "papers", "scratchpad", ".simorgh")
+
+
 class RunTestsTool:
     """The `isolated_test_suite` gap `execution/README.md`'s "Deliberate
     scope cuts" names as deferred -- built here as the standalone
@@ -1266,6 +1273,37 @@ class RunTestsTool:
         return self._run_isolated("tests", timeout=self._config.test_timeout_s, start=time.monotonic(),
                                   root=Path(root).resolve())
 
+    def failing_alone(self, root: Path, nodeids: tuple[str, ...]) -> frozenset[str] | None:
+        """Which of `nodeids` still fail when run again, alone, on a copy
+        of `root`; None for no opinion (a run that could not happen).
+        `worktree_land` asks this of the rebased tree and of main after
+        a red gate, so a test that only fails under a whole-suite load,
+        or that is red on main already, does not refuse a landing.
+        Blocking; the caller threads it."""
+        if not nodeids:
+            return frozenset()
+        root = Path(root).resolve()
+        with tempfile.TemporaryDirectory(prefix="simorgh-rerun-") as workdir:
+            dest = Path(workdir) / "repo"
+            try:
+                shutil.copytree(root, dest, ignore=shutil.ignore_patterns(*_ISOLATED_COPY_IGNORE))
+            except OSError:
+                return None
+            try:
+                done = subprocess.run(
+                    [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                     "--continue-on-collection-errors", *nodeids],
+                    capture_output=True, text=True, cwd=dest, timeout=self._config.test_timeout_s,
+                    stdin=subprocess.DEVNULL,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return None
+            if done.returncode == _PYTEST_USAGE_ERROR:
+                return None
+            if done.returncode == 0:
+                return frozenset()
+            return frozenset(failing_nodeids(done.stdout)) & frozenset(nodeids)
+
     def _run_isolated(self, target: str, *, timeout: float, start: float, root: Path | None = None) -> ToolResult:
         """Copy the repo, run pytest there, read the result. Blocking by
         design: `run` hands it to a worker thread."""
@@ -1279,10 +1317,7 @@ class RunTestsTool:
                 # test reads either; the copy is 17 MB without them.
                 # NOT "ledger": that pattern would also drop the
                 # `simorgh/ledger` package and its tests.
-                shutil.copytree(root, dest, ignore=shutil.ignore_patterns(
-                    "__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info", ".pytest_cache",
-                    "papers", "scratchpad", ".simorgh",
-                ))
+                shutil.copytree(root, dest, ignore=shutil.ignore_patterns(*_ISOLATED_COPY_IGNORE))
             except OSError as exc:
                 return ToolResult(ok=False, error=f"could not stage an isolated copy: {exc!r}")
             if not (dest / target).exists():

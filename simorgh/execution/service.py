@@ -231,8 +231,11 @@ class Service:
             if data_dir is None:
                 return None
             home = str(Path(data_dir) / "worktrees")
-        gate = RunTestsTool(self._config).gate if getattr(self._config, "landing_gate", True) else None
-        manager = WorktreeManager(self._config.repo_root, Path(home), gate=gate)
+        tests = RunTestsTool(self._config)
+        gated = getattr(self._config, "landing_gate", True)
+        manager = WorktreeManager(self._config.repo_root, Path(home),
+                                  gate=tests.gate if gated else None,
+                                  rerun=tests.failing_alone if gated else None)
         if not manager.available:
             ctx.logger.warning("worktrees_unavailable", repo=str(self._config.repo_root))
             return None

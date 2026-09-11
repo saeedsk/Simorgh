@@ -291,3 +291,72 @@ class TestTheTools(WorktreeCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestARedGateIsAttributed(WorktreeCase):
+    """Third live landing, 2026-09-11: the gate refused because the
+    whole suite was red on the rebased tree -- for a self-test that is
+    red on every main on this machine, and tests that only fail under
+    load. A red gate now asks the same question Verification asks:
+    still red alone on the branch, and green alone on main?"""
+
+    def _red_gate(self, *ids: str) -> ToolResult:
+        return ToolResult(ok=False, output="FAILED ...", error="exit_code=1",
+                          metadata={"failing_nodeids": list(ids)})
+
+    async def _branch(self) -> Path:
+        opened = await self.manager.open("t1")
+        (opened.path / "simorgh" / "x.py").write_text("VALUE = 2\n")
+        _git(opened.path, "commit", "-qam", "two")
+        return opened.path
+
+    async def test_failures_that_pass_alone_do_not_refuse(self) -> None:
+        self.manager.gate = lambda root: self._red_gate("tests/test_flaky.py::test_it")
+        self.manager.rerun = lambda root, ids: frozenset()
+        await self._branch()
+        landed = await self.manager.land("t1")
+        self.assertTrue(landed.ok, landed.detail)
+        self.assertIn("pass when run alone", landed.detail)
+        self.assertIn("test_flaky.py", landed.detail)
+        self.assertEqual((self.repo / "simorgh" / "x.py").read_text(), "VALUE = 2\n")
+
+    async def test_failures_red_on_main_too_do_not_refuse(self) -> None:
+        self.manager.gate = lambda root: self._red_gate("tests/test_old.py::test_it")
+        self.manager.rerun = lambda root, ids: frozenset(ids)  # red everywhere
+        await self._branch()
+        landed = await self.manager.land("t1")
+        self.assertTrue(landed.ok, landed.detail)
+        self.assertIn("also fail on main", landed.detail)
+
+    async def test_a_failure_the_branch_introduced_refuses(self) -> None:
+        self.manager.gate = lambda root: self._red_gate("tests/test_new.py::test_it", "tests/test_old.py::test_it")
+        path = await self._branch()
+
+        def rerun(root: Path, ids: tuple[str, ...]) -> frozenset[str]:
+            if Path(root).resolve() == self.repo.resolve():
+                return frozenset({"tests/test_old.py::test_it"})  # main: only the old one is red
+            return frozenset(ids)  # branch: both still red alone
+
+        self.manager.rerun = rerun
+        landed = await self.manager.land("t1")
+        self.assertFalse(landed.ok)
+        self.assertIn("makes tests fail that pass on main", landed.detail)
+        self.assertIn("test_new.py", landed.detail)
+        self.assertNotIn("test_old.py", landed.detail.split("main:")[1])
+        self.assertTrue(path.exists())
+
+    async def test_no_rerun_means_a_red_gate_refuses(self) -> None:
+        self.manager.gate = lambda root: self._red_gate("tests/test_x.py::test_it")
+        await self._branch()
+        landed = await self.manager.land("t1")
+        self.assertFalse(landed.ok)
+        self.assertIn("red on the rebased tree", landed.detail)
+
+    async def test_the_real_rerun_helper_runs_the_subset_alone(self) -> None:
+        from simorgh.execution.tools import RunTestsTool
+        (self.repo / "tests" / "test_a.py").write_text("def test_a():\n    assert True\n")
+        (self.repo / "tests" / "test_b.py").write_text("def test_b():\n    assert False\n")
+        tool = RunTestsTool(Config(repo_root=self.repo, test_timeout_s=60.0))
+        still = tool.failing_alone(self.repo, ("tests/test_a.py::test_a", "tests/test_b.py::test_b"))
+        self.assertEqual(still, frozenset({"tests/test_b.py::test_b"}))
+        self.assertEqual(tool.failing_alone(self.repo, ()), frozenset())
