@@ -328,6 +328,8 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 
     if name == "capabilities":
         return await _capabilities_command(ledger)
+    if name == "voice":
+        return await _voice(bus, args)
 
     if name == "schedule":
         return await _schedule_command(args, bus=bus, ledger=ledger, clock=clock)
@@ -379,6 +381,41 @@ _BENCHMARK_USAGE = "\n".join(
     f"  benchmark {f'{verb} {args}'.strip():<{_BENCHMARK_COLUMN}}{what}"
     for verb, args, what in BENCHMARK_VERBS
 )
+
+
+async def _voice(bus: BusClient, args: str) -> Outcome:
+    """`voice ...` -- every verb is one request to the voice subsystem;
+    the rendering is `voiceview`'s. `voice` alone is `voice status`."""
+    from . import voiceview
+
+    verb, rest = _benchmark_word(args)
+    if verb in ("", "status"):
+        return await _request(bus, topics.VOICE_STATUS_REQUEST, {}, timeout=10.0, render=voiceview.status)
+    if verb in ("on", "off", "mute", "unmute"):
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": verb}, timeout=60.0,
+                              render=voiceview.controlled)
+    if verb in ("test", "say"):
+        if not rest:
+            return Outcome("usage: voice test <text to speak>")
+        return await _request(bus, topics.VOICE_SPEAK_REQUEST, {"text": rest.strip().strip('"')}, timeout=120.0,
+                              render=voiceview.spoken)
+    if verb == "listen":
+        payload: dict = {}
+        words = rest.split()
+        if words and words[0].replace(".", "", 1).isdigit():
+            payload["seconds"] = float(words[0])
+        if "only" in words or "transcribe" in words:
+            payload["respond"] = False
+        return await _request(bus, topics.VOICE_LISTEN_REQUEST, payload, timeout=300.0, render=voiceview.listened)
+    if verb == "voices":
+        return await _request(bus, topics.VOICE_VOICES_REQUEST, {}, timeout=60.0, render=voiceview.voices)
+    if verb == "devices":
+        return await _request(bus, topics.VOICE_DEVICES_REQUEST, {}, timeout=60.0, render=voiceview.devices)
+    if verb == "models":
+        return await _request(bus, topics.VOICE_MODELS_REQUEST, {"name": rest.strip() or "base.en"},
+                              timeout=900.0, render=voiceview.models)
+    return Outcome(f"voice: unknown verb {verb!r} -- status | on | off | mute | unmute | listen [seconds] [only] "
+                   f"| test <text> | voices | devices | models [name]")
 
 
 def _benchmark_word(args: str) -> tuple[str, str]:

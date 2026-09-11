@@ -10,7 +10,7 @@ class TestLayers(unittest.TestCase):
             ("cognition", "memory", "worldmodel"),
             ("guardian", "execution", "verification", "planning"),
             ("learning", "reflection", "curiosity"),
-            ("persona", "benchmark", "interface"),
+            ("persona", "benchmark", "voice", "interface"),
             ("orchestration",),
         ))
 

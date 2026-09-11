@@ -1,8 +1,8 @@
-"""The definitive proof that the v2 blueprint is not just sixteen
+"""The definitive proof that the v2 blueprint is not just seventeen
 separately-tested packages: it is one system. Every other integration
 test in this suite boots a handful of real subsystems together (plus
 fakes for the rest) to prove one flow; this test boots the REAL,
-unpatched `simorgh.kernel.registry.build_factories()` -- all sixteen
+unpatched `simorgh.kernel.registry.build_factories()` -- all seventeen
 real `Service`s, in the real six-layer order, through the real
 `Kernel`/`Supervisor` -- and asserts every single one reports healthy
 before the boot completes, then shuts down cleanly.
@@ -13,7 +13,7 @@ at: "`python -m simorgh --self-check` boots every subsystem." Unlike
 the CLI's own `--self-check` (which deliberately uses two small inline
 stub subsystems for the guarded action-path drill, so it can prove the
 safety topology without depending on the rest of the build finishing),
-this test is the one place the REAL sixteen are all constructed
+this test is the one place the REAL seventeen are all constructed
 together, so a wiring mistake in any single `Service.__init__` or a
 missing dependency surfaces here, not only in that package's own
 narrower integration test.
@@ -30,6 +30,7 @@ from simorgh.kernel.state import RUNNING
 from simorgh.learning.service import Service as LearningService
 from tests.simorgh.helpers import FakeClock
 
+# Seventeen since `voice` (2026-09-10); the name stays, the count moves.
 ALL_SIXTEEN = frozenset(name for layer in LAYERS for name in layer)
 
 
@@ -39,7 +40,7 @@ class TestKernelBootsAllSixteenSubsystems(unittest.IsolatedAsyncioTestCase):
         # subsystem, but it is the composition root that boots the other
         # fifteen -- it does not appear as an entry in its own LAYERS.
         self.assertEqual(
-            len(ALL_SIXTEEN), 16,
+            len(ALL_SIXTEEN), 17,
             "LAYERS should name every non-kernel subsystem: the original fifteen plus `benchmark` (2026-09-08)",
         )
 

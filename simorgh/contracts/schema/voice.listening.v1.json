@@ -1,0 +1,26 @@
+{
+  "$id": "https://simorgh.local/schema/voice.listening.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `voice.listening` (catalog v1).",
+  "properties": {
+    "device": {
+      "type": "string"
+    },
+    "state": {
+      "enum": [
+        "listening",
+        "idle",
+        "muted",
+        "speaking"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "state",
+    "device"
+  ],
+  "title": "voice.listening",
+  "type": "object"
+}

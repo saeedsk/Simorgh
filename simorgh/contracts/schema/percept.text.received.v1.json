@@ -2,14 +2,15 @@
   "$id": "https://simorgh.local/schema/percept.text.received.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "channel=command + command for routed commands; steer=true marks a mid-task correction.",
+  "description": "channel=command + command for routed commands; steer=true marks a mid-task correction; channel=voice carries device/speaker/confidence from the voice pipeline.",
   "properties": {
     "channel": {
       "enum": [
         "cli",
         "api",
         "chat",
-        "command"
+        "command",
+        "voice"
       ],
       "type": "string"
     },
@@ -19,8 +20,26 @@
         "null"
       ]
     },
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "device": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "session_id": {
       "type": "string"
+    },
+    "speaker": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "steer": {
       "type": [

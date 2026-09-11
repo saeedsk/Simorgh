@@ -1,5 +1,9 @@
 # Talking to Sim: voice on the laptop, the phone, and the house
 
+**Build status (2026-09-10):** slice 1, the laptop path, is built --
+`simorgh/voice/` (see its README for what is and is not there). This
+document remains the spec for the rest.
+
 Design pass, 2026-09-09 (Fable). Implementation is handed to Opus; this
 document is written so that nothing below needs a design decision.
 Companion to `home-automation-design.md` and

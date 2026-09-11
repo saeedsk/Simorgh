@@ -1,0 +1,50 @@
+# voice -- talking to Sim
+
+The 19th subsystem (docs/plans/voice-design.md). A spoken turn becomes
+`percept.text.received{channel: "voice"}` and rides the same
+Orchestration/Cognition path as typed text; the reply comes back as
+`turn.completed` and is spoken. One brain, one Guardian, one ledger.
+This package owns only the audio.
+
+| file | what |
+|---|---|
+| `api.py` | `Audio`, `Utterance`, `VoiceTurn`, `VoiceState`; the engine protocols |
+| `config.py` | `[voice]` -- every key is read by something |
+| `audio.py` | capture (`sounddevice`, else `ffmpeg`), playback (`sounddevice`, else `afplay`/`ffplay`), WAV helpers |
+| `vad.py` | `Endpointer` over Silero (if installed) or an energy detector |
+| `stt/` | `faster_whisper` (primary), `whisper_cli` (whisper.cpp, present via Homebrew) |
+| `tts/` | `kokoro` (primary), `say` (macOS, present) |
+| `pipeline.py` | capture -> endpoint -> STT -> percept -> wait for the turn -> TTS -> play; `voice:turns` in the ledger |
+| `service.py` | the Subsystem: presence probes into `capabilities`, the `voice.*` request handlers, the `voice on` loop |
+| `fakes.py` | every engine and device as a deterministic stand-in |
+
+## Built (slice 1: the laptop)
+
+- `voice status | on | off | mute | unmute | listen [seconds] [only] | test <text> | voices | devices | models [name]`
+- Engines are opened on first use and refused BY NAME when absent, with
+  what to install. `capabilities` lists speech-to-text, text-to-speech,
+  microphone and audio-playback beside Docker and Chromium.
+- The never-guess rule: a hearing below `min_confidence` is asked about
+  ("did you say ...?"), never acted on.
+- A reply that is not back within `reply_timeout_s` is spoken as
+  "I'm still working on that", never silence.
+- Privacy defaults from the design: audio is not kept unless
+  `keep_audio`; transcripts are ledgered (`voice:turns`).
+
+## Not built yet (later slices, in the design)
+
+Wake word (openWakeWord; today is push-to-talk: `voice listen`, or
+`voice on` for an open mic), streaming STT and sentence-streamed TTS
+(today's turn is capture-then-transcribe-then-speak), speaker
+identification and per-speaker permissions, the fast intent path, the
+voice scaffold for short spoken replies, Wyoming satellites, the
+OpenAI-compatible endpoint for Home Assistant, the PWA, Alexa.
+
+## On this machine, today
+
+`whisper-cli` (whisper.cpp), `say`, `ffmpeg` capture, `afplay`. Homebrew's
+bundled `for-tests-ggml-tiny.bin` is a fixture that hears silence; `voice
+models base.en` fetches a real model (148 MB, ~5 s) and the JFK sample
+then transcribes in 0.5 s. Better: `pip install faster-whisper
+kokoro-onnx sounddevice`, and a real whisper model under
+`workspace/voice/models/`.

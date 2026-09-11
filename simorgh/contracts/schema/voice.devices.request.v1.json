@@ -1,0 +1,10 @@
+{
+  "$id": "https://simorgh.local/schema/voice.devices.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `voice.devices.request` (catalog v1).",
+  "properties": {},
+  "required": [],
+  "title": "voice.devices.request",
+  "type": "object"
+}

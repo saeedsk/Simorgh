@@ -1,0 +1,22 @@
+{
+  "$id": "https://simorgh.local/schema/voice.speak.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `voice.speak.request` (catalog v1).",
+  "properties": {
+    "text": {
+      "type": "string"
+    },
+    "voice": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "text"
+  ],
+  "title": "voice.speak.request",
+  "type": "object"
+}

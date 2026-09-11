@@ -24,14 +24,14 @@ several design choices.
 
 | Want to know... | Read |
 |---|---|
-| The sixteen subsystems, layering, safety topology, package rules, deployment modes, worked message flows | [`blueprint/02-system-architecture.md`](blueprint/02-system-architecture.md) |
+| The seventeen subsystems, layering, safety topology, package rules, deployment modes, worked message flows | [`blueprint/02-system-architecture.md`](blueprint/02-system-architecture.md) |
 | The message envelope, topic taxonomy, full message catalog, Bus/Ledger/Subsystem contracts | [`blueprint/03-contracts-and-messaging.md`](blueprint/03-contracts-and-messaging.md) |
 | Build phases, what's done vs. planned, acceptance criteria | [`blueprint/04-build-plan-and-roadmap.md`](blueprint/04-build-plan-and-roadmap.md) |
 | One detailed spec per subsystem | [`blueprint/subsystems/`](blueprint/subsystems/) |
 | What changed from v1, why, and the cutover plan itself | [`blueprint/06-migration-from-v1.md`](blueprint/06-migration-from-v1.md) |
 | Every milestone, bug, and design decision as it actually happened | [`EVOLUTION.md`](EVOLUTION.md) |
 
-## The sixteen subsystems
+## The seventeen subsystems
 
 | Layer | Subsystems |
 |---|---|
@@ -39,7 +39,7 @@ several design choices.
 | 1 Cognitive core | Cognition, Memory, World Model (+ Self Model) |
 | 2 Agency | Planning, Execution, Guardian, Verification |
 | 3 Growth | Learning, Reflection, Curiosity |
-| 4 Self & surfaces | Persona, Interface |
+| 4 Self & surfaces | Persona, Benchmark, Voice, Interface |
 | X Cross-cutting | Orchestration |
 
 Full package paths and specs: [`blueprint/00-README.md`](blueprint/00-README.md#the-subsystems).

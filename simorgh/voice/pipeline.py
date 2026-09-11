@@ -1,0 +1,253 @@
+"""wake -> VAD -> STT -> Sim -> TTS -> play, for one laptop.
+
+The pipeline decides nothing. A spoken utterance becomes
+`percept.text.received{channel: "voice"}` and rides the same
+Orchestration/Cognition path as typed text -- one brain, one Guardian,
+one ledger -- and whatever comes back as the turn's result is what gets
+spoken. Every stage announces itself on the bus (`voice.listening`,
+`voice.transcript`, `voice.spoken`) so the TUI, a satellite's LED or a
+test can watch it without touching audio.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+import time
+import uuid
+from pathlib import Path
+
+from simorgh.contracts import topics
+from simorgh.contracts.envelope import Event
+
+from .api import Audio, Utterance, VoiceTurn
+from .audio import write_wav
+from .config import Config
+from .vad import Endpointer
+
+TURNS_STREAM = "voice:turns"
+
+#: What Sim says when the answer is not back in time. Spoken, because a
+#: silent failure is the one thing a voice interface must never do.
+STILL_THINKING = "I'm still working on that. I'll tell you when I have it."
+NOT_SURE = "I'm not sure I heard that right. Did you say: {text}?"
+
+_MARKDOWN = (
+    (re.compile(r"```.*?```", re.S), " "),          # code blocks: not for speaking
+    (re.compile(r"`([^`]*)`"), r"\1"),
+    (re.compile(r"\*\*([^*]+)\*\*"), r"\1"),
+    (re.compile(r"(?m)^\s*#+\s*"), ""),
+    (re.compile(r"(?m)^\s*[-*]\s+"), ""),
+    (re.compile(r"\[([^\]]+)\]\([^)]+\)"), r"\1"),
+    (re.compile(r"[ \t]+"), " "),
+)
+
+
+def spoken_form(text: str) -> str:
+    """Markdown out, sentences in. A synthesiser reading `**bold**` and
+    bullet dashes aloud is the fastest way to sound like a machine."""
+    out = text or ""
+    for pattern, repl in _MARKDOWN:
+        out = pattern.sub(repl, out)
+    lines = [line.strip() for line in out.splitlines()]
+    return "\n".join(line for line in lines if line).strip()
+
+
+class Pipeline:
+    def __init__(self, *, bus, clock, logger, ledger, config: Config, microphone, speaker, recogniser,
+                 synthesiser, detector_factory, repo_root: Path | None = None) -> None:
+        self._bus = bus
+        self._clock = clock
+        self._logger = logger
+        self._ledger = ledger
+        self._config = config
+        self._mic = microphone
+        self._speaker = speaker
+        self._stt = recogniser
+        self._tts = synthesiser
+        self._detector_factory = detector_factory
+        self._repo_root = repo_root or Path(".")
+        self._pending: dict[str, asyncio.Future] = {}
+        self._subs: list = []
+        self.turns = 0
+        self.last_heard = ""
+        self.last_said = ""
+        self.speaking = False
+        self.listening = False
+
+    # ------------------------------------------------------------ lifecycle
+    async def start(self) -> None:
+        # The answer to a chat turn arrives as `turn.completed{session_id,
+        # text}` -- exactly what the REPL waits for (`interface/service.py::
+        # _on_turn_completed`). The task events are the fallback for a
+        # turn that ends without one: a chat task's id is its session id.
+        self._subs.append(await self._bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed))
+        for topic in (topics.TASK_FAILED, topics.TASK_BLOCKED):
+            self._subs.append(await self._bus.subscribe(topic, self._on_task_event))
+
+    async def _on_turn_completed(self, message) -> None:
+        payload = message.payload
+        fut = self._pending.get(str(payload.get("session_id") or ""))
+        if fut is not None and not fut.done():
+            fut.set_result(str(payload.get("text") or ""))
+
+    async def stop(self) -> None:
+        for sub in self._subs:
+            await sub.unsubscribe()
+        self._subs = []
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.cancel()
+        self._pending.clear()
+
+    async def _on_task_event(self, message) -> None:
+        """A chat turn's task id IS its session id (`interface/service.py`
+        does the same), so the reply is the terminal task event."""
+        payload = message.payload
+        fut = self._pending.get(str(payload.get("task_id") or ""))
+        if fut is None or fut.done():
+            return
+        reason = str(payload.get("reason") or payload.get("note") or "it did not work")
+        fut.set_result(f"Sorry, I couldn't do that: {reason}")
+
+    # ------------------------------------------------------------- one turn
+    async def listen_once(self, *, max_seconds: float | None = None, respond: bool = True,
+                          speaker_name: str = "") -> tuple[Utterance | None, str]:
+        """Capture one utterance, and unless `respond=False`, ask Sim and
+        speak the answer. Returns `(utterance, what was said)`."""
+        endpointer = Endpointer(self._detector_factory(), silence_ms=self._config.endpoint_silence_ms,
+                                max_seconds=max_seconds or self._config.max_utterance_s)
+        await self._announce("listening")
+        self.listening = True
+        try:
+            audio = await self._mic.capture(max_seconds=max_seconds or self._config.max_utterance_s,
+                                            endpointer=endpointer)
+        finally:
+            self.listening = False
+            await self._announce("idle")
+        if not endpointer.heard_speech and audio.seconds < 0.5:
+            return None, ""
+        if self._config.keep_audio:
+            self._keep(audio)
+        heard_at = self._clock.now()
+        utterance = await self._stt.transcribe(audio, language=self._config.stt_language)
+        session_id = str(uuid.uuid4())
+        await self._publish(topics.VOICE_TRANSCRIPT, {
+            "text": utterance.text, "confidence": utterance.confidence, "seconds": utterance.seconds,
+            "engine": utterance.engine, "device": self._config.device, "session_id": session_id,
+        })
+        if not utterance.text.strip():
+            return utterance, ""
+        self.last_heard = utterance.text
+        if not respond:
+            return utterance, ""
+        if utterance.confidence < self._config.min_confidence:
+            # The never-guess rule: ask, do not act.
+            said = NOT_SURE.format(text=utterance.text)
+            await self.speak(said, session_id=session_id)
+            return utterance, said
+        reply = await self.ask(utterance.text, session_id=session_id, speaker_name=speaker_name,
+                               confidence=utterance.confidence)
+        said = await self.speak(reply, session_id=session_id)
+        self.turns += 1
+        await self._record(VoiceTurn(
+            session_id=session_id, device=self._config.device, speaker=speaker_name, heard=utterance.text,
+            confidence=utterance.confidence, said=said, heard_at=heard_at, answered_at=self._clock.now(),
+            engine_stt=utterance.engine, engine_tts=getattr(self._tts, "name", ""),
+        ))
+        return utterance, said
+
+    async def ask(self, text: str, *, session_id: str | None = None, speaker_name: str = "",
+                  confidence: float = 1.0) -> str:
+        """Hand the words to Sim exactly as the REPL would, and wait."""
+        session_id = session_id or str(uuid.uuid4())
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._pending[session_id] = fut
+        payload = {"channel": "voice", "text": text, "session_id": session_id, "device": self._config.device,
+                   "confidence": confidence}
+        if speaker_name:
+            payload["speaker"] = speaker_name
+        await self._publish(topics.PERCEPT_TEXT_RECEIVED, payload)
+        try:
+            return await asyncio.wait_for(fut, timeout=self._config.reply_timeout_s)
+        except asyncio.TimeoutError:
+            if self._logger is not None:
+                self._logger.warning("voice.reply_timeout", session_id=session_id, seconds=self._config.reply_timeout_s)
+            return STILL_THINKING
+        finally:
+            self._pending.pop(session_id, None)
+
+    async def speak(self, text: str, *, session_id: str | None = None, voice: str = "") -> str:
+        """Say `text` aloud. Returns what was actually spoken (markdown
+        removed); an empty reply is spoken as a short honest line."""
+        said = spoken_form(text) or "I have nothing to say to that."
+        self.speaking = True
+        await self._announce("speaking")
+        try:
+            audio: Audio = await self._tts.synthesise(said, voice=voice or self._config.tts_voice,
+                                                      speed=self._config.tts_speed)
+            await self._speaker.play(audio)
+        finally:
+            self.speaking = False
+            await self._announce("idle")
+        self.last_said = said
+        await self._publish(topics.VOICE_SPOKEN, {
+            "text": said, "seconds": audio.seconds, "engine": getattr(self._tts, "name", ""),
+            "device": self._config.device, **({"session_id": session_id} if session_id else {}),
+        })
+        return said
+
+    async def run_loop(self, stop: asyncio.Event) -> None:
+        """`voice on`: listen, answer, listen again, until told to stop.
+        Without a wake word every capture is open; an empty one (nobody
+        spoke for `max_utterance_s`) simply comes round again."""
+        while not stop.is_set():
+            try:
+                utterance, _said = await self.listen_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- one bad turn must not end the session
+                if self._logger is not None:
+                    self._logger.warning("voice.turn_failed", error=repr(exc))
+                await asyncio.sleep(1.0)
+                continue
+            if utterance is None or not utterance.text.strip():
+                # Nothing heard. A real microphone spent `max_utterance_s`
+                # finding that out; a fake one answers at once, and a loop
+                # that never yields between empty captures starves the
+                # rest of the process.
+                await asyncio.sleep(0.05)
+
+    # ------------------------------------------------------------- helpers
+    async def _announce(self, state: str) -> None:
+        await self._publish(topics.VOICE_LISTENING, {"state": state, "device": self._config.device})
+
+    async def _publish(self, topic: str, payload: dict) -> None:
+        await self._bus.publish(self._bus.new(topic, payload))
+
+    async def _record(self, turn: VoiceTurn) -> None:
+        if not self._config.keep_transcripts or self._ledger is None:
+            return
+        try:
+            await self._ledger.append(TURNS_STREAM, Event(
+                stream=TURNS_STREAM, type="turn", ts=turn.answered_at, trace_id=turn.session_id,
+                causation_id=None, payload={
+                    "session_id": turn.session_id, "device": turn.device, "speaker": turn.speaker,
+                    "heard": turn.heard[:4000], "confidence": turn.confidence, "said": turn.said[:4000],
+                    "heard_at": turn.heard_at, "answered_at": turn.answered_at,
+                    "engine_stt": turn.engine_stt, "engine_tts": turn.engine_tts,
+                }))
+        except Exception as exc:  # noqa: BLE001 -- the turn happened; losing its record is a warning
+            if self._logger is not None:
+                self._logger.warning("voice.turn_not_recorded", error=repr(exc))
+
+    def _keep(self, audio: Audio) -> None:
+        try:
+            path = self._repo_root / self._config.audio_dir / f"{int(time.time())}.wav"
+            write_wav(path, audio)
+        except OSError as exc:
+            if self._logger is not None:
+                self._logger.warning("voice.audio_not_kept", error=repr(exc))
+
+
+__all__ = ["NOT_SURE", "Pipeline", "STILL_THINKING", "TURNS_STREAM", "spoken_form"]

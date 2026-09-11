@@ -24,5 +24,6 @@ from . import (  # noqa: F401 -- side effect: registration
     tool,
     ui,
     verify,
+    voice,
     world,
 )

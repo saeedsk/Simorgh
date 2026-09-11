@@ -1,0 +1,17 @@
+{
+  "$id": "https://simorgh.local/schema/voice.models.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "name: a whisper.cpp model (tiny.en, base.en, small.en, large-v3-turbo); default base.en",
+  "properties": {
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "voice.models.request",
+  "type": "object"
+}

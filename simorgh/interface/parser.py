@@ -32,6 +32,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("research", "<topic>", "investigate a question, no code written"),
     ("interests", "[topic]", "topics Sim is following, or add one"),
     ("benchmark", "[suites|load|run|stop|history|show]", "score this system on GAIA, BFCL or SWE-bench, and track it"),
+    ("voice", "[status|on|off|mute|unmute|listen [s]|test <text>|voices|devices|models [name]]", "talk to Sim: speech in, speech out, local engines"),
     ("schedule", "[every] <15m> <label> | cancel <id>", "fire a reminder later, or on a repeat"),
     ("mcp", "[list|approve|deny]", "review external tools Sim has proposed"),
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),

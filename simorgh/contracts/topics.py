@@ -17,13 +17,13 @@ from __future__ import annotations
 DOMAINS: tuple[str, ...] = (
     "system", "percept", "intent", "plan", "project", "task", "turn", "action",
     "guardian", "tool", "verify", "memory", "world", "self", "learn", "reflect",
-    "curiosity", "persona", "ui", "cognition", "research", "benchmark",
+    "curiosity", "persona", "ui", "cognition", "research", "benchmark", "voice",
 )
 
 SUBSYSTEMS: tuple[str, ...] = (
     "bus", "ledger", "kernel", "cognition", "memory", "worldmodel", "planning",
     "execution", "guardian", "verification", "learning", "reflection", "curiosity",
-    "persona", "interface", "orchestration", "benchmark",
+    "persona", "interface", "orchestration", "benchmark", "voice",
 )
 
 # --- section 4.1 system ---------------------------------------------------
@@ -210,6 +210,26 @@ GUARDIAN_POSTURE_CHANGED = "guardian.posture.changed"
 GUARDIAN_POSTURE_REQUEST = "guardian.posture.request"
 GUARDIAN_POSTURE_REPLY = "guardian.posture.reply"
 RESEARCH_FINDING_RECORDED = "research.finding.recorded"
+
+# --- voice (docs/plans/voice-design.md) -------------------------------------
+# Commands from the CLI, and what the pipeline announces as it goes.
+VOICE_STATUS_REQUEST = "voice.status.request"
+VOICE_STATUS_REPLY = "voice.status.reply"
+VOICE_CONTROL_REQUEST = "voice.control.request"    # on | off | mute | unmute
+VOICE_CONTROL_REPLY = "voice.control.reply"
+VOICE_SPEAK_REQUEST = "voice.speak.request"        # say this
+VOICE_SPEAK_REPLY = "voice.speak.reply"
+VOICE_LISTEN_REQUEST = "voice.listen.request"      # one push-to-talk turn
+VOICE_LISTEN_REPLY = "voice.listen.reply"
+VOICE_VOICES_REQUEST = "voice.voices.request"
+VOICE_VOICES_REPLY = "voice.voices.reply"
+VOICE_DEVICES_REQUEST = "voice.devices.request"
+VOICE_DEVICES_REPLY = "voice.devices.reply"
+VOICE_MODELS_REQUEST = "voice.models.request"      # download a recogniser/synthesiser model by name
+VOICE_MODELS_REPLY = "voice.models.reply"
+VOICE_LISTENING = "voice.listening"                # the mic state changed (listening | idle | muted)
+VOICE_TRANSCRIPT = "voice.transcript"              # what was heard, before Sim answers
+VOICE_SPOKEN = "voice.spoken"                      # what was said aloud
 
 CATALOG: tuple[str, ...] = tuple(
     value for name, value in sorted(globals().items())

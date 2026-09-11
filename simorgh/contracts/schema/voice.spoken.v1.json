@@ -1,0 +1,34 @@
+{
+  "$id": "https://simorgh.local/schema/voice.spoken.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `voice.spoken` (catalog v1).",
+  "properties": {
+    "device": {
+      "type": "string"
+    },
+    "engine": {
+      "type": "string"
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "text",
+    "seconds",
+    "engine",
+    "device"
+  ],
+  "title": "voice.spoken",
+  "type": "object"
+}

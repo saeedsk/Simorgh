@@ -69,6 +69,12 @@ class TestASettingReachesItsSubsystem(unittest.IsolatedAsyncioTestCase):
             VerificationService(), {"checklist": {"max_items": 9, "min_answered_fraction": 0.5}})
         self.assertEqual(service._config.checklist_max_items, 9)  # noqa: SLF001
 
+    async def test_voice_reads_its_section(self) -> None:
+        from simorgh.voice.service import Service
+
+        service = await self._started(Service(), {"endpoint_silence_ms": 321})
+        self.assertEqual(service.config.endpoint_silence_ms, 321)
+
     async def test_a_config_passed_by_the_caller_still_wins(self) -> None:
         """Tests construct services with an explicit config. Adopting
         the section over the top of that would break every one of them,

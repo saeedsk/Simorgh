@@ -1,0 +1,23 @@
+{
+  "$id": "https://simorgh.local/schema/voice.listen.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "respond=false transcribes only; the default asks Sim and speaks the reply.",
+  "properties": {
+    "respond": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "voice.listen.request",
+  "type": "object"
+}

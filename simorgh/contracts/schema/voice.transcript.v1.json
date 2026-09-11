@@ -1,0 +1,38 @@
+{
+  "$id": "https://simorgh.local/schema/voice.transcript.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `voice.transcript` (catalog v1).",
+  "properties": {
+    "confidence": {
+      "type": "number"
+    },
+    "device": {
+      "type": "string"
+    },
+    "engine": {
+      "type": "string"
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "text",
+    "confidence",
+    "seconds",
+    "engine",
+    "device"
+  ],
+  "title": "voice.transcript",
+  "type": "object"
+}

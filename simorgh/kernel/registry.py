@@ -41,7 +41,7 @@ LAYERS: tuple[tuple[str, ...], ...] = (
     ("cognition", "memory", "worldmodel"),
     ("guardian", "execution", "verification", "planning"),
     ("learning", "reflection", "curiosity"),
-    ("persona", "benchmark", "interface"),
+    ("persona", "benchmark", "voice", "interface"),
     ("orchestration",),
 )
 
@@ -124,6 +124,7 @@ def build_factories(
     from simorgh.planning.service import Service as PlanningService
     from simorgh.reflection.service import Service as ReflectionService
     from simorgh.verification.service import VerificationService
+    from simorgh.voice.service import Service as VoiceService
     from simorgh.worldmodel.service import Service as WorldModelService
 
     return {
@@ -141,6 +142,7 @@ def build_factories(
         "curiosity": lambda: CuriosityService(),
         "persona": lambda: PersonaService(),
         "benchmark": lambda: BenchmarkService(),
+        "voice": lambda: VoiceService(),
         "interface": lambda: InterfaceService(run_repl=run_repl, wait_for_boot=run_repl),
         "orchestration": lambda: OrchestrationService(),
     }

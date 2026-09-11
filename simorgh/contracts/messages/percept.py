@@ -7,13 +7,19 @@ from ..registry import define
 from .. import topics as t
 
 PerceptTextReceived = define(t.PERCEPT_TEXT_RECEIVED, [
-    F("channel", Enum("cli", "api", "chat", "command")),
+    F("channel", Enum("cli", "api", "chat", "command", "voice")),
     F("text", Str),
     F("session_id", Str),
     O("user_id", Str),
     O("command", Str),
     O("steer", Bool),
-], doc="channel=command + command for routed commands; steer=true marks a mid-task correction.")
+    # A spoken turn (docs/plans/voice-design.md section 4.1): where it
+    # was heard, who said it, and how sure the recogniser was.
+    O("device", Str),
+    O("speaker", Str),
+    O("confidence", Float),
+], doc="channel=command + command for routed commands; steer=true marks a mid-task correction; "
+       "channel=voice carries device/speaker/confidence from the voice pipeline.")
 PerceptFileChanged = define(t.PERCEPT_FILE_CHANGED, [
     F("path", Str),
     F("change", Enum("created", "modified", "deleted")),
