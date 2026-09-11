@@ -120,6 +120,11 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "media_now": ("read_only", True),
     "media_control": ("reversible", True),
     "media_play": ("reversible", True),
+    # The Mac's own Music app (execution/media/musicapp.py): the same
+    # three shapes as the home players, on the laptop's own speakers.
+    "music_now": ("read_only", True),
+    "music_control": ("reversible", True),
+    "music_play": ("reversible", True),
     # Runs on a machine this process cannot inspect, snapshot or roll
     # back -- the strongest case for `irreversible` in the table.
     "run_remote": ("irreversible", True),
@@ -326,6 +331,16 @@ _MARKER_ARG_HINT.update({
     "media_play": (
         "first line: what to play -- a URL, a radio stream, or a media id the player "
         'understands. Second line: {"where": "kitchen", "volume": 25}.'
+    ),
+    "music_now": "nothing -- it reports what the Mac's Music app is playing.",
+    "music_control": (
+        "first line: play, pause, stop, next, previous, volume, mute or unmute. Second line, "
+        'for volume: {"value": 30} -- 0-100. Loud is refused unattended, and refused outright '
+        "during quiet hours."
+    ),
+    "music_play": (
+        "first line: what to play -- a playlist, album, artist or song name, or a local audio "
+        "file or folder path. Nothing else is needed."
     ),
     "home_find": (
         "a name or a word to look for in the house -- \"kitchen\", \"thermostat\", "

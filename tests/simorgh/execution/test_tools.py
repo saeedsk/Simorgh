@@ -802,6 +802,7 @@ class TestBuiltinTools(unittest.TestCase):
             "home_find", "home_state", "home_describe", "home_call", "home_undo",
             "energy_status", "energy_report", "energy_tariff",
             "media_now", "media_control", "media_play",
+            "music_now", "music_control", "music_play",
             "propose_mcp_server", "run_shell",
         })
 

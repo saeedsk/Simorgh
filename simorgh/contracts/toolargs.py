@@ -113,6 +113,9 @@ MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "energy_tariff": ("op", "spec"),
     "media_control": ("op", "spec"),
     "media_play": ("what", "spec"),
+    # The Mac's Music app: same two shapes as the home players.
+    "music_control": ("op", "spec"),
+    "music_play": ("query", "spec"),
 }
 
 #: Of those, the ones whose second part is JSON whose keys merge into
@@ -124,6 +127,7 @@ MARKER_JSON_REST: frozenset[str] = frozenset({
     "search_listings", "install_package", "browse_page", "run_container",
     "kb_sources", "sec_findings", "home_call", "home_undo",
     "energy_tariff", "media_control", "media_play",
+    "music_control", "music_play",
 })
 
 #: Tools whose second part is a program, so a markdown fence around it

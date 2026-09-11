@@ -89,6 +89,11 @@ _TOOL_NOTES: dict[str, str] = {
     "media_now": "what is playing and where",
     "media_control": "pause, resume, skip, stop or set the volume on a player",
     "media_play": "play a URL or a stream on a player",
+    "music_now": "what the Mac's Music app is playing: track, artist, album, state, volume",
+    "music_control": "play, pause, stop, next, previous, volume (0-100), mute or unmute the Mac's Music app -- "
+                     "the person's own Apple Music and local library",
+    "music_play": "play a playlist, album, artist or song by name in the Mac's Music app, or a local audio "
+                  "file or a folder of them",
     "home_find": "find things in the house by name and get their entity ids",
     "home_state": "what one thing in the house is doing right now",
     "home_describe": "what is in the house and what each kind of thing can do",

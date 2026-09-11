@@ -31,6 +31,7 @@ CHAT = Profile(
            # "what's it costing me" and "pause the telly" are the same
            # kind of question as "turn the light off".
            "energy_status", "energy_report", "media_now", "media_control", "media_play",
+           "music_now", "music_control", "music_play",
            # Chat could turn the kitchen light on and read the mail, and
            # could not save a text file. Asked for a PowerPoint deck,
            # Sim correctly reported that it had no way to write one and

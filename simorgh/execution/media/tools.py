@@ -278,8 +278,10 @@ def _guess_type(what: str) -> str:
 
 
 def media_tools(config, **kwargs) -> list:
+    from .musicapp import musicapp_tools
+
     return [MediaNowTool(config, **kwargs), MediaControlTool(config, **kwargs),
-            MediaPlayTool(config, **kwargs)]
+            MediaPlayTool(config, **kwargs), *musicapp_tools(config, **kwargs)]
 
 
 __all__ = ["MediaControlTool", "MediaNowTool", "MediaPlayTool", "media_tools"]
