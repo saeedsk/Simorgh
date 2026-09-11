@@ -265,6 +265,31 @@ PARSERS = {
 }
 
 
+#: SGR colour codes. pytest writes them whenever the repo's own config
+#: forces colour (`--color=yes`, or an `addopts` in the project's
+#: setup.cfg), which several SWE-bench images do.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def strip_ansi(log: str) -> str:
+    """The log with terminal colour removed.
+
+    `\x1b[32mPASSED\x1b[0m astropy/...::\x1b[1mtest_x\x1b[0m` is what a
+    coloured run prints, and every pattern in this module expects
+    `PASSED astropy/...::test_x`. So a whole run could pass and parse to
+    NOTHING, which `judge` then reports as "the test log had no
+    recognisable results -- the suite most likely never ran".
+
+    Live, 2026-09-10: `astropy__astropy-14309` ended
+    `142 passed, 8 skipped, 5 xfailed in 2.14s`, with the case's one
+    fail-to-pass test (`test_is_fits_gh_14305`) PASSED in the log -- a
+    real fix, scored `skipped` as unmeasurable. Honest about not
+    knowing, and wrong about not knowing: 0 entries parsed with the
+    escapes in, 142 with them out.
+    """
+    return _ANSI.sub("", log or "")
+
+
 def parse_log(log: str, parser: str) -> tuple[dict[str, str], str]:
     """`(results, problem)`. An unknown parser is a refusal, not a
     guess: `pylint`'s runner prints a shape neither of ours reads, and
@@ -275,7 +300,7 @@ def parse_log(log: str, parser: str) -> tuple[dict[str, str], str]:
         return {}, (f"no log parser for {parser!r} yet -- this repo's test runner prints a shape "
                     f"neither the pytest nor the Django reader understands, and guessing at it "
                     f"would produce a score rather than a measurement")
-    return handler(log), ""
+    return handler(strip_ansi(log)), ""
 
 
 def _names(value) -> tuple[str, ...]:
@@ -455,8 +480,26 @@ def materialize(instance: dict, dest: Path, *, timeout: float = 900.0) -> str:
     return ""
 
 
-def diff_of(checkout: Path, *, timeout: float = 120.0) -> tuple[str, str]:
+def diff_of(checkout: Path, *, base: str = "", timeout: float = 120.0) -> tuple[str, str]:
     """`(patch, problem)` -- what the system changed in the checkout.
+
+    Against `base` (the instance's `base_commit`), not against HEAD. The
+    checkout is a copy of the image's `/testbed`, `.git` and all, sitting
+    at that commit -- so a change Sim COMMITTED moves HEAD and vanishes
+    from a HEAD-relative diff. Which is exactly what happened, twice in
+    one three-case run (2026-09-10):
+
+      step 12  run_shell: [main e2aef5e39] Fix NDDataRef mask propagation
+                          when one operand has no mask  1 file changed
+      ...
+      astropy__astropy-14995: "the system produced no patch"
+
+    Worse than an accident: `did_anything`'s own revise hint tells the
+    session to "apply the change with apply_source_patch, then commit
+    it", so the verifier was instructing Sim to do the one thing that
+    made its work invisible to the scorer. Two of three cases in that
+    run were lost this way, and both read as the system producing
+    nothing rather than as a harness that could not see it.
 
     Source files only. A model that "fixes" a case by editing its tests
     is not fixing anything, and SWE-bench restores the test files before
@@ -469,7 +512,17 @@ def diff_of(checkout: Path, *, timeout: float = 120.0) -> tuple[str, str]:
     code, out = _run([git, "-C", str(checkout), "add", "-A"], timeout=timeout)
     if code != 0:
         return "", f"could not stage the checkout: {out.strip()[:300]}"
-    code, out = _run([git, "-C", str(checkout), "diff", "--cached", "--binary",
+    against: list[str] = []
+    if base:
+        code, _ = _run([git, "-C", str(checkout), "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
+                       timeout=timeout)
+        if code == 0:
+            against = [base]
+        # A base the checkout does not carry (a shallow image, a rewritten
+        # history) falls back to the index-only diff rather than failing:
+        # an uncommitted change is still worth scoring, and saying "no
+        # patch" because of our own bookkeeping is the mistake above.
+    code, out = _run([git, "-C", str(checkout), "diff", "--cached", "--binary", *against,
                       "--", ".", ":(exclude)tests", ":(exclude)*/tests/*", ":(exclude)test_*.py"],
                      timeout=timeout)
     if code != 0:

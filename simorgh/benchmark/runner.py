@@ -245,7 +245,8 @@ class Runner:
             # its own work is evidence.
             _said, steps, cost_usd, error = await self._ask(
                 case, self.patch_prompt(case, relative), kind="patch")
-            patch, trouble = await asyncio.to_thread(swebench.diff_of, checkout)
+            patch, trouble = await asyncio.to_thread(
+                swebench.diff_of, checkout, base=str(instance.get("base_commit") or ""))
         finally:
             # The checkout has done its job the moment the diff is read;
             # the patch is re-applied to a pristine container anyway.
