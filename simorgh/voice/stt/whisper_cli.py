@@ -90,6 +90,24 @@ def download_model(name: str, model_dir: Path, *, timeout: float = 600.0) -> tup
     return target, ""
 
 
+#: whisper.cpp writes these for audio with no speech in it: `[BLANK_AUDIO]`,
+#: `[MUSIC]`, `(silence)`, `[inaudible]`, `*laughs*`. They are annotations,
+#: not words, and the pipeline used to hand `[BLANK_AUDIO]` to Sim as a
+#: question -- which Sim answered, aloud (the creator's screen, 2026-09-11).
+#: Bracketed and SHOUTED (`[BLANK_AUDIO]`, `[MUSIC]`), or a known
+#: non-speech word in parentheses or asterisks. A real parenthetical a
+#: person spoke -- "call foo (the old one)" -- is left alone.
+_SHOUTED = re.compile(r"\[[A-Z0-9_ ]{2,40}\]")
+_KNOWN = re.compile(r"[\[(*](?:silence|inaudible|laughs|laughter|laughing|applause|music|noise|blank(?:_audio)?|"
+                    r"unintelligible|crosstalk|sighs|coughs|coughing|breathing)[\])*]", re.I)
+
+
+def clean_transcript(text: str) -> str:
+    """The words, with whisper's non-speech annotations removed."""
+    cleaned = _KNOWN.sub(" ", _SHOUTED.sub(" ", text or ""))
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 class WhisperCliRecogniser:
     name = "whisper_cli"
 
@@ -134,5 +152,5 @@ class WhisperCliRecogniser:
                     confidence = min(1.0, sum(probs) / len(probs))
             else:
                 text = re.sub(r"\s+", " ", done.stdout).strip()
-        return Utterance(text=text, confidence=confidence, seconds=audio.seconds, engine=self.name,
-                         language=language or self._language)
+        return Utterance(text=clean_transcript(text), confidence=confidence, seconds=audio.seconds,
+                         engine=self.name, language=language or self._language)

@@ -2,13 +2,19 @@
   "$id": "https://simorgh.local/schema/voice.transcript.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "Payload of `voice.transcript` (catalog v1).",
+  "description": "echo=true: the words were Sim's own reply coming back through the microphone; not a turn.",
   "properties": {
     "confidence": {
       "type": "number"
     },
     "device": {
       "type": "string"
+    },
+    "echo": {
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "engine": {
       "type": "string"

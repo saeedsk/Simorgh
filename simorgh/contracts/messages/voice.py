@@ -42,7 +42,7 @@ VoiceModelsReply = define(t.VOICE_MODELS_REPLY, [O("path", Str), O("bytes", Int)
 VoiceListening = define(t.VOICE_LISTENING, [F("state", Enum("listening", "idle", "muted", "speaking")), F("device", Str)])
 VoiceTranscript = define(t.VOICE_TRANSCRIPT, [
     F("text", Str), F("confidence", Float), F("seconds", Float), F("engine", Str), F("device", Str),
-    O("session_id", Str),
-])
+    O("session_id", Str), O("echo", Bool),
+], doc="echo=true: the words were Sim's own reply coming back through the microphone; not a turn.")
 VoiceSpoken = define(t.VOICE_SPOKEN, [F("text", Str), F("seconds", Float), F("engine", Str), F("device", Str),
                                        O("session_id", Str), O("interrupted", Bool)])

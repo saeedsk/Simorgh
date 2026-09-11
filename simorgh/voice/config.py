@@ -40,6 +40,14 @@ class Config:
     # cutting in. Below it is an echo, a cough, a chair.
     barge_in: bool = True
     barge_in_speech_ms: int = 400
+    # The first stretch of each reply is spent learning how loud Sim's own
+    # voice is at the microphone; nothing can interrupt during it. Kokoro
+    # replies open near-silent, so a short window learnt silence and Sim
+    # then interrupted itself with its own voice and answered its own
+    # reply (the creator's screen, 2026-09-11). Then a person must be
+    # this many times louder than the loudest echo heard (2.0 = 6 dB).
+    barge_in_calibrate_ms: int = 900
+    barge_in_ratio: float = 2.0
     # Speak every reply Sim gives, including replies to TYPED turns.
     # The creator asked Sim itself for this on 2026-09-10 ("add TTS
     # output ... voice af_jessica"), and Sim built a second TTS path

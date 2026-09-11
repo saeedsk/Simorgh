@@ -44,6 +44,31 @@ _MARKDOWN = (
 )
 
 
+_WORD = re.compile(r"[a-z0-9']+")
+
+
+def is_echo(heard: str, said: str, *, min_words: int = 4, overlap: float = 0.6) -> bool:
+    """Whether `heard` is Sim's own reply coming back through the mic.
+
+    The energy gate in `vad.BargeInEndpointer` is the first defence and
+    it is only a level: a loud enough speaker beats it. This is the
+    second, and it needs no acoustics -- Sim knows what it just said,
+    and a person does not repeat Sim's reply back word for word. Most of
+    the heard words appearing in the said text, in a heard utterance of
+    a few words or more, is an echo. The creator's screen, 2026-09-11:
+    Sim's whole benchmark reply came back as the next "you:" and Sim
+    answered "You're echoing my own question back at me again."
+    """
+    heard_words = _WORD.findall((heard or "").lower())
+    if len(heard_words) < min_words:
+        return False
+    said_words = set(_WORD.findall((said or "").lower()))
+    if not said_words:
+        return False
+    hits = sum(1 for w in heard_words if w in said_words)
+    return hits / len(heard_words) >= overlap
+
+
 def spoken_form(text: str) -> str:
     """Markdown out, sentences in. A synthesiser reading `**bold**` and
     bullet dashes aloud is the fastest way to sound like a machine."""
@@ -149,6 +174,15 @@ class Pipeline:
         })
         if not utterance.text.strip():
             return utterance, ""
+        if self.last_said and is_echo(utterance.text, self.last_said):
+            # Sim's own voice, back through the microphone. Not a turn.
+            await self._publish(topics.VOICE_TRANSCRIPT, {
+                "text": utterance.text, "confidence": utterance.confidence, "seconds": utterance.seconds,
+                "engine": utterance.engine, "device": self._config.device, "session_id": session_id, "echo": True,
+            })
+            if self._logger is not None:
+                self._logger.info("voice.echo_ignored", words=len(utterance.text.split()))
+            return utterance, ""
         self.last_heard = utterance.text
         if not respond:
             return utterance, ""
@@ -243,6 +277,7 @@ class Pipeline:
             self._detector_factory(), silence_ms=self._config.endpoint_silence_ms,
             max_seconds=audio.seconds + self._config.max_utterance_s,
             speech_ms=self._config.barge_in_speech_ms, on_barge_in=_cut_in,
+            calibrate_frames=max(1, self._config.barge_in_calibrate_ms // 30), ratio=self._config.barge_in_ratio,
         )
         capture = asyncio.create_task(self._mic.capture(
             max_seconds=audio.seconds + self._config.max_utterance_s, endpointer=endpointer))

@@ -69,7 +69,7 @@ class BargeInEndpointerTestCase(unittest.TestCase):
         # The first frames are what the mic hears of the speakers; the
         # floor rises to them, and the same level afterwards is silence.
         det = EnergyDetector(0.5)
-        ep = BargeInEndpointer(det, silence_ms=90, max_seconds=10, speech_ms=300, calibrate_frames=4)
+        ep = BargeInEndpointer(det, silence_ms=90, max_seconds=10, speech_ms=300, calibrate_frames=4, ratio=2.0)
         echo = _tone(0.03, amplitude=3000).pcm
         for _ in range(30):
             self.assertFalse(ep.feed(echo))
@@ -145,3 +145,50 @@ class InterruptingSimTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EchoByContentTestCase(unittest.TestCase):
+    def test_sims_own_reply_coming_back_is_an_echo(self):
+        from simorgh.voice.pipeline import is_echo
+        said = ("Got it -- you're pointing me at the benchmark. What I have on record: four astropy cases "
+                "have all ended in timeouts so far.")
+        heard = "Got it, you're pointing me at the benchmark. What I have on record, four Astropie cases have all ended in timeout so far."
+        self.assertTrue(is_echo(heard, said))
+
+    def test_a_real_reply_that_shares_a_few_words_is_not(self):
+        from simorgh.voice.pipeline import is_echo
+        self.assertFalse(is_echo("run the benchmark on the astropy case again please", "four astropy cases timed out"))
+
+    def test_short_utterances_are_never_called_echoes(self):
+        from simorgh.voice.pipeline import is_echo
+        self.assertFalse(is_echo("yes", "yes, that is right, yes"))
+
+
+class EchoIsNotATurnTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_a_heard_echo_of_the_last_reply_is_dropped_before_sim_sees_it(self):
+        said_text = "the kitchen lights are on and the door is locked for the night"
+        stt = FakeRecogniser("the kitchen lights are on and the door is locked for the night")
+        pipe = _pipeline(mic=FakeMicrophone(silence(1.0)), speaker=FakeSpeaker(), stt=stt,
+                         config=Config(barge_in=False, reply_timeout_s=0.2))
+        pipe.last_said = said_text
+        utterance, said = await pipe.listen_once()
+        self.assertEqual(said, "", "nothing was spoken in reply")
+        percepts = [m for m in pipe._bus.published if m.type == topics.PERCEPT_TEXT_RECEIVED]  # noqa: SLF001
+        self.assertEqual(percepts, [], "Sim was never asked")
+        transcripts = [m.payload for m in pipe._bus.published if m.type == topics.VOICE_TRANSCRIPT]  # noqa: SLF001
+        self.assertTrue(transcripts and transcripts[-1].get("echo") is True)
+
+
+class WhisperAnnotationsTestCase(unittest.TestCase):
+    def test_blank_audio_is_no_words(self):
+        from simorgh.voice.stt.whisper_cli import clean_transcript
+        self.assertEqual(clean_transcript("[BLANK_AUDIO]"), "")
+        self.assertEqual(clean_transcript(" (silence) "), "")
+        self.assertEqual(clean_transcript("[MUSIC] hello there [inaudible]"), "hello there")
+        self.assertEqual(clean_transcript("*laughs* okay"), "okay")
+
+    def test_real_words_with_brackets_survive(self):
+        from simorgh.voice.stt.whisper_cli import clean_transcript
+        self.assertEqual(clean_transcript("call foo (the old one) now"), "call foo (the old one) now",
+                         "a parenthetical a person spoke is not an annotation")
+

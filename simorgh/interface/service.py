@@ -783,6 +783,10 @@ class Service:
         if not text:
             self._out(render_mod.style("  🎤 (heard nothing)", "dim", enabled=self._color))
             return
+        if p.get("echo"):
+            self._out(render_mod.style(f"  🎤 (my own voice, ignored: {text[:60]}{'...' if len(text) > 60 else ''})",
+                                       "dim", enabled=self._color))
+            return
         conf = p.get("confidence")
         tail = f"  ({conf:.0%})" if isinstance(conf, (int, float)) and conf < 0.999 else ""
         self._out(render_mod.style(f"🎤 you: {text}{tail}", "cyan", enabled=self._color))

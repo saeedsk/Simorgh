@@ -35,6 +35,10 @@ class EnergyDetector:
         as a person talking."""
         self._floor = max(self._floor or 0.0, rms, 1.0)
 
+    def set_ratio(self, ratio: float) -> None:
+        """How many times louder than the floor speech must be."""
+        self._ratio = max(1.1, float(ratio))
+
     @staticmethod
     def rms(frame: bytes) -> float:
         samples = array.array("h", frame)
@@ -135,7 +139,8 @@ class BargeInEndpointer(Endpointer):
     """
 
     def __init__(self, detector, *, silence_ms: int, max_seconds: float, speech_ms: int = 400,
-                 on_barge_in=None, calibrate_frames: int = 8, frame_ms: int = 30) -> None:
+                 on_barge_in=None, calibrate_frames: int = 30, ratio: float | None = None,
+                 frame_ms: int = 30) -> None:
         super().__init__(detector, silence_ms=silence_ms, max_seconds=max_seconds, frame_ms=frame_ms)
         self._need = max(1, speech_ms // frame_ms)
         self._run = 0
@@ -143,6 +148,8 @@ class BargeInEndpointer(Endpointer):
         self._calibrate = calibrate_frames
         self._seen = 0
         self.barged = False
+        if ratio is not None and hasattr(detector, "set_ratio"):
+            detector.set_ratio(ratio)
 
     def feed(self, frame: bytes) -> bool:
         self._seen += 1
