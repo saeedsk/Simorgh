@@ -745,10 +745,6 @@ class Service:
             self._live.clear()
             if reply_text:
                 print(render_mod.markdown(reply_text, enabled=self._color))
-                from simorgh.interface import tts as tts_mod
-
-                if tts_mod.enabled() and tts_mod.available():
-                    tts_mod.say(reply_text)
             else:
                 # An honest-floor completion (no real provider answered in
                 # time) resolves the future with "", same as a real reply
@@ -790,6 +786,11 @@ class Service:
         conf = p.get("confidence")
         tail = f"  ({conf:.0%})" if isinstance(conf, (int, float)) and conf < 0.999 else ""
         self._out(render_mod.style(f"🎤 you: {text}{tail}", "cyan", enabled=self._color))
+        session_id = str(p.get("session_id") or "")
+        if session_id:
+            # Otherwise the activity feed narrates the turn as
+            # `? · ? · (no description)` (the creator's screen, 2026-09-10).
+            self._book.on_created({"task_id": session_id, "kind": "chat", "origin": "voice", "description": text})
 
     async def _on_voice_spoken(self, message: Message) -> None:
         text = str(message.payload.get("text") or "").strip()

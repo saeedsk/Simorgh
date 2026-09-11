@@ -95,6 +95,14 @@ class WorkingMemory:
         return sum(len(t.request_text) + len(t.response_text) for t in turns)
 
 
+_EXCERPT_CHARS = 600
+
+
+def _excerpt(text, limit: int = _EXCERPT_CHARS) -> str:
+    text = str(text or "")
+    return text if len(text) <= limit else text[:limit] + f"... [{len(text)} chars]"
+
+
 class MemoryEngine:
     def __init__(self, ledger: Ledger, config: Config, *, clock: Clock, embedder=None) -> None:
         self._ledger = ledger
@@ -400,7 +408,17 @@ class MemoryEngine:
             (ref_a, ev_a), (ref_b, ev_b) = items[0], items[1]
             if ev_a.payload.get("content") == ev_b.payload.get("content"):
                 continue
-            evidence = f"both tagged {tag!r}: {ev_a.payload.get('content')!r} vs {ev_b.payload.get('content')!r}"
+            # The two refs ARE the evidence; the text beside them is an
+            # excerpt for a human reading the stream, and it is bounded.
+            # It used to be both records whole, so two long memories
+            # under one tag produced an `evidence` past the Ledger's
+            # inline limit, the append was refused, and the entire
+            # consolidation pass died on it: `memory.first_consolidation_
+            # failed ... $.evidence: 5659 chars inline exceeds 4096`, on
+            # the creator's screen the first evening voice was on
+            # (2026-09-10).
+            evidence = (f"both tagged {tag!r}: {_excerpt(ev_a.payload.get('content'))!r} "
+                        f"vs {_excerpt(ev_b.payload.get('content'))!r}")
             await self._ledger.append(CONTRADICTION_STREAM, Event(
                 stream=CONTRADICTION_STREAM, type="flagged", ts=self._clock.now(), trace_id="", causation_id=None,
                 idempotency_key=f"contradiction:{ref_a}:{ref_b}",

@@ -206,3 +206,64 @@ class PipelineOnAKernelTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpeakRepliesTestCase(unittest.IsolatedAsyncioTestCase):
+    """`[voice] speak_replies`: a reply to a TYPED turn is spoken too --
+    the ask the creator gave Sim itself on 2026-09-10, on the one path."""
+
+    async def test_a_typed_turns_reply_is_spoken_when_asked(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        kernel = Kernel(LoadedConfig({
+            "runtime": {"data_dir": str(Path(tmp.name) / "data")},
+            "curiosity": {"autonomy_on_boot": False},
+            "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake", "vad": "fake",
+                      "speak_replies": True},
+        }, None), secrets=EnvSecretStore({}))
+        await kernel.boot()
+        self.addAsyncCleanup(kernel.shutdown)
+        spoken = []
+
+        async def _spoken(m):
+            spoken.append(m.payload["text"])
+        await kernel.bus.subscribe(topics.VOICE_SPOKEN, _spoken)
+        await kernel.bus.publish(kernel.bus.new(topics.TURN_COMPLETED, {"session_id": "typed-1", "task_id": "typed-1", "text": "**Four.**", "floor": False, "tool_steps": 0}))
+        for _ in range(100):
+            if spoken:
+                break
+            await asyncio.sleep(0.02)
+        self.assertEqual(spoken, ["Four."])
+
+    async def test_off_by_default_nothing_is_spoken_for_typed_turns(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        kernel = Kernel(LoadedConfig({
+            "runtime": {"data_dir": str(Path(tmp.name) / "data")},
+            "curiosity": {"autonomy_on_boot": False},
+            "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake", "vad": "fake"},
+        }, None), secrets=EnvSecretStore({}))
+        await kernel.boot()
+        self.addAsyncCleanup(kernel.shutdown)
+        spoken = []
+
+        async def _spoken(m):
+            spoken.append(m.payload["text"])
+        await kernel.bus.subscribe(topics.VOICE_SPOKEN, _spoken)
+        await kernel.bus.publish(kernel.bus.new(topics.TURN_COMPLETED, {"session_id": "typed-2", "task_id": "typed-2", "text": "Four.", "floor": False, "tool_steps": 0}))
+        await asyncio.sleep(0.3)
+        self.assertEqual(spoken, [])
+
+
+class PlaybackPathOrderTestCase(unittest.TestCase):
+    def test_auto_prefers_the_command_player_over_portaudio(self):
+        from simorgh.voice import audio as audio_mod
+
+        spk, why = audio_mod.open_speaker("auto")
+        if spk is None:
+            self.skipTest(why)
+        # On a machine with afplay/ffplay it must win even when sounddevice is installed.
+        import shutil
+        if shutil.which("afplay") or shutil.which("ffplay"):
+            self.assertIsInstance(spk, audio_mod.CommandSpeaker)
+

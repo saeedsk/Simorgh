@@ -128,6 +128,8 @@ class Service:
         }
         for topic, handler in handlers.items():
             self._subs.append(await ctx.bus.subscribe(topic, handler))
+        if self.config.speak_replies:
+            self._subs.append(await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_any_reply))
         await self._write_probes()
         ctx.logger.info("voice.started", enabled=self.config.enabled, stt=self.config.stt, tts=self.config.tts)
         if self.config.enabled:
@@ -321,6 +323,25 @@ class Service:
         await self._reply(message, topics.VOICE_DEVICES_REPLY, {
             "microphone": n["mic"], "speaker": n["spk"], "stt": n["stt"], "tts": n["tts"], "vad": n["vad"],
             "problems": list(self._problems)})
+
+    async def _on_any_reply(self, message) -> None:
+        """`speak_replies`: a reply to a typed turn is spoken too. A reply
+        to a SPOKEN turn is the pipeline's own to speak (it is waiting on
+        this very session), so it is left alone here."""
+        text = str(message.payload.get("text") or "").strip()
+        session_id = str(message.payload.get("session_id") or "")
+        if not text:
+            return
+        pipeline, why = await self._pipeline_ready()
+        if pipeline is None:
+            self._ctx.logger.warning("voice.cannot_speak_reply", reason=why)
+            return
+        if session_id in pipeline._pending:  # noqa: SLF001 -- its own turn
+            return
+        try:
+            await pipeline.speak(text, session_id=session_id)
+        except Exception as exc:  # noqa: BLE001 -- speech is best effort; the reply was already printed
+            self._ctx.logger.warning("voice.reply_not_spoken", error=repr(exc))
 
     async def _on_models(self, message) -> None:
         """`voice models [name]`: fetch a real recogniser model. The next

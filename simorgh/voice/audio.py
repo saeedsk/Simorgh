@@ -84,19 +84,28 @@ class SounddeviceMicrophone:
             raise RuntimeError("sounddevice is not installed") from exc
 
         loop = asyncio.get_running_loop()
-        frames: list[bytes] = []
-        done = asyncio.Event()
+        queue: asyncio.Queue = asyncio.Queue()
         frame_samples = SAMPLE_RATE * FRAME_MS // 1000
+        limit = int(max_seconds * SAMPLE_RATE) * SAMPLE_WIDTH
 
+        # The callback runs on PortAudio's audio thread. It copies the
+        # frame and nothing else: the endpointer's arithmetic, however
+        # small, belongs on the event loop, not in the one place a late
+        # return becomes an audible glitch for every stream this process
+        # owns.
         def _on_frame(indata, _frames, _time, _status) -> None:
-            pcm = bytes(indata)
-            frames.append(pcm)
-            if endpointer.feed(pcm) or sum(map(len, frames)) >= max_seconds * SAMPLE_RATE * SAMPLE_WIDTH:
-                loop.call_soon_threadsafe(done.set)
+            loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
 
+        frames: list[bytes] = []
+        total = 0
         with sd.RawInputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16",
                                blocksize=frame_samples, callback=_on_frame):
-            await done.wait()
+            while True:
+                pcm = await queue.get()
+                frames.append(pcm)
+                total += len(pcm)
+                if endpointer.feed(pcm) or total >= limit:
+                    break
         return Audio(b"".join(frames))
 
 
@@ -227,8 +236,20 @@ def open_microphone(preferred: str = "auto") -> tuple[object | None, str]:
 
 
 def open_speaker(preferred: str = "auto") -> tuple[object | None, str]:
-    order = {"auto": (SounddeviceSpeaker, CommandSpeaker), "sounddevice": (SounddeviceSpeaker,),
-             "command": (CommandSpeaker,)}.get(preferred, (SounddeviceSpeaker, CommandSpeaker))
+    """`(speaker, why not)`. `auto` prefers the command player (`afplay`,
+    `ffplay`) over in-process PortAudio.
+
+    The creator, 2026-09-10, minutes after `sounddevice` was installed
+    and `auto` switched to it: "the sim voice became noisy, like
+    somebody is adding FM radio noise." The same Kokoro audio had played
+    clean through `afplay` an hour earlier. In-process playback shares
+    one PortAudio client with the barge-in capture stream on the same
+    device, and any stall in this process -- a Python audio callback, a
+    busy event loop -- reaches the output as crackle. A separate player
+    process has its own CoreAudio client and cannot be starved by ours,
+    and it is just as stoppable (`kill`)."""
+    order = {"auto": (CommandSpeaker, SounddeviceSpeaker), "sounddevice": (SounddeviceSpeaker,),
+             "command": (CommandSpeaker,)}.get(preferred, (CommandSpeaker, SounddeviceSpeaker))
     reasons = []
     for cls in order:
         try:

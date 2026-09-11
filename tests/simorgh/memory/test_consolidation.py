@@ -179,3 +179,33 @@ class TestRunConsolidation(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContradictionEvidenceIsBoundedTestCase(unittest.IsolatedAsyncioTestCase):
+    """Two long memories under one tag used to produce an `evidence` past
+    the Ledger's inline limit; the append was refused and the whole
+    consolidation pass died (`memory.first_consolidation_failed ...
+    $.evidence: 5659 chars inline exceeds 4096`, 2026-09-10)."""
+
+    async def test_long_contradicting_records_do_not_kill_the_pass(self):
+        from simorgh.ledger.backends.memory import InMemoryBackend
+        from simorgh.ledger.client import LedgerClient
+        from simorgh.memory.store import CONTRADICTION_STREAM, MemoryEngine
+        from tests.simorgh.helpers import FakeClock
+
+        clock = FakeClock()
+        ledger = LedgerClient(InMemoryBackend(), source="test")
+        from simorgh.memory.config import Config as MemoryConfig
+
+        engine = MemoryEngine(ledger, MemoryConfig(), clock=clock)
+        await engine.store(kind="semantic", content="A" * 3000, tags=["home"], source_ref="", confidence=1.0)
+        clock.advance(1.0)
+        await engine.store(kind="semantic", content="B" * 3000, tags=["home"], source_ref="", confidence=1.0)
+        flagged = await engine.flag_contradictions()
+        self.assertEqual(len(flagged), 1)
+        events = await ledger.read(CONTRADICTION_STREAM)
+        self.assertEqual(len(events), 1)
+        evidence = events[0].payload["evidence"]
+        self.assertLessEqual(len(evidence), ledger.inline_threshold)
+        self.assertIn("[3000 chars]", evidence)
+

@@ -23,7 +23,7 @@ class Config:
     stt_language: str = "en"           # "" = detect
     stt_compute: str = "auto"          # faster_whisper: int8 | float16 | auto
     tts: str = "auto"                  # auto | kokoro | say | fake
-    tts_voice: str = "af_bella"        # Kokoro voice id; a `say -v` voice name for `say`
+    tts_voice: str = "af_jessica"      # Kokoro voice id (the creator's pick); a `say -v` name for `say`
     tts_speed: float = 1.0
     # Endpointing (section 4.2).
     vad: str = "auto"                  # auto | silero | energy | fake
@@ -40,6 +40,11 @@ class Config:
     # cutting in. Below it is an echo, a cough, a chair.
     barge_in: bool = True
     barge_in_speech_ms: int = 400
+    # Speak every reply Sim gives, including replies to TYPED turns.
+    # The creator asked Sim itself for this on 2026-09-10 ("add TTS
+    # output ... voice af_jessica"), and Sim built a second TTS path
+    # inside the interface for it; this is that ask, on the one path.
+    speak_replies: bool = False
     # How long a spoken turn may wait for Sim's answer before the
     # pipeline says so aloud instead of nothing.
     reply_timeout_s: float = 60.0

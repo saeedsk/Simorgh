@@ -228,10 +228,16 @@ class Pipeline:
         `self.pending_audio` for the next turn."""
         play = asyncio.create_task(self._speaker.play(audio))
         stopper = getattr(self._speaker, "stop", None)
+        loop = asyncio.get_running_loop()
 
         def _cut_in() -> None:
+            # Called from wherever the endpointer runs. With the capture
+            # paths in `audio.py` that is this loop; the first version
+            # ran it on PortAudio's audio thread and died with "no
+            # running event loop" the first time the creator spoke over
+            # Sim (2026-09-10). Thread-safe either way now.
             if stopper is not None:
-                asyncio.get_running_loop().create_task(stopper())
+                loop.call_soon_threadsafe(lambda: loop.create_task(stopper()))
 
         endpointer = BargeInEndpointer(
             self._detector_factory(), silence_ms=self._config.endpoint_silence_ms,
