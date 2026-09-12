@@ -906,6 +906,18 @@ class DashFeeds:
                         "live": (now - at) <= self.LIVE_WITHIN_S, "at": at})
         return out
 
+    def ring_cameras(self) -> list[dict]:
+        """The Ring cameras the ring tools last saw (`ring/cameras.json`),
+        so the strip can offer their live view before any still exists."""
+        path = self._snapshot_root / "ring" / "cameras.json"
+        try:
+            rows = json.loads(path.read_text(encoding="utf-8")) or []
+        except (OSError, ValueError):
+            return []
+        return [{"name": str(r.get("name") or ""), "kind": str(r.get("kind") or ""), "battery": r.get("battery"),
+                 "safe": re.sub(r"[^A-Za-z0-9_-]+", "_", str(r.get("name") or "")).strip("_")}
+                for r in rows if isinstance(r, dict) and r.get("name")]
+
     def events(self) -> list[dict]:
         """Camera events the Ring tools keep in `ring/events.json`
         (execution/home/ring.py), newest first; [] when there are none."""
@@ -975,6 +987,7 @@ class DashFeeds:
             "ambient": self._data.get("ambient", []),
             "cameras": self.cameras(),
             "streams": self.streams(),
+            "ring_cameras": self.ring_cameras(),
             "events": self.events(),
         }
 

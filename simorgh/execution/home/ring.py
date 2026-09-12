@@ -12,6 +12,7 @@ camera in my home, add support for those camera and show them in dash."
     ring_siren      the siren, for a few seconds -- loud
     ring_watch      poll Ring on a timer: new events go on the bus and on
                     screen, stills stay fresh for the dashboard
+    ring_live       WebRTC signalling for the dashboard's live view
 
 Ring has no public API. This goes through `ring_doorbell` (python-ring-
 doorbell, LGPL, the library Home Assistant uses), which speaks the same
@@ -20,8 +21,9 @@ allow personal use of your own account through the app; a third-party
 client is not something Ring supports, and a login from a new "device"
 triggers their two-step code every time the token is lost. The token is
 refreshed by the library and written back to secrets.toml so that
-happens once. Live video is WebRTC and is not built here; the dashboard
-shows stills, which is what Ring itself shows in its event history.
+happens once. Live video is WebRTC: the browser on the TV talks to
+Ring's media servers directly, and `ring_live` carries the SDP offer and
+answer between them (the page cannot hold the token itself).
 
 Optional dependency, refused by name when missing. Every call is a tool
 call Guardian sees; the `ring` command in the CLI is sugar over them.
@@ -174,6 +176,21 @@ class RingCloud:
                         "answered": bool(row.get("answered")), "camera_id": str(cam_id)})
         return out
 
+    async def webrtc_offer(self, cam_id: str, sdp_offer: str, *, keep_alive_s: int = 60) -> str:
+        """Ring's SDP answer for the browser's offer (the page does WebRTC
+        with Ring's servers; Sim only carries the signalling). The answer
+        carries Ring's ICE candidates; the offer must carry the browser's."""
+        await self.connect()
+        return await self._dev(cam_id).generate_webrtc_stream(sdp_offer, keep_alive_timeout=keep_alive_s)
+
+    async def webrtc_keepalive(self, cam_id: str, session: str) -> None:
+        await self.connect()
+        await self._dev(cam_id).keep_alive_webrtc_stream(session)
+
+    async def webrtc_close(self, cam_id: str, session: str) -> None:
+        await self.connect()
+        await self._dev(cam_id).close_webrtc_stream(session)
+
     async def light(self, cam_id: str, on: bool) -> None:
         await self.connect()
         await self._dev(cam_id).async_set_lights("on" if on else "off")
@@ -254,9 +271,20 @@ class _RingTool:
             self._prefs.cloud = RingCloud(token, on_token=lambda t: _save_secrets(self._settings_home, {SECRET_TOKEN: json.dumps(t)}))
         return self._prefs.cloud
 
-    async def _cameras(self, cloud) -> list[RingCamera]:
+    async def _cameras(self, cloud, folder: Path | None = None) -> list[RingCamera]:
         cams = await cloud.cameras()
         self._prefs.cameras = cams
+        if folder is not None:
+            # The dashboard learns the Ring cameras from this file, so its
+            # strip can offer live view before any still has been taken.
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                tmp = folder / "cameras.json.part"
+                tmp.write_text(json.dumps([{"id": c.id, "name": c.name, "kind": c.kind, "battery": c.battery,
+                                            "light": c.has_light, "siren": c.has_siren} for c in cams]), encoding="utf-8")
+                tmp.replace(folder / "cameras.json")
+            except OSError:
+                pass
         return cams
 
     async def _camera(self, cloud, wanted: str) -> tuple[RingCamera | None, str]:
@@ -413,7 +441,7 @@ class RingListTool(_RingTool):
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         try:
-            cams = await self._cameras(self._cloud())
+            cams = await self._cameras(self._cloud(), self._folder(ctx))
         except Exception as exc:  # noqa: BLE001
             return ToolResult(ok=False, error=f"refused: {exc}")
         if not cams:
@@ -434,7 +462,7 @@ class RingSnapshotTool(_RingTool):
         try:
             cloud = self._cloud()
             if wanted.lower() in ("all", "*", "every"):
-                cams = await self._cameras(cloud)
+                cams = await self._cameras(cloud, self._folder(ctx))
                 problem = "" if cams else "refused: this Ring account has no cameras"
             else:
                 cam, problem = await self._camera(cloud, wanted)
@@ -552,6 +580,61 @@ class RingSirenTool(_RingTool):
                           metadata={"camera": cam.name, "seconds": seconds})
 
 
+class RingLiveTool(_RingTool):
+    """Ring live view for the dashboard. Ring's live video is WebRTC: the
+    browser on the TV negotiates a peer connection with Ring's servers,
+    and Sim carries only the signalling -- the browser's SDP offer in,
+    Ring's answer out, a keep-alive while it plays, a close. Each step is
+    a tool call, so Guardian sees who is opening a live view of the house."""
+
+    name = "ring_live"
+    description = ("Live view of a Ring camera for the dashboard's page (WebRTC signalling): `action` offer with the "
+                   "browser's `sdp` answers with Ring's; keepalive and close take the `session`.")
+    args_schema = {"type": "object", "required": ["camera"],
+                   "properties": {"camera": {"type": "string"}, "action": {"type": "string", "enum": ["offer", "keepalive", "close"]},
+                                  "sdp": {"type": "string"}, "session": {"type": "string"}}}
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        action = str(args.get("action") or "offer").strip().lower()
+        try:
+            cloud = self._cloud()
+            cam, problem = await self._camera(cloud, str(args.get("camera") or ""))
+            if problem:
+                return ToolResult(ok=False, error=problem)
+            if action == "offer":
+                sdp = str(args.get("sdp") or "")
+                if "v=0" not in sdp:
+                    return ToolResult(ok=False, error="refused: `sdp` must be the browser's SDP offer")
+                session = _sdp_session(sdp)
+                answer = await cloud.webrtc_offer(cam.id, sdp)
+                if not answer:
+                    return ToolResult(ok=False, error=f"refused: Ring gave no answer for {cam.name}")
+                return ToolResult(ok=True, output=json.dumps({"sdp": answer, "session": session, "camera": cam.name}),
+                                  side_effects=(f"ring_live:{cam.safe}",), metadata={"camera": cam.name, "session": session})
+            session = str(args.get("session") or "").strip()
+            if not session:
+                return ToolResult(ok=False, error="refused: `session` is needed")
+            if action == "keepalive":
+                await cloud.webrtc_keepalive(cam.id, session)
+                return ToolResult(ok=True, output=json.dumps({"ok": True}), metadata={"camera": cam.name, "session": session})
+            if action == "close":
+                await cloud.webrtc_close(cam.id, session)
+                return ToolResult(ok=True, output=json.dumps({"ok": True}), side_effects=(f"ring_live:{cam.safe}:close",),
+                                  metadata={"camera": cam.name, "session": session})
+            return ToolResult(ok=False, error="refused: `action` is offer, keepalive or close")
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(ok=False, error=f"refused: {exc.__class__.__name__}: {exc}")
+
+
+def _sdp_session(sdp: str) -> str:
+    for line in sdp.splitlines():
+        if line.startswith("o="):
+            parts = line[2:].split()
+            if len(parts) > 1:
+                return parts[1]
+    return ""
+
+
 class RingWatchTool(_RingTool):
     name = "ring_watch"
     description = ("Poll Ring on a timer (`on`/`off`): new rings and motions go on the bus and on screen as they arrive, "
@@ -592,7 +675,7 @@ class RingWatchTool(_RingTool):
         """One poll: new events announced (none on the first pass, which
         only learns what is already there), stills refreshed. Returns
         how many events were announced."""
-        cams = await self._cameras(cloud)
+        cams = await self._cameras(cloud, folder)
         names = {c.id: c.name for c in cams}
         fresh: list[dict] = []
         for cam in cams:
@@ -656,8 +739,8 @@ def ring_tools(config, **kwargs) -> list:
     return [RingSetupTool(config, prefs=prefs, **kwargs), RingListTool(config, prefs=prefs, **kwargs),
             RingSnapshotTool(config, prefs=prefs, **kwargs), RingEventsTool(config, prefs=prefs, **kwargs),
             RingLightTool(config, prefs=prefs, **kwargs), RingSirenTool(config, prefs=prefs, **kwargs),
-            RingWatchTool(config, prefs=prefs, **kwargs)]
+            RingWatchTool(config, prefs=prefs, **kwargs), RingLiveTool(config, prefs=prefs, **kwargs)]
 
 
-__all__ = ["RingCamera", "RingCloud", "RingEventsTool", "RingLightTool", "RingListTool", "RingPreferences",
+__all__ = ["RingCamera", "RingCloud", "RingEventsTool", "RingLightTool", "RingListTool", "RingLiveTool", "RingPreferences",
            "RingSetupTool", "RingSirenTool", "RingSnapshotTool", "RingWatchTool", "available", "ring_tools"]

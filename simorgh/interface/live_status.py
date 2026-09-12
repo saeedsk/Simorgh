@@ -89,6 +89,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "ring_light"): "Switching a Ring light",
     ("act", "ring_siren"): "Sounding a Ring siren",
     ("act", "ring_watch"): "Watching Ring",
+    ("act", "ring_live"): "Opening a Ring live view",
     ("act", "music_now"): "Checking the music",
     ("act", "music_control"): "Controlling the music",
     ("act", "music_play"): "Putting music on",

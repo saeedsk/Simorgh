@@ -5,12 +5,12 @@
 --stroke:rgba(255,255,255,.20);--stroke2:rgba(255,255,255,.10);--radius:22px;}
 *{box-sizing:border-box;}
 html,body{margin:0;height:100%;background:#06060b;color:var(--fg);overflow:hidden;
-font-family:"SF Mono","SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;font-size:15px;line-height:1.45;font-variant-numeric:tabular-nums;}
+font-family:"SF Mono","SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;font-size:14px;line-height:1.45;font-variant-numeric:tabular-nums;}
 #bg,#bg2{position:fixed;inset:0;background-size:cover;background-position:center;transition:opacity 1.4s ease;}
 #bg2{opacity:0;}
 #scrim{position:fixed;inset:0;pointer-events:none;
 background:radial-gradient(120% 120% at 50% 40%,transparent 40%,rgba(0,0,0,.55)),linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.45));}
-#app{position:relative;height:100vh;display:flex;flex-direction:column;padding:16px;gap:12px;}
+#app{position:absolute;left:0;top:0;width:1920px;height:1080px;display:flex;flex-direction:column;padding:16px;gap:12px;transform-origin:0 0;}
 .glass{position:relative;background:linear-gradient(150deg,rgba(255,255,255,.11),rgba(255,255,255,.03) 55%,rgba(255,255,255,.01)),rgba(10,10,16,.34);
 backdrop-filter:blur(42px) saturate(180%);-webkit-backdrop-filter:blur(42px) saturate(180%);
 border:1px solid var(--stroke);border-radius:var(--radius);
@@ -20,7 +20,7 @@ background:linear-gradient(160deg,rgba(255,255,255,.22),transparent 75%);opacity
 .dark{background:linear-gradient(160deg,rgba(8,8,14,.72),rgba(8,8,14,.55));}
 .dim{color:var(--dim);}.faint{color:var(--faint);}.warm{color:var(--warm);}.gold{color:var(--gold);}.amber{color:var(--amber);}
 .green{color:var(--green);}.cyan{color:var(--cyan);}.red{color:var(--red);}.violet{color:var(--violet);}
-.hd{font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:var(--faint);}
+.hd{font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--faint);}
 .hd.bb{color:var(--amber);}
 .tag{font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);border:1px solid var(--stroke2);border-radius:6px;padding:1px 6px;white-space:nowrap;}
 #bar{height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-radius:16px;}
@@ -34,11 +34,11 @@ background:rgba(255,255,255,.09);border:1px solid var(--stroke2);box-shadow:inse
 .card{padding:13px;min-width:0;min-height:0;overflow:hidden;}
 .col{display:flex;flex-direction:column;height:100%;min-height:0;}
 .fill{flex:1;min-height:0;overflow:hidden;}
-.rowitem{display:flex;gap:9px;padding:5px 0;border-bottom:1px solid var(--stroke2);font-size:12.5px;line-height:1.35;}
+.rowitem{display:flex;gap:9px;padding:4px 0;border-bottom:1px solid var(--stroke2);font-size:11.5px;line-height:1.35;}
 .rowitem:last-child{border-bottom:none;}
 .rowitem .t{min-width:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
 .rowitem .m{flex:none;color:var(--faint);font-size:10.5px;}
-.tr{display:flex;justify-content:space-between;gap:8px;padding:3.5px 0;border-bottom:1px solid var(--stroke2);font-size:12px;white-space:nowrap;}
+.tr{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px solid var(--stroke2);font-size:11px;white-space:nowrap;}
 .tr:last-child{border-bottom:none;}
 .tr .l{color:var(--dim);overflow:hidden;text-overflow:ellipsis;min-width:0;}
 .thumb{border-radius:14px;overflow:hidden;background-size:cover;background-position:center;position:relative;border:1px solid var(--stroke2);height:100%;}
@@ -62,18 +62,18 @@ background:rgba(255,255,255,.09);border:1px solid var(--stroke2);box-shadow:inse
 .range{position:relative;height:4px;border-radius:2px;background:rgba(255,255,255,.12);margin:5px 0 2px;}
 .range i{position:absolute;top:-3px;width:10px;height:10px;border-radius:5px;background:var(--amber);transform:translateX(-50%);box-shadow:0 0 6px rgba(255,179,71,.8);}
 .nlist{flex:1;min-height:0;overflow:hidden;position:relative;}
-.nit{display:flex;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid var(--stroke2);}
+.nit{display:flex;gap:9px;align-items:center;padding:4px 0;border-bottom:1px solid var(--stroke2);}
 .nit:last-child{border-bottom:none;}
-.nit .th{width:56px;height:40px;border-radius:9px;flex:none;background-size:cover;background-position:center;background-color:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;font-size:10px;letter-spacing:.6px;}
+.nit .th{width:48px;height:34px;border-radius:9px;flex:none;background-size:cover;background-position:center;background-color:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;font-size:10px;letter-spacing:.6px;}
 .nit .tx{min-width:0;flex:1;}
-.nit .ttl{font-size:13px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;}
-#camstrip{height:150px;flex:none;display:flex;gap:8px;padding:7px;border-radius:16px;}
-.ctile{flex:1;min-width:0;max-width:300px;position:relative;border-radius:11px;overflow:hidden;background:rgba(0,0,0,.35);border:1px solid var(--stroke2);}
+.nit .ttl{font-size:11.5px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;}
+#camstrip{height:76px;flex:none;display:flex;gap:6px;padding:5px;border-radius:14px;}
+.ctile{flex:1;min-width:0;max-width:150px;position:relative;border-radius:11px;overflow:hidden;background:rgba(0,0,0,.35);border:1px solid var(--stroke2);}
 .ctile video,.ctile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
-.ctile .cap{position:absolute;left:8px;right:8px;bottom:6px;font-size:11px;text-shadow:0 1px 5px #000;display:flex;justify-content:space-between;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;}
+.ctile .cap{position:absolute;left:6px;right:6px;bottom:4px;font-size:9.5px;text-shadow:0 1px 5px #000;display:flex;justify-content:space-between;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;}
 .ctile .cap .tag{background:rgba(0,0,0,.4);}
 .ctile .live{color:var(--red);}
-.ban{margin:0;font:inherit;font-size:11.5px;line-height:1.2;white-space:pre;color:var(--dim);}
+.ban{margin:0;font:inherit;font-size:10px;line-height:1.2;white-space:pre;color:var(--dim);}
 .ban b{font-weight:600;}
 .fade{animation:fadein .45s ease;}
 @keyframes fadein{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
@@ -220,7 +220,7 @@ async function loadBanner(){try{const b=await (await fetch(q("/api/dash/banner")
 function termHTML(big){
   const lines=ACT.map(actLine).join("")||(BANNER?"":'<div class="dim">Sim is idle. Say “Sim”, or pick a view.</div>');
   const ban=BANNER?'<pre class="ban">'+BANNER+'</pre><div style="height:8px;"></div>':'';
-  return '<div style="font-size:'+(big?'14px':'12.5px')+';line-height:1.55;height:100%;display:flex;flex-direction:column;overflow:hidden;">'
+  return '<div style="font-size:'+(big?'12.5px':'11.5px')+';line-height:1.5;height:100%;display:flex;flex-direction:column;overflow:hidden;">'
    +'<div style="flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;">'+ban+lines+'</div>'
    +'<div style="border-top:1px solid var(--stroke2);margin-top:8px;padding-top:8px;"><span style="color:#dfe3ea;">❯</span> <span class="faint">'+((STATUS.model?esc(STATUS.model)+' · ':'')+'ask, or say a view name…')+'</span></div></div>';}
 function mk(){return DATA&&DATA.markets||{stocks:[],indices:[],rates:[],fx:[],commodities:[],crypto:[],majors:[]};}
@@ -259,7 +259,7 @@ const SRC_BADGE={"Bloomberg":["BBG","#ffb347"],"BBC":["BBC","#ff9a94"],"Ars Tech
 function badge(label,col){return '<div class="th" style="color:'+(col||"var(--dim)")+';border:1px solid var(--stroke2);">'+esc(label)+'</div>';}
 function newsItem(it){const b=SRC_BADGE[it.source]||[String(it.source||"").slice(0,3).toUpperCase(),"var(--dim)"];
   const th=it.thumb?'<div class="th" style="background-image:url(\''+esc(it.thumb)+'\');"></div>':badge(it.badge||b[0],it.badgeCol||b[1]);
-  return '<div class="nit">'+th+'<div class="tx"><div class="ttl">'+esc(it.title)+'</div><div class="faint" style="font-size:10.5px;">'+esc(it.meta!=null?it.meta:(it.source||"")+(it.at?' · '+ago(it.at):''))+'</div></div></div>';}
+  return '<div class="nit">'+th+'<div class="tx"><div class="ttl">'+esc(it.title)+'</div><div class="faint" style="font-size:9.5px;">'+esc(it.meta!=null?it.meta:(it.source||"")+(it.at?' · '+ago(it.at):''))+'</div></div></div>';}
 function newsBoxHTML(title,tag,items,accent){return '<div class="col fade" style="flex:1;min-width:0;">'+head(title,tag,accent)+'<div class="nlist"><div class="nscroll">'+(items.length?items.map(newsItem).join(""):empty("waiting for the feed…"))+'</div></div></div>';}
 function deckItemsB(idx){const [name,feeds]=DECK_B[idx];const wk=DATA&&DATA.wiki;
   if(feeds) return merged(...feeds).slice(0,DECK_ITEMS);
@@ -304,22 +304,48 @@ function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-temp
   +'</div></div>';}
 // ---- the camera strip: every relay that is live (cameras show all dash) plays through hls.js; a camera with
 // no relay shows its newest still. Rebuilt only when the set of feeds changes, so players are not restarted.
-const CAM_LIVE_MAX=6;let CAMKEY="",HLS_PLAYERS=[];
-function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live);const stills=(DATA&&DATA.cameras)||[];
-  const tiles=[];const named=new Set();
-  streams.slice(0,CAM_LIVE_MAX).forEach(s=>{tiles.push({key:"live:"+s.channel,name:s.name,live:true,url:s.url});named.add(s.name.toLowerCase());});
-  streams.slice(CAM_LIVE_MAX).forEach(s=>{const st=stills.find(c=>c.name.toLowerCase()===s.name.toLowerCase());tiles.push({key:"still:"+s.name,name:s.name,live:false,img:st?st.url:null,at:st?st.at:0});named.add(s.name.toLowerCase());});
-  stills.forEach(c=>{if(!named.has(c.name.toLowerCase())){tiles.push({key:"still:"+c.name,name:c.name,live:false,img:c.url,at:c.at,kind:c.kind});named.add(c.name.toLowerCase());}});
-  return tiles.slice(0,8);}
-function refreshStrip(){const el=$("#camstrip");if(!el)return;const tiles=stripTiles();
-  const key=tiles.map(t=>t.key+(t.live?"":":"+Math.floor((t.at||0)/60))).join("|");if(key===CAMKEY)return;CAMKEY=key;
-  HLS_PLAYERS.forEach(h=>{try{h.destroy();}catch(e){}});HLS_PLAYERS=[];
-  if(!tiles.length){el.innerHTML='<div class="faint" style="display:flex;align-items:center;justify-content:center;flex:1;font-size:12px;gap:14px;"><span class="hd">Cameras</span>no feeds yet — <code style="color:var(--dim);">cameras show all dash</code> puts the Reolink cameras here live; <code style="color:var(--dim);">ring watch on</code> adds the Ring stills</div>';return;}
-  el.innerHTML=tiles.map((t,i)=>'<div class="ctile" data-i="'+i+'">'+(t.live?'<video muted autoplay playsinline></video>':(t.img?'<img src="'+esc(t.img)+'?t='+Math.floor((t.at||0))+'" alt="">':''))
-    +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+(t.live?' live':'')+'">'+(t.live?"● live":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>').join("");
-  tiles.forEach((t,i)=>{if(!t.live)return;const v=el.querySelector('.ctile[data-i="'+i+'"] video');if(!v)return;
+const CAM_LIVE_MAX=8;let CAMKEY="",HLS_PLAYERS=[],RTC_PEERS=[],LIVE_ASKED=0;
+async function ensureCamerasLive(){ // no Reolink relay is live: ask Sim to start them (cam_stream mode dash, through Guardian)
+  if(Date.now()-LIVE_ASKED<5*60*1000)return;LIVE_ASKED=Date.now();
+  try{const r=await fetch(q("/api/dash/cameras/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+    if(r.ok){setTimeout(loadData,8000);}}catch(e){}}
+async function ringLive(tile,video){ // Ring live view: WebRTC with Ring's servers, Sim carrying the SDP offer and answer
+  const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});RTC_PEERS.push(pc);
+  pc.addTransceiver("video",{direction:"recvonly"});pc.addTransceiver("audio",{direction:"recvonly"});
+  pc.ontrack=e=>{if(!video.srcObject)video.srcObject=e.streams[0];video.play().catch(()=>{});};
+  const offer=await pc.createOffer();await pc.setLocalDescription(offer);
+  await new Promise(res=>{if(pc.iceGatheringState==="complete")return res();const t=setTimeout(res,3000);pc.onicegatheringstatechange=()=>{if(pc.iceGatheringState==="complete"){clearTimeout(t);res();}};});
+  const r=await fetch(q("/api/dash/ring/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:tile.name,action:"offer",sdp:pc.localDescription.sdp})});
+  const body=await r.json();if(!r.ok||!body.sdp)throw new Error(body.text||body.error||"no answer");
+  await pc.setRemoteDescription({type:"answer",sdp:body.sdp});
+  const session=body.session;pc._session=session;pc._camera=tile.name;
+  pc._keep=setInterval(()=>{fetch(q("/api/dash/ring/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:tile.name,action:"keepalive",session})}).catch(()=>{});},20000);
+  pc.onconnectionstatechange=()=>{if(["failed","disconnected","closed"].includes(pc.connectionState)){clearInterval(pc._keep);const cap=video.parentElement&&video.parentElement.querySelector(".tag");if(cap)cap.textContent="ring · reconnecting";setTimeout(()=>{if(RTC_PEERS.includes(pc)){RTC_PEERS=RTC_PEERS.filter(x=>x!==pc);ringLive(tile,video).catch(()=>{});}},15000);}};}
+function closeLive(){HLS_PLAYERS.forEach(h=>{try{h.destroy();}catch(e){}});HLS_PLAYERS=[];
+  RTC_PEERS.forEach(pc=>{try{clearInterval(pc._keep);if(pc._session)fetch(q("/api/dash/ring/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:pc._camera,action:"close",session:pc._session})}).catch(()=>{});pc.close();}catch(e){}});RTC_PEERS=[];}
+function mountLive(root,tiles){ // attach players to the tiles just rendered under `root`
+  tiles.forEach((t,i)=>{const v=root.querySelector('.ctile[data-i="'+i+'"] video');if(!v)return;
+    if(t.rtc){ringLive(t,v).catch(()=>{const cap=v.parentElement.querySelector(".tag");if(cap)cap.textContent="ring · no live view";});return;}
+    if(!t.live)return;
     if(window.Hls&&Hls.isSupported()){const h=new Hls({lowLatencyMode:true,liveSyncDurationCount:2,maxBufferLength:6,enableWorker:true});h.loadSource(q(t.url));h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play().catch(()=>{}));HLS_PLAYERS.push(h);}
     else if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=q(t.url);v.play().catch(()=>{});}});}
+function tileHTML(t,i){return '<div class="ctile" data-i="'+i+'">'+((t.live||t.rtc)?'<video muted autoplay playsinline'+(t.img?' poster="'+esc(t.img)+'?t='+Math.floor(t.at||0)+'"':'')+'></video>':(t.img?'<img src="'+esc(t.img)+'?t='+Math.floor((t.at||0))+'" alt="">':''))
+    +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+((t.live||t.rtc)?' live':'')+'">'+(t.live?"● live":t.rtc?"● ring live":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>';}
+function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live);const stills=(DATA&&DATA.cameras)||[];const ring=(DATA&&DATA.ring_cameras)||[];
+  const tiles=[];const named=new Set();let players=0;
+  streams.forEach(s=>{const st=stills.find(c=>c.name.toLowerCase()===s.name.toLowerCase());const live=players<CAM_LIVE_MAX;if(live)players++;
+    tiles.push({key:(live?"live:":"still:")+s.channel,name:s.name,live,url:s.url,img:st?st.url:null,at:st?st.at:0});named.add(s.name.toLowerCase());});
+  ring.forEach(c=>{const st=stills.find(x=>x.kind==="ring"&&x.name.toLowerCase()===c.name.toLowerCase());const rtc=players<CAM_LIVE_MAX&&!!window.RTCPeerConnection;if(rtc)players++;
+    tiles.push({key:(rtc?"ring:":"still:")+c.name,name:c.name,rtc,kind:"ring",img:st?st.url:null,at:st?st.at:0});named.add(c.name.toLowerCase());});
+  stills.forEach(c=>{if(!named.has(c.name.toLowerCase())){tiles.push({key:"still:"+c.name,name:c.name,live:false,img:c.url,at:c.at,kind:c.kind});named.add(c.name.toLowerCase());}});
+  return tiles;}
+function refreshStrip(){const el=$("#camstrip");if(!el)return;const tiles=stripTiles().slice(0,10);
+  if(DATA&&!(DATA.streams||[]).some(s=>s.live)&&!DATA.off)ensureCamerasLive();
+  const key=tiles.map(t=>t.key+((t.live||t.rtc)?"":":"+Math.floor((t.at||0)/60))).join("|");if(key===CAMKEY)return;CAMKEY=key;
+  closeLive();
+  if(!tiles.length){el.innerHTML='<div class="faint" style="display:flex;align-items:center;justify-content:center;flex:1;font-size:12px;gap:14px;"><span class="hd">Cameras</span>no feeds yet — the Reolink relays are being asked for; <code style="color:var(--dim);">ring list</code> adds the Ring cameras</div>';return;}
+  el.innerHTML=tiles.map(tileHTML).join("");
+  mountLive(el,tiles);}
 function fillBox(id,html){const el=$(id);if(!el)return;el.innerHTML=html;setTimeout(()=>fitBox(el),40);}   // a timeout, not rAF: rAF never fires in a hidden tab
 function refreshDeck(force){
   if(!$("#deckroot")){$("#stage").innerHTML=deckSkeleton();force=true;DK={a:-1,b:-1,m:-1,np:"",qj:""};}
@@ -352,13 +378,15 @@ function viewDiscover(){
   const most=head("Most read","Wikipedia")+(wk?wk.mostread.slice(0,4).map(a=>'<div class="rowitem"><span class="violet" style="flex:none;">•</span><div class="t">'+esc(a.title)+'</div><span class="m">'+(a.views?Math.round(a.views/1000)+'k':'')+'</span></div>').join(""):empty("waiting…"));
   return '<div class="grid" style="grid-template-columns:repeat(6,1fr);grid-template-rows:repeat(6,1fr);grid-template-areas:'+A+';">'+C('world',world)+C('holly',holly)+C('photo',photo)+C('sci',sci)+C('wiki',wiki)+C('otd',otd)+C('movie',movie)+C('music',music)+C('jokes',jk)+C('most',most)+'</div>';
 }
+let CAMVIEWKEY="";
 function viewCameras(){
-  const cams=camList();const n=Math.max(cams.length,1);const cols=n<=1?1:n<=4?2:3;
-  const tiles=(cams.length?cams:[null]).slice(0,9).map(c=>'<div class="glass" style="padding:0;overflow:hidden;">'+camTile(c,"still")+'</div>').join("");
+  const tiles=stripTiles();const n=Math.max(tiles.length,1);const cols=n<=1?1:n<=4?2:n<=9?3:4;
+  const grid=tiles.length?tiles.map((t,i)=>tileHTML(t,i).replace('class="ctile"','class="ctile" style="max-width:none;"')).join(""):'<div class="glass card faint" style="display:flex;align-items:center;justify-content:center;">no cameras have sent a still yet — `cameras show all dash` (Reolink) or `ring list` (Ring)</div>';
   const events=(DATA&&DATA.events)||[];
-  const feedCol='<div class="glass card col" style="flex:1;">'+head("Events",events.length?"latest":"")+'<div class="fill">'+(events.length?events.slice(0,14).map(e=>'<div class="rowitem"><span class="'+(e.kind==="person"||e.kind==="ding"?"red":"gold")+'" style="flex:none;">•</span><div class="t">'+esc(e.camera)+' · '+esc(e.kind)+'</div><span class="m">'+ago(e.at)+'</span></div>').join(""):empty(cams.length?"no camera events yet — Ring events and the NVR's pushes land here":"no cameras have sent a still yet. `cameras snapshot <name>` (Reolink) or `ring setup` (Ring) puts them here."))+'</div>'
+  const feedCol='<div class="glass card col" style="flex:1;">'+head("Events",events.length?"latest":"")+'<div class="fill">'+(events.length?events.slice(0,14).map(e=>'<div class="rowitem"><span class="'+(e.kind==="person"||e.kind==="ding"?"red":"gold")+'" style="flex:none;">•</span><div class="t">'+esc(e.camera)+' · '+esc(e.kind)+'</div><span class="m">'+ago(e.at)+'</span></div>').join(""):empty("no camera events yet — Ring events and the NVR's pushes land here"))+'</div>'
     +'<div style="border-top:1px solid var(--stroke2);padding-top:8px;margin-top:6px;">'+weatherNow()+'</div></div>';
-  return '<div style="display:flex;gap:12px;height:100%;"><div class="grid" style="flex:2.6;grid-template-columns:repeat('+cols+',1fr);grid-auto-rows:1fr;">'+tiles+'</div>'+feedCol+'</div>';
+  setTimeout(()=>{const root=$("#camgrid");if(root){mountLive(root,tiles);}},30);
+  return '<div style="display:flex;gap:12px;height:100%;"><div id="camgrid" class="grid" style="flex:3;grid-template-columns:repeat('+cols+',1fr);grid-auto-rows:1fr;">'+grid+'</div>'+feedCol+'</div>';
 }
 function viewNews(){
   const cards=[["Bloomberg · Markets",["bloomberg_markets"],"amber"],["Bloomberg · Technology",["bloomberg_technology"],"amber"],["Bloomberg · Business",["bloomberg_business"],"amber"],
@@ -441,8 +469,16 @@ const RENDER={deck:viewDeck,discover:viewDiscover,cameras:viewCameras,news:viewN
 // ---- app ----
 function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
   $("#dock").querySelectorAll(".dot").forEach(d=>d.onclick=()=>go(d.dataset.k));}
-function render(){try{if(CUR==="deck"){refreshDeck(true);return;}$("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}catch(e){$("#stage").innerHTML='<div class="glass card red">render failed: '+esc(e.message)+'</div>';}}
+function render(){try{if(CUR==="deck"){refreshDeck(true);return;}
+  if(CUR==="cameras"){const key=stripTiles().map(t=>t.key).join("|");if(key===CAMVIEWKEY&&$("#camgrid"))return;CAMVIEWKEY=key;closeLive();CAMKEY="";setTimeout(refreshStrip,60);}
+  else if(CAMVIEWKEY){CAMVIEWKEY="";closeLive();CAMKEY="";setTimeout(refreshStrip,60);}
+  $("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}catch(e){$("#stage").innerHTML='<div class="glass card red">render failed: '+esc(e.message)+'</div>';}}
 function go(k){if(!RENDER[k])return;CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
+// A Cast receiver lays the page out at 1280x720 logical pixels whatever the panel (the creator's 4K Sony showed a
+// few boxes, 2026-09-12); the page is designed at 1920x1080 and scaled to the viewport it actually gets.
+function fitApp(){const app=$("#app");const sc=Math.min(innerWidth/1920,innerHeight/1080);
+  app.style.transform="translate("+((innerWidth-1920*sc)/2).toFixed(1)+"px,"+((innerHeight-1080*sc)/2).toFixed(1)+"px) scale("+sc.toFixed(4)+")";}
+addEventListener("resize",fitApp);
 function tickClock(){$("#clock").textContent=nowT();$("#date").textContent=new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
   if(CUR==="ambient"||CUR==="deck"){const c=$("#stage .big");}}
 // Keys: a TV browser, a keyboard, or a remote that does reach the page.
@@ -454,7 +490,7 @@ document.addEventListener("keydown",e=>{const i=VIEWS.findIndex(v=>v[0]===CUR);
   else if(e.key==="Escape"||e.key==="Backspace"||e.key==="GoBack"||e.key==="BrowserBack")go("deck");
   else return; e.preventDefault();});
 
-(async function(){await loadWP();setBG(WP[0]);buildDock();render();tickClock();
+(async function(){fitApp();await loadWP();setBG(WP[0]);buildDock();render();tickClock();
   setInterval(tickClock,1000);
   setInterval(()=>setBG(nextWP()),45000);
   setInterval(()=>{if(CUR==="ambient")render();},30000);

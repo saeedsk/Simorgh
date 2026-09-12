@@ -1150,6 +1150,33 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/banner?unicode=off")
         self.assertNotIn("▀", json.loads(b)["text"])
 
+    async def test_the_page_can_ask_for_live_cameras_and_ring_signalling_through_the_tool_path(self):
+        from simorgh.interface import dispatch as dispatch_mod
+        calls = []
+
+        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout):
+            calls.append((tool, json.loads(raw), session_id))
+            if tool == "ring_live":
+                return dispatch_mod.Outcome(json.dumps({"sdp": "v=0 answer", "session": "4242", "camera": "Front Door"}))
+            return dispatch_mod.Outcome("live in the dashboard's camera strip: Office, Pool")
+        original = dispatch_mod._run_tool
+        dispatch_mod._run_tool = _fake_run_tool
+        try:
+            api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
+            await api.start(); self.addAsyncCleanup(api.stop)
+            st, b = await asyncio.to_thread(self._p, api, "/api/dash/cameras/live", {})
+            self.assertEqual(st, 401, "a side effect: the token is needed")
+            st, b = await asyncio.to_thread(self._p, api, "/api/dash/cameras/live?token=secret", {})
+            self.assertEqual(st, 200); self.assertIn("Office", json.loads(b)["text"]); self.assertTrue(json.loads(b)["ok"])
+            st, b = await asyncio.to_thread(self._p, api, "/api/dash/ring/live?token=secret", {"camera": "Front Door", "sdp": "v=0..."})
+            self.assertEqual(st, 200); self.assertEqual(json.loads(b)["session"], "4242")
+            st, b = await asyncio.to_thread(self._p, api, "/api/dash/ring/live?token=secret", {"sdp": "v=0"})
+            self.assertEqual(st, 400)
+        finally:
+            dispatch_mod._run_tool = original
+        self.assertEqual(calls[0], ("cam_stream", {"camera": "all", "mode": "dash"}, "dash"))
+        self.assertEqual(calls[1][0], "ring_live"); self.assertEqual(calls[1][1]["camera"], "Front Door")
+
     async def test_the_remote_page_is_open_and_posts_to_the_state_route(self):
         api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
         await api.start(); self.addAsyncCleanup(api.stop)

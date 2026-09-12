@@ -304,6 +304,42 @@ class HttpApi:
         self.register_route("GET", "/logo.png", _logo, auth=False)
         self.register_route("GET", "/favicon.ico", _logo, auth=False)
         self.register_route("GET", "/api/dash/banner", _banner, auth=False)
+
+        async def _run_for_page(tool: str, args: dict, timeout: float) -> tuple[int, bytes, str]:
+            # The page asks for a tool the way the terminal does: a proposal
+            # Guardian sees, the result read back (interface/dispatch.py).
+            from .dispatch import _run_tool
+
+            outcome = await _run_tool(bus=self._bus, ledger=self._ledger, tool=tool, raw=json.dumps(args),
+                                      session_id="dash", timeout=timeout)
+            text = outcome.text or ""
+            body: dict
+            try:
+                parsed = json.loads(text)
+                body = parsed if isinstance(parsed, dict) else {"text": text}
+            except ValueError:
+                body = {"text": text}
+            failed = text.startswith(("refused", "error", "Guardian denied")) or "did not finish" in text
+            body.setdefault("ok", not failed)
+            return (200 if not failed else 502), json.dumps(body).encode("utf-8"), "application/json"
+
+        async def _cameras_live(_query, _body, _headers):
+            # The strip wants every Reolink camera live: relays for the
+            # dashboard, the TV's page untouched (cam_stream mode dash).
+            return await _run_for_page("cam_stream", {"camera": "all", "mode": "dash"}, 90.0)
+
+        async def _ring_live(_query, body, _headers):
+            try:
+                asked = json.loads(body.decode("utf-8") or "{}")
+            except ValueError:
+                return 400, b'{"error": "body must be JSON"}', "application/json"
+            if not isinstance(asked, dict) or not asked.get("camera"):
+                return 400, b'{"error": "camera is needed"}', "application/json"
+            args = {k: asked[k] for k in ("camera", "action", "sdp", "session") if k in asked}
+            return await _run_for_page("ring_live", args, 30.0)
+
+        self.register_route("POST", "/api/dash/cameras/live", _cameras_live, max_body=1024, rate=(4, 60.0))
+        self.register_route("POST", "/api/dash/ring/live", _ring_live, max_body=65536, rate=(120, 60.0))
         self.register_route("GET", "/api/tv/state", _tv_state)
         self.register_route("GET", "/api/tv/speech", _tv_speech)
 

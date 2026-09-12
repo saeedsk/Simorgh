@@ -52,6 +52,16 @@ class _FakeCloud:
     async def history(self, cam_id, *, limit=20):
         return list(self.events.get(cam_id, []))[:limit]
 
+    async def webrtc_offer(self, cam_id, sdp, *, keep_alive_s=60):
+        self.calls.append(("offer", cam_id, keep_alive_s))
+        return "v=0\r\no=- 999 2 IN IP4 127.0.0.1\r\na=candidate:ring 1 udp 1 1.2.3.4 5 typ host\r\n"
+
+    async def webrtc_keepalive(self, cam_id, session):
+        self.calls.append(("keepalive", cam_id, session))
+
+    async def webrtc_close(self, cam_id, session):
+        self.calls.append(("close", cam_id, session))
+
     async def light(self, cam_id, on):
         self.calls.append(("light", cam_id, on))
 
@@ -110,7 +120,7 @@ class RingTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_names_kind_battery_and_capabilities(self):
         tools, cloud, bus = self._tools()
-        result = await tools["ring_list"].run({}, ctx=_ctx(bus))
+        result = await tools["ring_list"].run({}, ctx=_ctx(bus, self.root))   # the list is written under the ctx root
         self.assertTrue(result.ok)
         self.assertIn("Back Yard  (stickup_cam, battery 45%, light+siren)", result.output)
         self.assertEqual(result.metadata["cameras"][0]["name"], "Front Door")
@@ -178,6 +188,31 @@ class RingTestCase(unittest.IsolatedAsyncioTestCase):
         kept = json.loads((folder / "events.json").read_text())
         self.assertEqual(kept[0]["id"], "e3")
         self.assertEqual(await watch.tick(bus, cloud, folder), 0, "announced once")
+
+    async def test_live_view_carries_the_offer_and_answer_and_the_session_through(self):
+        tools, cloud, bus = self._tools()
+        offer = "v=0\r\no=- 4242 2 IN IP4 127.0.0.1\r\ns=-\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=candidate:1 1 udp 1 10.0.0.2 5 typ host\r\n"
+        result = await tools["ring_live"].run({"camera": "front", "sdp": offer}, ctx=_ctx(bus))
+        self.assertTrue(result.ok, result.error)
+        body = json.loads(result.output)
+        self.assertEqual((body["session"], body["camera"]), ("4242", "Front Door"))
+        self.assertIn("a=candidate:ring", body["sdp"])
+        self.assertEqual(cloud.calls[-1], ("offer", "11", 60))
+        keep = await tools["ring_live"].run({"camera": "front", "action": "keepalive", "session": "4242"}, ctx=_ctx(bus))
+        self.assertTrue(keep.ok)
+        close = await tools["ring_live"].run({"camera": "front", "action": "close", "session": "4242"}, ctx=_ctx(bus))
+        self.assertTrue(close.ok)
+        self.assertEqual(cloud.calls[-2:], [("keepalive", "11", "4242"), ("close", "11", "4242")])
+        bad = await tools["ring_live"].run({"camera": "front", "sdp": "hello"}, ctx=_ctx(bus))
+        self.assertFalse(bad.ok)
+        self.assertFalse((await tools["ring_live"].run({"camera": "front", "action": "keepalive"}, ctx=_ctx(bus))).ok)
+
+    async def test_list_writes_the_camera_file_the_dashboard_reads(self):
+        tools, cloud, bus = self._tools()
+        result = await tools["ring_list"].run({}, ctx=_ctx(bus, self.root))
+        self.assertTrue(result.ok)
+        rows = json.loads((self.root / "workspace" / "cameras" / "ring" / "cameras.json").read_text())
+        self.assertEqual([(r["name"], r["kind"], r["light"]) for r in rows], [("Front Door", "doorbot", False), ("Back Yard", "stickup_cam", True)])
 
     async def test_watch_on_and_off_hold_one_task(self):
         tools, cloud, bus = self._tools()

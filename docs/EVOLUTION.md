@@ -4818,3 +4818,26 @@ Still ahead, roughly in order:
     default; `tv show tv` is the bare terminal. The reachability probe
     derived `/api/status` by splitting the URL at `/tv`, which a `/dash`
     URL never matched; it now takes scheme and host from the URL.
+
+153. **Live feeds without asking, Ring live view, and a page that fits
+    the receiver (2026-09-12, late).** "Reolink camera only discovered
+    one camera, while I have 8+" -- the NVR reports seven online
+    (Front Window, Backyard Door Left, Backyard Left, Office, Parking
+    Inside, Backyard Door Right, Pool); the strip had shown one because
+    one still was on disk. Now the page asks Sim for the relays itself:
+    `POST /api/dash/cameras/live` runs `cam_stream all dash` through
+    the same proposal path the terminal uses, so Guardian sees it, at
+    most once in five minutes while no relay is live. Ring live view
+    is WebRTC between the browser on the TV and Ring's media servers,
+    with Sim carrying only the signalling: `ring_live` (offer, keepalive,
+    close) behind `POST /api/dash/ring/live`; the browser gathers its
+    ICE candidates first, Ring's answer comes back with its own. The
+    Ring tools write `ring/cameras.json` so the strip knows the cameras
+    before any still exists. Up to eight players at once; the rest are
+    stills. Then the Sony: "low resolution casting where only few boxes
+    are being shown" -- a Cast receiver lays the page out at 1280x720
+    logical pixels whatever the panel, so the page is now designed at
+    1920x1080 and scaled to the viewport it gets; the strip is half its
+    height and every type size came down a step ("Bloomberg frame only
+    shows one headline"). Checked at 1244x736: every box present, nine
+    headlines in a box.

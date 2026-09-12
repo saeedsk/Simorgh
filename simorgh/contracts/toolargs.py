@@ -39,6 +39,7 @@ MARKER_ARG_KEY: dict[str, str] = {
     "cam_ir": "camera", "cam_siren": "camera", "cam_ptz": "camera", "cam_recordings": "camera",
     "cam_watch": "on",
     "ring_snapshot": "camera", "ring_events": "camera", "ring_light": "camera", "ring_siren": "camera", "ring_watch": "on",
+    "ring_live": "camera",
     "cast_play": "url",
     "cast_show": "target",
     "cast_stop": "what",

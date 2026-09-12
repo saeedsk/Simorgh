@@ -169,6 +169,7 @@ _TOOL_NOTES: dict[str, str] = {
     "ring_light": "a Ring camera's light: `<camera> on|off`",
     "ring_siren": "a Ring camera's siren for a few seconds -- loud; only when asked",
     "ring_watch": "poll Ring for new events and fresh stills: on|off",
+    "ring_live": "WebRTC signalling for a Ring camera's live view on the dashboard (the page calls it; not for chat)",
     "cast_setup": "one-time: open your API to the network with a token so the TV can fetch your page; then a restart",
     "propose_mcp_server": "propose a new MCP server to the human",
     "draft_candidate": "draft a change without applying it",
