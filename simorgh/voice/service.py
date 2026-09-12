@@ -458,6 +458,10 @@ class Service:
             return
         if session_id in pipeline._pending or pipeline.is_voice_session(session_id):  # noqa: SLF001 -- its own turn
             return
+        from .backchannel import is_quiet
+
+        if is_quiet(text):
+            return
         try:
             await self._say(text, session_id=session_id)
         except Exception as exc:  # noqa: BLE001 -- speech is best effort; the reply was already printed

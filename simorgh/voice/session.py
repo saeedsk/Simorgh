@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from simorgh.contracts import topics
 
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
-from .backchannel import Backchannel, classify, strip_lead
+from .backchannel import GREETING, Backchannel, addressed, classify, is_quiet, strip_lead
 from .config import Config
 from .lang import language_of
 from .pipeline import NOT_SURE, Pipeline, is_echo
@@ -128,6 +128,9 @@ class VoiceSession:
         # must not open with another "Okay,".
         self._backchannel = Backchannel()
         self._acknowledged: set[int] = set()
+        self._answered: set[int] = set()      # turns whose reply is back: too late for an aside
+        self._last_aside_at = -1e9
+        self._sim_spoke_at = -1e9        # when Sim's voice last finished: an exchange under way, or not
         self._ack_task: asyncio.Task | None = None
         self._still_task: asyncio.Task | None = None
         self._last_user_text = ""
@@ -381,6 +384,10 @@ class VoiceSession:
             with contextlib.suppress(asyncio.CancelledError):
                 await still
         clock.reply_at = self._now()
+        self._answered.add(turn_id)
+        if is_quiet(reply):
+            await self._stay_quiet(turn_id)
+            return
         took = clock.reply_at - clock.final_at if clock.final_at else 0.0
         context = Context(user_text=text, language=language, turns=self.stats.turns,
                           turns_since_connector=self._turns_since_connector,
@@ -395,14 +402,51 @@ class VoiceSession:
         turn seems to be from the provisional transcript, in the
         person's language, never the same as the last few. It counts as
         the turn's connector: the reply itself then opens plainly."""
-        if self.turns.turn_id != turn_id:
+        # Wait first. A quick answer is its own acknowledgement, and a
+        # person who only paused between sentences must not have a
+        # sound dropped on their next word: by now the turn manager has
+        # either started their next turn (then this one is over) or
+        # the pause was real.
+        await asyncio.sleep(self._config.backchannel_after_ms / 1000)
+        if self.turns.turn_id != turn_id or self.turns.state not in (THINKING, USER_SPEAKING):
             return
+        if turn_id in self._answered or turn_id in self._acknowledged:
+            return
+        if self._now() - self._last_aside_at < self._config.backchannel_gap_s:
+            return  # one was said a moment ago; another so soon is a tic
+        if not addressed(partial, since_sim_spoke_s=self._now() - self._sim_spoke_at,
+                         exchange_window_s=self._config.exchange_window_s):
+            return  # possibly not for Sim at all: sit quiet, let the model decide
+        kind = classify(partial)
+        if kind == GREETING:
+            return  # answered in a breath anyway
         language = language_of(partial) if partial else language_of(self._last_user_text)
-        text = self._backchannel.pick(classify(partial), language)
+        text = self._backchannel.pick(kind, language)
         if await self._say_aside(f"ack-{turn_id}", text):
             self._acknowledged.add(turn_id)
+            self._last_aside_at = self._now()
             self._turns_since_connector = 0
             self._previous_connector = "okay"
+
+    async def _stay_quiet(self, turn_id: int) -> None:
+        """The model heard words that were not for it. Nothing is said;
+        the floor goes back to listening, and the screen shows why
+        there was no reply."""
+        actions = self.turns.reply_ready(turn_id)
+        speak = next((a for a in actions if a.kind == Actions.SPEAK), None)
+        if speak is not None:
+            # A response was minted; it is over before it started.
+            self.turns.handle_playback_state(PlaybackState("finished", str(speak.response_id)))
+        if self.turns.state == THINKING:
+            self.turns.state = LISTENING if self.turns.auto_listen else self.turns.state
+        await self._announce(self.turns.state)
+        self._answered.discard(turn_id)
+        self._acknowledged.discard(turn_id)
+        self._clocks.pop(turn_id, None)
+        self._log("info", "voice.stayed_quiet", turn=turn_id)
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "interrupted": False,
+            "quiet": True, "turn": turn_id})
 
     async def _still_thinking(self, turn_id: int, language: str) -> None:
         """`still_after_s` into a wait with no answer yet: one more short
@@ -410,9 +454,10 @@ class VoiceSession:
         if self._config.still_after_s <= 0 or not self._config.backchannel:
             return
         await asyncio.sleep(self._config.still_after_s)
-        if self.turns.state != THINKING or self.turns.turn_id != turn_id:
+        if self.turns.state != THINKING or self.turns.turn_id != turn_id or turn_id in self._answered:
             return
-        await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language))
+        if await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language)):
+            self._last_aside_at = self._now()
 
     async def _say_aside(self, request_id: str, text: str) -> bool:
         """Say a short aside through the player -- gated by the echo
@@ -454,6 +499,7 @@ class VoiceSession:
                 await self._dispatch(action, frame_time=self._now())
             return
         response_id = str(speak.response_id)
+        self._answered.discard(turn_id)
         if turn_id in self._acknowledged:
             # "Okay." was already said aloud; "Okay, ..." again is a stutter.
             self._acknowledged.discard(turn_id)
@@ -478,9 +524,13 @@ class VoiceSession:
         except Exception as exc:  # noqa: BLE001 -- a reply that could not be spoken is logged, not fatal
             self._log("warning", "voice.reply_not_spoken", error=repr(exc))
             self.turns.handle_playback_state(PlaybackState("finished", response_id))
+            if self.turns.state == THINKING:  # playback never started, so "finished" moved nothing
+                self.turns.state = LISTENING
+                await self._announce(self.turns.state)
             self._pipeline.speaking = False
             return
         self._pipeline.speaking = False
+        self._sim_spoke_at = self._now()
         said = plan.text
         self._pipeline.last_said = said
         self.stats.turns += 1
@@ -525,6 +575,7 @@ class VoiceSession:
                 report = await self._play(self._tts.synthesise_stream(request), request_id=request.request_id)
         finally:
             self._pipeline.speaking = False
+            self._sim_spoke_at = self._now()
             if self.turns.state == AGENT_SPEAKING and entered_from == LISTENING:
                 self.turns.state = LISTENING
                 await self._announce(self.turns.state)

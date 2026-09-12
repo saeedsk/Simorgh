@@ -220,6 +220,14 @@ class Pipeline:
             return utterance, said
         reply = await self.ask(utterance.text, session_id=session_id, speaker_name=speaker_name,
                                confidence=utterance.confidence)
+        from .backchannel import is_quiet
+
+        if is_quiet(reply):
+            # Not for Sim, the model judged: nothing is said.
+            await self._publish(topics.VOICE_SPOKEN, {"text": "", "seconds": 0.0, "engine": "", "quiet": True,
+                                                      "device": self._config.device, "interrupted": False,
+                                                      "session_id": session_id})
+            return utterance, ""
         said = await self.speak(reply, session_id=session_id)
         self.turns += 1
         await self._record(VoiceTurn(

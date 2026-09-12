@@ -806,6 +806,9 @@ class Service:
 
     async def _on_voice_spoken(self, message: Message) -> None:
         text = str(message.payload.get("text") or "").strip()
+        if message.payload.get("quiet"):
+            self._out(render_mod.style("  🤫 not for me -- staying quiet", "dim", enabled=self._color))
+            return
         if text:
             tail = "  (interrupted)" if message.payload.get("interrupted") else ""
             if message.payload.get("aside"):

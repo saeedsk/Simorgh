@@ -43,15 +43,25 @@ This package owns only the audio.
   interrupted itself; raised by every frame it included the person's own voice
   and nobody could interrupt at all (2026-09-11). Headphones make it
   bulletproof; on a laptop's speakers the reference carries it.
-- **Backchannel** (`backchannel.py`): the moment the person's turn ends -- before
-  the recogniser has finished, long before the model has -- Sim says "Aha." /
+- **Backchannel** (`backchannel.py`): when the answer is not back
+  `backchannel_after_ms` after the person's turn ends, Sim says "Aha." /
   "Let me check." / "Sure, one sec.", picked by what the turn seems to be from
-  the provisional transcript (a remark, a question, a request, a greeting), in
-  the person's language (English and Farsi pools), never repeating the last
-  few. `still_after_s` later with no answer, one more ("Still on it."). The
+  the provisional transcript (a remark, a question, a request), in the
+  person's language (English and Farsi pools), never repeating the last few
+  and never within `backchannel_gap_s` of the last one -- a quick answer is
+  its own acknowledgement, and a sound on every turn is a tic (the creator,
+  2026-09-11) -- and only when the words are presumably for Sim: its name was
+  said, or Sim itself spoke within `exchange_window_s`. `still_after_s` later
+  with no answer, one more ("Still on it."). The
   reply then has any opening "Okay," of its own stripped, so it is never said
   twice. `backchannel = false` turns it off. On screen an aside is the dim
   `🔊 Aha.` line, not a `sim:` line.
+- **Staying quiet**: Sim is one presence in a room. The spoken-channel rules
+  tell the model to answer only words that are for it -- by name, as a
+  follow-up to what it just said, or a plain question or request meant for it
+  -- and to reply with the single word `QUIET` otherwise (people talking to
+  each other, thinking aloud, a fragment). `QUIET` is never spoken; the screen
+  shows "not for me -- staying quiet" and the floor goes back to listening.
 - **Listening on boot**: `enabled = "auto"` (the default) listens when a person
   starts Sim at a terminal and a real microphone opens; under tests, in a pipe,
   or with a fake microphone it stays off. `true` / `false` say so outright.

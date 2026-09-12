@@ -43,7 +43,10 @@ class Config:
     # Endpointing (section 4.2).
     vad: str = "auto"                  # auto | silero | energy | fake
     vad_threshold: float = 0.5
-    endpoint_silence_ms: int = 700
+    # 700 ms until 2026-09-11; a person who pauses after a sentence to
+    # find the next one was cut off, and Sim's "Aha" landed on top of
+    # their next word ("sim is cutting other people too much").
+    endpoint_silence_ms: int = 1000
     max_utterance_s: float = 30.0
     # Push-to-talk until the wake word is built: `voice listen` and the
     # `space` key in `sim voice`. "" = push-to-talk only.
@@ -91,19 +94,33 @@ class Config:
     vad_sensitivity: str = "balanced"  # low | balanced | high (vad.threshold_for); overrides vad_threshold
     min_speech_ms: int = 250           # shorter than this is a breath or a chair, not a turn
     max_turn_ms: int = 30000           # a turn is finalised at this length regardless
-    semantic_silence_factor: float = 0.6  # a finished sentence needs this much of the silence
+    semantic_silence_factor: float = 0.75  # a finished sentence needs this much of the silence
     stt_partials: bool = True          # provisional transcripts while the person is still talking
     stt_partial_every_ms: int = 1500
     connectors: bool = True            # the planner's rare "Okay," / "Yeah," lead-ins
-    max_spoken_sentences: int = 4      # longer answers are cut here and say there is more on screen
+    max_spoken_sentences: int = 3      # longer answers are cut here and say there is more on screen
     tts_lookahead: int = 2             # pieces synthesised ahead of playback; more = slower to cancel
     # The moment the person's turn ends, before the recogniser has even
     # finished, Sim says a short "Aha." / "Let me check." / "Sure, one
     # sec." (voice/backchannel.py) and only then goes to think; a person
     # is never left wondering whether they were heard. `still_after_s`
     # later, with no answer yet, one more ("Still on it.").
+    # ... but not on every turn, and not at once. A sound after every
+    # sentence, and another every few seconds, is a tic, not a listener
+    # (the creator, 2026-09-11: "like a person with ADHD that every 5
+    # seconds throws out a short sound"). So: only if the answer is not
+    # already back `backchannel_after_ms` after the turn ended -- a quick
+    # answer IS the acknowledgement -- and not within `backchannel_gap_s`
+    # of the last one.
+    # And only when the words are presumably for Sim: its name was
+    # said, or Sim itself spoke within `exchange_window_s` -- an
+    # exchange under way. Overheard talk gets no sound; whether it gets
+    # an answer at all is the model's call (backchannel.is_quiet).
     backchannel: bool = True
-    still_after_s: float = 8.0
+    backchannel_after_ms: int = 1500
+    backchannel_gap_s: float = 12.0
+    exchange_window_s: float = 20.0
+    still_after_s: float = 20.0
     diagnostics: bool = True           # per-turn latencies in `voice:turns` and `voice status`
     # Speak every reply Sim gives, including replies to TYPED turns.
     # The creator asked Sim itself for this on 2026-09-10 ("add TTS
