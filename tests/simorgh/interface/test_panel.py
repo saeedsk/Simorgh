@@ -77,6 +77,23 @@ class TreeTestCase(unittest.TestCase):
         self.assertIn("⏸ blocked in 3.0s -- no budget", blocked)
 
 
+class SparkAndWaveTestCase(unittest.TestCase):
+    def test_the_spark_opens_and_closes_over_time(self) -> None:
+        frames = [panel.spark(t * panel.SPARK_FRAME_S) for t in range(len(panel.SPARK_FRAMES))]
+        self.assertEqual(frames, list(panel.SPARK_FRAMES))
+        self.assertEqual(panel.spark(0.0, unicode=False), "*")
+
+    def test_each_letter_breathes_a_beat_after_the_one_to_its_left(self) -> None:
+        word = panel.breathing_word("Shimmying", 0.0)
+        self.assertEqual("".join(ch for _c, ch in word), "Shimmying…")
+        shades = [int(cls.rsplit(".", 1)[1]) for cls, _ch in word]
+        self.assertTrue(all(0 <= s < panel.BREATH_SHADES for s in shades))
+        # The wave moves: a beat later the same letter has the shade its right-hand neighbour had.
+        later = panel.breathing_word("Shimmying", panel.WAVE_SPREAD * panel.WAVE_PERIOD_S)
+        later_shades = [int(cls.rsplit(".", 1)[1]) for cls, _ch in later]
+        self.assertEqual(later_shades[1:], shades[:-1])
+
+
 class BottomRowsTestCase(unittest.TestCase):
     def test_idle_with_nothing_queued_is_idle_plus_the_status_row(self):
         rows = panel.footer_rows(TaskBook(), now=0.0, auto="on")
@@ -86,8 +103,10 @@ class BottomRowsTestCase(unittest.TestCase):
         book = _running(started=0.0, steps=2)
         live = panel.live_rows(book, now=12.0)
         first = live[0]
-        self.assertTrue(first[0][0].startswith("class:sim.breath."))  # the word carries the breathing style
-        self.assertIn(first[0][1].lstrip("✻ ").rstrip("…"), panel.BREATH_WORDS)
+        self.assertTrue(first[0][0].startswith("class:sim.breath."))  # the spark breathes
+        self.assertIn(first[0][1].strip(), panel.SPARK_FRAMES)
+        letters = [frag for frag in first[1:] if frag[0].startswith("class:sim.breath.")]
+        self.assertIn("".join(ch for _cls, ch in letters).rstrip("…"), panel.BREATH_WORDS)
         self.assertIn("patch · tighten the retry loop · 12s · 2 steps", panel.plain(live))
         ribbon = panel.plain(panel.footer_rows(book, now=12.0, auto="off", posture="guarded", model="GLM-5.3-Flash"))
         self.assertIn("⏺ patch · tighten the retry loop · 12s", ribbon)
@@ -105,7 +124,8 @@ class BottomRowsTestCase(unittest.TestCase):
         text = panel.plain(rows)
         self.assertTrue(text.startswith("⏺ run_shell(python -m pytest tests/simorgh/interface -q)"), text)
         self.assertIn("⎿  running… 3s", text)
-        self.assertEqual(rows[2][0][1], "✻ Running…")
+        self.assertEqual("".join(ch for cls, ch in rows[2] if cls.startswith("class:sim.breath.")).strip(),
+                         f"{panel.spark(3.0)} Running…")
         book.on_step("t1", now=4.0, in_flight=False)  # it landed: the block goes, the breathing stays
         text = panel.plain(panel.live_rows(book, now=5.0))
         self.assertNotIn("run_shell(", text)

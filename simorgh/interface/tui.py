@@ -258,7 +258,9 @@ def _split_keeping_space(line: str) -> list[str]:
 # The breathing word's shades, dimmest to brightest (`panel.breath_shade`
 # picks the index). Six steps of the prompt's own cyan, so the word
 # swells and fades rather than blinking.
-BREATH_COLOURS: tuple[str, ...] = ("#005f87", "#0087af", "#00afd7", "#5fd7ff", "#afefff", "#ffffff")
+# Orange-brown, dim ember to bright (the creator, 2026-09-12: "orange-
+# brown color where each letter will breathe in rotation").
+BREATH_COLOURS: tuple[str, ...] = ("#5f3a1a", "#87501f", "#af6a2a", "#d7873a", "#ffaf5f", "#ffd7af")
 PANEL_REFRESH_S = 0.25
 
 

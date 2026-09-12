@@ -104,6 +104,37 @@ def breath_class(t: float) -> str:
     return f"class:sim.breath.{breath_shade(t)}"
 
 
+# The spark before the word cycles through these, one every
+# `SPARK_FRAME_S`: a dot that opens into a star and closes again. The
+# creator, 2026-09-12: "the ✻ breathing by changing character between
+# · + ✶ ✻".
+SPARK_FRAMES: tuple[str, ...] = ("·", "+", "✶", "✻", "✶", "+")
+SPARK_FRAME_S = 0.3
+# How far along the word the colour wave has travelled per second of
+# `WAVE_PERIOD_S`: each letter breathes a little after the one to its
+# left, so the brightness rolls left to right and repeats.
+WAVE_PERIOD_S = 2.4
+WAVE_SPREAD = 0.12  # of a period, per letter
+
+
+def spark(t: float, *, unicode: bool = True) -> str:
+    if not unicode:
+        return "*"
+    return SPARK_FRAMES[int(max(0.0, t) / SPARK_FRAME_S + 1e-9) % len(SPARK_FRAMES)]
+
+
+def breathing_word(word: str, t: float, *, unicode: bool = True) -> list[tuple[str, str]]:
+    """`word…` as one fragment per letter, each with the breath shade
+    for its place in the wave: the leftmost letter brightens first,
+    the next a beat later, and so on down the word, over and over."""
+    text = f"{word}…" if unicode else f"{word}..."
+    out: list[tuple[str, str]] = []
+    for i, ch in enumerate(text):
+        shade = breath_shade(t - i * WAVE_SPREAD * WAVE_PERIOD_S, period_s=WAVE_PERIOD_S)
+        out.append((f"class:sim.breath.{shade}", ch))
+    return out
+
+
 # ------------------------------------------------------------ transcript tree
 _OK = {True: "✓", False: "✗"}
 _END_ICON = {"completed": "✅", "failed": "❌", "blocked": "⏸", "paused": "⏸"}
@@ -202,10 +233,10 @@ def running_row(record: TaskRecord, *, now: float, unicode: bool = True) -> list
         word = breath_word(record.task_id, elapsed)
     else:
         word = record.verb
-    spark = "✻ " if unicode else "* "
     steps = f" · {record.steps} step{'s' if record.steps != 1 else ''}" if record.steps else ""
     return [
-        (breath_class(now), f"{spark}{word}…"),
+        (breath_class(now), f"{spark(now, unicode=unicode)} "),
+        *breathing_word(word, now, unicode=unicode),
         ("class:sim.footer", _line(f"  {record.kind} · {record.short_topic(_topic(_ROW_OVERHEAD))} · {elapsed:.0f}s{steps}")),
     ]
 
@@ -365,7 +396,8 @@ def budget_summary(budget: dict) -> str:
 
 __all__ = [
     "BREATH_PERIOD_S", "BREATH_ROTATE_S", "BREATH_SHADES", "BREATH_WORDS",
-    "agent_row", "breath_class", "breath_shade", "breath_word", "budget_summary", "done_row", "flatten",
+    "SPARK_FRAMES", "agent_row", "breath_class", "breath_shade", "breath_word", "breathing_word", "budget_summary",
+    "done_row", "flatten", "spark",
     "footer_rows", "inflight_rows", "live_rows", "plain", "queued_row", "running_row", "status_row", "tree_end",
     "tree_note", "tree_start", "tree_step",
 ]
