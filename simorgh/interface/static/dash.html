@@ -306,8 +306,14 @@ function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-temp
 // ---- the camera strip: every relay that is live (cameras show all dash) plays through hls.js; a camera with
 // no relay shows its newest still. Rebuilt only when the set of feeds changes, so players are not restarted.
 const CAM_LIVE_MAX=8;let CAMKEY="",HLS_PLAYERS=[],RTC_PEERS=[],LIVE_ASKED=0;
+async function pollStreams(){ // the strip's own poll: what is live now, every ten seconds
+  try{const r=await (await fetch(q("/api/dash/streams"))).json();if(!DATA)return;DATA.streams=r.streams||[];DATA.cameras=r.cameras||[];DATA.ring_cameras=r.ring_cameras||[];refreshStrip();
+    if(CUR==="cameras")render();}catch(e){}}
+function watchPlayers(){ // a live tile that has shown no frame for a while gets its player rebuilt
+  document.querySelectorAll(".ctile video").forEach(v=>{if(v.readyState>=2){v._stuck=0;return;}v._stuck=(v._stuck||0)+1;
+    if(v._stuck>=3){v._stuck=0;CAMKEY="";CAMVIEWKEY="";refreshStrip();if(CUR==="cameras")render();}});}
 async function ensureCamerasLive(){ // no Reolink relay is live: ask Sim to start them (cam_stream mode dash, through Guardian)
-  if(Date.now()-LIVE_ASKED<5*60*1000)return;LIVE_ASKED=Date.now();
+  if(Date.now()-LIVE_ASKED<90*1000)return;LIVE_ASKED=Date.now();
   try{const r=await fetch(q("/api/dash/cameras/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
     if(r.ok){setTimeout(loadData,8000);}}catch(e){}}
 async function ringLive(tile,video){ // Ring live view: WebRTC with Ring's servers, Sim carrying the SDP offer and answer
@@ -506,6 +512,7 @@ document.addEventListener("keydown",e=>{const i=VIEWS.findIndex(v=>v[0]===CUR);
   poll();setInterval(poll,4000);
   loadBanner();refreshStrip();
   loadData();setInterval(loadData,60000);
-  setInterval(refreshStrip,15000);   // a relay that stopped goes back to a still within a minute
+  setInterval(pollStreams,10000);    // the strip follows the relays within ten seconds
+  setInterval(watchPlayers,15000);
 })();
 </script></body></html>

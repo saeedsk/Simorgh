@@ -269,6 +269,7 @@ class Service:
                 max_body_bytes=self.config.api_max_body_bytes,
                 logger=ctx.logger,
                 feeds=feeds,
+                cameras_live=self.config.dash_cameras_live,
             )
             # A dashboard on 127.0.0.1 is reachable only by this
             # machine's own user, which is the posture this server was

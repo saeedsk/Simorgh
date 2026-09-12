@@ -4841,3 +4841,16 @@ Still ahead, roughly in order:
     height and every type size came down a step ("Bloomberg frame only
     shows one headline"). Checked at 1244x736: every box present, nine
     headlines in a box.
+
+    **Why the tiles were grey (2026-09-12, later):** the relays were
+    fine and the players were fine -- once a tab is visible, hls.js
+    plays the 896x512 H.264 sub-streams (Chrome defers media in a
+    hidden tab, which fooled the first hour of debugging). The grey was
+    the gap: each Sim restart kills the ffmpeg relays, the page asked
+    for them again only after five minutes, and the relays started one
+    at a time with a 12-second wait each. Now the HTTP API asks for
+    them itself 20 s after boot and whenever the collector sees none
+    live (`[interface] dash_cameras_live`, off with false; it stops for
+    the boot once the answer is "not set up"); the relays start in
+    parallel; the page polls the light `/api/dash/streams` every ten
+    seconds and rebuilds a player that has shown no frame for 45 s.

@@ -72,7 +72,8 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: boot banner already prints. Everything else is gated
 #: (platform-connectors-design.md section 4).
 _OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers", "/api/dash/data",
-                                          "/api/dash/state", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner"})
+                                          "/api/dash/state", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner",
+                                          "/api/dash/streams"})
 
 #: The response to an unauthenticated request. A JSON body, because
 #: every other error on this server is JSON and a dashboard that got
@@ -113,6 +114,7 @@ class HttpApi:
         history_stream: str = "metrics:history", history_default_minutes: float = 10.0,
         history_max_points: int = 500, logs_default_limit: int = 100, logs_max_limit: int = 500,
         token: str = "", max_body_bytes: int = 1_000_000, logger=None, feeds=None,
+        cameras_live: bool = False, cameras_live_delay_s: float = 20.0, cameras_live_every_s: float = 120.0,
     ) -> None:
         self._bus = bus
         self._ledger = ledger
@@ -146,6 +148,15 @@ class HttpApi:
         # None when `[interface] dash_feeds = false`: `/api/dash/data`
         # then answers an empty snapshot that says the feeds are off.
         self._feeds = feeds
+        # Relays for the strip without waiting for the page: shortly after
+        # boot, then whenever the collector sees none live. Stops asking
+        # once the tool says the NVR is not set up (until the next boot).
+        self._cameras_live = bool(cameras_live)
+        self._cameras_live_delay_s = cameras_live_delay_s
+        self._cameras_live_every_s = cameras_live_every_s
+        self._cameras_live_task: asyncio.Task | None = None
+        self._cameras_live_gave_up = False
+        self._cameras_live_last: dict = {"at": 0.0, "text": ""}
         # Where the dashboard should look (`ui.dash.state`): set by the
         # `dash_view` tool or the phone remote, polled by the page.
         self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "scale": 0, "since": 0.0}
@@ -326,7 +337,23 @@ class HttpApi:
         async def _cameras_live(_query, _body, _headers):
             # The strip wants every Reolink camera live: relays for the
             # dashboard, the TV's page untouched (cam_stream mode dash).
-            return await _run_for_page("cam_stream", {"camera": "all", "mode": "dash"}, 90.0)
+            status, body, kind = await _run_for_page("cam_stream", {"camera": "all", "mode": "dash"}, 90.0)
+            self._cameras_live_last = {"at": self._now(), "text": json.loads(body).get("text", "")}
+            return status, body, kind
+
+        self._run_for_page = _run_for_page
+
+        async def _streams(_query, _body, _headers):
+            # The strip's own poll: what is live, and the stills -- small
+            # enough to ask every ten seconds, unlike the whole snapshot.
+            if self._feeds is None:
+                body = {"now": self._now(), "off": True, "streams": [], "cameras": [], "ring_cameras": []}
+            else:
+                body = {"now": self._now(), "streams": self._feeds.streams(), "cameras": self._feeds.cameras(),
+                        "ring_cameras": self._feeds.ring_cameras(), "asked": self._cameras_live_last}
+            return 200, json.dumps(body, default=str).encode("utf-8"), "application/json"
+
+        self.register_route("GET", "/api/dash/streams", _streams, auth=False)
 
         async def _ring_live(_query, body, _headers):
             try:
@@ -468,6 +495,8 @@ class HttpApi:
         self._dash_sub = await self._bus.subscribe(topics.DASH_STATE, self._on_dash_state)
         if self._feeds is not None:
             await self._feeds.start()
+        if self._cameras_live and self._feeds is not None:
+            self._cameras_live_task = asyncio.create_task(self._keep_cameras_live(), name="dash-cameras-live")
         # Live activity feed (07-post-cutover-review.md §3.9): the same
         # events the REPL narrates, kept in a small in-memory ring so
         # `/api/activity` answers "what is Sim doing right now / just did"
@@ -486,6 +515,13 @@ class HttpApi:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
+        if self._cameras_live_task is not None:
+            self._cameras_live_task.cancel()
+            try:
+                await self._cameras_live_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            self._cameras_live_task = None
         if self._feeds is not None:
             await self._feeds.stop()
         if self._dash_sub is not None:
@@ -502,6 +538,27 @@ class HttpApi:
         fut = self._pending_chats.get(message.payload.get("session_id", ""))
         if fut is not None and not fut.done():
             fut.set_result(message.payload)
+
+    async def _keep_cameras_live(self) -> None:
+        """Ask Execution for the strip's relays after boot, and again while
+        none is live; give up for this boot once the answer is that the
+        cameras are not set up (no NVR, no ffmpeg)."""
+        await asyncio.sleep(self._cameras_live_delay_s)
+        while not self._cameras_live_gave_up:
+            try:
+                live = any(s.get("live") for s in self._feeds.streams())
+                if not live:
+                    _status, body, _kind = await self._run_for_page("cam_stream", {"camera": "all", "mode": "dash"}, 90.0)
+                    text = str(json.loads(body).get("text", ""))
+                    self._cameras_live_last = {"at": self._now(), "text": text}
+                    if "not set up" in text or "not installed" in text or "Guardian denied" in text:
+                        self._cameras_live_gave_up = True
+                        if self._logger is not None:
+                            self._logger.info("dash_cameras_live_stopped", detail=text[:160])
+            except Exception as exc:  # noqa: BLE001 -- the loop outlives one bad answer
+                if self._logger is not None:
+                    self._logger.info("dash_cameras_live_failed", error=f"{exc.__class__.__name__}: {exc}")
+            await asyncio.sleep(self._cameras_live_every_s)
 
     _DASH_VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "terminal", "ambient")
 

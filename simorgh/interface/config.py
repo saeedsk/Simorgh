@@ -101,6 +101,12 @@ class Config:
     dash_longitude: float = -121.89
     dash_watchlist: tuple[str, ...] = ()
     dash_majors: tuple[str, ...] = ()
+    # The dashboard's camera strip wants every Reolink camera live. On,
+    # the HTTP API asks Execution for the relays (`cam_stream all dash`,
+    # through Guardian) shortly after boot and again whenever none is
+    # live -- so a restart does not leave the TV grey until the page
+    # notices. Off, only the page asks, or a person does.
+    dash_cameras_live: bool = True
 
     def resolved_history_path(self) -> Path | None:
         return self.history_path.expanduser() if self.history_path is not None else None
@@ -144,4 +150,5 @@ class Config:
             dash_longitude=float(data.get("dash_longitude", default.dash_longitude)),
             dash_watchlist=tuple(str(s).strip().upper() for s in (data.get("dash_watchlist") or ()) if str(s).strip()),
             dash_majors=tuple(str(s).strip().upper() for s in (data.get("dash_majors") or ()) if str(s).strip()),
+            dash_cameras_live=bool(data.get("dash_cameras_live", default.dash_cameras_live)),
         )

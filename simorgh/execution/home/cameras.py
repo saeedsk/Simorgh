@@ -454,13 +454,19 @@ class CamStreamTool(_CameraTool):
         root = Path(getattr(ctx, "root", None) or getattr(ctx, "data_dir", ".") or ".")
         started: list[tuple[Camera, str]] = []
         failures: list[str] = []
-        for cam in cameras:
-            try:
-                rtsp = await nvr.stream_url(cam.channel, "sub")
-                url = await self._relay(binary, root, cam, rtsp)
-                started.append((cam, url))
-            except Exception as exc:  # noqa: BLE001
-                failures.append(f"{cam.name}: {exc}")
+
+        async def _one(cam: Camera):
+            rtsp = await nvr.stream_url(cam.channel, "sub")
+            return cam, await self._relay(binary, root, cam, rtsp)
+
+        # All at once: each relay waits up to 12 s for its first playlist,
+        # and seven of them in a row left the dashboard's strip half grey
+        # for over a minute after every restart (the creator, 2026-09-12).
+        for cam, outcome in zip(cameras, await asyncio.gather(*(_one(c) for c in cameras), return_exceptions=True)):
+            if isinstance(outcome, BaseException):
+                failures.append(f"{cam.name}: {outcome}")
+            else:
+                started.append(outcome)
         if not started:
             return ToolResult(ok=False, error="refused: " + "; ".join(failures))
         if mode == "full":

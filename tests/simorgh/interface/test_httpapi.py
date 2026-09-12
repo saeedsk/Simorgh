@@ -1177,6 +1177,71 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0], ("cam_stream", {"camera": "all", "mode": "dash"}, "dash"))
         self.assertEqual(calls[1][0], "ring_live"); self.assertEqual(calls[1][1]["camera"], "Front Door")
 
+    async def test_the_relays_are_asked_for_after_boot_and_the_streams_route_is_small_and_open(self):
+        from simorgh.interface import dispatch as dispatch_mod
+        calls = []
+
+        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout):
+            calls.append((tool, json.loads(raw)))
+            return dispatch_mod.Outcome("live in the dashboard's camera strip: Office")
+
+        class _Feeds:
+            live = False
+            async def start(self): pass
+            async def stop(self): pass
+            def streams(self): return [{"channel": 7, "name": "Office", "live": self.live, "url": "/tv/hls/7/index.m3u8", "at": 1.0}]
+            def cameras(self): return []
+            def ring_cameras(self): return []
+            def snapshot(self): return {}
+        original = dispatch_mod._run_tool
+        dispatch_mod._run_tool = _fake_run_tool
+        try:
+            feeds = _Feeds()
+            api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret", feeds=feeds, cameras_live=True,
+                          cameras_live_delay_s=0.05, cameras_live_every_s=0.05)
+            await api.start(); self.addAsyncCleanup(api.stop)
+            for _ in range(40):
+                await asyncio.sleep(0.02)
+                if calls:
+                    break
+            self.assertEqual(calls[0], ("cam_stream", {"camera": "all", "mode": "dash"}), "asked without the page")
+            feeds.live = True
+            n = len(calls)
+            await asyncio.sleep(0.2)
+            self.assertLessEqual(len(calls), n + 1, "not asked again while a relay is live")
+            st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/streams")
+            self.assertEqual(st, 200)
+            body = json.loads(b)
+            self.assertEqual(body["streams"][0]["name"], "Office"); self.assertIn("Office", body["asked"]["text"])
+        finally:
+            dispatch_mod._run_tool = original
+
+    async def test_asking_stops_for_this_boot_once_the_cameras_are_not_set_up(self):
+        from simorgh.interface import dispatch as dispatch_mod
+        calls = []
+
+        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout):
+            calls.append(tool)
+            return dispatch_mod.Outcome("refused: the NVR is not set up: `cameras setup <host> <username> <password>`")
+
+        class _Feeds:
+            async def start(self): pass
+            async def stop(self): pass
+            def streams(self): return []
+            def cameras(self): return []
+            def ring_cameras(self): return []
+            def snapshot(self): return {}
+        original = dispatch_mod._run_tool
+        dispatch_mod._run_tool = _fake_run_tool
+        try:
+            api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, feeds=_Feeds(), cameras_live=True,
+                          cameras_live_delay_s=0.02, cameras_live_every_s=0.02)
+            await api.start(); self.addAsyncCleanup(api.stop)
+            await asyncio.sleep(0.3)
+            self.assertEqual(calls, ["cam_stream"], "one refusal is enough until the next boot")
+        finally:
+            dispatch_mod._run_tool = original
+
     async def test_the_remote_page_is_open_and_posts_to_the_state_route(self):
         api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
         await api.start(); self.addAsyncCleanup(api.stop)
