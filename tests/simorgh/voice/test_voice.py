@@ -197,6 +197,33 @@ class PipelineOnAKernelTestCase(unittest.IsolatedAsyncioTestCase):
         off = await kernel.bus.request(kernel.bus.new(topics.VOICE_CONTROL_REQUEST, {"action": "off"}), timeout=60)
         self.assertFalse(off.payload["enabled"])
 
+    async def test_changing_the_voice_applies_live_and_only_an_engine_change_reopens_the_stack(self):
+        # 2026-09-11: every `voice set` tore down whisper, Kokoro and the
+        # microphone and rebuilt them; the creator trying voices heard
+        # Sim go dead for seconds each time ("sim talking on and off").
+        kernel = await self._kernel(fake_transcript="")
+        on = await kernel.bus.request(kernel.bus.new(topics.VOICE_CONTROL_REQUEST, {"action": "on"}), timeout=60)
+        self.assertTrue(on.payload["ok"], on.payload)
+
+        async def _set(key, value):
+            reply = await kernel.bus.request(kernel.bus.new(
+                topics.VOICE_CONTROL_REQUEST, {"action": "set", "key": key, "value": value}), timeout=60)
+            self.assertTrue(reply.payload["ok"], reply.payload)
+            self.assertTrue(reply.payload["enabled"], reply.payload)
+            return reply.payload["detail"]
+
+        detail = await _set("tts_voice", "af_jessica")
+        self.assertIn("tts_voice = 'af_jessica'", detail)
+        self.assertNotIn("listening again", detail, "a voice is read per request; nothing restarts")
+        self.assertNotIn("reopened", detail)
+        detail = await _set("backchannel", "off")
+        self.assertNotIn("listening again", detail)
+        detail = await _set("barge_in", "off")
+        self.assertIn("listening again with it", detail, "the turn rules are built into the session")
+        self.assertNotIn("reopened", detail)
+        detail = await _set("tts", "fake")
+        self.assertIn("engines reopened", detail)
+
     async def test_the_probes_reach_the_capabilities_stream(self):
         kernel = await self._kernel()
         events = await kernel.ledger.read("capabilities")

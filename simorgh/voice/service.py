@@ -48,6 +48,15 @@ _PRODUCES = (
 )
 
 
+# Which `voice set` keys need what. Engines are reopened only for a
+# different engine or detector; the session alone is rebuilt for the
+# rules it was constructed with; everything else is read per turn by
+# the running session and applies in place.
+_ENGINE_KEYS = frozenset({"stt", "tts", "tts_farsi_voice", "vad_sensitivity", "microphone", "speaker"})
+_SESSION_KEYS = frozenset({"barge_in", "endpoint_silence_ms", "min_speech_ms", "stt_partials", "connectors",
+                           "max_spoken_sentences"})
+
+
 def presence_probes() -> list[dict]:
     """What is installed, without loading any of it. Each entry is the
     shape `execution/capabilities.py` writes, so `capabilities` renders
@@ -359,14 +368,40 @@ class Service:
             except OSError as exc:
                 where = f"; NOT saved ({exc})"
         restarted = ""
-        if self._enabled and key not in ("keep_transcripts", "diagnostics", "speak_replies", "keep_audio"):
-            # The session was built from the old config: rebuild it.
+        if key == "enabled":
+            if value and not self._enabled:
+                ok, why = await self._turn_on()
+                restarted = " (listening)" if ok else f" (could not start: {why})"
+            elif not value and self._enabled:
+                await self._turn_off()
+                restarted = " (off)"
+        elif self._enabled and key in _ENGINE_KEYS:
+            # A different engine or detector: everything is reopened.
             await self._turn_off()
             if self._pipeline is not None:
                 await self._pipeline.stop()
                 self._pipeline = None
             ok, why = await self._turn_on()
+            restarted = " (engines reopened; listening again)" if ok else f" (could not restart: {why})"
+        elif self._enabled and key in _SESSION_KEYS:
+            # The conversation's rules changed; the engines have not.
+            await self._turn_off()
+            ok, why = await self._turn_on()
             restarted = " (listening again with it)" if ok else f" (could not restart: {why})"
+        else:
+            # Read per turn by the live session and pipeline: applied in
+            # place, nothing stops. Until 2026-09-11 every key tore the
+            # whole stack down -- whisper, Kokoro, the microphone -- and
+            # the creator, trying voices with `voice set tts_voice ...`
+            # thirteen times in twelve minutes, heard Sim go dead for
+            # seconds after each ("sim talking on and off").
+            if self._pipeline is not None:
+                self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
+            session = self._session
+            if session is not None:
+                session._config = self.config  # noqa: SLF001 -- read per request
+                if key == "auto_listen":
+                    session.turns.auto_listen = bool(value)
         return True, f"{key} = {value!r}{where}{restarted}"
 
     async def _on_bench(self, message) -> None:
