@@ -67,7 +67,8 @@ class CastTestCase(unittest.IsolatedAsyncioTestCase):
         tools, cast, bus = self._tools()
         result = await tools["cast_show"].run({}, ctx=_ctx(bus))
         self.assertTrue(result.ok, result.error)
-        self.assertEqual(cast.calls, [("show_page", "Living Room TV", "http://10.0.0.5:8765/tv?token=s3")])
+        self.assertEqual(cast.calls, [("show_page", "Living Room TV", "http://10.0.0.5:8765/dash?token=s3")],
+                         "the dashboard is what goes on the TV by default (the creator saw the bare terminal, 2026-09-12)")
         self.assertEqual(bus.published[-1].type, topics.TV_STATE)
         self.assertEqual(bus.published[-1].payload["mode"], "none")
         self.assertNotIn("s3", result.output, "the token is not echoed")
@@ -294,11 +295,13 @@ class DashViewTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.metadata["url"], "http://10.0.0.5:8765/remote?token=s3")
 
-    async def test_cast_show_can_put_the_dashboard_up_instead_of_the_terminal(self):
+    async def test_cast_show_puts_the_dashboard_up_by_default_and_the_bare_terminal_on_request(self):
         tools, cast, bus = self._tools()
-        result = await tools["cast_show"].run({"page": "dash"}, ctx=_ctx(bus))
+        result = await tools["cast_show"].run({}, ctx=_ctx(bus))
         self.assertTrue(result.ok, result.error)
         self.assertEqual(cast.calls[-1], ("show_page", "Living Room TV", "http://10.0.0.5:8765/dash?token=s3"))
         self.assertIn("dashboard", result.output)
-        result = await tools["cast_show"].run({"target": "dashboard"}, ctx=_ctx(bus))
-        self.assertEqual(cast.calls[-1][2], "http://10.0.0.5:8765/dash?token=s3", "the marker form names the page too")
+        result = await tools["cast_show"].run({"page": "tv"}, ctx=_ctx(bus))
+        self.assertEqual(cast.calls[-1][2], "http://10.0.0.5:8765/tv?token=s3")
+        result = await tools["cast_show"].run({"target": "terminal"}, ctx=_ctx(bus))
+        self.assertEqual(cast.calls[-1][2], "http://10.0.0.5:8765/tv?token=s3", "the marker form names the page too")

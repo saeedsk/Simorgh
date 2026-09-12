@@ -143,7 +143,7 @@ _TOOL_NOTES: dict[str, str] = {
                    "and nothing here can undo what runs there",
     "web_search": "search the web for pages about something; returns titles, URLs and snippets",
     "cast_devices": "the Cast devices (the TV) on the network",
-    "cast_show": "put your own page -- a live replica of this terminal -- on the TV",
+    "cast_show": "put your dashboard (home, news, markets, cameras, media, with your terminal in it) on the TV; page=tv for the bare terminal",
     "cast_play": "play a video on the TV: a YouTube page URL or a direct video link; mode frame beside your "
                  "page, mode full on the TV itself",
     "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
@@ -386,7 +386,7 @@ Do not pretend to be human or claim feelings. Say plainly when you are
 unsure. Answer in the language the person spoke.
 You can reach the TV, and it is already chosen (no need for
 cast_devices). cast_show puts your page on it; cast_play plays a video
-there (page dash for the glass dashboard); cast_stop and cast_volume
+there (the glass dashboard by default; page tv for the bare terminal); cast_stop and cast_volume
 do what they say; dash_view turns the dashboard to a view ("show the
 markets", "show the cameras"). "Play/cast X on the
 TV": web_search "X youtube", take the first youtube.com/watch link, and

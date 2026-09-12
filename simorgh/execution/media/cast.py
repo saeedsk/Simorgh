@@ -25,6 +25,7 @@ import json
 import re
 import socket
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -305,7 +306,9 @@ class _CastTool:
         """"" when the TV will be able to fetch the page, else why not."""
         if self._reachable is not None:
             return "" if self._reachable(url) else "the page did not answer"
-        status = url.split("/tv", 1)[0] + "/api/status"
+        # Whatever page the URL names, liveness is the API's own route on the same host.
+        parts = urllib.parse.urlsplit(url)
+        status = f"{parts.scheme}://{parts.netloc}/api/status"
         try:
             with urllib.request.urlopen(status, timeout=3.0) as response:  # noqa: S310 -- our own server
                 response.read(64)
@@ -351,19 +354,20 @@ class CastDevicesTool(_CastTool):
 
 class CastShowTool(_CastTool):
     name = "cast_show"
-    description = ("Put Sim's page on a Cast device (the TV): page tv is the live replica of its terminal with room "
-                   "for a video; page dash is the glass dashboard (home, news, markets, cameras, media, ambient). "
-                   "`url` shows another page instead. `device` names the TV when there are several.")
+    description = ("Put Sim's page on a Cast device (the TV). page dash (the default) is the glass dashboard -- home, "
+                   "news, markets, cameras, media, ambient, with Sim's terminal in it; page tv is the bare terminal "
+                   "replica with room for a video. `url` shows another page instead. `device` names the TV when "
+                   "there are several.")
     args_schema = {"type": "object", "properties": {"device": {"type": "string"}, "url": {"type": "string"},
                                                     "page": {"type": "string", "enum": ["tv", "dash"]}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         target = str(args.get("target") or "").strip()  # the marker form: a URL, a page name or a device name
         if target and not args.get("url") and not args.get("device") and not args.get("page"):
-            key = "url" if target.lower().startswith(("http://", "https://")) else ("page" if target.lower() in ("tv", "dash", "dashboard") else "device")
+            key = "url" if target.lower().startswith(("http://", "https://")) else ("page" if target.lower() in ("tv", "terminal", "tui", "dash", "dashboard") else "device")
             args = {**args, key: target}
-        page = str(args.get("page") or "tv").strip().lower()
-        page = "dash" if page in ("dash", "dashboard") else "tv"
+        page = str(args.get("page") or "dash").strip().lower()
+        page = "tv" if page in ("tv", "terminal", "tui") else "dash"
         url = str(args.get("url") or "").strip() or self._page_url(page)
         try:
             backend = self._backend()

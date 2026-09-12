@@ -329,7 +329,7 @@ class TvCommandTestCase(unittest.IsolatedAsyncioTestCase):
         try:
             for line in ("tv setup", "tv devices", "tv use Living Room TV", "tv show", "tv show Bedroom", "tv", "tv video https://x/clip.mp4",
                          "tv video https://x/clip.mp4 full Living Room TV", "tv stop", "tv stop frame", "tv volume 35",
-                         "tv show dash", "tv dash", "tv view markets 1W amd", "tv rotate 45", "tv rotate off", "tv remote"):
+                         "tv show dash", "tv dash", "tv show tv", "tv view markets 1W amd", "tv rotate 45", "tv rotate off", "tv remote"):
                 await dispatch_mod.dispatch(parse(line), bus=None, clock=_Clock(), session_id="s1", vitals=None,
                                             ledger=None)
         finally:
@@ -340,7 +340,7 @@ class TvCommandTestCase(unittest.IsolatedAsyncioTestCase):
             ("cast_play", {"url": "https://x/clip.mp4", "mode": "frame"}),
             ("cast_play", {"url": "https://x/clip.mp4", "mode": "full", "device": "Living Room TV"}),
             ("cast_stop", {}), ("cast_stop", {"what": "frame"}), ("cast_volume", {"level": 35.0}),
-            ("cast_show", {"page": "dash"}), ("cast_show", {"page": "dash"}),
+            ("cast_show", {"page": "dash"}), ("cast_show", {"page": "dash"}), ("cast_show", {"page": "tv"}),
             ("dash_view", {"view": "markets", "timeframe": "1W", "symbol": "AMD"}),
             ("dash_view", {"rotate_s": 45.0}), ("dash_view", {"rotate_s": 0.0}), ("dash_view", {"action": "remote"}),
         ])

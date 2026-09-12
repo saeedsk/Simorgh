@@ -4811,3 +4811,10 @@ Still ahead, roughly in order:
     CLI's own startup banner -- splash, wordmark, epigraph, quick
     commands -- and the page turns the SGR codes into spans; activity
     lines push it up like any scrollback.
+
+    **Later the same night:** the TV showed "pure sim tui (black screen
+    with sim terminal text) and not the dashboard" -- `tv show` still
+    cast `/tv`. The dashboard is now what `cast_show` puts up by
+    default; `tv show tv` is the bare terminal. The reachability probe
+    derived `/api/status` by splitting the URL at `/tv`, which a `/dash`
+    URL never matched; it now takes scheme and host from the URL.

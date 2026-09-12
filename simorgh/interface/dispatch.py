@@ -758,8 +758,8 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         payload = {}
         if verb != "show":
             payload["page"] = "dash"
-        if rest and rest[0].lower() in ("tv", "dash", "dashboard"):
-            payload["page"] = "dash" if rest[0].lower() != "tv" else "tv"
+        if rest and rest[0].lower() in ("tv", "terminal", "tui", "dash", "dashboard"):
+            payload["page"] = "tv" if rest[0].lower() in ("tv", "terminal", "tui") else "dash"
             rest = rest[1:]
         if rest:
             payload["url" if rest[0].startswith(("http://", "https://")) else "device"] = " ".join(rest)
