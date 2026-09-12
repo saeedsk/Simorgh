@@ -33,10 +33,16 @@ This package owns only the audio.
   on a synthetic echo (>20 dB ERLE); a real room needs a recording to tune, which is why
   it is off until then. The level gate is the default and the fallback.
 - **Barge-in**: the mic stays open while Sim speaks; `barge_in_speech_ms` of a
-  person's speech, measured over the level the mic hears of Sim's own voice
-  (the first frames of each reply calibrate the floor), stops playback at once,
-  and the interrupting words become the next turn. Headphones make it
-  bulletproof; on a laptop's speakers the echo calibration carries it.
+  person's speech, louder than Sim's own voice is expected to be at the mic
+  right then, stops playback at once, and the interrupting words become the
+  next turn. That expectation comes from what is PLAYING (`vad.EchoTracker`):
+  the loudness envelope of the audio handed to the speaker, scaled by a gain
+  learnt from the first `barge_in_calibrate_ms` of each reply -- never from
+  what the mic hears afterwards, which may be the person. A bar learnt from
+  the mic failed twice: frozen early it sat under Kokoro's later swell and Sim
+  interrupted itself; raised by every frame it included the person's own voice
+  and nobody could interrupt at all (2026-09-11). Headphones make it
+  bulletproof; on a laptop's speakers the reference carries it.
 - A reply that is not back within `reply_timeout_s` is spoken as
   "I'm still working on that", never silence.
 - Privacy defaults from the design: audio is not kept unless

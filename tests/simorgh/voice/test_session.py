@@ -264,6 +264,140 @@ class TestStaleAndEcho(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(task, timeout=3.0)
 
 
+class TestBargeInWithTheRealLevelGate(unittest.IsolatedAsyncioTestCase):
+    """The scripted detector above says what it is told. These use the
+    real level gate (EnergyDetector inside CompositeDetector) with a
+    microphone whose frames have real loudness, because that is where
+    barge-in broke on 2026-09-11: the gate learnt its bar from every
+    frame it heard, the person's included, so nobody could ever be
+    louder than the bar and Sim never stopped."""
+
+    async def _speaking_session(self, echo_rms: float, person_rms: float, *, calibrate_ms: int = 300):
+        import array
+        import math
+
+        from simorgh.voice.vad import CompositeDetector, EnergyDetector
+
+        class Voiced:
+            """Silero's stand-in: anything with sound in it is a voice --
+            Sim's echo as much as a person."""
+            name = "voiced"
+
+            def is_speech(self, frame: bytes) -> bool:
+                return EnergyDetector.rms(frame) > 250.0
+
+        class LevelMic(FakeMicrophone):
+            """Frames at whatever RMS the test says right now."""
+
+            def __init__(self) -> None:
+                super().__init__(silence(0.03), frame_delay=0.0005)
+                self.rms = 100.0
+
+            async def stream(self, *, max_seconds: float = 0.0):
+                n = SAMPLE_RATE * 30 // 1000
+                while True:
+                    await asyncio.sleep(self._delay)
+                    amp = self.rms * math.sqrt(2)
+                    yield array.array("h", [int(amp * math.sin(i / 3)) for i in range(n)]).tobytes()
+
+        class ToneSynth(FakeSynthesiser):
+            """A reply with real level, 3 s long, so the reference has an envelope."""
+
+            async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
+                self.spoken.append(text)
+                n = int(3.0 * SAMPLE_RATE)
+                return Audio(array.array("h", [int(8000 * math.sin(i / 3)) for i in range(n)]).tobytes())
+
+        config = _config(barge_in_calibrate_ms=calibrate_ms, barge_in_ratio=2.8)
+        bus = _Bus()
+        mic = LevelMic()
+        speaker = FakeSpeaker(realtime=True)
+        stt = FakeRecogniser("what time is it", 0.95)
+        tts = ToneSynth()
+        detector = CompositeDetector(Voiced(), EnergyDetector(0.5))
+        pipeline = Pipeline(bus=bus, clock=None, logger=None, ledger=None, config=config, microphone=mic,
+                            speaker=speaker, recogniser=stt, synthesiser=tts, detector_factory=lambda: detector)
+        replies = _Replies(["A long answer, spoken as a three second tone."])
+        pipeline.ask = replies.ask  # type: ignore[method-assign]
+        session = VoiceSession(pipeline=pipeline, config=config, microphone=mic, speaker=speaker, recogniser=stt,
+                               synthesiser=tts, detector_factory=lambda: detector)
+        return session, mic, speaker, replies, bus
+
+    async def _until(self, predicate, seconds: float) -> bool:
+        deadline = asyncio.get_running_loop().time() + seconds
+        while asyncio.get_running_loop().time() < deadline:
+            if predicate():
+                return True
+            await asyncio.sleep(0.01)
+        return predicate()
+
+    async def _drive(self, mic, session, echo_rms: float, person_rms: float, *, person_after_s: float) -> None:
+        # A quiet room first, so the gate learns its floor from the room
+        # and not from the person's opening word; then the person asks
+        # something (loud), then quiet; Sim answers.
+        await asyncio.sleep(0.3)
+        mic.rms = 6000.0
+        self.assertTrue(await self._until(lambda: session.state == USER_SPEAKING, 3.0), session.state)
+        await asyncio.sleep(0.3)
+        mic.rms = 100.0
+        self.assertTrue(await self._until(lambda: session.state == AGENT_SPEAKING, 5.0), session.state)
+        # Sim is speaking: the mic hears its echo at `echo_rms`...
+        mic.rms = echo_rms
+        await asyncio.sleep(person_after_s)
+        # ...and then the person, at `person_rms`, for as long as it takes.
+        mic.rms = person_rms
+
+    async def test_a_person_louder_than_sims_echo_stops_sim(self) -> None:
+        session, mic, speaker, replies, bus = await self._speaking_session(echo_rms=2000.0, person_rms=9000.0)
+        stop = asyncio.Event()
+        task = asyncio.create_task(session.run(stop))
+        try:
+            await self._drive(mic, session, 2000.0, 9000.0, person_after_s=0.6)
+            t0 = asyncio.get_running_loop().time()
+            stopped = await self._until(lambda: session.stats.interruptions >= 1 and not session._player.playing, 2.5)  # noqa: SLF001
+            self.assertTrue(stopped, f"Sim did not stop; state={session.state}")
+            self.assertLess(asyncio.get_running_loop().time() - t0, 2.0)
+            self.assertGreaterEqual(speaker.stopped, 1)
+            mic.rms = 100.0
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=3.0)
+
+    async def test_sims_own_echo_however_loud_does_not_stop_sim(self) -> None:
+        # The echo is 2000 for the whole reply; nobody speaks. Sim must
+        # finish all three seconds and go back to listening.
+        session, mic, speaker, replies, bus = await self._speaking_session(echo_rms=2000.0, person_rms=2000.0)
+        stop = asyncio.Event()
+        task = asyncio.create_task(session.run(stop))
+        try:
+            await self._drive(mic, session, 2000.0, 2000.0, person_after_s=0.2)
+            finished = await self._until(lambda: session.stats.turns >= 1, 6.0)
+            mic.rms = 100.0
+            self.assertTrue(finished, session.state)
+            self.assertEqual(session.stats.interruptions, 0)
+            self.assertEqual(speaker.stopped, 0)
+            self.assertEqual(len(replies.asked), 1, "Sim's echo was not a turn")
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=3.0)
+
+    async def test_the_person_can_be_quieter_than_the_bar_learnt_from_themselves(self) -> None:
+        # The regression itself: the person talks at 5000 -- louder than
+        # the echo, quieter than 2.8 x their own level. With a bar learnt
+        # from the mic they could never win; from the reference they do.
+        session, mic, speaker, replies, bus = await self._speaking_session(echo_rms=1500.0, person_rms=5000.0)
+        stop = asyncio.Event()
+        task = asyncio.create_task(session.run(stop))
+        try:
+            await self._drive(mic, session, 1500.0, 5000.0, person_after_s=0.6)
+            stopped = await self._until(lambda: session.stats.interruptions >= 1, 2.5)
+            mic.rms = 100.0
+            self.assertTrue(stopped, f"Sim did not stop; state={session.state}")
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=3.0)
+
+
 if __name__ == "__main__":
     unittest.main()
 

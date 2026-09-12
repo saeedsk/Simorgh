@@ -60,9 +60,12 @@ class StreamingPlayer:
                 await result
 
     async def play_stream(self, chunks, *, request_id: str, on_first_audio=None,
-                          on_chunk=None) -> PlaybackReport:
+                          on_chunk=None, on_play=None) -> PlaybackReport:
         """Play `chunks` (an async iterable of `AudioChunk`) for
-        `request_id` until they end or `stop()` is called."""
+        `request_id` until they end or `stop()` is called. `on_play` is
+        told each run of `Audio` the instant it goes to the speaker --
+        the reference for anything that must know what the room is
+        about to hear."""
         report = PlaybackReport(request_id=request_id)
         self.last_report = report
         self._current = request_id
@@ -117,6 +120,10 @@ class StreamingPlayer:
                         result = on_chunk(c)
                         if asyncio.iscoroutine(result):
                             await result
+                if on_play is not None:
+                    result = on_play(audio)
+                    if asyncio.iscoroutine(result):
+                        await result
                 self._playing = asyncio.create_task(self._speaker.play(audio))
                 try:
                     await self._playing

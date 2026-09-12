@@ -37,7 +37,7 @@ from .playback import StreamingPlayer
 from .stt.streaming import IncrementalRecogniser
 from .tts.streaming import StreamingSynthesiser
 from .turns import AGENT_SPEAKING, Actions, LISTENING, Policy, THINKING, TurnManager, USER_SPEAKING
-from .vad import CompositeDetector, EnergyDetector, FrameVad, threshold_for
+from .vad import CompositeDetector, EchoTracker, EnergyDetector, FrameVad, threshold_for
 
 _END = object()
 _PREROLL_FRAMES = 20  # 600 ms of audio kept from before speech was noticed
@@ -114,8 +114,11 @@ class VoiceSession:
         self._ask_task: asyncio.Task | None = None
         self._speak_task: asyncio.Task | None = None
         self._preroll: deque[bytes] = deque(maxlen=_PREROLL_FRAMES)
-        self._reference: deque[bytes] = deque()
-        self._echo_rms = 0.0
+        # Sim's own voice at the microphone, expected frame by frame
+        # from what is playing (vad.EchoTracker) -- the bar a person
+        # must clear to interrupt, and the reason Sim's echo is not a
+        # turn. Fed by every playback, the ack and `say` included.
+        self._echo = EchoTracker(calibrate_frames=max(1, config.barge_in_calibrate_ms // 30))
         self._detector = None
         self._vad: FrameVad | None = None
         self._turns_since_connector = 99
@@ -196,13 +199,19 @@ class VoiceSession:
 
     async def _on_frame(self, frame: bytes) -> None:
         assert self._vad is not None
-        speaking = self.turns.state == AGENT_SPEAKING
-        if speaking and self._detector is not None and hasattr(self._detector, "raise_floor"):
-            # Sim's own voice at the microphone: the floor a person must
-            # clear is its loudest moment so far (vad.BargeInEndpointer).
-            rms = self._detector.rms(frame) if hasattr(self._detector, "rms") else 0.0
-            self._echo_rms = max(self._echo_rms, rms)
-            self._detector.raise_floor(self._echo_rms)
+        now = self._now()
+        set_echo = getattr(self._detector, "set_echo", None)
+        if set_echo is not None:
+            if self._echo.active(now):
+                # Sim may be audible: the bar is what the reference says
+                # the mic should hear of it now, never what the mic
+                # heard -- the mic frame may be the person. Only the
+                # calibration frames of a reply teach the gain.
+                rms = self._detector.rms(frame) if hasattr(self._detector, "rms") else 0.0
+                self._echo.observe(rms, now)
+                set_echo(self._echo.expected(now))
+            else:
+                self._detector.clear_echo()
         event = self._vad.process(frame)
         before = self.turns.state
         actions = self.turns.handle_vad(event)
@@ -388,7 +397,7 @@ class VoiceSession:
             return  # something is being said already; an "Okay." over it is noise
         try:
             async with lock:
-                await self._player.play_stream(self._tts.synthesise_stream(request), request_id=request.request_id)
+                await self._play(self._tts.synthesise_stream(request), request_id=request.request_id)
         except Exception as exc:  # noqa: BLE001
             self._log("warning", "voice.ack_failed", error=repr(exc))
             return
@@ -421,8 +430,6 @@ class VoiceSession:
             self._turns_since_connector += 1
         request = TtsRequest(request_id=response_id, pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
                              voice=self._config.tts_voice, speed=self._config.tts_speed)
-        self._echo_rms = 0.0
-        self._reference.clear()
         self._pipeline.speaking = True
 
         def _first_audio(seconds: float) -> None:
@@ -430,8 +437,8 @@ class VoiceSession:
 
         try:
             async with self._pipeline.speech_lock:
-                report = await self._player.play_stream(self._tts.synthesise_stream(request), request_id=response_id,
-                                                        on_first_audio=_first_audio)
+                report = await self._play(self._tts.synthesise_stream(request), request_id=response_id,
+                                          on_first_audio=_first_audio)
         except Exception as exc:  # noqa: BLE001 -- a reply that could not be spoken is logged, not fatal
             self._log("warning", "voice.reply_not_spoken", error=repr(exc))
             self.turns.handle_playback_state(PlaybackState("finished", response_id))
@@ -471,7 +478,6 @@ class VoiceSession:
         request = TtsRequest(request_id=request_id or f"say-{uuid.uuid4().hex[:8]}",
                              pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
                              voice=self._config.tts_voice, speed=self._config.tts_speed)
-        self._echo_rms = 0.0
         entered_from = self.turns.state
         if entered_from == LISTENING:
             self.turns.state = AGENT_SPEAKING
@@ -480,8 +486,7 @@ class VoiceSession:
         self._pipeline.speaking = True
         try:
             async with self._pipeline.speech_lock:
-                report = await self._player.play_stream(self._tts.synthesise_stream(request),
-                                                        request_id=request.request_id)
+                report = await self._play(self._tts.synthesise_stream(request), request_id=request.request_id)
         finally:
             self._pipeline.speaking = False
             if self.turns.state == AGENT_SPEAKING and entered_from == LISTENING:
@@ -492,6 +497,16 @@ class VoiceSession:
             "text": plan.text, "seconds": report.seconds, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
             "device": self._config.device, "interrupted": report.interrupted})
         return plan.text
+
+    async def _play(self, chunks, *, request_id: str, **kw):
+        """Every playback goes through here so the echo tracker is told
+        what the room is about to hear -- a reply, the ack, `say`."""
+        self._echo.start()
+
+        def _reference(audio: Audio) -> None:
+            self._echo.play(audio, at=self._now())
+
+        return await self._player.play_stream(chunks, request_id=request_id, on_play=_reference, **kw)
 
     async def _on_playback_state(self, state: PlaybackState) -> None:
         if state.request_id.startswith(("ack-", "say-")):

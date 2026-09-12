@@ -166,6 +166,23 @@ class EchoByContentTestCase(unittest.TestCase):
         from simorgh.voice.pipeline import is_echo
         self.assertFalse(is_echo("yes", "yes, that is right, yes"))
 
+    def test_a_short_sentence_of_common_words_is_not_an_echo_of_a_long_reply(self):
+        # 2026-09-11: "Can you hear me?" and "I said fix it." were both
+        # dropped as Sim's own voice -- three of their four words appear
+        # somewhere in a forty-word reply. Words must come back in runs.
+        from simorgh.voice.pipeline import is_echo
+        said = ("That's a real problem the interruption isn't reaching me while I'm talking, so my voice plays "
+                "to the end no matter what you do. I need to look at how the playback loop handles stopping "
+                "before I can fix it. Let me check.")
+        self.assertFalse(is_echo("Can you hear me?", said))
+        self.assertFalse(is_echo("I said fix it.", said))
+        self.assertFalse(is_echo("no, look at me, not the loop", said))
+
+    def test_the_tail_of_a_reply_coming_back_is_an_echo(self):
+        from simorgh.voice.pipeline import is_echo
+        said = "Yeah, I hear you -- clear as always. Your words came through whole, and I'm here."
+        self.assertTrue(is_echo("Your words came through whole and I'm here.", said))
+
 
 class EchoIsNotATurnTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_heard_echo_of_the_last_reply_is_dropped_before_sim_sees_it(self):

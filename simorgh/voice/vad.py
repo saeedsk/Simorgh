@@ -28,12 +28,28 @@ class EnergyDetector:
         # sit: 0.5 -> 6 dB, 1.0 -> 12 dB.
         self._ratio = 10 ** (0.6 * max(0.05, min(1.0, threshold)))
         self._floor: float | None = None
+        # What the microphone is expected to hear of Sim's own voice
+        # RIGHT NOW (`set_echo`); 0 when nothing is playing. It is a bar
+        # alongside the room floor, not part of it: the floor learns the
+        # room through silence and must not learn Sim.
+        self._echo = 0.0
 
     def raise_floor(self, rms: float) -> None:
         """Treat `rms` as silence from now on. Used while Sim speaks:
         the microphone hears the speakers, and that echo must not count
         as a person talking."""
         self._floor = max(self._floor or 0.0, rms, 1.0)
+
+    def set_echo(self, rms: float) -> None:
+        """The level of Sim's own voice expected at the microphone for
+        the next frame -- from what is PLAYING, never from what the mic
+        hears, so a person talking cannot raise the bar against
+        themselves. `inf` while that level is still being learnt: then
+        nothing is speech."""
+        self._echo = max(0.0, float(rms))
+
+    def clear_echo(self) -> None:
+        self._echo = 0.0
 
     def set_ratio(self, ratio: float) -> None:
         """How many times louder than the floor speech must be."""
@@ -52,9 +68,11 @@ class EnergyDetector:
         if self._floor is None:
             self._floor = max(rms, 1.0)
             return False
-        speech = rms > self._floor * self._ratio and rms > 200.0
-        if not speech:
-            # Track the floor only through silence, slowly.
+        bar = max(self._floor, self._echo)
+        speech = rms > bar * self._ratio and rms > 200.0
+        if not speech and not self._echo:
+            # Track the floor only through silence, slowly -- and never
+            # while Sim is playing: its echo is not the room.
             self._floor = 0.95 * self._floor + 0.05 * max(rms, 1.0)
         return speech
 
@@ -122,6 +140,16 @@ class CompositeDetector:
         set_ratio = getattr(self._level, "set_ratio", None)
         if set_ratio is not None:
             set_ratio(ratio)
+
+    def set_echo(self, rms: float) -> None:
+        set_echo = getattr(self._level, "set_echo", None)
+        if set_echo is not None:
+            set_echo(rms)
+
+    def clear_echo(self) -> None:
+        clear_echo = getattr(self._level, "clear_echo", None)
+        if clear_echo is not None:
+            clear_echo()
 
     @staticmethod
     def rms(frame: bytes) -> float:
@@ -277,6 +305,146 @@ class BargeInEndpointer(Endpointer):
         return False
 
 
+
+def frame_levels(pcm: bytes, sample_rate: int, *, frame_ms: int = 30) -> list[float]:
+    """RMS per `frame_ms` frame of int16 PCM, at any sample rate: the
+    loudness envelope of a piece of audio."""
+    step = max(1, sample_rate * frame_ms // 1000) * SAMPLE_WIDTH
+    try:
+        import numpy as np
+
+        samples = np.frombuffer(pcm[: len(pcm) - len(pcm) % SAMPLE_WIDTH], dtype=np.int16).astype(np.float64)
+        n = step // SAMPLE_WIDTH
+        if n <= 0 or not len(samples):
+            return []
+        whole = len(samples) // n * n
+        out = np.sqrt(np.mean(samples[:whole].reshape(-1, n) ** 2, axis=1)).tolist() if whole else []
+        if whole < len(samples):
+            out.append(float(np.sqrt(np.mean(samples[whole:] ** 2))))
+        return [float(x) for x in out]
+    except ImportError:
+        return [EnergyDetector.rms(pcm[i:i + step]) for i in range(0, len(pcm), step)]
+
+
+class EchoTracker:
+    """What the microphone should be hearing of Sim's own voice, frame
+    by frame, worked out from what is being PLAYED.
+
+    The level gate for barge-in needs a bar: "louder than Sim". The
+    first two versions learnt that bar from the microphone -- the
+    loudest frame heard while Sim spoke -- and both failed, in opposite
+    ways. Frozen after a calibration window, the bar sat below Kokoro's
+    later, louder syllables, and Sim interrupted itself. Raised by every
+    frame for the whole reply, the bar included the person's own frames
+    the moment they spoke, and since a frame is never 2.8 times louder
+    than a bar that already contains it, no one could interrupt Sim at
+    all (the creator, 2026-09-11: "I tried to cut you off or stop you
+    like 10 times but you didn't stop").
+
+    So the bar comes from the reference instead. `play(audio)` is told
+    each run of audio as it goes to the speaker, with the time it went;
+    `expected(now)` is the loudest reference frame in a window around
+    `now` -- wide enough for the speaker's latency and the room's tail
+    -- scaled by `gain`, the ratio of what the mic hears to what is
+    played. The gain is learnt once per reply from the first
+    `calibrate_frames` mic frames, during which nothing may interrupt
+    (`calibrating`), and carried to the next reply as its starting
+    point. The person cannot raise the bar against themselves: their
+    voice is not in the reference. Kokoro's swell cannot beat it either:
+    when the reference is loud the bar is loud, and in a pause between
+    sentences it drops to the room, so a person can cut in there at once.
+    """
+
+    # The reference window, relative to a mic frame's arrival: playback
+    # starts a beat late (afplay spawns; PortAudio buffers) and the room
+    # rings on after each syllable, so the echo of a reference frame
+    # reaches the mic anything up to half a second AFTER it was queued.
+    BEFORE_S = 0.5
+    AFTER_S = 0.15
+    MIN_REFERENCE = 100.0  # below this the reference is silence; it teaches no gain
+
+    def __init__(self, *, calibrate_frames: int = 40, gain: float = 0.0) -> None:
+        self._calibrate = max(1, int(calibrate_frames))
+        self._runs: list[tuple[float, float, list[float]]] = []  # (started_at, frame_s, levels)
+        self._ends_at = 0.0
+        self.gain = float(gain)      # mic RMS per reference RMS; 0 = not yet learnt
+        self._learnt = 0.0           # this reply's estimate so far
+        self._seen = 0               # calibration frames used this reply
+        self.replies = 0
+
+    # -- what is playing --------------------------------------------------------------------------
+    def start(self) -> None:
+        """A new playback: forget the old reference, learn the gain afresh."""
+        self._runs.clear()
+        self._ends_at = 0.0
+        self._learnt = 0.0
+        self._seen = 0
+        self.replies += 1
+
+    def play(self, audio, *, at: float) -> None:
+        """`audio` was handed to the speaker at monotonic time `at`."""
+        levels = frame_levels(audio.pcm, audio.sample_rate)
+        if not levels:
+            return
+        frame_s = 0.03
+        self._runs.append((at, frame_s, levels))
+        self._ends_at = max(self._ends_at, at + frame_s * len(levels))
+
+    @property
+    def playing(self) -> bool:
+        return bool(self._runs)
+
+    def active(self, now: float) -> bool:
+        """Whether the microphone may still be hearing Sim at `now`."""
+        return bool(self._runs) and now <= self._ends_at + self.BEFORE_S
+
+    @property
+    def calibrating(self) -> bool:
+        """Still learning this reply's gain with no earlier one to go
+        on: the only time a person cannot interrupt."""
+        return bool(self._runs) and self._seen < self._calibrate and self.gain <= 0.0
+
+    def reference(self, now: float) -> float:
+        """The loudest reference frame that could be reaching the mic now."""
+        lo, hi = now - self.BEFORE_S, now + self.AFTER_S
+        peak = 0.0
+        for started, frame_s, levels in self._runs:
+            first = max(0, int((lo - started) / frame_s))
+            last = min(len(levels), int((hi - started) / frame_s) + 1)
+            if first < last:
+                peak = max(peak, max(levels[first:last]))
+        return peak
+
+    # -- what the mic hears ---------------------------------------------------------------------------
+    def observe(self, mic_rms: float, now: float) -> None:
+        """One mic frame while Sim plays. During calibration it teaches
+        the gain; afterwards it teaches nothing -- it may be the person."""
+        if self._seen >= self._calibrate:
+            return
+        ref = self.reference(now)
+        if ref < self.MIN_REFERENCE:
+            return  # the reference is silent here: the mic hears the room, not Sim
+        self._seen += 1
+        self._learnt = max(self._learnt, mic_rms / ref)
+        if self._seen >= self._calibrate and self._learnt > 0.0:
+            # This reply's measurement replaces the last one's: the
+            # volume may have changed between them.
+            self.gain = self._learnt
+
+    def expected(self, now: float) -> float:
+        """Sim's own voice at the mic, expected now. `inf` while the gain
+        for this reply is still being learnt and none is known from an
+        earlier one -- then nothing may count as a person."""
+        if not self.active(now):
+            return 0.0
+        if self.calibrating:
+            return float("inf")
+        # Learning still (a later reply): the last reply's gain, or this
+        # one's so far if the volume has gone up since.
+        gain = max(self.gain, self._learnt) if self._seen < self._calibrate else self.gain
+        return gain * self.reference(now)
+
+
 def open_detector(preferred: str = "auto", *, threshold: float = 0.5) -> tuple[object, str]:
     """`(detector, note)`. Never fails: the energy detector needs nothing."""
     if preferred in ("auto", "silero"):
@@ -292,7 +460,7 @@ def open_detector(preferred: str = "auto", *, threshold: float = 0.5) -> tuple[o
     return EnergyDetector(threshold), ""
 
 
-__all__ = ["FrameVad", "SENSITIVITY", "threshold_for", "BargeInEndpointer", "CompositeDetector", "EnergyDetector", "Endpointer", "SileroDetector", "open_detector"]
+__all__ = ["FrameVad", "SENSITIVITY", "threshold_for", "BargeInEndpointer", "CompositeDetector", "EchoTracker", "EnergyDetector", "Endpointer", "SileroDetector", "frame_levels", "open_detector"]
 
 
 class FrameVad:

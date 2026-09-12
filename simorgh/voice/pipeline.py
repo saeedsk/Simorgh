@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections import deque
+import difflib
 import re
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 
 from simorgh.contracts import topics
@@ -54,26 +55,34 @@ def _aec_available() -> bool:
 _WORD = re.compile(r"[a-z0-9']+")
 
 
-def is_echo(heard: str, said: str, *, min_words: int = 4, overlap: float = 0.6) -> bool:
+def is_echo(heard: str, said: str, *, min_words: int = 4, overlap: float = 0.6, run: int = 3) -> bool:
     """Whether `heard` is Sim's own reply coming back through the mic.
 
     The energy gate in `vad.BargeInEndpointer` is the first defence and
     it is only a level: a loud enough speaker beats it. This is the
     second, and it needs no acoustics -- Sim knows what it just said,
     and a person does not repeat Sim's reply back word for word. Most of
-    the heard words appearing in the said text, in a heard utterance of
-    a few words or more, is an echo. The creator's screen, 2026-09-11:
-    Sim's whole benchmark reply came back as the next "you:" and Sim
-    answered "You're echoing my own question back at me again."
+    the heard words lying in RUNS of `run` or more consecutive words
+    that Sim said consecutively, in a heard utterance of a few words or
+    more, is an echo. The creator's screen, 2026-09-11: Sim's whole
+    benchmark reply came back as the next "you:" and Sim answered
+    "You're echoing my own question back at me again."
+
+    Runs, not a bag of words: the first version counted any heard word
+    that appeared anywhere in the reply, and a long reply contains most
+    short sentences' words. "Can you hear me?" and "I said fix it." were
+    both thrown away as Sim's own voice (2026-09-11), three of four
+    words each being somewhere in a reply of forty.
     """
     heard_words = _WORD.findall((heard or "").lower())
     if len(heard_words) < min_words:
         return False
-    said_words = set(_WORD.findall((said or "").lower()))
+    said_words = _WORD.findall((said or "").lower())
     if not said_words:
         return False
-    hits = sum(1 for w in heard_words if w in said_words)
-    return hits / len(heard_words) >= overlap
+    matcher = difflib.SequenceMatcher(None, heard_words, said_words, autojunk=False)
+    covered = sum(block.size for block in matcher.get_matching_blocks() if block.size >= run)
+    return covered / len(heard_words) >= overlap
 
 
 def spoken_form(text: str) -> str:
