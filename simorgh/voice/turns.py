@@ -50,6 +50,7 @@ class Policy:
     # How much continuous speech over Sim's own voice counts as a person
     # cutting in (the level gate and echo cancellation sit in the VAD).
     barge_in_speech_ms: int = 650
+    frame_ms: int = 30
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,7 @@ class TurnManager:
         self.turn_id += 1
         self.partial = ""
         self.speech_ms = 0
+        self.speech_total_ms = 0
         self._awaiting_final = False
         self._go(USER_SPEAKING, why)
         return [Action(Actions.CAPTURE_START, turn_id=self.turn_id)]
@@ -159,17 +161,23 @@ class TurnManager:
             return []
         if event.kind in ("speech_start", "speech"):
             self.speech_ms = max(self.speech_ms, event.speech_ms)
+            # Every voiced frame counts towards "was that a turn", not
+            # only the longest unbroken run: a quiet speaker's frames
+            # come through chopped, and a 3 s sentence of 100 ms runs
+            # was "too short" (2026-09-11).
+            self.speech_total_ms += self.policy.frame_ms
             total_ms = self.speech_ms + event.silence_ms
             if total_ms >= self.policy.max_turn_ms:
                 return self._finalise("max turn length")
             return []
         # silence or speech_end
-        if self.speech_ms < self.policy.min_speech_ms and event.silence_ms >= self.policy.end_of_turn_silence_ms:
+        spoken_ms = max(self.speech_ms, getattr(self, "speech_total_ms", 0))
+        if spoken_ms < self.policy.min_speech_ms and event.silence_ms >= self.policy.end_of_turn_silence_ms:
             turn = self.turn_id
             # Back to waiting for the answer, if one is still owed.
             self._go(THINKING if self._asked_turn else LISTENING, "too short")
             return [Action(Actions.DISCARD, turn_id=turn, reason="too short to be a turn")]
-        if self.speech_ms >= self.policy.min_speech_ms and event.silence_ms >= self._required_silence_ms():
+        if spoken_ms >= self.policy.min_speech_ms and event.silence_ms >= self._required_silence_ms():
             return self._finalise("end of turn")
         return []
 

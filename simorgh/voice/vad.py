@@ -18,6 +18,15 @@ import math
 from .api import SAMPLE_RATE, SAMPLE_WIDTH
 
 
+# Below this a frame is never speech, whatever the floor: the hum of a
+# quiet room, a breath. It was 200 until 2026-09-11, which a quiet
+# speaker across the desk sat right on top of -- half their frames
+# passed, half did not, and a turn of chopped-up fragments came out
+# "too short". Silero, not the level, is what tells a voice from a
+# keyboard now; this only has to reject near-silence.
+MIN_SPEECH_RMS = 60.0
+
+
 class EnergyDetector:
     """Speech = RMS well above a running estimate of the noise floor."""
 
@@ -33,12 +42,19 @@ class EnergyDetector:
         # alongside the room floor, not part of it: the floor learns the
         # room through silence and must not learn Sim.
         self._echo = 0.0
+        # The stricter ratio (`set_ratio`, 2.8 for barge-in) applies only
+        # while there is an echo to be louder than -- Sim playing, or a
+        # floor raised to Sim's level. With nothing playing, the person
+        # need only clear the room by the sensitivity's own margin.
+        self._echo_ratio: float | None = None
+        self._raised = False
 
     def raise_floor(self, rms: float) -> None:
         """Treat `rms` as silence from now on. Used while Sim speaks:
         the microphone hears the speakers, and that echo must not count
         as a person talking."""
         self._floor = max(self._floor or 0.0, rms, 1.0)
+        self._raised = True
 
     def set_echo(self, rms: float) -> None:
         """The level of Sim's own voice expected at the microphone for
@@ -52,15 +68,24 @@ class EnergyDetector:
         self._echo = 0.0
 
     def set_ratio(self, ratio: float) -> None:
-        """How many times louder than the floor speech must be."""
-        self._ratio = max(1.1, float(ratio))
+        """How many times louder than Sim's echo a person must be."""
+        self._echo_ratio = max(1.1, float(ratio))
 
     @staticmethod
     def rms(frame: bytes) -> float:
         samples = array.array("h", frame)
         return math.sqrt(sum(s * s for s in samples) / len(samples)) if samples else 0.0
 
-    def is_speech(self, frame: bytes) -> bool:
+    def is_speech(self, frame: bytes, *, learn: bool = True) -> bool:
+        """`learn=False`: judge the frame but do not let it teach the
+        floor -- the caller knows it is a voice (see CompositeDetector).
+
+        The floor learnt from every frame below the bar until
+        2026-09-11, the person's own softer syllables included; with a
+        2.8x bar that ratchet put the bar above their voice within a
+        second of their starting to talk, and the turn ended "too
+        short" (the creator: "it can't hear anything"; reproduced on
+        the laptop with `say` through the speakers)."""
         samples = array.array("h", frame)
         if not samples:
             return False
@@ -69,8 +94,9 @@ class EnergyDetector:
             self._floor = max(rms, 1.0)
             return False
         bar = max(self._floor, self._echo)
-        speech = rms > bar * self._ratio and rms > 200.0
-        if not speech and not self._echo:
+        ratio = self._echo_ratio if (self._echo_ratio is not None and (self._echo > 0.0 or self._raised)) else self._ratio
+        speech = rms > bar * ratio and rms > MIN_SPEECH_RMS
+        if learn and not speech and not self._echo:
             # Track the floor only through silence, slowly -- and never
             # while Sim is playing: its echo is not the room.
             self._floor = 0.95 * self._floor + 0.05 * max(rms, 1.0)
@@ -125,10 +151,15 @@ class CompositeDetector:
         self.name = f"{voice.name}+{level.name}"
 
     def is_speech(self, frame: bytes) -> bool:
-        # Evaluate both every frame: the level gate's floor only learns
-        # from frames it sees, and Silero's state must follow the audio.
-        loud = self._level.is_speech(frame)
+        # Evaluate both every frame: Silero's state must follow the
+        # audio, and the level gate's floor learns from the frames it
+        # sees -- but only the ones Silero says are NOT a voice. A
+        # voice, however soft, is never the room.
         voiced = self._voice.is_speech(frame)
+        try:
+            loud = self._level.is_speech(frame, learn=not voiced)
+        except TypeError:  # a level gate without the keyword
+            loud = self._level.is_speech(frame)
         return loud and voiced
 
     def raise_floor(self, rms: float) -> None:

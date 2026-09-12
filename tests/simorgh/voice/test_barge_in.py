@@ -257,6 +257,48 @@ class CompositeDetectorTestCase(unittest.TestCase):
         self.assertIn("CompositeDetector(", inspect.getsource(pipeline_mod.Pipeline._play_stream_interruptibly))
 
 
+class LevelGateLearningTestCase(unittest.TestCase):
+    """2026-09-11, "it can't hear anything": the level gate's floor
+    learnt from the person's own softer syllables and, at 2.8x, rose
+    above their voice within a second. Reproduced on the laptop with
+    `say` through the speakers (tools/voice_live_trial.py)."""
+
+    def test_a_voice_never_teaches_the_floor(self):
+        from simorgh.voice.vad import CompositeDetector, EnergyDetector
+        level = EnergyDetector(0.5)
+        det = CompositeDetector(_Voice([False] * 5 + [True] * 200), level)
+        for _ in range(5):
+            det.is_speech(_tone(0.03, 60).pcm)  # the room
+        floor_before = level._floor  # noqa: SLF001
+        # A quiet speaker: soft frames the level alone would call room.
+        for _ in range(100):
+            det.is_speech(_tone(0.03, 120).pcm)
+        self.assertLess(level._floor, floor_before * 1.05, "soft voiced frames taught the floor")  # noqa: SLF001
+        self.assertTrue(det.is_speech(_tone(0.03, 400).pcm), "and their louder frames are still speech")
+
+    def test_the_strict_ratio_applies_only_while_sim_is_audible(self):
+        from simorgh.voice.vad import EnergyDetector
+        level = EnergyDetector(0.5)   # 2.0x the room by itself
+        level.set_ratio(2.8)          # the barge-in margin over an echo
+        for _ in range(5):
+            level.is_speech(_tone(0.03, 100).pcm)
+        floor = level._floor  # noqa: SLF001
+        quiet_speaker = _tone(0.03, int(floor * 2.3 * 1.5)).pcm  # 2.3x the floor in RMS terms
+        self.assertTrue(level.is_speech(quiet_speaker), "nothing playing: 2x the room is a voice")
+        level.set_echo(floor)
+        self.assertFalse(level.is_speech(quiet_speaker), "Sim audible: a person must be 2.8x")
+        level.clear_echo()
+        self.assertTrue(level.is_speech(quiet_speaker))
+
+    def test_near_silence_is_never_speech_but_a_quiet_voice_is(self):
+        from simorgh.voice.vad import MIN_SPEECH_RMS, EnergyDetector
+        level = EnergyDetector(0.5)
+        for _ in range(5):
+            level.is_speech(_tone(0.03, 8).pcm)
+        self.assertFalse(level.is_speech(_tone(0.03, 40).pcm))
+        self.assertTrue(level.is_speech(_tone(0.03, int(MIN_SPEECH_RMS * 2)).pcm))
+
+
 class SileroSmokeTestCase(unittest.TestCase):
     def test_silero_tells_a_voice_from_a_tone_when_installed(self):
         try:

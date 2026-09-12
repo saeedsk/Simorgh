@@ -27,6 +27,30 @@ def _kinds(actions) -> list[str]:
     return [a.kind for a in actions]
 
 
+class TestChoppedSpeechIsStillATurn(unittest.TestCase):
+    def test_short_runs_add_up_to_a_turn(self) -> None:
+        # A quiet speaker's frames come through in 90 ms runs with gaps
+        # between; 3 s of them is a sentence, not "too short" (2026-09-11).
+        tm = TurnManager(Policy(end_of_turn_silence_ms=600, min_speech_ms=250, frame_ms=30))
+        tm.start()
+        self.assertEqual(_kinds(tm.handle_vad(VadEvent("speech_start", speech_ms=30))), [Actions.CAPTURE_START])
+        for _ in range(12):  # twelve runs of three frames, none 250 ms long
+            for ms in (30, 60, 90):
+                tm.handle_vad(_speech(ms))
+            tm.handle_vad(VadEvent("speech_end", speech_ms=90, silence_ms=30))
+            tm.handle_vad(_silence(60))
+        actions = tm.handle_vad(_silence(600))
+        self.assertEqual(_kinds(actions), [Actions.FINALISE], "chopped speech adds up to a turn")
+
+    def test_a_single_blip_is_still_too_short(self) -> None:
+        tm = TurnManager(Policy(end_of_turn_silence_ms=600, min_speech_ms=250, frame_ms=30))
+        tm.start()
+        tm.handle_vad(VadEvent("speech_start", speech_ms=30))
+        tm.handle_vad(_speech(60))
+        actions = tm.handle_vad(_silence(600))
+        self.assertEqual(_kinds(actions), [Actions.DISCARD])
+
+
 class TestTurnManager(unittest.TestCase):
     def _speaking_manager(self) -> TurnManager:
         tm = TurnManager(Policy(end_of_turn_silence_ms=600, min_speech_ms=200, barge_in_speech_ms=300))
