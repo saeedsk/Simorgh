@@ -518,20 +518,29 @@ class DashViewTool(_CastTool):
                    "media, terminal, ambient; `timeframe` 1D/1W/1M/1Y and `symbol` pick the markets chart; `rotate_s` "
                    "cycles the views every N seconds (0 stops); `scale` fixes the page's zoom on a TV that misreports "
                    "its size (0 = fit); `live_max` caps how many camera feeds play at once; `video_quality` light|full "
-                   "for the embedded video. `action` remote answers the phone remote's link.")
+                   "for the embedded video. `action` remote answers the phone remote's link; link, the dashboard's own link "
+                   "for a browser (with the token).")
     args_schema = {"type": "object", "properties": {
         "view": {"type": "string"}, "timeframe": {"type": "string"}, "symbol": {"type": "string"},
         "rotate_s": {"type": "number"}, "scale": {"type": "number"}, "live_max": {"type": "integer"},
-        "video_quality": {"type": "string", "enum": ["light", "full"]}, "action": {"type": "string", "enum": ["view", "remote"]}}}
+        "video_quality": {"type": "string", "enum": ["light", "full"]}, "action": {"type": "string", "enum": ["view", "remote", "link"]}}}
     VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "terminal", "ambient")
     ALIASES = {"deck": "home", "start": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
                "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "tv": "media", "video": "media",
                "headlines": "news"}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        if str(args.get("action") or "").strip().lower() == "remote":
+        action = str(args.get("action") or "").strip().lower()
+        if action == "remote":
             url = self._page_url("remote")
             return ToolResult(ok=True, output=f"the remote for the TV dashboard, for a phone on this Wi-Fi: {url}",
+                              metadata={"url": url})
+        if action == "link":
+            # The dashboard for a browser: with the token, or the live
+            # activity is withheld and the Sim box shows only the banner
+            # (the creator's Mac, 2026-09-12).
+            url = self._page_url("dash")
+            return ToolResult(ok=True, output=f"the dashboard, for a browser on this Wi-Fi (the token is in the link): {url}",
                               metadata={"url": url})
         view = str(args.get("view") or "").strip().lower()
         view = self.ALIASES.get(view, view)

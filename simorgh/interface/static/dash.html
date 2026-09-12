@@ -131,8 +131,9 @@ function setOffline(on){if(on===OFFLINE)return;OFFLINE=on;document.body.classLis
   if(on){OFFLINE_AT=Date.now();closeLive();CAMKEY="";const np=$("#dk-np");if(np){np.innerHTML="";DK.np="";}}
   else{CAMKEY="";CAMVIEWKEY="";loadData();refreshStrip();if(CUR==="deck")refreshDeck(true);else render();}}
 setInterval(()=>{if(OFFLINE){const s=Math.round((Date.now()-OFFLINE_AT)/1000);$("#offline-since").textContent="offline for "+(s<90?s+" s":Math.round(s/60)+" min");}},1000);
+let ACT_GATED=false;
 async function poll(){
-  try{const a=await (await fetch(q("/api/activity?limit=40"))).json();ACT=(a.events||[]).slice().reverse();$("#net").innerHTML=(a.pending_turns||[]).length?'<span class="warm">✻ thinking</span>':'<span class="green">● online</span>';OFFLINE_MISSES=0;setOffline(false);}
+  try{const r=await fetch(q("/api/activity?limit=40"));const a=await r.json();ACT_GATED=(r.status===401);ACT=(a.events||[]).slice().reverse();$("#net").innerHTML=(a.pending_turns||[]).length?'<span class="warm">✻ thinking</span>':'<span class="green">● online</span>';OFFLINE_MISSES=0;setOffline(false);}
   catch(e){$("#net").innerHTML='<span class="red">● offline</span>';OFFLINE_MISSES++;if(OFFLINE_MISSES>=5)setOffline(true);return;}
   try{STATUS=await (await fetch(q("/api/status"))).json();}catch(e){}
   try{TV=await (await fetch(q("/api/tv/state"))).json();}catch(e){}
@@ -236,7 +237,8 @@ function ansiToHtml(text){ // the CLI's SGR codes -> spans: 24-bit fg/bg, the 16
   flush();return out;}
 async function loadBanner(){try{const b=await (await fetch(q("/api/dash/banner"))).json();BANNER=ansiToHtml(b.text||"");if(CUR==="deck"||CUR==="terminal")render();}catch(e){}}
 function termHTML(big){
-  const lines=ACT.map(actLine).join("")||(BANNER?"":'<div class="dim">Sim is idle. Say “Sim”, or pick a view.</div>');
+  const gated=ACT_GATED?'<div class="warm" style="margin-top:6px;">⚠ Sim\'s live activity is withheld: this page was opened without its token. In Sim, run <b>tv link</b> and open that address instead.</div>':'';
+  const lines=(ACT.map(actLine).join("")||(BANNER?"":'<div class="dim">Sim is idle. Say “Sim”, or pick a view.</div>'))+gated;
   const ban=BANNER?'<pre class="ban">'+BANNER+'</pre><div style="height:8px;"></div>':'';
   return '<div style="font-size:'+(big?'12.5px':'11.5px')+';line-height:1.5;height:100%;display:flex;flex-direction:column;overflow:hidden;">'
    +'<div style="flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;">'+ban+lines+'</div>'

@@ -296,6 +296,8 @@ class DashViewTestCase(unittest.IsolatedAsyncioTestCase):
         result = await tools["dash_view"].run({"action": "remote"}, ctx=_ctx(bus))
         self.assertTrue(result.ok)
         self.assertEqual(result.metadata["url"], "http://10.0.0.5:8765/remote?token=s3")
+        link = await tools["dash_view"].run({"action": "link"}, ctx=_ctx(bus))
+        self.assertEqual(link.metadata["url"], "http://10.0.0.5:8765/dash?token=s3")
 
     async def test_cast_show_puts_the_dashboard_up_by_default_and_the_bare_terminal_on_request(self):
         tools, cast, bus = self._tools()

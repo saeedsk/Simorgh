@@ -740,7 +740,7 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     rest = words[1:]
     usage = ("usage: tv setup [device] | devices | use <device> | show [tv|dash] [device] | view <home|discover|cameras|news|"
              "markets|media|terminal|ambient> [1D|1W|1M|1Y] [symbol] | rotate <seconds|off> | scale <factor|auto> | live <n> | "
-             "quality light|full | remote | "
+             "quality light|full | remote | link | "
              "video <url> [full|frame] [device] | stop [frame] | volume <0-100> [device]")
 
     async def _run(tool: str, payload: dict) -> Outcome:
@@ -803,6 +803,8 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         return await _run("dash_view", {"video_quality": "full" if rest[0].lower() in ("full", "high", "hd") else "light"})
     if verb == "remote":
         return await _run("dash_view", {"action": "remote"})
+    if verb in ("link", "url"):
+        return await _run("dash_view", {"action": "link"})
     if verb in ("video", "play"):
         if not rest:
             return Outcome(usage)
