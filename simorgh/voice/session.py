@@ -485,6 +485,23 @@ class VoiceSession:
             await self._pipeline._publish(topics.VOICE_CONTROL_REQUEST, {  # noqa: SLF001
                 "action": "off" if command == OFF else "mute"})
 
+    async def _report_synthesis(self, report) -> None:
+        """A voice that could not be used, or a reply that could not be
+        made at all, is said on screen once rather than swallowed."""
+        fell_back = getattr(self._tts, "fell_back", None)
+        error = getattr(self._tts, "last_error", "")
+        if fell_back:
+            voice, why = fell_back
+            self._log("warning", "voice.voice_fell_back", voice=voice, why=why)
+            await self._pipeline._publish(topics.UI_NOTICE, {  # noqa: SLF001
+                "level": "warn", "source": "voice",
+                "text": f"the voice {voice!r} could not be used ({why}); spoke with the engine's default. "
+                        f"`voice voices` lists the real ones."})
+        elif error and report.chunks == 0:
+            self._log("warning", "voice.reply_not_synthesised", why=error)
+            await self._pipeline._publish(topics.UI_NOTICE, {  # noqa: SLF001
+                "level": "warn", "source": "voice", "text": f"could not synthesise the reply: {error}"})
+
     async def _stay_quiet(self, turn_id: int) -> None:
         """The model heard words that were not for it. Nothing is said;
         the floor goes back to listening, and the screen shows why
@@ -620,6 +637,7 @@ class VoiceSession:
             return
         self._pipeline.speaking = False
         self._sim_spoke_at = self._now()
+        await self._report_synthesis(report)
         said = plan.text
         self._pipeline.last_said = said
         self.stats.turns += 1

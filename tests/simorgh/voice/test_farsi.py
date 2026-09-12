@@ -98,7 +98,7 @@ class TestPolyglotRouting(unittest.IsolatedAsyncioTestCase):
     async def test_voices_lists_every_opened_engine(self) -> None:
         router = self._router()
         await router.synthesise(FA)
-        self.assertEqual(router.voices(), ["fake", "fake"])
+        self.assertEqual(router.voices(), FakeSynthesiser().voices() * 2)
 
     def test_open_synthesiser_wraps_the_primary_unless_told_not_to(self) -> None:
         # `fake` is the primary here; the router is what wraps it in

@@ -378,6 +378,10 @@ class Service:
         value, problem = settings.parse(key, raw)
         if problem:
             return False, problem
+        if key in ("tts_voice", "tts_farsi_voice"):
+            problem = await self._unknown_voice(str(value))
+            if problem:
+                return False, problem
         self.config = settings.apply(self.config, key, value)
         if self._pipeline is not None:
             self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
@@ -425,6 +429,30 @@ class Service:
                 if key == "auto_listen":
                     session.turns.auto_listen = bool(value)
         return True, f"{key} = {value!r}{where}{restarted}"
+
+    async def _unknown_voice(self, name: str) -> str:
+        """Why `name` cannot be set as a voice, or "" when it can: the
+        engine lists its voices, and a name not on the list is refused
+        with the nearest one. 2026-09-12: `af_bellae` was accepted,
+        saved, and every reply after it died in the synthesiser. The
+        engines are opened for the check if they are not yet."""
+        tts = self._injected["synthesiser"]
+        if tts is None:
+            pipeline, _why = await self._pipeline_ready()
+            tts = pipeline._tts if pipeline is not None else None  # noqa: SLF001
+        if tts is None:
+            return ""
+        try:
+            voices = [str(v) for v in tts.voices()]
+        except Exception:  # noqa: BLE001 -- an engine that cannot say is not an engine that refuses
+            return ""
+        if not voices or name in voices:
+            return ""
+        import difflib
+
+        close = difflib.get_close_matches(name, voices, n=1, cutoff=0.6)
+        hint = f"did you mean {close[0]}?" if close else "`voice voices` lists them"
+        return f"{name!r} is not a voice this engine has; {hint}"
 
     async def _on_bench(self, message) -> None:
         """`voice bench`: measure the configured engines on this machine."""

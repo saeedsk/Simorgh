@@ -197,6 +197,17 @@ class PipelineOnAKernelTestCase(unittest.IsolatedAsyncioTestCase):
         off = await kernel.bus.request(kernel.bus.new(topics.VOICE_CONTROL_REQUEST, {"action": "off"}), timeout=60)
         self.assertFalse(off.payload["enabled"])
 
+    async def test_a_voice_the_engine_does_not_have_is_refused_with_the_nearest(self):
+        # 2026-09-12: `af_bellae` was accepted and saved; every reply after it died.
+        kernel = await self._kernel(fake_transcript="")
+        reply = await kernel.bus.request(kernel.bus.new(
+            topics.VOICE_CONTROL_REQUEST, {"action": "set", "key": "tts_voice", "value": "af_bellae"}), timeout=60)
+        self.assertFalse(reply.payload["ok"])
+        self.assertIn("did you mean af_bella?", reply.payload["error"]["detail"])
+        ok = await kernel.bus.request(kernel.bus.new(
+            topics.VOICE_CONTROL_REQUEST, {"action": "set", "key": "tts_voice", "value": "af_bella"}), timeout=60)
+        self.assertTrue(ok.payload["ok"], ok.payload)
+
     async def test_a_bad_setting_is_refused_in_a_reply_that_passes_the_contract(self):
         # 2026-09-12: `voice set ttc_voice = af_kore` raised ContractError
         # at publish time -- `ok: false` with state fields matches

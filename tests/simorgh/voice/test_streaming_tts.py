@@ -169,3 +169,39 @@ class TestStreamingPlayer(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _PickySynth(FakeSynthesiser):
+    """Knows two voices; anything else raises, the way kokoro-onnx does."""
+
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
+        if voice not in ("", "af_bella"):
+            raise ValueError(f"Voice {voice} not found in available voices")
+        return await super().synthesise(text, voice=voice, speed=speed)
+
+
+class _BrokenSynth(FakeSynthesiser):
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
+        raise RuntimeError("no model")
+
+
+class TestSynthesisFailures(unittest.IsolatedAsyncioTestCase):
+    """2026-09-12: a voice that does not exist raised inside the producer
+    task -- "Unhandled exception in event loop" on the creator's screen
+    -- and the reply was shown but never heard."""
+
+    async def test_an_unknown_voice_falls_back_to_the_default_and_says_so(self) -> None:
+        synth = StreamingSynthesiser(_PickySynth(), lookahead=1)
+        request = TtsRequest(request_id="r1", pieces=(("Hello.", 0), ("There.", 0)), voice="af_bellae")
+        chunks = [c async for c in synth.synthesise_stream(request)]
+        self.assertEqual([c.text for c in chunks], ["Hello.", "There."])
+        self.assertIsNotNone(synth.fell_back)
+        self.assertEqual(synth.fell_back[0], "af_bellae")
+        self.assertIn("not found", synth.fell_back[1])
+
+    async def test_an_engine_that_cannot_synthesise_ends_the_stream_cleanly(self) -> None:
+        synth = StreamingSynthesiser(_BrokenSynth(), lookahead=1)
+        request = TtsRequest(request_id="r2", pieces=(("Hello.", 0),), voice="af_bella")
+        chunks = [c async for c in synth.synthesise_stream(request)]
+        self.assertEqual(chunks, [])
+        self.assertIn("no model", synth.last_error)

@@ -107,6 +107,9 @@ class StreamingSynthesiser:
         self.warm = True
         return self.warmup_seconds
 
+    fell_back: tuple[str, str] | None = None   # (voice asked for, why) when the default voice stood in
+    last_error: str = ""                       # why the last stream ended early, if it did
+
     async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
         """The whole-utterance path, kept for `voice test` and callers
         that want one `Audio`."""
@@ -121,11 +124,42 @@ class StreamingSynthesiser:
         if task is not None and not task.done():
             task.cancel()
 
+    async def _synthesise_or_fall_back(self, text: str, request: TtsRequest):
+        """One piece, or the same piece in the engine's own default voice
+        when the requested one fails, or None when nothing can be made
+        of it. An exception here used to escape the producer task as
+        "Unhandled exception in event loop" (the creator, 2026-09-12,
+        after `voice set tts_voice af_bellae`, a voice that does not
+        exist); the reply then showed on screen and was never heard."""
+        try:
+            return await self._inner.synthesise(text, voice=request.voice, speed=request.speed)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- the engine's failure, whatever it is
+            first = exc
+        if request.voice:
+            try:
+                audio = await self._inner.synthesise(text, voice="", speed=request.speed)
+                self.fell_back = (request.voice, f"{first}")
+                return audio
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                first = exc
+        self.last_error = f"{first}"
+        return None
+
     async def synthesise_stream(self, request: TtsRequest):
         """Yield `AudioChunk`s for `request.pieces`, in order, as each is
-        synthesised; `final` marks the last."""
+        synthesised; `final` marks the last. A piece the engine could
+        not make in the requested voice is made in its default voice
+        (`fell_back` says so); a piece it could not make at all ends
+        the stream and `last_error` says why -- never an exception out
+        of the producer."""
         queue: asyncio.Queue = asyncio.Queue(maxsize=self._lookahead)
         self._cancelled.discard(request.request_id)
+        self.fell_back = None
+        self.last_error = ""
 
         async def _produce() -> None:
             cancelled = False
@@ -134,7 +168,9 @@ class StreamingSynthesiser:
                 for seq, (text, pause_ms) in enumerate(request.pieces):
                     if request.request_id in self._cancelled:
                         break
-                    audio = await self._inner.synthesise(text, voice=request.voice, speed=request.speed)
+                    audio = await self._synthesise_or_fall_back(text, request)
+                    if audio is None:
+                        break
                     if request.request_id in self._cancelled:
                         break
                     self.last_engine = getattr(self._inner, "last_engine", None) or getattr(self._inner, "name", "")
@@ -150,6 +186,8 @@ class StreamingSynthesiser:
             except asyncio.CancelledError:
                 cancelled = True
                 raise
+            except Exception as exc:  # noqa: BLE001 -- levelling, silence, anything: the stream ends, nothing escapes
+                self.last_error = f"{exc}"
             finally:
                 if cancelled:
                     # Nobody may be reading a full queue any more, and a
