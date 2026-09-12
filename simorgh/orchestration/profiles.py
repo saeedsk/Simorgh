@@ -181,11 +181,12 @@ VOICE_CHAT = replace(
     CHAT,
     tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task",
            "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume"),
-    # Eight: a search, a cast, a retry, and the answer (the creator,
-    # 2026-09-12: "cast something on TV" ran out at five). The silence
-    # a longer spoken turn used to mean is covered now: the backchannel
-    # says "still on it" while the work goes on.
-    max_steps=8,
+    # Six: a search, a cast, a retry, and the answer (the creator,
+    # 2026-09-12: "cast something on TV" ran out at five, having listed
+    # devices it did not need and hunted for an mp4 -- the rule now says
+    # not to). Still short on purpose: a spoken turn is answered, not
+    # investigated; a longer job is a task.
+    max_steps=6,
 )
 
 
