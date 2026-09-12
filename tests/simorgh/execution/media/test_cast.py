@@ -134,9 +134,9 @@ class RememberedTvTestCase(unittest.IsolatedAsyncioTestCase):
         import tempfile
         from simorgh.contracts.protocols import ToolContext
         cast = _FakeCast(("Living Room TV", "Bedroom"))
-        tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
-                                               reachable=lambda url: True)}
         with tempfile.TemporaryDirectory() as tmp:
+            tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
+                                                   reachable=lambda url: True, settings_home=Path(tmp))}
             ctx = ToolContext(action_id="a1", task_id=None, scope={}, constraints={}, data_dir=Path(tmp) / "data",
                               clock=None, logger=None, ledger=None, bus=_Bus())
             refused = await tools["cast_show"].run({}, ctx=ctx)
@@ -163,9 +163,10 @@ class SetupTestCase(unittest.IsolatedAsyncioTestCase):
         import tomllib
         from simorgh.contracts.protocols import ToolContext
         cast = _FakeCast(("Family Room TV",))
-        tools = {t.name: t for t in cast_tools(Config(), cast=cast, reachable=lambda url: True, env={})}
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
+            tools = {t.name: t for t in cast_tools(Config(), cast=cast, reachable=lambda url: True, env={},
+                                                   settings_home=home)}
             ctx = ToolContext(action_id="a1", task_id=None, scope={}, constraints={}, data_dir=home / "data",
                               clock=None, logger=None, ledger=None, bus=_Bus())
             result = await tools["cast_setup"].run({}, ctx=ctx)
@@ -185,3 +186,13 @@ class SetupTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(again.ok)
             self.assertIn("already set", again.output)
             self.assertEqual(tomllib.loads(secrets_path.read_text())["SIM_API_TOKEN"], token)
+
+
+class SettingsPathsTestCase(unittest.TestCase):
+    def test_the_files_are_the_kernels_own(self):
+        import os
+        from simorgh.execution.media.cast import settings_paths
+        config_path, secrets_path = settings_paths()
+        self.assertEqual(config_path.name, "simorgh.toml")
+        self.assertEqual(secrets_path, config_path.parent / "secrets.toml")
+        self.assertNotEqual(config_path.parent, Path(os.getcwd()).parent, "never the working directory's parent")

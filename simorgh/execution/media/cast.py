@@ -148,12 +148,32 @@ class CastPreferences:
     device: str = ""
 
 
+def settings_paths(home: Path | None = None) -> tuple[Path, Path]:
+    """`(simorgh.toml, secrets.toml)` -- the files the Kernel actually
+    reads, found the way it finds them (kernel/config.py: `--config`,
+    `$SIMORGH_CONFIG`, `./simorgh.toml`, `~/.simorgh/simorgh.toml`).
+    Deriving them from a tool's `data_dir` wrote `[execution]
+    cast_device` into /Users/<x>/ws/simorgh.toml, a file nothing reads
+    (the creator's screen, 2026-09-12)."""
+    if home is not None:
+        return home / "simorgh.toml", home / "secrets.toml"
+    default_home = Path("~/.simorgh").expanduser()
+    try:
+        from simorgh.kernel.config import find_config_path
+
+        found = find_config_path(data_dir=default_home)
+    except Exception:  # noqa: BLE001 -- the default is the right answer when the loader cannot say
+        found = None
+    config_path = found or default_home / "simorgh.toml"
+    return config_path, config_path.parent / "secrets.toml"
+
+
 class _CastTool:
     read_only = False
     reversibility = "reversible"
 
     def __init__(self, config, *, cast=None, env=None, secrets=None, clock=time.time, reachable=None,
-                 prefs: CastPreferences | None = None) -> None:
+                 prefs: CastPreferences | None = None, settings_home: Path | None = None) -> None:
         self._config = config
         self._given = cast
         self._env = env
@@ -161,6 +181,7 @@ class _CastTool:
         self._clock = clock
         self._reachable = reachable
         self._prefs = prefs or CastPreferences(device=str(getattr(config, "cast_device", "") or ""))
+        self._settings_home = settings_home
 
     def _backend(self):
         if self._given is not None:
@@ -400,17 +421,14 @@ class CastUseTool(_CastTool):
         if problem:
             return ToolResult(ok=False, error=problem)
         self._prefs.device = name
-        where = ""
-        data_dir = getattr(ctx, "data_dir", None)
-        if data_dir:
-            from simorgh.voice.settings import persist
+        from simorgh.voice.settings import persist
 
-            path = Path(data_dir).parent / "simorgh.toml"
-            try:
-                persist(path, "cast_device", name, section="execution")
-                where = f"; saved to {path}"
-            except OSError as exc:
-                where = f"; NOT saved ({exc})"
+        path, _secrets_path = settings_paths(self._settings_home)
+        try:
+            persist(path, "cast_device", name, section="execution")
+            where = f"; saved to {path}"
+        except OSError as exc:
+            where = f"; NOT saved ({exc})"
         return ToolResult(ok=True, output=f"the TV is {name}{where}", side_effects=("cast_use",),
                           metadata={"device": name})
 
@@ -423,13 +441,9 @@ class CastSetupTool(_CastTool):
     args_schema = {"type": "object", "properties": {"device": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        data_dir = getattr(ctx, "data_dir", None)
-        if not data_dir:
-            return ToolResult(ok=False, error="refused: no data directory to write settings into")
         from simorgh.voice.settings import persist
 
-        home = Path(data_dir).parent
-        config_path, secrets_path = home / "simorgh.toml", home / "secrets.toml"
+        config_path, secrets_path = settings_paths(self._settings_home)
         changed: list[str] = []
         try:
             persist(config_path, "http_host", "0.0.0.0", section="interface")
@@ -495,7 +509,7 @@ class CastSetupTool(_CastTool):
 
 
 def cast_tools(config, **kwargs) -> list:
-    kwargs = {k: v for k, v in kwargs.items() if k in ("cast", "env", "secrets", "clock", "reachable")}
+    kwargs = {k: v for k, v in kwargs.items() if k in ("cast", "env", "secrets", "clock", "reachable", "settings_home")}
     prefs = CastPreferences(device=str(getattr(config, "cast_device", "") or ""))
     return [CastDevicesTool(config, prefs=prefs, **kwargs), CastShowTool(config, prefs=prefs, **kwargs),
             CastPlayTool(config, prefs=prefs, **kwargs), CastStopTool(config, prefs=prefs, **kwargs),
@@ -504,5 +518,5 @@ def cast_tools(config, **kwargs) -> list:
 
 
 __all__ = ["CastDevicesTool", "CastPlayTool", "CastPreferences", "CastSetupTool", "CastShowTool", "CastStopTool", "CastUseTool",
-           "CastVolumeTool", "Device",
+           "CastVolumeTool", "Device", "settings_paths",
            "PyChromecast", "available", "cast_tools", "lan_address"]
