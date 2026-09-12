@@ -147,7 +147,8 @@ class TestTheVoiceChannel(unittest.TestCase):
 
         spoken = scaffolds.render(profiles.CHAT, channel="voice")
         typed = scaffolds.render(profiles.CHAT, channel="cli")
-        self.assertIn("Write for listening, not reading", spoken)
-        self.assertIn("never more than once", spoken)
-        self.assertNotIn("Write for listening", typed)
-        self.assertNotIn("Write for listening", scaffolds.render(profiles.CHAT))
+        self.assertIn("You are answering by voice", spoken)
+        self.assertIn("One or two sentences is the norm", spoken)
+        self.assertIn("do not open with one", spoken)  # the backchannel already said "Okay"
+        self.assertNotIn("You are answering by voice", typed)
+        self.assertNotIn("You are answering by voice", scaffolds.render(profiles.CHAT))

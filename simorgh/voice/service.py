@@ -137,11 +137,28 @@ class Service:
         if self.config.speak_replies:
             self._subs.append(await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_any_reply))
         await self._write_probes()
-        ctx.logger.info("voice.started", enabled=self.config.enabled, stt=self.config.stt, tts=self.config.tts)
-        if self.config.enabled:
+        interactive = self._interactive()
+        real_microphone = self.config.microphone != "fake" and self._injected["microphone"] is None
+        listen = self.config.wants_listening(interactive=interactive, real_microphone=real_microphone)
+        ctx.logger.info("voice.started", enabled=self.config.enabled, listen=listen, interactive=interactive,
+                        stt=self.config.stt, tts=self.config.tts)
+        if listen:
             ok, why = await self._turn_on()
             if not ok:
                 ctx.logger.warning("voice.not_enabled", reason=why)
+
+    @staticmethod
+    def _interactive() -> bool:
+        """A person at a terminal, as against a test, a pipe or a service."""
+        import os
+        import sys
+
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return False
+        try:
+            return bool(sys.stdin.isatty() and sys.stdout.isatty())
+        except (AttributeError, ValueError):
+            return False
 
     async def stop(self) -> None:
         await self._turn_off()

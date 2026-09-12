@@ -15,7 +15,12 @@ from typing import Mapping
 
 @dataclass(frozen=True)
 class Config:
-    enabled: bool = False
+    # Listen on boot. "auto" (the default since 2026-09-11, the creator:
+    # "the voice should be enabled by default when we start sim") means
+    # on when Sim is started by a person at a terminal and a real
+    # microphone opens; off under tests, in a pipe, or with a fake
+    # microphone. `true`/`false` say so outright.
+    enabled: bool | str = "auto"
     # Engines. "auto" = the best one whose package or binary is present;
     # never a cloud engine (section 0: local first for speech).
     stt: str = "auto"                  # auto | faster_whisper | whisper_cli | fake
@@ -90,9 +95,15 @@ class Config:
     stt_partials: bool = True          # provisional transcripts while the person is still talking
     stt_partial_every_ms: int = 1500
     connectors: bool = True            # the planner's rare "Okay," / "Yeah," lead-ins
-    max_spoken_sentences: int = 6      # longer answers are cut here and say there is more on screen
+    max_spoken_sentences: int = 4      # longer answers are cut here and say there is more on screen
     tts_lookahead: int = 2             # pieces synthesised ahead of playback; more = slower to cancel
-    ack_after_ms: int = 900            # a slow answer to a request gets a spoken "Okay," meanwhile
+    # The moment the person's turn ends, before the recogniser has even
+    # finished, Sim says a short "Aha." / "Let me check." / "Sure, one
+    # sec." (voice/backchannel.py) and only then goes to think; a person
+    # is never left wondering whether they were heard. `still_after_s`
+    # later, with no answer yet, one more ("Still on it.").
+    backchannel: bool = True
+    still_after_s: float = 8.0
     diagnostics: bool = True           # per-turn latencies in `voice:turns` and `voice status`
     # Speak every reply Sim gives, including replies to TYPED turns.
     # The creator asked Sim itself for this on 2026-09-10 ("add TTS
@@ -126,7 +137,17 @@ class Config:
         if not mapping:
             return cls()
         known = set(cls.__dataclass_fields__)
-        return cls(**{k: v for k, v in dict(mapping).items() if k in known})
+        values = {k: v for k, v in dict(mapping).items() if k in known}
+        if isinstance(values.get("enabled"), str) and values["enabled"].strip().lower() != "auto":
+            values["enabled"] = values["enabled"].strip().lower() in ("on", "true", "yes", "1")
+        return cls(**values)
+
+    def wants_listening(self, *, interactive: bool, real_microphone: bool) -> bool:
+        """Whether to listen on boot: `enabled` as said, or for "auto",
+        a person at a terminal with a microphone that is not a fake."""
+        if isinstance(self.enabled, bool):
+            return self.enabled
+        return bool(interactive and real_microphone)
 
 
 __all__ = ["Config"]

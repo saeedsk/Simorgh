@@ -43,6 +43,18 @@ This package owns only the audio.
   interrupted itself; raised by every frame it included the person's own voice
   and nobody could interrupt at all (2026-09-11). Headphones make it
   bulletproof; on a laptop's speakers the reference carries it.
+- **Backchannel** (`backchannel.py`): the moment the person's turn ends -- before
+  the recogniser has finished, long before the model has -- Sim says "Aha." /
+  "Let me check." / "Sure, one sec.", picked by what the turn seems to be from
+  the provisional transcript (a remark, a question, a request, a greeting), in
+  the person's language (English and Farsi pools), never repeating the last
+  few. `still_after_s` later with no answer, one more ("Still on it."). The
+  reply then has any opening "Okay," of its own stripped, so it is never said
+  twice. `backchannel = false` turns it off. On screen an aside is the dim
+  `🔊 Aha.` line, not a `sim:` line.
+- **Listening on boot**: `enabled = "auto"` (the default) listens when a person
+  starts Sim at a terminal and a real microphone opens; under tests, in a pipe,
+  or with a fake microphone it stays off. `true` / `false` say so outright.
 - A reply that is not back within `reply_timeout_s` is spoken as
   "I'm still working on that", never silence.
 - Privacy defaults from the design: audio is not kept unless

@@ -85,7 +85,7 @@ class _Replies:
 
 def _config(**kw) -> Config:
     base = dict(stt="fake", tts="fake", endpoint_silence_ms=300, min_speech_ms=150, barge_in_speech_ms=300,
-                stt_partials=False, ack_after_ms=0, reply_timeout_s=5.0, keep_transcripts=False)
+                stt_partials=False, backchannel=False, reply_timeout_s=5.0, keep_transcripts=False)
     base.update(kw)
     return Config(**base)
 
@@ -262,6 +262,69 @@ class TestStaleAndEcho(unittest.IsolatedAsyncioTestCase):
         finally:
             stop.set()
             await asyncio.wait_for(task, timeout=3.0)
+
+
+class TestTheBackchannel(unittest.IsolatedAsyncioTestCase):
+    """The moment a turn ends Sim says "Aha." / "Let me check." and only
+    then thinks; the reply follows and does not open with another
+    "Okay,". The creator, 2026-09-11: "sim should not remain silent for
+    a long time to process and reply back"."""
+
+    async def test_a_sound_is_made_before_the_answer_and_the_answer_does_not_repeat_it(self) -> None:
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["Okay, the pool has twelve connections."], delay=0.4)
+        session, bus, speaker, tts = _session(_config(backchannel=True), script, replies)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        spoken = bus.of(topics.VOICE_SPOKEN)
+        self.assertTrue(spoken[0].get("aside"), "the first thing said is the aside")
+        ack = spoken[0]["text"]
+        from simorgh.voice.backchannel import POOLS
+        every = {text for pool in POOLS.values() for texts in pool.values() for text in texts}
+        self.assertIn(ack, every, "and it is a backchannel")
+        said = tts.spoken  # the synthesiser's warm-up line first, then the aside, then the reply
+        self.assertIn(ack, said)
+        answer = next(i for i, t in enumerate(said) if "pool has twelve" in t)
+        self.assertLess(said.index(ack), answer, said)
+        self.assertNotIn("Okay,", said[answer], "the reply's own Okay was dropped -- one was already said")
+        self.assertLess(len(replies.asked), 2, "the sound was not a turn")
+
+    async def test_the_sound_comes_at_once_not_after_the_answer(self) -> None:
+        # The answer takes 1.5 s; the sound must be out well before it.
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["Twelve."], delay=1.5)
+        session, bus, speaker, tts = _session(_config(backchannel=True), script, replies)
+        stop = asyncio.Event()
+        task = asyncio.create_task(session.run(stop))
+        try:
+            t0 = asyncio.get_running_loop().time()
+            for _ in range(800):
+                if any(p.get("aside") for p in bus.of(topics.VOICE_SPOKEN)):
+                    break
+                await asyncio.sleep(0.01)
+            asides = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("aside")]
+            self.assertTrue(asides, "nothing was said")
+            self.assertLess(asyncio.get_running_loop().time() - t0, 1.2)
+            self.assertNotIn("Twelve.", tts.spoken, "the answer itself was still to come")
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=3.0)
+
+    async def test_a_long_think_gets_a_second_sound(self) -> None:
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["Twelve."], delay=1.2)
+        session, bus, speaker, tts = _session(_config(backchannel=True, still_after_s=0.4), script, replies)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        from simorgh.voice.backchannel import STILL
+        stills = {text for texts in STILL.values() for text in texts}
+        self.assertTrue(any(t in stills for t in tts.spoken), tts.spoken)
+
+    async def test_off_means_silence_until_the_answer(self) -> None:
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["Twelve."], delay=0.3)
+        session, bus, speaker, tts = _session(_config(backchannel=False), script, replies)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        self.assertEqual(tts.spoken[-1], "Twelve.")
+        self.assertFalse([p for p in bus.of(topics.VOICE_SPOKEN) if p.get("aside")])
 
 
 class TestBargeInWithTheRealLevelGate(unittest.IsolatedAsyncioTestCase):

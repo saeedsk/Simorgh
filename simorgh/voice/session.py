@@ -27,12 +27,12 @@ from dataclasses import dataclass, field
 
 from simorgh.contracts import topics
 
-from .api import SAMPLE_RATE, SAMPLE_WIDTH, Audio, PlaybackState, TtsRequest, VoiceTurn
-from .audio import FRAME_BYTES
+from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
+from .backchannel import Backchannel, classify, strip_lead
 from .config import Config
 from .lang import language_of
 from .pipeline import NOT_SURE, Pipeline, is_echo
-from .planner import CONNECTORS, Context, SpokenResponsePlanner, choose_connector
+from .planner import CONNECTORS, Context, SpokenResponsePlanner
 from .playback import StreamingPlayer
 from .stt.streaming import IncrementalRecogniser
 from .tts.streaming import StreamingSynthesiser
@@ -123,6 +123,13 @@ class VoiceSession:
         self._vad: FrameVad | None = None
         self._turns_since_connector = 99
         self._previous_connector = ""
+        # The "Aha." / "Let me check." said the moment a turn ends
+        # (backchannel.py), and the turns that got one -- their reply
+        # must not open with another "Okay,".
+        self._backchannel = Backchannel()
+        self._acknowledged: set[int] = set()
+        self._ack_task: asyncio.Task | None = None
+        self._still_task: asyncio.Task | None = None
         self._last_user_text = ""
         self._stop: asyncio.Event | None = None
         # Set whenever a candidate turn settles (discarded, or asked), so
@@ -186,7 +193,7 @@ class VoiceSession:
             await self._teardown()
 
     async def _teardown(self) -> None:
-        for task in (self._stt_task, self._ask_task, self._speak_task):
+        for task in (self._stt_task, self._ask_task, self._speak_task, self._ack_task, self._still_task):
             if task is not None and not task.done():
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -241,6 +248,10 @@ class VoiceSession:
                 clock.speech_end = frame_time
             if self._frames is not None:
                 self._frames.put_nowait(_END)
+            if self._config.backchannel:
+                # Heard: say so now, from what the recogniser has so far,
+                # and only then wait for the final words and the answer.
+                self._ack_task = asyncio.create_task(self._acknowledge(action.turn_id, self.partial))
         elif kind == Actions.DISCARD:
             if self._frames is not None:
                 self._frames.put_nowait(_END)
@@ -352,21 +363,23 @@ class VoiceSession:
             await self._announce(self.turns.state)
             return
         self._pipeline.last_heard = text
+        self._last_user_text = text
         if clock.confidence < self._config.min_confidence:
             reply = NOT_SURE.format(text=text)
             clock.reply_at = self._now()
             await self._speak_reply(turn_id, reply, clock, Context(is_error=True))
             return
         language = language_of(text)
-        ack = asyncio.create_task(self._ack_if_slow(turn_id, text, language))
+        still = asyncio.create_task(self._still_thinking(turn_id, language))
+        self._still_task = still
         self._outstanding[turn_id] = session_id
         try:
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence)
         finally:
             self._outstanding.pop(turn_id, None)
-            ack.cancel()
+            still.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await ack
+                await still
         clock.reply_at = self._now()
         took = clock.reply_at - clock.final_at if clock.final_at else 0.0
         context = Context(user_text=text, language=language, turns=self.stats.turns,
@@ -375,34 +388,53 @@ class VoiceSession:
                           is_error=reply.startswith(("Sorry, I couldn't", "I'm still working")))
         await self._speak_reply(turn_id, reply, clock, context)
 
-    async def _ack_if_slow(self, turn_id: int, text: str, language: str) -> None:
-        """A request that is taking a while gets a spoken "Okay," so the
-        silence is not read as not having heard. Only for a request,
-        only after `ack_after_ms`, and it counts as the turn's connector
-        so the reply itself gets none."""
-        if not self._config.connectors or self._config.ack_after_ms <= 0:
+    async def _acknowledge(self, turn_id: int, partial: str) -> None:
+        """The sound of having heard -- "Aha.", "Let me check.", "Sure,
+        one sec." -- the instant the person stops, before the recogniser
+        has finished and long before the model has. Picked by what the
+        turn seems to be from the provisional transcript, in the
+        person's language, never the same as the last few. It counts as
+        the turn's connector: the reply itself then opens plainly."""
+        if self.turns.turn_id != turn_id:
             return
-        kind = choose_connector("I'll do that.", Context(user_text=text, turns_since_connector=self._turns_since_connector,
-                                                        previous_connector=self._previous_connector))
-        if kind != "okay":
+        language = language_of(partial) if partial else language_of(self._last_user_text)
+        text = self._backchannel.pick(classify(partial), language)
+        if await self._say_aside(f"ack-{turn_id}", text):
+            self._acknowledged.add(turn_id)
+            self._turns_since_connector = 0
+            self._previous_connector = "okay"
+
+    async def _still_thinking(self, turn_id: int, language: str) -> None:
+        """`still_after_s` into a wait with no answer yet: one more short
+        sound, so a long think is not a dead line."""
+        if self._config.still_after_s <= 0 or not self._config.backchannel:
             return
-        await asyncio.sleep(self._config.ack_after_ms / 1000)
+        await asyncio.sleep(self._config.still_after_s)
         if self.turns.state != THINKING or self.turns.turn_id != turn_id:
             return
-        word = CONNECTORS["okay"].get(language, CONNECTORS["okay"]["en"]).rstrip(",") + "."
-        request = TtsRequest(request_id=f"ack-{turn_id}", pieces=((word, 0),), voice=self._config.tts_voice,
+        await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language))
+
+    async def _say_aside(self, request_id: str, text: str) -> bool:
+        """Say a short aside through the player -- gated by the echo
+        tracker like everything else -- unless a voice is already
+        speaking, when an aside over it would be noise. True if said."""
+        request = TtsRequest(request_id=request_id, pieces=((text, 0),), voice=self._config.tts_voice,
                              speed=self._config.tts_speed)
         lock = self._pipeline.speech_lock
         if lock.locked():
-            return  # something is being said already; an "Okay." over it is noise
+            return False
         try:
             async with lock:
                 await self._play(self._tts.synthesise_stream(request), request_id=request.request_id)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:  # noqa: BLE001
-            self._log("warning", "voice.ack_failed", error=repr(exc))
-            return
-        self._turns_since_connector = 0
-        self._previous_connector = "okay"
+            self._log("warning", "voice.aside_failed", error=repr(exc))
+            return False
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": text, "seconds": 0.0, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
+            "device": self._config.device, "interrupted": False, "aside": True, "turn": self.turns.turn_id})
+        return True
 
     async def _speak_reply(self, turn_id: int, reply: str, clock: TurnClock, context: Context) -> None:
         actions = self.turns.reply_ready(turn_id)
@@ -422,6 +454,10 @@ class VoiceSession:
                 await self._dispatch(action, frame_time=self._now())
             return
         response_id = str(speak.response_id)
+        if turn_id in self._acknowledged:
+            # "Okay." was already said aloud; "Okay, ..." again is a stutter.
+            self._acknowledged.discard(turn_id)
+            reply = strip_lead(reply)
         plan = self._planner.plan(reply, context)
         if plan.connector:
             self._turns_since_connector = 0

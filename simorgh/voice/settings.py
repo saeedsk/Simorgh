@@ -35,6 +35,7 @@ SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "stt": (str, ("auto", "faster_whisper", "whisper_cli", "fake"), "the recogniser"),
     "stt_partials": (bool, None, "show what is heard while you are still talking"),
     "connectors": (bool, None, "the rare Okay / Yeah lead-ins"),
+    "backchannel": (bool, None, "say Aha / Let me check the moment your turn ends, before thinking"),
     "max_spoken_sentences": (int, (1, 30), "longer answers are cut and say there is more on screen"),
     "diagnostics": (bool, None, "per-turn latencies in voice status"),
     "keep_audio": (bool, None, "keep raw recordings under workspace/voice/audio (off by default)"),

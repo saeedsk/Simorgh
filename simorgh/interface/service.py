@@ -808,6 +808,11 @@ class Service:
         text = str(message.payload.get("text") or "").strip()
         if text:
             tail = "  (interrupted)" if message.payload.get("interrupted") else ""
+            if message.payload.get("aside"):
+                # The "Aha." / "Let me check." said the moment a turn ends
+                # -- a beat, not a reply.
+                self._out(render_mod.style(f"  🔊 {text}", "dim", enabled=self._color))
+                return
             self._out(render_mod.style(f"🔊 sim: {text}{tail}", "green", enabled=self._color))
 
     async def _on_voice_listening(self, message: Message) -> None:
