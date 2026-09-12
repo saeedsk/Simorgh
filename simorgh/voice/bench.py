@@ -114,27 +114,4 @@ async def run_benchmark(*, synthesiser, recogniser, speaker, config, samples: tu
     return out
 
 
-def render(result: dict) -> str:
-    lines = [f"voice bench · tts {result.get('engine_tts') or '-'} · stt {result.get('engine_stt') or '-'}",
-             f"  warm-up {result.get('warmup_s', 0):.2f}s · peak memory {result.get('peak_memory_mb', 0):.0f} MB"]
-    for s in result.get("samples", []):
-        rtf = f"{s['rtf']:.2f}x" if s.get("rtf") else "-"
-        lines.append(f"  first audio {s['first_audio_s']:.2f}s · rtf {rtf} · {s['audio_s']:.1f}s of audio "
-                     f"({s['engine']})  \"{s['text']}\"")
-    if result.get("first_audio_s_median") is not None:
-        lines.append(f"  median: first audio {result['first_audio_s_median']:.2f}s · rtf {result.get('rtf_median')}x")
-    t = result.get("transcription")
-    if t:
-        if "error" in t:
-            lines.append(f"  transcription: {t['error']}")
-        else:
-            lines.append(f"  transcription {t['latency_s']:.2f}s for {t['audio_s']:.1f}s of audio (rtf {t['rtf']}) "
-                         f"[{t['engine']}]: \"{t['heard']}\"")
-    i = result.get("interruption") or {}
-    if i:
-        stop = f", speaker stopped in {i['stop_s'] * 1000:.0f} ms" if "stop_s" in i else ""
-        lines.append(f"  interruption: a person is noticed after {i['detect_ms']} ms of speech{stop}")
-    return "\n".join(lines)
-
-
-__all__ = ["SAMPLES", "peak_memory_mb", "render", "run_benchmark"]
+__all__ = ["SAMPLES", "peak_memory_mb", "run_benchmark"]
