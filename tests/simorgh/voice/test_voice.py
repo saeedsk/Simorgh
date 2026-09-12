@@ -262,6 +262,43 @@ class SpeakRepliesTestCase(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.02)
         self.assertEqual(spoken, ["Four."])
 
+    async def test_a_tasks_own_reply_is_not_read_aloud_and_voice_off_silences_typed_ones(self):
+        # 2026-09-11: with speak_replies on, Sim read a benchmark's
+        # "FINAL ANSWER: 3" aloud, and went on reading after `voice off`.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        kernel = Kernel(LoadedConfig({
+            "runtime": {"data_dir": str(Path(tmp.name) / "data")},
+            "curiosity": {"autonomy_on_boot": False},
+            "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake", "vad": "fake",
+                      "speak_replies": True, "enabled": True, "fake_transcript": ""},
+        }, None), secrets=EnvSecretStore({}))
+        await kernel.boot()
+        self.addAsyncCleanup(kernel.shutdown)
+        spoken = []
+
+        async def _spoken(m):
+            spoken.append(m.payload["text"])
+        await kernel.bus.subscribe(topics.VOICE_SPOKEN, _spoken)
+
+        def _turn(sid, text, channel):
+            return kernel.bus.new(topics.TURN_COMPLETED, {"session_id": sid, "task_id": sid, "text": text,
+                                                          "floor": False, "tool_steps": 0, "kind": "chat",
+                                                          "channel": channel})
+        await kernel.bus.publish(_turn("bench-1", "FINAL ANSWER: 3", ""))
+        await kernel.bus.publish(_turn("typed-3", "Four.", "cli"))
+        for _ in range(100):
+            if spoken:
+                break
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.2)
+        self.assertEqual(spoken, ["Four."], "only the typed turn's reply is read aloud")
+        off = await kernel.bus.request(kernel.bus.new(topics.VOICE_CONTROL_REQUEST, {"action": "off"}), timeout=60)
+        self.assertFalse(off.payload["enabled"])
+        await kernel.bus.publish(_turn("typed-4", "Five.", "cli"))
+        await asyncio.sleep(0.3)
+        self.assertEqual(spoken, ["Four."], "voice off means silent as well as deaf")
+
     async def test_off_by_default_nothing_is_spoken_for_typed_turns(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)

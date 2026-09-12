@@ -29,6 +29,7 @@ from simorgh.contracts import topics
 
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
 from .backchannel import GREETING, Backchannel, addressed, classify, is_quiet, strip_lead
+from .commands import MUTE, OFF, STOP, spoken_command
 from .config import Config
 from .lang import language_of
 from .pipeline import NOT_SURE, Pipeline, is_echo
@@ -374,6 +375,10 @@ class VoiceSession:
             return
         self._pipeline.last_heard = text
         self._last_user_text = text
+        command = spoken_command(text)
+        if command is not None:
+            await self._obey(turn_id, command)
+            return
         if clock.confidence < self._config.min_confidence:
             reply = NOT_SURE.format(text=text)
             clock.reply_at = self._now()
@@ -434,6 +439,28 @@ class VoiceSession:
             self._last_aside_at = self._now()
             self._turns_since_connector = 0
             self._previous_connector = "okay"
+
+    async def _obey(self, turn_id: int, command: str) -> None:
+        """"Stop", "be quiet", "voice off": done here and now, the model
+        never hears of it. Playback is cut, the floor goes back to
+        listening (or, for off/mute, to the service to close)."""
+        for task in (self._ack_task, self._still_task):
+            if task is not None and not task.done():
+                task.cancel()
+        if self._player.playing:
+            await self._player.stop()
+        await self._tts.cancel(str(self.turns.speaking_response))
+        self.turns.state = LISTENING
+        await self._announce(self.turns.state)
+        self._clocks.pop(turn_id, None)
+        self._log("info", "voice.command", command=command, turn=turn_id)
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "interrupted": False,
+            "command": command, "turn": turn_id})
+        if command in (OFF, MUTE):
+            # The service owns on/off; this session is about to be closed by it.
+            await self._pipeline._publish(topics.VOICE_CONTROL_REQUEST, {  # noqa: SLF001
+                "action": "off" if command == OFF else "mute"})
 
     async def _stay_quiet(self, turn_id: int) -> None:
         """The model heard words that were not for it. Nothing is said;

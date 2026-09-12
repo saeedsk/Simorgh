@@ -107,6 +107,7 @@ TurnCompleted = define(t.TURN_COMPLETED, [
     O("verification_ref", Str),
     O("confidence", Float),
     O("user_text", Str),
+    O("kind", Str), O("channel", Str),
 ], doc="The chat-turn counterpart of task.completed (Flow 1). "
        "`user_text` is the human's own message for this turn -- optional "
        "so older producers/consumers built against v1 of this catalog "

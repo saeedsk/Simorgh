@@ -123,6 +123,11 @@ class Service:
         self._session = None
         self._enabled = False
         self._muted = False
+        # `voice off` / `voice mute`, typed or said: silent as well as
+        # deaf, until `voice on`. Not the same as never having listened
+        # (a machine with no microphone still gets typed replies spoken
+        # when `speak_replies` asks for it).
+        self._silenced = False
         self._problems: list[str] = []
         self._engine_names = {"stt": "", "tts": "", "mic": "", "spk": "", "vad": ""}
 
@@ -266,6 +271,8 @@ class Service:
     async def _turn_off(self) -> None:
         self._enabled = False
         self._loop_stop.set()
+        if self._pipeline is not None:
+            await self._pipeline.stop_speaking()  # off means quiet NOW, not after the sentence
         if self._loop_task is not None and not self._loop_task.done():
             self._loop_task.cancel()
             try:
@@ -312,15 +319,19 @@ class Service:
         action = str(message.payload.get("action") or "")
         ok, detail = True, ""
         if action == "on":
+            self._silenced = False
             ok, detail = await self._turn_on()
         elif action == "off":
+            self._silenced = True
             await self._turn_off()
         elif action == "mute":
             self._muted = True
+            self._silenced = True
             await self._turn_off()
             self._muted = True
         elif action == "unmute":
             self._muted = False
+            self._silenced = False
             ok, detail = await self._turn_on()
         elif action == "set":
             ok, detail = await self._set(str(message.payload.get("key") or ""), str(message.payload.get("value") or ""))
@@ -493,6 +504,15 @@ class Service:
             return
         if session_id in pipeline._pending or pipeline.is_voice_session(session_id):  # noqa: SLF001 -- its own turn
             return
+        channel = message.payload.get("channel")
+        if channel is not None and channel != "cli":
+            # A task's own chat, a benchmark's answer, a spoken turn: not
+            # a reply to something the person typed. 2026-09-11: Sim read
+            # a benchmark's "FINAL ANSWER: 3" aloud, and kept reading
+            # after `voice off`.
+            return
+        if self._silenced:
+            return  # `voice off` means silent as well as deaf
         from .backchannel import is_quiet
 
         if is_quiet(text):

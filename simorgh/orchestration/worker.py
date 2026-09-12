@@ -420,6 +420,11 @@ class Worker:
                 ),
                 "floor": outcome.floor,
                 "tool_steps": len(session.steps), "user_text": session.user_text,
+                # Who this reply is to. A typed turn is `channel == "cli"`,
+                # a spoken one "voice", a task's own chat "" -- and only
+                # the first is for the voice subsystem to read aloud
+                # (2026-09-11: it read a benchmark's "FINAL ANSWER: 3").
+                "kind": session.kind, "channel": getattr(session, "channel", "") or "",
             },
             partition_key=f"task:{session.task_id}", trace_id=session.task_id, clock=self._clock,
         )

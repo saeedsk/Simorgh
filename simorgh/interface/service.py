@@ -809,6 +809,10 @@ class Service:
         if message.payload.get("quiet"):
             self._out(render_mod.style("  🤫 not for me -- staying quiet", "dim", enabled=self._color))
             return
+        if message.payload.get("command"):
+            what = {"stop": "stopped", "off": "voice off", "mute": "muted"}.get(message.payload["command"], "stopped")
+            self._out(render_mod.style(f"  ⏹ {what} -- you said so", "dim", enabled=self._color))
+            return
         if message.payload.get("dropped"):
             reason = str(message.payload.get("reason") or "you had moved on")
             self._out(render_mod.style(f"  🔇 that answer came too late and was not spoken ({reason})", "dim",

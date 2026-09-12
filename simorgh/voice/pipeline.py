@@ -123,6 +123,7 @@ class Pipeline:
         # `_pending`, which is emptied the instant the reply arrives.
         self._voice_sessions: deque[str] = deque(maxlen=200)
         self.turns = 0
+        self._player = None
         self.pending_audio: Audio | None = None
         self.last_heard = ""
         self.last_said = ""
@@ -145,7 +146,14 @@ class Pipeline:
         if fut is not None and not fut.done():
             fut.set_result(str(payload.get("text") or ""))
 
+    async def stop_speaking(self) -> None:
+        """Cut whatever this pipeline is saying, now."""
+        player = self._player
+        if player is not None and player.playing:
+            await player.stop()
+
     async def stop(self) -> None:
+        await self.stop_speaking()
         for sub in self._subs:
             await sub.unsubscribe()
         self._subs = []
@@ -325,6 +333,7 @@ class Pipeline:
         from .playback import StreamingPlayer
 
         player = StreamingPlayer(self._speaker)
+        self._player = player
         if not (self._config.barge_in and self._mic is not None):
             return await player.play_stream(chunks, request_id=request_id)
 

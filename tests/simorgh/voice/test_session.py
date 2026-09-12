@@ -402,6 +402,60 @@ class TestTheBackchannel(unittest.IsolatedAsyncioTestCase):
         self.assertFalse([p for p in bus.of(topics.VOICE_SPOKEN) if p.get("aside")])
 
 
+class TestSpokenCommands(unittest.IsolatedAsyncioTestCase):
+    """"Stop" and "voice off", said aloud, are obeyed at once and never
+    sent to the model (the creator, 2026-09-11: saying "voice off"
+    did not stop Sim talking)."""
+
+    async def test_stop_said_over_sim_cuts_playback_and_asks_nothing(self) -> None:
+        class LongSynth(FakeSynthesiser):
+            async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
+                self.spoken.append(text)
+                return silence(3.0)
+
+        speaker = FakeSpeaker(realtime=True)
+        script = _Script((True, 20), (False, 15))
+        replies = _Replies(["A long answer that goes on and on."])
+        heard = FakeRecogniser("what time is it", 0.95)
+        session, bus, speaker, tts = _session(_config(), script, replies, speaker=speaker, recogniser=heard)
+        from simorgh.voice.tts.streaming import StreamingSynthesiser
+        session._tts = StreamingSynthesiser(LongSynth(), lookahead=1)  # noqa: SLF001
+        stop = asyncio.Event()
+        task = asyncio.create_task(session.run(stop))
+        try:
+            for _ in range(500):
+                if session.state == AGENT_SPEAKING:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertEqual(session.state, AGENT_SPEAKING)
+            heard.text = "Stop talking."
+            script.add((True, 40), (False, 15))  # the person cuts in and says it
+            for _ in range(500):
+                if any(p.get("command") for p in bus.of(topics.VOICE_SPOKEN)):
+                    break
+                await asyncio.sleep(0.01)
+            commands = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("command")]
+            self.assertEqual([p["command"] for p in commands], ["stop"])
+            self.assertGreaterEqual(speaker.stopped, 1)
+            self.assertFalse(session._player.playing)  # noqa: SLF001
+            await asyncio.sleep(0.05)
+            self.assertEqual(session.state, LISTENING)
+            self.assertEqual(replies.asked, ["what time is it"], "the command never reached the model")
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=3.0)
+
+    async def test_voice_off_said_aloud_asks_the_service_to_switch_off(self) -> None:
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["never"])
+        heard = FakeRecogniser("Voice off.", 0.95)
+        session, bus, speaker, tts = _session(_config(), script, replies, recogniser=heard)
+        await _run_until(session, lambda: bool(bus.of(topics.VOICE_CONTROL_REQUEST)), timeout=8.0)
+        self.assertEqual(bus.of(topics.VOICE_CONTROL_REQUEST)[0]["action"], "off")
+        self.assertEqual(replies.asked, [])
+        self.assertEqual([p["command"] for p in bus.of(topics.VOICE_SPOKEN) if p.get("command")], ["off"])
+
+
 class TestBargeInWithTheRealLevelGate(unittest.IsolatedAsyncioTestCase):
     """The scripted detector above says what it is told. These use the
     real level gate (EnergyDetector inside CompositeDetector) with a
