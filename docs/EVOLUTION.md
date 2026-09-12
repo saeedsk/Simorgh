@@ -4891,3 +4891,10 @@ Still ahead, roughly in order:
     tile that is not live shows the last frame captured from its own
     playback, never grey while a relay exists. The video frame yields
     one slot while it plays.
+
+    **The live one is the big one (2026-09-12, night):** "the one that is
+    streaming shows up in a bigger size". The live tiles take 2.4 times
+    the width in the strip and a 2x2 span in the Cameras grid (dense
+    flow), and the slots turn every eight seconds -- two would show
+    mostly loading, since a segment has to buffer and the relays cut at
+    the cameras' keyframes.
