@@ -48,7 +48,11 @@ def parse(key: str, raw: str) -> tuple[object | None, str]:
     """`(value, problem)` for a `voice set` argument."""
     spec = SAFE_KEYS.get(key)
     if spec is None:
-        return None, f"{key!r} is not a setting you can change here; one of: {', '.join(sorted(SAFE_KEYS))}"
+        import difflib
+
+        close = difflib.get_close_matches(key, list(SAFE_KEYS), n=1, cutoff=0.6)
+        hint = f"did you mean {close[0]}?" if close else f"one of: {', '.join(sorted(SAFE_KEYS))}"
+        return None, f"{key!r} is not a setting you can change here; {hint}"
     kind, allowed, _help = spec
     text = raw.strip().strip('"')
     try:

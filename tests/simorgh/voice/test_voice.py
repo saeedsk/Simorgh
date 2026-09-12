@@ -197,6 +197,16 @@ class PipelineOnAKernelTestCase(unittest.IsolatedAsyncioTestCase):
         off = await kernel.bus.request(kernel.bus.new(topics.VOICE_CONTROL_REQUEST, {"action": "off"}), timeout=60)
         self.assertFalse(off.payload["enabled"])
 
+    async def test_a_bad_setting_is_refused_in_a_reply_that_passes_the_contract(self):
+        # 2026-09-12: `voice set ttc_voice = af_kore` raised ContractError
+        # at publish time -- `ok: false` with state fields matches
+        # neither reply branch -- so the person saw a traceback.
+        kernel = await self._kernel(fake_transcript="")
+        reply = await kernel.bus.request(kernel.bus.new(
+            topics.VOICE_CONTROL_REQUEST, {"action": "set", "key": "ttc_voice", "value": "af_kore"}), timeout=60)
+        self.assertFalse(reply.payload["ok"])
+        self.assertIn("did you mean tts_voice?", reply.payload["error"]["detail"])
+
     async def test_changing_the_voice_applies_live_and_only_an_engine_change_reopens_the_stack(self):
         # 2026-09-11: every `voice set` tore down whisper, Kokoro and the
         # microphone and rebuilt them; the creator trying voices heard

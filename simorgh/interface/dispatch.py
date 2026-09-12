@@ -426,11 +426,17 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
         return await _request(bus, topics.VOICE_MODELS_REQUEST, {"name": rest.strip() or "base.en"},
                               timeout=900.0, render=voiceview.models)
     if verb == "set":
-        key, _, value = rest.strip().partition(" ")
+        # `voice set tts_voice af_kore`, `tts_voice = af_kore` and
+        # `tts_voice=af_kore` are the same ask.
+        text = rest.strip()
+        if "=" in text.split(" ", 1)[0] or text.split(" ", 2)[1:2] == ["="]:
+            key, _, value = text.partition("=")
+        else:
+            key, _, value = text.partition(" ")
         payload = {"action": "set"}
-        if key:
+        if key.strip():
             payload["key"] = key.strip()
-            payload["value"] = value.strip()
+            payload["value"] = value.strip().strip("=").strip()
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, payload, timeout=120.0, render=voiceview.controlled)
     if verb == "bench":
         return await _request(bus, topics.VOICE_BENCH_REQUEST, {"play": "quiet" not in rest},

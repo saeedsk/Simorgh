@@ -355,7 +355,17 @@ class Service:
                 self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
         else:
             ok, detail = False, f"unknown action {action!r} (on | off | mute | unmute | set)"
-        await self._reply(message, topics.VOICE_CONTROL_REPLY, {"ok": ok, "detail": detail, **self._state()})
+        if not ok:
+            # The reply contract's error branch: `ok: false` may only
+            # travel with an `error` object. `{"ok": False, "detail": ...,
+            # **state}` matched neither branch and raised at publish time
+            # -- the creator's `voice set ttc_voice = af_kore` (2026-09-12)
+            # got a traceback instead of "did you mean tts_voice".
+            from simorgh.contracts.registry import error_reply_payload
+
+            await self._reply(message, topics.VOICE_CONTROL_REPLY, error_reply_payload("refused", detail))
+            return
+        await self._reply(message, topics.VOICE_CONTROL_REPLY, {"ok": True, "detail": detail, **self._state()})
 
     async def _set(self, key: str, raw: str) -> tuple[bool, str]:
         """`voice set key value`: a safe setting, applied live and written

@@ -48,7 +48,8 @@ def status(payload: dict) -> str:
 
 def controlled(payload: dict) -> str:
     if not payload.get("ok"):
-        return f"voice: {payload.get('detail') or 'could not do that'}"
+        error = payload.get("error") or {}
+        return f"voice: {payload.get('detail') or error.get('detail') or 'could not do that'}"
     detail = payload.get("detail") or ""
     if detail.startswith(("barge-in", "echo cancellation", "settings you can change")) or " = " in detail:
         return f"voice: {detail}"

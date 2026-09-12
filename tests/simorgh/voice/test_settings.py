@@ -59,3 +59,11 @@ class TestPersist(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NearestKeyTestCase(unittest.TestCase):
+    def test_a_misspelt_key_gets_the_nearest_real_one(self):
+        from simorgh.voice.settings import parse
+        value, problem = parse("ttc_voice", "af_kore")
+        self.assertIsNone(value)
+        self.assertIn("did you mean tts_voice?", problem)

@@ -259,3 +259,27 @@ class StepsOptionTestCase(unittest.TestCase):
     def test_it_lands_in_the_payload_only_when_given(self):
         self.assertEqual(dispatch_module._with_steps({"kind": "patch"}, 40), {"kind": "patch", "max_steps": 40})  # noqa: SLF001
         self.assertEqual(dispatch_module._with_steps({"kind": "patch"}, None), {"kind": "patch"})  # noqa: SLF001
+
+
+class VoiceSetSpellingsTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_key_equals_value_is_the_same_ask(self):
+        from simorgh.interface import dispatch as dispatch_mod
+
+        seen = []
+
+        async def _request(bus, topic, payload, **kw):
+            seen.append(payload)
+            return dispatch_mod.Outcome("ok")
+        original = dispatch_mod._request
+        dispatch_mod._request = _request
+        try:
+            for spelling in ("tts_voice af_kore", "tts_voice = af_kore", "tts_voice=af_kore"):
+                await dispatch_mod._voice(None, f"set {spelling}")
+        finally:
+            dispatch_mod._request = original
+        self.assertEqual(seen, [{"action": "set", "key": "tts_voice", "value": "af_kore"}] * 3)
+
+    def test_a_refused_setting_shows_its_reason(self):
+        from simorgh.interface.voiceview import controlled
+        out = controlled({"ok": False, "error": {"code": "refused", "detail": "did you mean tts_voice?", "retryable": False}})
+        self.assertIn("did you mean tts_voice?", out)
