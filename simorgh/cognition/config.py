@@ -48,7 +48,13 @@ class Config:
     provider_order: tuple[str, ...] = ("together", "claude_code_cli", "gemini", "floor")
     providers: Mapping[str, ProviderConfig] = field(default_factory=lambda: {
         "together": ProviderConfig(
-            max_calls=int(os.environ.get("SIMORGH_LLM_DAILY_MAX_CALLS", "1500")),
+            # 1500 until 2026-09-11, when a spoken conversation reached
+            # it at 20:32 with 86 cents of the $2 spent, and every turn
+            # after that silently went to the Claude Code CLI: five
+            # times slower and two hundred times the reported cost. A
+            # voice session is a hundred calls an hour; the dollar cap
+            # below is the real guard.
+            max_calls=int(os.environ.get("SIMORGH_LLM_DAILY_MAX_CALLS", "6000")),
             window_seconds=86_400.0,
             max_spend_usd=float(os.environ.get("SIMORGH_LLM_DAILY_BUDGET_USD", "2.0")),
             timeout_seconds=180.0,

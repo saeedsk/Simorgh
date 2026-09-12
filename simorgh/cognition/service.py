@@ -156,6 +156,7 @@ class Service:
         self._assembler = PromptAssembler(
             ctx.bus, ctx.source, request_timeout=self._config.assembly_request_timeout, logger=ctx.logger,
         )
+        self._last_provider: str | None = None
         self._compactor = Compactor(
             self._config, ctx.ledger, bus=ctx.bus, source=ctx.source, clock=ctx.clock,
             summarize=self._summarize_for_compaction,
@@ -304,6 +305,7 @@ class Service:
         self._no_real_provider_since = self._ctx.clock.now() if floor else None
         parsed = self._parser.parse(response.text, _expected_spec(payload))
         await self._append_call_record(purpose, response, floor, compacted)
+        await self._notice_if_provider_changed(response.provider)
 
         await self._ctx.bus.reply(message, type=topics.COGNITION_THINK_REPLY, payload={
             "text": parsed.text,
@@ -427,6 +429,37 @@ class Service:
                 "model": self._model_of(provider.name), "selected": provider.name == selected,
             },
         ))
+
+    async def _notice_if_provider_changed(self, provider: str) -> None:
+        """Say on screen when thinking moves to another provider, and
+        why. The failover is silent by design at the router; the person
+        must not be. 2026-09-11: Together's day of calls ran out at
+        20:32 in the middle of a spoken conversation, every turn after
+        it went to the Claude Code CLI, and the creator's report was
+        "sim became less responsive" -- five seconds a turn instead of
+        one, and nothing on screen said so."""
+        previous, self._last_provider = self._last_provider, provider
+        if previous is None or previous == provider or self._ctx is None:
+            return
+        why = ""
+        budget = self._budgets.get(previous)
+        if budget is not None:
+            try:
+                status = await budget.status()
+            except Exception:  # noqa: BLE001 -- the notice matters more than its detail
+                status = None
+            if status is not None and status.exhausted:
+                hours = status.window_seconds / 3600
+                if status.max_calls is not None and status.calls_in_window >= status.max_calls:
+                    why = f"{previous} reached its cap of {status.max_calls} calls per {hours:g} h"
+                elif status.max_spend_usd is not None:
+                    why = f"{previous} reached its ${status.max_spend_usd:g} per {hours:g} h budget"
+        text = f"thinking moved from {previous} to {provider}" + (f": {why}" if why else "")
+        if provider == "claude_code_cli":
+            text += " -- slower per turn, and it counts against the Claude Code quota"
+        self._ctx.logger.warning("cognition.provider_changed", previous=previous, provider=provider, why=why)
+        await self._ctx.bus.publish(Message.new(topics.UI_NOTICE, source=self._ctx.source, payload={
+            "level": "warning", "text": text, "source": "cognition"}))
 
     async def _append_call_record(self, purpose: Purpose, response: ProviderResponse, floor: bool, compacted) -> None:
         await self._ctx.ledger.append("cognition:calls", Event(

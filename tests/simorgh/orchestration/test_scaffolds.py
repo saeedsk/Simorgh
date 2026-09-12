@@ -151,5 +151,6 @@ class TestTheVoiceChannel(unittest.TestCase):
         self.assertIn("One or two sentences is the norm", spoken)
         self.assertIn("do not open with one", spoken)  # the backchannel already said "Okay"
         self.assertIn("the single word QUIET", spoken)  # overheard words get no reply
+        self.assertIn("Never say aloud that words were a fragment", spoken)
         self.assertNotIn("You are answering by voice", typed)
         self.assertNotIn("You are answering by voice", scaffolds.render(profiles.CHAT))

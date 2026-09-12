@@ -236,11 +236,14 @@ class TestStaleAndEcho(unittest.IsolatedAsyncioTestCase):
         session, bus, speaker, tts = _session(_config(), script, replies)
         await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
         await asyncio.sleep(0.05)
-        spoken = bus.of(topics.VOICE_SPOKEN)
+        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("dropped")]
         self.assertEqual(len(spoken), 1)
         self.assertEqual(spoken[0]["turn"], 2)
         self.assertEqual(spoken[0]["response"], 1)
         self.assertNotIn("first answer", " ".join(tts.spoken))
+        dropped = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("dropped")]
+        self.assertIn(1, [p["turn"] for p in dropped], "the screen is told the first answer was not spoken")
+        self.assertIn("later turn", next(p for p in dropped if p["turn"] == 1)["reason"])
 
     async def test_sims_own_words_coming_back_are_not_a_turn(self) -> None:
         script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
@@ -336,7 +339,7 @@ class TestTheBackchannel(unittest.IsolatedAsyncioTestCase):
         self.assertFalse([p for p in bus.of(topics.VOICE_SPOKEN) if p.get("aside")])
 
     async def test_two_slow_turns_in_a_row_get_one_sound_not_two(self) -> None:
-        script = _Script((True, 20), (False, 15), (False, 10_000))
+        script = _Script((True, 20), (False, 15))  # no long silent tail: `add` below must play at once
         replies = _Replies(["Twelve.", "Thirteen."], delay=0.8)
         session, bus, speaker, tts = _in_conversation(_session(_config(backchannel=True, backchannel_after_ms=200,
                                                       backchannel_gap_s=30.0), script, replies))
@@ -579,5 +582,5 @@ class TestASupersededAskIsCancelled(unittest.IsolatedAsyncioTestCase):
         cancels = bus.of(topics.TASK_CANCEL)
         self.assertEqual(len(cancels), 1)
         self.assertIn("new turn", cancels[0]["reason"])
-        spoken = bus.of(topics.VOICE_SPOKEN)
+        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("dropped")]
         self.assertEqual([p["turn"] for p in spoken], [2])

@@ -55,6 +55,7 @@ class TestAddressedAndQuiet(unittest.TestCase):
     def test_by_name_or_in_an_exchange_and_not_otherwise(self) -> None:
         self.assertTrue(addressed("hey sim, what time is it", since_sim_spoke_s=999.0, exchange_window_s=20.0))
         self.assertTrue(addressed("سیم ساعت چنده", since_sim_spoke_s=999.0, exchange_window_s=20.0))
+        self.assertTrue(addressed("- Understood. - Shin.", since_sim_spoke_s=999.0, exchange_window_s=20.0))
         self.assertTrue(addressed("and the second one?", since_sim_spoke_s=4.0, exchange_window_s=20.0))
         self.assertFalse(addressed("and the second one?", since_sim_spoke_s=40.0, exchange_window_s=20.0))
         self.assertFalse(addressed("what time is it", since_sim_spoke_s=999.0, exchange_window_s=20.0))

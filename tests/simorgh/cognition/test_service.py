@@ -76,6 +76,35 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         await self.bus.stop()
         self._tmp.cleanup()
 
+    async def test_moving_to_another_provider_is_said_on_screen_with_the_reason(self):
+        # The first provider's cap is one call; the second think goes to
+        # the next one, and the person is told why (2026-09-11: Together's
+        # day ran out mid-conversation and nothing said so).
+        first, second = _FakeProvider("first"), _FakeProvider("second")
+        config = CognitionConfig(
+            provider_order=("first", "second", "floor"), assembly_request_timeout=0.05,
+            providers={"first": ProviderConfig(max_calls=1, window_seconds=3600.0),
+                       "second": ProviderConfig(max_calls=100, window_seconds=3600.0)},
+        )
+        await self._make(providers=[first, second], config=config)
+        notices: list[dict] = []
+
+        async def _on_notice(message):
+            notices.append(message.payload)
+
+        await self.bus.subscribe(topics.UI_NOTICE, _on_notice)
+        for _ in range(2):
+            reply = await self.bus.request(Message.new(topics.COGNITION_THINK, source="test", payload={
+                "purpose": "chat", "messages": [{"role": "user", "content": "hi"}],
+                "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False,
+            }), timeout=5.0)
+        self.assertEqual(reply.payload["provider"], "second")
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(notices), 1, notices)
+        self.assertEqual(notices[0]["level"], "warning")
+        self.assertIn("from first to second", notices[0]["text"])
+        self.assertIn("cap of 1 calls per 1 h", notices[0]["text"])
+
     async def test_think_with_a_fake_provider_returns_its_answer_not_the_floor(self):
         await self._make(providers=[_FakeProvider(text="42")])
         request = Message.new(topics.COGNITION_THINK, source="test", payload={

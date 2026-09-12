@@ -285,7 +285,14 @@ class VoiceSession:
         elif kind == Actions.SPEAK:
             pass  # handled by `_ask_and_speak`, which minted the response
         elif kind == Actions.DROP_REPLY:
+            # On screen, not only in the log: the reply's text is already
+            # there from the task line, and a person reading it hears
+            # nothing (the creator, 2026-09-11: "I know it is talking
+            # because I see text on screen but no voice").
             self._log("info", "voice.reply_dropped", turn=action.turn_id, reason=action.reason)
+            await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+                "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "interrupted": False,
+                "dropped": True, "reason": str(action.reason or ""), "turn": action.turn_id})
 
     async def _guarded(self, coro) -> None:
         """A task's exception is nobody's unless somebody looks: a turn
