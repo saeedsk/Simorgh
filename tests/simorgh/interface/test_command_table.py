@@ -182,3 +182,28 @@ class ImproveMeansImproveTestCase(unittest.IsolatedAsyncioTestCase):
         outcome = await dispatch(parse("skill"), bus=self.bus, clock=self.clock,
                                  session_id="s1", vitals=VitalsCache(), ledger=self.ledger)
         self.assertIn("improve", outcome.text)
+
+
+class HelpPanelTestCase(unittest.TestCase):
+    def test_every_command_is_on_the_help_screen_with_its_words(self):
+        from simorgh.interface.parser import SUBCOMMANDS
+        from simorgh.interface.render import help_panel
+        text = help_panel(enabled=False)
+        for name in COMMAND_NAMES:
+            self.assertIn(f"  {name}", text, name)
+        for name, subs in SUBCOMMANDS.items():
+            for sub, meaning in subs:
+                self.assertIn(f"{name} {sub}".strip(), text)
+                self.assertIn(meaning, text)
+        self.assertIn("tasks clear", text)
+        self.assertIn("Look around", text)
+        self.assertIn("Voice", text)
+        self.assertNotIn("\x1b[", text, "no colour when colour is off")
+
+    def test_every_section_names_only_real_commands(self):
+        from simorgh.interface.parser import SECTIONS, SUBCOMMANDS
+        for _title, names in SECTIONS:
+            for name in names:
+                self.assertIn(name, COMMAND_NAMES, name)
+        for name in SUBCOMMANDS:
+            self.assertIn(name, COMMAND_NAMES, name)

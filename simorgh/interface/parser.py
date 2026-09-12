@@ -34,7 +34,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("research", "<topic>", "investigate a question, no code written"),
     ("interests", "[topic]", "topics Sim is following, or add one"),
     ("benchmark", "[suites|load|run|stop|history|show]", "score this system on GAIA, BFCL or SWE-bench, and track it"),
-    ("voice", "[status|on|off|mute|unmute|barge on|off|listen [s]|test <text>|voices|devices|models [name]]", "talk to Sim: speech in, speech out, local engines"),
+    ("voice", "[status|on|off|mute|unmute|barge on|off|listen [s]|test <text>|voices|devices|models [name]|set <key> <value>|bench]", "talk to Sim: speech in, speech out, local engines"),
     ("schedule", "[every] <15m> <label> | cancel <id>", "fire a reminder later, or on a repeat"),
     ("mcp", "[list|approve|deny]", "review external tools Sim has proposed"),
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),
@@ -67,12 +67,61 @@ NO_ARGUMENT_COMMANDS: frozenset[str] = frozenset(
 SPLASH_COMMANDS = 8
 
 
+#: The help screen's sections, in the order they read best, and what
+#: each command's words mean. The creator, 2026-09-12: "make the help
+#: screen more visually appealing and more informative, I'd like to see
+#: subcommand options". A command not listed in a section goes under
+#: "More"; a subcommand not listed here still completes (from the usage
+#: hint) but has no line of its own.
+SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Look around", ("status", "domains", "capabilities", "config", "alerts", "tool")),
+    ("Work", ("tasks", "cancel", "improve", "skill", "plan", "research", "interests", "benchmark")),
+    ("Voice", ("voice",)),
+    ("Control", ("auto", "schedule", "mcp", "pause", "resume")),
+    ("Session", ("help", "exit")),
+)
+SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "tasks": (("", "the backlog: the twenty most recent, with status and origin"),
+              ("all", "every task, not just the recent ones"),
+              ("work", "advance the next item now"),
+              ("clear", "wipe the backlog -- queued, running, done; the ledger keeps the history")),
+    "alerts": (("", "what the monitors have raised"), ("all", "including what already went into a digest")),
+    "domains": (("", "every domain: on? working?"), ("<name>", "one domain in detail")),
+    "tool": (("", "list every tool"), ("<name> [args]", "run one -- Guardian gates it as usual")),
+    "config": (("", "the settings in force"), ("<section>", "one section, and any setting nothing reads")),
+    "benchmark": (("suites", "the suites available and their sizes"), ("load <suite>", "fetch a suite's cases"),
+                  ("run <suite> [n]", "score the system on it"), ("stop", "stop a run"),
+                  ("history", "past runs, by model"), ("show <run>", "one run in detail")),
+    "voice": (("status", "engines, state, the last turn's timings"), ("on", "listen and speak"),
+              ("off", "silent and deaf until `voice on`"), ("mute", "stop listening; keep the rest"),
+              ("unmute", "listen again"), ("barge on|off", "whether talking over Sim stops it"),
+              ("listen [s]", "one push-to-talk turn"), ("test <text>", "say something aloud"),
+              ("voices", "the voices the engine has"), ("devices", "microphone, speaker, engines"),
+              ("models [name]", "recogniser models on disk, or fetch one"),
+              ("set <key> <value>", "change a setting live: tts_voice, tts_speed, volume, backchannel, ..."),
+              ("bench", "measure the engines on this machine")),
+    "schedule": (("<15m> <label>", "a reminder later"), ("every <15m> <label>", "a reminder on a repeat"),
+                 ("cancel <id>", "drop one")),
+    "mcp": (("list", "external tools Sim has proposed"), ("approve <id>", "let one in"), ("deny <id>", "keep one out")),
+    "auto": (("", "is the idle loop on?"), ("on", "let Sim improve itself when idle"), ("off", "stop that"),
+             ("now", "one round now")),
+    "interests": (("", "topics Sim is following"), ("<topic>", "follow one more")),
+    "improve": (("[path] <description>", "change something; tested before it lands; `steps=N` bounds one attempt"),),
+}
+
+
 def subcommands(name: str) -> tuple[str, ...]:
     """The words a command takes next, read off its own usage hint --
     `[all|work|clear]` gives all, work, clear; `<topic>` gives nothing,
     a free argument is not a word to offer. What Tab shows after a
     command (the creator, 2026-09-12: "if I type tasks and press tab
     at least I expect to see all")."""
+    listed = SUBCOMMANDS.get(name.lstrip("/"))
+    if listed:
+        words = tuple(dict.fromkeys(sub.split(" ", 1)[0] for sub, _m in listed
+                                    if sub and not sub.startswith(("<", "["))))
+        if words:
+            return words
     for command, hint, _desc in COMMANDS:
         if command != name.lstrip("/"):
             continue

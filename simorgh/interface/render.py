@@ -911,3 +911,39 @@ def _task_line(task: dict, *, enabled: bool = True) -> str:
         f"{style(f'{origin:<9s}', 'dim', enabled=enabled)}  {description}"
     )
 
+
+
+def help_panel(*, enabled: bool = True, unicode: bool = True) -> str:
+    """The help screen: commands in sections, each with its words and
+    what they mean, the way a person reads a manual -- not one flat
+    row per command with the whole usage crammed into a column (the
+    creator, 2026-09-12)."""
+    from .parser import COMMANDS, SECTIONS, SUBCOMMANDS
+
+    by_name = {name: (hint, desc) for name, hint, desc in COMMANDS}
+    placed = {name for _title, names in SECTIONS for name in names}
+    sections = list(SECTIONS) + ([("More", tuple(n for n in by_name if n not in placed))]
+                                 if set(by_name) - placed else [])
+    corner = "⎿" if unicode else "`-"
+    lines = [style(f"{len(by_name)} commands. A leading / is optional everywhere; Tab completes.", "dim",
+                   enabled=enabled)]
+    for title, names in sections:
+        lines.append("")
+        lines.append(style(title, "bold", enabled=enabled))
+        usages = {name: (f"{name} {by_name[name][0]}".strip() if by_name[name][0] and name not in SUBCOMMANDS
+                         else name) for name in names}
+        column = max(len(u) for u in usages.values())
+        for name in names:
+            hint, desc = by_name[name]
+            usage = usages[name]
+            lines.append(f"  {style(usage.ljust(column), 'warm', enabled=enabled)}  {desc}")
+            subs = SUBCOMMANDS.get(name, ())
+            width = max((len(f"{name} {sub}".strip()) for sub, _m in subs), default=0)
+            for sub, meaning in subs:
+                form = f"{name} {sub}".strip()
+                lines.append(f"    {style(corner, 'dim', enabled=enabled)} {style(form.ljust(width), 'warm', enabled=enabled)}"
+                             f"  {style(meaning, 'dim', enabled=enabled)}")
+    lines.append("")
+    lines.append(f"  {style('!<shell command>', 'warm', enabled=enabled)}  run a shell command directly")
+    lines.append(f"  {style('anything else', 'warm', enabled=enabled)}      is chat")
+    return "\n".join(lines)

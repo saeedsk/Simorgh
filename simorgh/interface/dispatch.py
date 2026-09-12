@@ -199,14 +199,8 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         return Outcome(await _status_panel(bus, vitals))
 
     if name == "help":
-        from .parser import command_help
-
-        rows = command_help()
-        width = max(len(usage) for usage, _ in rows)
-        listed = "\n".join(f"  {usage.ljust(width)}  {description}" for usage, description in rows)
-        return Outcome(f"{len(rows)} commands. A leading `/` is optional everywhere.\n{listed}\n"
-                       "  !<shell command>      run a shell command directly\n"
-                       "  anything else         is chat")
+        return Outcome(render_mod.help_panel(enabled=render_mod.color_enabled(),
+                                             unicode=render_mod.unicode_mode() != "off"))
 
     if name == "improve":
         args, steps = _pop_steps(args)
