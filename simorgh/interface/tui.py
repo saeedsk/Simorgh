@@ -275,6 +275,7 @@ def _style():
         "sim.prompt": "#bcbcbc",
         "sim.rule": "#3a3a3a",
         "sim.footer": "#6c6c6c",
+        "sim.live": "#d0d0d0",
         "sim.status": "#8a8a8a",
         **shades,
         "completion-menu.completion": "bg:#1c1c1c #d0d0d0",
@@ -298,6 +299,7 @@ class Tui:
         self, *, on_line: Callable[[str], Awaitable[None]],
         on_interrupt: Callable[[], None] | None = None,
         footer_text: Callable[[], str] | None = None,
+        live_text: Callable[[], list] | None = None,
         history_path: Path | None = None,
         root: Path | None = None,
         double_interrupt_s: float = DOUBLE_INTERRUPT_S,
@@ -306,6 +308,7 @@ class Tui:
         self._on_line = on_line
         self._on_interrupt = on_interrupt or (lambda: None)
         self._footer_text = footer_text or (lambda: "")
+        self._live_text = live_text or (lambda: [])
         self._history_path = history_path
         self._root = root or Path.cwd()
         self._double_interrupt_s = double_interrupt_s
@@ -378,11 +381,21 @@ class Tui:
         )
 
     def _message(self):
-        """The input bar: a rule across the terminal, then the prompt.
-        The rule is what separates the transcript above from the line
-        being typed, the way Claude Code boxes its input."""
+        """Above the input: the live section (`panel.live_rows` -- the
+        call in flight and the breathing line, re-rendered every
+        `PANEL_REFRESH_S` because the message is a callable), then a rule,
+        then the prompt. The rule is what separates what is happening
+        from the line being typed, the way Claude Code boxes its input."""
         cols = shutil.get_terminal_size((80, 24)).columns
-        return [("class:sim.rule", "─" * max(10, cols - 1) + "\n"), ("class:sim.prompt", f"{PROMPT_GLYPH} ")]
+        live: list = []
+        try:
+            for fragment in self._live_text() or []:
+                live.append(fragment)
+        except Exception:  # noqa: BLE001 -- a broken live row must not take the prompt down
+            live = []
+        if live and live[-1][1] != "\n":
+            live.append(("", "\n"))
+        return live + [("class:sim.rule", "─" * max(10, cols - 1) + "\n"), ("class:sim.prompt", f"{PROMPT_GLYPH} ")]
 
     def _toolbar(self):
         """The activity panel under the input, behind a rule of its own:

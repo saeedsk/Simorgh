@@ -132,6 +132,7 @@ class Service:
         self._booted = threading.Event()
         self._dashboard_line = ""
         self._tui = None            # the prompt_toolkit prompt, when available
+        self._last_done = None      # (word, elapsed, clock) of the turn that just finished, until the next line
         self._tui_task = None
         self._footer = ""           # what the sticky footer under the prompt shows
         # What every task actually is, so a narration line can name the
@@ -455,6 +456,7 @@ class Service:
             on_line=self._handle_line_guarded,
             on_interrupt=self._cancel_current_turn,
             footer_text=self._panel_text,
+            live_text=self._live_text,
             history_path=self._history_path(),
             root=Path.cwd(),
         )
@@ -481,19 +483,24 @@ class Service:
             app.invalidate()
 
     def _panel_text(self) -> list[tuple[str, str]]:
-        """The bottom section for the prompt's toolbar (`panel.py`): a
-        row per running task with its breathing word, the queue, and a
-        status row. The one-line `_footer` that `LiveStatus` redirects
-        here is only shown when the book has nothing running -- a task
-        the book knows renders richer than "Thinking... [4s]"."""
+        """The ribbon at the very bottom (`panel.footer_rows`): the
+        running tasks, the queue, and the status row."""
         snap = self.vitals.snapshot()
         unicode = render_mod.unicode_mode(self.config.unicode) != "off"
         rows = panel_mod.footer_rows(
             self._book, now=time.monotonic(), auto=self._auto, posture=snap.posture, model=self._model,
             budget=panel_mod.budget_summary(snap.budget), hint="Ctrl-C cancels", unicode=unicode,
         )
-        if self._footer and not self._book.running():
-            rows.insert(0, [("class:sim.footer", self._footer)])
+        return panel_mod.flatten(rows)
+
+    def _live_text(self) -> list[tuple[str, str]]:
+        """The live section above the prompt (`panel.live_rows`): the call
+        in flight, drawn in place, and the breathing line; the one-line
+        `_footer` that `LiveStatus` redirects here when the book has
+        nothing running; what just finished, until the next line."""
+        unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+        rows = panel_mod.live_rows(self._book, now=time.monotonic(), footer_text=self._footer,
+                                   last_done=self._last_done, unicode=unicode)
         return panel_mod.flatten(rows)
 
     async def _await_boot(self) -> None:
@@ -505,6 +512,7 @@ class Service:
         """`_handle_line` already has its own crash boundary; this one
         covers the prompt's own call path so a raising handler can never
         end the session (spec section 8)."""
+        self._last_done = None
         try:
             await self._handle_line(line)
         except Exception as exc:  # noqa: BLE001
@@ -1035,16 +1043,21 @@ class Service:
             in_flight = p.get("ok") is None
             if not in_flight:
                 took = self._book.step_took(task_id, now=now)
+            head = str(p.get("summary", "")).partition("\n\n--- a/")[0]
             self._book.on_step(
                 task_id, now=now, phase=p.get("phase", ""), verb=verb_for(p.get("phase", ""), p.get("tool")),
-                in_flight=in_flight,
+                in_flight=in_flight, tool=str(p.get("tool") or ""), detail=head,
             )
         elif message.type in (topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED):
-            self._book.on_finished(task_id, {
+            finished = self._book.on_finished(task_id, {
                 topics.TASK_COMPLETED: "completed",
                 topics.TASK_FAILED: "failed",
                 topics.TASK_BLOCKED: "blocked",
             }[message.type])
+            if task_id in self._pending_turns or task_id in self._watched_tasks:
+                elapsed = now - finished.started_at if finished.started_at is not None else 0.0
+                self._last_done = (panel_mod.breath_word(task_id, elapsed).replace("ing", "ed"), elapsed,
+                                   time.strftime("%H:%M"))
         self._refresh_activity_footer()
 
         watched = task_id in self._watched_tasks

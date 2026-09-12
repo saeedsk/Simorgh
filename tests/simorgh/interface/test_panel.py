@@ -82,21 +82,40 @@ class BottomRowsTestCase(unittest.TestCase):
         rows = panel.footer_rows(TaskBook(), now=0.0, auto="on")
         self.assertEqual(panel.plain(rows), "idle\n⏵⏵ auto on")
 
-    def test_a_running_task_gets_a_breathing_word_its_topic_and_its_age(self):
+    def test_a_running_task_breathes_above_the_prompt_and_is_listed_plainly_below(self):
         book = _running(started=0.0, steps=2)
-        rows = panel.footer_rows(book, now=12.0, auto="off", posture="guarded", model="GLM-5.3-Flash")
-        text = panel.plain(rows)
-        first = rows[0]
+        live = panel.live_rows(book, now=12.0)
+        first = live[0]
         self.assertTrue(first[0][0].startswith("class:sim.breath."))  # the word carries the breathing style
         self.assertIn(first[0][1].lstrip("✻ ").rstrip("…"), panel.BREATH_WORDS)
-        self.assertIn("patch · tighten the retry loop · 12s · 2 steps", text)
-        self.assertIn("auto off · guarded · GLM-5.3-Flash", text)
+        self.assertIn("patch · tighten the retry loop · 12s · 2 steps", panel.plain(live))
+        ribbon = panel.plain(panel.footer_rows(book, now=12.0, auto="off", posture="guarded", model="GLM-5.3-Flash"))
+        self.assertIn("⏺ patch · tighten the retry loop · 12s", ribbon)
+        self.assertNotIn("…", ribbon.split("\n")[0], "no breathing in the ribbon")
+        self.assertIn("auto off · guarded · GLM-5.3-Flash", ribbon)
 
-    def test_a_tool_call_in_flight_shows_its_verb_not_a_breathing_word(self):
+    def test_a_tool_call_in_flight_is_drawn_in_place_above_the_breathing_line(self):
+        # The creator, 2026-09-12: "a dynamic section showing current
+        # activity, process, shell in nested format which ... gets
+        # updated in place", above the breathing bullet, above the prompt.
         book = _running()
-        book.on_step("t1", phase="act", verb="Patching", in_flight=True)
-        rows = panel.footer_rows(book, now=1.0, auto="on")
-        self.assertEqual(rows[0][0][1], "✻ Patching…")
+        book.on_step("t1", now=0.0, phase="act", verb="Running", in_flight=True, tool="run_shell",
+                     detail="python -m pytest tests/simorgh/interface -q")
+        rows = panel.live_rows(book, now=3.0)
+        text = panel.plain(rows)
+        self.assertTrue(text.startswith("⏺ run_shell(python -m pytest tests/simorgh/interface -q)"), text)
+        self.assertIn("⎿  running… 3s", text)
+        self.assertEqual(rows[2][0][1], "✻ Running…")
+        book.on_step("t1", now=4.0, in_flight=False)  # it landed: the block goes, the breathing stays
+        text = panel.plain(panel.live_rows(book, now=5.0))
+        self.assertNotIn("run_shell(", text)
+        self.assertIn("✻", text)
+
+    def test_idle_shows_nothing_live_but_what_just_finished(self):
+        self.assertEqual(panel.live_rows(TaskBook(), now=0.0), [])
+        self.assertEqual(panel.plain(panel.live_rows(TaskBook(), now=0.0, footer_text="Thinking… [4s]")), "Thinking… [4s]")
+        done = panel.plain(panel.live_rows(TaskBook(), now=0.0, last_done=("Baked", 61.0, "04:33")))
+        self.assertEqual(done, "✻ Baked for 61s · done 04:33")
 
     def test_the_queue_names_what_waits(self):
         book = _running()

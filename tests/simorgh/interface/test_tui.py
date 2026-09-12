@@ -478,6 +478,16 @@ class TestThePanelToolbar(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(message[0][1].endswith("\n"))
         self.assertEqual(message[-1], ("class:sim.prompt", "❯ "))
 
+    async def test_the_live_section_sits_above_the_rule_and_the_prompt(self):
+        rows = [("class:sim.live", "⏺ run_shell(pytest)"), ("", "\n"), ("class:sim.breath.2", "✻ Osmosing…")]
+        prompt = Tui(on_line=self._noop_line, live_text=lambda: rows)
+        session = prompt._build_session()  # noqa: SLF001
+        message = session.message() if callable(session.message) else session.message
+        self.assertEqual(message[:3], rows)
+        self.assertEqual(message[3], ("", "\n"))
+        self.assertEqual(message[4][0], "class:sim.rule")
+        self.assertEqual(message[-1], ("class:sim.prompt", "❯ "))
+
     async def test_every_breathing_shade_has_a_colour(self):
         from simorgh.interface import panel
         from simorgh.interface.tui import BREATH_COLOURS

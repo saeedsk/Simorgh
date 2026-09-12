@@ -65,6 +65,11 @@ class TaskRecord:
     # "Patching"; a gather phase breathes a word instead -- `panel.py`).
     phase: str = ""
     verb: str = ""
+    # The call in flight, for the live block above the prompt: its tool
+    # and what it is on ("run_shell", "python -m pytest tests/…").
+    tool: str = ""
+    detail: str = ""
+    inflight_since: float | None = None
     # When the last event for this task landed, so a finished step can
     # say how long it took: the step record itself carries no timing.
     last_event_at: float | None = None
@@ -146,15 +151,18 @@ class TaskBook:
         return record
 
     def on_step(self, task_id: str, *, now: float | None = None, phase: str = "", verb: str = "",
-                in_flight: bool = False) -> TaskRecord:
+                in_flight: bool = False, tool: str = "", detail: str = "") -> TaskRecord:
         """A step event. An in-flight one (no outcome yet) only updates
         what the task is doing; a finished one counts."""
         record = self.get(task_id)
         if in_flight:
             record.phase, record.verb = phase, verb
+            record.tool, record.detail = tool or "", " ".join((detail or "").split())
+            record.inflight_since = now
             return record
         record.steps += 1
         record.phase, record.verb = "", ""
+        record.tool, record.detail, record.inflight_since = "", "", None
         if now is not None:
             record.last_event_at = now
         return record

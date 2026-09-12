@@ -192,7 +192,7 @@ def tree_end(record: TaskRecord, *, elapsed: float | None, detail: str = "", uni
     return _line(f"{corner}{icon} {record.status}{took}{tail}")
 
 
-# ---------------------------------------------------------------- bottom rows
+# ------------------------------------------------- the live section (above the prompt)
 def running_row(record: TaskRecord, *, now: float, unicode: bool = True) -> list[tuple[str, str]]:
     """One running task: a breathing word (or the tool's verb), then what
     it is and for how long. Formatted-text fragments, because the word
@@ -208,6 +208,74 @@ def running_row(record: TaskRecord, *, now: float, unicode: bool = True) -> list
         (breath_class(now), f"{spark}{word}…"),
         ("class:sim.footer", _line(f"  {record.kind} · {record.short_topic(_topic(_ROW_OVERHEAD))} · {elapsed:.0f}s{steps}")),
     ]
+
+
+def inflight_rows(record: TaskRecord, *, now: float, unicode: bool = True) -> list[list[tuple[str, str]]]:
+    """The call in flight, drawn in place above the prompt the way Claude
+    Code shows a running tool: `⏺ run_shell(python -m pytest …)` and,
+    hanging from it, how long it has been running. Empty when the task
+    is between calls (thinking)."""
+    if not record.tool and not record.detail:
+        return []
+    from .render import display_width, terminal_width
+
+    head = "⏺ " if unicode else "* "
+    corner = "  ⎿  " if unicode else "  `- "
+    what = f"{record.tool}({record.detail})" if record.tool and record.detail else (record.tool or record.detail)
+    what = _fit(what, terminal_width() - display_width(head) - 1)
+    since = now - record.inflight_since if record.inflight_since is not None else 0.0
+    return [[("class:sim.live", f"{head}{what}")],
+            [("class:sim.footer", _line(f"{corner}running… {since:.0f}s"))]]
+
+
+def done_row(last_done, *, unicode: bool = True) -> list[tuple[str, str]] | None:
+    """After the last task of a turn: `✻ Baked for 61s · done 04:33`, kept
+    until the next line is typed (Claude Code's own habit)."""
+    if not last_done:
+        return None
+    word, elapsed, when = last_done
+    spark = "✻ " if unicode else "* "
+    return [("class:sim.footer", _line(f"{spark}{word} for {_took(elapsed)} · done {when}"))]
+
+
+def live_rows(book: TaskBook, *, now: float, footer_text: str = "", last_done=None,
+              unicode: bool = True) -> list[list[tuple[str, str]]]:
+    """Everything that sits between the transcript and the prompt: for
+    each running task the call in flight (in place) and its breathing
+    line; else the redirected one-liner ("Thinking… [4s]"); else what
+    just finished. Nothing at all when Sim is idle -- the prompt then
+    sits right under the transcript.
+
+    The creator, 2026-09-12, describing the screen bottom-up: the
+    status ribbon, a rule, the prompt, a rule, "a dynamic live
+    indication section ... with breathing bullet point", and above it
+    "a dynamic section showing current activity, process, shell in
+    nested format which as system makes progress gets updated in
+    place"."""
+    rows: list[list[tuple[str, str]]] = []
+    running = book.running()
+    for record in running[:MAX_RUNNING_ROWS]:
+        rows.extend(inflight_rows(record, now=now, unicode=unicode))
+        rows.append(running_row(record, now=now, unicode=unicode))
+    if len(running) > MAX_RUNNING_ROWS:
+        rows.append([("class:sim.footer", f"  … and {len(running) - MAX_RUNNING_ROWS} more running")])
+    if not running:
+        if footer_text:
+            rows.append([("class:sim.footer", _line(footer_text))])
+        else:
+            done = done_row(last_done, unicode=unicode)
+            if done:
+                rows.append(done)
+    return rows
+
+
+# ------------------------------------------------- the ribbon (below the prompt)
+def agent_row(record: TaskRecord, *, now: float, unicode: bool = True) -> list[tuple[str, str]]:
+    """One running task in the ribbon, plainly: what it is and its age.
+    The breathing and the call in flight live above the prompt."""
+    elapsed = now - record.started_at if record.started_at is not None else 0.0
+    mark = "⏺ " if unicode else "* "
+    return [("class:sim.footer", _line(f"{mark}{record.kind} · {record.short_topic(_topic(_ROW_OVERHEAD))} · {elapsed:.0f}s"))]
 
 
 def queued_row(queued: list[TaskRecord], *, unicode: bool = True) -> list[tuple[str, str]] | None:
@@ -247,11 +315,12 @@ def status_row(*, auto: str, posture: str, model: str, budget: str, hint: str = 
 
 def footer_rows(book: TaskBook, *, now: float, auto: str, posture: str = "", model: str = "",
                 budget: str = "", hint: str = "", unicode: bool = True) -> list[list[tuple[str, str]]]:
-    """The whole bottom section, top row first."""
+    """The ribbon at the very bottom, top row first: the running tasks
+    (the agents), the queue, and the status row. `idle` when nothing runs."""
     rows: list[list[tuple[str, str]]] = []
     running = book.running()
     for record in running[:MAX_RUNNING_ROWS]:
-        rows.append(running_row(record, now=now, unicode=unicode))
+        rows.append(agent_row(record, now=now, unicode=unicode))
     if len(running) > MAX_RUNNING_ROWS:
         rows.append([("class:sim.footer", f"  … and {len(running) - MAX_RUNNING_ROWS} more running")])
     if not running:
@@ -296,6 +365,7 @@ def budget_summary(budget: dict) -> str:
 
 __all__ = [
     "BREATH_PERIOD_S", "BREATH_ROTATE_S", "BREATH_SHADES", "BREATH_WORDS",
-    "breath_class", "breath_shade", "breath_word", "budget_summary", "flatten", "footer_rows",
-    "plain", "queued_row", "running_row", "status_row", "tree_end", "tree_note", "tree_start", "tree_step",
+    "agent_row", "breath_class", "breath_shade", "breath_word", "budget_summary", "done_row", "flatten",
+    "footer_rows", "inflight_rows", "live_rows", "plain", "queued_row", "running_row", "status_row", "tree_end",
+    "tree_note", "tree_start", "tree_step",
 ]
