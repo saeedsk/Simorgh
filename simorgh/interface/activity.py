@@ -30,6 +30,8 @@ Two surfaces, from one book:
 
 from __future__ import annotations
 
+import re
+
 import time
 from dataclasses import dataclass, field
 
@@ -86,8 +88,48 @@ class TaskRecord:
 
     def short_topic(self, width: int | None = None) -> str:
         width = topic_width() if width is None else width
-        text = self.topic
-        return text if len(text) <= width else text[: width - 1] + "…"
+        return short_title(self.description, subject=self.subject, limit=max(_TITLE_MAX, width))
+
+
+# -- titles ------------------------------------------------------------------
+# A task's description is a prompt: a paragraph, a pasted brief, a
+# benchmark question with its attachment path. On a list or a tree root
+# a person needs a name, not the prompt (the creator, 2026-09-12: "task
+# names are too long and not easy to read and understand, task names
+# need to be precise and short"). These rules pull one out: the
+# boilerplate the system itself wraps around work is dropped, the
+# first sentence is kept, and it is cut at a word.
+_TITLE_MAX = 56
+_TITLE_BOILERPLATE = (
+    (re.compile(r"^Fix this bug in the repository checked out at `?workspace/swebench/([\w.-]+)`?\.?\s*", re.I),
+     r"swebench \1: "),
+    (re.compile(r"^simorgh_skills/(\w+)\.py:\s*Write a skill `\w+\(\.\.\.\)`.*$", re.I), r"skill \1"),
+    (re.compile(r"^simorgh_skills/(\w+)\.py:\s*", re.I), r"skill \1: "),
+    (re.compile(r"\s*The file this question is about is at `[^`]*`\.?\s*Read it\.?", re.I), " "),
+    (re.compile(r"\s*Save anything you download or produce.*$", re.I | re.S), ""),
+    (re.compile(r"\s*(?:--|—)\s*worth reviewing for a systematic issue\.?$", re.I), ""),
+)
+_TITLE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z\d\"'(])|\s+--\s+|\s+—\s+|\n")
+_MARKUP = re.compile(r"[`*#>]+")
+
+
+def short_title(description: str, *, subject: str | None = None, limit: int = _TITLE_MAX) -> str:
+    """A short, precise name for a task, from its description: the
+    first sentence, boilerplate dropped, cut at a word past `limit`."""
+    text = " ".join((description or "").split())
+    for pattern, replacement in _TITLE_BOILERPLATE:
+        text = pattern.sub(replacement, text)
+    text = _MARKUP.sub("", text).strip()
+    if subject and not text.lower().startswith(subject.lower()) and subject not in text:
+        text = f"{subject}: {text}" if text else subject
+    first = _TITLE_END.split(text, maxsplit=1)[0].strip() if text else ""
+    if first.endswith(":"):
+        first = first[:-1]
+    limit = max(16, limit)
+    if len(first) > limit:
+        cut = first[:limit].rsplit(" ", 1)[0].rstrip(",;:")
+        first = (cut if len(cut) >= limit // 2 else first[:limit - 1]) + "…"
+    return first or "(no description)"
 
 
 @dataclass
@@ -270,5 +312,5 @@ def footer(book: TaskBook, *, now: float, extra: str = "") -> str:
 
 
 __all__ = [
-    "TaskBook", "TaskRecord", "finished_line", "footer", "started_line", "step_line",
+    "TaskBook", "TaskRecord", "finished_line", "footer", "short_title", "started_line", "step_line",
 ]

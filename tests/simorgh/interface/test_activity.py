@@ -354,3 +354,36 @@ class AReminderLabelIsSomebodyElsesTextTestCase(TestTheServiceNarratesAutonomous
         before = len(self.printed)
         await self._emit(topics.PERCEPT_TIME_SCHEDULED, {"schedule_id": "s4", "label": "\x1b\x00"})
         self.assertEqual(len(self.printed), before)
+
+
+class ShortTitleTestCase(unittest.TestCase):
+    """From the creator's own `tasks` screen, 2026-09-12: "task names are
+    too long and not easy to read and understand"."""
+
+    def test_the_creators_screen(self):
+        from simorgh.interface.activity import short_title
+        cases = {
+            "Build a detailed Prince of Persia-style platformer game that looks like the original (side-view "
+            "palace, running jumps, sword fights).": "Build a detailed Prince of Persia-style platformer game…",
+            "simorgh_skills/fix_bug_repository_10097.py: Write a skill `fix_bug_repository_10097(...)` that repeats "
+            "what this task worked out.": "skill fix_bug_repository_10097",
+            "'research' tasks failed 73/101 recent outcomes (72%) -- worth reviewing for a systematic issue.":
+                "'research' tasks failed 73/101 recent outcomes (72%)",
+            "Fix this bug in the repository checked out at `workspace/swebench/django__django-11555`.  order_by() a "
+            "parent model crashes when the child model has a Meta.ordering.": "swebench django__django-11555: "
+            "order_by() a parent…",
+            "How many slides in this PowerPoint presentation mention crustaceans?  The file this question is about is "
+            "at `workspace/benchmark/x.pptx`. Read it.": "How many slides in this PowerPoint presentation mention…",
+            "Review the chess position provided in the image. It is black's turn. Provide the correct next move.":
+                "Review the chess position provided in the image.",
+        }
+        for description, expected in cases.items():
+            self.assertEqual(short_title(description), expected, description[:40])
+
+    def test_a_subject_leads_and_markup_goes(self):
+        from simorgh.interface.activity import short_title
+        self.assertEqual(short_title("change Simorgh's voice to a relaxed tone", subject="simorgh/voice"),
+                         "simorgh/voice: change Simorgh's voice to a relaxed tone")
+        self.assertEqual(short_title("**Add** a `docstring` to vitals.py"), "Add a docstring to vitals.py")
+        self.assertEqual(short_title(""), "(no description)")
+        self.assertLessEqual(len(short_title("word " * 40)), 57)

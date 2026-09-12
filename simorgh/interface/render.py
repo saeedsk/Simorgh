@@ -890,12 +890,16 @@ def _project_line(project: dict, by_id: dict, *, enabled: bool = True) -> str:
 
 
 def _task_line(task: dict, *, enabled: bool = True) -> str:
+    from .activity import short_title
+
     status = task.get("status", "?")
     origin = task.get("origin", "?")
-    description = (task.get("description") or "").replace("\n", " ").strip()
-    subject = task.get("subject") or ""
-    if subject and subject not in description:
-        description = f"{subject}: {description}"
+    # A name, not the prompt: the description is a paragraph and a list
+    # is read at a glance (the creator, 2026-09-12).
+    prefix_width = display_width(f"{'x' * 12}  {'x' * 12}  {'x' * 8}  {'x' * 9}  ")
+    room = max(20, terminal_width() - prefix_width - 2)
+    description = task.get("title") or short_title(task.get("description") or "", subject=task.get("subject"),
+                                                   limit=max(56, room))
     # Measure the prefix rather than guessing its width -- guessing is
     # exactly how this line came to be 87 columns on an 80-column
     # terminal (observer, 2026-09-08).
