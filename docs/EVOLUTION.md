@@ -4776,3 +4776,19 @@ Still ahead, roughly in order:
     `min-width` let the no-wrap titles push every row past the card's
     edge, and `requestAnimationFrame` never fires in a hidden tab, so
     the measurements that start the scrolling now run on a timeout.
+
+151. **Sim's new logo, on the dashboard and in the terminal (2026-09-12).**
+    The creator drew a new Sim -- a small peacock-feathered phoenix with
+    an orb in its claw -- and dropped it in `images/logo/Sim-Logo.png`.
+    The file had a painted checkerboard, not an alpha channel, so it was
+    keyed from the edges at full resolution (flood fill over the two
+    checker tones, a second pass giving the orb's glow alpha from its
+    saturation, specks dropped) into `Sim-Logo-transparent.png`, with a
+    512 px and a 160 px copy; the small one ships in the package and is
+    served at `/logo.png` and `/favicon.ico` for the dashboard's bar and
+    the phone remote. The startup splash is regenerated from it:
+    `tools/render_logo_splash.py` now reads alpha (resampled
+    premultiplied so edges do not pick up the checker's grey, a half
+    under fifty percent covered stays the terminal's own background,
+    lone specks dropped) -- 52 columns by 24 rows of half-block cells,
+    clean edges, the bird recognisable at a glance.

@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Simorgh</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Simorgh</title><link rel="icon" type="image/png" href="/logo.png">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--fg:#f2f4f9;--dim:#b3b9c6;--faint:#828a99;--warm:#f0bd83;--gold:#f7d29b;--amber:#ffb347;--green:#84e6a6;--cyan:#9fe3ff;--red:#ff9a94;--violet:#c9a9ff;
@@ -80,7 +80,7 @@ a{color:var(--warm);}
 <div id="bg"></div><div id="bg2"></div><div id="scrim"></div>
 <div id="app">
   <div id="bar" class="glass">
-    <div style="display:flex;align-items:center;gap:12px;"><span class="warm" id="spark" style="font-size:17px;">✻</span>
+    <div style="display:flex;align-items:center;gap:10px;"><img src="/logo.png" alt="" style="height:36px;width:auto;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5));">
       <span style="font-size:15px;letter-spacing:.5px;">Simorgh</span><span class="faint">·</span><span class="dim" id="viewname">Home</span>
       <span class="tag" id="rot" style="display:none;"></span></div>
     <div id="dock"></div>
@@ -413,7 +413,6 @@ document.addEventListener("keydown",e=>{const i=VIEWS.findIndex(v=>v[0]===CUR);
 
 (async function(){await loadWP();setBG(WP[0]);buildDock();render();tickClock();
   setInterval(tickClock,1000);
-  let s=0;setInterval(()=>{s=(s+1)%6;$("#spark").textContent="·+✶✻✶+"[s];},300);
   setInterval(()=>setBG(nextWP()),45000);
   setInterval(()=>{if(CUR==="ambient")render();},30000);
   setInterval(()=>{if(CUR==="deck")refreshDeck(false);},1000);   // the Home boxes rotate on their own clock

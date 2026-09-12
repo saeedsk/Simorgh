@@ -72,7 +72,7 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: boot banner already prints. Everything else is gated
 #: (platform-connectors-design.md section 4).
 _OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers", "/api/dash/data",
-                                          "/api/dash/state", "/remote"})
+                                          "/api/dash/state", "/remote", "/logo.png", "/favicon.ico"})
 
 #: The response to an unauthenticated request. A JSON body, because
 #: every other error on this server is JSON and a dashboard that got
@@ -151,6 +151,9 @@ class HttpApi:
         self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "since": 0.0}
         self._dash_sub = None
         self._remote_page = (_STATIC_DIR / "remote.html").read_text(encoding="utf-8")
+        # Sim's logo (the creator's, 2026-09-12; keyed and shrunk from
+        # images/logo/Sim-Logo.png), for the pages' top bar and the tab icon.
+        self._logo = (_STATIC_DIR / "sim-logo.png").read_bytes()
         # The newest camera still per camera (execution/home/cameras.py
         # writes `workspace/cameras/<name>-<stamp>.jpg`; ring.py the same
         # under workspace/cameras/ring/), for the dashboard's tiles.
@@ -277,12 +280,17 @@ class HttpApi:
         async def _remote(_query, _body, _headers):
             return 200, self._remote_page.encode("utf-8"), "text/html; charset=utf-8"
 
+        async def _logo(_query, _body, _headers):
+            return 200, self._logo, "image/png"
+
         self.register_route("GET", "/dash", _dash, auth=False)
         self.register_route("GET", "/api/wallpapers", _wallpapers, auth=False)
         self.register_route("GET", "/api/dash/data", _dash_data, auth=False)
         self.register_route("GET", "/api/dash/state", _dash_state_get, auth=False)
         self.register_route("POST", "/api/dash/state", _dash_state_post, max_body=4096, rate=(120, 60.0))
         self.register_route("GET", "/remote", _remote, auth=False)
+        self.register_route("GET", "/logo.png", _logo, auth=False)
+        self.register_route("GET", "/favicon.ico", _logo, auth=False)
         self.register_route("GET", "/api/tv/state", _tv_state)
         self.register_route("GET", "/api/tv/speech", _tv_speech)
 

@@ -154,7 +154,7 @@ class RenderTestCase(unittest.TestCase):
     def test_splash_is_generated_from_the_official_logo_and_fits_the_rule(self):
         from simorgh.interface import splash_art
 
-        self.assertEqual(splash_art.SOURCE, "images/logo/Logo-5.png")
+        self.assertEqual(splash_art.SOURCE, "images/logo/Sim-Logo-transparent.png")
         rows = render.splash(enabled=False)
         self.assertEqual(len(rows), len(splash_art.ROWS))
         self.assertTrue(10 <= len(rows) <= 40, len(rows))

@@ -1130,6 +1130,16 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
                                         {"Origin": "http://evil.example", "Host": host})
         self.assertEqual(st, 403)
 
+    async def test_the_logo_is_served_open_for_the_pages_and_the_tab_icon(self):
+        api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
+        await api.start(); self.addAsyncCleanup(api.stop)
+        for path in ("/logo.png", "/favicon.ico"):
+            st, b, ct = await asyncio.to_thread(self._g, api, path)
+            self.assertEqual((st, ct), (200, "image/png"), path)
+            self.assertTrue(b.startswith(b"\x89PNG"), path)
+        st, b, _ = await asyncio.to_thread(self._g, api, "/dash")
+        self.assertIn(b'src="/logo.png"', b)
+
     async def test_the_remote_page_is_open_and_posts_to_the_state_route(self):
         api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
         await api.start(); self.addAsyncCleanup(api.stop)
