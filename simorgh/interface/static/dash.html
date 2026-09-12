@@ -1,0 +1,197 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Simorgh</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--fg:#f2f4f9;--dim:#b3b9c6;--faint:#828a99;--warm:#f0bd83;--gold:#f7d29b;--green:#84e6a6;--cyan:#9fe3ff;--red:#ff9a94;--violet:#c9a9ff;
+--stroke:rgba(255,255,255,.20);--stroke2:rgba(255,255,255,.10);--radius:24px;}
+*{box-sizing:border-box;}
+html,body{margin:0;height:100%;background:#06060b;color:var(--fg);overflow:hidden;
+font-family:"SF Mono","SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;font-size:15px;line-height:1.45;}
+#bg,#bg2{position:fixed;inset:0;background-size:cover;background-position:center;transition:opacity 1.4s ease;}
+#bg2{opacity:0;}
+#scrim{position:fixed;inset:0;pointer-events:none;
+background:radial-gradient(120% 120% at 50% 40%,transparent 40%,rgba(0,0,0,.55)),linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.45));}
+#app{position:relative;height:100vh;display:flex;flex-direction:column;padding:18px;gap:14px;}
+.glass{position:relative;background:linear-gradient(150deg,rgba(255,255,255,.13),rgba(255,255,255,.035) 55%,rgba(255,255,255,.02));
+backdrop-filter:blur(42px) saturate(180%);-webkit-backdrop-filter:blur(42px) saturate(180%);
+border:1px solid var(--stroke);border-radius:var(--radius);
+box-shadow:0 22px 55px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.28),inset 0 -1px 0 rgba(255,255,255,.05);overflow:hidden;}
+.glass::before{content:"";position:absolute;top:0;left:0;right:40%;height:42%;pointer-events:none;
+background:linear-gradient(160deg,rgba(255,255,255,.22),transparent 75%);opacity:.7;}
+.dim{color:var(--dim);}.faint{color:var(--faint);}.warm{color:var(--warm);}.gold{color:var(--gold);}
+.green{color:var(--green);}.cyan{color:var(--cyan);}.red{color:var(--red);}.violet{color:var(--violet);}
+.hd{font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:var(--faint);}
+.tag{font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);border:1px solid var(--stroke2);border-radius:6px;padding:1px 6px;}
+#bar{height:52px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-radius:16px;}
+#dock{display:flex;gap:7px;}
+.dot{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+background:rgba(255,255,255,.09);border:1px solid var(--stroke2);box-shadow:inset 0 1px 0 rgba(255,255,255,.2);transition:.2s;}
+.dot.on{background:rgba(240,189,131,.24);border-color:rgba(240,189,131,.6);}
+.dot svg{stroke:var(--dim);} .dot.on svg{stroke:var(--gold);}
+#stage{flex:1;min-height:0;}
+.grid{display:grid;gap:14px;height:100%;min-height:0;}
+.card{padding:14px;min-width:0;min-height:0;overflow:hidden;}
+.rowitem{display:flex;gap:9px;padding:6px 0;border-bottom:1px solid var(--stroke2);font-size:13px;line-height:1.35;}
+.chart{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--stroke2);}
+.thumb{border-radius:14px;overflow:hidden;background-size:cover;background-position:center;position:relative;border:1px solid var(--stroke2);}
+.thumb .cap{position:absolute;left:12px;right:12px;bottom:10px;font-size:13px;text-shadow:0 1px 6px #000;}
+.thumb .scr{position:absolute;inset:0;background:linear-gradient(180deg,transparent 48%,rgba(0,0,0,.66));}
+a{color:var(--warm);}
+</style></head>
+<body>
+<div id="bg"></div><div id="bg2"></div><div id="scrim"></div>
+<div id="app">
+  <div id="bar" class="glass">
+    <div style="display:flex;align-items:center;gap:12px;"><span class="warm" id="spark" style="font-size:17px;">✻</span>
+      <span style="font-size:15px;letter-spacing:.5px;">Simorgh</span><span class="faint">·</span><span class="dim" id="viewname">Home</span></div>
+    <div id="dock"></div>
+    <div style="display:flex;align-items:center;gap:14px;font-size:12px;">
+      <span class="green" id="net">● online</span><span class="gold" id="clock" style="font-size:15px;">--:--</span>
+      <span class="dim" id="date"></span></div>
+  </div>
+  <div id="stage"></div>
+</div>
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const ICONS={deck:'<path d="M3 9.5 10 3l7 6.5M5 8.2V16h4v-4h2v4h4V8.2"/>',discover:'<circle cx="10" cy="10" r="7.2"/><path d="M10 4.6l1.5 3.9 3.9 1.5-3.9 1.5L10 15.4 8.5 11.5 4.6 10l3.9-1.5z"/>',cameras:'<rect x="2.5" y="5.5" width="10" height="9" rx="1.6"/><path d="M12.5 8.5l5-2.5v8l-5-2.5z"/>',news:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M5.5 7h6M5.5 10h9M5.5 13h9"/>',markets:'<path d="M3 15.5V4.5M3 15.5h13.5"/><path d="M6 12l3-3 2.5 2L16 6"/>',media:'<circle cx="10" cy="10" r="7"/><path d="M8.5 7l4.5 3-4.5 3z"/>',terminal:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l3 2.5L6 13M11 13h3"/>',ambient:'<circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.5"/>'};
+const VIEWS=[["deck","Home"],["discover","Discover"],["cameras","Cameras"],["news","News"],["markets","Markets"],["media","Media"],["terminal","Terminal"],["ambient","Ambient"]];
+
+// ---- wallpapers ----
+let WP=[],wpi=0,bgFlip=false;
+async function loadWP(){try{const r=await fetch("/api/wallpapers");WP=(await r.json()).wallpapers||[];shuffle(WP);}catch(e){}}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}}
+function wpUrl(n){return "/wallpapers/"+encodeURIComponent(n);}
+function nextWP(){ if(!WP.length) return null; wpi=(wpi+1)%WP.length; return WP[wpi]; }
+function setBG(name){ if(!name) return; const show=bgFlip?$("#bg"):$("#bg2"),hide=bgFlip?$("#bg2"):$("#bg");
+  const img=new Image(); img.onload=()=>{show.style.backgroundImage=`url("${wpUrl(name)}")`;show.style.opacity=1;hide.style.opacity=0;bgFlip=!bgFlip;}; img.src=wpUrl(name);}
+function randWP(){ return WP.length? WP[Math.floor(Math.random()*WP.length)] : null; }
+
+// ---- content data (placeholder until Sim's collector fills it) ----
+const JOKES=["Why did the scarecrow win an award? He was outstanding in his field.","What do you call cheese that isn't yours? Nacho cheese.","Why can't a bicycle stand up by itself? It's two-tired.","What did the ocean say to the beach? Nothing — it just waved.","Why did the math book look sad? Too many problems.","What do you call a bear with no teeth? A gummy bear."];
+const SCHED=[["gold","7:00a","Trash & recycling out",""],["cyan","8:15a","Aria — school drop-off","Lincoln Elementary"],["cyan","8:40a","Kian — school drop-off","Harker Middle"],["green","1:00p","Lunch: taco bar 🌮","cafeteria"],["violet","3:20p","Aria — soccer","field 4"],["warm","6:30p","Dinner reservation","Namsan · 2"]];
+const SONGS=[["1","Golden Hour","JVKE","▲"],["2","Espresso","S. Carpenter","–"],["3","Birds of a Feather","Billie Eilish","▲"],["4","Not Like Us","K. Lamar","▼"],["5","Good Luck, Babe!","C. Roan","▲"]];
+const MOVIES=[["1","Dune: Part Three","$92M wknd","▲"],["2","Zootopia 2","$54M","▲"],["3","Avatar 3","$38M","▼"],["4","The Batman II","$21M","–"],["5","Inside Out 3","$14M","▼"]];
+const TICK=[["S&P","5,842","+0.5%","green"],["NASDAQ","20,140","+0.8%","green"],["DOW","43,110","-0.2%","red"],["NVDA","1,204","+2.4%","green"],["AAPL","236","-0.6%","red"],["BTC","98,240","+3.7%","green"],["Oil","$79.4","-1.1%","red"],["Gold","$2,610","+0.3%","green"]];
+const CATS={World:[["gold","Climate finance deal reached at global summit","Reuters"],["gold","Ceasefire holds a third day along disputed border","AP"],["gold","Record monsoon displaces thousands","BBC"]],
+Technology:[["cyan","Open model tops coding benchmarks","Verge"],["cyan","2nm chips announced for 2027","Ars"],["cyan","Robotaxis expand to three cities","TC"]],
+Business:[["green","Futures up before jobs report","CNBC"],["green","Oil slips below $80","WSJ"],["green","Gold steady near record","FT"]],
+Science:[["violet","Asteroid samples hint at early water","Nature"],["violet","Fusion plasma sustained a record 8 min","IEEE"],["violet","Malaria vaccine v2 shows promise","STAT"]]};
+const CAMS=["Front Door","Driveway","Backyard","Garage","Pool","Side Gate"];
+
+// ---- live state ----
+let ACT=[],STATUS={};
+async function poll(){
+  try{const a=await (await fetch("/api/activity?limit=40")).json();ACT=(a.events||[]).slice().reverse();$("#net").innerHTML=(a.pending_turns||[]).length?'<span class="warm">✻ thinking</span>':'<span class="green">● online</span>';}catch(e){}
+  try{STATUS=await (await fetch("/api/status")).json();}catch(e){}
+  if(CUR==="deck"||CUR==="terminal"||CUR==="news") render();
+}
+function actLine(e){const t=e.type||"",s=esc(e.summary||"");
+  if(t==="percept.text.received")return '<div style="color:#dfe3ea;">❯ '+s+'</div>';
+  if(t==="turn.completed")return '<div>● '+s+'</div>';
+  if(t==="task.started")return '<div class="warm">⏺ '+esc(e.kind||"task")+' · '+s+'</div>';
+  if(t==="task.completed")return '<div class="green">&nbsp;&nbsp;⎿ ✅ '+s+'</div>';
+  if(t==="task.failed"||t==="task.blocked")return '<div class="red">&nbsp;&nbsp;⎿ '+t.split(".")[1]+' '+s+'</div>';
+  if(t==="action.result")return '<div class="dim">&nbsp;&nbsp;⏺ '+esc(e.tool||"tool")+' '+(e.ok===false?"✗":"✓")+' '+s+'</div>';
+  return '<div class="dim">'+s+'</div>';}
+function termHTML(big){
+  const lines=ACT.length?ACT.map(actLine).join(""):'<div class="dim">Sim is idle. Say “Sim”, or pick a view.</div>';
+  const fs=big?'15px':'13px';
+  return '<div style="font-size:'+fs+';line-height:1.55;height:100%;display:flex;flex-direction:column;overflow:hidden;">'
+   +'<div style="flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;">'+lines+'</div>'
+   +'<div style="border-top:1px solid var(--stroke2);margin-top:9px;padding-top:9px;">'
+   +'<span style="color:#dfe3ea;">❯</span> <span class="faint">'+( (STATUS.model?esc(STATUS.model)+' · ':'')+'ask, or say a view name…')+'</span></div></div>';
+}
+
+// ---- builders ----
+function head(t,tag){return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span class="hd">'+t+'</span>'+(tag?'<span class="tag">'+tag+'</span>':'')+'</div>';}
+function rows(items){return items.map(([c,t,s])=>'<div class="rowitem"><span class="'+c+'">•</span><div>'+esc(t)+(s?' <span class="faint" style="font-size:11px;">· '+esc(s)+'</span>':'')+'</div></div>').join("");}
+function chartrows(items){return items.map(([r,t,s,v])=>'<div class="chart"><span class="gold" style="width:14px;text-align:center;">'+r+'</span><div style="flex:1;min-width:0;"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(t)+'</div><div class="faint" style="font-size:10.5px;">'+esc(s)+'</div></div><span class="dim">'+v+'</span></div>').join("");}
+function schedrows(){return SCHED.map(([c,tm,t,s])=>'<div class="rowitem"><span class="'+c+'" style="flex:none;">'+tm+'</span><div>'+esc(t)+(s?' <span class="faint" style="font-size:11px;">· '+esc(s)+'</span>':'')+'</div></div>').join("");}
+function thumb(cap,tag,h){return '<div class="thumb" style="height:'+(h||'100%')+';background-image:url(\''+wpUrl(randWP()||"")+'\');"><div class="scr"></div>'+(tag?'<div class="tag" style="position:absolute;right:9px;top:8px;">'+tag+'</div>':'')+'<div class="cap">'+cap+'</div></div>';}
+
+function viewDeck(){
+  const A='"clock clock weath weath cam cam" "clock clock news news cam cam" "sched sched joke joke music movie" "sched sched art reel music movie" "tick tick tick tick tick tick"';
+  const clock='<div class="hd">Good evening</div><div style="font-size:60px;font-weight:200;line-height:1.05;margin-top:4px;">'+nowT()+'</div><div class="dim" style="font-size:13px;">'+nowD()+'</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><span class="tag">🏠 all secure</span><span class="tag">'+CAMS.length+' cams</span><span class="tag">'+esc(STATUS.posture||"guarded")+'</span></div>';
+  const weath='<div class="hd">San Jose</div><div style="font-size:34px;font-weight:300;">72°</div><div class="faint" style="font-size:11px;">Clear · feels 70° · H79 L58</div>';
+  const news=head("Top story","live")+'<div style="font-size:14px;line-height:1.35;">'+esc(CATS.World[0][1])+'</div><div class="faint" style="font-size:10.5px;margin-top:4px;">'+esc(CATS.World[0][2])+' · World</div>';
+  const cam='<div style="display:flex;flex-direction:column;height:100%;">'+head("Front Door","live")+'<div style="flex:1;min-height:0;">'+thumb('Front Door','')+'</div></div>';
+  const sched=head("Today")+schedrows();
+  const joke=head("Joke of the moment","for Kian")+'<div style="font-size:15px;line-height:1.45;">'+esc(JOKES[0])+'</div>';
+  const art='<div style="display:flex;flex-direction:column;height:100%;">'+head("Photo of the day")+'<div style="flex:1;min-height:0;">'+thumb('from your gallery','daily')+'</div></div>';
+  const reel='<div style="display:flex;flex-direction:column;height:100%;">'+head("Trending")+'<div style="flex:1;min-height:0;">'+thumb('▶ 2.4M · trending short','reel')+'</div></div>';
+  const music='<div style="display:flex;flex-direction:column;height:100%;">'+head("Top songs","sample")+chartrows(SONGS)+'</div>';
+  const movie='<div style="display:flex;flex-direction:column;height:100%;">'+head("Box office","sample")+chartrows(MOVIES)+'</div>';
+  const tick='<div style="display:flex;align-items:center;gap:24px;height:100%;font-size:12.5px;overflow:hidden;"><span class="hd" style="flex:none;">Markets</span>'+TICK.map(([s,p,c,col])=>'<span style="flex:none;">'+s+' <span style="color:var(--fg);">'+p+'</span> <span class="'+col+'">'+c+'</span></span>').join("")+'</div>';
+  const C=(a,inner,pad)=>'<div class="glass card" style="grid-area:'+a+';padding:'+(pad==null?14:pad)+'px;">'+inner+'</div>';
+  return '<div class="grid" style="grid-template-columns:repeat(6,1fr);grid-template-rows:1.15fr .85fr 1fr 1fr .42fr;grid-template-areas:'+A+';">'
+    +C('clock',clock,16)+C('weath',weath)+C('news',news)+C('cam',cam)+C('sched',sched)+C('joke',joke)+C('art',art)+C('reel',reel)+C('music',music)+C('movie',movie)
+    +'<div class="glass" style="grid-area:tick;padding:0 16px;">'+tick+'</div></div>';
+}
+function viewDiscover(){
+  const A='"world world holly holly photo photo" "world world holly holly photo photo" "sci sci local local photo photo" "movie movie music music jokes jokes" "movie movie music music short short"';
+  const C=(a,inner)=>'<div class="glass card" style="grid-area:'+a+';">'+inner+'</div>';
+  const world=head("World","6 stories")+rows(CATS.World.map(x=>[x[0],x[1],x[2]]));
+  const holly=head("Hollywood & Entertainment","trending")+rows([["violet","Dune 3 wraps reshoots; teaser Friday","Variety"],["violet","A24 lands festival darling in $20M deal","Deadline"],["violet","Two streamers announce a merger","THR"],["violet","Grammy nominations revealed","Billboard"]]);
+  const photo='<div style="display:flex;flex-direction:column;height:100%;">'+head("Photo of the day","from your gallery")+'<div style="flex:1;min-height:0;">'+thumb('a favourite from images/wallpapers','')+'</div></div>';
+  const sci=head("Science")+rows(CATS.Science.map(x=>[x[0],x[1],x[2]]));
+  const local=head("San Jose")+rows([["green","Downtown street festival Sat, 11–6","Mercury News"],["green","101 north lanes reopen","511.org"]]);
+  const movie='<div style="display:flex;flex-direction:column;height:100%;">'+head("Top movies","sample")+chartrows(MOVIES.concat([["6","Wednesday S2","Netflix","▲"]]))+'</div>';
+  const music='<div style="display:flex;flex-direction:column;height:100%;">'+head("Top music","sample")+chartrows(SONGS.concat([["6","Too Sweet — Hozier","alt","▼"]]))+'</div>';
+  const jokes=head("Jokes","family")+JOKES.slice(1,4).map(j=>'<div style="font-size:12.5px;line-height:1.4;padding:4px 0;border-bottom:1px solid var(--stroke2);">'+esc(j)+'</div>').join("");
+  const short=head("Trending short")+'<div style="display:flex;gap:11px;align-items:center;height:calc(100% - 22px);">'+thumb('','',null).replace('class="cap"','class="cap" style="display:none"').replace('height:100%','height:100%;width:72px;flex:none;')+'<div><div style="font-size:12.5px;">Golden hour timelapse</div><div class="faint" style="font-size:10.5px;margin-top:3px;">YouTube Shorts · 2.4M · 18h</div></div></div>';
+  return '<div class="grid" style="grid-template-columns:repeat(6,1fr);grid-template-rows:repeat(5,1fr);grid-template-areas:'+A+';">'+C('world',world)+C('holly',holly)+C('photo',photo)+C('sci',sci)+C('local',local)+C('movie',movie)+C('music',music)+C('jokes',jokes)+C('short',short)+'</div>';
+}
+function viewCameras(){
+  const tiles=CAMS.map(n=>'<div class="glass" style="padding:0;overflow:hidden;">'+thumb(n,'live')+'</div>').join("");
+  const feed='<div class="glass" style="flex:1;padding:14px;overflow:hidden;">'+head("Events","live")+rows([["red","Front Door · person","9:38p"],["gold","Side Gate · motion","9:31p"],["green","Backyard · all clear","9:20p"],["gold","Driveway · vehicle","8:52p"]].map(x=>[x[0],x[1],x[2]]))+'</div>';
+  return '<div style="display:flex;gap:14px;height:100%;"><div class="grid" style="flex:2;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);">'+tiles+'</div>'+feed+'</div>';
+}
+function viewNews(){
+  const cards=Object.entries(CATS).map(([k,v])=>'<div class="glass card">'+head(k)+rows(v.map(x=>[x[0],x[1],x[2]]))+'</div>').join("");
+  return '<div style="display:flex;gap:14px;height:100%;"><div class="glass card" style="flex:1;display:flex;">'+termHTML()+'</div><div class="grid" style="flex:2.2;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;">'+cards+'</div></div>';
+}
+function viewMarkets(){
+  const pts=[20,22,21,24,23,26,25,28,27,30,29,33,31,35,34,38,42,40,44,46,45,49],w=520,h=290,mx=Math.max(...pts),mn=Math.min(...pts),st=w/(pts.length-1);
+  const xy=pts.map((v,i)=>[i*st,h-20-((v-mn)/(mx-mn))*(h-50)]),ln=xy.map(p=>p[0].toFixed(0)+","+p[1].toFixed(0)).join(" ");
+  const chart='<svg width="100%" height="'+h+'" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none"><polygon points="0,'+(h-20)+' '+ln+' '+w+','+(h-20)+'" fill="#84e6a6" opacity=".14"/><polyline points="'+ln+'" fill="none" stroke="#84e6a6" stroke-width="2"/></svg>';
+  const watch='<div class="glass card" style="flex:1;">'+head("Watchlist")+TICK.slice(3).map(([s,p,c,col])=>'<div class="rowitem" style="justify-content:space-between;"><span>'+s+'</span><span class="'+col+'">'+p+' '+c+'</span></div>').join("")+'</div>';
+  const mid='<div class="glass card" style="flex:2;"><div style="font-size:21px;">NVIDIA · NVDA</div><div class="green" style="font-size:13px;margin-bottom:6px;">$1,204.30  +28.40 (+2.4%)</div>'+chart+'</div>';
+  const idx='<div class="glass card" style="flex:1;">'+head("Indices")+[["S&P 500","5,842 +0.5%","green"],["Nasdaq","20,140 +0.8%","green"],["Dow","43,110 -0.2%","red"],["VIX","13.4 -3.1%","green"]].map(x=>'<div class="rowitem" style="justify-content:space-between;"><span>'+x[0]+'</span><span class="'+x[2]+'">'+x[1]+'</span></div>').join("")+'</div>';
+  return '<div style="display:flex;gap:14px;height:100%;">'+watch+mid+idx+'</div>';
+}
+function viewMedia(){
+  const now='<div class="glass" style="flex:2;padding:0;overflow:hidden;display:flex;flex-direction:column;"><div style="flex:1;min-height:0;">'+thumb('Planet Earth III · “Deserts”','LIVE 4K')+'</div><div style="padding:13px 16px;font-size:14px;">Planet Earth III · “Deserts” <span class="faint" style="font-size:11px;">· casting to Family Room TV</span></div></div>';
+  const up='<div class="glass card" style="flex:1;">'+head("Up next")+[["Blue Planet II","YouTube · 50m"],["Cosmos","Disney+ · 44m"],["Chef's Table","Netflix · 41m"],["Lo-fi beats","YouTube · live"]].map(x=>'<div class="rowitem"><div>'+x[0]+' <span class="faint" style="font-size:11px;">· '+x[1]+'</span></div></div>').join("")+'</div>';
+  return '<div style="display:flex;gap:14px;height:100%;">'+now+up+'</div>';
+}
+function viewTerminal(){return '<div class="glass card" style="height:100%;display:flex;">'+termHTML(true)+'</div>';}
+function viewAmbient(){
+  return '<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;">'
+    +'<div style="font-size:150px;font-weight:200;letter-spacing:2px;text-shadow:0 4px 44px rgba(0,0,0,.5);">'+nowT()+'</div>'
+    +'<div class="dim" style="font-size:22px;">'+nowD()+'</div>'
+    +'<div style="display:flex;gap:14px;margin-top:24px;">'
+    +'<div class="glass" style="padding:16px 22px;text-align:center;"><div style="font-size:30px;">72°</div><div class="faint" style="font-size:11px;">Clear</div></div>'
+    +'<div class="glass" style="padding:16px 22px;text-align:center;"><div class="hd">Next</div><div style="font-size:15px;margin-top:5px;">Aria · school</div><div class="faint" style="font-size:11px;">8:15 AM</div></div>'
+    +'<div class="glass" style="padding:16px 22px;text-align:center;"><div class="hd">Home</div><div class="green" style="font-size:15px;margin-top:5px;">all secure</div></div></div></div>';
+}
+const RENDER={deck:viewDeck,discover:viewDiscover,cameras:viewCameras,news:viewNews,markets:viewMarkets,media:viewMedia,terminal:viewTerminal,ambient:viewAmbient};
+
+// ---- time ----
+function nowT(){const d=new Date();let h=d.getHours(),m=d.getMinutes();const ap=h>=12?"PM":"AM";h=h%12||12;return h+":"+String(m).padStart(2,"0");}
+function nowD(){return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});}
+
+// ---- app ----
+let CUR="deck";
+function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
+  $("#dock").querySelectorAll(".dot").forEach(d=>d.onclick=()=>go(d.dataset.k));}
+function render(){$("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}
+function go(k){CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
+function tickClock(){$("#clock").textContent=nowT();$("#date").textContent=new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});}
+
+(async function(){await loadWP();setBG(WP[0]);buildDock();render();tickClock();
+  setInterval(tickClock,1000);
+  let s=0;setInterval(()=>{s=(s+1)%6;$("#spark").textContent="·+✶✻✶+"[s];},300);
+  setInterval(()=>setBG(nextWP()),45000);   // rotate wallpaper
+  poll();setInterval(poll,4000);
+})();
+</script></body></html>

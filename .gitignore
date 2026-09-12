@@ -44,3 +44,6 @@ workspace/*
 
 # Scripts run_script stages before running them. Transient.
 .simorgh_scripts/
+
+# Local high-res wallpapers for the TV dashboard (large; kept out of git)
+images/wallpapers/

@@ -70,7 +70,7 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: check a monitor or a shell script polls, and it reveals only what the
 #: boot banner already prints. Everything else is gated
 #: (platform-connectors-design.md section 4).
-_OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv"})
+_OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers"})
 
 #: The response to an unauthenticated request. A JSON body, because
 #: every other error on this server is JSON and a dashboard that got
@@ -135,6 +135,7 @@ class HttpApi:
         # terminal, and what to frame in it (`tv.state`, published by the
         # cast tools in execution/media/cast.py).
         self._tv_page = (_STATIC_DIR / "tv.html").read_text(encoding="utf-8")
+        self._dash_page = (_STATIC_DIR / "dash.html").read_text(encoding="utf-8")
         self._tv_state: dict = {"mode": "none", "url": "", "title": "", "since": 0.0}
         self._tv_sub = None
         self._tv_speech: deque = deque(maxlen=40)   # (seq, ref, seconds, at): Sim's voice for the page
@@ -144,6 +145,9 @@ class HttpApi:
         # the LAN without the token: the Cast receiver fetches segments
         # with no header and no query of its own.
         self._hls_root = (Path.cwd() / "workspace" / "cameras" / "hls").resolve()
+        # High-res wallpapers the dashboard rotates through the panels
+        # (the creator dropped them in images/wallpapers, 2026-09-12).
+        self._wallpaper_root = (Path.cwd() / "images" / "wallpapers").resolve()
         self._prefixes: list[tuple[str, str, RouteHandler]] = []
         self._pending_chats: dict[str, asyncio.Future] = {}
         self._turn_sub = None
@@ -217,6 +221,20 @@ class HttpApi:
         self.register_route("GET", "/", _page, auth=False)
         self.register_route("GET", "/api/status", _status, auth=False)
         self.register_route("GET", "/tv", _tv, auth=False)
+
+        async def _dash(_query, _body, _headers):
+            return 200, self._dash_page.encode("utf-8"), "text/html; charset=utf-8"
+
+        async def _wallpapers(_query, _body, _headers):
+            names = []
+            root = self._wallpaper_root
+            if root.is_dir():
+                names = sorted(f.name for f in root.iterdir()
+                               if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".avif") and not f.name.startswith("."))
+            return 200, json.dumps({"wallpapers": names}).encode("utf-8"), "application/json"
+
+        self.register_route("GET", "/dash", _dash, auth=False)
+        self.register_route("GET", "/api/wallpapers", _wallpapers, auth=False)
         self.register_route("GET", "/api/tv/state", _tv_state)
         self.register_route("GET", "/api/tv/speech", _tv_speech)
 
@@ -237,6 +255,18 @@ class HttpApi:
 
         self._prefixes.append(("POST", "/api/hooks/", _hook))
         self._prefixes.append(("GET", "/tv/hls/", _hls))
+
+        async def _wall(query, _body, _headers, *, rest: str = ""):
+            import mimetypes
+            name = rest.split("/", 1)[0].split("?", 1)[0]
+            target = (self._wallpaper_root / name).resolve()
+            if (not name or "/" in rest.rstrip("/") or not str(target).startswith(str(self._wallpaper_root) + os.sep)
+                    or not target.is_file() or target.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp", ".avif")):
+                return 404, b"no such wallpaper", "text/plain; charset=utf-8"
+            kind = mimetypes.guess_type(str(target))[0] or "image/jpeg"
+            return 200, target.read_bytes(), kind
+
+        self._prefixes.append(("GET", "/wallpapers/", _wall))
         self.register_route("GET", "/api/history", _json_route(self._history_json))
         self.register_route("GET", "/api/logs", _json_route(self._logs_json))
         self.register_route("GET", "/api/benchmarks", _json_route(self._benchmarks_json))
@@ -429,7 +459,7 @@ class HttpApi:
             for p_method, prefix, handler in self._prefixes:
                 if method == p_method and split.path.startswith(prefix):
                     rest = split.path[len(prefix):]
-                    open_ = prefix == "/tv/hls/"
+                    open_ = prefix in ("/tv/hls/", "/wallpapers/")
                     route = Route(method=method, path=split.path, handler=handler, auth=not open_,
                                   max_body=_MAX_BODY_BYTES if method == "POST" else None, rate=None)
                     prefix_extra = {"name": rest.split("/", 1)[0]} if prefix == "/api/hooks/" else {"rest": rest}

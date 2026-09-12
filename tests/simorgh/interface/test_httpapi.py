@@ -1014,3 +1014,29 @@ class HooksAndHlsTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((status, body), (200, b"#EXTM3U\n"), "a live stream is open on the LAN")
             status, _ = await asyncio.to_thread(_req, "GET", "/tv/hls/../secrets.toml")
             self.assertEqual(status, 404)
+
+
+class DashAndWallpapersTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_dash_is_open_wallpapers_list_and_serve_and_no_traversal(self):
+        import tempfile
+        bus=_FakeBus()
+        api=HttpApi(bus,ledger=None,host="127.0.0.1",port=0,token="secret")
+        with tempfile.TemporaryDirectory() as tmp:
+            api._wallpaper_root=Path(tmp).resolve()  # noqa: SLF001
+            (Path(tmp)/"beach.jpg").write_bytes(b"\xff\xd8jpeg")
+            (Path(tmp)/".DS_Store").write_bytes(b"x")
+            await api.start(); self.addAsyncCleanup(api.stop)
+            def g(path,hdr=None):
+                c=http.client.HTTPConnection("127.0.0.1",api.port,timeout=5)
+                c.request("GET",path,headers=hdr or {}); r=c.getresponse(); b=r.read(); ct=r.getheader("Content-Type"); c.close()
+                return r.status,b,ct
+            st,b,_=await asyncio.to_thread(g,"/dash")
+            self.assertEqual(st,200); self.assertIn(b"Simorgh",b)  # open, no token
+            st,b,_=await asyncio.to_thread(g,"/api/wallpapers")
+            self.assertEqual(st,200); self.assertEqual(json.loads(b)["wallpapers"],["beach.jpg"])  # dotfile skipped
+            st,b,ct=await asyncio.to_thread(g,"/wallpapers/beach.jpg")
+            self.assertEqual((st,b),(200,b"\xff\xd8jpeg")); self.assertEqual(ct,"image/jpeg")
+            st,_,_=await asyncio.to_thread(g,"/wallpapers/../secrets.toml")
+            self.assertEqual(st,404)
+            st,_,_=await asyncio.to_thread(g,"/wallpapers/missing.jpg")
+            self.assertEqual(st,404)
