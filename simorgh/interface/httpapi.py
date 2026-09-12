@@ -148,7 +148,7 @@ class HttpApi:
         self._feeds = feeds
         # Where the dashboard should look (`ui.dash.state`): set by the
         # `dash_view` tool or the phone remote, polled by the page.
-        self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "since": 0.0}
+        self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "scale": 0, "since": 0.0}
         self._dash_sub = None
         self._remote_page = (_STATIC_DIR / "remote.html").read_text(encoding="utf-8")
         # Sim's logo (the creator's, 2026-09-12; keyed and shrunk from
@@ -272,7 +272,7 @@ class HttpApi:
                 return 400, b'{"error": "body must be JSON"}', "application/json"
             if not isinstance(asked, dict):
                 return 400, b'{"error": "body must be a JSON object"}', "application/json"
-            payload = {k: asked[k] for k in ("view", "timeframe", "symbol", "rotate_s") if k in asked}
+            payload = {k: asked[k] for k in ("view", "timeframe", "symbol", "rotate_s", "scale") if k in asked}
             self._apply_dash_state(payload)
             await self._bus.publish(Message.new(topics.DASH_STATE, source="interface", payload=payload))
             return 200, json.dumps({"now": self._now(), **self._dash_state}).encode("utf-8"), "application/json"
@@ -520,6 +520,12 @@ class HttpApi:
         if "rotate_s" in payload:
             try:
                 self._dash_state["rotate_s"] = max(0, min(3600, int(float(payload.get("rotate_s") or 0))))
+            except (TypeError, ValueError):
+                pass
+        if "scale" in payload:
+            # 0 = fit the viewport; else a fixed factor for a receiver that misreports its size.
+            try:
+                self._dash_state["scale"] = max(0.0, min(4.0, float(payload.get("scale") or 0)))
             except (TypeError, ValueError):
                 pass
         self._dash_state["since"] = self._now()

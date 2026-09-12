@@ -739,7 +739,7 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     verb = words[0].lower() if words else "show"
     rest = words[1:]
     usage = ("usage: tv setup [device] | devices | use <device> | show [tv|dash] [device] | view <home|discover|cameras|news|"
-             "markets|media|terminal|ambient> [1D|1W|1M|1Y] [symbol] | rotate <seconds|off> | remote | "
+             "markets|media|terminal|ambient> [1D|1W|1M|1Y] [symbol] | rotate <seconds|off> | scale <factor|auto> | remote | "
              "video <url> [full|frame] [device] | stop [frame] | volume <0-100> [device]")
 
     async def _run(tool: str, payload: dict) -> Outcome:
@@ -783,6 +783,15 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         except ValueError:
             return Outcome("usage: tv rotate <seconds|off>")
         return await _run("dash_view", {"rotate_s": seconds})
+    if verb in ("scale", "zoom"):
+        if not rest:
+            return Outcome("usage: tv scale <factor|auto>   (0.5 shows the whole page on a receiver that reports twice its size)")
+        raw = rest[0].lower()
+        try:
+            scale = 0.0 if raw in ("auto", "fit", "0") else float(raw.rstrip("x"))
+        except ValueError:
+            return Outcome("usage: tv scale <factor|auto>")
+        return await _run("dash_view", {"scale": scale})
     if verb == "remote":
         return await _run("dash_view", {"action": "remote"})
     if verb in ("video", "play"):

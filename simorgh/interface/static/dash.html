@@ -90,7 +90,7 @@ a{color:var(--warm);}
     <div style="display:flex;align-items:center;gap:14px;font-size:12px;">
       <span class="dim" id="wx"></span>
       <span class="green" id="net">● online</span><span class="gold" id="clock" style="font-size:15px;">--:--</span>
-      <span class="dim" id="date"></span></div>
+      <span class="dim" id="date"></span><span class="faint" id="vp" style="font-size:9px;"></span></div>
   </div>
   <div id="camstrip" class="glass"></div>
   <div id="stage"></div>
@@ -141,6 +141,7 @@ function applyState(st){
   if(st.timeframe) TF=st.timeframe;
   if(st.symbol!=null) {SEL=st.symbol||""; if(SEL) PIN=SEL;}
   if(st.rotate_s!=null) setRotate(st.rotate_s|0);
+  if(st.scale!=null){SCALE=Number(st.scale)||0;fitApp();}
   const k=VIEW_KEYS[st.view||""];
   if(k&&k!==CUR) go(k); else render();
 }
@@ -476,8 +477,14 @@ function render(){try{if(CUR==="deck"){refreshDeck(true);return;}
 function go(k){if(!RENDER[k])return;CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
 // A Cast receiver lays the page out at 1280x720 logical pixels whatever the panel (the creator's 4K Sony showed a
 // few boxes, 2026-09-12); the page is designed at 1920x1080 and scaled to the viewport it actually gets.
-function fitApp(){const app=$("#app");const sc=Math.min(innerWidth/1920,innerHeight/1080);
-  app.style.transform="translate("+((innerWidth-1920*sc)/2).toFixed(1)+"px,"+((innerHeight-1080*sc)/2).toFixed(1)+"px) scale("+sc.toFixed(4)+")";}
+let SCALE=0;   // 0 = fit the viewport; a number = the creator's override (tv scale 0.5)
+function viewportSize(){const vv=window.visualViewport;
+  const w=Math.max(0,Math.min(innerWidth||0,document.documentElement.clientWidth||innerWidth||0,vv?vv.width:1e9))||innerWidth||1920;
+  const h=Math.max(0,Math.min(innerHeight||0,document.documentElement.clientHeight||innerHeight||0,vv?vv.height:1e9))||innerHeight||1080;
+  return [w,h];}
+function fitApp(){const app=$("#app");const [w,h]=viewportSize();const sc=SCALE>0?SCALE:Math.min(w/1920,h/1080);
+  app.style.transform="translate("+Math.max(0,(w-1920*sc)/2).toFixed(1)+"px,"+Math.max(0,(h-1080*sc)/2).toFixed(1)+"px) scale("+sc.toFixed(4)+")";
+  const r=$("#vp");if(r)r.textContent=w+"×"+h+" ·"+sc.toFixed(2)+(devicePixelRatio&&devicePixelRatio!==1?" dpr"+devicePixelRatio:"");}
 addEventListener("resize",fitApp);
 function tickClock(){$("#clock").textContent=nowT();$("#date").textContent=new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
   if(CUR==="ambient"||CUR==="deck"){const c=$("#stage .big");}}
@@ -490,7 +497,8 @@ document.addEventListener("keydown",e=>{const i=VIEWS.findIndex(v=>v[0]===CUR);
   else if(e.key==="Escape"||e.key==="Backspace"||e.key==="GoBack"||e.key==="BrowserBack")go("deck");
   else return; e.preventDefault();});
 
-(async function(){fitApp();await loadWP();setBG(WP[0]);buildDock();render();tickClock();
+(async function(){fitApp();[300,1000,3000,8000].forEach(ms=>setTimeout(fitApp,ms));   // receivers settle their viewport late
+  await loadWP();setBG(WP[0]);buildDock();render();tickClock();
   setInterval(tickClock,1000);
   setInterval(()=>setBG(nextWP()),45000);
   setInterval(()=>{if(CUR==="ambient")render();},30000);

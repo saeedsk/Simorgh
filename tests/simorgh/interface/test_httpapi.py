@@ -1104,10 +1104,10 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         # the write needs the token -- header or query (the phone page carries it in its URL)
         st, _ = await asyncio.to_thread(self._p, api, "/api/dash/state", {"view": "markets"})
         self.assertEqual(st, 401)
-        st, b = await asyncio.to_thread(self._p, api, "/api/dash/state?token=secret", {"view": "stocks", "timeframe": "1w", "rotate_s": 30})
+        st, b = await asyncio.to_thread(self._p, api, "/api/dash/state?token=secret", {"view": "stocks", "timeframe": "1w", "rotate_s": 30, "scale": 0.5})
         self.assertEqual(st, 200)
         state = json.loads(b)
-        self.assertEqual((state["view"], state["timeframe"], state["rotate_s"]), ("markets", "1W", 30), "aliases and case are normalised")
+        self.assertEqual((state["view"], state["timeframe"], state["rotate_s"], state["scale"]), ("markets", "1W", 30, 0.5), "aliases and case are normalised")
         self.assertGreater(state["since"], 0)
         self.assertEqual(bus.published[-1].type, topics.DASH_STATE, "the remote's change is announced like the tool's")
         # a nonsense view or timeframe changes nothing

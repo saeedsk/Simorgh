@@ -278,6 +278,8 @@ class DashViewTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bus.published[-1].payload, {"rotate_s": 3600})
         result = await tools["dash_view"].run({"rotate_s": 0}, ctx=_ctx(bus))
         self.assertIn("rotation off", result.output)
+        result = await tools["dash_view"].run({"scale": 0.5}, ctx=_ctx(bus))
+        self.assertEqual(bus.published[-1].payload, {"scale": 0.5}); self.assertIn("0.5", result.output)
 
     async def test_nonsense_is_refused_with_the_choices(self):
         tools, cast, bus = self._tools()

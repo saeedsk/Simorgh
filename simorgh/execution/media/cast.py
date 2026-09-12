@@ -516,10 +516,11 @@ class DashViewTool(_CastTool):
     reversibility = "reversible"
     description = ("Change what Sim's dashboard on the TV shows: `view` is one of home, discover, cameras, news, markets, "
                    "media, terminal, ambient; `timeframe` 1D/1W/1M/1Y and `symbol` pick the markets chart; `rotate_s` "
-                   "cycles the views every N seconds (0 stops). `action` remote answers the phone remote's link.")
+                   "cycles the views every N seconds (0 stops); `scale` fixes the page's zoom on a TV that misreports "
+                   "its size (0 = fit). `action` remote answers the phone remote's link.")
     args_schema = {"type": "object", "properties": {
         "view": {"type": "string"}, "timeframe": {"type": "string"}, "symbol": {"type": "string"},
-        "rotate_s": {"type": "number"}, "action": {"type": "string", "enum": ["view", "remote"]}}}
+        "rotate_s": {"type": "number"}, "scale": {"type": "number"}, "action": {"type": "string", "enum": ["view", "remote"]}}}
     VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "terminal", "ambient")
     ALIASES = {"deck": "home", "start": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
                "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "tv": "media", "video": "media",
@@ -551,9 +552,14 @@ class DashViewTool(_CastTool):
                 payload["rotate_s"] = max(0, min(3600, int(float(args["rotate_s"]))))
             except (TypeError, ValueError):
                 return ToolResult(ok=False, error="refused: `rotate_s` is a number of seconds (0 stops)")
+        if "scale" in args and args["scale"] is not None:
+            try:
+                payload["scale"] = max(0.0, min(4.0, float(args["scale"])))
+            except (TypeError, ValueError):
+                return ToolResult(ok=False, error="refused: `scale` is a factor like 0.5, or 0 to fit the screen")
         if not payload:
             return ToolResult(ok=False, error="refused: say a `view` (home, discover, cameras, news, markets, media, terminal, "
-                                              "ambient), a `timeframe`, a `symbol`, or `rotate_s`")
+                                              "ambient), a `timeframe`, a `symbol`, `rotate_s` or `scale`")
         bus = getattr(ctx, "bus", None)
         if bus is None:
             return ToolResult(ok=False, error="refused: no bus to reach the dashboard")
@@ -565,6 +571,8 @@ class DashViewTool(_CastTool):
             said.append(" ".join(x for x in (payload.get("symbol", ""), payload.get("timeframe", "")) if x) + " on the chart")
         if "rotate_s" in payload:
             said.append(f"rotating every {payload['rotate_s']}s" if payload["rotate_s"] else "rotation off")
+        if "scale" in payload:
+            said.append(f"scale fixed at {payload['scale']:g}" if payload["scale"] else "scale fits the screen")
         return ToolResult(ok=True, output="; ".join(said), side_effects=("dash_view",), metadata=payload)
 
 
