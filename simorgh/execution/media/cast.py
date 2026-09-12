@@ -289,9 +289,13 @@ class _CastTool:
 
         return str((self._env or os.environ).get("SIM_API_TOKEN") or "")
 
-    def _page_url(self) -> str:
+    def _page_url(self, page: str = "tv") -> str:
+        """Where the TV fetches Sim's page: `/tv` (the terminal replica) or
+        `/dash` (the glass dashboard), `/remote` (the phone's remote)."""
         configured = str(getattr(self._config, "cast_page_url", "") or "").strip()
         base = configured or f"http://{lan_address()}:{int(getattr(self._config, 'cast_page_port', 8765))}/tv"
+        if page != "tv":
+            base = base.rsplit("/tv", 1)[0] + "/" + page if "/tv" in base else base.rstrip("/") + "/" + page
         token = self._token()
         if token and "token=" not in base:
             base += ("&" if "?" in base else "?") + "token=" + token
@@ -347,15 +351,20 @@ class CastDevicesTool(_CastTool):
 
 class CastShowTool(_CastTool):
     name = "cast_show"
-    description = ("Put Sim's page -- a live replica of its terminal, with room for a video -- on a Cast "
-                   "device (the TV). `url` shows another page instead. `device` names the TV when there are several.")
-    args_schema = {"type": "object", "properties": {"device": {"type": "string"}, "url": {"type": "string"}}}
+    description = ("Put Sim's page on a Cast device (the TV): page tv is the live replica of its terminal with room "
+                   "for a video; page dash is the glass dashboard (home, news, markets, cameras, media, ambient). "
+                   "`url` shows another page instead. `device` names the TV when there are several.")
+    args_schema = {"type": "object", "properties": {"device": {"type": "string"}, "url": {"type": "string"},
+                                                    "page": {"type": "string", "enum": ["tv", "dash"]}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        target = str(args.get("target") or "").strip()  # the marker form: a URL or a device name
-        if target and not args.get("url") and not args.get("device"):
-            args = {**args, ("url" if target.lower().startswith(("http://", "https://")) else "device"): target}
-        url = str(args.get("url") or "").strip() or self._page_url()
+        target = str(args.get("target") or "").strip()  # the marker form: a URL, a page name or a device name
+        if target and not args.get("url") and not args.get("device") and not args.get("page"):
+            key = "url" if target.lower().startswith(("http://", "https://")) else ("page" if target.lower() in ("tv", "dash", "dashboard") else "device")
+            args = {**args, key: target}
+        page = str(args.get("page") or "tv").strip().lower()
+        page = "dash" if page in ("dash", "dashboard") else "tv"
+        url = str(args.get("url") or "").strip() or self._page_url(page)
         try:
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
@@ -375,9 +384,9 @@ class CastShowTool(_CastTool):
         except Exception as exc:  # noqa: BLE001
             return ToolResult(ok=False, error=f"refused: {name} would not show the page ({exc})")
         await self._publish_state(ctx, "none")
-        shown = "Sim's page" if not args.get("url") else url
+        shown = url if args.get("url") else ("Sim's dashboard" if page == "dash" else "Sim's page")
         return ToolResult(ok=True, output=f"{shown} is on {name}", side_effects=(f"cast_show:{name}",),
-                          metadata={"device": name, "url": url.split("?")[0]})
+                          metadata={"device": name, "url": url.split("?")[0], "page": page})
 
 
 class CastPlayTool(_CastTool):
@@ -491,6 +500,70 @@ class CastVolumeTool(_CastTool):
                           metadata={"device": name, "level": level})
 
 
+class DashViewTool(_CastTool):
+    """Steer the glass dashboard on the TV. A Cast receiver never sees the
+    TV remote's keys, so the dashboard is turned from here: by voice or
+    the CLI (`tv view markets`), or from the phone page whose link this
+    tool hands out (`action=remote`). Publishes `ui.dash.state`; the
+    HTTP API keeps it and the page polls it."""
+
+    name = "dash_view"
+    read_only = False
+    reversibility = "reversible"
+    description = ("Change what Sim's dashboard on the TV shows: `view` is one of home, discover, cameras, news, markets, "
+                   "media, terminal, ambient; `timeframe` 1D/1W/1M/1Y and `symbol` pick the markets chart; `rotate_s` "
+                   "cycles the views every N seconds (0 stops). `action` remote answers the phone remote's link.")
+    args_schema = {"type": "object", "properties": {
+        "view": {"type": "string"}, "timeframe": {"type": "string"}, "symbol": {"type": "string"},
+        "rotate_s": {"type": "number"}, "action": {"type": "string", "enum": ["view", "remote"]}}}
+    VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "terminal", "ambient")
+    ALIASES = {"deck": "home", "start": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
+               "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "tv": "media", "video": "media",
+               "headlines": "news"}
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        if str(args.get("action") or "").strip().lower() == "remote":
+            url = self._page_url("remote")
+            return ToolResult(ok=True, output=f"the remote for the TV dashboard, for a phone on this Wi-Fi: {url}",
+                              metadata={"url": url})
+        view = str(args.get("view") or "").strip().lower()
+        view = self.ALIASES.get(view, view)
+        payload: dict = {}
+        if view:
+            if view not in self.VIEWS:
+                return ToolResult(ok=False, error=f"refused: no view called {view!r}; the views are {', '.join(self.VIEWS)}")
+            payload["view"] = view
+        tf = str(args.get("timeframe") or "").strip().upper()
+        if tf:
+            if tf not in ("1D", "1W", "1M", "1Y"):
+                return ToolResult(ok=False, error="refused: `timeframe` is one of 1D, 1W, 1M, 1Y")
+            payload["timeframe"] = tf
+            payload.setdefault("view", "markets")
+        if args.get("symbol"):
+            payload["symbol"] = str(args["symbol"]).strip().upper()[:12]
+            payload.setdefault("view", "markets")
+        if "rotate_s" in args and args["rotate_s"] is not None:
+            try:
+                payload["rotate_s"] = max(0, min(3600, int(float(args["rotate_s"]))))
+            except (TypeError, ValueError):
+                return ToolResult(ok=False, error="refused: `rotate_s` is a number of seconds (0 stops)")
+        if not payload:
+            return ToolResult(ok=False, error="refused: say a `view` (home, discover, cameras, news, markets, media, terminal, "
+                                              "ambient), a `timeframe`, a `symbol`, or `rotate_s`")
+        bus = getattr(ctx, "bus", None)
+        if bus is None:
+            return ToolResult(ok=False, error="refused: no bus to reach the dashboard")
+        await bus.publish(Message.new(topics.DASH_STATE, source="execution", payload=payload))
+        said = []
+        if "view" in payload:
+            said.append(f"the dashboard shows {payload['view']}")
+        if "timeframe" in payload or "symbol" in payload:
+            said.append(" ".join(x for x in (payload.get("symbol", ""), payload.get("timeframe", "")) if x) + " on the chart")
+        if "rotate_s" in payload:
+            said.append(f"rotating every {payload['rotate_s']}s" if payload["rotate_s"] else "rotation off")
+        return ToolResult(ok=True, output="; ".join(said), side_effects=("dash_view",), metadata=payload)
+
+
 class CastUseTool(_CastTool):
     name = "cast_use"
     description = ("Remember which Cast device is the TV: the name must be one found on the network "
@@ -602,9 +675,9 @@ def cast_tools(config, **kwargs) -> list:
     return [CastDevicesTool(config, prefs=prefs, **kwargs), CastShowTool(config, prefs=prefs, **kwargs),
             CastPlayTool(config, prefs=prefs, **kwargs), CastStopTool(config, prefs=prefs, **kwargs),
             CastVolumeTool(config, prefs=prefs, **kwargs), CastUseTool(config, prefs=prefs, **kwargs),
-            CastSetupTool(config, prefs=prefs, **kwargs)]
+            CastSetupTool(config, prefs=prefs, **kwargs), DashViewTool(config, prefs=prefs, **kwargs)]
 
 
 __all__ = ["CastDevicesTool", "CastPlayTool", "CastPreferences", "CastSetupTool", "CastShowTool", "CastStopTool", "CastUseTool",
-           "CastVolumeTool", "Device", "settings_paths", "youtube_id",
+           "CastVolumeTool", "DashViewTool", "Device", "settings_paths", "youtube_id",
            "PyChromecast", "available", "cast_tools", "lan_address"]

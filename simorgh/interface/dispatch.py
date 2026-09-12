@@ -337,6 +337,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "cameras":
         return await _cameras(args, bus=bus, ledger=ledger, session_id=session_id)
 
+    if name == "ring":
+        return await _ring(args, bus=bus, ledger=ledger, session_id=session_id)
+
     if name == "schedule":
         return await _schedule_command(args, bus=bus, ledger=ledger, clock=clock)
 
@@ -735,8 +738,9 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     words = (args or "").strip().split()
     verb = words[0].lower() if words else "show"
     rest = words[1:]
-    usage = ("usage: tv setup [device] | devices | use <device> | show [device] | video <url> [full|frame] [device] | stop [frame] "
-             "| volume <0-100> [device]")
+    usage = ("usage: tv setup [device] | devices | use <device> | show [tv|dash] [device] | view <home|discover|cameras|news|"
+             "markets|media|terminal|ambient> [1D|1W|1M|1Y] [symbol] | rotate <seconds|off> | remote | "
+             "video <url> [full|frame] [device] | stop [frame] | volume <0-100> [device]")
 
     async def _run(tool: str, payload: dict) -> Outcome:
         return await _run_tool(bus=bus, ledger=ledger, tool=tool, raw=json.dumps(payload), session_id=session_id,
@@ -750,11 +754,37 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         if not rest:
             return Outcome("usage: tv use <device name>   (`tv devices` lists them)")
         return await _run("cast_use", {"device": " ".join(rest)})
-    if verb == "show":
+    if verb in ("show", "dash", "dashboard"):
         payload = {}
+        if verb != "show":
+            payload["page"] = "dash"
+        if rest and rest[0].lower() in ("tv", "dash", "dashboard"):
+            payload["page"] = "dash" if rest[0].lower() != "tv" else "tv"
+            rest = rest[1:]
         if rest:
             payload["url" if rest[0].startswith(("http://", "https://")) else "device"] = " ".join(rest)
         return await _run("cast_show", payload)
+    if verb == "view":
+        if not rest:
+            return Outcome("usage: tv view <home|discover|cameras|news|markets|media|terminal|ambient> [1D|1W|1M|1Y] [symbol]")
+        payload = {"view": rest[0]}
+        for word in rest[1:]:
+            if word.upper() in ("1D", "1W", "1M", "1Y"):
+                payload["timeframe"] = word.upper()
+            else:
+                payload["symbol"] = word.upper()
+        return await _run("dash_view", payload)
+    if verb == "rotate":
+        if not rest:
+            return Outcome("usage: tv rotate <seconds|off>")
+        seconds = 0 if rest[0].lower() in ("off", "stop", "0") else rest[0]
+        try:
+            seconds = float(seconds)
+        except ValueError:
+            return Outcome("usage: tv rotate <seconds|off>")
+        return await _run("dash_view", {"rotate_s": seconds})
+    if verb == "remote":
+        return await _run("dash_view", {"action": "remote"})
     if verb in ("video", "play"):
         if not rest:
             return Outcome(usage)
@@ -844,6 +874,57 @@ async def _cameras(args: str, *, bus: BusClient, ledger: LedgerClient, session_i
             return Outcome("usage: cameras setup <host> <username> <password>")
         return await _run("cam_setup", {"host": rest[0], "username": rest[1], "password": " ".join(rest[2:])}, timeout=60.0)
     return Outcome(f"cameras: unknown verb {verb!r} -- {usage}")
+
+
+async def _ring(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: str) -> Outcome:
+    """`ring ...`: sugar over the ring_* tools (execution/home/ring.py)."""
+    words = (args or "").strip().split()
+    verb = words[0].lower() if words else "list"
+    rest = words[1:]
+    usage = ("usage: ring list | snapshot <camera|all> | events [camera] [n] | light <camera> on|off | siren <camera> [seconds] | "
+             "watch on|off [seconds] | setup <email> <password> [code]")
+
+    async def _run(tool: str, payload: dict, timeout: float = 120.0) -> Outcome:
+        return await _run_tool(bus=bus, ledger=ledger, tool=tool, raw=json.dumps(payload), session_id=session_id,
+                               timeout=timeout)
+
+    if verb in ("list", "cameras"):
+        return await _run("ring_list", {})
+    if verb in ("snapshot", "snap", "picture"):
+        return await _run("ring_snapshot", {"camera": " ".join(rest) or "all"})
+    if verb in ("events", "history"):
+        limit = int(rest[-1]) if rest and rest[-1].isdigit() else None
+        camera = " ".join(rest[:-1] if limit is not None else rest)
+        payload = {}
+        if camera:
+            payload["camera"] = camera
+        if limit:
+            payload["limit"] = limit
+        return await _run("ring_events", payload)
+    if verb == "light":
+        if len(rest) < 2:
+            return Outcome(usage)
+        return await _run("ring_light", {"camera": " ".join(rest[:-1]), "on": rest[-1].lower() in ("on", "true", "1")})
+    if verb == "siren":
+        if not rest:
+            return Outcome(usage)
+        seconds = int(rest[-1]) if rest[-1].isdigit() else None
+        camera = " ".join(rest[:-1] if seconds is not None else rest)
+        return await _run("ring_siren", {"camera": camera, **({"seconds": seconds} if seconds else {})})
+    if verb == "watch":
+        on = not rest or rest[0].lower() not in ("off", "stop")
+        payload = {"on": on}
+        if len(rest) > 1 and rest[1].isdigit():
+            payload["every_s"] = float(rest[1])
+        return await _run("ring_watch", payload)
+    if verb in ("setup", "login"):
+        if len(rest) < 2:
+            return Outcome("usage: ring setup <email> <password> [code]")
+        payload = {"email": rest[0], "password": rest[1]}
+        if len(rest) > 2:
+            payload["code"] = rest[2]
+        return await _run("ring_setup", payload, timeout=90.0)
+    return Outcome(f"ring: unknown verb {verb!r} -- {usage}")
 
 
 async def _tool_command(args: str, *, bus: BusClient, ledger: LedgerClient,

@@ -1040,3 +1040,119 @@ class DashAndWallpapersTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(st,404)
             st,_,_=await asyncio.to_thread(g,"/wallpapers/missing.jpg")
             self.assertEqual(st,404)
+
+
+class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
+    """The collector's snapshot, the steering state, the phone remote and
+    the camera stills (2026-09-12): the page and the TV's Cast receiver
+    fetch these with no header, so the reads are open; the one write is
+    behind the token like every other side effect."""
+
+    class _Feeds:
+        def __init__(self) -> None:
+            self.started = self.stopped = False
+
+        async def start(self):
+            self.started = True
+
+        async def stop(self):
+            self.stopped = True
+
+        def snapshot(self):
+            return {"now": 1.0, "feeds": {"quotes": {"error": ""}}, "markets": {"stocks": [{"symbol": "NVDA", "last": 218.29}]},
+                    "news": {}, "cameras": []}
+
+    def _g(self, api, path, hdr=None):
+        c = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+        c.request("GET", path, headers=hdr or {}); r = c.getresponse(); b = r.read(); ct = r.getheader("Content-Type"); c.close()
+        return r.status, b, ct
+
+    def _p(self, api, path, body, hdr=None):
+        c = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+        headers = {"Content-Type": "application/json"}
+        headers.update(hdr or {})
+        c.request("POST", path, body=json.dumps(body).encode(), headers=headers); r = c.getresponse(); b = r.read(); c.close()
+        return r.status, b
+
+    async def test_the_snapshot_is_served_open_and_the_collector_is_started_and_stopped_with_the_api(self):
+        feeds = self._Feeds()
+        api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret", feeds=feeds)
+        await api.start()
+        self.assertTrue(feeds.started)
+        st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/data")
+        self.assertEqual(st, 200)
+        self.assertEqual(json.loads(b)["markets"]["stocks"][0]["symbol"], "NVDA")
+        await api.stop()
+        self.assertTrue(feeds.stopped)
+
+    async def test_without_a_collector_the_snapshot_says_so_instead_of_inventing(self):
+        api = HttpApi(_FakeBus(), host="127.0.0.1", port=0)
+        await api.start(); self.addAsyncCleanup(api.stop)
+        st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/data")
+        self.assertEqual(st, 200)
+        body = json.loads(b)
+        self.assertTrue(body["off"]); self.assertIsNone(body["markets"])
+
+    async def test_the_state_is_read_open_written_with_the_token_and_follows_the_bus(self):
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+        bus = _FakeBus()
+        api = HttpApi(bus, host="127.0.0.1", port=0, token="secret")
+        await api.start(); self.addAsyncCleanup(api.stop)
+        st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/state")
+        self.assertEqual(st, 200); self.assertEqual(json.loads(b)["view"], "")
+        # the write needs the token -- header or query (the phone page carries it in its URL)
+        st, _ = await asyncio.to_thread(self._p, api, "/api/dash/state", {"view": "markets"})
+        self.assertEqual(st, 401)
+        st, b = await asyncio.to_thread(self._p, api, "/api/dash/state?token=secret", {"view": "stocks", "timeframe": "1w", "rotate_s": 30})
+        self.assertEqual(st, 200)
+        state = json.loads(b)
+        self.assertEqual((state["view"], state["timeframe"], state["rotate_s"]), ("markets", "1W", 30), "aliases and case are normalised")
+        self.assertGreater(state["since"], 0)
+        self.assertEqual(bus.published[-1].type, topics.DASH_STATE, "the remote's change is announced like the tool's")
+        # a nonsense view or timeframe changes nothing
+        st, b = await asyncio.to_thread(self._p, api, "/api/dash/state", {"view": "nope", "timeframe": "5Y"}, {"Authorization": "Bearer secret"})
+        self.assertEqual(json.loads(b)["view"], "markets"); self.assertEqual(json.loads(b)["timeframe"], "1W")
+        # and the dash_view tool's message on the bus lands in the same state
+        handler = next(entry[1] for entry in bus._subs if entry[0] == topics.DASH_STATE)  # noqa: SLF001
+        await handler(Message.new(topics.DASH_STATE, source="execution", payload={"view": "cameras", "symbol": "amd"}))
+        st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/state")
+        self.assertEqual((json.loads(b)["view"], json.loads(b)["symbol"]), ("cameras", "AMD"))
+
+    async def test_a_same_origin_post_from_the_lan_address_is_not_mistaken_for_csrf(self):
+        api = HttpApi(_FakeBus(), host="0.0.0.0", port=0)
+        await api.start(); self.addAsyncCleanup(api.stop)
+        host = f"192.168.50.7:{api.port}"
+        st, _ = await asyncio.to_thread(self._p, api, "/api/dash/state", {"view": "news"},
+                                        {"Origin": f"http://{host}", "Host": host})
+        self.assertEqual(st, 200)
+        st, _ = await asyncio.to_thread(self._p, api, "/api/dash/state", {"view": "news"},
+                                        {"Origin": "http://evil.example", "Host": host})
+        self.assertEqual(st, 403)
+
+    async def test_the_remote_page_is_open_and_posts_to_the_state_route(self):
+        api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
+        await api.start(); self.addAsyncCleanup(api.stop)
+        st, b, ct = await asyncio.to_thread(self._g, api, "/remote")
+        self.assertEqual(st, 200); self.assertIn("text/html", ct); self.assertIn(b"/api/dash/state", b)
+
+    async def test_the_newest_camera_still_is_served_by_camera_name(self):
+        import tempfile
+        api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            api._snapshot_root = root  # noqa: SLF001
+            (root / "Front_Door-20260912-090000.jpg").write_bytes(b"old")
+            (root / "Front_Door-20260912-100000.jpg").write_bytes(b"new")
+            import os
+            os.utime(root / "Front_Door-20260912-100000.jpg", (2_000_000_000, 2_000_000_000))
+            (root / "ring").mkdir(); (root / "ring" / "Porch-20260912-110000.jpg").write_bytes(b"ring")
+            await api.start(); self.addAsyncCleanup(api.stop)
+            st, b, ct = await asyncio.to_thread(self._g, api, "/cameras/snap/Front_Door")
+            self.assertEqual((st, b, ct), (200, b"new", "image/jpeg"))
+            st, b, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/ring/Porch")
+            self.assertEqual((st, b), (200, b"ring"))
+            st, _, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/Garage")
+            self.assertEqual(st, 404)
+            st, _, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/../secrets")
+            self.assertEqual(st, 404)

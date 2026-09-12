@@ -451,6 +451,14 @@ class Config:
     cast_page_port: int = 8765
     cast_discovery_s: float = 5.0
 
+    # -- ring (execution/home/ring.py): the Ring cameras through Ring's
+    # cloud. `ring_watch` polls every `ring_poll_s` for new rings and
+    # motions and refreshes each camera's still every
+    # `ring_snapshot_every_s` for the dashboard's tiles. Ring throttles
+    # snapshot requests, and a battery camera wakes for each one.
+    ring_poll_s: float = 120.0
+    ring_snapshot_every_s: float = 300.0
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a

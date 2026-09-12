@@ -137,6 +137,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "cast_stop": ("reversible", True),
 
     "cast_volume": ("reversible", True),
+    "dash_view": ("reversible", True),
 
     "cast_use": ("reversible", True),
 
@@ -174,6 +175,13 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 
 
     "cam_watch": ("reversible", True),
+    "ring_setup": ("reversible", True),
+    "ring_list": ("read_only", True),
+    "ring_snapshot": ("reversible", True),
+    "ring_events": ("read_only", True),
+    "ring_light": ("reversible", True),
+    "ring_siren": ("irreversible", True),
+    "ring_watch": ("reversible", True),
     # The Mac's own Music app (execution/media/musicapp.py): the same
     # three shapes as the home players, on the laptop's own speakers.
     "music_now": ("read_only", True),

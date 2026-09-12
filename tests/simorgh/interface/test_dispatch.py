@@ -328,7 +328,8 @@ class TvCommandTestCase(unittest.IsolatedAsyncioTestCase):
         dispatch_mod._run_tool = _run_tool
         try:
             for line in ("tv setup", "tv devices", "tv use Living Room TV", "tv show", "tv show Bedroom", "tv", "tv video https://x/clip.mp4",
-                         "tv video https://x/clip.mp4 full Living Room TV", "tv stop", "tv stop frame", "tv volume 35"):
+                         "tv video https://x/clip.mp4 full Living Room TV", "tv stop", "tv stop frame", "tv volume 35",
+                         "tv show dash", "tv dash", "tv view markets 1W amd", "tv rotate 45", "tv rotate off", "tv remote"):
                 await dispatch_mod.dispatch(parse(line), bus=None, clock=_Clock(), session_id="s1", vitals=None,
                                             ledger=None)
         finally:
@@ -339,6 +340,38 @@ class TvCommandTestCase(unittest.IsolatedAsyncioTestCase):
             ("cast_play", {"url": "https://x/clip.mp4", "mode": "frame"}),
             ("cast_play", {"url": "https://x/clip.mp4", "mode": "full", "device": "Living Room TV"}),
             ("cast_stop", {}), ("cast_stop", {"what": "frame"}), ("cast_volume", {"level": 35.0}),
+            ("cast_show", {"page": "dash"}), ("cast_show", {"page": "dash"}),
+            ("dash_view", {"view": "markets", "timeframe": "1W", "symbol": "AMD"}),
+            ("dash_view", {"rotate_s": 45.0}), ("dash_view", {"rotate_s": 0.0}), ("dash_view", {"action": "remote"}),
+        ])
+
+
+class RingCommandTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_every_verb_is_a_ring_tool_call(self):
+        from simorgh.interface import dispatch as dispatch_mod
+        from simorgh.interface.parser import parse
+        import json as _json
+
+        calls = []
+
+        async def _run_tool(*, bus, ledger, tool, raw, session_id, timeout=300.0):
+            calls.append((tool, _json.loads(raw)))
+            return dispatch_mod.Outcome("ok")
+        original = dispatch_mod._run_tool
+        dispatch_mod._run_tool = _run_tool
+        try:
+            for line in ("ring", "ring list", "ring snapshot", "ring snapshot front door", "ring events", "ring events back yard 5",
+                         "ring light back yard on", "ring siren back yard 15", "ring watch", "ring watch off", "ring watch on 60",
+                         "ring setup a@b.c pw", "ring setup a@b.c pw 123456"):
+                await dispatch_mod.dispatch(parse(line), bus=None, clock=_Clock(), session_id="s1", vitals=None, ledger=None)
+        finally:
+            dispatch_mod._run_tool = original
+        self.assertEqual(calls, [
+            ("ring_list", {}), ("ring_list", {}), ("ring_snapshot", {"camera": "all"}), ("ring_snapshot", {"camera": "front door"}),
+            ("ring_events", {}), ("ring_events", {"camera": "back yard", "limit": 5}),
+            ("ring_light", {"camera": "back yard", "on": True}), ("ring_siren", {"camera": "back yard", "seconds": 15}),
+            ("ring_watch", {"on": True}), ("ring_watch", {"on": False}), ("ring_watch", {"on": True, "every_s": 60.0}),
+            ("ring_setup", {"email": "a@b.c", "password": "pw"}), ("ring_setup", {"email": "a@b.c", "password": "pw", "code": "123456"}),
         ])
 
 

@@ -246,6 +246,15 @@ class Service:
                 self._repl_thread = threading.Thread(target=self._repl_main, name="interface-repl", daemon=True)
                 self._repl_thread.start()
         if self._http_enabled:
+            feeds = None
+            if self.config.dash_feeds:
+                from simorgh.interface.dashfeeds import DEFAULT_MAJORS, DEFAULT_WATCHLIST, DashFeeds
+
+                feeds = DashFeeds(place=self.config.dash_place, latitude=self.config.dash_latitude,
+                                  longitude=self.config.dash_longitude,
+                                  watchlist=self.config.dash_watchlist or DEFAULT_WATCHLIST,
+                                  majors=self.config.dash_majors or DEFAULT_MAJORS, logger=ctx.logger,
+                                  snapshot_root=Path.cwd() / "workspace" / "cameras")
             self._http = HttpApi(
                 ctx.bus, ledger=ctx.ledger, host=self.config.http_host, port=self.config.http_port,
                 clock=ctx.clock.now if hasattr(ctx.clock, "now") else None,
@@ -259,6 +268,7 @@ class Service:
                 token=(ctx.secrets.get("SIM_API_TOKEN") or ""),
                 max_body_bytes=self.config.api_max_body_bytes,
                 logger=ctx.logger,
+                feeds=feeds,
             )
             # A dashboard on 127.0.0.1 is reachable only by this
             # machine's own user, which is the posture this server was

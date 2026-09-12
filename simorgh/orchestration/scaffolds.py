@@ -148,6 +148,8 @@ _TOOL_NOTES: dict[str, str] = {
                  "page, mode full on the TV itself",
     "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
     "cast_volume": "the TV's volume, 0-100",
+    "dash_view": "turn the dashboard on the TV to a view (home, news, markets, cameras, media, ambient...), a chart "
+                 "timeframe or symbol, or set it rotating; action=remote gives the phone remote's link",
     "cast_use": "remember which Cast device is the TV, by name",
     "cam_setup": "the NVR's address and login, kept in secrets.toml; then a restart",
     "cam_list": "every camera on the NVR: number, name, online",
@@ -160,6 +162,13 @@ _TOOL_NOTES: dict[str, str] = {
     "cam_ptz": "move a camera: `<camera> left|right|up|down|stop|zoom_in|zoom_out|preset <n>`",
     "cam_recordings": "what a camera recorded: `<camera> [today|yesterday|<n>h]`",
     "cam_watch": "have the NVR push events (motion, person, vehicle, animal) to the screen: on|off",
+    "ring_setup": "log in to Ring once (email, password, then the texted code); the token is kept in secrets.toml",
+    "ring_list": "the Ring cameras: name, kind, battery, light/siren",
+    "ring_snapshot": "a fresh still from a Ring camera (or all), saved under workspace/cameras/ring/ for the dashboard",
+    "ring_events": "recent Ring rings and motions, newest first",
+    "ring_light": "a Ring camera's light: `<camera> on|off`",
+    "ring_siren": "a Ring camera's siren for a few seconds -- loud; only when asked",
+    "ring_watch": "poll Ring for new events and fresh stills: on|off",
     "cast_setup": "one-time: open your API to the network with a token so the TV can fetch your page; then a restart",
     "propose_mcp_server": "propose a new MCP server to the human",
     "draft_candidate": "draft a change without applying it",
@@ -377,7 +386,9 @@ Do not pretend to be human or claim feelings. Say plainly when you are
 unsure. Answer in the language the person spoke.
 You can reach the TV, and it is already chosen (no need for
 cast_devices). cast_show puts your page on it; cast_play plays a video
-there; cast_stop and cast_volume do what they say. "Play/cast X on the
+there (page dash for the glass dashboard); cast_stop and cast_volume
+do what they say; dash_view turns the dashboard to a view ("show the
+markets", "show the cameras"). "Play/cast X on the
 TV": web_search "X youtube", take the first youtube.com/watch link, and
 cast_play it -- mode frame beside your page unless they said full
 screen. A YouTube page URL is exactly what cast_play wants; never hunt
@@ -388,7 +399,10 @@ The cameras are yours too: cam_list names them, cam_state says what
 each sees, cam_snapshot takes a picture, cam_stream puts one live on
 the TV (frame or full), cam_light and cam_ir switch its lights,
 cam_ptz moves it, cam_recordings reads the NVR, cam_watch turns event
-pushes on. cam_siren is loud: only when plainly asked.
+pushes on. cam_siren is loud: only when plainly asked. The Ring
+cameras (doorbell, stick-up cams) are the ring_* tools: ring_list,
+ring_snapshot, ring_events, ring_light, ring_siren, ring_watch -- the
+same words, through Ring's cloud.
 How you sound is a setting, not code: if asked for a different voice,
 speed or volume, do not start a task or edit anything. Say that the
 person can type `voice voices` to hear the list and `voice set

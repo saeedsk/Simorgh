@@ -245,3 +245,60 @@ class MarkerFormsTestCase(unittest.IsolatedAsyncioTestCase):
         r = await tools["cast_volume"].run({"level": "35 Bedroom"}, ctx=_ctx(bus))
         self.assertTrue(r.ok, r.error)
         self.assertEqual(cast.calls[-1], ("volume", "Bedroom", 0.35))
+
+
+class DashViewTestCase(unittest.IsolatedAsyncioTestCase):
+    """`dash_view` (2026-09-12): the TV's remote never reaches a Cast
+    receiver, so the dashboard is turned from Sim -- a bus message the
+    HTTP API keeps and the page polls -- or from the phone page whose
+    link the tool hands out."""
+
+    def _tools(self):
+        cast = _FakeCast()
+        tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
+                                               reachable=lambda url: True, env={"SIM_API_TOKEN": "s3"})}
+        return tools, cast, _Bus()
+
+    async def test_a_view_a_timeframe_and_a_symbol_are_announced_normalised(self):
+        tools, cast, bus = self._tools()
+        result = await tools["dash_view"].run({"view": "stocks", "timeframe": "1m", "symbol": "amd"}, ctx=_ctx(bus))
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(bus.published[-1].type, topics.DASH_STATE)
+        self.assertEqual(bus.published[-1].payload, {"view": "markets", "timeframe": "1M", "symbol": "AMD"})
+        self.assertIn("markets", result.output)
+        self.assertEqual(cast.calls, [], "steering the page touches no device")
+
+    async def test_a_timeframe_alone_implies_the_markets_view_and_rotation_is_bounded(self):
+        tools, cast, bus = self._tools()
+        result = await tools["dash_view"].run({"timeframe": "1Y"}, ctx=_ctx(bus))
+        self.assertTrue(result.ok)
+        self.assertEqual(bus.published[-1].payload, {"timeframe": "1Y", "view": "markets"})
+        result = await tools["dash_view"].run({"rotate_s": 99999}, ctx=_ctx(bus))
+        self.assertEqual(bus.published[-1].payload, {"rotate_s": 3600})
+        result = await tools["dash_view"].run({"rotate_s": 0}, ctx=_ctx(bus))
+        self.assertIn("rotation off", result.output)
+
+    async def test_nonsense_is_refused_with_the_choices(self):
+        tools, cast, bus = self._tools()
+        result = await tools["dash_view"].run({"view": "kitchen"}, ctx=_ctx(bus))
+        self.assertFalse(result.ok); self.assertIn("ambient", result.error)
+        result = await tools["dash_view"].run({"timeframe": "5Y"}, ctx=_ctx(bus))
+        self.assertFalse(result.ok)
+        result = await tools["dash_view"].run({}, ctx=_ctx(bus))
+        self.assertFalse(result.ok)
+        self.assertEqual(bus.published, [])
+
+    async def test_the_remote_link_carries_the_token_and_points_at_the_remote_page(self):
+        tools, cast, bus = self._tools()
+        result = await tools["dash_view"].run({"action": "remote"}, ctx=_ctx(bus))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.metadata["url"], "http://10.0.0.5:8765/remote?token=s3")
+
+    async def test_cast_show_can_put_the_dashboard_up_instead_of_the_terminal(self):
+        tools, cast, bus = self._tools()
+        result = await tools["cast_show"].run({"page": "dash"}, ctx=_ctx(bus))
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(cast.calls[-1], ("show_page", "Living Room TV", "http://10.0.0.5:8765/dash?token=s3"))
+        self.assertIn("dashboard", result.output)
+        result = await tools["cast_show"].run({"target": "dashboard"}, ctx=_ctx(bus))
+        self.assertEqual(cast.calls[-1][2], "http://10.0.0.5:8765/dash?token=s3", "the marker form names the page too")

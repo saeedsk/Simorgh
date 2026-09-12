@@ -803,6 +803,10 @@ class TestBuiltinTools(unittest.TestCase):
             "energy_status", "energy_report", "energy_tariff",
             "media_now", "media_control", "media_play",
             "music_now", "music_control", "music_play",
+            "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "cast_use", "cast_setup", "dash_view",
+            "cam_setup", "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren",
+            "cam_ptz", "cam_recordings", "cam_watch",
+            "ring_setup", "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch",
             "propose_mcp_server", "run_shell",
         })
 

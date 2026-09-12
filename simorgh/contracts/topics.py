@@ -215,6 +215,13 @@ TV_STATE = "ui.tv.state"
 # Sim's own voice, for the TV page to play: one piece of a reply as it
 # is handed to the speaker, as a ledger blob (WAV). `[voice] output`.
 TV_SPEECH = "ui.tv.speech"
+# Which view the glass dashboard (interface/static/dash.html) should
+# show, and how: `{"view": "markets", "timeframe": "1M", "symbol": "",
+# "rotate_s": 0}`. Published by the `dash_view` tool (execution/media/
+# cast.py) and by `POST /api/dash/state` (the phone remote); the page
+# polls `/api/dash/state`. A Cast receiver gets no key events from the
+# TV's remote, so this is how the dashboard is steered.
+DASH_STATE = "ui.dash.state"
 # An inbound webhook the HTTP API received (`POST /api/hooks/<name>`),
 # body verbatim, for whichever subsystem asked something to call it --
 # the Reolink NVR's event push, first (execution/home/cameras.py).

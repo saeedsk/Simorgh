@@ -4676,3 +4676,103 @@ Still ahead, roughly in order:
     Earlier the same day: Farsi speech through Piper, recognition
     through whisper large-v3-turbo with language detection, and the
     SIGTERM/Ctrl-C hard exit (`kernel/cli.py::Stopper`).
+
+149. **The dashboard stops making things up: a collector, a Bloomberg
+    Markets view, and a remote for a screen the TV's remote cannot
+    reach (2026-09-12).** The glass dashboard shipped in the morning
+    with every panel but the terminal hard-coded in JavaScript -- fake
+    headlines, a seeded random walk labelled "sample series", 72
+    degrees forever. The creator's afternoon: "the market view is dumb,
+    be creative, scrape Bloomberg and replicate it", the five major tech
+    charts bigger and the rest tiled, "more elements" on every view, and
+    "can the user change the dashboard on the TV using the TV remote?"
+
+    `interface/dashfeeds.py` is the collector: 25 feeds, each a pure
+    parser over one public endpoint's bytes, run on its own cadence by
+    one background task and merged into the snapshot `/api/dash/data`
+    serves. Bloomberg's site answers every request with "Are you a
+    robot?", so what is Bloomberg's here is its own RSS (markets,
+    technology, business, economics, politics); the numbers come from
+    CNBC's quote service (stocks, ten indices, rates, FX, commodities,
+    crypto in one call) and its bar API (5-minute, 30-minute, hourly and
+    daily bars for 1D/1W/1M/1Y). Also: BBC, Ars Technica, ScienceDaily,
+    NASA, Variety, Deadline; Open-Meteo weather and air quality for
+    `[interface] dash_place`; Apple's top songs, iTunes' top movies, The
+    Numbers' weekend box office (Box Office Mojo sends no table to a
+    non-browser); Wikipedia's featured article, picture of the day, "on
+    this day" and most-read; NASA's picture of the day; Hacker News;
+    dad jokes; a quote. A feed that fails keeps its last value and
+    records the error, so the page says stale rather than inventing.
+    The 1D series keeps the last *full* session -- the S&P leaves one
+    Saturday print behind that would otherwise be the whole chart.
+
+    Markets is laid out like a terminal page: a status/ticker strip
+    with the timeframe pills, five big cards (NVDA, AAPL, MSFT, GOOGL,
+    AMZN by default; `dash_majors` changes it) each with a real price
+    chart, previous-close line, O/H/L/Vol, cap, P/E, EPS, beta and a
+    52-week range bar; the other ten as tiles with sparklines (a click
+    swaps one into the big row); indices, rates & FX, commodities &
+    crypto tables and Bloomberg's headlines beneath. Home is 18 tiles
+    with a piece of everything; Discover, News (nine sources), Media,
+    Cameras, Terminal and Ambient all fill from the same snapshot.
+    Camera stills on disk become tiles (`/cameras/snap/<name>`).
+
+    The remote: a Cast receiver gets no key events from the TV's own
+    remote, so the page is steered from Sim. `dash_view` (a tool, so
+    Guardian sees it; `tv view markets 1W amd`, `tv rotate 60`, `tv
+    remote`) publishes `ui.dash.state`; the HTTP API keeps it and the
+    page polls `/api/dash/state`. `/remote` is a phone page that POSTs
+    the same state behind the token; `cast_show page=dash` puts the
+    dashboard itself on the TV. The page also listens for keys (arrows,
+    digits, Enter) for any TV browser that does deliver them. Two bugs
+    found by looking at the running page, not by tests: the bento's
+    `grid-template-areas` used double quotes inside a double-quoted
+    `style` attribute (the whole grid had silently collapsed to one
+    column since the morning), and the dashboard fetched its live
+    routes with no token (a token-gated Sim showed an idle terminal
+    forever). Tests: 13 for the collector, 6 for the routes, 5 for the
+    tool, the `tv` verbs.
+
+150. **The Ring cameras (2026-09-12).** "I have ring camera in my home,
+    add support for those camera and show them in dash." Ring has no
+    public API; `execution/home/ring.py` goes through `ring_doorbell`
+    (python-ring-doorbell, the library Home Assistant uses -- an
+    optional dependency, refused by name when missing) and speaks the
+    Ring app's own endpoints with the account's OAuth token. `ring_setup
+    <email> <password>` triggers Ring's texted code; the same call with
+    the code saves the token (never the password) to secrets.toml and
+    widens `[execution] secrets` by *adding* to the list -- `cam_setup`
+    had been replacing it, which would have dropped the Reolink login
+    the next time either ran. Then `ring_list`, `ring_snapshot <camera|
+    all>` (JPEGs under `workspace/cameras/ring/`, exactly where the
+    dashboard's tiles look), `ring_events` (rings, motions, live views,
+    also kept in `events.json` for the Cameras view), `ring_light`,
+    `ring_siren` (irreversible, like the NVR's), and `ring_watch`: a
+    poll every `ring_poll_s` that learns the history on its first pass
+    and announces only what is new after (`world.camera.event` with
+    host=ring, and a notice on screen), refreshing every camera's still
+    every `ring_snapshot_every_s` so the TV stays current. Live video is
+    WebRTC and is not built; stills are what Ring's own history shows.
+    The `ring` command is sugar over the tools. Tested against a fake
+    cloud: the two-step login, the scope merge, stills, events, lights,
+    the siren's cap, the watch loop's first-pass silence.
+
+    **Home, the second time (2026-09-12, evening).** The 18-tile bento
+    was "too crowded". The creator's layout: Sim's terminal takes the
+    left third, top to bottom of the frame; two large news boxes rotate
+    through categories every ten seconds (Bloomberg, Technology, World;
+    then Science, Entertainment, On this day, Hacker News, Most read),
+    each headline with a thumbnail from the feed or a source badge, the
+    list scrolling slowly when it does not fit and a title scrolling
+    sideways when it does not fit its line; a player a quarter of the
+    page that shows what Sim was asked to play or, when nothing was,
+    long 4K relaxation films found on YouTube's own results page (the
+    `ambient` feed, four queries, videos over thirty minutes, one every
+    half hour, muted); a markets box limited to NVDA, AAPL, GOOGL, AMZN,
+    the S&P, Nasdaq and Dow that alternates a five-day trend with the
+    market and AI headlines; the quote and the joke in one panel. The
+    skeleton is built once and refilled in place, so the video keeps
+    playing across polls. Found by looking: a flex column with no
+    `min-width` let the no-wrap titles push every row past the card's
+    edge, and `requestAnimationFrame` never fires in a hidden tab, so
+    the measurements that start the scrolling now run on a timeout.

@@ -1,0 +1,68 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Simorgh remote</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<style>
+:root{--fg:#f2f4f9;--dim:#b3b9c6;--faint:#828a99;--warm:#f0bd83;--gold:#f7d29b;--green:#84e6a6;--red:#ff9a94;
+--stroke:rgba(255,255,255,.18);--stroke2:rgba(255,255,255,.09);}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;min-height:100%;background:#07070c;color:var(--fg);
+font-family:"SF Mono","SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;font-size:15px;}
+body{padding:18px 16px 32px;background:radial-gradient(120% 80% at 50% 0%,#1b1626 0%,#07070c 70%);}
+h1{font-size:15px;letter-spacing:.5px;margin:0 0 4px;display:flex;align-items:center;gap:10px;}
+.sub{color:var(--faint);font-size:11.5px;margin-bottom:18px;}
+.hd{font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:var(--faint);margin:18px 0 8px;}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+.btn{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px;border-radius:16px;cursor:pointer;
+background:linear-gradient(150deg,rgba(255,255,255,.12),rgba(255,255,255,.03));border:1px solid var(--stroke);
+box-shadow:inset 0 1px 0 rgba(255,255,255,.22);font-size:14px;color:var(--fg);user-select:none;}
+.btn svg{stroke:var(--dim);} .btn.on{background:rgba(240,189,131,.22);border-color:rgba(240,189,131,.6);}
+.btn.on svg{stroke:var(--gold);} .btn small{color:var(--faint);font-size:10.5px;}
+.row{display:flex;gap:8px;} .row .btn{flex:1;align-items:center;padding:11px 6px;font-size:13px;}
+#status{margin-top:22px;font-size:12px;color:var(--faint);min-height:18px;}
+#status.ok{color:var(--green);} #status.bad{color:var(--red);}
+.dpad{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;}
+.dpad .btn{align-items:center;justify-content:center;padding:16px 0;font-size:20px;}
+</style></head>
+<body>
+<h1><span style="color:var(--warm);font-size:18px;">✻</span> Simorgh <span class="faint" style="color:var(--faint);">· remote</span></h1>
+<div class="sub">Steers the dashboard on the TV. A Cast receiver hears nothing from the TV's own remote, so this page is the remote.</div>
+
+<div class="hd">Views</div>
+<div class="grid" id="views"></div>
+
+<div class="hd">Previous / next</div>
+<div class="dpad">
+  <div class="btn" onclick="step(-1)">‹</div>
+  <div class="btn" onclick="send({view:'home'})" style="font-size:13px;">Home</div>
+  <div class="btn" onclick="step(1)">›</div>
+</div>
+
+<div class="hd">Markets timeframe</div>
+<div class="row" id="tfs"></div>
+
+<div class="hd">Rotate views</div>
+<div class="row" id="rot"></div>
+
+<div id="status"></div>
+
+<script>
+const token=new URLSearchParams(location.search).get("token")||"";
+const q=p=>p+(token?(p.includes("?")?"&":"?")+"token="+encodeURIComponent(token):"");
+const VIEWS=[["home","Home","everything at once"],["discover","Discover","world, science, culture"],["cameras","Cameras","live stills & events"],["news","News","Bloomberg, BBC, Ars…"],["markets","Markets","the watchlist, Bloomberg-style"],["media","Media","now playing, charts"],["terminal","Terminal","Sim, full screen"],["ambient","Ambient","clock & weather"]];
+const ICONS={home:'<path d="M3 9.5 10 3l7 6.5M5 8.2V16h4v-4h2v4h4V8.2"/>',discover:'<circle cx="10" cy="10" r="7.2"/><path d="M10 4.6l1.5 3.9 3.9 1.5-3.9 1.5L10 15.4 8.5 11.5 4.6 10l3.9-1.5z"/>',cameras:'<rect x="2.5" y="5.5" width="10" height="9" rx="1.6"/><path d="M12.5 8.5l5-2.5v8l-5-2.5z"/>',news:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M5.5 7h6M5.5 10h9M5.5 13h9"/>',markets:'<path d="M3 15.5V4.5M3 15.5h13.5"/><path d="M6 12l3-3 2.5 2L16 6"/>',media:'<circle cx="10" cy="10" r="7"/><path d="M8.5 7l4.5 3-4.5 3z"/>',terminal:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l3 2.5L6 13M11 13h3"/>',ambient:'<circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.5"/>'};
+let STATE={view:"home",timeframe:"1M",rotate_s:0};
+function draw(){
+  document.getElementById("views").innerHTML=VIEWS.map(([k,n,d])=>'<div class="btn'+(STATE.view===k?" on":"")+'" onclick="send({view:\''+k+'\'})"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg>'+n+'<small>'+d+'</small></div>').join("");
+  document.getElementById("tfs").innerHTML=["1D","1W","1M","1Y"].map(t=>'<div class="btn'+(STATE.timeframe===t?" on":"")+'" onclick="send({view:\'markets\',timeframe:\''+t+'\'})">'+t+'</div>').join("");
+  document.getElementById("rot").innerHTML=[[0,"Off"],[30,"30 s"],[60,"1 min"],[300,"5 min"]].map(([s,n])=>'<div class="btn'+((STATE.rotate_s|0)===s?" on":"")+'" onclick="send({rotate_s:'+s+'})">'+n+'</div>').join("");
+}
+function step(d){const i=VIEWS.findIndex(v=>v[0]===STATE.view);send({view:VIEWS[((i<0?0:i)+d+VIEWS.length)%VIEWS.length][0]});}
+async function send(p){
+  const st=document.getElementById("status");
+  try{const r=await fetch(q("/api/dash/state"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
+    if(!r.ok){st.className="bad";st.textContent=r.status===401?"this link has no token — ask Sim: tv remote":"the TV did not take it ("+r.status+")";return;}
+    STATE=await r.json();draw();st.className="ok";st.textContent="sent · "+(p.view||"")+(p.timeframe?" "+p.timeframe:"")+(p.rotate_s!=null?" rotate "+p.rotate_s+"s":"");
+  }catch(e){st.className="bad";st.textContent="Sim is not answering";}
+}
+async function refresh(){try{STATE=await (await fetch(q("/api/dash/state"))).json();draw();}catch(e){draw();}}
+refresh();setInterval(refresh,5000);
+</script></body></html>

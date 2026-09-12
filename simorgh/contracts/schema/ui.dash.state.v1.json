@@ -1,0 +1,35 @@
+{
+  "$id": "https://simorgh.local/schema/ui.dash.state.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Where the glass dashboard on the TV should look: a view name, the markets chart's timeframe or symbol, a rotation period in seconds (0 stops). Any subset; the HTTP API merges it.",
+  "properties": {
+    "rotate_s": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "symbol": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "timeframe": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "view": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "ui.dash.state",
+  "type": "object"
+}

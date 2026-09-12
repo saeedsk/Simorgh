@@ -90,6 +90,17 @@ class Config:
     history_max_points: int = 500
     logs_default_limit: int = 100
     logs_max_limit: int = 500
+    # The glass dashboard's collector (interface/dashfeeds.py): markets,
+    # headlines, weather, charts, Wikipedia, jokes for `/dash`. Off, the
+    # page shows Sim and empty panels that say so. The place is for the
+    # weather; the watchlist is the creator's 15 tech names by default
+    # and the majors are the five that get the big charts.
+    dash_feeds: bool = True
+    dash_place: str = "San Jose, CA"
+    dash_latitude: float = 37.34
+    dash_longitude: float = -121.89
+    dash_watchlist: tuple[str, ...] = ()
+    dash_majors: tuple[str, ...] = ()
 
     def resolved_history_path(self) -> Path | None:
         return self.history_path.expanduser() if self.history_path is not None else None
@@ -127,4 +138,10 @@ class Config:
             history_max_points=int(data.get("history_max_points", default.history_max_points)),
             logs_default_limit=int(data.get("logs_default_limit", default.logs_default_limit)),
             logs_max_limit=int(data.get("logs_max_limit", default.logs_max_limit)),
+            dash_feeds=bool(data.get("dash_feeds", default.dash_feeds)),
+            dash_place=str(data.get("dash_place", default.dash_place)),
+            dash_latitude=float(data.get("dash_latitude", default.dash_latitude)),
+            dash_longitude=float(data.get("dash_longitude", default.dash_longitude)),
+            dash_watchlist=tuple(str(s).strip().upper() for s in (data.get("dash_watchlist") or ()) if str(s).strip()),
+            dash_majors=tuple(str(s).strip().upper() for s in (data.get("dash_majors") or ()) if str(s).strip()),
         )

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import hmac
 import json
 import time
@@ -70,7 +71,8 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: check a monitor or a shell script polls, and it reveals only what the
 #: boot banner already prints. Everything else is gated
 #: (platform-connectors-design.md section 4).
-_OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers"})
+_OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers", "/api/dash/data",
+                                          "/api/dash/state", "/remote"})
 
 #: The response to an unauthenticated request. A JSON body, because
 #: every other error on this server is JSON and a dashboard that got
@@ -110,7 +112,7 @@ class HttpApi:
         clock=None, status_timeout_s: float = 3.0, chat_timeout_s: float = 130.0,
         history_stream: str = "metrics:history", history_default_minutes: float = 10.0,
         history_max_points: int = 500, logs_default_limit: int = 100, logs_max_limit: int = 500,
-        token: str = "", max_body_bytes: int = 1_000_000, logger=None,
+        token: str = "", max_body_bytes: int = 1_000_000, logger=None, feeds=None,
     ) -> None:
         self._bus = bus
         self._ledger = ledger
@@ -140,6 +142,19 @@ class HttpApi:
         self._tv_sub = None
         self._tv_speech: deque = deque(maxlen=40)   # (seq, ref, seconds, at): Sim's voice for the page
         self._tv_speech_sub = None
+        # The glass dashboard's collector (interface/dashfeeds.py), or
+        # None when `[interface] dash_feeds = false`: `/api/dash/data`
+        # then answers an empty snapshot that says the feeds are off.
+        self._feeds = feeds
+        # Where the dashboard should look (`ui.dash.state`): set by the
+        # `dash_view` tool or the phone remote, polled by the page.
+        self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "since": 0.0}
+        self._dash_sub = None
+        self._remote_page = (_STATIC_DIR / "remote.html").read_text(encoding="utf-8")
+        # The newest camera still per camera (execution/home/cameras.py
+        # writes `workspace/cameras/<name>-<stamp>.jpg`; ring.py the same
+        # under workspace/cameras/ring/), for the dashboard's tiles.
+        self._snapshot_root = (Path.cwd() / "workspace" / "cameras").resolve()
         # Live camera video for the TV page (execution/home/cameras.py
         # writes HLS under workspace/cameras/hls/<channel>/). Served on
         # the LAN without the token: the Cast receiver fetches segments
@@ -171,7 +186,9 @@ class HttpApi:
             raise ValueError(f"route already registered: {method} {path}")
         self._routes[(method, path)] = Route(
             method=method, path=path, handler=handler,
-            auth=auth and path not in _OPEN_ROUTES, max_body=max_body, rate=rate)
+            # The open list covers reads only: `POST /api/dash/state`
+            # shares its path with an open GET and stays behind the token.
+            auth=auth and not (path in _OPEN_ROUTES and method == "GET"), max_body=max_body, rate=rate)
 
     def _register_builtin_routes(self) -> None:
         async def _page(_query, _body, _headers):
@@ -233,8 +250,39 @@ class HttpApi:
                                if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".avif") and not f.name.startswith("."))
             return 200, json.dumps({"wallpapers": names}).encode("utf-8"), "application/json"
 
+        async def _dash_data(_query, _body, _headers):
+            if self._feeds is None:
+                body = {"now": self._now(), "off": True, "feeds": {}, "markets": None, "news": {}}
+            else:
+                body = self._feeds.snapshot()
+            return 200, json.dumps(body, default=str).encode("utf-8"), "application/json"
+
+        async def _dash_state_get(_query, _body, _headers):
+            return 200, json.dumps({"now": self._now(), **self._dash_state}).encode("utf-8"), "application/json"
+
+        async def _dash_state_post(query, body, headers):
+            # The phone remote (`/remote?token=`): gated like every other
+            # side effect (the token, in the header or the query).
+            try:
+                asked = json.loads(body.decode("utf-8") or "{}")
+            except ValueError:
+                return 400, b'{"error": "body must be JSON"}', "application/json"
+            if not isinstance(asked, dict):
+                return 400, b'{"error": "body must be a JSON object"}', "application/json"
+            payload = {k: asked[k] for k in ("view", "timeframe", "symbol", "rotate_s") if k in asked}
+            self._apply_dash_state(payload)
+            await self._bus.publish(Message.new(topics.DASH_STATE, source="interface", payload=payload))
+            return 200, json.dumps({"now": self._now(), **self._dash_state}).encode("utf-8"), "application/json"
+
+        async def _remote(_query, _body, _headers):
+            return 200, self._remote_page.encode("utf-8"), "text/html; charset=utf-8"
+
         self.register_route("GET", "/dash", _dash, auth=False)
         self.register_route("GET", "/api/wallpapers", _wallpapers, auth=False)
+        self.register_route("GET", "/api/dash/data", _dash_data, auth=False)
+        self.register_route("GET", "/api/dash/state", _dash_state_get, auth=False)
+        self.register_route("POST", "/api/dash/state", _dash_state_post, max_body=4096, rate=(120, 60.0))
+        self.register_route("GET", "/remote", _remote, auth=False)
         self.register_route("GET", "/api/tv/state", _tv_state)
         self.register_route("GET", "/api/tv/speech", _tv_speech)
 
@@ -267,6 +315,32 @@ class HttpApi:
             return 200, target.read_bytes(), kind
 
         self._prefixes.append(("GET", "/wallpapers/", _wall))
+
+        async def _snap(query, _body, _headers, *, rest: str = ""):
+            # `/cameras/snap/<camera>` (Reolink stills) or
+            # `/cameras/snap/ring/<camera>`: the newest JPEG whose name
+            # starts with the camera's safe name. Open on the LAN like
+            # the HLS segments: the Cast receiver sends no header.
+            parts = [p for p in rest.split("?", 1)[0].split("/") if p]
+            if not parts or any(p in (".", "..") for p in parts):
+                return 404, b"no such camera", "text/plain; charset=utf-8"
+            folder = self._snapshot_root
+            if parts[0] == "ring" and len(parts) > 1:
+                folder, parts = folder / "ring", parts[1:]
+            safe = re.sub(r"[^A-Za-z0-9_-]+", "_", "/".join(parts)).strip("_")
+            folder = folder.resolve()
+            if not safe or not folder.is_dir() or not str(folder).startswith(str(self._snapshot_root)):
+                return 404, b"no such camera", "text/plain; charset=utf-8"
+            newest = None
+            for f in folder.iterdir():
+                if f.suffix.lower() in (".jpg", ".jpeg") and (f.name == f"{safe}.jpg" or f.name.startswith(f"{safe}-")):
+                    if newest is None or f.stat().st_mtime > newest.stat().st_mtime:
+                        newest = f
+            if newest is None:
+                return 404, b"no still yet", "text/plain; charset=utf-8"
+            return 200, newest.read_bytes(), "image/jpeg"
+
+        self._prefixes.append(("GET", "/cameras/snap/", _snap))
         self.register_route("GET", "/api/history", _json_route(self._history_json))
         self.register_route("GET", "/api/logs", _json_route(self._logs_json))
         self.register_route("GET", "/api/benchmarks", _json_route(self._benchmarks_json))
@@ -334,6 +408,9 @@ class HttpApi:
         self._turn_sub = await self._bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
         self._tv_sub = await self._bus.subscribe(topics.TV_STATE, self._on_tv_state)
         self._tv_speech_sub = await self._bus.subscribe(topics.TV_SPEECH, self._on_tv_speech)
+        self._dash_sub = await self._bus.subscribe(topics.DASH_STATE, self._on_dash_state)
+        if self._feeds is not None:
+            await self._feeds.start()
         # Live activity feed (07-post-cutover-review.md §3.9): the same
         # events the REPL narrates, kept in a small in-memory ring so
         # `/api/activity` answers "what is Sim doing right now / just did"
@@ -352,6 +429,11 @@ class HttpApi:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
+        if self._feeds is not None:
+            await self._feeds.stop()
+        if self._dash_sub is not None:
+            await self._dash_sub.unsubscribe()
+            self._dash_sub = None
         if self._turn_sub is not None:
             await self._turn_sub.unsubscribe()
             self._turn_sub = None
@@ -363,6 +445,30 @@ class HttpApi:
         fut = self._pending_chats.get(message.payload.get("session_id", ""))
         if fut is not None and not fut.done():
             fut.set_result(message.payload)
+
+    _DASH_VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "terminal", "ambient")
+
+    def _apply_dash_state(self, payload: dict) -> None:
+        view = str(payload.get("view") or "").strip().lower()
+        aliases = {"deck": "home", "start": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
+                   "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "tv": "media", "video": "media"}
+        view = aliases.get(view, view)
+        if view and view in self._DASH_VIEWS:
+            self._dash_state["view"] = view
+        tf = str(payload.get("timeframe") or "").strip().upper()
+        if tf in ("1D", "1W", "1M", "1Y"):
+            self._dash_state["timeframe"] = tf
+        if "symbol" in payload:
+            self._dash_state["symbol"] = str(payload.get("symbol") or "").strip().upper()[:12]
+        if "rotate_s" in payload:
+            try:
+                self._dash_state["rotate_s"] = max(0, min(3600, int(float(payload.get("rotate_s") or 0))))
+            except (TypeError, ValueError):
+                pass
+        self._dash_state["since"] = self._now()
+
+    async def _on_dash_state(self, message: Message) -> None:
+        self._apply_dash_state(dict(message.payload or {}))
 
     _ACTIVITY_MAX = 200
 
@@ -459,7 +565,7 @@ class HttpApi:
             for p_method, prefix, handler in self._prefixes:
                 if method == p_method and split.path.startswith(prefix):
                     rest = split.path[len(prefix):]
-                    open_ = prefix in ("/tv/hls/", "/wallpapers/")
+                    open_ = prefix in ("/tv/hls/", "/wallpapers/", "/cameras/snap/")
                     route = Route(method=method, path=split.path, handler=handler, auth=not open_,
                                   max_body=_MAX_BODY_BYTES if method == "POST" else None, rate=None)
                     prefix_extra = {"name": rest.split("/", 1)[0]} if prefix == "/api/hooks/" else {"rest": rest}
@@ -571,6 +677,14 @@ class HttpApi:
             return True
         allowed = {f"http://{self._host}:{self.port}", f"http://localhost:{self.port}",
                    f"http://127.0.0.1:{self.port}"}
+        # Bound to 0.0.0.0 and reached by its LAN address (the phone
+        # remote at /remote, the dashboard on the TV), a same-origin
+        # POST carries `Origin: http://192.168.x.y:8765` -- the page's
+        # own host, which is exactly what `Host` says. Same-origin is
+        # Origin == scheme + Host; a cross-site page cannot forge Host.
+        host = headers.get("host", "").strip()
+        if host and origin == f"http://{host}":
+            return True
         return origin in allowed
 
     async def _chat_route(self, _query: dict, body: bytes, _headers: dict) -> tuple[int, bytes, str]:

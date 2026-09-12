@@ -1,40 +1,79 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><title>Simorgh</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root{--fg:#f2f4f9;--dim:#b3b9c6;--faint:#828a99;--warm:#f0bd83;--gold:#f7d29b;--green:#84e6a6;--cyan:#9fe3ff;--red:#ff9a94;--violet:#c9a9ff;
---stroke:rgba(255,255,255,.20);--stroke2:rgba(255,255,255,.10);--radius:24px;}
+:root{--fg:#f2f4f9;--dim:#b3b9c6;--faint:#828a99;--warm:#f0bd83;--gold:#f7d29b;--amber:#ffb347;--green:#84e6a6;--cyan:#9fe3ff;--red:#ff9a94;--violet:#c9a9ff;
+--stroke:rgba(255,255,255,.20);--stroke2:rgba(255,255,255,.10);--radius:22px;}
 *{box-sizing:border-box;}
 html,body{margin:0;height:100%;background:#06060b;color:var(--fg);overflow:hidden;
-font-family:"SF Mono","SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;font-size:15px;line-height:1.45;}
+font-family:"SF Mono","SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;font-size:15px;line-height:1.45;font-variant-numeric:tabular-nums;}
 #bg,#bg2{position:fixed;inset:0;background-size:cover;background-position:center;transition:opacity 1.4s ease;}
 #bg2{opacity:0;}
 #scrim{position:fixed;inset:0;pointer-events:none;
 background:radial-gradient(120% 120% at 50% 40%,transparent 40%,rgba(0,0,0,.55)),linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.45));}
-#app{position:relative;height:100vh;display:flex;flex-direction:column;padding:18px;gap:14px;}
-.glass{position:relative;background:linear-gradient(150deg,rgba(255,255,255,.13),rgba(255,255,255,.035) 55%,rgba(255,255,255,.02));
+#app{position:relative;height:100vh;display:flex;flex-direction:column;padding:16px;gap:12px;}
+.glass{position:relative;background:linear-gradient(150deg,rgba(255,255,255,.11),rgba(255,255,255,.03) 55%,rgba(255,255,255,.01)),rgba(10,10,16,.34);
 backdrop-filter:blur(42px) saturate(180%);-webkit-backdrop-filter:blur(42px) saturate(180%);
 border:1px solid var(--stroke);border-radius:var(--radius);
 box-shadow:0 22px 55px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.28),inset 0 -1px 0 rgba(255,255,255,.05);overflow:hidden;}
 .glass::before{content:"";position:absolute;top:0;left:0;right:40%;height:42%;pointer-events:none;
 background:linear-gradient(160deg,rgba(255,255,255,.22),transparent 75%);opacity:.7;}
-.dim{color:var(--dim);}.faint{color:var(--faint);}.warm{color:var(--warm);}.gold{color:var(--gold);}
+.dark{background:linear-gradient(160deg,rgba(8,8,14,.72),rgba(8,8,14,.55));}
+.dim{color:var(--dim);}.faint{color:var(--faint);}.warm{color:var(--warm);}.gold{color:var(--gold);}.amber{color:var(--amber);}
 .green{color:var(--green);}.cyan{color:var(--cyan);}.red{color:var(--red);}.violet{color:var(--violet);}
 .hd{font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:var(--faint);}
-.tag{font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);border:1px solid var(--stroke2);border-radius:6px;padding:1px 6px;}
-#bar{height:52px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-radius:16px;}
+.hd.bb{color:var(--amber);}
+.tag{font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);border:1px solid var(--stroke2);border-radius:6px;padding:1px 6px;white-space:nowrap;}
+#bar{height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-radius:16px;}
 #dock{display:flex;gap:7px;}
 .dot{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;
 background:rgba(255,255,255,.09);border:1px solid var(--stroke2);box-shadow:inset 0 1px 0 rgba(255,255,255,.2);transition:.2s;}
 .dot.on{background:rgba(240,189,131,.24);border-color:rgba(240,189,131,.6);}
 .dot svg{stroke:var(--dim);} .dot.on svg{stroke:var(--gold);}
 #stage{flex:1;min-height:0;}
-.grid{display:grid;gap:14px;height:100%;min-height:0;}
-.card{padding:14px;min-width:0;min-height:0;overflow:hidden;}
-.rowitem{display:flex;gap:9px;padding:6px 0;border-bottom:1px solid var(--stroke2);font-size:13px;line-height:1.35;}
-.chart{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--stroke2);}
-.thumb{border-radius:14px;overflow:hidden;background-size:cover;background-position:center;position:relative;border:1px solid var(--stroke2);}
-.thumb .cap{position:absolute;left:12px;right:12px;bottom:10px;font-size:13px;text-shadow:0 1px 6px #000;}
-.thumb .scr{position:absolute;inset:0;background:linear-gradient(180deg,transparent 48%,rgba(0,0,0,.66));}
+.grid{display:grid;gap:12px;height:100%;min-height:0;}
+.card{padding:13px;min-width:0;min-height:0;overflow:hidden;}
+.col{display:flex;flex-direction:column;height:100%;min-height:0;}
+.fill{flex:1;min-height:0;overflow:hidden;}
+.rowitem{display:flex;gap:9px;padding:5px 0;border-bottom:1px solid var(--stroke2);font-size:12.5px;line-height:1.35;}
+.rowitem:last-child{border-bottom:none;}
+.rowitem .t{min-width:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.rowitem .m{flex:none;color:var(--faint);font-size:10.5px;}
+.tr{display:flex;justify-content:space-between;gap:8px;padding:3.5px 0;border-bottom:1px solid var(--stroke2);font-size:12px;white-space:nowrap;}
+.tr:last-child{border-bottom:none;}
+.tr .l{color:var(--dim);overflow:hidden;text-overflow:ellipsis;min-width:0;}
+.thumb{border-radius:14px;overflow:hidden;background-size:cover;background-position:center;position:relative;border:1px solid var(--stroke2);height:100%;}
+.thumb .cap{position:absolute;left:12px;right:12px;bottom:10px;font-size:12.5px;text-shadow:0 1px 6px #000;line-height:1.3;}
+.thumb .scr{position:absolute;inset:0;background:linear-gradient(180deg,transparent 45%,rgba(0,0,0,.72));}
+.thumb .tag{position:absolute;right:9px;top:8px;background:rgba(0,0,0,.35);}
+.clamp{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-box-orient:vertical;}
+.ch{position:relative;width:100%;height:100%;min-height:0;}
+.ch svg{position:absolute;inset:0;width:100%;height:100%;}
+.ch .yl{position:absolute;right:4px;font-size:9.5px;color:var(--faint);transform:translateY(-50%);text-shadow:0 1px 3px #000;}
+.ch .xl{position:absolute;bottom:0;font-size:9.5px;color:var(--faint);transform:translateX(-50%);}
+.pill{cursor:pointer;padding:3px 10px;border-radius:8px;border:1px solid var(--stroke2);color:var(--dim);font-size:11px;}
+.pill.on{background:rgba(255,179,71,.22);color:var(--amber);border-color:rgba(255,179,71,.5);}
+.tile{cursor:pointer;transition:border-color .2s;}
+.tile.on{border-color:rgba(255,179,71,.6);}
+.marquee{display:flex;align-items:center;height:100%;overflow:hidden;white-space:nowrap;}
+.marquee .track{display:inline-flex;gap:28px;padding-left:100%;animation:mq var(--mqs,60s) linear infinite;}
+@keyframes mq{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+.art{width:34px;height:34px;border-radius:7px;background-size:cover;background-position:center;flex:none;background-color:rgba(255,255,255,.06);}
+.big{font-weight:200;line-height:1.02;letter-spacing:-.5px;}
+.range{position:relative;height:4px;border-radius:2px;background:rgba(255,255,255,.12);margin:5px 0 2px;}
+.range i{position:absolute;top:-3px;width:10px;height:10px;border-radius:5px;background:var(--amber);transform:translateX(-50%);box-shadow:0 0 6px rgba(255,179,71,.8);}
+.nlist{flex:1;min-height:0;overflow:hidden;position:relative;}
+.nscroll.vs{animation:vs var(--dur,6s) linear 1.6s 1 forwards;}
+@keyframes vs{from{transform:translateY(0)}to{transform:translateY(var(--dy))}}
+.nit{display:flex;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid var(--stroke2);}
+.nit:last-child{border-bottom:none;}
+.nit .th{width:56px;height:40px;border-radius:9px;flex:none;background-size:cover;background-position:center;background-color:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;font-size:10px;letter-spacing:.6px;}
+.nit .tx{min-width:0;flex:1;}
+.hm{overflow:hidden;white-space:nowrap;}
+.hmi{display:inline-block;}
+.hmi.go{animation:hm var(--hdur,8s) linear 1.2s infinite alternate;}
+@keyframes hm{from{transform:translateX(0)}to{transform:translateX(var(--dx))}}
+.fade{animation:fadein .45s ease;}
+@keyframes fadein{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 a{color:var(--warm);}
 </style></head>
 <body>
@@ -42,9 +81,11 @@ a{color:var(--warm);}
 <div id="app">
   <div id="bar" class="glass">
     <div style="display:flex;align-items:center;gap:12px;"><span class="warm" id="spark" style="font-size:17px;">✻</span>
-      <span style="font-size:15px;letter-spacing:.5px;">Simorgh</span><span class="faint">·</span><span class="dim" id="viewname">Home</span></div>
+      <span style="font-size:15px;letter-spacing:.5px;">Simorgh</span><span class="faint">·</span><span class="dim" id="viewname">Home</span>
+      <span class="tag" id="rot" style="display:none;"></span></div>
     <div id="dock"></div>
     <div style="display:flex;align-items:center;gap:14px;font-size:12px;">
+      <span class="dim" id="wx"></span>
       <span class="green" id="net">● online</span><span class="gold" id="clock" style="font-size:15px;">--:--</span>
       <span class="dim" id="date"></span></div>
   </div>
@@ -52,13 +93,16 @@ a{color:var(--warm);}
 </div>
 <script>
 const $=(s,r=document)=>r.querySelector(s);
-const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const token=new URLSearchParams(location.search).get("token")||"";
+const q=p=>p+(token?(p.includes("?")?"&":"?")+"token="+encodeURIComponent(token):"");
 const ICONS={deck:'<path d="M3 9.5 10 3l7 6.5M5 8.2V16h4v-4h2v4h4V8.2"/>',discover:'<circle cx="10" cy="10" r="7.2"/><path d="M10 4.6l1.5 3.9 3.9 1.5-3.9 1.5L10 15.4 8.5 11.5 4.6 10l3.9-1.5z"/>',cameras:'<rect x="2.5" y="5.5" width="10" height="9" rx="1.6"/><path d="M12.5 8.5l5-2.5v8l-5-2.5z"/>',news:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M5.5 7h6M5.5 10h9M5.5 13h9"/>',markets:'<path d="M3 15.5V4.5M3 15.5h13.5"/><path d="M6 12l3-3 2.5 2L16 6"/>',media:'<circle cx="10" cy="10" r="7"/><path d="M8.5 7l4.5 3-4.5 3z"/>',terminal:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l3 2.5L6 13M11 13h3"/>',ambient:'<circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.5"/>'};
 const VIEWS=[["deck","Home"],["discover","Discover"],["cameras","Cameras"],["news","News"],["markets","Markets"],["media","Media"],["terminal","Terminal"],["ambient","Ambient"]];
+const VIEW_KEYS={home:"deck",deck:"deck",discover:"discover",cameras:"cameras",news:"news",markets:"markets",media:"media",terminal:"terminal",ambient:"ambient"};
 
 // ---- wallpapers ----
 let WP=[],wpi=0,bgFlip=false;
-async function loadWP(){try{const r=await fetch("/api/wallpapers");WP=(await r.json()).wallpapers||[];shuffle(WP);}catch(e){}}
+async function loadWP(){try{const r=await fetch(q("/api/wallpapers"));WP=(await r.json()).wallpapers||[];shuffle(WP);}catch(e){}}
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}}
 function wpUrl(n){return "/wallpapers/"+encodeURIComponent(n);}
 function nextWP(){ if(!WP.length) return null; wpi=(wpi+1)%WP.length; return WP[wpi]; }
@@ -66,25 +110,81 @@ function setBG(name){ if(!name) return; const show=bgFlip?$("#bg"):$("#bg2"),hid
   const img=new Image(); img.onload=()=>{show.style.backgroundImage=`url("${wpUrl(name)}")`;show.style.opacity=1;hide.style.opacity=0;bgFlip=!bgFlip;}; img.src=wpUrl(name);}
 function randWP(){ return WP.length? WP[Math.floor(Math.random()*WP.length)] : null; }
 
-// ---- content data (placeholder until Sim's collector fills it) ----
-const JOKES=["Why did the scarecrow win an award? He was outstanding in his field.","What do you call cheese that isn't yours? Nacho cheese.","Why can't a bicycle stand up by itself? It's two-tired.","What did the ocean say to the beach? Nothing — it just waved.","Why did the math book look sad? Too many problems.","What do you call a bear with no teeth? A gummy bear."];
-const SCHED=[["gold","7:00a","Trash & recycling out",""],["cyan","8:15a","Aria — school drop-off","Lincoln Elementary"],["cyan","8:40a","Kian — school drop-off","Harker Middle"],["green","1:00p","Lunch: taco bar 🌮","cafeteria"],["violet","3:20p","Aria — soccer","field 4"],["warm","6:30p","Dinner reservation","Namsan · 2"]];
-const SONGS=[["1","Golden Hour","JVKE","▲"],["2","Espresso","S. Carpenter","–"],["3","Birds of a Feather","Billie Eilish","▲"],["4","Not Like Us","K. Lamar","▼"],["5","Good Luck, Babe!","C. Roan","▲"]];
-const MOVIES=[["1","Dune: Part Three","$92M wknd","▲"],["2","Zootopia 2","$54M","▲"],["3","Avatar 3","$38M","▼"],["4","The Batman II","$21M","–"],["5","Inside Out 3","$14M","▼"]];
-const TICK=[["S&P","5,842","+0.5%","green"],["NASDAQ","20,140","+0.8%","green"],["DOW","43,110","-0.2%","red"],["NVDA","1,204","+2.4%","green"],["AAPL","236","-0.6%","red"],["BTC","98,240","+3.7%","green"],["Oil","$79.4","-1.1%","red"],["Gold","$2,610","+0.3%","green"]];
-const CATS={World:[["gold","Climate finance deal reached at global summit","Reuters"],["gold","Ceasefire holds a third day along disputed border","AP"],["gold","Record monsoon displaces thousands","BBC"]],
-Technology:[["cyan","Open model tops coding benchmarks","Verge"],["cyan","2nm chips announced for 2027","Ars"],["cyan","Robotaxis expand to three cities","TC"]],
-Business:[["green","Futures up before jobs report","CNBC"],["green","Oil slips below $80","WSJ"],["green","Gold steady near record","FT"]],
-Science:[["violet","Asteroid samples hint at early water","Nature"],["violet","Fusion plasma sustained a record 8 min","IEEE"],["violet","Malaria vaccine v2 shows promise","STAT"]]};
-const CAMS=["Front Door","Driveway","Backyard","Garage","Pool","Side Gate"];
-
 // ---- live state ----
-let ACT=[],STATUS={};
+let ACT=[],STATUS={},TV={},DATA=null,DATA_AT=0,CUR="deck",TF="1D",SEL="",PIN="",ROT=0,rotTimer=null,appliedSince=0;
 async function poll(){
-  try{const a=await (await fetch("/api/activity?limit=40")).json();ACT=(a.events||[]).slice().reverse();$("#net").innerHTML=(a.pending_turns||[]).length?'<span class="warm">✻ thinking</span>':'<span class="green">● online</span>';}catch(e){}
-  try{STATUS=await (await fetch("/api/status")).json();}catch(e){}
-  if(CUR==="deck"||CUR==="terminal"||CUR==="news") render();
+  try{const a=await (await fetch(q("/api/activity?limit=40"))).json();ACT=(a.events||[]).slice().reverse();$("#net").innerHTML=(a.pending_turns||[]).length?'<span class="warm">✻ thinking</span>':'<span class="green">● online</span>';}catch(e){$("#net").innerHTML='<span class="red">● offline</span>';}
+  try{STATUS=await (await fetch(q("/api/status"))).json();}catch(e){}
+  try{TV=await (await fetch(q("/api/tv/state"))).json();}catch(e){}
+  try{const st=await (await fetch(q("/api/dash/state"))).json();applyState(st);}catch(e){}
+  if(CUR==="deck") refreshDeck(false); else if(CUR==="terminal"||CUR==="news") render();
 }
+let warmRetries=0;
+async function loadData(){
+  try{DATA=await (await fetch(q("/api/dash/data"))).json();DATA_AT=Date.now();
+    const w=DATA&&DATA.weather;$("#wx").textContent=w&&w.temp!=null?`${w.glyph} ${Math.round(w.temp)}° ${w.text}`:"";
+    if(CUR!=="terminal") render();
+    // The collector is still warming up (Sim just started): ask again soon rather than in a minute.
+    const warm=DATA&&DATA.weather&&(DATA.ambient||[]).length&&(DATA.quote||DATA.off);
+    if(!warm&&warmRetries<12){warmRetries++;setTimeout(loadData,6000);}
+  }catch(e){if(warmRetries<12){warmRetries++;setTimeout(loadData,6000);}}
+}
+function applyState(st){
+  if(!st||!st.since||st.since<=appliedSince) return;
+  appliedSince=st.since;
+  if(st.timeframe) TF=st.timeframe;
+  if(st.symbol!=null) {SEL=st.symbol||""; if(SEL) PIN=SEL;}
+  if(st.rotate_s!=null) setRotate(st.rotate_s|0);
+  const k=VIEW_KEYS[st.view||""];
+  if(k&&k!==CUR) go(k); else render();
+}
+function setRotate(s){ROT=s;if(rotTimer){clearInterval(rotTimer);rotTimer=null;}
+  const t=$("#rot");if(s>0){rotTimer=setInterval(()=>{const i=VIEWS.findIndex(v=>v[0]===CUR);go(VIEWS[(i+1)%VIEWS.length][0]);},s*1000);t.style.display="";t.textContent="rotating "+s+"s";}else t.style.display="none";}
+
+// ---- helpers ----
+const N=(v,d=2)=>v==null||isNaN(v)?"—":Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+const P=(v,d=2)=>v==null||isNaN(v)?"—":(v>=0?"+":"")+Number(v).toFixed(d)+"%";
+const cls=v=>v==null?"dim":v>=0?"green":"red";
+const priceDigits=v=>v==null?2:v>=1000?0:v>=100?1:2;
+function ago(ts){if(!ts)return "";const s=Math.max(0,Date.now()/1000-ts);if(s<90)return "now";if(s<3600)return Math.round(s/60)+"m";if(s<86400)return Math.round(s/3600)+"h";return Math.round(s/86400)+"d";}
+function nowT(){const d=new Date();let h=d.getHours(),m=d.getMinutes();const ap=h>=12?"PM":"AM";h=h%12||12;return h+":"+String(m).padStart(2,"0");}
+function nowD(){return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});}
+function greet(){const h=new Date().getHours();return h<5?"Good night":h<12?"Good morning":h<17?"Good afternoon":"Good evening";}
+function hhmm(iso){if(!iso)return "";const d=new Date(iso);let h=d.getHours(),m=d.getMinutes();const ap=h>=12?"p":"a";h=h%12||12;return h+":"+String(m).padStart(2,"0")+ap;}
+function head(t,tag,bb){return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;gap:8px;"><span class="hd'+(bb?" bb":"")+'">'+t+'</span>'+(tag?'<span class="tag">'+tag+'</span>':'')+'</div>';}
+function empty(msg){return '<div class="faint" style="font-size:11.5px;padding:6px 0;">'+esc(msg)+'</div>';}
+function newsRows(items,n,opts={}){items=(items||[]).slice(0,n);if(!items.length)return empty(opts.empty||"waiting for the feed…");
+  return items.map(it=>'<div class="rowitem"><span class="'+(opts.color||"gold")+'" style="flex:none;">•</span><div class="t">'+esc(it.title)+'</div><span class="m">'+(opts.src?esc(it.source)+' · ':'')+ago(it.at)+'</span></div>').join("");}
+function feed(name){return (DATA&&DATA.news&&DATA.news[name])||[];}
+function merged(...names){const all=[];names.forEach(n=>all.push(...feed(n)));all.sort((a,b)=>(b.at||0)-(a.at||0));return all;}
+function spark(pts,col,w=84,h=26,sw=1.5){pts=(pts||[]).map(p=>Array.isArray(p)?p[1]:p);if(pts.length<2)return '<svg width="'+w+'" height="'+h+'"></svg>';
+  const mx=Math.max(...pts),mn=Math.min(...pts),rg=(mx-mn)||1,stp=w/(pts.length-1);
+  const ln=pts.map((v,i)=>(i*stp).toFixed(1)+","+(h-2-((v-mn)/rg)*(h-4)).toFixed(1)).join(" ");
+  return '<svg width="'+w+'" height="'+h+'" style="flex:none;"><polyline points="'+ln+'" fill="none" stroke="'+col+'" stroke-width="'+sw+'"/></svg>';}
+let gid=0;
+function lineChart(pts,opts={}){ // pts: [[epoch_s, value]]
+  pts=pts||[];if(pts.length<2)return '<div class="ch"><div class="faint" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;">'+esc(opts.empty||"no series yet")+'</div></div>';
+  const vals=pts.map(p=>p[1]);let mx=Math.max(...vals),mn=Math.min(...vals);
+  if(opts.ref!=null&&opts.ref>0){mx=Math.max(mx,opts.ref);mn=Math.min(mn,opts.ref);}
+  const pad=(mx-mn)*0.08||mx*0.005||1;mx+=pad;mn-=pad;const rg=mx-mn;
+  const W=1000,H=1000,bot=opts.xlabels?60:0;
+  const X=i=>(i/(pts.length-1))*W,Y=v=>((1-(v-mn)/rg)*(H-bot));
+  const ln=pts.map((p,i)=>X(i).toFixed(1)+","+Y(p[1]).toFixed(1)).join(" ");
+  const col=opts.col||"#84e6a6",id="g"+(gid++);
+  const grid=[0.25,0.5,0.75].map(f=>'<line x1="0" x2="'+W+'" y1="'+(f*(H-bot)).toFixed(0)+'" y2="'+(f*(H-bot)).toFixed(0)+'" stroke="rgba(255,255,255,.07)" vector-effect="non-scaling-stroke"/>').join("");
+  const ref=opts.ref!=null&&opts.ref>0?'<line x1="0" x2="'+W+'" y1="'+Y(opts.ref).toFixed(1)+'" y2="'+Y(opts.ref).toFixed(1)+'" stroke="rgba(255,179,71,.55)" stroke-dasharray="6 6" vector-effect="non-scaling-stroke"/>':"";
+  const svg='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none"><defs><linearGradient id="'+id+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+col+'" stop-opacity=".32"/><stop offset="1" stop-color="'+col+'" stop-opacity="0"/></linearGradient></defs>'+grid+ref
+    +'<polygon points="0,'+(H-bot)+' '+ln+' '+W+','+(H-bot)+'" fill="url(#'+id+')"/><polyline points="'+ln+'" fill="none" stroke="'+col+'" stroke-width="'+(opts.sw||2)+'" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>';
+  let labels="";
+  if(opts.ylabels!==false){const d=priceDigits(mx);labels+=[0,0.25,0.5,0.75,1].map(f=>{const v=mn+rg*(1-f);return '<span class="yl" style="top:'+(f*(100-(bot/H)*100)).toFixed(1)+'%;">'+N(v,d)+'</span>';}).join("");}
+  if(opts.xlabels){const n=opts.xn||5;for(let k=0;k<n;k++){const i=Math.round(k*(pts.length-1)/(n-1));const pos=k===0?'left:0;transform:none;':k===n-1?'right:0;left:auto;transform:none;':'left:'+(100*i/(pts.length-1)).toFixed(1)+'%;';labels+='<span class="xl" style="'+pos+'">'+tlabel(pts[i][0],opts.tf)+'</span>';}}
+  return '<div class="ch">'+svg+labels+'</div>';}
+function tlabel(t,tf){const d=new Date(t*1000);
+  if(tf==="1D"){let h=d.getHours(),m=d.getMinutes();const ap=h>=12?"p":"a";h=h%12||12;return h+(m?":"+String(m).padStart(2,"0"):"")+ap;}
+  if(tf==="1W")return d.toLocaleDateString(undefined,{weekday:"short"});
+  if(tf==="1M")return d.toLocaleDateString(undefined,{month:"short",day:"numeric"});
+  return d.toLocaleDateString(undefined,{month:"short",year:"2-digit"});}
+function thumb(cap,tag,img){return '<div class="thumb" style="background-image:url(\''+(img||wpUrl(randWP()||"")).replace(/'/g,"%27")+'\');"><div class="scr"></div>'+(tag?'<div class="tag">'+esc(tag)+'</div>':'')+(cap?'<div class="cap">'+cap+'</div>':'')+'</div>';}
 function actLine(e){const t=e.type||"",s=esc(e.summary||"");
   if(t==="percept.text.received")return '<div style="color:#dfe3ea;">❯ '+s+'</div>';
   if(t==="turn.completed")return '<div>● '+s+'</div>';
@@ -95,168 +195,229 @@ function actLine(e){const t=e.type||"",s=esc(e.summary||"");
   return '<div class="dim">'+s+'</div>';}
 function termHTML(big){
   const lines=ACT.length?ACT.map(actLine).join(""):'<div class="dim">Sim is idle. Say “Sim”, or pick a view.</div>';
-  const fs=big?'15px':'13px';
-  return '<div style="font-size:'+fs+';line-height:1.55;height:100%;display:flex;flex-direction:column;overflow:hidden;">'
+  return '<div style="font-size:'+(big?'15px':'12.5px')+';line-height:1.55;height:100%;display:flex;flex-direction:column;overflow:hidden;">'
    +'<div style="flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;">'+lines+'</div>'
-   +'<div style="border-top:1px solid var(--stroke2);margin-top:9px;padding-top:9px;">'
-   +'<span style="color:#dfe3ea;">❯</span> <span class="faint">'+( (STATUS.model?esc(STATUS.model)+' · ':'')+'ask, or say a view name…')+'</span></div></div>';
-}
+   +'<div style="border-top:1px solid var(--stroke2);margin-top:8px;padding-top:8px;"><span style="color:#dfe3ea;">❯</span> <span class="faint">'+((STATUS.model?esc(STATUS.model)+' · ':'')+'ask, or say a view name…')+'</span></div></div>';}
+function mk(){return DATA&&DATA.markets||{stocks:[],indices:[],rates:[],fx:[],commodities:[],crypto:[],majors:[]};}
+function stock(sym){return mk().stocks.find(s=>s.symbol===sym);}
+function mktStatus(){const s=mk().status||"";return {REG_MKT:["market open","green"],PRE_MKT:["pre-market","gold"],POST_MKT:["after hours","gold"],CLOSED:["closed","dim"]}[s]||[s.toLowerCase().replace("_"," ")||"—","dim"];}
+function quoteRow(r,sparkOn){const d=priceDigits(r.last);return '<div class="tr"><span class="l">'+esc(r.label||r.name)+'</span>'+(sparkOn&&r.spark?spark(r.spark,r.change_pct>=0?"#84e6a6":"#ff9a94",44,14,1.2):'')+'<span>'+N(r.last,d)+'</span><span class="'+cls(r.change_pct)+'" style="width:58px;text-align:right;">'+P(r.change_pct,2)+'</span></div>';}
+function tickerHTML(){const m=mk();const rows=[...m.indices,...m.crypto,...m.commodities,...m.fx,...m.rates];
+  if(!rows.length) return '<div class="faint" style="font-size:11.5px;padding:0 6px;">markets: waiting for the collector…</div>';
+  const items=rows.map(r=>'<span>'+esc(r.label)+' <span style="color:var(--fg);">'+N(r.last,priceDigits(r.last))+'</span> <span class="'+cls(r.change_pct)+'">'+P(r.change_pct,2)+'</span></span>').join("");
+  return '<div class="marquee" style="font-size:11.5px;--mqs:'+(rows.length*3.2)+'s;"><div class="track">'+items+'</div></div>';}
+function weatherNow(){const w=DATA&&DATA.weather;if(!w||w.temp==null)return '<div class="hd">Weather</div>'+empty("waiting for Open-Meteo…");
+  const d0=(w.daily||[])[0]||{};
+  return '<div class="hd">'+esc(w.place)+'</div><div style="display:flex;align-items:center;gap:10px;"><div class="big" style="font-size:38px;">'+Math.round(w.temp)+'°</div><div style="font-size:26px;">'+w.glyph+'</div><div style="font-size:11px;line-height:1.35;"><div>'+esc(w.text)+'</div><div class="faint">feels '+Math.round(w.feels)+'° · H '+Math.round(d0.high)+' L '+Math.round(d0.low)+'</div></div></div>'
+   +'<div class="faint" style="font-size:10.5px;display:flex;gap:10px;flex-wrap:wrap;margin-top:2px;"><span>wind '+Math.round(w.wind)+' mph</span><span>hum '+w.humidity+'%</span><span>UV '+(w.uv!=null?Math.round(w.uv):"—")+'</span>'+(w.aqi!=null?'<span class="'+(w.aqi<=50?"green":w.aqi<=100?"gold":"red")+'">AQI '+w.aqi+'</span>':'')+'<span>☀ '+hhmm(w.sunrise)+' · ☾ '+hhmm(w.sunset)+'</span></div>';}
+function forecastStrip(n){const w=DATA&&DATA.weather;if(!w)return "";
+  return '<div style="display:flex;gap:6px;margin-top:6px;">'+(w.daily||[]).slice(1,1+n).map(d=>'<div style="flex:1;text-align:center;font-size:10.5px;line-height:1.3;background:rgba(255,255,255,.05);border-radius:9px;padding:4px 2px;"><div class="faint">'+new Date(d.date+"T12:00").toLocaleDateString(undefined,{weekday:"short"})+'</div><div style="font-size:14px;">'+d.glyph+'</div><div>'+Math.round(d.high)+'° <span class="faint">'+Math.round(d.low)+'°</span></div>'+(d.rain?'<div class="cyan">'+d.rain+'%</div>':'')+'</div>').join("")+'</div>';}
+function hourlyStrip(n){const w=DATA&&DATA.weather;if(!w)return "";
+  return '<div style="display:flex;gap:8px;">'+(w.hourly||[]).filter((h,i)=>i%2===0).slice(0,n).map(h=>'<div style="flex:1;text-align:center;font-size:11px;line-height:1.35;"><div class="faint">'+hhmm(h.time)+'</div><div style="font-size:18px;">'+h.glyph+'</div><div>'+Math.round(h.temp)+'°</div></div>').join("")+'</div>';}
+function nowPlaying(){const m=TV.mode||"none";if(m==="none"||!m)return {title:"Nothing on the TV",sub:"say “cast something” — a video, YouTube, the cameras",tag:"idle"};
+  if(m==="grid")return {title:"Cameras",sub:(TV.titles||[]).join(" · "),tag:"live grid"};
+  return {title:TV.title||TV.url||"",sub:m==="frame"?"framed inside Sim's page":"full screen on the TV",tag:m};}
+function camList(){return (DATA&&DATA.cameras)||[];}
+function camTile(c,tag){return c?thumb(esc(c.name)+' <span class="faint" style="font-size:10px;">· '+ago(c.at)+'</span>',tag||(c.kind==="ring"?"ring":"still"),c.url):thumb("no camera still yet <span class='faint' style='font-size:10px;'>· cameras snapshot &lt;name&gt;</span>","");}
+function kv(k,v,c){return '<div class="tr"><span class="l">'+k+'</span><span class="'+(c||"")+'">'+v+'</span></div>';}
 
-// ---- builders ----
-function head(t,tag){return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span class="hd">'+t+'</span>'+(tag?'<span class="tag">'+tag+'</span>':'')+'</div>';}
-function rows(items){return items.map(([c,t,s])=>'<div class="rowitem"><span class="'+c+'">•</span><div>'+esc(t)+(s?' <span class="faint" style="font-size:11px;">· '+esc(s)+'</span>':'')+'</div></div>').join("");}
-function chartrows(items){return items.map(([r,t,s,v])=>'<div class="chart"><span class="gold" style="width:14px;text-align:center;">'+r+'</span><div style="flex:1;min-width:0;"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(t)+'</div><div class="faint" style="font-size:10.5px;">'+esc(s)+'</div></div><span class="dim">'+v+'</span></div>').join("");}
-function schedrows(){return SCHED.map(([c,tm,t,s])=>'<div class="rowitem"><span class="'+c+'" style="flex:none;">'+tm+'</span><div>'+esc(t)+(s?' <span class="faint" style="font-size:11px;">· '+esc(s)+'</span>':'')+'</div></div>').join("");}
-function thumb(cap,tag,h){return '<div class="thumb" style="height:'+(h||'100%')+';background-image:url(\''+wpUrl(randWP()||"")+'\');"><div class="scr"></div>'+(tag?'<div class="tag" style="position:absolute;right:9px;top:8px;">'+tag+'</div>':'')+'<div class="cap">'+cap+'</div></div>';}
-
-function miniWatch(){return STOCKS.slice(0,5).map(([sym,name,desc,base])=>{const pp=series(sym,"1M"),ch=pct(pp),up=ch>=0;
-  return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--stroke2);font-size:11.5px;">'
-   +'<span style="width:44px;">'+sym+'</span>'+spark(pp,up?"#84e6a6":"#ff9a94",56,18)
-   +'<span style="flex:1;text-align:right;">$'+base.toLocaleString()+'</span><span class="'+(up?"green":"red")+'" style="width:52px;text-align:right;">'+(up?"+":"")+ch.toFixed(1)+'%</span></div>';}).join("");}
-function viewDeck(){
-  const A=('"clock clock weath weath term term term term cam cam watch watch"'
-    +'"sched sched news news term term term term cam cam watch watch"'
-    +'"sched sched news news world world sci sci photo photo charts charts"'
-    +'"joke joke ent ent world world sci sci photo photo charts charts"'
-    +'"media media media reel reel events events events tick tick tick tick"');
-  const C=(a,inner,pad)=>'<div class="glass" style="grid-area:'+a+';padding:'+(pad==null?11:pad)+'px;min-width:0;min-height:0;overflow:hidden;">'+inner+'</div>';
-  const clock='<div class="hd">Good evening</div><div style="font-size:40px;font-weight:200;line-height:1.05;">'+nowT()+'</div><div class="dim" style="font-size:11px;">'+nowD()+'</div>';
-  const weath='<div class="hd">San Jose</div><div style="font-size:30px;font-weight:300;">72°</div><div class="faint" style="font-size:10.5px;">Clear · feels 70°</div>';
-  const term='<div style="display:flex;flex-direction:column;height:100%;">'+head("Sim","live")+'<div style="flex:1;min-height:0;">'+termHTML()+'</div></div>';
-  const cam='<div style="display:flex;flex-direction:column;height:100%;">'+head("Front Door","live")+'<div style="flex:1;min-height:0;">'+thumb("Front Door","")+'</div></div>';
-  const watch='<div style="display:flex;flex-direction:column;height:100%;">'+head("Markets","watchlist")+miniWatch()+'</div>';
-  const sched='<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">'+head("Today")+schedrows()+'</div>';
-  const smallrows=items=>items.map(([c,t,src])=>'<div class="rowitem" style="padding:4px 0;font-size:11.5px;"><span class="'+c+'">•</span><div style="min-width:0;">'+esc(t)+'</div></div>').join("");
-  const news=head("Technology")+smallrows(CATS.Technology);
-  const world=head("World")+smallrows(CATS.World);
-  const sci=head("Science")+smallrows(CATS.Science);
-  const ent=head("Entertainment")+smallrows([["violet","Dune 3 teaser drops Friday"],["violet","Grammy nominations revealed"]]);
-  const photo='<div style="display:flex;flex-direction:column;height:100%;">'+head("Photo of the day")+'<div style="flex:1;min-height:0;">'+thumb("from your gallery","daily")+'</div></div>';
-  const charts=head("Charts","top 3")+'<div class="faint" style="font-size:9.5px;margin-bottom:2px;">MUSIC</div>'
-    +SONGS.slice(0,3).map(x=>'<div style="font-size:11px;padding:2px 0;"><span class="gold">'+x[0]+'</span> '+esc(x[1])+'</div>').join("")
-    +'<div class="faint" style="font-size:9.5px;margin:4px 0 2px;">BOX OFFICE</div>'
-    +MOVIES.slice(0,3).map(x=>'<div style="font-size:11px;padding:2px 0;"><span class="gold">'+x[0]+'</span> '+esc(x[1])+'</div>').join("");
-  const joke=head("Joke","for Kian")+'<div style="font-size:12.5px;line-height:1.4;">'+esc(JOKES[0])+'</div>';
-  const media='<div style="display:flex;gap:9px;height:100%;align-items:center;">'+'<div style="width:88px;height:100%;">'+thumb("","LIVE").replace('class="cap"','class="cap" style="display:none"')+'</div><div style="min-width:0;"><div class="hd">Now playing</div><div style="font-size:12.5px;margin-top:3px;">Planet Earth III</div><div class="faint" style="font-size:10.5px;">casting to Family Room TV</div></div></div>';
-  const reel='<div style="display:flex;flex-direction:column;height:100%;">'+head("Trending")+'<div style="flex:1;min-height:0;">'+thumb("▶ 2.4M","reel")+'</div></div>';
-  const events=head("Cameras","events")+smallrows([["red","Front Door · person · 9:38p"],["gold","Side Gate · motion · 9:31p"],["green","Backyard · all clear · 9:20p"]]);
-  const tick='<div style="display:flex;align-items:center;gap:18px;height:100%;font-size:11.5px;overflow:hidden;"><span class="hd" style="flex:none;">Markets</span>'+TICK.map(([sy,pr,c,col])=>'<span style="flex:none;">'+sy+' <span style="color:var(--fg);">'+pr+'</span> <span class="'+col+'">'+c+'</span></span>').join("")+'</div>';
-  return '<div class="grid" style="grid-template-columns:repeat(12,1fr);grid-template-rows:1.05fr 1fr 1fr 1fr .8fr;grid-template-areas:'+A+';gap:12px;">'
-    +C("clock",clock)+C("weath",weath)+C("term",term)+C("cam",cam)+C("watch",watch)+C("sched",sched)
-    +C("news",news)+C("world",world)+C("sci",sci)+C("ent",ent)+C("photo",photo)+C("charts",charts)
-    +C("joke",joke)+C("media",media)+C("reel",reel)+C("events",events)
-    +'<div class="glass" style="grid-area:tick;padding:0 14px;min-width:0;overflow:hidden;">'+tick+'</div></div>';
+// ---- views ----
+// ---- Home: Sim's terminal on the left third; two rotating news boxes, a quarter-page player,
+// the short watchlist and the quote+joke on the right. The skeleton is built once and its boxes
+// are refilled in place, so the video keeps playing and the scroll animations run their course.
+const DECK_A=[["Bloomberg",["bloomberg_markets","bloomberg_business"],"BBG"],["Technology",["bloomberg_technology","ars"],"TECH"],["World",["bbc_world","bloomberg_politics"],"WORLD"]];
+const DECK_B=[["Science",["sciencedaily","nasa"],"SCI"],["Entertainment",["variety","deadline"],"ENT"],["On this day",null,"OTD"],["Hacker News",null,"HN"],["Most read",null,"WIKI"]];
+const DECK_ROT_S=10,DECK_ITEMS=9;
+const DECK_WATCH=["NVDA","AAPL","GOOGL","AMZN"],DECK_IDX=[".SPX",".IXIC",".DJI"];
+let DK={a:-1,b:-1,m:-1,np:"",qj:""};
+const SRC_BADGE={"Bloomberg":["BBG","#ffb347"],"BBC":["BBC","#ff9a94"],"Ars Technica":["ARS","#9fe3ff"],"ScienceDaily":["SD","#c9a9ff"],"NASA":["NASA","#c9a9ff"],"Variety":["VAR","#c9a9ff"],"Deadline":["DL","#c9a9ff"],"Hacker News":["HN","#f0bd83"],"Wikipedia":["W","#b3b9c6"]};
+function badge(label,col){return '<div class="th" style="color:'+(col||"var(--dim)")+';border:1px solid var(--stroke2);">'+esc(label)+'</div>';}
+function newsItem(it){const b=SRC_BADGE[it.source]||[String(it.source||"").slice(0,3).toUpperCase(),"var(--dim)"];
+  const th=it.thumb?'<div class="th" style="background-image:url(\''+esc(it.thumb)+'\');"></div>':badge(it.badge||b[0],it.badgeCol||b[1]);
+  return '<div class="nit">'+th+'<div class="tx"><div class="hm" style="font-size:13px;"><span class="hmi">'+esc(it.title)+'</span></div><div class="faint" style="font-size:10.5px;">'+esc(it.meta!=null?it.meta:(it.source||"")+(it.at?' · '+ago(it.at):''))+'</div></div></div>';}
+function newsBoxHTML(title,tag,items,accent){return '<div class="col fade" style="flex:1;min-width:0;">'+head(title,tag,accent)+'<div class="nlist"><div class="nscroll">'+(items.length?items.map(newsItem).join(""):empty("waiting for the feed…"))+'</div></div></div>';}
+function deckItemsB(idx){const [name,feeds]=DECK_B[idx];const wk=DATA&&DATA.wiki;
+  if(feeds) return merged(...feeds).slice(0,DECK_ITEMS);
+  if(name==="On this day") return (wk?wk.onthisday:[]).slice(0,DECK_ITEMS).map(e=>({title:e.text,meta:"Wikipedia · "+e.year,badge:String(e.year),badgeCol:"var(--gold)"}));
+  if(name==="Hacker News") return ((DATA&&DATA.hn)||[]).slice(0,DECK_ITEMS).map(h=>({title:h.title,meta:"▲ "+(h.score||0)+" · "+(h.comments||0)+" comments · "+ago(h.at),source:"Hacker News"}));
+  return (wk?wk.mostread:[]).slice(0,DECK_ITEMS).map(a=>({title:a.title,thumb:a.thumb,meta:"Wikipedia · "+(a.views?Math.round(a.views/1000)+"k reads today":""),source:"Wikipedia"}));}
+function fitBox(el){ // slow vertical scroll when the list overflows; a marquee for a title that does not fit
+  const list=el.querySelector(".nlist"),inner=el.querySelector(".nscroll");
+  if(list&&inner){const ov=inner.scrollHeight-list.clientHeight;if(ov>6){inner.style.setProperty("--dy",(-ov)+"px");inner.style.setProperty("--dur",Math.max(4,Math.min(7.5,ov/25))+"s");inner.classList.add("vs");}}
+  el.querySelectorAll(".hm").forEach(h=>{const i=h.querySelector(".hmi");if(!i)return;const ov=i.scrollWidth-h.clientWidth;if(ov>4){i.style.setProperty("--dx",(-ov)+"px");i.style.setProperty("--hdur",Math.max(3,ov/45)+"s");i.classList.add("go");}});}
+function ytId(url){const m=/(?:v=|youtu\.be\/|\/embed\/|\/live\/|\/shorts\/)([A-Za-z0-9_-]{11})/.exec(url||"");return m?m[1]:"";}
+function ambientPick(){const list=(DATA&&DATA.ambient)||[];if(!list.length)return null;return list[Math.floor(Date.now()/(30*60*1000))%list.length];}
+function ytFrame(id,mute){return '<iframe src="https://www.youtube.com/embed/'+id+'?autoplay=1&mute='+(mute?1:0)+'&controls=0&rel=0&iv_load_policy=3&modestbranding=1&playsinline=1&loop=1&playlist='+id+'&vq=hd2160" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>';}
+function npOverlay(title,sub,tag){return '<div style="position:absolute;left:0;right:0;bottom:0;padding:26px 16px 12px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.72));pointer-events:none;"><div style="font-size:14px;text-shadow:0 1px 6px #000;" class="clamp" style="-webkit-line-clamp:1;">'+title+'</div><div class="dim" style="font-size:11px;text-shadow:0 1px 6px #000;">'+sub+'</div></div>'+(tag?'<div class="tag" style="position:absolute;right:10px;top:9px;background:rgba(0,0,0,.4);">'+esc(tag)+'</div>':'');}
+function npKey(){const m=TV.mode||"none";if(m!=="none")return m+"|"+(TV.url||"")+"|"+(TV.urls||[]).join(",");const v=ambientPick();return "ambient|"+(v?v.id:"");}
+function npHTML(){const m=TV.mode||"none";
+  if(m==="frame"||m==="full"){const id=ytId(TV.url||"");const title=esc(TV.title||TV.url||"");const sub=m==="frame"?"playing here, asked of Sim":"playing on the TV itself";
+    if(id)return ytFrame(id,false)+npOverlay(title,sub,"now playing");
+    if(/\.(mp4|webm|m3u8)(\?|$)/i.test(TV.url||""))return '<video src="'+esc(TV.url)+'" autoplay muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"></video>'+npOverlay(title,sub,"now playing");
+    return thumb('<b>'+title+'</b><br><span class="faint">'+sub+'</span>',"now playing");}
+  if(m==="grid"){const cams=camList();return '<div style="position:absolute;inset:0;display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;">'+(cams.length?cams.slice(0,4).map(c=>camTile(c,"live")).join(""):thumb("cameras on the TV","live"))+'</div>';}
+  const v=ambientPick();
+  if(v)return ytFrame(v.id,true)+npOverlay(esc(v.title),esc(v.channel)+' · '+esc(v.length)+' · relaxing, muted — say “Sim, play…” for something else',"ambient");
+  return thumb('<b>Nothing is playing</b><br><span class="faint">say “cast something” — a video, YouTube, the cameras</span>',"idle");}
+function mktBoxHTML(idx){const m=mk();
+  if(idx===0){const rows=DECK_WATCH.map(s=>stock(s)).filter(Boolean).map(s=>({label:s.symbol,name:s.short||s.name,last:s.last,week:(s.history||{})["1W"],pct:s.change_pct}))
+      .concat(m.indices.filter(r=>DECK_IDX.includes(r.symbol)).map(r=>({label:r.label,name:"",last:r.last,week:r.week,pct:r.change_pct})));
+    if(!rows.length)return '<div class="col fade" style="flex:1;min-width:0;">'+head("Markets","5-day trend",true)+empty("waiting for quotes…")+'</div>';
+    return '<div class="col fade" style="flex:1;min-width:0;">'+head("Markets · 5-day trend",mktStatus()[0],true)+'<div class="nlist"><div class="nscroll">'+rows.map(r=>{const w=r.week||[];const ch=w.length>1?(w[w.length-1][1]-w[0][1])/w[0][1]*100:null;const up=(ch==null?r.pct:ch)>=0;
+      return '<div class="tr" style="align-items:center;gap:10px;padding:5px 0;"><span class="amber" style="width:64px;">'+esc(r.label)+'</span>'+spark(w,up?"#84e6a6":"#ff9a94",120,24,1.6)+'<span style="flex:1;text-align:right;">'+N(r.last,priceDigits(r.last))+'</span><span class="'+cls(ch==null?r.pct:ch)+'" style="width:64px;text-align:right;">'+P(ch==null?r.pct:ch,1)+'<span class="faint" style="font-size:9px;"> 5d</span></span></div>';}).join("")+'</div></div></div>';}
+  return newsBoxHTML("Market & AI hot topics","Bloomberg",merged("bloomberg_markets","bloomberg_technology").slice(0,DECK_ITEMS),true);}
+function qjHTML(){const qt=DATA&&DATA.quote,jokes=(DATA&&DATA.jokes)||[];const jk=jokes.length?jokes[Math.floor(Date.now()/600000)%jokes.length]:"";
+  return '<div class="col fade" style="flex:1;min-width:0;">'+head("Quote of the day")+(qt&&qt.text?'<div style="font-size:13px;line-height:1.45;">“'+esc(qt.text)+'”</div><div class="faint" style="font-size:10.5px;margin-top:3px;">— '+esc(qt.author)+'</div>':empty("waiting…"))
+    +'<div style="border-top:1px solid var(--stroke2);margin:10px 0 8px;"></div>'+head("Joke","for Kian")+(jk?'<div style="font-size:13px;line-height:1.45;">'+esc(jk)+'</div>':empty("waiting for a good one…"))+'</div>';}
+function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-template-columns:1fr 2fr;gap:12px;height:100%;min-height:0;">'
+  +'<div class="glass card col" id="dk-term">'+head("Sim","live")+'<div class="fill" id="dk-term-body"></div></div>'
+  +'<div style="display:grid;grid-template-columns:1.7fr 3.3fr;grid-template-rows:3.2fr 1.8fr;gap:12px;min-height:0;min-width:0;">'
+  +'<div class="glass card" id="dk-newsA" style="display:flex;"></div>'
+  +'<div class="glass" id="dk-np" style="padding:0;overflow:hidden;position:relative;min-height:0;"></div>'
+  +'<div class="glass card" id="dk-newsB" style="display:flex;"></div>'
+  +'<div style="display:flex;gap:12px;min-height:0;min-width:0;"><div class="glass card" id="dk-mkt" style="flex:1.55;display:flex;min-width:0;"></div><div class="glass card" id="dk-qj" style="flex:1;display:flex;min-width:0;"></div></div>'
+  +'</div></div>';}
+function fillBox(id,html){const el=$(id);if(!el)return;el.innerHTML=html;setTimeout(()=>fitBox(el),40);}   // a timeout, not rAF: rAF never fires in a hidden tab
+function refreshDeck(force){
+  if(!$("#deckroot")){$("#stage").innerHTML=deckSkeleton();force=true;DK={a:-1,b:-1,m:-1,np:"",qj:""};}
+  const t=Math.floor(Date.now()/1000);
+  const a=Math.floor(t/DECK_ROT_S)%DECK_A.length,b=Math.floor((t+5)/DECK_ROT_S)%DECK_B.length,m=Math.floor(t/(DECK_ROT_S+2))%2;
+  if(force||a!==DK.a){DK.a=a;const [name,feeds,tag]=DECK_A[a];fillBox("#dk-newsA",newsBoxHTML(name,DATA?tag:"waiting…",merged(...feeds).slice(0,DECK_ITEMS),name==="Bloomberg"));}
+  if(force||b!==DK.b){DK.b=b;const [name,,tag]=DECK_B[b];fillBox("#dk-newsB",newsBoxHTML(name,tag,deckItemsB(b)));}
+  if(force||m!==DK.m){DK.m=m;fillBox("#dk-mkt",mktBoxHTML(m));}
+  const npk=npKey();if(npk!==DK.np){DK.np=npk;$("#dk-np").innerHTML=npHTML();}
+  const qjk=String(Math.floor(Date.now()/600000))+(DATA?"d":"");if(force||qjk!==DK.qj){DK.qj=qjk;fillBox("#dk-qj",qjHTML());}
+  const body=$("#dk-term-body");if(body)body.innerHTML=termHTML(true);
 }
+function viewDeck(){return deckSkeleton();}
 function viewDiscover(){
-  const A='"world world holly holly photo photo" "world world holly holly photo photo" "sci sci local local photo photo" "movie movie music music jokes jokes" "movie movie music music short short"';
+  const A="'world world holly holly photo photo' 'world world holly holly photo photo' 'sci sci wiki wiki photo photo' 'sci sci wiki wiki otd otd' 'movie movie music music jokes jokes' 'movie movie music music most most'";
   const C=(a,inner)=>'<div class="glass card" style="grid-area:'+a+';">'+inner+'</div>';
-  const world=head("World","6 stories")+rows(CATS.World.map(x=>[x[0],x[1],x[2]]));
-  const holly=head("Hollywood & Entertainment","trending")+rows([["violet","Dune 3 wraps reshoots; teaser Friday","Variety"],["violet","A24 lands festival darling in $20M deal","Deadline"],["violet","Two streamers announce a merger","THR"],["violet","Grammy nominations revealed","Billboard"]]);
-  const photo='<div style="display:flex;flex-direction:column;height:100%;">'+head("Photo of the day","from your gallery")+'<div style="flex:1;min-height:0;">'+thumb('a favourite from images/wallpapers','')+'</div></div>';
-  const sci=head("Science")+rows(CATS.Science.map(x=>[x[0],x[1],x[2]]));
-  const local=head("San Jose")+rows([["green","Downtown street festival Sat, 11–6","Mercury News"],["green","101 north lanes reopen","511.org"]]);
-  const movie='<div style="display:flex;flex-direction:column;height:100%;">'+head("Top movies","sample")+chartrows(MOVIES.concat([["6","Wednesday S2","Netflix","▲"]]))+'</div>';
-  const music='<div style="display:flex;flex-direction:column;height:100%;">'+head("Top music","sample")+chartrows(SONGS.concat([["6","Too Sweet — Hozier","alt","▼"]]))+'</div>';
-  const jokes=head("Jokes","family")+JOKES.slice(1,4).map(j=>'<div style="font-size:12.5px;line-height:1.4;padding:4px 0;border-bottom:1px solid var(--stroke2);">'+esc(j)+'</div>').join("");
-  const short=head("Trending short")+'<div style="display:flex;gap:11px;align-items:center;height:calc(100% - 22px);">'+thumb('','',null).replace('class="cap"','class="cap" style="display:none"').replace('height:100%','height:100%;width:72px;flex:none;')+'<div><div style="font-size:12.5px;">Golden hour timelapse</div><div class="faint" style="font-size:10.5px;margin-top:3px;">YouTube Shorts · 2.4M · 18h</div></div></div>';
-  return '<div class="grid" style="grid-template-columns:repeat(6,1fr);grid-template-rows:repeat(5,1fr);grid-template-areas:'+A+';">'+C('world',world)+C('holly',holly)+C('photo',photo)+C('sci',sci)+C('local',local)+C('movie',movie)+C('music',music)+C('jokes',jokes)+C('short',short)+'</div>';
+  const world=head("World","BBC · Bloomberg")+newsRows(merged("bbc_world","bloomberg_politics"),9,{src:true});
+  const holly=head("Hollywood & entertainment","Variety · Deadline")+newsRows(merged("variety","deadline"),9,{color:"violet",src:true});
+  const ap=DATA&&DATA.apod,wk=DATA&&DATA.wiki;
+  const photo='<div class="col">'+head("Astronomy picture of the day","NASA")+'<div class="fill">'+(ap&&ap.media_type==="image"?thumb('<b>'+esc(ap.title)+'</b><br><span class="clamp faint" style="-webkit-line-clamp:3;font-size:11px;">'+esc(ap.explanation)+'</span>',ap.copyright?esc(ap.copyright):"",ap.url):(wk&&wk.potd.thumb?thumb(esc(wk.potd.description),"Wikimedia",wk.potd.thumb):thumb("waiting for the picture…","")))+'</div></div>';
+  const sci=head("Science","ScienceDaily · NASA")+newsRows(merged("sciencedaily","nasa"),6,{color:"violet"});
+  const wiki='<div class="col">'+head("Featured article","Wikipedia")+(wk?'<div style="display:flex;gap:10px;height:100%;min-height:0;">'+(wk.featured.thumb?'<div style="width:38%;flex:none;">'+thumb("","",wk.featured.thumb)+'</div>':'')+'<div style="min-width:0;"><div style="font-size:13.5px;margin-bottom:4px;">'+esc(wk.featured.title)+'</div><div class="dim clamp" style="font-size:11.5px;line-height:1.4;-webkit-line-clamp:9;">'+esc(wk.featured.extract)+'</div></div></div>':empty("waiting…"))+'</div>';
+  const otd=head("On this day")+(wk?wk.onthisday.slice(0,4).map(e=>'<div class="rowitem"><span class="gold" style="flex:none;width:36px;">'+e.year+'</span><div class="t">'+esc(e.text)+'</div></div>').join(""):empty("waiting…"));
+  const movies=(DATA&&DATA.movies)||[],bo=(DATA&&DATA.boxoffice)||[];
+  const movie='<div class="col">'+head("Box office","The Numbers · weekend")+(bo.length?bo.slice(0,8).map(b=>'<div class="tr"><span class="gold" style="width:16px;">'+b.rank+'</span><span class="l" style="flex:1;">'+esc(b.title)+'</span><span>'+esc(b.weekend)+'</span><span class="'+(String(b.change).startsWith("-")?"red":"green")+'" style="width:44px;text-align:right;">'+esc(b.change)+'</span></div>').join(""):movies.slice(0,8).map(m=>'<div class="tr"><span class="gold" style="width:16px;">'+m.rank+'</span><span class="l" style="flex:1;">'+esc(m.name)+'</span><span class="faint">'+esc(m.genre)+'</span></div>').join("")||empty("waiting…"))+'</div>';
+  const songs=(DATA&&DATA.songs)||[];
+  const music='<div class="col">'+head("Top songs","Apple Music")+(songs.length?songs.slice(0,8).map(s=>'<div class="rowitem" style="align-items:center;padding:3px 0;"><span class="gold" style="width:14px;">'+s.rank+'</span><div class="art" style="background-image:url(\''+esc(s.art)+'\');width:26px;height:26px;"></div><div style="min-width:0;"><div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.name)+'</div><div class="faint" style="font-size:10px;">'+esc(s.artist)+'</div></div></div>').join(""):empty("waiting…"))+'</div>';
+  const jokes=(DATA&&DATA.jokes)||[];
+  const jk=head("Jokes","family")+(jokes.length?jokes.slice(0,3).map(j=>'<div style="font-size:12px;line-height:1.4;padding:4px 0;border-bottom:1px solid var(--stroke2);">'+esc(j)+'</div>').join(""):empty("waiting…"));
+  const most=head("Most read","Wikipedia")+(wk?wk.mostread.slice(0,4).map(a=>'<div class="rowitem"><span class="violet" style="flex:none;">•</span><div class="t">'+esc(a.title)+'</div><span class="m">'+(a.views?Math.round(a.views/1000)+'k':'')+'</span></div>').join(""):empty("waiting…"));
+  return '<div class="grid" style="grid-template-columns:repeat(6,1fr);grid-template-rows:repeat(6,1fr);grid-template-areas:'+A+';">'+C('world',world)+C('holly',holly)+C('photo',photo)+C('sci',sci)+C('wiki',wiki)+C('otd',otd)+C('movie',movie)+C('music',music)+C('jokes',jk)+C('most',most)+'</div>';
 }
 function viewCameras(){
-  const tiles=CAMS.map(n=>'<div class="glass" style="padding:0;overflow:hidden;">'+thumb(n,'live')+'</div>').join("");
-  const feed='<div class="glass" style="flex:1;padding:14px;overflow:hidden;">'+head("Events","live")+rows([["red","Front Door · person","9:38p"],["gold","Side Gate · motion","9:31p"],["green","Backyard · all clear","9:20p"],["gold","Driveway · vehicle","8:52p"]].map(x=>[x[0],x[1],x[2]]))+'</div>';
-  return '<div style="display:flex;gap:14px;height:100%;"><div class="grid" style="flex:2;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);">'+tiles+'</div>'+feed+'</div>';
+  const cams=camList();const n=Math.max(cams.length,1);const cols=n<=1?1:n<=4?2:3;
+  const tiles=(cams.length?cams:[null]).slice(0,9).map(c=>'<div class="glass" style="padding:0;overflow:hidden;">'+camTile(c,"still")+'</div>').join("");
+  const events=(DATA&&DATA.events)||[];
+  const feedCol='<div class="glass card col" style="flex:1;">'+head("Events",events.length?"latest":"")+'<div class="fill">'+(events.length?events.slice(0,14).map(e=>'<div class="rowitem"><span class="'+(e.kind==="person"||e.kind==="ding"?"red":"gold")+'" style="flex:none;">•</span><div class="t">'+esc(e.camera)+' · '+esc(e.kind)+'</div><span class="m">'+ago(e.at)+'</span></div>').join(""):empty(cams.length?"no camera events yet — Ring events and the NVR's pushes land here":"no cameras have sent a still yet. `cameras snapshot <name>` (Reolink) or `ring setup` (Ring) puts them here."))+'</div>'
+    +'<div style="border-top:1px solid var(--stroke2);padding-top:8px;margin-top:6px;">'+weatherNow()+'</div></div>';
+  return '<div style="display:flex;gap:12px;height:100%;"><div class="grid" style="flex:2.6;grid-template-columns:repeat('+cols+',1fr);grid-auto-rows:1fr;">'+tiles+'</div>'+feedCol+'</div>';
 }
 function viewNews(){
-  const cards=Object.entries(CATS).map(([k,v])=>'<div class="glass card">'+head(k)+rows(v.map(x=>[x[0],x[1],x[2]]))+'</div>').join("");
-  return '<div style="display:flex;gap:14px;height:100%;"><div class="glass card" style="flex:1;display:flex;">'+termHTML()+'</div><div class="grid" style="flex:2.2;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;">'+cards+'</div></div>';
+  const cards=[["Bloomberg · Markets",["bloomberg_markets"],"amber"],["Bloomberg · Technology",["bloomberg_technology"],"amber"],["Bloomberg · Business",["bloomberg_business"],"amber"],
+    ["Bloomberg · Economics",["bloomberg_economics"],"amber"],["Bloomberg · Politics",["bloomberg_politics"],"amber"],["BBC · World",["bbc_world"],"gold"],
+    ["Ars Technica",["ars"],"cyan"],["Science · ScienceDaily · NASA",["sciencedaily","nasa"],"violet"],["Entertainment · Variety · Deadline",["variety","deadline"],"violet"]]
+    .map(([t,f,c])=>'<div class="glass card">'+head(t,"",c==="amber")+newsRows(merged(...f),6,{color:c})+'</div>').join("");
+  const all=merged("bloomberg_markets","bbc_world","bloomberg_technology","ars").slice(0,40);
+  const strip='<div class="glass" style="flex:none;height:36px;padding:0 14px;display:flex;align-items:center;gap:14px;overflow:hidden;"><span class="hd bb" style="flex:none;">Headlines</span><div class="marquee" style="font-size:12px;--mqs:'+(all.length*4)+'s;"><div class="track">'+all.map(it=>'<span><span class="faint">'+esc(it.source)+'</span> '+esc(it.title)+'</span>').join("")+'</div></div></div>';
+  return '<div style="display:flex;flex-direction:column;gap:12px;height:100%;">'+strip+'<div style="display:flex;gap:12px;flex:1;min-height:0;"><div class="glass card" style="flex:1;display:flex;">'+termHTML()+'</div><div class="grid" style="flex:3;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr;">'+cards+'</div></div></div>';
 }
-const STOCKS=[
-["NVDA","NVIDIA","AI infrastructure & graphics chip leader",1204,1],
-["AAPL","Apple","Consumer electronics, software & digital services",236,0],
-["MSFT","Microsoft","Cloud computing, enterprise software & AI",458,1],
-["GOOGL","Alphabet","Search, cloud services & AI platforms",178,1],
-["AVGO","Broadcom","Semiconductor & infrastructure software",172,1],
-["AMZN","Amazon","E-commerce & AWS cloud computing",201,1],
-["META","Meta Platforms","Social networks & advertising technology",574,1],
-["MU","Micron","Memory & storage technology",108,0],
-["AMD","AMD","Processors, graphics & adaptive computing",162,0],
-["INTC","Intel","Semiconductor manufacturing & processor design",23,-1],
-["CSCO","Cisco","Networking hardware & telecom equipment",58,0],
-["ORCL","Oracle","Enterprise database software & cloud",178,1],
-["TSM","TSMC","World's largest dedicated chip foundry",194,1],
-["TXN","Texas Instruments","Analog & embedded processing chips",205,0],
-["QCOM","Qualcomm","Wireless technology & mobile processors",168,0]];
-let SEL="NVDA",TF="1M";
-function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
-function hash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
-function series(sym,tf){const st=STOCKS.find(x=>x[0]===sym)||STOCKS[0];const base=st[3],bias=st[4];
-  const n={"1D":26,"1W":30,"1M":34,"1Y":54}[tf]||34;const rnd=mulberry(hash(sym+tf));
-  const vol=base*({"1D":.006,"1W":.02,"1M":.05,"1Y":.22}[tf]||.05);let v=base*(1-bias*({"1D":.004,"1W":.01,"1M":.03,"1Y":.14}[tf]||.03));
-  const out=[];for(let i=0;i<n;i++){v+=(rnd()-0.5)*vol+bias*vol*0.18;v=Math.max(base*0.4,v);out.push(v);}
-  out[out.length-1]=base;return out;}
-function spark(pts,col,w=84,h=26){const mx=Math.max(...pts),mn=Math.min(...pts),rg=(mx-mn)||1,stp=w/(pts.length-1);
-  const ln=pts.map((v,i)=>(i*stp).toFixed(0)+","+(h-2-((v-mn)/rg)*(h-4)).toFixed(0)).join(" ");
-  return '<svg width="'+w+'" height="'+h+'"><polyline points="'+ln+'" fill="none" stroke="'+col+'" stroke-width="1.5"/></svg>';}
-function pct(pts){return (pts[pts.length-1]-pts[0])/pts[0]*100;}
-window.selStock=s=>{SEL=s;render();};window.selTF=t=>{TF=t;render();};
+window.selTF=t=>{TF=t;render();};window.pinStock=s=>{PIN=PIN===s?"":s;render();};
+function majorCard(s){
+  const pts=(s.history||{})[TF]||[];const first=pts.length?pts[0][1]:null,last=s.last!=null?s.last:(pts.length?pts[pts.length-1][1]:null);
+  const ch=TF==="1D"?s.change_pct:(first&&last?(last-first)/first*100:null);const up=(ch==null?(s.change_pct||0):ch)>=0;const col=up?"#84e6a6":"#ff9a94";
+  const d=priceDigits(s.last);const lo=s.year_low,hi=s.year_high;const pos=lo!=null&&hi!=null&&hi>lo&&s.last!=null?Math.max(0,Math.min(100,(s.last-lo)/(hi-lo)*100)):null;
+  return '<div class="glass card col" style="flex:1;min-width:0;">'
+   +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;"><div style="min-width:0;"><div style="display:flex;align-items:baseline;gap:8px;"><span class="amber" style="font-size:19px;letter-spacing:.5px;">'+s.symbol+'</span><span class="dim" style="font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.short||s.name)+'</span></div>'
+   +'<div class="faint clamp" style="font-size:10.5px;-webkit-line-clamp:1;">'+esc(s.description||"")+'</div></div>'
+   +'<div style="text-align:right;flex:none;"><div style="font-size:20px;line-height:1.1;">'+N(s.last,d)+'</div><div class="'+cls(ch)+'" style="font-size:12px;">'+(s.change!=null&&TF==="1D"?(s.change>=0?"+":"")+N(s.change,d)+'  ':'')+P(ch,2)+' <span class="faint">'+TF+'</span></div></div></div>'
+   +'<div class="fill" style="margin:6px 0 4px;">'+lineChart(pts,{col:col,xlabels:true,tf:TF,ref:TF==="1D"?s.prev_close:null,empty:"waiting for the bars…"})+'</div>'
+   +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:2px 10px;font-size:10.5px;" class="dim"><span>O <span style="color:var(--fg);">'+N(s.open,d)+'</span></span><span>H <span style="color:var(--fg);">'+N(s.high,d)+'</span></span><span>L <span style="color:var(--fg);">'+N(s.low,d)+'</span></span><span>Vol <span style="color:var(--fg);">'+esc(s.volume||"—")+'</span></span>'
+   +'<span>Cap <span style="color:var(--fg);">'+esc(s.market_cap||"—")+'</span></span><span>P/E <span style="color:var(--fg);">'+N(s.pe,1)+'</span></span><span>EPS <span style="color:var(--fg);">'+N(s.eps,2)+'</span></span><span>β <span style="color:var(--fg);">'+N(s.beta,2)+'</span></span></div>'
+   +(pos!=null?'<div class="range"><i style="left:'+pos.toFixed(1)+'%;"></i></div><div class="faint" style="display:flex;justify-content:space-between;font-size:9.5px;"><span>52w '+N(lo,d)+'</span><span>'+N(hi,d)+'</span></div>':'')+'</div>';}
+function smallTile(s,on){const pts=(s.history||{})[TF]||(s.history||{})["1D"]||[];const up=(s.change_pct||0)>=0;const d=priceDigits(s.last);
+  return '<div class="glass card tile'+(on?" on":"")+'" onclick="pinStock(\''+s.symbol+'\')" style="display:flex;flex-direction:column;justify-content:space-between;padding:9px 11px;">'
+   +'<div style="display:flex;justify-content:space-between;align-items:baseline;"><span class="amber" style="font-size:14px;">'+s.symbol+'</span><span class="'+cls(s.change_pct)+'" style="font-size:11.5px;">'+P(s.change_pct,2)+'</span></div>'
+   +'<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;"><div style="min-width:0;"><div style="font-size:15px;">'+N(s.last,d)+'</div><div class="faint" style="font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.short||s.name)+'</div></div><div style="width:44%;height:30px;">'+lineChart(pts,{col:up?"#84e6a6":"#ff9a94",ylabels:false,sw:1.5})+'</div></div>'
+   +'<div class="faint" style="display:flex;justify-content:space-between;font-size:9.5px;"><span>H '+N(s.high,d)+'</span><span>L '+N(s.low,d)+'</span><span>'+esc(s.volume||"")+'</span></div></div>';}
 function viewMarkets(){
-  const watchInner=STOCKS.map(([sym,name,desc,base])=>{const p=series(sym,"1M"),ch=pct(p),up=ch>=0,col=up?"#84e6a6":"#ff9a94";
-    return '<div onclick="selStock(&quot;'+sym+'&quot;)" style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid var(--stroke2);cursor:pointer;border-radius:8px;'+(sym===SEL?"background:rgba(240,189,131,.14);":"")+'">'
-      +'<div style="width:52px;"><div style="font-size:12.5px;">'+sym+'</div><div class="faint" style="font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:50px;">'+esc(name)+'</div></div>'
-      +spark(p,col)+'<div style="text-align:right;flex:1;"><div style="font-size:12px;">$'+base.toLocaleString()+'</div><div class="'+(up?"green":"red")+'" style="font-size:10.5px;">'+(up?"+":"")+ch.toFixed(1)+'%</div></div></div>';}).join("");
-  const watch='<div class="glass card" style="flex:1;overflow-y:auto;">'+head("Watchlist","15")+watchInner+'</div>';
-  const st=STOCKS.find(x=>x[0]===SEL)||STOCKS[0];const pts=series(SEL,TF);const ch=pct(pts),up=ch>=0;const last=pts[pts.length-1];
-  const w=560,h=300,mx=Math.max(...pts),mn=Math.min(...pts),rg=(mx-mn)||1,stp=w/(pts.length-1);
-  const xy=pts.map((v,i)=>[i*stp,h-24-((v-mn)/rg)*(h-56)]);const ln=xy.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ");
-  const col=up?"#84e6a6":"#ff9a94";const grid=[0,1,2,3,4].map(i=>'<line x1="0" y1="'+(h-24-i*(h-56)/4).toFixed(0)+'" x2="'+w+'" y2="'+(h-24-i*(h-56)/4).toFixed(0)+'" stroke="rgba(255,255,255,.06)"/>').join("");
-  const labels=[0,1,2,3,4].map(i=>{const val=mn+rg*i/4;return '<text x="'+(w-2)+'" y="'+(h-24-i*(h-56)/4-3).toFixed(0)+'" fill="#828a99" font-size="9" text-anchor="end">'+val.toFixed(val>500?0:1)+'</text>';}).join("");
-  const chart='<svg width="100%" height="'+h+'" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none">'+grid+'<polygon points="0,'+(h-24)+' '+ln+' '+w+','+(h-24)+'" fill="'+col+'" opacity=".13"/><polyline points="'+ln+'" fill="none" stroke="'+col+'" stroke-width="2"/>'+labels+'</svg>';
-  const pills=["1D","1W","1M","1Y"].map(t=>'<span onclick="selTF(&quot;'+t+'&quot;)" style="cursor:pointer;padding:4px 11px;border-radius:8px;border:1px solid var(--stroke2);'+(t===TF?"background:rgba(240,189,131,.22);color:var(--gold);":"color:var(--dim);")+'">'+t+'</span>').join("");
-  const rnd=mulberry(hash(SEL));const o=(last*(0.99+rnd()*0.01)),hi=last*(1.005+rnd()*0.01),lo=last*(0.985+rnd()*0.008),vol=(20+rnd()*60);
-  const mid='<div class="glass card" style="flex:2.2;display:flex;flex-direction:column;">'
-    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
-    +'<div><div style="font-size:22px;">'+esc(st[1])+' · '+SEL+'</div>'
-    +'<div class="'+(up?"green":"red")+'" style="font-size:14px;">$'+last.toLocaleString(undefined,{maximumFractionDigits:2})+'  '+(up?"+":"")+ch.toFixed(2)+'% ('+TF+')</div></div>'
-    +'<div style="display:flex;gap:7px;font-size:11px;">'+pills+'</div></div>'
-    +'<div class="faint" style="font-size:11.5px;margin:6px 0 4px;">'+esc(st[2])+'</div>'
-    +'<div style="flex:1;min-height:0;display:flex;align-items:center;">'+chart+'</div>'
-    +'<div style="display:flex;gap:20px;margin-top:4px;font-size:11px;" class="dim"><span>O '+o.toFixed(1)+'</span><span>H '+hi.toFixed(1)+'</span><span>L '+lo.toFixed(1)+'</span><span>Vol '+vol.toFixed(1)+'M</span><span class="faint">sample series</span></div></div>';
-  const idx='<div class="glass card" style="flex:1;">'+head("Indices")+[["S&P 500","5,842 +0.5%","green"],["Nasdaq","20,140 +0.8%","green"],["Dow","43,110 -0.2%","red"],["VIX","13.4 -3.1%","green"],["10Y","4.18%","dim"]].map(x=>'<div class="rowitem" style="justify-content:space-between;"><span>'+x[0]+'</span><span class="'+x[2]+'">'+x[1]+'</span></div>').join("")+'</div>';
-  return '<div style="display:flex;gap:14px;height:100%;">'+watch+mid+idx+'</div>';
+  const m=mk();let stocks=m.stocks.slice();if(!stocks.length)return '<div class="glass card" style="height:100%;display:flex;align-items:center;justify-content:center;" class="faint">markets: waiting for the collector (CNBC quotes)…</div>';
+  let majors=stocks.filter(s=>s.major);let rest=stocks.filter(s=>!s.major);
+  if(PIN&&rest.some(s=>s.symbol===PIN)){const p=rest.find(s=>s.symbol===PIN);const last=majors[majors.length-1];majors=majors.slice(0,-1).concat([p]);rest=rest.filter(s=>s.symbol!==PIN);if(last)rest=[last].concat(rest);}
+  const st=mktStatus();const asof=m.as_of?new Date(m.as_of*1000).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}):"";
+  const pills=["1D","1W","1M","1Y"].map(t=>'<span class="pill'+(t===TF?" on":"")+'" onclick="selTF(\''+t+'\')">'+t+'</span>').join("");
+  const top='<div class="glass" style="flex:none;height:38px;padding:0 14px;display:flex;align-items:center;gap:14px;overflow:hidden;"><span class="hd bb" style="flex:none;">Markets</span><span class="'+st[1]+'" style="font-size:11px;flex:none;">● '+st[0]+'</span><span class="faint" style="font-size:10.5px;flex:none;">'+(asof?'as of '+asof:'')+'</span>'+tickerHTML()+'<div style="display:flex;gap:6px;flex:none;">'+pills+'</div></div>';
+  const bigRow='<div style="display:flex;gap:12px;flex:2.35;min-height:0;">'+majors.map(majorCard).join("")+'</div>';
+  const tiles='<div class="grid" style="flex:1.1;grid-template-columns:repeat(5,1fr);grid-template-rows:1fr 1fr;gap:10px;">'+rest.slice(0,10).map(s=>smallTile(s,s.symbol===PIN)).join("")+'</div>';
+  const col=(t,rows,extra)=>'<div class="glass card col" style="flex:1;min-width:0;padding:10px 12px;">'+head(t,"",true)+'<div class="fill">'+(rows.length?rows.map(r=>quoteRow(r,true)).join(""):empty("waiting…"))+(extra||"")+'</div></div>';
+  const idxRows=m.indices;const half=Math.ceil(idxRows.length/2);
+  const idx='<div class="glass card col" style="flex:1.7;min-width:0;padding:10px 12px;">'+head("Indices","",true)+'<div style="display:flex;gap:16px;"><div style="flex:1;min-width:0;">'+idxRows.slice(0,half).map(r=>quoteRow(r,true)).join("")+'</div><div style="flex:1;min-width:0;">'+idxRows.slice(half).map(r=>quoteRow(r,true)).join("")+'</div></div></div>';
+  const rf=col("Rates & FX",[...m.rates,...m.fx]);
+  const cc=col("Commodities & crypto",[...m.commodities,...m.crypto]);
+  const news='<div class="glass card col" style="flex:1.9;min-width:0;padding:10px 12px;">'+head("Bloomberg","markets · economics",true)+'<div class="fill">'+newsRows(merged("bloomberg_markets","bloomberg_economics"),7,{color:"amber"})+'</div></div>';
+  const bottom='<div style="display:flex;gap:12px;flex:1.05;min-height:0;">'+idx+rf+cc+news+'</div>';
+  return '<div style="display:flex;flex-direction:column;gap:12px;height:100%;">'+top+bigRow+tiles+bottom+'</div>';
 }
 function viewMedia(){
-  const now='<div class="glass" style="flex:2;padding:0;overflow:hidden;display:flex;flex-direction:column;"><div style="flex:1;min-height:0;">'+thumb('Planet Earth III · “Deserts”','LIVE 4K')+'</div><div style="padding:13px 16px;font-size:14px;">Planet Earth III · “Deserts” <span class="faint" style="font-size:11px;">· casting to Family Room TV</span></div></div>';
-  const up='<div class="glass card" style="flex:1;">'+head("Up next")+[["Blue Planet II","YouTube · 50m"],["Cosmos","Disney+ · 44m"],["Chef's Table","Netflix · 41m"],["Lo-fi beats","YouTube · live"]].map(x=>'<div class="rowitem"><div>'+x[0]+' <span class="faint" style="font-size:11px;">· '+x[1]+'</span></div></div>').join("")+'</div>';
-  return '<div style="display:flex;gap:14px;height:100%;">'+now+up+'</div>';
+  const np=nowPlaying();const songs=(DATA&&DATA.songs)||[],movies=(DATA&&DATA.movies)||[],bo=(DATA&&DATA.boxoffice)||[];
+  const now='<div class="glass" style="flex:2;padding:0;overflow:hidden;display:flex;flex-direction:column;"><div style="flex:1;min-height:0;">'+thumb('<b>'+esc(np.title)+'</b><br><span class="faint">'+esc(np.sub)+'</span>',np.tag)+'</div>'
+    +'<div style="padding:12px 16px;">'+head("Hollywood","Variety · Deadline")+newsRows(merged("variety","deadline"),5,{color:"violet"})+'</div></div>';
+  const music='<div class="glass card col" style="flex:1;">'+head("Top songs","Apple Music")+(songs.length?songs.slice(0,10).map(s=>'<div class="rowitem" style="align-items:center;padding:3.5px 0;"><span class="gold" style="width:16px;">'+s.rank+'</span><div class="art" style="background-image:url(\''+esc(s.art)+'\');"></div><div style="min-width:0;"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.name)+'</div><div class="faint" style="font-size:10.5px;">'+esc(s.artist)+'</div></div></div>').join(""):empty("waiting…"))+'</div>';
+  const films='<div class="glass card col" style="flex:1;">'+head("Top movies","iTunes")+(movies.length?movies.slice(0,7).map(mv=>'<div class="rowitem" style="align-items:center;padding:3.5px 0;"><span class="gold" style="width:16px;">'+mv.rank+'</span><div class="art" style="background-image:url(\''+esc(mv.art)+'\');width:30px;height:42px;"></div><div style="min-width:0;"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(mv.name)+'</div><div class="faint" style="font-size:10.5px;">'+esc(mv.genre)+' · '+esc(mv.released)+'</div></div></div>').join(""):empty("waiting…"))
+    +(bo.length?'<div class="hd" style="margin:8px 0 4px;">Box office · weekend</div>'+bo.slice(0,5).map(b=>'<div class="tr"><span class="gold" style="width:16px;">'+b.rank+'</span><span class="l" style="flex:1;">'+esc(b.title)+'</span><span>'+esc(b.weekend)+'</span></div>').join(""):'')+'</div>';
+  return '<div style="display:flex;gap:12px;height:100%;">'+now+music+films+'</div>';
 }
-function viewTerminal(){return '<div class="glass card" style="height:100%;display:flex;">'+termHTML(true)+'</div>';}
+function viewTerminal(){
+  const s=STATUS||{};const rows=[];
+  for(const k of ["state","model","version","uptime_s","tasks_running","tasks_queued","workers","memory_mb","load"]){if(s[k]!=null&&typeof s[k]!=="object")rows.push(kv(k.replace(/_/g," "),esc(String(s[k]))));}
+  const tools=ACT.filter(e=>e.type==="action.result").slice(-8).reverse().map(e=>'<div class="tr"><span class="l">'+esc(e.tool||"tool")+'</span><span class="'+(e.ok===false?"red":"green")+'">'+(e.ok===false?"✗":"✓")+(e.duration_ms?' '+Math.round(e.duration_ms)+'ms':'')+'</span></div>').join("");
+  const side='<div class="glass card col" style="flex:1;min-width:0;">'+head("Sim","status")+(rows.join("")||empty("status needs the token"))+'<div class="hd" style="margin:10px 0 4px;">Recent tools</div>'+(tools||empty("nothing yet"))+'<div style="margin-top:auto;">'+weatherNow()+'</div></div>';
+  return '<div style="display:flex;gap:12px;height:100%;"><div class="glass card" style="flex:3.2;display:flex;">'+termHTML(true)+'</div>'+side+'</div>';
+}
 function viewAmbient(){
-  return '<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;">'
-    +'<div style="font-size:150px;font-weight:200;letter-spacing:2px;text-shadow:0 4px 44px rgba(0,0,0,.5);">'+nowT()+'</div>'
+  const w=DATA&&DATA.weather,qt=DATA&&DATA.quote,h=merged("bloomberg_markets","bbc_world")[0];
+  const box=(inner,w)=>'<div class="glass" style="padding:14px 20px;text-align:center;'+(w?'min-width:'+w+'px;':'')+'">'+inner+'</div>';
+  return '<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;">'
+    +'<div class="big" style="font-size:150px;text-shadow:0 4px 44px rgba(0,0,0,.5);">'+nowT()+'</div>'
     +'<div class="dim" style="font-size:22px;">'+nowD()+'</div>'
-    +'<div style="display:flex;gap:14px;margin-top:24px;">'
-    +'<div class="glass" style="padding:16px 22px;text-align:center;"><div style="font-size:30px;">72°</div><div class="faint" style="font-size:11px;">Clear</div></div>'
-    +'<div class="glass" style="padding:16px 22px;text-align:center;"><div class="hd">Next</div><div style="font-size:15px;margin-top:5px;">Aria · school</div><div class="faint" style="font-size:11px;">8:15 AM</div></div>'
-    +'<div class="glass" style="padding:16px 22px;text-align:center;"><div class="hd">Home</div><div class="green" style="font-size:15px;margin-top:5px;">all secure</div></div></div></div>';
+    +'<div style="display:flex;gap:12px;margin-top:22px;align-items:stretch;">'
+    +box(w&&w.temp!=null?'<div style="font-size:34px;">'+w.glyph+' '+Math.round(w.temp)+'°</div><div class="faint" style="font-size:11px;">'+esc(w.text)+' · '+esc(w.place)+'</div>':'<div class="faint">weather…</div>')
+    +box('<div class="hd">Sun</div><div style="font-size:15px;margin-top:5px;">☀ '+(w?hhmm(w.sunrise):"—")+'</div><div class="faint" style="font-size:11px;">☾ '+(w?hhmm(w.sunset):"—")+'</div>')
+    +box('<div class="hd">Air</div><div class="'+(w&&w.aqi!=null?(w.aqi<=50?"green":w.aqi<=100?"gold":"red"):"dim")+'" style="font-size:15px;margin-top:5px;">AQI '+(w&&w.aqi!=null?w.aqi:"—")+'</div><div class="faint" style="font-size:11px;">'+(w&&w.aqi!=null?(w.aqi<=50?"good":w.aqi<=100?"moderate":"unhealthy"):"")+'</div>')
+    +box('<div class="hd">Sim</div><div class="green" style="font-size:15px;margin-top:5px;">'+(STATUS.state||"online")+'</div><div class="faint" style="font-size:11px;">'+esc(STATUS.model||"")+'</div>')+'</div>'
+    +'<div class="glass" style="padding:12px 20px;margin-top:10px;width:min(920px,86vw);">'+hourlyStrip(10)+'</div>'
+    +(qt&&qt.text?'<div class="dim" style="font-size:15px;margin-top:14px;max-width:80vw;text-align:center;">“'+esc(qt.text)+'” <span class="faint">— '+esc(qt.author)+'</span></div>':'')
+    +(h?'<div class="faint" style="font-size:12.5px;margin-top:6px;max-width:80vw;text-align:center;"><span class="amber">'+esc(h.source)+'</span> '+esc(h.title)+'</div>':'')+'</div>';
 }
 const RENDER={deck:viewDeck,discover:viewDiscover,cameras:viewCameras,news:viewNews,markets:viewMarkets,media:viewMedia,terminal:viewTerminal,ambient:viewAmbient};
 
-// ---- time ----
-function nowT(){const d=new Date();let h=d.getHours(),m=d.getMinutes();const ap=h>=12?"PM":"AM";h=h%12||12;return h+":"+String(m).padStart(2,"0");}
-function nowD(){return new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});}
-
 // ---- app ----
-let CUR="deck";
 function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
   $("#dock").querySelectorAll(".dot").forEach(d=>d.onclick=()=>go(d.dataset.k));}
-function render(){$("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}
-function go(k){CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
-function tickClock(){$("#clock").textContent=nowT();$("#date").textContent=new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});}
+function render(){try{if(CUR==="deck"){refreshDeck(true);return;}$("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}catch(e){$("#stage").innerHTML='<div class="glass card red">render failed: '+esc(e.message)+'</div>';}}
+function go(k){if(!RENDER[k])return;CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
+function tickClock(){$("#clock").textContent=nowT();$("#date").textContent=new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
+  if(CUR==="ambient"||CUR==="deck"){const c=$("#stage .big");}}
+// Keys: a TV browser, a keyboard, or a remote that does reach the page.
+document.addEventListener("keydown",e=>{const i=VIEWS.findIndex(v=>v[0]===CUR);
+  if(e.key==="ArrowRight"||e.key==="MediaTrackNext")go(VIEWS[(i+1)%VIEWS.length][0]);
+  else if(e.key==="ArrowLeft"||e.key==="MediaTrackPrevious")go(VIEWS[(i-1+VIEWS.length)%VIEWS.length][0]);
+  else if(/^[1-8]$/.test(e.key))go(VIEWS[parseInt(e.key)-1][0]);
+  else if(e.key==="Enter"||e.key===" "){if(CUR==="markets"){const t=["1D","1W","1M","1Y"];TF=t[(t.indexOf(TF)+1)%4];render();}else go("markets");}
+  else if(e.key==="Escape"||e.key==="Backspace"||e.key==="GoBack"||e.key==="BrowserBack")go("deck");
+  else return; e.preventDefault();});
 
 (async function(){await loadWP();setBG(WP[0]);buildDock();render();tickClock();
   setInterval(tickClock,1000);
   let s=0;setInterval(()=>{s=(s+1)%6;$("#spark").textContent="·+✶✻✶+"[s];},300);
-  setInterval(()=>setBG(nextWP()),45000);   // rotate wallpaper
+  setInterval(()=>setBG(nextWP()),45000);
+  setInterval(()=>{if(CUR==="ambient")render();},30000);
+  setInterval(()=>{if(CUR==="deck")refreshDeck(false);},1000);   // the Home boxes rotate on their own clock
   poll();setInterval(poll,4000);
+  loadData();setInterval(loadData,60000);
 })();
 </script></body></html>
