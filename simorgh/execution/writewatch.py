@@ -75,6 +75,82 @@ def written_between(before: dict[str, str] | None, after: dict[str, str] | None)
     return sorted(changed)[:_MAX_REPORTED]
 
 
+# Where a stray lands: under the scratch prefix (contracts.scratch), in
+# a folder per task.
+STRAY_HOME = "workspace/scratch"
+
+
+def strays(written: list[str], after: dict[str, str] | None, repo_root: Path) -> list[str]:
+    """The NEW files a command left in the repository root, or in a new
+    top-level directory of its own making: a download, a frame dump, a
+    cropped image -- everything that is not source and not scratch.
+
+    A file under a tracked top-level directory (`simorgh/new.py`,
+    `docs/x.md`) is a change to the project and is left where it is;
+    anything under `workspace/` or the ignored `results/` already lives
+    in the right place. 2026-09-11: a GAIA run left penguins.mp4, sixty
+    frames and nine PNG crops in the root beside sim.sh."""
+    if not written or after is None:
+        return []
+    try:
+        tree = subprocess.run(["git", "ls-tree", "--name-only", "HEAD"], cwd=str(repo_root), capture_output=True,
+                              text=True, timeout=_TIMEOUT_S, stdin=subprocess.DEVNULL)
+        tracked_top = set(tree.stdout.split()) if tree.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        tracked_top = None
+    if tracked_top is None:
+        return []
+    from simorgh.contracts.scratch import SCRATCH_PREFIX
+
+    out = []
+    for path in written:
+        if after.get(path) != "??" or path.startswith(SCRATCH_PREFIX) or "/" not in path.strip("/") and path in tracked_top:
+            continue
+        top = path.split("/", 1)[0]
+        if top in tracked_top or top.startswith("."):
+            continue
+        out.append(path)
+    return out
+
+
+def relocate(paths: list[str], repo_root: Path, *, task_id: str | None) -> list[tuple[str, str]]:
+    """Move `paths` (repo-relative) under `workspace/scratch/<task>/`,
+    keeping their relative shape; `[(old, new)]` for what moved. A move
+    that fails leaves the file and says nothing -- the file is still
+    where the command put it, which the tool result already reports."""
+    home = f"{STRAY_HOME}/{(task_id or 'chat')[:12]}"
+    moved: list[tuple[str, str]] = []
+    for path in paths:
+        src = repo_root / path
+        if not src.is_file():
+            continue
+        dest = repo_root / home / path
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            src.replace(dest)
+        except OSError:
+            continue
+        moved.append((path, f"{home}/{path}"))
+        # An emptied directory of the command's own making goes too.
+        parent = src.parent
+        while parent != repo_root:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+    return moved
+
+
+def relocation_note(moved: list[tuple[str, str]]) -> str:
+    if not moved:
+        return ""
+    home = "/".join(moved[0][1].split("/")[:3])  # workspace/scratch/<task>
+    names = ", ".join(old for old, _new in moved[:6]) + (f" and {len(moved) - 6} more" if len(moved) > 6 else "")
+    return (f"[note] {len(moved)} new file(s) landed in the repository root and were moved into {home}/: {names}. "
+            f"Downloads and intermediates belong under workspace/; use the new path from here on.")
+
+
 def side_effects_for(paths: list[str], before: dict[str, str] | None,
                      after: dict[str, str] | None = None) -> tuple[str, ...]:
     """`file_create:`/`file_write:` entries in the shape

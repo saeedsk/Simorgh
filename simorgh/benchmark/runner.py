@@ -66,6 +66,8 @@ class Runner:
         parts = [case.question]
         if attachment:
             parts.append(f"The file this question is about is at `{attachment}`. Read it.")
+        parts.append("Save anything you download or produce on the way -- a video, frames, crops, a table -- "
+                     "under workspace/scratch/, never in the repository root.")
         if case.functions:
             parts.append(f"Functions you may call:\n{case.functions}")
         parts.append(answer_format(case.mode))

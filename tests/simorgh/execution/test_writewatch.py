@@ -136,3 +136,53 @@ class ToolsReportTheirWritesTestCase(_Repo):
         result = await RunScriptTool(config).run({"code": "pass"}, ctx=_ctx(self.root))
         self.assertTrue(result.ok, result.metadata.get("stderr"))
         self.assertEqual(result.metadata["written_paths"], [])
+
+
+class StraysGoToScratchTestCase(_Repo):
+    """2026-09-11: a GAIA run left penguins.mp4, sixty frames and nine
+    PNG crops beside sim.sh. New files a command leaves in the root, or
+    in a new top-level folder, are swept into workspace/scratch/<task>/;
+    a new file under a tracked directory is a change to the project and
+    stays."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "docs" / "README.md").write_text("hi\n")
+        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"],
+                       cwd=self.root, check=True)
+
+    async def test_a_download_and_a_frame_dump_are_moved_and_the_result_says_so(self):
+        tool = RunShellTool(Config(repo_root=self.root))
+        ctx = ToolContext(action_id="a1", task_id="gaia-42", scope={}, constraints={},
+                          data_dir=self.root, clock=None, logger=None, ledger=None)
+        result = await tool.run({"command": "echo mp4 > penguins.mp4 && mkdir frames && echo j > frames/f001.jpg "
+                                            "&& echo new > docs/notes.md"}, ctx=ctx)
+        self.assertTrue(result.ok, result)
+        self.assertFalse((self.root / "penguins.mp4").exists())
+        self.assertFalse((self.root / "frames").exists(), "the emptied folder went too")
+        self.assertTrue((self.root / "workspace/scratch/gaia-42/penguins.mp4").exists())
+        self.assertTrue((self.root / "workspace/scratch/gaia-42/frames/f001.jpg").exists())
+        self.assertTrue((self.root / "docs/notes.md").exists(), "under a tracked directory: a project change")
+        self.assertIn("moved into workspace/scratch/gaia-42/", result.output)
+        self.assertIn("penguins.mp4", result.output)
+        self.assertIn("workspace/scratch/gaia-42/penguins.mp4", result.metadata["written_paths"])
+        self.assertIn("docs/notes.md", result.metadata["written_paths"])
+
+    async def test_a_task_in_its_own_worktree_is_left_alone(self):
+        tool = RunShellTool(Config(repo_root=self.root))
+        ctx = ToolContext(action_id="a1", task_id="code-1", scope={}, constraints={},
+                          data_dir=self.root, clock=None, logger=None, ledger=None, root=self.root)
+        result = await tool.run({"command": "echo x > stray.txt"}, ctx=ctx)
+        self.assertTrue(result.ok, result)
+        self.assertTrue((self.root / "stray.txt").exists())
+        self.assertNotIn("[note]", result.output)
+
+    async def test_a_script_that_saves_beside_the_launcher_is_swept_too(self):
+        tool = RunScriptTool(Config(repo_root=self.root))
+        ctx = ToolContext(action_id="a2", task_id="chat-7", scope={}, constraints={},
+                          data_dir=self.root, clock=None, logger=None, ledger=None)
+        result = await tool.run({"code": "open('big.png', 'wb').write(b'png')\nprint('saved')"}, ctx=ctx)
+        self.assertTrue(result.ok, result)
+        self.assertTrue((self.root / "workspace/scratch/chat-7/big.png").exists())
+        self.assertIn("[note]", result.output)

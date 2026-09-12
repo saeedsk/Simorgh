@@ -101,8 +101,17 @@ class RunScriptTool:
         ok = completed.returncode == 0
         after = writewatch.snapshot(self._config.repo_root)
         written = writewatch.written_between(before, after)
+        output = completed.stdout[-cap:]
+        if getattr(ctx, "root", None) is None:
+            # As in run_shell: what a script saves beside sim.sh goes to workspace/.
+            moved = writewatch.relocate(writewatch.strays(written, after, self._config.repo_root),
+                                        self._config.repo_root, task_id=ctx.task_id)
+            if moved:
+                renamed = dict(moved)
+                written = [renamed.get(path, path) for path in written]
+                output = f"{output}\n{writewatch.relocation_note(moved)}".strip()
         return ToolResult(
-            ok=ok, output=completed.stdout[-cap:],
+            ok=ok, output=output,
             error=None if ok else f"exit_code={completed.returncode}",
             side_effects=writewatch.side_effects_for(written, before, after),
             metadata={"stderr": completed.stderr[-cap:], "exit_code": completed.returncode,

@@ -245,13 +245,21 @@ class RunShellTool:
             # from a heredoc truncated to its first line (which runs an
             # empty program and exits 0), once from a command that
             # genuinely printed nothing. Say which happened.
-            output = f"exited 0 with no output (the command produced nothing on stdout or stderr)"
+            output = "exited 0 with no output (the command produced nothing on stdout or stderr)"
         # What it wrote, found by asking git rather than by trusting the
         # command to say (writewatch.py). Without this a heredoc that
         # writes a page produced no `written_paths`, and every
         # file-reading verification check skipped it.
         after = writewatch.snapshot(root)
         written = writewatch.written_between(before, after)
+        if getattr(ctx, "root", None) is None:
+            # The live repository, not a task's worktree: a download or
+            # a frame dump left beside sim.sh is swept into workspace/.
+            moved = writewatch.relocate(writewatch.strays(written, after, root), root, task_id=ctx.task_id)
+            if moved:
+                renamed = dict(moved)
+                written = [renamed.get(path, path) for path in written]
+                output = f"{output}\n{writewatch.relocation_note(moved)}".strip()
         return ToolResult(
             ok=ok, output=output,
             error=None if ok else f"exit_code={completed.returncode}",
