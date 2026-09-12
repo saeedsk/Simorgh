@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..fields import F, Float, List, O, Str
+from ..fields import Enum, F, Float, List, O, Str
 from ..registry import define
 from .. import topics as t
 
@@ -16,3 +16,6 @@ UiPrompt = define(t.UI_PROMPT, [
 ])
 UiPromptAnswered = define(t.UI_PROMPT_ANSWERED, [F("prompt_id", Str), F("answer", Str)])
 UiRendered = define(t.UI_RENDERED, [F("channel", Str), F("text", Str)])
+TvState = define(t.TV_STATE, [F("mode", Enum("none", "frame", "full")), O("url", Str), O("title", Str)],
+                 doc="frame: `url` plays inside the TV page's box; full: the cast device plays it itself; "
+                     "none: the terminal replica alone.")

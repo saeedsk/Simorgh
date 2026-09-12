@@ -437,6 +437,19 @@ class Config:
     media_max_volume_unattended: int = 60
     media_quiet_hours: str = "22:00-07:00"
     media_quiet_hours_max_volume: int = 20
+    # -- cast (execution/media/cast.py): Sim on the TV over Chromecast.
+    # `cast_device` is the Cast device used when a call names none (""
+    # = the only one found, or refuse when there are several).
+    # `cast_page_url` is where the TV fetches Sim's page from; "" derives
+    # `http://<this machine's LAN address>:<cast_page_port>/tv`, which is
+    # right when `[interface] http_host` is "0.0.0.0". The creator,
+    # 2026-09-12: "I'd like Sim to have an interface and appear on my
+    # screen, show a replica of its terminal ... showing video stream on
+    # my TV either at full screen or framed within its TUI box".
+    cast_device: str = ""
+    cast_page_url: str = ""
+    cast_page_port: int = 8765
+    cast_discovery_s: float = 5.0
 
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a

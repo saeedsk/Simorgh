@@ -39,7 +39,7 @@ POOLS: dict[str, dict[str, tuple[str, ...]]] = {
     # ("Okay, okay."), and nothing a synthesiser cannot say -- Kokoro
     # read "Mm-hm." as four letters; "Uh-huh." it can say.
     HEARD: {
-        ENGLISH: ("Aha.", "Okay.", "Right.", "Got it.", "I see.", "Yeah.", "Alright.", "Ah, okay.",
+        ENGLISH: ("Aha.", "Okay.", "Right.", "Got it.", "I see.", "Yes.", "Alright.", "Ah, okay.",
                   "Okay, I see.", "Right, okay.", "Yep.", "Sure."),
         FARSI: ("اوهوم.", "آها.", "باشه.", "خب.", "درسته.", "آره.", "فهمیدم.", "بله.", "آها، خب."),
     },
@@ -57,17 +57,18 @@ POOLS: dict[str, dict[str, tuple[str, ...]]] = {
                 "خب، الان.", "حتماً، یه ثانیه."),
     },
     EMPATHY: {
-        ENGLISH: ("I know.", "I hear you.", "That's hard.", "Yeah…", "Oh no.", "I'm sorry.", "That sounds rough.",
-                  "Mm, I know.", "Yeah, I get it."),
+        ENGLISH: ("I know.", "I hear you.", "That's hard.", "Oh no.", "I'm sorry.", "That sounds rough.",
+                  "I get it.", "That's a lot."),
         FARSI: ("می‌فهمم.", "سخته.", "آره…", "متاسفم.", "می‌دونم.", "درکت می‌کنم."),
     },
 }
 
 # Under a person mid-story, half loud (voice/delivery.py "hum"): plain
 # words only. "Uh-huh" was here and the creator did not like the sound
-# of it (2026-09-12); "Mm-hm" Kokoro cannot say.
+# of it (2026-09-12); "Mm-hm" Kokoro cannot say, and "Yeah" it says as
+# "yaw ho".
 HUM: dict[str, tuple[str, ...]] = {
-    ENGLISH: ("Yeah.", "Right.", "Okay.", "I see.", "Aha."),
+    ENGLISH: ("Right.", "Okay.", "I see.", "Aha.", "Yep."),
     FARSI: ("آره.", "خب.", "آها.", "درسته."),
 }
 

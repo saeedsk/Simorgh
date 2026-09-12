@@ -331,6 +331,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "voice":
         return await _voice(bus, args)
 
+    if name == "tv":
+        return await _tv(args, bus=bus, ledger=ledger, session_id=session_id)
+
     if name == "schedule":
         return await _schedule_command(args, bus=bus, ledger=ledger, clock=clock)
 
@@ -722,6 +725,65 @@ async def _schedule_list(ledger: LedgerClient) -> Outcome:
     return Outcome(f"{len(live)} scheduled:\n" + "\n".join(lines), exit_repl=False)
 
 
+async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: str) -> Outcome:
+    """`tv ...`: sugar over the cast tools (execution/media/cast.py), so
+    every verb is a tool call Guardian sees -- the same path as `tool
+    cast_show {...}`, spelt for a person."""
+    words = (args or "").strip().split()
+    verb = words[0].lower() if words else "show"
+    rest = words[1:]
+    usage = ("usage: tv devices | use <device> | show [device] | video <url> [full|frame] [device] | stop [frame] "
+             "| volume <0-100> [device]")
+
+    async def _run(tool: str, payload: dict) -> Outcome:
+        return await _run_tool(bus=bus, ledger=ledger, tool=tool, raw=json.dumps(payload), session_id=session_id,
+                               timeout=120.0)
+
+    if verb == "devices":
+        return await _run("cast_devices", {})
+    if verb == "use":
+        if not rest:
+            return Outcome("usage: tv use <device name>   (`tv devices` lists them)")
+        return await _run("cast_use", {"device": " ".join(rest)})
+    if verb == "show":
+        payload = {}
+        if rest:
+            payload["url" if rest[0].startswith(("http://", "https://")) else "device"] = " ".join(rest)
+        return await _run("cast_show", payload)
+    if verb in ("video", "play"):
+        if not rest:
+            return Outcome(usage)
+        url = rest[0]
+        mode = "frame"
+        device = []
+        for word in rest[1:]:
+            if word.lower() in ("full", "fullscreen"):
+                mode = "full"
+            elif word.lower() in ("frame", "framed", "box"):
+                mode = "frame"
+            else:
+                device.append(word)
+        payload = {"url": url, "mode": mode}
+        if device:
+            payload["device"] = " ".join(device)
+        return await _run("cast_play", payload)
+    if verb == "stop":
+        payload = {"what": "frame"} if rest and rest[0].lower() in ("frame", "framed", "box") else {}
+        return await _run("cast_stop", payload)
+    if verb == "volume":
+        if not rest:
+            return Outcome(usage)
+        try:
+            level = float(rest[0].rstrip("%"))
+        except ValueError:
+            return Outcome(usage)
+        payload = {"level": level}
+        if rest[1:]:
+            payload["device"] = " ".join(rest[1:])
+        return await _run("cast_volume", payload)
+    return Outcome(f"tv: unknown verb {verb!r} -- {usage}")
+
+
 async def _tool_command(args: str, *, bus: BusClient, ledger: LedgerClient,
                         session_id: str, timeout: float = 300.0) -> Outcome:
     """Run any registered tool, from the terminal, through Guardian.
@@ -775,6 +837,7 @@ async def _tool_list(ledger: LedgerClient) -> Outcome:
 #: Prefix -> the heading it is listed under. A flat list of fifty names
 #: is not something anyone reads.
 _TOOL_GROUPS: tuple[tuple[str, str], ...] = (
+    ("cast_", "media -- the TV"),
     ("kb_", "documents"), ("cal_", "calendar and mail"), ("mail_", "calendar and mail"),
     ("remind", "calendar and mail"), ("sec_", "security"), ("home_", "the house"),
     ("energy_", "energy"), ("media_", "media"), ("git_", "source control"),
@@ -791,7 +854,8 @@ def _tool_group(name: str) -> str:
 
 
 _NO_ARG_TOOLS = frozenset({"kb_status", "sec_self", "sec_posture", "energy_status",
-                           "home_describe", "media_now", "self_map", "git_revert"})
+                           "home_describe", "media_now", "self_map", "git_revert",
+                           "cast_devices", "cast_show", "cast_stop"})
 
 
 async def _known_tools(ledger: LedgerClient) -> dict[str, dict]:

@@ -69,7 +69,7 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: check a monitor or a shell script polls, and it reveals only what the
 #: boot banner already prints. Everything else is gated
 #: (platform-connectors-design.md section 4).
-_OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status"})
+_OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv"})
 
 #: The response to an unauthenticated request. A JSON body, because
 #: every other error on this server is JSON and a dashboard that got
@@ -130,6 +130,12 @@ class HttpApi:
         self._logs_max_limit = max(1, logs_max_limit)
         self._server: asyncio.base_events.Server | None = None
         self._page = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
+        # Sim on the TV (interface/static/tv.html): a replica of the
+        # terminal, and what to frame in it (`tv.state`, published by the
+        # cast tools in execution/media/cast.py).
+        self._tv_page = (_STATIC_DIR / "tv.html").read_text(encoding="utf-8")
+        self._tv_state: dict = {"mode": "none", "url": "", "title": "", "since": 0.0}
+        self._tv_sub = None
         self._pending_chats: dict[str, asyncio.Future] = {}
         self._turn_sub = None
         self._register_builtin_routes()
@@ -179,8 +185,16 @@ class HttpApi:
             full = self._token and not self._authorized(headers)
             return 200, await self._status_json(public_only=bool(full)), "application/json"
 
+        async def _tv(_query, _body, _headers):
+            return 200, self._tv_page.encode("utf-8"), "text/html; charset=utf-8"
+
+        async def _tv_state(_query, _body, _headers):
+            return 200, json.dumps({"now": self._now(), **self._tv_state}).encode("utf-8"), "application/json"
+
         self.register_route("GET", "/", _page, auth=False)
         self.register_route("GET", "/api/status", _status, auth=False)
+        self.register_route("GET", "/tv", _tv, auth=False)
+        self.register_route("GET", "/api/tv/state", _tv_state)
         self.register_route("GET", "/api/history", _json_route(self._history_json))
         self.register_route("GET", "/api/logs", _json_route(self._logs_json))
         self.register_route("GET", "/api/benchmarks", _json_route(self._benchmarks_json))
@@ -195,19 +209,21 @@ class HttpApi:
         self.register_route("POST", "/api/chat", self._chat_route,
                             max_body=_MAX_BODY_BYTES, rate=(30, 60.0))
 
-    def _authorized(self, headers: dict[str, str]) -> bool:
+    def _authorized(self, headers: dict[str, str], query: dict | None = None) -> bool:
         """No token configured means no gate -- the local, single-viewer
         dashboard this server shipped as. With a token configured, only
-        `Authorization: Bearer <token>` passes, compared in constant time
-        so the comparison itself cannot be used to guess the token a
-        character at a time."""
+        `Authorization: Bearer <token>` passes -- or, for a page that
+        cannot set a header (the TV, handed a URL), `?token=<token>` --
+        compared in constant time so the comparison itself cannot be
+        used to guess the token a character at a time."""
         if not self._token:
             return True
         supplied = headers.get("authorization", "")
         scheme, _, value = supplied.partition(" ")
-        if scheme.lower() != "bearer":
-            return False
-        return hmac.compare_digest(value.strip(), self._token)
+        if scheme.lower() == "bearer" and hmac.compare_digest(value.strip(), self._token):
+            return True
+        from_query = self._q1(query or {}, "token", "") or ""
+        return bool(from_query) and hmac.compare_digest(from_query.strip(), self._token)
 
     def _rate_limited(self, route: Route) -> bool:
         if route.rate is None:
@@ -244,6 +260,7 @@ class HttpApi:
 
     async def start(self) -> None:
         self._turn_sub = await self._bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
+        self._tv_sub = await self._bus.subscribe(topics.TV_STATE, self._on_tv_state)
         # Live activity feed (07-post-cutover-review.md §3.9): the same
         # events the REPL narrates, kept in a small in-memory ring so
         # `/api/activity` answers "what is Sim doing right now / just did"
@@ -375,7 +392,7 @@ class HttpApi:
                 await self._try_respond(writer, 404, b"not found", "text/plain; charset=utf-8")
             return
 
-        if route.auth and not self._authorized(headers):
+        if route.auth and not self._authorized(headers, query):
             await self._try_respond(writer, 401, _UNAUTHORIZED, "application/json",
                                     extra_headers=('WWW-Authenticate: Bearer realm="simorgh"',))
             return
@@ -559,6 +576,11 @@ class HttpApi:
                 return {"text": "", "floor": True, "error": "no response in time"}
         finally:
             self._pending_chats.pop(session_id, None)
+
+    async def _on_tv_state(self, message) -> None:
+        p = message.payload
+        self._tv_state = {"mode": str(p.get("mode") or "none"), "url": str(p.get("url") or ""),
+                          "title": str(p.get("title") or ""), "since": self._now()}
 
     @staticmethod
     def _q1(query: dict, key: str, default: str | None) -> str | None:

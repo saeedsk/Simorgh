@@ -311,3 +311,32 @@ class TasksClearTestCase(unittest.IsolatedAsyncioTestCase):
             dispatch_mod._request = original
         self.assertTrue(all(topic == topics.TASK_CLEAR_REQUEST for topic, _p in seen))
         self.assertEqual(len(seen), 3)
+
+
+class TvCommandTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_every_verb_is_a_cast_tool_call(self):
+        from simorgh.interface import dispatch as dispatch_mod
+        from simorgh.interface.parser import parse
+        import json as _json
+
+        calls = []
+
+        async def _run_tool(*, bus, ledger, tool, raw, session_id, timeout=300.0):
+            calls.append((tool, _json.loads(raw)))
+            return dispatch_mod.Outcome("ok")
+        original = dispatch_mod._run_tool
+        dispatch_mod._run_tool = _run_tool
+        try:
+            for line in ("tv devices", "tv use Living Room TV", "tv show", "tv show Bedroom", "tv", "tv video https://x/clip.mp4",
+                         "tv video https://x/clip.mp4 full Living Room TV", "tv stop", "tv stop frame", "tv volume 35"):
+                await dispatch_mod.dispatch(parse(line), bus=None, clock=_Clock(), session_id="s1", vitals=None,
+                                            ledger=None)
+        finally:
+            dispatch_mod._run_tool = original
+        self.assertEqual(calls, [
+            ("cast_devices", {}), ("cast_use", {"device": "Living Room TV"}), ("cast_show", {}),
+            ("cast_show", {"device": "Bedroom"}), ("cast_show", {}),
+            ("cast_play", {"url": "https://x/clip.mp4", "mode": "frame"}),
+            ("cast_play", {"url": "https://x/clip.mp4", "mode": "full", "device": "Living Room TV"}),
+            ("cast_stop", {}), ("cast_stop", {"what": "frame"}), ("cast_volume", {"level": 35.0}),
+        ])

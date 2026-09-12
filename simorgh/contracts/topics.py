@@ -204,6 +204,11 @@ UI_NOTICE = "ui.notice"
 UI_PROMPT = "ui.prompt"
 UI_PROMPT_ANSWERED = "ui.prompt.answered"
 UI_RENDERED = "ui.rendered"
+# What Sim's TV page shows (interface/static/tv.html): nothing beside
+# the terminal replica, a video framed inside it, or a note that the
+# cast device itself is playing full screen. Published by the cast
+# tools (execution/media/cast.py), read by the interface's HTTP API.
+TV_STATE = "ui.tv.state"
 COGNITION_THINK = "cognition.think"
 COGNITION_THINK_REPLY = "cognition.think.reply"
 COGNITION_COMPACT_REQUEST = "cognition.compact.request"

@@ -119,16 +119,17 @@ def _dump(data: dict) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def persist(path: Path, key: str, value: object) -> None:
-    """Write `[voice] key = value` into the TOML at `path`, keeping every
-    other setting the file already has."""
+def persist(path: Path, key: str, value: object, *, section: str = "voice") -> None:
+    """Write `[section] key = value` into the TOML at `path`, keeping
+    every other setting the file already has. `[voice]` by default; the
+    cast tools write `[execution] cast_device` the same way."""
     data: dict = {}
     if path.is_file():
         with path.open("rb") as handle:
             data = tomllib.load(handle)
-    voice = dict(data.get("voice") or {})
-    voice[key] = value
-    data["voice"] = voice
+    table = dict(data.get(section) or {})
+    table[key] = value
+    data[section] = table
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".toml.part")
     tmp.write_text(_dump(data))

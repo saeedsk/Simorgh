@@ -1,0 +1,33 @@
+{
+  "$id": "https://simorgh.local/schema/ui.tv.state.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "frame: `url` plays inside the TV page's box; full: the cast device plays it itself; none: the terminal replica alone.",
+  "properties": {
+    "mode": {
+      "enum": [
+        "none",
+        "frame",
+        "full"
+      ],
+      "type": "string"
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "mode"
+  ],
+  "title": "ui.tv.state",
+  "type": "object"
+}

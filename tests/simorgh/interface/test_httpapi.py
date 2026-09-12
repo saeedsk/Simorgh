@@ -894,3 +894,51 @@ class TheOpenRouteDoesNotBypassTheTokenTestCase(AuthTestCase):
         self.addAsyncCleanup(api.stop)
         _status, body = await self._request(api, "GET", "/api/status")
         self.assertIn("metrics", json.loads(body))
+
+
+class TvPageTestCase(unittest.IsolatedAsyncioTestCase):
+    """Sim on the TV: the page is open (a shell), the state behind the
+    token -- which the TV passes in the URL, since a cast URL cannot
+    carry a header -- and `tv.state` on the bus is what the page frames."""
+
+    async def _api(self, token=""):
+        bus = _FakeBus()
+        api = HttpApi(bus, ledger=None, host="127.0.0.1", port=0, token=token)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        return api, bus
+
+    def _get(self, api, path, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+        conn.request("GET", path, headers=headers or {})
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        return resp.status, body
+
+    async def test_the_page_is_open_and_the_state_needs_the_token_in_header_or_url(self):
+        api, bus = await self._api(token="tv-secret")
+        status, body = await asyncio.to_thread(self._get, api, "/tv")
+        self.assertEqual(status, 200)
+        self.assertIn(b"<title>Sim</title>", body)
+        status, _ = await asyncio.to_thread(self._get, api, "/api/tv/state")
+        self.assertEqual(status, 401)
+        status, body = await asyncio.to_thread(self._get, api, "/api/tv/state?token=tv-secret")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["mode"], "none")
+        status, _ = await asyncio.to_thread(self._get, api, "/api/tv/state?token=wrong")
+        self.assertEqual(status, 401)
+        status, _ = await asyncio.to_thread(self._get, api, "/api/tv/state", {"Authorization": "Bearer tv-secret"})
+        self.assertEqual(status, 200)
+
+    async def test_the_state_follows_tv_state_on_the_bus(self):
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+        api, bus = await self._api()
+        handler = next(entry[1] for entry in bus._subs if entry[0] == topics.TV_STATE)  # noqa: SLF001
+        await handler(Message.new(topics.TV_STATE, source="execution",
+                                  payload={"mode": "frame", "url": "https://x/clip.mp4", "title": "Clip"}))
+        status, body = await asyncio.to_thread(self._get, api, "/api/tv/state")
+        self.assertEqual(status, 200)
+        state = json.loads(body)
+        self.assertEqual((state["mode"], state["url"], state["title"]), ("frame", "https://x/clip.mp4", "Clip"))

@@ -392,7 +392,7 @@ def chunk(text: str, *, max_chars: int = MAX_CHUNK_CHARS, min_chars: int = MIN_C
 
 CONNECTORS: dict[str, dict[str, str]] = {
     "okay": {ENGLISH: "Okay,", FARSI: "باشه،"},
-    "yeah": {ENGLISH: "Yeah,", FARSI: "آره،"},
+    "yeah": {ENGLISH: "Yes,", FARSI: "آره،"},  # "Yeah" comes out of Kokoro as "yaw ho" (2026-09-12)
     "right": {ENGLISH: "Right,", FARSI: "درسته،"},
     "hmm": {ENGLISH: "Hmm,", FARSI: "هوم،"},
     "ah": {ENGLISH: "Ah,", FARSI: "آها،"},
