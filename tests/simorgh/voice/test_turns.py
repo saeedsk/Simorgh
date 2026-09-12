@@ -123,10 +123,15 @@ class TestTurnManager(unittest.TestCase):
         tm.handle_vad(_silence(600))
         tm.handle_transcript(TranscriptEvent("final", "first question", 1))
         self.assertEqual(tm.state, THINKING)
-        # The person goes on before the answer: a new turn.
+        # The person goes on before the answer: a new turn opens. Until it
+        # proves real the reply is held; once it is asked, the reply is stale.
         actions = tm.handle_vad(VadEvent("speech_start", speech_ms=30))
         self.assertEqual(_kinds(actions), [Actions.CAPTURE_START])
         self.assertEqual(tm.turn_id, 2)
+        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.HOLD_REPLY])
+        tm.handle_vad(_speech(700))
+        tm.handle_vad(_silence(600))
+        tm.handle_transcript(TranscriptEvent("final", "second question", 2))
         self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.DROP_REPLY])
         self.assertEqual(tm.response_id, 0)
 
@@ -247,3 +252,56 @@ class TestIncrementalRecogniser(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestABlipWhileThinkingDoesNotLoseTheReply(unittest.TestCase):
+    """Live, 2026-09-11: "You're not responding" took the model ten
+    seconds; two short blips at the microphone meanwhile each opened
+    and discarded a turn, the reply was judged stale, and nothing was
+    said. A discarded blip must not make the owed reply stale; real
+    speech must."""
+
+    def _thinking(self) -> TurnManager:
+        tm = TurnManager(Policy(end_of_turn_silence_ms=600, min_speech_ms=250))
+        tm.start()
+        tm.handle_vad(VadEvent("speech_start", speech_ms=30))
+        tm.handle_vad(_speech(600))
+        tm.handle_vad(_silence(600))
+        tm.handle_transcript(TranscriptEvent("final", "are you there", 1))
+        self.assertEqual(tm.state, THINKING)
+        return tm
+
+    def test_a_blip_is_discarded_and_the_reply_is_still_spoken(self) -> None:
+        tm = self._thinking()
+        tm.handle_vad(VadEvent("speech_start", speech_ms=30))   # a blip
+        self.assertEqual(tm.state, USER_SPEAKING)
+        actions = tm.handle_vad(_silence(600))
+        self.assertEqual(_kinds(actions), [Actions.DISCARD])
+        self.assertEqual(tm.state, THINKING)                     # still owed an answer
+        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.SPEAK])
+
+    def test_a_reply_arriving_during_a_blip_is_held_then_spoken(self) -> None:
+        tm = self._thinking()
+        tm.handle_vad(VadEvent("speech_start", speech_ms=30))
+        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.HOLD_REPLY])
+        tm.handle_vad(_silence(600))                              # the blip ends: too short
+        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.SPEAK])
+
+    def test_real_speech_while_thinking_makes_the_reply_stale(self) -> None:
+        tm = self._thinking()
+        tm.handle_vad(VadEvent("speech_start", speech_ms=30))
+        tm.handle_vad(_speech(700))
+        tm.handle_vad(_silence(600))
+        actions = tm.handle_transcript(TranscriptEvent("final", "never mind, something else", tm.turn_id))
+        self.assertEqual(_kinds(actions), [Actions.ASK])
+        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.DROP_REPLY])
+        self.assertEqual(_kinds(tm.reply_ready(tm.turn_id)), [Actions.SPEAK])
+
+    def test_an_empty_final_during_thinking_keeps_thinking(self) -> None:
+        tm = self._thinking()
+        tm.handle_vad(VadEvent("speech_start", speech_ms=30))
+        tm.handle_vad(_speech(700))
+        tm.handle_vad(_silence(600))
+        tm.handle_transcript(TranscriptEvent("final", "", tm.turn_id))
+        self.assertEqual(tm.state, THINKING)
+        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.SPEAK])

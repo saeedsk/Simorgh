@@ -266,3 +266,16 @@ class TestStaleAndEcho(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestASlowModelAndANoisyRoom(unittest.IsolatedAsyncioTestCase):
+    async def test_blips_while_thinking_do_not_lose_the_reply(self) -> None:
+        # Speech, then a slow answer; during the wait, two short blips.
+        script = _Script((True, 20), (False, 15), (False, 10), (True, 2), (False, 15), (True, 2), (False, 10_000))
+        replies = _Replies(["I'm here, and I am replying."], delay=1.0)
+        session, bus, speaker, tts = _session(_config(), script, replies)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        spoken = bus.of(topics.VOICE_SPOKEN)
+        self.assertEqual(len(spoken), 1)
+        self.assertEqual(spoken[0]["turn"], 1)
+        self.assertEqual(len(replies.asked), 1)

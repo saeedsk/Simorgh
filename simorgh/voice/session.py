@@ -122,6 +122,9 @@ class VoiceSession:
         self._previous_connector = ""
         self._last_user_text = ""
         self._stop: asyncio.Event | None = None
+        # Set whenever a candidate turn settles (discarded, or asked), so
+        # a reply held for it can try again.
+        self._settled = asyncio.Event()
 
     # ------------------------------------------------------------- helpers
     @property
@@ -231,6 +234,7 @@ class VoiceSession:
                 self._stt_task.cancel()
                 self._stt_task = None
             await self._stt.stop()
+            self._settled.set()
         elif kind == Actions.STOP_PLAYBACK:
             self.stats.interruptions += 1
             clock = self._clocks.get(self.turns.turn_id)
@@ -246,6 +250,7 @@ class VoiceSession:
         elif kind == Actions.CANCEL_TTS:
             await self._tts.cancel(str(action.response_id))
         elif kind == Actions.ASK:
+            self._settled.set()
             self._ask_task = asyncio.create_task(self._guarded(self._ask_and_speak(action.turn_id, action.text)))
         elif kind == Actions.SPEAK:
             pass  # handled by `_ask_and_speak`, which minted the response
@@ -367,6 +372,16 @@ class VoiceSession:
 
     async def _speak_reply(self, turn_id: int, reply: str, clock: TurnClock, context: Context) -> None:
         actions = self.turns.reply_ready(turn_id)
+        while any(a.kind == Actions.HOLD_REPLY for a in actions):
+            # The person may be starting to talk: wait for that to settle
+            # -- a blip is discarded and the reply goes ahead; real
+            # speech becomes the next turn and this reply is dropped.
+            self._settled.clear()
+            try:
+                await asyncio.wait_for(self._settled.wait(), timeout=self._config.max_turn_ms / 1000 + 2.0)
+            except asyncio.TimeoutError:
+                break
+            actions = self.turns.reply_ready(turn_id)
         speak = next((a for a in actions if a.kind == Actions.SPEAK), None)
         if speak is None:
             for action in actions:

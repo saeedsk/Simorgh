@@ -70,6 +70,7 @@ class Actions:
     CANCEL_TTS = "cancel_tts"          # ... and stop synthesising the rest
     SPEAK = "speak"                    # a reply is ready: play it
     DROP_REPLY = "drop_reply"          # a reply arrived for a turn that is over
+    HOLD_REPLY = "hold_reply"          # a reply is ready but the person may be starting to talk: wait
 
 
 @dataclass
@@ -83,6 +84,12 @@ class TurnManager:
     speech_ms: int = 0
     speaking_response: int = 0
     _awaiting_final: bool = False
+    # The turn whose answer is outstanding. A reply is stale only when a
+    # LATER turn has really been asked -- not when a blip during
+    # thinking opened a turn that was then discarded as too short.
+    # Live, 2026-09-11: two such blips while the model took ten seconds
+    # advanced the turn id, the reply was judged stale, and Sim said
+    # nothing to "you're not responding".
     _asked_turn: int = 0
     transitions: list[tuple[str, str, str]] = field(default_factory=list)
 
@@ -159,7 +166,8 @@ class TurnManager:
         # silence or speech_end
         if self.speech_ms < self.policy.min_speech_ms and event.silence_ms >= self.policy.end_of_turn_silence_ms:
             turn = self.turn_id
-            self._go(LISTENING, "too short")
+            # Back to waiting for the answer, if one is still owed.
+            self._go(THINKING if self._asked_turn else LISTENING, "too short")
             return [Action(Actions.DISCARD, turn_id=turn, reason="too short to be a turn")]
         if self.speech_ms >= self.policy.min_speech_ms and event.silence_ms >= self._required_silence_ms():
             return self._finalise("end of turn")
@@ -182,18 +190,24 @@ class TurnManager:
         text = event.text.strip()
         if not text:
             self._awaiting_final = False
-            self._go(LISTENING, "heard nothing")
+            self._go(THINKING if self._asked_turn else LISTENING, "heard nothing")
             return []
         self._asked_turn = self.turn_id
         self._go(THINKING, "final transcript")
         return [Action(Actions.ASK, turn_id=self.turn_id, text=text)]
 
     def reply_ready(self, turn_id: int) -> list[Action]:
-        """The model answered `turn_id`. If that turn is still the current
-        one, a new response id is minted and the reply may be spoken;
-        otherwise the reply is stale and dropped."""
-        if turn_id != self.turn_id or self.state != THINKING:
-            return [Action(Actions.DROP_REPLY, turn_id=turn_id, reason="the turn is over")]
+        """The model answered `turn_id`. Spoken if that is still the turn
+        whose answer is owed; held if the person may be starting a new
+        turn right now (the caller asks again once that settles);
+        dropped if a later turn has really been asked."""
+        if turn_id != self._asked_turn:
+            return [Action(Actions.DROP_REPLY, turn_id=turn_id, reason="a later turn was asked")]
+        if self.state == USER_SPEAKING:
+            return [Action(Actions.HOLD_REPLY, turn_id=turn_id, reason="the person may be speaking")]
+        if self.state != THINKING:
+            return [Action(Actions.DROP_REPLY, turn_id=turn_id, reason=f"the session is {self.state}")]
+        self._asked_turn = 0
         self.response_id += 1
         self.speaking_response = self.response_id
         return [Action(Actions.SPEAK, turn_id=turn_id, response_id=self.response_id)]
