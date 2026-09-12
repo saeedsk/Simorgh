@@ -4652,3 +4652,27 @@ Still ahead, roughly in order:
 
     Design and decisions: `docs/plans/worktree-landing-design.md`.
     Tests: 20 against real git, 6 session flows, 3 for the checks.
+
+148. **The spoken conversation (2026-09-11).** The creator's brief: a
+    low-latency, natural, fully local voice agent -- smooth turn-taking,
+    natural pacing, context-aware delivery, rare connectors, and
+    interruptible. Built as independently replaceable parts behind
+    protocols in `voice/api.py`: `FrameVad`, `TurnManager` (the
+    idle/listening/user_speaking/thinking/agent_speaking/interrupted/
+    error machine, hybrid end of turn, monotonic turn and response ids),
+    `IncrementalRecogniser` (partials while the person talks, one final
+    that replaces them), `SpokenResponsePlanner` (the mandatory layer:
+    speakable text, semantic chunks, at most one contextual connector),
+    `StreamingSynthesiser` and `StreamingPlayer` (piece-by-piece,
+    levelled, gapless, cancellable), `VoiceSession` (the loop and the
+    clocks). The model is told it is speaking only on the voice channel.
+    `voice set` persists safe settings; `voice bench` measures; `voice
+    status` shows the turn state and last latencies. Measured on this
+    M3 Pro: first audio 0.31-0.55 s after the answer, synthesis 0.2x
+    real time, 4 s transcribed in 1.9 s, afplay stops in 8 ms, 684 MB.
+    Not done: the answer is not streamed from Cognition, so the first
+    piece waits for the whole reply; Farsi has no open-source female
+    voice. `THIRD_PARTY_NOTICES.md` records every model and licence.
+    Earlier the same day: Farsi speech through Piper, recognition
+    through whisper large-v3-turbo with language detection, and the
+    SIGTERM/Ctrl-C hard exit (`kernel/cli.py::Stopper`).

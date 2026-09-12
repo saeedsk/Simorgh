@@ -1,8 +1,11 @@
 # Talking to Sim: voice on the laptop, the phone, and the house
 
-**Build status (2026-09-10):** slice 1, the laptop path, is built --
-`simorgh/voice/` (see its README for what is and is not there). This
-document remains the spec for the rest.
+**Build status (2026-09-11):** slice 1 (the laptop path) and the
+conversation slice -- streaming STT partials, a turn manager,
+the spoken-response planner, streaming levelled synthesis,
+gapless interruptible playback, settings and a benchmark -- are
+built; `simorgh/voice/README.md` says what is there and what was
+measured. This document remains the spec for the rest.
 
 Design pass, 2026-09-09 (Fable). Implementation is handed to Opus; this
 document is written so that nothing below needs a design decision.
