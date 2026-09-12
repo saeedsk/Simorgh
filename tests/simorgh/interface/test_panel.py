@@ -129,7 +129,7 @@ class BottomRowsTestCase(unittest.TestCase):
         book.on_step("t1", now=4.0, in_flight=False)  # it landed: the block goes, the breathing stays
         text = panel.plain(panel.live_rows(book, now=5.0))
         self.assertNotIn("run_shell(", text)
-        self.assertIn("✻", text)
+        self.assertIn(text[0], panel.SPARK_FRAMES, text)
 
     def test_idle_shows_nothing_live_but_what_just_finished(self):
         self.assertEqual(panel.live_rows(TaskBook(), now=0.0), [])
