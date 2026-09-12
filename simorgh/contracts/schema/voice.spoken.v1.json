@@ -31,6 +31,12 @@
         "null"
       ]
     },
+    "register": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "response": {
       "type": [
         "integer",

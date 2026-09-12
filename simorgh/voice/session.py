@@ -28,8 +28,9 @@ from dataclasses import dataclass, field
 from simorgh.contracts import topics
 
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
-from .backchannel import GREETING, Backchannel, addressed, classify, is_quiet, strip_lead
+from .backchannel import GREETING, HEARD, Backchannel, addressed, classify, is_quiet, strip_lead
 from .commands import MUTE, OFF, STOP, spoken_command
+from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply
 from .config import Config
 from .lang import language_of
 from .pipeline import NOT_SURE, Pipeline, is_echo
@@ -131,6 +132,8 @@ class VoiceSession:
         self._acknowledged: set[int] = set()
         self._answered: set[int] = set()      # turns whose reply is back: too late for an aside
         self._last_aside_at = -1e9
+        self._last_hum_at = -1e9
+        self._hum_task: asyncio.Task | None = None
         self._sim_spoke_at = -1e9        # when Sim's voice last finished: an exchange under way, or not
         self._ack_task: asyncio.Task | None = None
         self._still_task: asyncio.Task | None = None
@@ -197,7 +200,8 @@ class VoiceSession:
             await self._teardown()
 
     async def _teardown(self) -> None:
-        for task in (self._stt_task, self._ask_task, self._speak_task, self._ack_task, self._still_task):
+        for task in (self._stt_task, self._ask_task, self._speak_task, self._ack_task, self._still_task,
+                     self._hum_task):
             if task is not None and not task.done():
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -225,6 +229,8 @@ class VoiceSession:
                 self._detector.clear_echo()
         event = self._vad.process(frame)
         before = self.turns.state
+        if before == USER_SPEAKING and event.kind == "speech_end":
+            self._maybe_hum(event.speech_ms)
         actions = self.turns.handle_vad(event)
         if self.turns.state in (USER_SPEAKING,) and self._frames is not None:
             self._frames.put_nowait(frame)
@@ -435,7 +441,7 @@ class VoiceSession:
             return  # answered in a breath anyway
         language = language_of(partial) if partial else language_of(self._last_user_text)
         text = self._backchannel.pick(kind, language)
-        if await self._say_aside(f"ack-{turn_id}", text):
+        if await self._say_aside(f"ack-{turn_id}", text, delivery=register_for_backchannel(kind)):
             self._acknowledged.add(turn_id)
             self._last_aside_at = self._now()
             self._turns_since_connector = 0
@@ -510,12 +516,41 @@ class VoiceSession:
         if await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language)):
             self._last_aside_at = self._now()
 
-    async def _say_aside(self, request_id: str, text: str) -> bool:
+    def _delivery_for(self, user_text: str, reply: str, *, is_error: bool = False) -> Delivery:
+        base = Delivery()
+        if self._config.expressive:
+            mood = getattr(self._pipeline, "mood", None) or {}
+            base = register_for_reply(user_text, reply, valence=float(mood.get("valence", 0.0)),
+                                      arousal=float(mood.get("arousal", 0.0)), is_error=is_error)
+        return base.with_base(self._config.tts_speed, self._config.volume)
+
+    def _maybe_hum(self, spoken_ms: int) -> None:
+        """The person paused mid-story: a listener's "uh-huh", half loud,
+        under them -- once they have been talking a while, not at the end
+        of a question, and not twice within `hum_gap_s`."""
+        if not (self._config.hum and self._config.backchannel):
+            return
+        now = self._now()
+        if spoken_ms < self._config.hum_after_ms or now - self._last_hum_at < self._config.hum_gap_s:
+            return
+        if self.partial.rstrip().endswith("?") or self._pipeline.speech_lock.locked():
+            return
+        if self._hum_task is not None and not self._hum_task.done():
+            return
+        self._last_hum_at = now
+        language = language_of(self.partial) if self.partial else language_of(self._last_user_text)
+        text = self._backchannel.pick(HEARD, language)
+        self._hum_task = asyncio.create_task(self._say_aside(f"hum-{self.turns.turn_id}", text,
+                                                             delivery=REGISTERS["hum"]))
+
+    async def _say_aside(self, request_id: str, text: str, *, delivery: Delivery | None = None) -> bool:
         """Say a short aside through the player -- gated by the echo
         tracker like everything else -- unless a voice is already
         speaking, when an aside over it would be noise. True if said."""
+        delivery = (delivery or Delivery()) if self._config.expressive else Delivery()
+        delivery = delivery.with_base(self._config.tts_speed, self._config.volume)
         request = TtsRequest(request_id=request_id, pieces=((text, 0),), voice=self._config.tts_voice,
-                             speed=self._config.tts_speed)
+                             speed=delivery.speed, gain=delivery.gain)
         lock = self._pipeline.speech_lock
         if lock.locked():
             return False
@@ -529,7 +564,8 @@ class VoiceSession:
             return False
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": text, "seconds": 0.0, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
-            "device": self._config.device, "interrupted": False, "aside": True, "turn": self.turns.turn_id})
+            "device": self._config.device, "interrupted": False, "aside": True, "turn": self.turns.turn_id,
+            "register": delivery.register})
         return True
 
     async def _speak_reply(self, turn_id: int, reply: str, clock: TurnClock, context: Context) -> None:
@@ -561,8 +597,10 @@ class VoiceSession:
             self._previous_connector = next((k for k, v in CONNECTORS.items() if plan.connector in v.values()), "")
         else:
             self._turns_since_connector += 1
-        request = TtsRequest(request_id=response_id, pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
-                             voice=self._config.tts_voice, speed=self._config.tts_speed)
+        delivery = self._delivery_for(context.user_text, plan.text, is_error=context.is_error)
+        request = TtsRequest(request_id=response_id,
+                             pieces=tuple((c.text, int(c.pause_ms * delivery.pause_scale)) for c in plan.chunks),
+                             voice=self._config.tts_voice, speed=delivery.speed, gain=delivery.gain)
         self._pipeline.speaking = True
 
         def _first_audio(seconds: float) -> None:
@@ -589,6 +627,7 @@ class VoiceSession:
         if clock.interrupted_at and clock.stopped_at:
             metrics["interruption"] = round(clock.stopped_at - clock.interrupted_at, 3)
         metrics["connector"] = bool(plan.connector)
+        metrics["register"] = delivery.register
         metrics["omitted"] = list(plan.omitted)
         self.stats.last_metrics = metrics
         engine = getattr(self._tts, "last_engine", "") or self._tts.name
@@ -647,7 +686,7 @@ class VoiceSession:
         return await self._player.play_stream(chunks, request_id=request_id, on_play=_reference, **kw)
 
     async def _on_playback_state(self, state: PlaybackState) -> None:
-        if state.request_id.startswith(("ack-", "say-")):
+        if state.request_id.startswith(("ack-", "say-", "hum-")):
             return
         before = self.turns.state
         for action in self.turns.handle_playback_state(state):

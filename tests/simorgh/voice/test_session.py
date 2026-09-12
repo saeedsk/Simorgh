@@ -414,6 +414,49 @@ class TestMisheardName(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([p["text"] for p in corrected], ["Sim, do something"])
 
 
+class TestDelivery(unittest.IsolatedAsyncioTestCase):
+    """A reply is delivered for the situation (voice/delivery.py): warm
+    and slower for a hurt, and the person hears a half-loud "uh-huh"
+    when they pause mid-story."""
+
+    async def test_a_hurt_is_answered_slower_and_softer(self) -> None:
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["I'm sorry to hear that."])
+        heard = FakeRecogniser("my dog died yesterday and I am so tired", 0.95)
+        session, bus, speaker, tts = _session(_config(), script, replies, recogniser=heard)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        self.assertLess(tts.speeds[-1], 1.0, tts.speeds)
+        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("aside")]
+        self.assertEqual(spoken[-1]["metrics"]["register"], "warm")
+
+    async def test_a_plain_question_is_answered_at_normal_pace(self) -> None:
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["Twelve."])
+        session, bus, speaker, tts = _session(_config(), script, replies)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        self.assertEqual(tts.speeds[-1], 1.0)
+
+    async def test_a_listener_hums_under_a_long_story(self) -> None:
+        # 7.5 s of talk, a breath, more talk: the breath gets a half-loud
+        # "uh-huh" under it; the turn goes on and is asked once.
+        script = _Script((True, 250), (False, 4), (True, 30), (False, 15), (False, 10_000))
+        replies = _Replies(["Go on."])
+        session, bus, speaker, tts = _session(_config(backchannel=True, hum=True, hum_after_ms=6000), script, replies)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        hums = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("register") == "hum"]
+        self.assertEqual(len(hums), 1, [p.get("text") for p in bus.of(topics.VOICE_SPOKEN)])
+        from simorgh.voice.backchannel import HEARD, POOLS
+        self.assertIn(hums[0]["text"], POOLS[HEARD]["en"])
+        self.assertEqual(len(replies.asked), 1)
+
+    async def test_no_hum_for_a_short_remark(self) -> None:
+        script = _Script((True, 20), (False, 4), (True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["Okay."])
+        session, bus, speaker, tts = _session(_config(backchannel=True, hum=True), script, replies)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        self.assertFalse([p for p in bus.of(topics.VOICE_SPOKEN) if p.get("register") == "hum"])
+
+
 class TestSpokenCommands(unittest.IsolatedAsyncioTestCase):
     """"Stop" and "voice off", said aloud, are obeyed at once and never
     sent to the model (the creator, 2026-09-11: saying "voice off"

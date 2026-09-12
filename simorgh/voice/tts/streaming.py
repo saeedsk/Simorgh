@@ -139,6 +139,10 @@ class StreamingSynthesiser:
                         break
                     self.last_engine = getattr(self._inner, "last_engine", None) or getattr(self._inner, "name", "")
                     pcm = levelled(audio.pcm) if self._level else audio.pcm
+                    if getattr(request, "gain", 1.0) != 1.0:
+                        from ..delivery import apply_gain
+
+                        pcm = apply_gain(pcm, request.gain)
                     if pause_ms > 0 and seq < total - 1:
                         pcm += silence(pause_ms, audio.sample_rate)
                     await queue.put(AudioChunk(pcm=pcm, sample_rate=audio.sample_rate, request_id=request.request_id,

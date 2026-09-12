@@ -143,6 +143,7 @@ class TtsRequest:
     pieces: tuple[tuple[str, int], ...]   # (text, pause_ms after it)
     voice: str = ""
     speed: float = 1.0
+    gain: float = 1.0   # loudness multiplier on the synthesised PCM (voice/delivery.py)
 
 
 @dataclass(frozen=True)

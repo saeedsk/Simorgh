@@ -60,6 +60,6 @@ VoiceTranscript = define(t.VOICE_TRANSCRIPT, [
        "corrected=true: the same turn, read through the recogniser's mistakes (cognition/tidy.py). "
        "partial=true: provisional, replaced by the next transcript for the same turn.")
 VoiceSpoken = define(t.VOICE_SPOKEN, [F("text", Str), F("seconds", Float), F("engine", Str), F("device", Str),
-                                       O("session_id", Str), O("interrupted", Bool), O("turn", Int),
+                                       O("session_id", Str), O("interrupted", Bool), O("turn", Int), O("register", Str),
                                        O("response", Int), O("metrics", Obj()), O("first_audio_s", Float),
                                        O("underruns", Int)])

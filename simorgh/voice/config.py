@@ -126,6 +126,17 @@ class Config:
     backchannel_gap_s: float = 12.0
     exchange_window_s: float = 20.0
     still_after_s: float = 20.0
+    # A listener's "uh-huh" under the person, at half volume, when
+    # they pause mid-story (voice/delivery.py "hum"): only once they have
+    # been talking `hum_after_ms`, at a pause that is not the end of a
+    # question, and not twice within `hum_gap_s`.
+    hum: bool = True
+    hum_after_ms: int = 6000
+    hum_gap_s: float = 10.0
+    # How a reply is delivered -- pace, loudness, pauses -- follows the
+    # situation (voice/delivery.py): warm for a hurt, bright for good
+    # news, "Aha…" slow, "Got it." quick. Off = one flat register.
+    expressive: bool = True
     diagnostics: bool = True           # per-turn latencies in `voice:turns` and `voice status`
     # Speak every reply Sim gives, including replies to TYPED turns.
     # The creator asked Sim itself for this on 2026-09-10 ("add TTS

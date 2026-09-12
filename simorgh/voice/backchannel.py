@@ -31,6 +31,7 @@ HEARD = "heard"          # a remark, a statement, an answer to Sim's question
 QUESTION = "question"    # the person wants to know something
 REQUEST = "request"      # the person wants something done
 GREETING = "greeting"    # hello, thanks, goodbye -- answered fast; only a beat is needed
+EMPATHY = "empathy"      # the person said something that hurts; the sound is warm, not brisk
 
 POOLS: dict[str, dict[str, tuple[str, ...]]] = {
     # Reviewed with the creator 2026-09-11: nothing brisk ("Noted."),
@@ -55,6 +56,11 @@ POOLS: dict[str, dict[str, tuple[str, ...]]] = {
         FARSI: ("چشم.", "حتماً.", "باشه.", "باشه، الان.", "الان انجام می‌دم.", "باشه، یه لحظه.", "باشه، ببینم.",
                 "خب، الان.", "حتماً، یه ثانیه."),
     },
+    EMPATHY: {
+        ENGLISH: ("I know.", "I hear you.", "That's hard.", "Yeah…", "Oh no.", "I'm sorry.", "That sounds rough.",
+                  "Mm, I know.", "Yeah, I get it."),
+        FARSI: ("می‌فهمم.", "سخته.", "آره…", "متاسفم.", "می‌دونم.", "درکت می‌کنم."),
+    },
 }
 
 # Said when the answer is still not back a while after the first sound.
@@ -76,6 +82,12 @@ _REQUEST = re.compile(
     r"book|search|look|change|update|delete|remove|install|restart|commit|push|deploy|test|try|go|get|"
     r"put|move|rename|save|read|list|call|tell)\b|\bلطفا\b|^\s*(?:می‌?تونی|میشه|بکن|بذار|بزن|بساز|درست کن|"
     r"عوض کن|بفرست|باز کن|ببند|اجرا کن)\b", re.I)
+# Feelings, not states of the system: "the pool is exhausted" and "the
+# link is dead" are engineering, so those words are not here.
+_HURT = re.compile(
+    r"\b(?:sorry|sad|tired|frustrat\w*|died|passed away|stressed|worried|scared|alone|lonely|upset|angry|"
+    r"overwhelmed|depress\w*|anxious|cry\w*|awful|terrible|horrible|hard day|rough day|give up|can'?t take|"
+    r"miss (?:him|her|them|you|my))\b|ناراحت|خسته|متاسف|غمگین|دلم گرفته|مریض|نگران|تنها|عصبانی|گریه", re.I)
 _GREETING = re.compile(
     r"^\s*(?:hi|hello|hey|good (?:morning|afternoon|evening|night)|thanks|thank you|cheers|bye|goodbye|"
     r"see you|good night|سلام|مرسی|ممنون|خداحافظ|شب بخیر|صبح بخیر)\b[\s!.,]*$", re.I)
@@ -95,6 +107,8 @@ def classify(text: str) -> str:
         return HEARD
     if _GREETING.match(words):
         return GREETING
+    if _HURT.search(words):
+        return EMPATHY
     # A question that is also a request ("can you check the pool?") is
     # a request: what the person wants is the doing.
     if _REQUEST.search(words) and not re.match(r"^\s*(?:is|are|was|were|do|does|did)\b", words, re.I):
@@ -174,5 +188,5 @@ class Backchannel:
         del self._recent[: -self.RECENT]
 
 
-__all__ = ["Backchannel", "GREETING", "HEARD", "POOLS", "QUESTION", "QUIET", "REQUEST", "STILL", "addressed",
+__all__ = ["Backchannel", "EMPATHY", "GREETING", "HEARD", "POOLS", "QUESTION", "QUIET", "REQUEST", "STILL", "addressed",
            "classify", "is_quiet", "strip_lead"]

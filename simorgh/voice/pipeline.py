@@ -124,6 +124,9 @@ class Pipeline:
         self._voice_sessions: deque[str] = deque(maxlen=200)
         self.turns = 0
         self._player = None
+        # The persona's mood (persona/mood.py), as last announced on the
+        # bus: the voice service keeps it current, delivery reads it.
+        self.mood: dict = {"valence": 0.0, "arousal": 0.0}
         self.pending_audio: Audio | None = None
         self.last_heard = ""
         self.last_said = ""

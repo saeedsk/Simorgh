@@ -127,12 +127,14 @@ class FakeSynthesiser:
 
     def __init__(self) -> None:
         self.spoken: list[str] = []
+        self.speeds: list[float] = []  # the speed each piece was asked for (voice/delivery.py)
 
     def voices(self) -> list[str]:
         return ["fake"]
 
     async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
         self.spoken.append(text)
+        self.speeds.append(speed)
         return silence(max(0.1, len(text) / 20.0))
 
 

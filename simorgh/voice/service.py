@@ -150,6 +150,7 @@ class Service:
             self._subs.append(await ctx.bus.subscribe(topic, handler))
         if self.config.speak_replies:
             self._subs.append(await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_any_reply))
+        self._subs.append(await ctx.bus.subscribe(topics.PERSONA_STATE_CHANGED, self._on_mood))
         await self._write_probes()
         interactive = self._interactive()
         real_microphone = self.config.microphone != "fake" and self._injected["microphone"] is None
@@ -489,6 +490,13 @@ class Service:
         await self._reply(message, topics.VOICE_DEVICES_REPLY, {
             "microphone": n["mic"], "speaker": n["spk"], "stt": n["stt"], "tts": n["tts"], "vad": n["vad"],
             "problems": list(self._problems)})
+
+    async def _on_mood(self, message) -> None:
+        """The persona's mood colours delivery (voice/delivery.py)."""
+        if self._pipeline is None:
+            return
+        p = message.payload
+        self._pipeline.mood = {"valence": float(p.get("valence") or 0.0), "arousal": float(p.get("arousal") or 0.0)}
 
     async def _on_any_reply(self, message) -> None:
         """`speak_replies`: a reply to a typed turn is spoken too. A reply
