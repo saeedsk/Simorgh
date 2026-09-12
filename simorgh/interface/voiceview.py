@@ -19,11 +19,28 @@ def status(payload: dict) -> str:
         return line
     state = "muted" if payload.get("muted") else ("speaking" if payload.get("speaking") else
                                                   ("listening" if payload.get("listening") else "on, between turns"))
+    if payload.get("state") and not payload.get("muted"):
+        state = str(payload["state"]).replace("_", " ")
     lines = [f"voice {state} · {_engines(payload)} · {payload.get('turns', 0)} turn(s) this session"]
+    if payload.get("partial"):
+        lines.append(f"  hearing: {payload['partial']} ...")
     if payload.get("last_heard"):
         lines.append(f"  heard: {payload['last_heard']}")
     if payload.get("last_said"):
         lines.append(f"  said:  {payload['last_said']}")
+    m = payload.get("metrics") or {}
+    if m:
+        parts = [f"{k} {m[k]:.2f}s" for k in ("stt", "llm", "first_audio", "response") if isinstance(m.get(k), (int, float))]
+        if m.get("interrupted"):
+            parts.append(f"interrupted in {m.get('interruption', 0):.2f}s")
+        if m.get("underruns"):
+            parts.append(f"{m['underruns']} underrun(s)")
+        if parts:
+            lines.append("  last turn: " + " · ".join(parts))
+    if payload.get("interruptions"):
+        last = payload.get("last_interruption_s")
+        tail = f" (last stop {last * 1000:.0f} ms)" if isinstance(last, (int, float)) and last >= 0 else ""
+        lines.append(f"  interruptions: {payload['interruptions']}{tail}")
     for problem in payload.get("problems") or []:
         lines.append(f"  ! {problem}")
     return "\n".join(lines)
@@ -33,9 +50,17 @@ def controlled(payload: dict) -> str:
     if not payload.get("ok"):
         return f"voice: {payload.get('detail') or 'could not do that'}"
     detail = payload.get("detail") or ""
-    if detail.startswith("barge-in"):
+    if detail.startswith(("barge-in", "echo cancellation", "settings you can change")) or " = " in detail:
         return f"voice: {detail}"
     return status(payload)
+
+
+def bench(payload: dict) -> str:
+    if not payload.get("ok"):
+        return f"voice: {payload.get('detail') or 'could not run the benchmark'}"
+    from simorgh.voice.bench import render
+
+    return render(payload.get("result") or {})
 
 
 def spoken(payload: dict) -> str:

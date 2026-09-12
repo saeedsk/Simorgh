@@ -425,8 +425,18 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
     if verb == "models":
         return await _request(bus, topics.VOICE_MODELS_REQUEST, {"name": rest.strip() or "base.en"},
                               timeout=900.0, render=voiceview.models)
+    if verb == "set":
+        key, _, value = rest.strip().partition(" ")
+        payload = {"action": "set"}
+        if key:
+            payload["key"] = key.strip()
+            payload["value"] = value.strip()
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, payload, timeout=120.0, render=voiceview.controlled)
+    if verb == "bench":
+        return await _request(bus, topics.VOICE_BENCH_REQUEST, {"play": "quiet" not in rest},
+                              timeout=600.0, render=voiceview.bench)
     return Outcome(f"voice: unknown verb {verb!r} -- status | on | off | mute | unmute | listen [seconds] [only] "
-                   f"| test <text> | voices | devices | models [name]")
+                   f"| test <text> | voices | devices | models [name] | set [key value] | bench [quiet]")
 
 
 def _benchmark_word(args: str) -> tuple[str, str]:

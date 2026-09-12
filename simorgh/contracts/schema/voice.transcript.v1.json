@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/voice.transcript.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "echo=true: the words were Sim's own reply coming back through the microphone; not a turn.",
+  "description": "echo=true: the words were Sim's own reply coming back through the microphone; not a turn. partial=true: provisional, replaced by the next transcript for the same turn.",
   "properties": {
     "confidence": {
       "type": "number"
@@ -19,6 +19,12 @@
     "engine": {
       "type": "string"
     },
+    "partial": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "seconds": {
       "type": "number"
     },
@@ -30,6 +36,12 @@
     },
     "text": {
       "type": "string"
+    },
+    "turn": {
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [

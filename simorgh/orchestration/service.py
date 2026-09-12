@@ -262,8 +262,9 @@ class Service:
         # that fired the session was cancelled mid-step with no
         # `turn.completed`, no failure, no notice: the human's prompt just
         # never came back. Found by a watched chat trial 2026-09-07.
+        channel = str(message.payload.get("channel") or "")
         task = asyncio.create_task(
-            worker.run_percept_chat(session_id, text), name=f"chat-{session_id[:8]}",
+            worker.run_percept_chat(session_id, text, channel=channel), name=f"chat-{session_id[:8]}",
         )
         self._chat_tasks.add(task)
         task.add_done_callback(self._chat_tasks.discard)

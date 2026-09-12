@@ -75,6 +75,25 @@ class Config:
     aec_taps: int = 1024
     aec_mu: float = 0.3
     aec_residual_threshold: float = 0.02  # a floor; the voice check on the residual is the real gate
+    # -- the conversation (voice/session.py, voice/turns.py, voice/planner.py; 2026-09-11).
+    # The design's VoiceSettings, by their names here: `speaking_rate` is
+    # `tts_speed`, `interrupt_on_user_speech` is `barge_in`, `end_of_turn_
+    # silence_ms` is `endpoint_silence_ms`, `tts_provider` is `tts`,
+    # `stt_provider` is `stt`, `voice_id` is `tts_voice`, `language` is
+    # `stt_language`.
+    volume: float = 1.0                # playback gain, 0.2 .. 2.0
+    auto_listen: bool = True           # after a reply, listen again without being asked
+    vad_sensitivity: str = "balanced"  # low | balanced | high (vad.threshold_for); overrides vad_threshold
+    min_speech_ms: int = 250           # shorter than this is a breath or a chair, not a turn
+    max_turn_ms: int = 30000           # a turn is finalised at this length regardless
+    semantic_silence_factor: float = 0.6  # a finished sentence needs this much of the silence
+    stt_partials: bool = True          # provisional transcripts while the person is still talking
+    stt_partial_every_ms: int = 1500
+    connectors: bool = True            # the planner's rare "Okay," / "Yeah," lead-ins
+    max_spoken_sentences: int = 6      # longer answers are cut here and say there is more on screen
+    tts_lookahead: int = 2             # pieces synthesised ahead of playback; more = slower to cancel
+    ack_after_ms: int = 900            # a slow answer to a request gets a spoken "Okay," meanwhile
+    diagnostics: bool = True           # per-turn latencies in `voice:turns` and `voice status`
     # Speak every reply Sim gives, including replies to TYPED turns.
     # The creator asked Sim itself for this on 2026-09-10 ("add TTS
     # output ... voice af_jessica"), and Sim built a second TTS path

@@ -40,9 +40,21 @@
             "null"
           ]
         },
+        "interruptions": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "last_heard": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "last_interruption_s": {
+          "type": [
+            "number",
             "null"
           ]
         },
@@ -54,6 +66,15 @@
         },
         "listening": {
           "type": "boolean"
+        },
+        "metrics": {
+          "additionalProperties": true,
+          "properties": {},
+          "required": [],
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "muted": {
           "type": "boolean"
@@ -68,6 +89,12 @@
             }
           ]
         },
+        "partial": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "problems": {
           "items": {
             "type": "string"
@@ -80,6 +107,12 @@
         "speaking": {
           "type": "boolean"
         },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "stt": {
           "type": "string"
         },
@@ -88,6 +121,12 @@
         },
         "turns": {
           "type": "integer"
+        },
+        "warmup_s": {
+          "type": [
+            "number",
+            "null"
+          ]
         }
       },
       "required": [

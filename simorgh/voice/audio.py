@@ -109,6 +109,33 @@ class SounddeviceMicrophone:
         return Audio(b"".join(frames))
 
 
+    async def stream(self, *, max_seconds: float = 0.0):
+        """Frames as they arrive, until the consumer stops iterating or
+        `max_seconds` (0 = no limit) elapse. The streaming session
+        (voice/session.py) runs on this; `capture` above is push-to-talk."""
+        try:
+            import sounddevice as sd
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("sounddevice is not installed") from exc
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        frame_samples = SAMPLE_RATE * FRAME_MS // 1000
+        limit = int(max_seconds * SAMPLE_RATE) * SAMPLE_WIDTH if max_seconds else 0
+
+        def _on_frame(indata, _frames, _time, _status) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
+
+        total = 0
+        with sd.RawInputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16",
+                               blocksize=frame_samples, callback=_on_frame):
+            while True:
+                pcm = await queue.get()
+                total += len(pcm)
+                yield pcm
+                if limit and total >= limit:
+                    break
+
+
 class FfmpegMicrophone:
     """Capture through ffmpeg's platform input, read as a stream of 30 ms
     frames so the endpointer can stop it mid-recording."""
@@ -155,6 +182,30 @@ class FfmpegMicrophone:
             err = (await proc.stderr.read()).decode(errors="replace") if proc.stderr else ""
             raise RuntimeError(f"ffmpeg captured nothing: {err.strip()[:200] or 'no input device?'}")
         return Audio(b"".join(frames))
+
+
+    async def stream(self, *, max_seconds: float = 0.0):
+        """Frames as they arrive (see `SounddeviceMicrophone.stream`)."""
+        duration = ["-t", f"{max_seconds:.1f}"] if max_seconds else []
+        proc = await asyncio.create_subprocess_exec(
+            self._ffmpeg, "-v", "error", *self._input_args(),
+            "-f", "s16le", "-ac", str(CHANNELS), "-ar", str(SAMPLE_RATE), *duration, "-",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            assert proc.stdout is not None
+            while True:
+                try:
+                    frame = await proc.stdout.readexactly(FRAME_BYTES)
+                except asyncio.IncompleteReadError:
+                    break
+                yield frame
+        finally:
+            if proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.terminate()
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
 
 
 # ----------------------------------------------------------------- playback

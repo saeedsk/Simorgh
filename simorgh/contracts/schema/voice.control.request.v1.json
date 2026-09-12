@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/voice.control.request.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "Payload of `voice.control.request` (catalog v1).",
+  "description": "set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it.",
   "properties": {
     "action": {
       "enum": [
@@ -13,9 +13,22 @@
         "barge_on",
         "barge_off",
         "aec_on",
-        "aec_off"
+        "aec_off",
+        "set"
       ],
       "type": "string"
+    },
+    "key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "value": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

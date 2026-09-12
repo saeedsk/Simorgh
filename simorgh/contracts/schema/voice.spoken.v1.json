@@ -10,9 +10,30 @@
     "engine": {
       "type": "string"
     },
+    "first_audio_s": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
     "interrupted": {
       "type": [
         "boolean",
+        "null"
+      ]
+    },
+    "metrics": {
+      "additionalProperties": true,
+      "properties": {},
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "response": {
+      "type": [
+        "integer",
         "null"
       ]
     },
@@ -27,6 +48,18 @@
     },
     "text": {
       "type": "string"
+    },
+    "turn": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "underruns": {
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [

@@ -149,6 +149,10 @@ class Session:
     # that edits the live tree: chat and research tasks, and any code
     # task whose Execution has no worktree tools.
     worktree: str = ""
+    # Where the person is: "cli" for the typed prompt, "voice" for a
+    # spoken turn. A spoken reply is written for listening
+    # (`scaffolds.VOICE`), a typed one for reading.
+    channel: str = ""
 
     def next_step_no(self) -> int:
         return len(self.steps) + 1

@@ -57,6 +57,10 @@ class VoiceTurn:
     answered_at: float
     engine_stt: str
     engine_tts: str
+    # Per-turn diagnostics (voice/session.py): latencies in seconds
+    # (`stt`, `llm`, `first_audio`, `interruption`), `underruns`,
+    # `dropped`, `interrupted`. Metadata only, never text.
+    metrics: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -80,6 +84,100 @@ class Recogniser(Protocol):
     name: str
 
     async def transcribe(self, audio: Audio, *, language: str = "") -> Utterance: ...
+
+
+# -- the conversational pipeline's shapes (2026-09-11) ----------------------------------------
+#
+# The streaming pipeline (voice/session.py) is built from independently
+# replaceable parts speaking these: frames go in, events come out, and
+# no part knows which engine is behind another.
+
+
+@dataclass(frozen=True)
+class TranscriptEvent:
+    """What the recogniser has heard so far. A `partial` is provisional
+    and replaced by the next one; a `final` closes the utterance."""
+
+    kind: str                  # "partial" | "final"
+    text: str
+    turn_id: int
+    confidence: float = 1.0
+    language: str = ""
+    audio_seconds: float = 0.0
+    engine: str = ""
+
+
+@dataclass(frozen=True)
+class VadEvent:
+    """One frame's verdict. `speech_start`/`speech_end` fire once at the
+    edges; `speech`/`silence` every frame in between."""
+
+    kind: str                  # "speech_start" | "speech" | "silence" | "speech_end"
+    speech_ms: int = 0         # continuous speech so far
+    silence_ms: int = 0        # continuous silence so far
+    level: float = 0.0
+
+
+@dataclass(frozen=True)
+class AudioChunk:
+    """One piece of a spoken reply, in playback order. `request_id` is
+    the response it belongs to: a chunk from an old response can never
+    play in a new turn."""
+
+    pcm: bytes
+    sample_rate: int
+    request_id: str
+    seq: int
+    final: bool = False
+    text: str = ""
+    pause_ms: int = 0
+
+    @property
+    def seconds(self) -> float:
+        return len(self.pcm) / (SAMPLE_WIDTH * CHANNELS * self.sample_rate)
+
+
+@dataclass(frozen=True)
+class TtsRequest:
+    request_id: str
+    pieces: tuple[tuple[str, int], ...]   # (text, pause_ms after it)
+    voice: str = ""
+    speed: float = 1.0
+
+
+@dataclass(frozen=True)
+class PlaybackState:
+    state: str                 # "started" | "chunk" | "finished" | "stopped"
+    request_id: str
+    seq: int = -1
+
+
+class SpeechToTextProvider(Protocol):
+    name: str
+
+    def start_stream(self, frames, *, turn_id: int, language: str = ""):
+        """`frames`: an async iterable of PCM frames. Yields `TranscriptEvent`s."""
+        ...
+
+    async def stop(self) -> None: ...
+
+
+class TextToSpeechProvider(Protocol):
+    name: str
+
+    async def warmup(self) -> float: ...
+
+    def synthesise_stream(self, request: TtsRequest):
+        """Yields `AudioChunk`s as they are ready."""
+        ...
+
+    async def cancel(self, request_id: str) -> None: ...
+
+    def list_voices(self) -> list[str]: ...
+
+
+class VoiceActivityDetector(Protocol):
+    def process(self, frame: bytes) -> VadEvent: ...
 
 
 class Synthesiser(Protocol):
@@ -109,5 +207,7 @@ class Speaker(Protocol):
         ...
 
 
-__all__ = ["Audio", "CHANNELS", "Microphone", "Recogniser", "SAMPLE_RATE", "SAMPLE_WIDTH", "Speaker",
-           "Synthesiser", "Utterance", "VoiceState", "VoiceTurn"]
+__all__ = ["Audio", "AudioChunk", "CHANNELS", "Microphone", "PlaybackState", "Recogniser", "SAMPLE_RATE",
+           "SAMPLE_WIDTH", "Speaker", "SpeechToTextProvider", "Synthesiser", "TextToSpeechProvider",
+           "TranscriptEvent", "TtsRequest", "Utterance", "VadEvent", "VoiceActivityDetector", "VoiceState",
+           "VoiceTurn"]

@@ -48,6 +48,34 @@ class FakeMicrophone:
                 return Audio(pcm[:i + frame], self._audio.sample_rate)
         return self._audio
 
+    async def stream(self, *, max_seconds: float = 0.0):
+        """The audio, frame by frame, then silence for as long as anyone
+        keeps reading -- a fake room that goes quiet after the person
+        has spoken. `feed(audio)` queues more speech for later."""
+        import asyncio
+
+        frame = SAMPLE_RATE * 30 // 1000 * SAMPLE_WIDTH
+        self._queue = getattr(self, "_queue", [])
+        self._queue.insert(0, self._audio.pcm)
+        served = 0
+        limit = int(max_seconds * SAMPLE_RATE) * SAMPLE_WIDTH if max_seconds else 0
+        while True:
+            pcm = self._queue.pop(0) if self._queue else b"\x00" * frame * 10
+            for i in range(0, len(pcm), frame):
+                if self._delay:
+                    await asyncio.sleep(self._delay)
+                else:
+                    await asyncio.sleep(0)
+                chunk = pcm[i:i + frame]
+                served += len(chunk)
+                yield chunk
+                if limit and served >= limit:
+                    return
+
+    def feed(self, audio: Audio) -> None:
+        self._queue = getattr(self, "_queue", [])
+        self._queue.append(audio.pcm)
+
 
 class FakeSpeaker:
     """Records what was played; with `realtime=True` it takes as long

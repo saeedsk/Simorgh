@@ -12,9 +12,20 @@
         "listening",
         "idle",
         "muted",
-        "speaking"
+        "speaking",
+        "user_speaking",
+        "thinking",
+        "agent_speaking",
+        "interrupted",
+        "error"
       ],
       "type": "string"
+    },
+    "turn": {
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [

@@ -314,6 +314,25 @@ Stop only after you have actually looked and found nothing, and then
 say what you looked for. A Guardian denial is different -- that is an
 answer, and you do not route around it."""
 
+# Applied only when the reply will be SPOKEN (`Session.channel ==
+# "voice"`). The spoken-response planner (voice/planner.py) strips what
+# a screen needs anyway; this is the model writing for the ear in the
+# first place, which no amount of stripping can do afterwards.
+VOICE = """\
+You are answering by voice: the person hears this, they do not read it.
+
+Write for listening, not reading. Lead with the answer, then the next
+useful detail. Use short, complete sentences and natural transitions.
+Keep most answers to two or three sentences unless the person asks for
+depth. A small connector such as "Okay," "Yeah," "Right," "Ah," or
+"Hmm" is optional and only right when it genuinely reflects the
+conversation; never use one by default and never more than once.
+No markdown, headings, bullets, citations, raw URLs or code unless
+asked: for anything precise -- a command, a path, a number that
+matters -- say it plainly in words and offer the exact text on screen.
+Do not pretend to be human or claim feelings. Say plainly when you are
+unsure. Answer in the language the person spoke."""
+
 _BY_SCAFFOLD: dict[str, str] = {
     "patch": _PATCH,
     "skill": _SKILL,
@@ -324,7 +343,7 @@ _BY_SCAFFOLD: dict[str, str] = {
 
 
 def render(profile: Profile, *, subject: str | None = None, task: str | None = None,
-           unavailable: str = "") -> str:
+           unavailable: str = "", channel: str = "") -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -336,6 +355,8 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         # pair this text tells the model to reach for -- was never shown
         # it.
         body = f"{body}\n\n{_RESOURCEFUL}"
+    if channel == "voice":
+        body = f"{VOICE}\n\n{body}" if body else VOICE
     if task:
         # The task belongs in `task_rules` because that block is
         # *protected* -- never compacted (04 section 4.6). As a plain user

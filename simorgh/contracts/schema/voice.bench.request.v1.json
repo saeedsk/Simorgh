@@ -1,0 +1,17 @@
+{
+  "$id": "https://simorgh.local/schema/voice.bench.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "play=false skips the one audible step (measuring how fast the speaker stops).",
+  "properties": {
+    "play": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "voice.bench.request",
+  "type": "object"
+}

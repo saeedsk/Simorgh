@@ -136,3 +136,18 @@ class TestTheRulesReachCognition(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheVoiceChannel(unittest.TestCase):
+    """A spoken reply is written for the ear: the voice guidance is in
+    the rules for a `channel == "voice"` session and nowhere else."""
+
+    def test_voice_guidance_only_for_the_voice_channel(self) -> None:
+        from simorgh.orchestration import profiles, scaffolds
+
+        spoken = scaffolds.render(profiles.CHAT, channel="voice")
+        typed = scaffolds.render(profiles.CHAT, channel="cli")
+        self.assertIn("Write for listening, not reading", spoken)
+        self.assertIn("never more than once", spoken)
+        self.assertNotIn("Write for listening", typed)
+        self.assertNotIn("Write for listening", scaffolds.render(profiles.CHAT))

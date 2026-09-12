@@ -21,7 +21,7 @@ from pathlib import Path
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event
 
-from .api import Audio, Utterance, VoiceTurn
+from .api import Audio, AudioChunk, TtsRequest, Utterance, VoiceTurn
 from .audio import write_wav
 from .config import Config
 from .vad import BargeInEndpointer, CompositeDetector, EnergyDetector, Endpointer
@@ -230,48 +230,70 @@ class Pipeline:
             self._pending.pop(session_id, None)
 
     async def speak(self, text: str, *, session_id: str | None = None, voice: str = "") -> str:
-        """Say `text` aloud. Returns what was actually spoken (markdown
-        removed); an empty reply is spoken as a short honest line.
+        """Say `text` aloud. Returns what was actually spoken (planned for
+        the ear: markdown, links and code out, the answer in pieces); an
+        empty reply is spoken as a short honest line.
 
-        With `barge_in` on, the microphone stays open while Sim speaks.
-        The creator, 2026-09-10: "I want sim to stop talking as soon as
-        I start talking." `barge_in_speech_ms` of a person's speech --
+        Spoken piece by piece as each is synthesised, so the first
+        sentence plays while the rest is still being made. With
+        `barge_in` on, the microphone stays open while Sim speaks. The
+        creator, 2026-09-10: "I want sim to stop talking as soon as I
+        start talking." `barge_in_speech_ms` of a person's speech --
         measured over the level the mic hears of Sim's own voice --
         stops playback at once, and the interrupting words are kept as
         the start of the next turn (`self.pending_audio`), not thrown
         away with the echo."""
-        said = spoken_form(text) or "I have nothing to say to that."
+        from .planner import SpokenResponsePlanner
+        from .tts.streaming import StreamingSynthesiser
+
+        plan = SpokenResponsePlanner(max_sentences=self._config.max_spoken_sentences,
+                                     connectors=False).plan(text)
+        said = plan.text
+        request_id = session_id or str(uuid.uuid4())
+        if not isinstance(self._tts, StreamingSynthesiser):
+            self._tts = StreamingSynthesiser(self._tts, lookahead=self._config.tts_lookahead)
+        request = TtsRequest(request_id=request_id, pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
+                             voice=voice or self._config.tts_voice, speed=self._config.tts_speed)
         self.speaking = True
         self.pending_audio = None
-        interrupted = False
         await self._announce("speaking")
         try:
-            audio: Audio = await self._tts.synthesise(said, voice=voice or self._config.tts_voice,
-                                                      speed=self._config.tts_speed)
-            if self._config.barge_in and self._mic is not None:
-                interrupted = await self._play_interruptibly(audio)
-            else:
-                await self._speaker.play(audio)
+            report = await self._play_stream_interruptibly(self._tts.synthesise_stream(request), request_id)
         finally:
             self.speaking = False
             await self._announce("idle")
         self.last_said = said
         await self._publish(topics.VOICE_SPOKEN, {
-            "text": said, "seconds": audio.seconds,
+            "text": said, "seconds": report.seconds,
             # The engine that spoke THIS reply: a polyglot synthesiser
             # picks per language, and `name` is only its primary.
             "engine": getattr(self._tts, "last_engine", None) or getattr(self._tts, "name", ""),
-            "device": self._config.device, "interrupted": interrupted,
+            "device": self._config.device, "interrupted": report.interrupted,
+            "first_audio_s": round(report.first_audio_s, 3), "underruns": report.underruns,
             **({"session_id": session_id} if session_id else {}),
         })
         return said
 
     async def _play_interruptibly(self, audio: Audio) -> bool:
-        """Play `audio` while listening; True if a person cut in. The
-        interrupting utterance, captured to its end, is left in
-        `self.pending_audio` for the next turn."""
-        play = asyncio.create_task(self._speaker.play(audio))
-        stopper = getattr(self._speaker, "stop", None)
+        """Play one `Audio` while listening; True if a person cut in. The
+        streaming path below is the real one; this wraps a whole
+        utterance as a single chunk for callers that have one."""
+        async def _one():
+            yield AudioChunk(pcm=audio.pcm, sample_rate=audio.sample_rate, request_id="one", seq=0, final=True)
+
+        report = await self._play_stream_interruptibly(_one(), "one", expected_seconds=audio.seconds)
+        return report.interrupted
+
+    async def _play_stream_interruptibly(self, chunks, request_id: str, *, expected_seconds: float = 0.0):
+        """Play a stream of chunks; with `barge_in` and a microphone, a
+        person cutting in stops the player. The interrupting utterance,
+        captured to its end, is left in `self.pending_audio`."""
+        from .playback import StreamingPlayer
+
+        player = StreamingPlayer(self._speaker)
+        if not (self._config.barge_in and self._mic is not None):
+            return await player.play_stream(chunks, request_id=request_id)
+
         loop = asyncio.get_running_loop()
 
         def _cut_in() -> None:
@@ -280,54 +302,80 @@ class Pipeline:
             # ran it on PortAudio's audio thread and died with "no
             # running event loop" the first time the creator spoke over
             # Sim (2026-09-10). Thread-safe either way now.
-            if stopper is not None:
-                loop.call_soon_threadsafe(lambda: loop.create_task(stopper()))
+            loop.call_soon_threadsafe(lambda: loop.create_task(player.stop()))
 
         voice = self._detector_factory()
         reference: list = []
         if self._config.aec and _aec_available():
             # Decide on the residual after Sim's own voice is cancelled
-            # out. Chop the reference into the same 30 ms frames the mic
-            # arrives in; a frame past the end of playback is silence,
-            # which is right -- once Sim stops, the residual is the
-            # person, uncancelled.
+            # out. The reference is what is playing, appended chunk by
+            # chunk as it plays, brought to the microphone's rate; a
+            # frame past the end of playback is silence, which is right
+            # -- once Sim stops, the residual is the person, uncancelled.
             from .aec import EchoCanceller, EchoCancellingDetector
-            from .audio import FRAME_BYTES
 
             canceller = EchoCanceller(taps=self._config.aec_taps, mu=self._config.aec_mu)
             detector = EchoCancellingDetector(voice, canceller,
                                               residual_threshold=self._config.aec_residual_threshold)
-            reference = [audio.pcm[i:i + FRAME_BYTES] for i in range(0, len(audio.pcm), FRAME_BYTES)]
         elif hasattr(voice, "raise_floor"):
             detector = voice
         else:
             # A voice detector (Silero) alone would fire on Sim's own
             # voice; pair it with a level gate calibrated to that echo.
             detector = CompositeDetector(voice, EnergyDetector(self._config.vad_threshold))
+        horizon = (expected_seconds or 120.0) + self._config.max_utterance_s
         endpointer = BargeInEndpointer(
-            detector, silence_ms=self._config.endpoint_silence_ms,
-            max_seconds=audio.seconds + self._config.max_utterance_s,
+            detector, silence_ms=self._config.endpoint_silence_ms, max_seconds=horizon,
             speech_ms=self._config.barge_in_speech_ms, on_barge_in=_cut_in,
             calibrate_frames=max(1, self._config.barge_in_calibrate_ms // 30), ratio=self._config.barge_in_ratio,
             reference=reference,
         )
-        capture = asyncio.create_task(self._mic.capture(
-            max_seconds=audio.seconds + self._config.max_utterance_s, endpointer=endpointer))
+
+        def _feed_reference(chunk: AudioChunk) -> None:
+            from .audio import FRAME_BYTES
+            from .resample import to_mic_rate
+
+            pcm = to_mic_rate(chunk.pcm, chunk.sample_rate)
+            reference.extend(pcm[i:i + FRAME_BYTES] for i in range(0, len(pcm), FRAME_BYTES))
+
+        # The reference must be in step with the microphone from the
+        # capture's first frame: a reference that starts a few frames
+        # late is a delay the canceller's taps cannot reach, and the
+        # echo comes through uncancelled as a person. So the first
+        # piece is synthesised BEFORE the capture opens, and every later
+        # piece joins the reference as it is produced, ahead of playing.
+        feed = _feed_reference if (self._config.aec and _aec_available()) else (lambda chunk: None)
+        iterator = chunks.__aiter__()
         try:
-            await play
+            first = await iterator.__anext__()
+        except StopAsyncIteration:
+            first = None
+        if first is not None:
+            feed(first)
+
+        async def _rest():
+            if first is not None:
+                yield first
+            async for chunk in iterator:
+                feed(chunk)
+                yield chunk
+
+        capture = asyncio.create_task(self._mic.capture(max_seconds=horizon, endpointer=endpointer))
+        try:
+            report = await player.play_stream(_rest(), request_id=request_id)
         finally:
             if not endpointer.barged:
                 capture.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await capture
         if not endpointer.barged:
-            return False
+            return report
         try:
             self.pending_audio = await capture
         except Exception as exc:  # noqa: BLE001 -- the interruption stands even if its tail was lost
             if self._logger is not None:
                 self._logger.warning("voice.barge_in_capture_failed", error=repr(exc))
-        return True
+        return report
 
     async def run_loop(self, stop: asyncio.Event) -> None:
         """`voice on`: listen, answer, listen again, until told to stop.
@@ -372,6 +420,7 @@ class Pipeline:
                     "heard": turn.heard[:4000], "confidence": turn.confidence, "said": turn.said[:4000],
                     "heard_at": turn.heard_at, "answered_at": turn.answered_at,
                     "engine_stt": turn.engine_stt, "engine_tts": turn.engine_tts,
+                    **({"metrics": dict(turn.metrics)} if turn.metrics else {}),
                 }))
         except Exception as exc:  # noqa: BLE001 -- the turn happened; losing its record is a warning
             if self._logger is not None:

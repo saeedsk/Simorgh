@@ -37,14 +37,14 @@ CAPABILITIES_STREAM = "capabilities"
 _CONSUMES = (
     topics.VOICE_STATUS_REQUEST, topics.VOICE_CONTROL_REQUEST, topics.VOICE_SPEAK_REQUEST,
     topics.VOICE_LISTEN_REQUEST, topics.VOICE_VOICES_REQUEST, topics.VOICE_DEVICES_REQUEST,
-    topics.VOICE_MODELS_REQUEST,
+    topics.VOICE_MODELS_REQUEST, topics.VOICE_BENCH_REQUEST,
     topics.TURN_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
 )
 _PRODUCES = (
     topics.PERCEPT_TEXT_RECEIVED, topics.VOICE_LISTENING, topics.VOICE_TRANSCRIPT, topics.VOICE_SPOKEN,
     topics.VOICE_STATUS_REPLY, topics.VOICE_CONTROL_REPLY, topics.VOICE_SPEAK_REPLY,
     topics.VOICE_LISTEN_REPLY, topics.VOICE_VOICES_REPLY, topics.VOICE_DEVICES_REPLY,
-    topics.VOICE_MODELS_REPLY,
+    topics.VOICE_MODELS_REPLY, topics.VOICE_BENCH_REPLY,
 )
 
 
@@ -109,6 +109,9 @@ class Service:
                           "synthesiser": synthesiser}
         self._loop_task: asyncio.Task | None = None
         self._loop_stop = asyncio.Event()
+        # The streaming conversation (session.py), when the microphone
+        # can stream; the older capture-then-answer loop otherwise.
+        self._session = None
         self._enabled = False
         self._muted = False
         self._problems: list[str] = []
@@ -127,6 +130,7 @@ class Service:
             topics.VOICE_VOICES_REQUEST: self._on_voices,
             topics.VOICE_DEVICES_REQUEST: self._on_devices,
             topics.VOICE_MODELS_REQUEST: self._on_models,
+            topics.VOICE_BENCH_REQUEST: self._on_bench,
         }
         for topic, handler in handlers.items():
             self._subs.append(await ctx.bus.subscribe(topic, handler))
@@ -218,7 +222,19 @@ class Service:
         self._muted = False
         if self._loop_task is None or self._loop_task.done():
             self._loop_stop = asyncio.Event()
-            self._loop_task = asyncio.create_task(pipeline.run_loop(self._loop_stop), name="voice-loop")
+            mic = pipeline._mic  # noqa: SLF001 -- the engines the pipeline was opened with
+            if hasattr(mic, "stream"):
+                from .session import VoiceSession
+
+                self._session = VoiceSession(
+                    pipeline=pipeline, config=self.config, microphone=mic, speaker=pipeline._speaker,  # noqa: SLF001
+                    recogniser=pipeline._stt, synthesiser=pipeline._tts,  # noqa: SLF001
+                    detector_factory=pipeline._detector_factory,  # noqa: SLF001
+                    clock=self._ctx.clock if self._ctx else None, logger=self._ctx.logger if self._ctx else None,
+                )
+                self._loop_task = asyncio.create_task(self._session.run(self._loop_stop), name="voice-session")
+            else:
+                self._loop_task = asyncio.create_task(pipeline.run_loop(self._loop_stop), name="voice-loop")
         return True, ""
 
     async def _turn_off(self) -> None:
@@ -234,13 +250,28 @@ class Service:
 
     def _state(self) -> dict:
         p = self._pipeline
+        session = self._session
+        listening = bool(p and p.listening and not self._muted)
+        turns = p.turns if p else 0
+        if session is not None and self._enabled:
+            listening = session.state in ("listening", "user_speaking") and not self._muted
+            turns = session.stats.turns
         state = VoiceState(
-            enabled=self._enabled, listening=bool(p and p.listening and not self._muted), muted=self._muted,
+            enabled=self._enabled, listening=listening, muted=self._muted,
             speaking=bool(p and p.speaking), stt=self._engine_names["stt"], tts=self._engine_names["tts"],
-            device=self.config.device, turns=p.turns if p else 0, last_heard=p.last_heard if p else "",
+            device=self.config.device, turns=turns, last_heard=p.last_heard if p else "",
             last_said=p.last_said if p else "", problems=list(self._problems),
         )
-        return asdict(state)
+        out = asdict(state)
+        if session is not None:
+            out["state"] = session.state
+            out["interruptions"] = session.stats.interruptions
+            out["warmup_s"] = round(session.stats.warmup_seconds, 3)
+            out["last_interruption_s"] = session.stats.last_interruption_s
+            out["partial"] = session.partial
+            if self.config.diagnostics and session.stats.last_metrics:
+                out["metrics"] = dict(session.stats.last_metrics)
+        return out
 
     # ----------------------------------------------------------- handlers
     async def _reply(self, message, type_: str, payload: dict) -> None:
@@ -265,6 +296,8 @@ class Service:
         elif action == "unmute":
             self._muted = False
             ok, detail = await self._turn_on()
+        elif action == "set":
+            ok, detail = await self._set(str(message.payload.get("key") or ""), str(message.payload.get("value") or ""))
         elif action in ("barge_on", "barge_off", "aec_on", "aec_off"):
             from dataclasses import replace
             if action in ("barge_on", "barge_off"):
@@ -283,8 +316,59 @@ class Service:
             if self._pipeline is not None:
                 self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
         else:
-            ok, detail = False, f"unknown action {action!r} (on | off | mute | unmute)"
+            ok, detail = False, f"unknown action {action!r} (on | off | mute | unmute | set)"
         await self._reply(message, topics.VOICE_CONTROL_REPLY, {"ok": ok, "detail": detail, **self._state()})
+
+    async def _set(self, key: str, raw: str) -> tuple[bool, str]:
+        """`voice set key value`: a safe setting, applied live and written
+        to the data directory's simorgh.toml so it survives a restart."""
+        from . import settings
+
+        if not key:
+            rows = "; ".join(f"{k} ({t})" for k, t, _h in settings.describe())
+            return True, f"settings you can change here: {rows}"
+        value, problem = settings.parse(key, raw)
+        if problem:
+            return False, problem
+        self.config = settings.apply(self.config, key, value)
+        if self._pipeline is not None:
+            self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
+        where = ""
+        if self._ctx is not None and getattr(self._ctx, "data_dir", None):
+            path = Path(self._ctx.data_dir).parent / "simorgh.toml"
+            try:
+                settings.persist(path, key, value)
+                where = f"; saved to {path}"
+            except OSError as exc:
+                where = f"; NOT saved ({exc})"
+        restarted = ""
+        if self._enabled and key not in ("keep_transcripts", "diagnostics", "speak_replies", "keep_audio"):
+            # The session was built from the old config: rebuild it.
+            await self._turn_off()
+            if self._pipeline is not None:
+                await self._pipeline.stop()
+                self._pipeline = None
+            ok, why = await self._turn_on()
+            restarted = " (listening again with it)" if ok else f" (could not restart: {why})"
+        return True, f"{key} = {value!r}{where}{restarted}"
+
+    async def _on_bench(self, message) -> None:
+        """`voice bench`: measure the configured engines on this machine."""
+        from .bench import run_benchmark
+
+        pipeline, why = await self._pipeline_ready()
+        if pipeline is None:
+            await self._reply(message, topics.VOICE_BENCH_REPLY, {"ok": False, "detail": why})
+            return
+        play = bool(message.payload.get("play", True))
+        try:
+            result = await run_benchmark(
+                synthesiser=pipeline._tts, recogniser=pipeline._stt, speaker=pipeline._speaker,  # noqa: SLF001
+                config=self.config, play=play)
+        except Exception as exc:  # noqa: BLE001 -- a benchmark that fails is a result too
+            await self._reply(message, topics.VOICE_BENCH_REPLY, {"ok": False, "detail": f"benchmark failed: {exc!r}"})
+            return
+        await self._reply(message, topics.VOICE_BENCH_REPLY, {"ok": True, "result": result})
 
     async def _on_speak(self, message) -> None:
         text = str(message.payload.get("text") or "").strip()

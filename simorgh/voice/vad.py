@@ -192,7 +192,12 @@ class BargeInEndpointer(Endpointer):
         self.barged = False
         # For an echo-cancelling detector: the reference (what Sim is
         # playing), one frame per mic frame. Consumed in step with feed.
-        self._reference = reference or []
+        # The caller's own list, kept by identity: the streaming path
+        # (`pipeline._play_stream_interruptibly`) appends to it as pieces
+        # are produced, so an empty list at construction is not "no
+        # reference", it is "none yet". `reference or []` silently
+        # replaced it with a private empty list and cancelled nothing.
+        self._reference = reference if reference is not None else []
         self._ref_i = 0
         self._silence_frame = b""
         if ratio is not None and hasattr(detector, "set_ratio"):
@@ -287,4 +292,65 @@ def open_detector(preferred: str = "auto", *, threshold: float = 0.5) -> tuple[o
     return EnergyDetector(threshold), ""
 
 
-__all__ = ["BargeInEndpointer", "CompositeDetector", "EnergyDetector", "Endpointer", "SileroDetector", "open_detector"]
+__all__ = ["FrameVad", "SENSITIVITY", "threshold_for", "BargeInEndpointer", "CompositeDetector", "EnergyDetector", "Endpointer", "SileroDetector", "open_detector"]
+
+
+class FrameVad:
+    """`VoiceActivityDetector`: one `VadEvent` per frame, with the running
+    lengths of the current speech or silence, over any frame detector
+    (Silero, energy, composite, echo-cancelling). `speech_start` fires
+    on the first speech frame after silence and `speech_end` on the
+    first silence frame after speech; the turn manager decides what a
+    run of silence means."""
+
+    def __init__(self, detector, *, frame_ms: int = 30, hangover_frames: int = 2) -> None:
+        self._detector = detector
+        self._frame_ms = frame_ms
+        self._hangover = max(0, hangover_frames)
+        self._speech_ms = 0
+        self._silence_ms = 0
+        self._in_speech = False
+        self._quiet_run = 0
+
+    @property
+    def name(self) -> str:
+        return getattr(self._detector, "name", "vad")
+
+    def process(self, frame: bytes):
+        from .api import VadEvent
+
+        speech = self._detector.is_speech(frame)
+        level = self._detector.rms(frame) if hasattr(self._detector, "rms") else 0.0
+        if speech:
+            self._quiet_run = 0
+            self._silence_ms = 0
+            self._speech_ms += self._frame_ms
+            if not self._in_speech:
+                self._in_speech = True
+                return VadEvent("speech_start", speech_ms=self._speech_ms, level=level)
+            return VadEvent("speech", speech_ms=self._speech_ms, level=level)
+        # A frame or two of quiet inside a word is not the end of speech.
+        if self._in_speech and self._quiet_run < self._hangover:
+            self._quiet_run += 1
+            self._speech_ms += self._frame_ms
+            return VadEvent("speech", speech_ms=self._speech_ms, level=level)
+        self._silence_ms += self._frame_ms
+        if self._in_speech:
+            self._in_speech = False
+            ended = self._speech_ms
+            self._speech_ms = 0
+            return VadEvent("speech_end", speech_ms=ended, silence_ms=self._silence_ms, level=level)
+        return VadEvent("silence", silence_ms=self._silence_ms, level=level)
+
+    def reset(self) -> None:
+        self._speech_ms = self._silence_ms = self._quiet_run = 0
+        self._in_speech = False
+
+
+SENSITIVITY = {"low": 0.7, "balanced": 0.5, "high": 0.35}
+
+
+def threshold_for(sensitivity: str, fallback: float = 0.5) -> float:
+    """`vad_sensitivity` low | balanced | high as a detector threshold;
+    a higher threshold needs a surer voice, so `low` is the strict one."""
+    return SENSITIVITY.get(str(sensitivity).lower(), fallback)

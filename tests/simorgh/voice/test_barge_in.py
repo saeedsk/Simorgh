@@ -237,7 +237,7 @@ class CompositeDetectorTestCase(unittest.TestCase):
     def test_barge_in_uses_the_composite_when_the_detector_is_a_voice_detector(self):
         from simorgh.voice import pipeline as pipeline_mod
         import inspect
-        self.assertIn("CompositeDetector(", inspect.getsource(pipeline_mod.Pipeline._play_interruptibly))
+        self.assertIn("CompositeDetector(", inspect.getsource(pipeline_mod.Pipeline._play_stream_interruptibly))
 
 
 class SileroSmokeTestCase(unittest.TestCase):
