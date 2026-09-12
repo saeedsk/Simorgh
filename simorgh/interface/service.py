@@ -780,6 +780,14 @@ class Service:
     async def _on_voice_transcript(self, message: Message) -> None:
         p = message.payload
         text = str(p.get("text") or "").strip()
+        if p.get("partial"):
+            # What is being heard so far, provisional: dim, and never
+            # mistakable for a turn (the creator's screen, 2026-09-11,
+            # showed three "you:" lines for one sentence).
+            if text:
+                self._out(render_mod.style(f"  🎤 hearing: {text[:80]}{'…' if len(text) > 80 else ''} …",
+                                           "dim", enabled=self._color))
+            return
         if not text:
             self._out(render_mod.style("  🎤 (heard nothing)", "dim", enabled=self._color))
             return

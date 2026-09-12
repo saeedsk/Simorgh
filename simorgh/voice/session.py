@@ -125,6 +125,12 @@ class VoiceSession:
         # Set whenever a candidate turn settles (discarded, or asked), so
         # a reply held for it can try again.
         self._settled = asyncio.Event()
+        # Chat sessions still running for turns the person has moved on
+        # from: turn id -> the chat's session id, cancelled when a later
+        # turn is asked. On the creator's screen (2026-09-11) five such
+        # chats ran at once, each exploring the codebase, and the
+        # replies came back late, out of order, and stale.
+        self._outstanding: dict[int, str] = {}
 
     # ------------------------------------------------------------- helpers
     @property
@@ -251,6 +257,7 @@ class VoiceSession:
             await self._tts.cancel(str(action.response_id))
         elif kind == Actions.ASK:
             self._settled.set()
+            await self._cancel_outstanding(before=action.turn_id)
             self._ask_task = asyncio.create_task(self._guarded(self._ask_and_speak(action.turn_id, action.text)))
         elif kind == Actions.SPEAK:
             pass  # handled by `_ask_and_speak`, which minted the response
@@ -270,6 +277,18 @@ class VoiceSession:
             if self.turns.state in (THINKING, AGENT_SPEAKING):
                 self.turns.state = LISTENING
                 await self._announce(self.turns.state)
+
+    async def _cancel_outstanding(self, *, before: int) -> None:
+        """Ask the Worker to stop the chats for turns older than
+        `before`: their replies would be dropped as stale anyway, and a
+        chat mid-investigation was holding the model for the turn the
+        person actually wants answered."""
+        for turn, session_id in list(self._outstanding.items()):
+            if turn < before:
+                self._outstanding.pop(turn, None)
+                await self._pipeline._publish(topics.TASK_CANCEL, {  # noqa: SLF001
+                    "task_id": session_id, "reason": "the person went on to a new turn"})
+                self._log("info", "voice.ask_cancelled", turn=turn)
 
     # ------------------------------------------------------------- hearing
     async def _frames_until_end(self, queue: asyncio.Queue):
@@ -331,9 +350,11 @@ class VoiceSession:
             return
         language = language_of(text)
         ack = asyncio.create_task(self._ack_if_slow(turn_id, text, language))
+        self._outstanding[turn_id] = session_id
         try:
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence)
         finally:
+            self._outstanding.pop(turn_id, None)
             ack.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await ack

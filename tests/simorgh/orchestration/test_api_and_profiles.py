@@ -44,3 +44,26 @@ class TestSession(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheVoiceChatProfile(unittest.TestCase):
+    """A spoken remark is answered, not investigated, and never edits a
+    file (the creator's screen, 2026-09-11: a spoken "you're not
+    responding" ended in `replace_in_file` on the live voice config)."""
+
+    def test_no_write_tools_and_a_short_budget(self) -> None:
+        from simorgh.orchestration import profiles
+        voice = profiles.for_percept("voice")
+        self.assertIs(voice, profiles.VOICE_CHAT)
+        for tool in ("apply_source_patch", "replace_in_file", "run_script", "install_package", "run_shell",
+                     "git_commit", "apply_skill"):
+            self.assertNotIn(tool, voice.tools)
+        self.assertIn("start_task", voice.tools)
+        self.assertLessEqual(voice.max_steps, 6)
+        self.assertEqual(voice.name, profiles.CHAT.name)      # still a chat turn to Cognition
+        self.assertEqual(voice.scaffold, profiles.CHAT.scaffold)
+
+    def test_typed_turns_keep_the_full_chat_profile(self) -> None:
+        from simorgh.orchestration import profiles
+        self.assertIs(profiles.for_percept("cli"), profiles.CHAT)
+        self.assertIs(profiles.for_percept(""), profiles.CHAT)

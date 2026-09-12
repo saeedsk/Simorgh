@@ -301,7 +301,7 @@ class Worker:
         the one part of `_report` this session actually needs is its
         `if session.kind == "chat": publish turn.completed` branch.
         """
-        profile = profiles.for_task("chat", "execute")
+        profile = profiles.for_percept(channel)
         session = Session(
             task_id=session_id, kind="chat", mode="execute", profile=profile,
             worker_id=self.worker_id, user_text=text, channel=channel,

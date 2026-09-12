@@ -279,3 +279,17 @@ class TestASlowModelAndANoisyRoom(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(spoken), 1)
         self.assertEqual(spoken[0]["turn"], 1)
         self.assertEqual(len(replies.asked), 1)
+
+
+class TestASupersededAskIsCancelled(unittest.IsolatedAsyncioTestCase):
+    async def test_a_new_real_turn_cancels_the_chat_still_running_for_the_old_one(self) -> None:
+        # Sim is slow; the person speaks a whole new turn meanwhile.
+        script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["first answer", "second answer"], delay=0.6)
+        session, bus, speaker, tts = _session(_config(), script, replies)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        cancels = bus.of(topics.TASK_CANCEL)
+        self.assertEqual(len(cancels), 1)
+        self.assertIn("new turn", cancels[0]["reason"])
+        spoken = bus.of(topics.VOICE_SPOKEN)
+        self.assertEqual([p["turn"] for p in spoken], [2])

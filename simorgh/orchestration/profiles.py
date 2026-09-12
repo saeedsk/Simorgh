@@ -5,6 +5,8 @@ these are the same numbers, generalized to one table.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .api import Profile
 
 CHAT = Profile(
@@ -163,6 +165,26 @@ SKILL = Profile(
            "apply_skill", "replace_in_file", "git_commit", "git_discard"),
     read_only=False, max_steps=20, max_revisions=2, scaffold="skill", max_output_tokens=16_000,
 )
+
+# A SPOKEN chat turn. The creator's screen, 2026-09-11: "you're not
+# responding" became a 25-step exploration -- self_map, search_code,
+# read_file, and finally `replace_in_file` on the live voice config --
+# while the person waited in silence. A spoken remark is answered from
+# what the model knows, quickly; a spoken REQUEST for work becomes a
+# task (`start_task`) that runs on its own and reports back. No tool
+# here writes a file, and four steps is room for one lookup, not a
+# dig.
+VOICE_CHAT = replace(
+    CHAT,
+    tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task"),
+    max_steps=4,
+)
+
+
+def for_percept(channel: str) -> Profile:
+    """The profile for a conversational percept on `channel`."""
+    return VOICE_CHAT if channel == "voice" else CHAT
+
 
 BY_KIND: dict[str, Profile] = {
     "chat": CHAT,
