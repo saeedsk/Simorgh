@@ -2,10 +2,16 @@
   "$id": "https://simorgh.local/schema/voice.transcript.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "echo=true: the words were Sim's own reply coming back through the microphone; not a turn. partial=true: provisional, replaced by the next transcript for the same turn.",
+  "description": "echo=true: the words were Sim's own reply coming back through the microphone; not a turn. corrected=true: the same turn, read through the recogniser's mistakes (cognition/tidy.py). partial=true: provisional, replaced by the next transcript for the same turn.",
   "properties": {
     "confidence": {
       "type": "number"
+    },
+    "corrected": {
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "device": {
       "type": "string"

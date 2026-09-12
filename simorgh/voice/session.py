@@ -379,6 +379,7 @@ class VoiceSession:
         if command is not None:
             await self._obey(turn_id, command)
             return
+        text = await self._tidy(text, turn_id)
         if clock.confidence < self._config.min_confidence:
             reply = NOT_SURE.format(text=text)
             clock.reply_at = self._now()
@@ -439,6 +440,22 @@ class VoiceSession:
             self._last_aside_at = self._now()
             self._turns_since_connector = 0
             self._previous_connector = "okay"
+
+    async def _tidy(self, text: str, turn_id: int) -> str:
+        """What the recogniser wrote, as Sim should read it (cognition/
+        tidy.py); a change is announced as a corrected transcript."""
+        if not self._config.tidy:
+            return text
+        from simorgh.cognition.tidy import tidy
+
+        tidied = await tidy(self._pipeline._bus, text,  # noqa: SLF001 -- the same bus the ask goes on
+                            recent=[self._last_user_text, self._pipeline.last_said])
+        if tidied.changed:
+            await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
+                "text": tidied.text, "confidence": 1.0, "seconds": 0.0, "engine": "tidy",
+                "device": self._config.device, "corrected": True, "turn": turn_id})
+            self._last_user_text = tidied.text
+        return tidied.text
 
     async def _obey(self, turn_id: int, command: str) -> None:
         """"Stop", "be quiet", "voice off": done here and now, the model

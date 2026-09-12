@@ -402,6 +402,18 @@ class TestTheBackchannel(unittest.IsolatedAsyncioTestCase):
         self.assertFalse([p for p in bus.of(topics.VOICE_SPOKEN) if p.get("aside")])
 
 
+class TestMisheardName(unittest.IsolatedAsyncioTestCase):
+    async def test_seem_do_something_reaches_sim_as_sim_and_the_screen_shows_the_reading(self) -> None:
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["On it."])
+        heard = FakeRecogniser("Seem do something", 0.95)
+        session, bus, speaker, tts = _session(_config(), script, replies, recogniser=heard)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        self.assertEqual(replies.asked, ["Sim, do something"])
+        corrected = [p for p in bus.of(topics.VOICE_TRANSCRIPT) if p.get("corrected")]
+        self.assertEqual([p["text"] for p in corrected], ["Sim, do something"])
+
+
 class TestSpokenCommands(unittest.IsolatedAsyncioTestCase):
     """"Stop" and "voice off", said aloud, are obeyed at once and never
     sent to the model (the creator, 2026-09-11: saying "voice off"

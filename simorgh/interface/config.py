@@ -32,6 +32,10 @@ class Config:
     # restores the previous behaviour, where autonomous work ran
     # silently and only a watched task ever printed anything.
     narrate_autonomous: bool = True
+    # Read through typos before a typed line is answered (cognition/
+    # tidy.py): a line that looks garbled gets one short model call and
+    # the screen shows what it was read as. The creator, 2026-09-12.
+    tidy_input: bool = True
     # Print a line per step for autonomous work too, not just the
     # start and the outcome. "verbose as hell", their words.
     narrate_steps: bool = True

@@ -52,6 +52,7 @@ scrolling line.
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import sys
 import threading
 import time
@@ -133,6 +134,7 @@ class Service:
         self._dashboard_line = ""
         self._tui = None            # the prompt_toolkit prompt, when available
         self._last_done = None      # (word, elapsed, clock) of the turn that just finished, until the next line
+        self._recent_text: deque = deque(maxlen=12)  # what was said lately, for tidy's names and terms
         self._tui_task = None
         self._footer = ""           # what the sticky footer under the prompt shows
         # What every task actually is, so a narration line can name the
@@ -700,6 +702,20 @@ class Service:
             return
         self._set_footer(activity_mod.footer(self._book, now=time.monotonic()))
 
+    async def _tidy(self, text: str) -> str:
+        """The line as Sim reads it: typos fixed, run-together words
+        split, "Seem" made "Sim" -- shown as `↳ read as:` when anything
+        changed, so the person sees what was understood."""
+        if not self.config.tidy_input or self._ctx is None:
+            return text
+        from simorgh.cognition.tidy import tidy
+
+        tidied = await tidy(self._ctx.bus, text, recent=list(self._recent_text))
+        self._recent_text.append(tidied.text)
+        if tidied.changed:
+            self._out(render_mod.style(f"  ↳ read as: {tidied.text}", "dim", enabled=self._color))
+        return tidied.text
+
     async def _handle_chat(self, text: str) -> None:
         # A paused system runs no sessions, so no answer is coming. This
         # used to publish the percept and then wait `chat_reply_timeout_s`
@@ -725,6 +741,7 @@ class Service:
         # leaving the other one to time out with a false "no response" --
         # a real bug live-caught only once `run_repl=True` actually ran
         # (milestone 106).
+        text = await self._tidy(text)
         session_id = str(uuid.uuid4())
         fut: asyncio.Future = self._loop.create_future()
         self._pending_turns[session_id] = fut
@@ -759,6 +776,7 @@ class Service:
             reply_text = await asyncio.wait_for(fut, timeout=self.config.chat_reply_timeout_s)
             self._live.clear()
             if reply_text:
+                self._recent_text.append(reply_text[:300])
                 unicode = render_mod.unicode_mode(self.config.unicode) != "off"
                 print(render_mod.reply_block(reply_text, enabled=self._color, unicode=unicode))
             else:
@@ -810,6 +828,9 @@ class Service:
         if p.get("echo"):
             self._out(render_mod.style(f"  🎤 (my own voice, ignored: {text[:60]}{'...' if len(text) > 60 else ''})",
                                        "dim", enabled=self._color))
+            return
+        if p.get("corrected"):
+            self._out(render_mod.style(f"  ↳ read as: {text}", "dim", enabled=self._color))
             return
         conf = p.get("confidence")
         tail = f"  ({conf:.0%})" if isinstance(conf, (int, float)) and conf < 0.999 else ""

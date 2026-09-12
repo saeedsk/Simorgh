@@ -276,6 +276,12 @@ def _style():
         "sim.rule": "#3a3a3a",
         "sim.footer": "#6c6c6c",
         "sim.live": "#d0d0d0",
+        # prompt_toolkit reverses the toolbar's colours by default, which
+        # reads as a light band across the bottom (the creator,
+        # 2026-09-12: "weird light background color, I expect regular
+        # black"). Plain text on the terminal's own background.
+        "bottom-toolbar": "noreverse",
+        "bottom-toolbar.text": "noreverse",
         "sim.status": "#8a8a8a",
         **shades,
         "completion-menu.completion": "bg:#1c1c1c #d0d0d0",
@@ -376,7 +382,10 @@ class Tui:
             key_bindings=bindings,
             multiline=False,          # Enter submits; c-j / M-Enter insert newlines
             mouse_support=False,      # keeps terminal scrollback and copy/paste working
-            reserve_space_for_menu=6,
+            # 6 until 2026-09-12: six blank lines between the prompt and
+            # the ribbon, always (the creator's screenshot). 0: the
+            # completion menu floats over the ribbon while it is open.
+            reserve_space_for_menu=0,
             refresh_interval=PANEL_REFRESH_S,
         )
 

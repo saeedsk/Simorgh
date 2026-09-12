@@ -76,6 +76,33 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
             await self.service._handle_line(text)
         return buf.getvalue()
 
+    async def test_a_garbled_line_is_read_through_and_the_screen_says_how(self):
+        """The creator, 2026-09-12: "Sim let sdo somethin gfunnty tday,
+        ther isan even onlne called agencon" should be read as "Sim lets
+        do something funny today, there is an event online called
+        agentcon". A fake cognition answers the tidy call; the percept
+        Sim answers carries the corrected text."""
+        from simorgh.cognition.tidy import dictionary
+        if not dictionary():
+            self.skipTest("no system word list on this machine")
+        garbled = "Sim let sdo somethin gfunnty tday, ther isan even onlne called agencon"
+        clean = "Sim lets do something funny today, there is an event online called agentcon"
+        percepts = []
+
+        async def _cognition(message):
+            await self.other.reply(message, type=topics.COGNITION_THINK_REPLY, payload={
+                "text": clean, "tool_calls": [], "provider": "fake", "cost_usd": 0.0, "tokens": 0,
+                "floor": False, "non_answer": False, "edit_blocks": [],
+                "compaction": {"layers_applied": [], "tokens_before": 0, "tokens_after": 0, "summary_ref": ""}})
+
+        async def _percept(message):
+            percepts.append(message.payload["text"])
+        await self.other.subscribe(topics.COGNITION_THINK, _cognition)
+        await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _percept)
+        out = await self._line(garbled)
+        self.assertIn(f"read as: {clean}", out)
+        self.assertEqual(percepts, [clean])
+
     async def test_ui_notice_renders(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):

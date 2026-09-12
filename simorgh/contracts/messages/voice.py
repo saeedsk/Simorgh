@@ -55,8 +55,9 @@ VoiceBenchRequest = define(t.VOICE_BENCH_REQUEST, [O("play", Bool)],
 VoiceBenchReply = define(t.VOICE_BENCH_REPLY, [O("detail", Str), O("result", Obj())])
 VoiceTranscript = define(t.VOICE_TRANSCRIPT, [
     F("text", Str), F("confidence", Float), F("seconds", Float), F("engine", Str), F("device", Str),
-    O("session_id", Str), O("echo", Bool), O("partial", Bool), O("turn", Int),
+    O("session_id", Str), O("echo", Bool), O("partial", Bool), O("turn", Int), O("corrected", Bool),
 ], doc="echo=true: the words were Sim's own reply coming back through the microphone; not a turn. "
+       "corrected=true: the same turn, read through the recogniser's mistakes (cognition/tidy.py). "
        "partial=true: provisional, replaced by the next transcript for the same turn.")
 VoiceSpoken = define(t.VOICE_SPOKEN, [F("text", Str), F("seconds", Float), F("engine", Str), F("device", Str),
                                        O("session_id", Str), O("interrupted", Bool), O("turn", Int),
