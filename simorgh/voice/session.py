@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from simorgh.contracts import topics
 
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
-from .backchannel import GREETING, HEARD, Backchannel, addressed, classify, is_quiet, strip_lead
+from .backchannel import GREETING, Backchannel, addressed, classify, is_quiet, strip_lead
 from .commands import MUTE, OFF, STOP, spoken_command
 from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply
 from .config import Config
@@ -556,7 +556,7 @@ class VoiceSession:
             return
         self._last_hum_at = now
         language = language_of(self.partial) if self.partial else language_of(self._last_user_text)
-        text = self._backchannel.pick(HEARD, language)
+        text = self._backchannel.hum(language)
         self._hum_task = asyncio.create_task(self._say_aside(f"hum-{self.turns.turn_id}", text,
                                                              delivery=REGISTERS["hum"]))
 

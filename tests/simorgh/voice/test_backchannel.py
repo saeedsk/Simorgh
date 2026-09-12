@@ -42,9 +42,11 @@ class TestPick(unittest.TestCase):
         # Kokoro read "Mm-hm." as letters (the creator, 2026-09-11); and
         # "Noted." / "Good question." / "Okay, okay." are not a listener.
         every = [t for pool in POOLS.values() for texts in pool.values() for t in texts]
-        for bad in ("Mm-hm.", "Mm.", "Noted.", "Good question.", "Hmm, good question.", "Okay, okay.", "Right, right."):
+        for bad in ("Mm-hm.", "Mm.", "Uh-huh.", "Noted.", "Good question.", "Hmm, good question.", "Okay, okay.",
+                    "Right, right."):
             self.assertNotIn(bad, every)
-        self.assertIn("Uh-huh.", POOLS[HEARD]["en"])
+        from simorgh.voice.backchannel import HUM
+        self.assertNotIn("Uh-huh.", HUM["en"])  # the creator did not like the sound of it (2026-09-12)
         self.assertIn("اوهوم.", POOLS[HEARD]["fa"])
 
     def test_a_greeting_falls_back_to_the_neutral_pool(self) -> None:

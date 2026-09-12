@@ -445,8 +445,8 @@ class TestDelivery(unittest.IsolatedAsyncioTestCase):
         await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
         hums = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("register") == "hum"]
         self.assertEqual(len(hums), 1, [p.get("text") for p in bus.of(topics.VOICE_SPOKEN)])
-        from simorgh.voice.backchannel import HEARD, POOLS
-        self.assertIn(hums[0]["text"], POOLS[HEARD]["en"])
+        from simorgh.voice.backchannel import HUM
+        self.assertIn(hums[0]["text"], HUM["en"])
         self.assertEqual(len(replies.asked), 1)
 
     async def test_no_hum_for_a_short_remark(self) -> None:
