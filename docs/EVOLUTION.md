@@ -4854,3 +4854,14 @@ Still ahead, roughly in order:
     the boot once the answer is "not set up"); the relays start in
     parallel; the page polls the light `/api/dash/streams` every ten
     seconds and rebuilds a player that has shown no frame for 45 s.
+
+    **Two more, from the creator's screenshots (2026-09-12, late):**
+    the Cameras view's big tiles stayed grey while the strip played --
+    the strip's refresh, sixty milliseconds after the view rendered,
+    destroyed every player on the page, the grid's included; each now
+    owns its players. And "I stopped Sim, the TV still shows the
+    dashboard and the video plays" -- the page runs in the TV's own
+    browser and YouTube streams from YouTube, so a dead Sim looked like
+    a live dashboard; after five missed polls (20 s) the page dims,
+    says "Sim is offline", drops the video and the camera players, and
+    picks everything up again on its own when Sim answers.

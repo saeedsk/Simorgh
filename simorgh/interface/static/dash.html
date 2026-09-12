@@ -30,6 +30,12 @@ background:rgba(255,255,255,.09);border:1px solid var(--stroke2);box-shadow:inse
 .dot.on{background:rgba(240,189,131,.24);border-color:rgba(240,189,131,.6);}
 .dot svg{stroke:var(--dim);} .dot.on svg{stroke:var(--gold);}
 #stage{flex:1;min-height:0;}
+#offline{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;
+background:rgba(6,6,11,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:9;text-align:center;}
+#offline img{height:120px;opacity:.9;filter:drop-shadow(0 4px 18px rgba(0,0,0,.6));}
+#offline .t{font-size:26px;letter-spacing:.5px;}
+#offline .s{font-size:13px;color:var(--dim);max-width:640px;line-height:1.5;}
+body.offline #offline{display:flex;} body.offline #stage,body.offline #camstrip{filter:grayscale(.6) brightness(.55);}
 .grid{display:grid;gap:12px;height:100%;min-height:0;}
 .card{padding:13px;min-width:0;min-height:0;overflow:hidden;}
 .col{display:flex;flex-direction:column;height:100%;min-height:0;}
@@ -94,6 +100,7 @@ a{color:var(--warm);}
   </div>
   <div id="camstrip" class="glass"></div>
   <div id="stage"></div>
+  <div id="offline"><img src="/logo.png" alt=""><div class="t">Sim is offline</div><div class="s">This page runs on the TV; Sim stopped answering it. The video and the camera feeds are paused until it is back. Start Sim again — the page reconnects on its own — or stop the cast from the TV.</div><div class="faint" id="offline-since" style="font-size:11px;"></div></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.6.15/hls.min.js"></script>
 <script>
@@ -117,8 +124,16 @@ function randWP(){ return WP.length? WP[Math.floor(Math.random()*WP.length)] : n
 
 // ---- live state ----
 let ACT=[],STATUS={},TV={},DATA=null,DATA_AT=0,CUR="deck",TF="1D",SEL="",PIN="",ROT=0,rotTimer=null,appliedSince=0;
+// Sim gone: the page is on the TV's own browser and keeps running; after five failed polls (20 s) it says so, dims,
+// and drops the video and camera players so a dead Sim does not look like a live dashboard.
+let OFFLINE_MISSES=0,OFFLINE=false,OFFLINE_AT=0;
+function setOffline(on){if(on===OFFLINE)return;OFFLINE=on;document.body.classList.toggle("offline",on);
+  if(on){OFFLINE_AT=Date.now();closeLive();CAMKEY="";const np=$("#dk-np");if(np){np.innerHTML="";DK.np="";}}
+  else{CAMKEY="";CAMVIEWKEY="";loadData();refreshStrip();if(CUR==="deck")refreshDeck(true);else render();}}
+setInterval(()=>{if(OFFLINE){const s=Math.round((Date.now()-OFFLINE_AT)/1000);$("#offline-since").textContent="offline for "+(s<90?s+" s":Math.round(s/60)+" min");}},1000);
 async function poll(){
-  try{const a=await (await fetch(q("/api/activity?limit=40"))).json();ACT=(a.events||[]).slice().reverse();$("#net").innerHTML=(a.pending_turns||[]).length?'<span class="warm">✻ thinking</span>':'<span class="green">● online</span>';}catch(e){$("#net").innerHTML='<span class="red">● offline</span>';}
+  try{const a=await (await fetch(q("/api/activity?limit=40"))).json();ACT=(a.events||[]).slice().reverse();$("#net").innerHTML=(a.pending_turns||[]).length?'<span class="warm">✻ thinking</span>':'<span class="green">● online</span>';OFFLINE_MISSES=0;setOffline(false);}
+  catch(e){$("#net").innerHTML='<span class="red">● offline</span>';OFFLINE_MISSES++;if(OFFLINE_MISSES>=5)setOffline(true);return;}
   try{STATUS=await (await fetch(q("/api/status"))).json();}catch(e){}
   try{TV=await (await fetch(q("/api/tv/state"))).json();}catch(e){}
   try{const st=await (await fetch(q("/api/dash/state"))).json();applyState(st);}catch(e){}
@@ -310,19 +325,22 @@ function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-temp
   +'</div></div>';}
 // ---- the camera strip: every relay that is live (cameras show all dash) plays through hls.js; a camera with
 // no relay shows its newest still. Rebuilt only when the set of feeds changes, so players are not restarted.
-let CAM_LIVE_MAX=8,VIDEO_QUALITY="light";let CAMKEY="",HLS_PLAYERS=[],RTC_PEERS=[],LIVE_ASKED=0;
+let CAM_LIVE_MAX=8,VIDEO_QUALITY="light";let CAMKEY="",LIVE_ASKED=0;
+// Two sets of players: the strip's and the Cameras view's. Each is torn down only by its own owner -- the strip's
+// refresh once destroyed the grid's players sixty milliseconds after they were mounted (the creator's screenshot).
+const PLAYERS={strip:{hls:[],rtc:[]},grid:{hls:[],rtc:[]}};
 async function pollStreams(){ // the strip's own poll: what is live now, every ten seconds
   try{const r=await (await fetch(q("/api/dash/streams"))).json();if(!DATA)return;DATA.streams=r.streams||[];DATA.cameras=r.cameras||[];DATA.ring_cameras=r.ring_cameras||[];refreshStrip();
     if(CUR==="cameras")render();}catch(e){}}
 function watchPlayers(){ // a live tile that has shown no frame for a while gets its player rebuilt
   document.querySelectorAll(".ctile video").forEach(v=>{if(v.readyState>=2){v._stuck=0;return;}v._stuck=(v._stuck||0)+1;
-    if(v._stuck>=3){v._stuck=0;CAMKEY="";CAMVIEWKEY="";refreshStrip();if(CUR==="cameras")render();}});}
+    if(v._stuck>=3){v._stuck=0;if(v.closest("#camstrip")){CAMKEY="";refreshStrip();}else{CAMVIEWKEY="";if(CUR==="cameras")render();}}});}
 async function ensureCamerasLive(){ // no Reolink relay is live: ask Sim to start them (cam_stream mode dash, through Guardian)
   if(Date.now()-LIVE_ASKED<90*1000)return;LIVE_ASKED=Date.now();
   try{const r=await fetch(q("/api/dash/cameras/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
     if(r.ok){setTimeout(loadData,8000);}}catch(e){}}
-async function ringLive(tile,video){ // Ring live view: WebRTC with Ring's servers, Sim carrying the SDP offer and answer
-  const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});RTC_PEERS.push(pc);
+async function ringLive(tile,video,set){ // Ring live view: WebRTC with Ring's servers, Sim carrying the SDP offer and answer
+  const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});set.rtc.push(pc);
   pc.addTransceiver("video",{direction:"recvonly"});pc.addTransceiver("audio",{direction:"recvonly"});
   pc.ontrack=e=>{if(!video.srcObject)video.srcObject=e.streams[0];video.play().catch(()=>{});};
   const offer=await pc.createOffer();await pc.setLocalDescription(offer);
@@ -332,14 +350,17 @@ async function ringLive(tile,video){ // Ring live view: WebRTC with Ring's serve
   await pc.setRemoteDescription({type:"answer",sdp:body.sdp});
   const session=body.session;pc._session=session;pc._camera=tile.name;
   pc._keep=setInterval(()=>{fetch(q("/api/dash/ring/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:tile.name,action:"keepalive",session})}).catch(()=>{});},20000);
-  pc.onconnectionstatechange=()=>{if(["failed","disconnected","closed"].includes(pc.connectionState)){clearInterval(pc._keep);const cap=video.parentElement&&video.parentElement.querySelector(".tag");if(cap)cap.textContent="ring · reconnecting";setTimeout(()=>{if(RTC_PEERS.includes(pc)){RTC_PEERS=RTC_PEERS.filter(x=>x!==pc);ringLive(tile,video).catch(()=>{});}},15000);}};}
-function closeLive(){HLS_PLAYERS.forEach(h=>{try{h.destroy();}catch(e){}});HLS_PLAYERS=[];
-  RTC_PEERS.forEach(pc=>{try{clearInterval(pc._keep);if(pc._session)fetch(q("/api/dash/ring/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:pc._camera,action:"close",session:pc._session})}).catch(()=>{});pc.close();}catch(e){}});RTC_PEERS=[];}
-function mountLive(root,tiles){ // attach players to the tiles just rendered under `root`
+  pc.onconnectionstatechange=()=>{if(["failed","disconnected","closed"].includes(pc.connectionState)){clearInterval(pc._keep);const cap=video.parentElement&&video.parentElement.querySelector(".tag");if(cap)cap.textContent="ring · reconnecting";setTimeout(()=>{if(set.rtc.includes(pc)){set.rtc=set.rtc.filter(x=>x!==pc);ringLive(tile,video,set).catch(()=>{});}},15000);}};}
+function closeLive(which){ // "strip", "grid", or nothing for both
+  Object.keys(PLAYERS).filter(k=>!which||k===which).forEach(k=>{const set=PLAYERS[k];
+    set.hls.forEach(h=>{try{h.destroy();}catch(e){}});set.hls=[];
+    set.rtc.forEach(pc=>{try{clearInterval(pc._keep);if(pc._session)fetch(q("/api/dash/ring/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:pc._camera,action:"close",session:pc._session})}).catch(()=>{});pc.close();}catch(e){}});set.rtc=[];});}
+function mountLive(root,tiles,which){ // attach players to the tiles just rendered under `root`, owned by `which`
+  const set=PLAYERS[which||"strip"];
   tiles.forEach((t,i)=>{const v=root.querySelector('.ctile[data-i="'+i+'"] video');if(!v)return;
-    if(t.rtc){ringLive(t,v).catch(()=>{const cap=v.parentElement.querySelector(".tag");if(cap)cap.textContent="ring · no live view";});return;}
+    if(t.rtc){ringLive(t,v,set).catch(()=>{const cap=v.parentElement.querySelector(".tag");if(cap)cap.textContent="ring · no live view";});return;}
     if(!t.live)return;
-    if(window.Hls&&Hls.isSupported()){const h=new Hls({lowLatencyMode:true,liveSyncDurationCount:2,maxBufferLength:6,enableWorker:true});h.loadSource(q(t.url));h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play().catch(()=>{}));HLS_PLAYERS.push(h);}
+    if(window.Hls&&Hls.isSupported()){const h=new Hls({lowLatencyMode:true,liveSyncDurationCount:2,maxBufferLength:6,enableWorker:true});h.loadSource(q(t.url));h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play().catch(()=>{}));set.hls.push(h);}
     else if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=q(t.url);v.play().catch(()=>{});}});}
 function tileHTML(t,i){return '<div class="ctile" data-i="'+i+'">'+((t.live||t.rtc)?'<video muted autoplay playsinline'+(t.img?' poster="'+esc(t.img)+'?t='+Math.floor(t.at||0)+'"':'')+'></video>':(t.img?'<img src="'+esc(t.img)+'?t='+Math.floor((t.at||0))+'" alt="">':''))
     +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+((t.live||t.rtc)?' live':'')+'">'+(t.live?"● live":t.rtc?"● ring live":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>';}
@@ -351,13 +372,13 @@ function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live)
     tiles.push({key:(rtc?"ring:":"still:")+c.name,name:c.name,rtc,kind:"ring",img:st?st.url:null,at:st?st.at:0});named.add(c.name.toLowerCase());});
   stills.forEach(c=>{if(!named.has(c.name.toLowerCase())){tiles.push({key:"still:"+c.name,name:c.name,live:false,img:c.url,at:c.at,kind:c.kind});named.add(c.name.toLowerCase());}});
   return tiles;}
-function refreshStrip(){const el=$("#camstrip");if(!el)return;const tiles=stripTiles().slice(0,10);
+function refreshStrip(){const el=$("#camstrip");if(!el||OFFLINE)return;const tiles=stripTiles().slice(0,10);
   if(DATA&&!(DATA.streams||[]).some(s=>s.live)&&!DATA.off)ensureCamerasLive();
   const key=tiles.map(t=>t.key+((t.live||t.rtc)?"":":"+Math.floor((t.at||0)/60))).join("|");if(key===CAMKEY)return;CAMKEY=key;
-  closeLive();
+  closeLive("strip");
   if(!tiles.length){el.innerHTML='<div class="faint" style="display:flex;align-items:center;justify-content:center;flex:1;font-size:12px;gap:14px;"><span class="hd">Cameras</span>no feeds yet — the Reolink relays are being asked for; <code style="color:var(--dim);">ring list</code> adds the Ring cameras</div>';return;}
   el.innerHTML=tiles.map(tileHTML).join("");
-  mountLive(el,tiles);}
+  mountLive(el,tiles,"strip");}
 function fillBox(id,html){const el=$(id);if(!el)return;el.innerHTML=html;setTimeout(()=>fitBox(el),40);}   // a timeout, not rAF: rAF never fires in a hidden tab
 function refreshDeck(force){
   if(!$("#deckroot")){$("#stage").innerHTML=deckSkeleton();force=true;DK={a:-1,b:-1,m:-1,np:"",qj:""};}
@@ -366,7 +387,7 @@ function refreshDeck(force){
   if(force||a!==DK.a){DK.a=a;const [name,feeds,tag]=DECK_A[a];fillBox("#dk-newsA",newsBoxHTML(name,DATA?tag:"waiting…",merged(...feeds).slice(0,DECK_ITEMS),name==="Bloomberg"));}
   if(force||b!==DK.b){DK.b=b;const [name,,tag]=DECK_B[b];fillBox("#dk-newsB",newsBoxHTML(name,tag,deckItemsB(b)));}
   if(force||m!==DK.m){DK.m=m;fillBox("#dk-mkt",mktBoxHTML(m));}
-  const npk=npKey();if(npk!==DK.np){DK.np=npk;$("#dk-np").innerHTML=npHTML();}
+  const npk=npKey();if(!OFFLINE&&npk!==DK.np){DK.np=npk;$("#dk-np").innerHTML=npHTML();}
   const qjk=String(Math.floor(Date.now()/600000))+(DATA?"d":"");if(force||qjk!==DK.qj){DK.qj=qjk;fillBox("#dk-qj",qjHTML());}
   const body=$("#dk-term-body");if(body)body.innerHTML=termHTML(true);
 }
@@ -397,7 +418,7 @@ function viewCameras(){
   const events=(DATA&&DATA.events)||[];
   const feedCol='<div class="glass card col" style="flex:1;">'+head("Events",events.length?"latest":"")+'<div class="fill">'+(events.length?events.slice(0,14).map(e=>'<div class="rowitem"><span class="'+(e.kind==="person"||e.kind==="ding"?"red":"gold")+'" style="flex:none;">•</span><div class="t">'+esc(e.camera)+' · '+esc(e.kind)+'</div><span class="m">'+ago(e.at)+'</span></div>').join(""):empty("no camera events yet — Ring events and the NVR's pushes land here"))+'</div>'
     +'<div style="border-top:1px solid var(--stroke2);padding-top:8px;margin-top:6px;">'+weatherNow()+'</div></div>';
-  setTimeout(()=>{const root=$("#camgrid");if(root){mountLive(root,tiles);}},30);
+  setTimeout(()=>{const root=$("#camgrid");if(root){closeLive("grid");mountLive(root,tiles,"grid");}},30);
   return '<div style="display:flex;gap:12px;height:100%;"><div id="camgrid" class="grid" style="flex:3;grid-template-columns:repeat('+cols+',1fr);grid-auto-rows:1fr;">'+grid+'</div>'+feedCol+'</div>';
 }
 function viewNews(){
@@ -482,8 +503,8 @@ const RENDER={deck:viewDeck,discover:viewDiscover,cameras:viewCameras,news:viewN
 function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
   $("#dock").querySelectorAll(".dot").forEach(d=>d.onclick=()=>go(d.dataset.k));}
 function render(){try{if(CUR==="deck"){refreshDeck(true);return;}
-  if(CUR==="cameras"){const key=stripTiles().map(t=>t.key).join("|");if(key===CAMVIEWKEY&&$("#camgrid"))return;CAMVIEWKEY=key;closeLive();CAMKEY="";setTimeout(refreshStrip,60);}
-  else if(CAMVIEWKEY){CAMVIEWKEY="";closeLive();CAMKEY="";setTimeout(refreshStrip,60);}
+  if(CUR==="cameras"){const key=stripTiles().map(t=>t.key).join("|");if(key===CAMVIEWKEY&&$("#camgrid"))return;CAMVIEWKEY=key;closeLive("grid");}
+  else if(CAMVIEWKEY){CAMVIEWKEY="";closeLive("grid");}
   $("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}catch(e){$("#stage").innerHTML='<div class="glass card red">render failed: '+esc(e.message)+'</div>';}}
 function go(k){if(!RENDER[k])return;CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
 // A Cast receiver lays the page out at 1280x720 logical pixels whatever the panel (the creator's 4K Sony showed a
