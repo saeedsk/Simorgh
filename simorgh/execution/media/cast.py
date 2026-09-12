@@ -140,13 +140,21 @@ class PyChromecast:
         cast.register_handler(controller)
         done = {}
 
-        def _cb(ok):
+        def _cb(ok, *_rest):  # the library hands (ok, data)
             done["ok"] = ok
-        controller.load_url(url, callback_function=_cb, timeout=_DASHCAST_TIMEOUT_S)
-        deadline = time.monotonic() + _DASHCAST_TIMEOUT_S
+        # `force`: the receiver navigates to the page itself instead of
+        # framing it. The receiver runs over HTTPS and Sim's page is plain
+        # HTTP on the LAN, and a framed HTTP page inside an HTTPS receiver
+        # is mixed content Chromium refuses -- the TV showed DashCast's
+        # own splash and nothing else (the creator, 2026-09-12).
+        controller.load_url(url, force=True, callback_function=_cb)
+        # A forced load navigates the receiver away, so no callback ever
+        # comes back: a couple of seconds for the command to land is all
+        # there is to wait for.
+        deadline = time.monotonic() + 2.5
         while "ok" not in done and time.monotonic() < deadline:
             time.sleep(0.2)
-        if not done.get("ok", True):
+        if done.get("ok") is False:
             raise RuntimeError("the device did not load the page")
 
     def play(self, name: str, url: str, *, content_type: str, title: str) -> None:
