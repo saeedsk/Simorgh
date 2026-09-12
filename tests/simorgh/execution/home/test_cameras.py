@@ -99,6 +99,12 @@ def _fake_ffmpeg(tmp: Path) -> str:
     return str(script)
 
 
+
+def bus_msgs(case):
+    bus = getattr(case, "bus", None) or case.ctx.bus
+    return bus.published
+
+
 class CamerasTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -167,6 +173,15 @@ class CamerasTestCase(unittest.IsolatedAsyncioTestCase):
         every = await self.tools["cam_stream"].run({"camera": "all", "mode": "grid"}, ctx=self.ctx)
         self.assertTrue(every.ok)
         self.assertEqual(self.bus.published[-1].payload["titles"], ["Front Window", "Office"], "only the online ones")
+        # `dash`: relays for the dashboard's strip, the TV's page untouched, the name written beside the playlist
+        before = len(bus_msgs(self))
+        dash = await self.tools["cam_stream"].run({"camera": "all", "mode": "dash"}, ctx=self.ctx)
+        self.assertTrue(dash.ok, dash.error)
+        self.assertIn("dashboard", dash.output)
+        self.assertEqual(len(bus_msgs(self)), before, "nothing is published to the TV")
+        import json as _json
+        meta = _json.loads((self.root / "workspace" / "cameras" / "hls" / "1" / "camera.json").read_text())
+        self.assertEqual((meta["channel"], meta["name"]), (1, "Front Window"))
         stopped = await self.tools["cam_stream"].run({"camera": "all stop"}, ctx=self.ctx)
         self.assertTrue(stopped.ok)
         self.assertEqual(self.bus.published[-1].payload["mode"], "none")

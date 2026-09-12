@@ -415,10 +415,11 @@ class CamStreamTool(_CameraTool):
     name = "cam_stream"
     description = ("Live video on the TV. `camera` is one camera, several separated by commas, or `all`; `mode` "
                    "frame (one camera inside Sim's page), grid (the cameras tiled across the TV), full (one camera "
-                   "full screen), or stop. Uses ffmpeg to relay each camera's stream as HLS.")
+                   "full screen), dash (live in the dashboard's camera strip, the TV's page untouched), or stop. "
+                   "Uses ffmpeg to relay each camera's stream as HLS.")
     args_schema = {"type": "object", "required": ["camera"],
                    "properties": {"camera": {"type": "string"},
-                                  "mode": {"type": "string", "enum": ["frame", "grid", "full", "stop"]}}}
+                                  "mode": {"type": "string", "enum": ["frame", "grid", "full", "dash", "stop"]}}}
 
     def _binary(self) -> str:
         return self._ffmpeg or shutil.which("ffmpeg") or ""
@@ -426,9 +427,9 @@ class CamStreamTool(_CameraTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         words = str(args.get("camera") or "").split()
         mode = str(args.get("mode") or "").lower()
-        if words and words[-1].lower() in ("frame", "grid", "full", "stop", "tiled", "tile") and not mode:
+        if words and words[-1].lower() in ("frame", "grid", "full", "stop", "tiled", "tile", "dash", "dashboard", "background") and not mode:
             mode, words = words[-1].lower(), words[:-1]
-        mode = {"tiled": "grid", "tile": "grid"}.get(mode, mode) or "frame"
+        mode = {"tiled": "grid", "tile": "grid", "dashboard": "dash", "background": "dash"}.get(mode, mode) or "frame"
         wanted = " ".join(words)
         if mode == "stop":
             stopped = self._stop(None)
@@ -448,7 +449,7 @@ class CamStreamTool(_CameraTool):
             mode = "grid"
         if len(cameras) > 1 and mode == "full":
             return ToolResult(ok=False, error="refused: full screen takes one camera; use grid for several")
-        if mode != "grid":
+        if mode not in ("grid", "dash"):
             self._stop(None)
         root = Path(getattr(ctx, "root", None) or getattr(ctx, "data_dir", ".") or ".")
         started: list[tuple[Camera, str]] = []
@@ -473,12 +474,15 @@ class CamStreamTool(_CameraTool):
         elif mode == "grid":
             await self._publish(ctx, topics.TV_STATE, {"mode": "grid", "urls": [u for _c, u in started],
                                                        "titles": [c.name for c, _u in started]})
+        elif mode == "dash":
+            pass   # the dashboard's camera strip finds the playlists itself (interface/dashfeeds.py)
         else:
             cam, url = started[0]
             await self._publish(ctx, topics.TV_STATE, {"mode": "frame", "url": url, "title": cam.name})
         names = ", ".join(c.name for c, _u in started)
         tail = f"; could not start {'; '.join(failures)}" if failures else ""
-        return ToolResult(ok=True, output=f"live on the TV ({mode}): {names}{tail}; `cam_stream all stop` ends it",
+        where = "live in the dashboard's camera strip" if mode == "dash" else f"live on the TV ({mode})"
+        return ToolResult(ok=True, output=f"{where}: {names}{tail}; `cam_stream all stop` ends it",
                           side_effects=tuple(f"cam_stream:{c.channel}" for c, _u in started),
                           metadata={"cameras": [c.name for c, _u in started], "urls": [u for _c, u in started], "mode": mode})
 
@@ -501,6 +505,9 @@ class CamStreamTool(_CameraTool):
         self._stop(cam.channel)
         shutil.rmtree(folder, ignore_errors=True)
         folder.mkdir(parents=True, exist_ok=True)
+        # The folder is named by channel; the dashboard wants the name.
+        (folder / "camera.json").write_text(json.dumps({"channel": cam.channel, "name": cam.name, "model": cam.model}),
+                                            encoding="utf-8")
         cmd = [binary, "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-i", rtsp,
                "-c:v", "copy", "-c:a", "aac", "-ac", "1", "-f", "hls", "-hls_time", "2", "-hls_list_size", "6",
                "-hls_flags", "delete_segments+omit_endlist", "-y", str(folder / "index.m3u8")]

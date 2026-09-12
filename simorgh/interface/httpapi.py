@@ -72,7 +72,7 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: boot banner already prints. Everything else is gated
 #: (platform-connectors-design.md section 4).
 _OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers", "/api/dash/data",
-                                          "/api/dash/state", "/remote", "/logo.png", "/favicon.ico"})
+                                          "/api/dash/state", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner"})
 
 #: The response to an unauthenticated request. A JSON body, because
 #: every other error on this server is JSON and a dashboard that got
@@ -283,6 +283,18 @@ class HttpApi:
         async def _logo(_query, _body, _headers):
             return 200, self._logo, "image/png"
 
+        async def _banner(query, _body, _headers):
+            # What the terminal prints at startup -- the splash, the
+            # wordmark, the quick commands -- for the dashboard's Sim box
+            # (the creator, 2026-09-12: "show the startup like the banner,
+            # help commands"). ANSI as the CLI writes it; the page turns
+            # the SGR codes into spans.
+            from .render import banner
+
+            mode = self._q1(query, "unicode", "auto") or "auto"
+            text = banner(enabled=True, unicode=mode if mode in ("auto", "full", "off") else "auto")
+            return 200, json.dumps({"text": text}).encode("utf-8"), "application/json"
+
         self.register_route("GET", "/dash", _dash, auth=False)
         self.register_route("GET", "/api/wallpapers", _wallpapers, auth=False)
         self.register_route("GET", "/api/dash/data", _dash_data, auth=False)
@@ -291,6 +303,7 @@ class HttpApi:
         self.register_route("GET", "/remote", _remote, auth=False)
         self.register_route("GET", "/logo.png", _logo, auth=False)
         self.register_route("GET", "/favicon.ico", _logo, auth=False)
+        self.register_route("GET", "/api/dash/banner", _banner, auth=False)
         self.register_route("GET", "/api/tv/state", _tv_state)
         self.register_route("GET", "/api/tv/speech", _tv_speech)
 

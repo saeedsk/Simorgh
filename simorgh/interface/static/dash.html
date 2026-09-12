@@ -62,16 +62,19 @@ background:rgba(255,255,255,.09);border:1px solid var(--stroke2);box-shadow:inse
 .range{position:relative;height:4px;border-radius:2px;background:rgba(255,255,255,.12);margin:5px 0 2px;}
 .range i{position:absolute;top:-3px;width:10px;height:10px;border-radius:5px;background:var(--amber);transform:translateX(-50%);box-shadow:0 0 6px rgba(255,179,71,.8);}
 .nlist{flex:1;min-height:0;overflow:hidden;position:relative;}
-.nscroll.vs{animation:vs var(--dur,6s) linear 1.6s 1 forwards;}
-@keyframes vs{from{transform:translateY(0)}to{transform:translateY(var(--dy))}}
 .nit{display:flex;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid var(--stroke2);}
 .nit:last-child{border-bottom:none;}
 .nit .th{width:56px;height:40px;border-radius:9px;flex:none;background-size:cover;background-position:center;background-color:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;font-size:10px;letter-spacing:.6px;}
 .nit .tx{min-width:0;flex:1;}
-.hm{overflow:hidden;white-space:nowrap;}
-.hmi{display:inline-block;}
-.hmi.go{animation:hm var(--hdur,8s) linear 1.2s infinite alternate;}
-@keyframes hm{from{transform:translateX(0)}to{transform:translateX(var(--dx))}}
+.nit .ttl{font-size:13px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;}
+#camstrip{height:150px;flex:none;display:flex;gap:8px;padding:7px;border-radius:16px;}
+.ctile{flex:1;min-width:0;max-width:300px;position:relative;border-radius:11px;overflow:hidden;background:rgba(0,0,0,.35);border:1px solid var(--stroke2);}
+.ctile video,.ctile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+.ctile .cap{position:absolute;left:8px;right:8px;bottom:6px;font-size:11px;text-shadow:0 1px 5px #000;display:flex;justify-content:space-between;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;}
+.ctile .cap .tag{background:rgba(0,0,0,.4);}
+.ctile .live{color:var(--red);}
+.ban{margin:0;font:inherit;font-size:11.5px;line-height:1.2;white-space:pre;color:var(--dim);}
+.ban b{font-weight:600;}
 .fade{animation:fadein .45s ease;}
 @keyframes fadein{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 a{color:var(--warm);}
@@ -89,8 +92,10 @@ a{color:var(--warm);}
       <span class="green" id="net">● online</span><span class="gold" id="clock" style="font-size:15px;">--:--</span>
       <span class="dim" id="date"></span></div>
   </div>
+  <div id="camstrip" class="glass"></div>
   <div id="stage"></div>
 </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.6.15/hls.min.js"></script>
 <script>
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -123,6 +128,7 @@ let warmRetries=0;
 async function loadData(){
   try{DATA=await (await fetch(q("/api/dash/data"))).json();DATA_AT=Date.now();
     const w=DATA&&DATA.weather;$("#wx").textContent=w&&w.temp!=null?`${w.glyph} ${Math.round(w.temp)}° ${w.text}`:"";
+    refreshStrip();
     if(CUR!=="terminal") render();
     // The collector is still warming up (Sim just started): ask again soon rather than in a minute.
     const warm=DATA&&DATA.weather&&(DATA.ambient||[]).length&&(DATA.quote||DATA.off);
@@ -193,10 +199,29 @@ function actLine(e){const t=e.type||"",s=esc(e.summary||"");
   if(t==="task.failed"||t==="task.blocked")return '<div class="red">&nbsp;&nbsp;⎿ '+t.split(".")[1]+' '+s+'</div>';
   if(t==="action.result")return '<div class="dim">&nbsp;&nbsp;⏺ '+esc(e.tool||"tool")+' '+(e.ok===false?"✗":"✓")+' '+s+'</div>';
   return '<div class="dim">'+s+'</div>';}
+let BANNER="";
+const ANSI16={30:"#3a3f4b",31:"#ff9a94",32:"#84e6a6",33:"#f7d29b",34:"#9fb6ff",35:"#c9a9ff",36:"#9fe3ff",37:"#e6e9f0",90:"#828a99",91:"#ff9a94",92:"#84e6a6",93:"#f7d29b",94:"#9fb6ff",95:"#c9a9ff",96:"#9fe3ff",97:"#ffffff"};
+function ansiToHtml(text){ // the CLI's SGR codes -> spans: 24-bit fg/bg, the 16 colours, bold, dim, reset
+  let out="",open=false,fg="",bg="",bold=false,dim=false;const parts=text.split(/\x1b\[([0-9;]*)m/);
+  const flush=()=>{if(open){out+="</span>";open=false;}};
+  const start=()=>{const st=[];if(fg)st.push("color:"+fg);if(bg)st.push("background:"+bg);if(bold)st.push("font-weight:600");if(dim)st.push("opacity:.7");if(st.length){out+='<span style="'+st.join(";")+'">';open=true;}};
+  for(let k=0;k<parts.length;k++){if(k%2===0){if(parts[k])out+=esc(parts[k]);continue;}
+    const codes=parts[k]===""?[0]:parts[k].split(";").map(Number);flush();
+    for(let c=0;c<codes.length;c++){const n=codes[c];
+      if(n===0){fg="";bg="";bold=false;dim=false;}
+      else if(n===1)bold=true;else if(n===2)dim=true;else if(n===22){bold=false;dim=false;}
+      else if(n===39)fg="";else if(n===49)bg="";
+      else if(n===38&&codes[c+1]===2){fg="rgb("+codes[c+2]+","+codes[c+3]+","+codes[c+4]+")";c+=4;}
+      else if(n===48&&codes[c+1]===2){bg="rgb("+codes[c+2]+","+codes[c+3]+","+codes[c+4]+")";c+=4;}
+      else if(ANSI16[n])fg=ANSI16[n];}
+    start();}
+  flush();return out;}
+async function loadBanner(){try{const b=await (await fetch(q("/api/dash/banner"))).json();BANNER=ansiToHtml(b.text||"");if(CUR==="deck"||CUR==="terminal")render();}catch(e){}}
 function termHTML(big){
-  const lines=ACT.length?ACT.map(actLine).join(""):'<div class="dim">Sim is idle. Say “Sim”, or pick a view.</div>';
-  return '<div style="font-size:'+(big?'15px':'12.5px')+';line-height:1.55;height:100%;display:flex;flex-direction:column;overflow:hidden;">'
-   +'<div style="flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;">'+lines+'</div>'
+  const lines=ACT.map(actLine).join("")||(BANNER?"":'<div class="dim">Sim is idle. Say “Sim”, or pick a view.</div>');
+  const ban=BANNER?'<pre class="ban">'+BANNER+'</pre><div style="height:8px;"></div>':'';
+  return '<div style="font-size:'+(big?'14px':'12.5px')+';line-height:1.55;height:100%;display:flex;flex-direction:column;overflow:hidden;">'
+   +'<div style="flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;">'+ban+lines+'</div>'
    +'<div style="border-top:1px solid var(--stroke2);margin-top:8px;padding-top:8px;"><span style="color:#dfe3ea;">❯</span> <span class="faint">'+((STATUS.model?esc(STATUS.model)+' · ':'')+'ask, or say a view name…')+'</span></div></div>';}
 function mk(){return DATA&&DATA.markets||{stocks:[],indices:[],rates:[],fx:[],commodities:[],crypto:[],majors:[]};}
 function stock(sym){return mk().stocks.find(s=>s.symbol===sym);}
@@ -234,17 +259,17 @@ const SRC_BADGE={"Bloomberg":["BBG","#ffb347"],"BBC":["BBC","#ff9a94"],"Ars Tech
 function badge(label,col){return '<div class="th" style="color:'+(col||"var(--dim)")+';border:1px solid var(--stroke2);">'+esc(label)+'</div>';}
 function newsItem(it){const b=SRC_BADGE[it.source]||[String(it.source||"").slice(0,3).toUpperCase(),"var(--dim)"];
   const th=it.thumb?'<div class="th" style="background-image:url(\''+esc(it.thumb)+'\');"></div>':badge(it.badge||b[0],it.badgeCol||b[1]);
-  return '<div class="nit">'+th+'<div class="tx"><div class="hm" style="font-size:13px;"><span class="hmi">'+esc(it.title)+'</span></div><div class="faint" style="font-size:10.5px;">'+esc(it.meta!=null?it.meta:(it.source||"")+(it.at?' · '+ago(it.at):''))+'</div></div></div>';}
+  return '<div class="nit">'+th+'<div class="tx"><div class="ttl">'+esc(it.title)+'</div><div class="faint" style="font-size:10.5px;">'+esc(it.meta!=null?it.meta:(it.source||"")+(it.at?' · '+ago(it.at):''))+'</div></div></div>';}
 function newsBoxHTML(title,tag,items,accent){return '<div class="col fade" style="flex:1;min-width:0;">'+head(title,tag,accent)+'<div class="nlist"><div class="nscroll">'+(items.length?items.map(newsItem).join(""):empty("waiting for the feed…"))+'</div></div></div>';}
 function deckItemsB(idx){const [name,feeds]=DECK_B[idx];const wk=DATA&&DATA.wiki;
   if(feeds) return merged(...feeds).slice(0,DECK_ITEMS);
   if(name==="On this day") return (wk?wk.onthisday:[]).slice(0,DECK_ITEMS).map(e=>({title:e.text,meta:"Wikipedia · "+e.year,badge:String(e.year),badgeCol:"var(--gold)"}));
   if(name==="Hacker News") return ((DATA&&DATA.hn)||[]).slice(0,DECK_ITEMS).map(h=>({title:h.title,meta:"▲ "+(h.score||0)+" · "+(h.comments||0)+" comments · "+ago(h.at),source:"Hacker News"}));
   return (wk?wk.mostread:[]).slice(0,DECK_ITEMS).map(a=>({title:a.title,thumb:a.thumb,meta:"Wikipedia · "+(a.views?Math.round(a.views/1000)+"k reads today":""),source:"Wikipedia"}));}
-function fitBox(el){ // slow vertical scroll when the list overflows; a marquee for a title that does not fit
-  const list=el.querySelector(".nlist"),inner=el.querySelector(".nscroll");
-  if(list&&inner){const ov=inner.scrollHeight-list.clientHeight;if(ov>6){inner.style.setProperty("--dy",(-ov)+"px");inner.style.setProperty("--dur",Math.max(4,Math.min(7.5,ov/25))+"s");inner.classList.add("vs");}}
-  el.querySelectorAll(".hm").forEach(h=>{const i=h.querySelector(".hmi");if(!i)return;const ov=i.scrollWidth-h.clientWidth;if(ov>4){i.style.setProperty("--dx",(-ov)+"px");i.style.setProperty("--hdur",Math.max(3,ov/45)+"s");i.classList.add("go");}});}
+function fitBox(el){ // no scrolling in either direction: a headline wraps to three lines, and what does not fit is left out
+  const list=el.querySelector(".nlist");if(!list)return;
+  const bottom=list.getBoundingClientRect().bottom;
+  [...el.querySelectorAll(".nit")].forEach(it=>{if(it.getBoundingClientRect().bottom>bottom+1)it.remove();});}
 function ytId(url){const m=/(?:v=|youtu\.be\/|\/embed\/|\/live\/|\/shorts\/)([A-Za-z0-9_-]{11})/.exec(url||"");return m?m[1]:"";}
 function ambientPick(){const list=(DATA&&DATA.ambient)||[];if(!list.length)return null;return list[Math.floor(Date.now()/(30*60*1000))%list.length];}
 function ytFrame(id,mute){return '<iframe src="https://www.youtube.com/embed/'+id+'?autoplay=1&mute='+(mute?1:0)+'&controls=0&rel=0&iv_load_policy=3&modestbranding=1&playsinline=1&loop=1&playlist='+id+'&vq=hd2160" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>';}
@@ -277,6 +302,24 @@ function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-temp
   +'<div class="glass card" id="dk-newsB" style="display:flex;"></div>'
   +'<div style="display:flex;gap:12px;min-height:0;min-width:0;"><div class="glass card" id="dk-mkt" style="flex:1.55;display:flex;min-width:0;"></div><div class="glass card" id="dk-qj" style="flex:1;display:flex;min-width:0;"></div></div>'
   +'</div></div>';}
+// ---- the camera strip: every relay that is live (cameras show all dash) plays through hls.js; a camera with
+// no relay shows its newest still. Rebuilt only when the set of feeds changes, so players are not restarted.
+const CAM_LIVE_MAX=6;let CAMKEY="",HLS_PLAYERS=[];
+function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live);const stills=(DATA&&DATA.cameras)||[];
+  const tiles=[];const named=new Set();
+  streams.slice(0,CAM_LIVE_MAX).forEach(s=>{tiles.push({key:"live:"+s.channel,name:s.name,live:true,url:s.url});named.add(s.name.toLowerCase());});
+  streams.slice(CAM_LIVE_MAX).forEach(s=>{const st=stills.find(c=>c.name.toLowerCase()===s.name.toLowerCase());tiles.push({key:"still:"+s.name,name:s.name,live:false,img:st?st.url:null,at:st?st.at:0});named.add(s.name.toLowerCase());});
+  stills.forEach(c=>{if(!named.has(c.name.toLowerCase())){tiles.push({key:"still:"+c.name,name:c.name,live:false,img:c.url,at:c.at,kind:c.kind});named.add(c.name.toLowerCase());}});
+  return tiles.slice(0,8);}
+function refreshStrip(){const el=$("#camstrip");if(!el)return;const tiles=stripTiles();
+  const key=tiles.map(t=>t.key+(t.live?"":":"+Math.floor((t.at||0)/60))).join("|");if(key===CAMKEY)return;CAMKEY=key;
+  HLS_PLAYERS.forEach(h=>{try{h.destroy();}catch(e){}});HLS_PLAYERS=[];
+  if(!tiles.length){el.innerHTML='<div class="faint" style="display:flex;align-items:center;justify-content:center;flex:1;font-size:12px;gap:14px;"><span class="hd">Cameras</span>no feeds yet — <code style="color:var(--dim);">cameras show all dash</code> puts the Reolink cameras here live; <code style="color:var(--dim);">ring watch on</code> adds the Ring stills</div>';return;}
+  el.innerHTML=tiles.map((t,i)=>'<div class="ctile" data-i="'+i+'">'+(t.live?'<video muted autoplay playsinline></video>':(t.img?'<img src="'+esc(t.img)+'?t='+Math.floor((t.at||0))+'" alt="">':''))
+    +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+(t.live?' live':'')+'">'+(t.live?"● live":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>').join("");
+  tiles.forEach((t,i)=>{if(!t.live)return;const v=el.querySelector('.ctile[data-i="'+i+'"] video');if(!v)return;
+    if(window.Hls&&Hls.isSupported()){const h=new Hls({lowLatencyMode:true,liveSyncDurationCount:2,maxBufferLength:6,enableWorker:true});h.loadSource(q(t.url));h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play().catch(()=>{}));HLS_PLAYERS.push(h);}
+    else if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=q(t.url);v.play().catch(()=>{});}});}
 function fillBox(id,html){const el=$(id);if(!el)return;el.innerHTML=html;setTimeout(()=>fitBox(el),40);}   // a timeout, not rAF: rAF never fires in a hidden tab
 function refreshDeck(force){
   if(!$("#deckroot")){$("#stage").innerHTML=deckSkeleton();force=true;DK={a:-1,b:-1,m:-1,np:"",qj:""};}
@@ -417,6 +460,8 @@ document.addEventListener("keydown",e=>{const i=VIEWS.findIndex(v=>v[0]===CUR);
   setInterval(()=>{if(CUR==="ambient")render();},30000);
   setInterval(()=>{if(CUR==="deck")refreshDeck(false);},1000);   // the Home boxes rotate on their own clock
   poll();setInterval(poll,4000);
+  loadBanner();refreshStrip();
   loadData();setInterval(loadData,60000);
+  setInterval(refreshStrip,15000);   // a relay that stopped goes back to a still within a minute
 })();
 </script></body></html>

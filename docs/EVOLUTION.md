@@ -4792,3 +4792,22 @@ Still ahead, roughly in order:
     under fifty percent covered stays the terminal's own background,
     lone specks dropped) -- 52 columns by 24 rows of half-block cells,
     clean edges, the bird recognisable at a glance.
+
+152. **Home, the third time; a camera strip on every view; the banner
+    in Sim's box (2026-09-12, night).** The creator, after watching the
+    marquee and the slow scroll: "has made me headache". Headlines now
+    wrap to three lines, nothing moves, and a box shows only as many as
+    fit -- the fit pass drops what crosses the bottom edge. Under the
+    icon bar, three times its height, a camera strip runs on every
+    view: each Reolink relay that is live plays through hls.js (up to
+    six players; a Cast device will not decode many more), a camera
+    without a relay shows its newest still, and the strip is rebuilt
+    only when the set of feeds changes so players are not restarted.
+    `cameras show all dash` is the new `cam_stream` mode: relays for
+    the strip, the TV's page left alone; each relay's folder now carries
+    `camera.json` so the strip knows the camera's name, and the
+    collector lists the playlists with a 20-second liveness rule. Sim's
+    box opens the way the terminal does: `/api/dash/banner` serves the
+    CLI's own startup banner -- splash, wordmark, epigraph, quick
+    commands -- and the page turns the SGR codes into spans; activity
+    lines push it up like any scrollback.

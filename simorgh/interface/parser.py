@@ -108,6 +108,7 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
                 ("show <camera>", "one camera live, framed beside Sim's page"),
                 ("show <a>, <b>, ... | all", "several cameras tiled across the TV"),
                 ("show <camera> full", "one camera full screen on the TV"),
+                ("show all dash", "every camera live in the dashboard's camera strip; the TV's page is left alone"),
                 ("show stop", "end the live streams"),
                 ("snapshot <camera>", "a still, saved under workspace/cameras/"),
                 ("light <camera> on|off", "the spotlight"),

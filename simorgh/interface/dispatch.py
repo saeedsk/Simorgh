@@ -839,9 +839,9 @@ async def _cameras(args: str, *, bus: BusClient, ledger: LedgerClient, session_i
     if verb in ("show", "stream", "live"):
         if not rest:
             return Outcome(usage)
-        mode = rest[-1].lower() if rest[-1].lower() in ("frame", "grid", "full", "stop", "tiled") else ""
+        mode = rest[-1].lower() if rest[-1].lower() in ("frame", "grid", "full", "stop", "tiled", "dash", "dashboard") else ""
         camera = " ".join(rest[:-1] if mode else rest) or "all"
-        return await _run("cam_stream", {"camera": camera, "mode": {"tiled": "grid"}.get(mode, mode) or "frame"})
+        return await _run("cam_stream", {"camera": camera, "mode": {"tiled": "grid", "dashboard": "dash"}.get(mode, mode) or "frame"})
     if verb in ("snapshot", "snap", "picture"):
         return await _run("cam_snapshot", {"camera": " ".join(rest)}) if rest else Outcome(usage)
     if verb in ("light", "spotlight", "ir"):

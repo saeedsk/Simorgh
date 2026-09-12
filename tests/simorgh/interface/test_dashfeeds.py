@@ -285,6 +285,26 @@ class SchedulerTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(next(c for c in cams if c["name"] == "Front Door")["url"], "/cameras/snap/Front_Door")
             self.assertEqual(feeds.snapshot()["cameras"], cams)
 
+    async def test_live_relays_are_listed_by_name_and_go_stale_when_the_playlist_stops_moving(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for ch, name in ((1, "Front Window"), (7, "Office")):
+                folder = root / "hls" / str(ch)
+                folder.mkdir(parents=True)
+                (folder / "index.m3u8").write_text("#EXTM3U\n")
+                (folder / "camera.json").write_text(json.dumps({"channel": ch, "name": name}))
+            (root / "hls" / "3").mkdir(); (root / "hls" / "3" / "index.m3u8").write_text("#EXTM3U\n")   # no camera.json
+            (root / "hls" / "junk").mkdir()
+            import os, time as _t
+            now = _t.time()
+            os.utime(root / "hls" / "7" / "index.m3u8", (now - 300, now - 300))
+            feeds = df.DashFeeds(fetcher=_Fetcher({}), clock=lambda: now, snapshot_root=root)
+            streams = feeds.streams()
+            self.assertEqual([(s["channel"], s["name"], s["live"], s["url"]) for s in streams],
+                             [(1, "Front Window", True, "/tv/hls/1/index.m3u8"), (3, "Camera 4", True, "/tv/hls/3/index.m3u8"),
+                              (7, "Office", False, "/tv/hls/7/index.m3u8")])
+            self.assertEqual(feeds.snapshot()["streams"], streams)
+
     async def test_start_and_stop_run_the_loop_once(self):
         feeds, fetcher, clock = self._feeds({"restQuote": CNBC_QUOTES, "bars/": CNBC_BARS})
         feeds._tick_s = 0.01  # noqa: SLF001

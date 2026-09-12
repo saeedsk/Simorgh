@@ -1140,6 +1140,16 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         st, b, _ = await asyncio.to_thread(self._g, api, "/dash")
         self.assertIn(b'src="/logo.png"', b)
 
+    async def test_the_startup_banner_is_served_for_the_terminal_box(self):
+        api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
+        await api.start(); self.addAsyncCleanup(api.stop)
+        st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/banner")
+        self.assertEqual(st, 200)
+        text = json.loads(b)["text"]
+        self.assertIn("SIMORGH", text); self.assertIn("help", text); self.assertIn("\x1b[38;2;", text, "the splash's colours")
+        st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/banner?unicode=off")
+        self.assertNotIn("▀", json.loads(b)["text"])
+
     async def test_the_remote_page_is_open_and_posts_to_the_state_route(self):
         api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
         await api.start(); self.addAsyncCleanup(api.stop)

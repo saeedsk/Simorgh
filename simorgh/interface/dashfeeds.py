@@ -876,6 +876,36 @@ class DashFeeds:
         out.sort(key=lambda c: c["at"], reverse=True)
         return out
 
+    LIVE_WITHIN_S = 20.0
+
+    def streams(self) -> list[dict]:
+        """The camera relays running now (execution/home/cameras.py writes
+        `hls/<channel>/index.m3u8` and `camera.json`): channel, name, the
+        playlist's URL on this API, and whether it is live -- a playlist
+        untouched for `LIVE_WITHIN_S` is a relay that has stopped."""
+        root = self._snapshot_root / "hls"
+        if not root.is_dir():
+            return []
+        now = self._clock()
+        out: list[dict] = []
+        for folder in sorted(root.iterdir(), key=lambda f: f.name):
+            playlist = folder / "index.m3u8"
+            if not folder.name.isdigit() or not playlist.is_file():
+                continue
+            try:
+                at = playlist.stat().st_mtime
+            except OSError:
+                continue
+            name = f"Camera {int(folder.name) + 1}"
+            try:
+                meta = json.loads((folder / "camera.json").read_text(encoding="utf-8"))
+                name = str(meta.get("name") or name)
+            except (OSError, ValueError):
+                pass
+            out.append({"channel": int(folder.name), "name": name, "url": f"/tv/hls/{folder.name}/index.m3u8",
+                        "live": (now - at) <= self.LIVE_WITHIN_S, "at": at})
+        return out
+
     def events(self) -> list[dict]:
         """Camera events the Ring tools keep in `ring/events.json`
         (execution/home/ring.py), newest first; [] when there are none."""
@@ -944,6 +974,7 @@ class DashFeeds:
             "quote": self._data.get("quote"),
             "ambient": self._data.get("ambient", []),
             "cameras": self.cameras(),
+            "streams": self.streams(),
             "events": self.events(),
         }
 
