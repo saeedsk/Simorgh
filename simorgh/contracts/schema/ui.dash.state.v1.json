@@ -4,6 +4,12 @@
   "additionalProperties": true,
   "description": "Where the glass dashboard on the TV should look: a view name, the markets chart's timeframe or symbol, a rotation period in seconds (0 stops). Any subset; the HTTP API merges it.",
   "properties": {
+    "live_max": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "rotate_s": {
       "type": [
         "integer",
@@ -26,6 +32,20 @@
       "type": [
         "string",
         "null"
+      ]
+    },
+    "video_quality": {
+      "anyOf": [
+        {
+          "enum": [
+            "light",
+            "full"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "view": {

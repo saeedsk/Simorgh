@@ -142,6 +142,8 @@ function applyState(st){
   if(st.symbol!=null) {SEL=st.symbol||""; if(SEL) PIN=SEL;}
   if(st.rotate_s!=null) setRotate(st.rotate_s|0);
   if(st.scale!=null){SCALE=Number(st.scale)||0;fitApp();}
+  if(st.live_max!=null&&Number(st.live_max)!==CAM_LIVE_MAX){CAM_LIVE_MAX=Number(st.live_max);CAMKEY="";CAMVIEWKEY="";refreshStrip();}
+  if(st.video_quality&&st.video_quality!==VIDEO_QUALITY){VIDEO_QUALITY=st.video_quality;DK.np="";}
   const k=VIEW_KEYS[st.view||""];
   if(k&&k!==CUR) go(k); else render();
 }
@@ -273,9 +275,12 @@ function fitBox(el){ // no scrolling in either direction: a headline wraps to th
   [...el.querySelectorAll(".nit")].forEach(it=>{if(it.getBoundingClientRect().bottom>bottom+1)it.remove();});}
 function ytId(url){const m=/(?:v=|youtu\.be\/|\/embed\/|\/live\/|\/shorts\/)([A-Za-z0-9_-]{11})/.exec(url||"");return m?m[1]:"";}
 function ambientPick(){const list=(DATA&&DATA.ambient)||[];if(!list.length)return null;return list[Math.floor(Date.now()/(30*60*1000))%list.length];}
-function ytFrame(id,mute){return '<iframe src="https://www.youtube.com/embed/'+id+'?autoplay=1&mute='+(mute?1:0)+'&controls=0&rel=0&iv_load_policy=3&modestbranding=1&playsinline=1&loop=1&playlist='+id+'&vq=hd2160" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>';}
+function ytFrame(id,mute){ // light: the iframe is laid out at half size and scaled up, so YouTube's player picks a
+  // resolution the TV's browser can decode beside the camera feeds (it sizes quality to the iframe it sees)
+  const light=VIDEO_QUALITY==="light";const box=light?'position:absolute;left:0;top:0;width:50%;height:50%;transform:scale(2);transform-origin:0 0;':'position:absolute;inset:0;width:100%;height:100%;';
+  return '<iframe src="https://www.youtube.com/embed/'+id+'?autoplay=1&mute='+(mute?1:0)+'&controls=0&rel=0&iv_load_policy=3&modestbranding=1&playsinline=1&loop=1&playlist='+id+'" style="'+box+'border:0;" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>';}
 function npOverlay(title,sub,tag){return '<div style="position:absolute;left:0;right:0;bottom:0;padding:26px 16px 12px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.72));pointer-events:none;"><div style="font-size:14px;text-shadow:0 1px 6px #000;" class="clamp" style="-webkit-line-clamp:1;">'+title+'</div><div class="dim" style="font-size:11px;text-shadow:0 1px 6px #000;">'+sub+'</div></div>'+(tag?'<div class="tag" style="position:absolute;right:10px;top:9px;background:rgba(0,0,0,.4);">'+esc(tag)+'</div>':'');}
-function npKey(){const m=TV.mode||"none";if(m!=="none")return m+"|"+(TV.url||"")+"|"+(TV.urls||[]).join(",");const v=ambientPick();return "ambient|"+(v?v.id:"");}
+function npKey(){const m=TV.mode||"none";if(m!=="none")return m+"|"+(TV.url||"")+"|"+(TV.urls||[]).join(",")+"|"+VIDEO_QUALITY;const v=ambientPick();return "ambient|"+(v?v.id:"")+"|"+VIDEO_QUALITY;}
 function npHTML(){const m=TV.mode||"none";
   if(m==="frame"||m==="full"){const id=ytId(TV.url||"");const title=esc(TV.title||TV.url||"");const sub=m==="frame"?"playing here, asked of Sim":"playing on the TV itself";
     if(id)return ytFrame(id,false)+npOverlay(title,sub,"now playing");
@@ -305,7 +310,7 @@ function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-temp
   +'</div></div>';}
 // ---- the camera strip: every relay that is live (cameras show all dash) plays through hls.js; a camera with
 // no relay shows its newest still. Rebuilt only when the set of feeds changes, so players are not restarted.
-const CAM_LIVE_MAX=8;let CAMKEY="",HLS_PLAYERS=[],RTC_PEERS=[],LIVE_ASKED=0;
+let CAM_LIVE_MAX=8,VIDEO_QUALITY="light";let CAMKEY="",HLS_PLAYERS=[],RTC_PEERS=[],LIVE_ASKED=0;
 async function pollStreams(){ // the strip's own poll: what is live now, every ten seconds
   try{const r=await (await fetch(q("/api/dash/streams"))).json();if(!DATA)return;DATA.streams=r.streams||[];DATA.cameras=r.cameras||[];DATA.ring_cameras=r.ring_cameras||[];refreshStrip();
     if(CUR==="cameras")render();}catch(e){}}

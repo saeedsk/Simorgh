@@ -159,7 +159,8 @@ class HttpApi:
         self._cameras_live_last: dict = {"at": 0.0, "text": ""}
         # Where the dashboard should look (`ui.dash.state`): set by the
         # `dash_view` tool or the phone remote, polled by the page.
-        self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "scale": 0, "since": 0.0}
+        self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "scale": 0,
+                                  "live_max": 8, "video_quality": "light", "since": 0.0}
         self._dash_sub = None
         self._remote_page = (_STATIC_DIR / "remote.html").read_text(encoding="utf-8")
         # Sim's logo (the creator's, 2026-09-12; keyed and shrunk from
@@ -283,7 +284,7 @@ class HttpApi:
                 return 400, b'{"error": "body must be JSON"}', "application/json"
             if not isinstance(asked, dict):
                 return 400, b'{"error": "body must be a JSON object"}', "application/json"
-            payload = {k: asked[k] for k in ("view", "timeframe", "symbol", "rotate_s", "scale") if k in asked}
+            payload = {k: asked[k] for k in ("view", "timeframe", "symbol", "rotate_s", "scale", "live_max", "video_quality") if k in asked}
             self._apply_dash_state(payload)
             await self._bus.publish(Message.new(topics.DASH_STATE, source="interface", payload=payload))
             return 200, json.dumps({"now": self._now(), **self._dash_state}).encode("utf-8"), "application/json"
@@ -585,6 +586,15 @@ class HttpApi:
                 self._dash_state["scale"] = max(0.0, min(4.0, float(payload.get("scale") or 0)))
             except (TypeError, ValueError):
                 pass
+        if "live_max" in payload:
+            # How many camera feeds decode at once; the TV's browser also plays the ambient video.
+            try:
+                self._dash_state["live_max"] = max(0, min(16, int(float(payload.get("live_max") or 0))))
+            except (TypeError, ValueError):
+                pass
+        quality = str(payload.get("video_quality") or "").strip().lower()
+        if quality in ("light", "full"):
+            self._dash_state["video_quality"] = quality
         self._dash_state["since"] = self._now()
 
     async def _on_dash_state(self, message: Message) -> None:
