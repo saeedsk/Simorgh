@@ -943,7 +943,7 @@ class SessionRunner:
         payload = to_action_payload(
             action_id=action_id, task_id=session.task_id, call=call,
             rationale=f"step {step_no} of {session.profile.name} session",
-            proposed_by=self._bus.source,
+            proposed_by=self._bus.source, kind=session.kind,
         )
         msg = Message.new(
             topics.ACTION_PROPOSED, source=self._bus.source,

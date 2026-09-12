@@ -1739,7 +1739,13 @@ class StartTaskTool:
         goal = " ".join(str(args.get("goal") or "").split())
         if not goal:
             return ToolResult(ok=False, error="refused: say what the task is for")
-        if ctx.task_id:
+        # A chat turn is a session with a task id too (its percept's
+        # session id). Its kind rides in the scope; a chat may start
+        # work, a task may not. Before 2026-09-11 Execution passed no
+        # task id at all, so this refused nothing; the day it started
+        # passing one, this refused every chat.
+        kind = str((ctx.scope or {}).get("kind") or "")
+        if ctx.task_id and kind != "chat":
             return ToolResult(
                 ok=False,
                 error=("refused: this is already a task, and a task that starts tasks is how a "

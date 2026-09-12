@@ -573,21 +573,23 @@ class Service:
             await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "finished", {"action_id": action_id, "ok": False}))
 
     async def _fetch_proposed_args(self, action_id: str) -> dict | None:
-        args, _task_id = await self._fetch_proposal(action_id)
+        args, _task_id, _scope = await self._fetch_proposal(action_id)
         return args
 
-    async def _fetch_proposal(self, action_id: str) -> tuple[dict | None, str | None]:
-        """`(args, task_id)` of the proposal Guardian recorded. The task
-        id is what binds a call to its task's worktree; it comes from
+    async def _fetch_proposal(self, action_id: str) -> tuple[dict | None, str | None, dict]:
+        """`(args, task_id, scope)` of the proposal Guardian recorded. The
+        task id is what binds a call to its task's worktree; it comes from
         the proposal the session runner wrote, never from the model's
-        arguments."""
+        arguments. The scope carries the session's kind for the same
+        reason."""
         events = await self._ctx.ledger.read(f"action:{action_id}")
         for event in events:
             if event.type == "received":
                 proposal = event.payload["proposal"]
                 task_id = proposal.get("task_id")
-                return await self._resolve_arg_refs(proposal.get("args")), (str(task_id) if task_id else None)
-        return None, None
+                scope = proposal.get("scope") if isinstance(proposal.get("scope"), dict) else {}
+                return await self._resolve_arg_refs(proposal.get("args")), (str(task_id) if task_id else None), dict(scope)
+        return None, None, {}
 
     async def _resolve_arg_refs(self, args: dict | None) -> dict | None:
         """Guardian records an oversized argument (a patch's whole file
@@ -610,7 +612,7 @@ class Service:
         approved = message.payload
         action_id = approved["action_id"]
         now = self._ctx.clock.now()
-        args, task_id = await self._fetch_proposal(action_id)
+        args, task_id, scope = await self._fetch_proposal(action_id)
         outcome = self._verifier.verify(approved, args, now=now)
 
         await self._ctx.ledger.append(f"action:{action_id}", self._event(
@@ -651,7 +653,7 @@ class Service:
             timeout = timeout_for(tool, approved.get("constraints") or {}, self._config.default_timeout_s)
             root = self._worktrees.root_for(task_id) if self._worktrees is not None else None
             ctx = ToolContext(
-                action_id=action_id, task_id=task_id, scope={}, constraints=approved.get("constraints") or {},
+                action_id=action_id, task_id=task_id, scope=scope, constraints=approved.get("constraints") or {},
                 data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
                 ledger=self._ctx.ledger, bus=self._ctx.bus, root=root,
             )

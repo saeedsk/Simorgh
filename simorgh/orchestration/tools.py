@@ -582,7 +582,7 @@ _strip_code_fence = strip_code_fence
 
 
 def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: str,
-                      proposed_by: str = "orchestration") -> dict:
+                      proposed_by: str = "orchestration", kind: str = "") -> dict:
     tool = call.get("tool", "")
     args = call.get("args", {})
     if isinstance(args, dict) and set(args) == {"argument"}:
@@ -623,7 +623,11 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
         "task_id": task_id,
         "tool": tool,
         "args": args if isinstance(args, dict) else {},
-        "scope": {"paths": paths, "network": network},
+        # `kind` rides in the scope so a tool can tell a chat turn from a
+        # task: `start_task` is a chat's escape hatch into real work and a
+        # task's fork bomb. Until 2026-09-11 Execution passed no task id
+        # at all and the tool could not tell either apart.
+        "scope": {"paths": paths, "network": network, **({"kind": kind} if kind else {})},
         "reversibility": reversibility,
         "rationale": rationale,
         # 16-orchestration.md section 3.2: `proposed_by:"orchestration@wN"`

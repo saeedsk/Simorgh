@@ -380,7 +380,7 @@ class Service:
             await self._reply(message, topics.VOICE_SPEAK_REPLY, {"ok": False, "detail": why})
             return
         try:
-            said = await pipeline.speak(text, voice=str(message.payload.get("voice") or ""))
+            said = await self._say(text)
         except Exception as exc:  # noqa: BLE001 -- an engine failure is an answer, not a crash
             await self._reply(message, topics.VOICE_SPEAK_REPLY, {"ok": False, "detail": f"could not speak: {exc!r}"})
             return
@@ -439,12 +439,24 @@ class Service:
         if pipeline is None:
             self._ctx.logger.warning("voice.cannot_speak_reply", reason=why)
             return
-        if session_id in pipeline._pending:  # noqa: SLF001 -- its own turn
+        if session_id in pipeline._pending or pipeline.is_voice_session(session_id):  # noqa: SLF001 -- its own turn
             return
         try:
-            await pipeline.speak(text, session_id=session_id)
+            await self._say(text, session_id=session_id)
         except Exception as exc:  # noqa: BLE001 -- speech is best effort; the reply was already printed
             self._ctx.logger.warning("voice.reply_not_spoken", error=repr(exc))
+
+    async def _say(self, text: str, *, session_id: str = "") -> str:
+        """Speak through the running session when there is one -- so it
+        knows Sim is talking and does not hear itself -- else through
+        the pipeline. Both take the one speech lock."""
+        session = self._session
+        if session is not None and self._enabled and self._loop_task is not None and not self._loop_task.done():
+            return await session.say(text)
+        pipeline, why = await self._pipeline_ready()
+        if pipeline is None:
+            raise RuntimeError(why)
+        return await pipeline.speak(text, session_id=session_id or None)
 
     async def _on_models(self, message) -> None:
         """`voice models [name]`: fetch a real recogniser model. The next

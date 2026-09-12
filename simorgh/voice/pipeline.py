@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections import deque
 import re
 import time
 import uuid
@@ -101,6 +102,17 @@ class Pipeline:
         self._repo_root = repo_root or Path(".")
         self._pending: dict[str, asyncio.Future] = {}
         self._subs: list = []
+        # One voice at a time, whoever asks: the session's replies, the
+        # short acknowledgement, `voice test`, a typed turn's reply.
+        # Two players at once is two voices at once -- the creator
+        # heard exactly that (2026-09-11) -- and a voice the session
+        # did not start is a voice the microphone will hear as a person.
+        self.speech_lock = asyncio.Lock()
+        # Session ids this pipeline asked Sim about, recent first. A reply
+        # to one of these is the session's own to speak; the service's
+        # speak-every-reply path must leave it alone -- and cannot rely on
+        # `_pending`, which is emptied the instant the reply arrives.
+        self._voice_sessions: deque[str] = deque(maxlen=200)
         self.turns = 0
         self.pending_audio: Audio | None = None
         self.last_heard = ""
@@ -215,6 +227,7 @@ class Pipeline:
         session_id = session_id or str(uuid.uuid4())
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[session_id] = fut
+        self._voice_sessions.append(session_id)
         payload = {"channel": "voice", "text": text, "session_id": session_id, "device": self._config.device,
                    "confidence": confidence}
         if speaker_name:
@@ -254,14 +267,15 @@ class Pipeline:
             self._tts = StreamingSynthesiser(self._tts, lookahead=self._config.tts_lookahead)
         request = TtsRequest(request_id=request_id, pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
                              voice=voice or self._config.tts_voice, speed=self._config.tts_speed)
-        self.speaking = True
-        self.pending_audio = None
-        await self._announce("speaking")
-        try:
-            report = await self._play_stream_interruptibly(self._tts.synthesise_stream(request), request_id)
-        finally:
-            self.speaking = False
-            await self._announce("idle")
+        async with self.speech_lock:
+            self.speaking = True
+            self.pending_audio = None
+            await self._announce("speaking")
+            try:
+                report = await self._play_stream_interruptibly(self._tts.synthesise_stream(request), request_id)
+            finally:
+                self.speaking = False
+                await self._announce("idle")
         self.last_said = said
         await self._publish(topics.VOICE_SPOKEN, {
             "text": said, "seconds": report.seconds,
@@ -273,6 +287,9 @@ class Pipeline:
             **({"session_id": session_id} if session_id else {}),
         })
         return said
+
+    def is_voice_session(self, session_id: str) -> bool:
+        return session_id in self._voice_sessions
 
     async def _play_interruptibly(self, audio: Audio) -> bool:
         """Play one `Audio` while listening; True if a person cut in. The

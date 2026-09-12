@@ -383,8 +383,12 @@ class VoiceSession:
         word = CONNECTORS["okay"].get(language, CONNECTORS["okay"]["en"]).rstrip(",") + "."
         request = TtsRequest(request_id=f"ack-{turn_id}", pieces=((word, 0),), voice=self._config.tts_voice,
                              speed=self._config.tts_speed)
+        lock = self._pipeline.speech_lock
+        if lock.locked():
+            return  # something is being said already; an "Okay." over it is noise
         try:
-            await self._player.play_stream(self._tts.synthesise_stream(request), request_id=request.request_id)
+            async with lock:
+                await self._player.play_stream(self._tts.synthesise_stream(request), request_id=request.request_id)
         except Exception as exc:  # noqa: BLE001
             self._log("warning", "voice.ack_failed", error=repr(exc))
             return
@@ -425,8 +429,9 @@ class VoiceSession:
             clock.first_audio_at = self._now()
 
         try:
-            report = await self._player.play_stream(self._tts.synthesise_stream(request), request_id=response_id,
-                                                    on_first_audio=_first_audio)
+            async with self._pipeline.speech_lock:
+                report = await self._player.play_stream(self._tts.synthesise_stream(request), request_id=response_id,
+                                                        on_first_audio=_first_audio)
         except Exception as exc:  # noqa: BLE001 -- a reply that could not be spoken is logged, not fatal
             self._log("warning", "voice.reply_not_spoken", error=repr(exc))
             self.turns.handle_playback_state(PlaybackState("finished", response_id))
@@ -457,8 +462,39 @@ class VoiceSession:
         ))
         self._clocks.pop(turn_id, None)
 
+    async def say(self, text: str, *, request_id: str = "") -> str:
+        """Speak something that is not a reply to a spoken turn -- a typed
+        turn's reply, `voice test` -- THROUGH the session, so the turn
+        manager knows Sim is talking and the microphone's echo of it is
+        treated as Sim, not as a person. Returns what was said."""
+        plan = self._planner.plan(text, Context())
+        request = TtsRequest(request_id=request_id or f"say-{uuid.uuid4().hex[:8]}",
+                             pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
+                             voice=self._config.tts_voice, speed=self._config.tts_speed)
+        self._echo_rms = 0.0
+        entered_from = self.turns.state
+        if entered_from == LISTENING:
+            self.turns.state = AGENT_SPEAKING
+            self.turns.speaking_response = 0
+            await self._announce(self.turns.state)
+        self._pipeline.speaking = True
+        try:
+            async with self._pipeline.speech_lock:
+                report = await self._player.play_stream(self._tts.synthesise_stream(request),
+                                                        request_id=request.request_id)
+        finally:
+            self._pipeline.speaking = False
+            if self.turns.state == AGENT_SPEAKING and entered_from == LISTENING:
+                self.turns.state = LISTENING
+                await self._announce(self.turns.state)
+        self._pipeline.last_said = plan.text
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": plan.text, "seconds": report.seconds, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
+            "device": self._config.device, "interrupted": report.interrupted})
+        return plan.text
+
     async def _on_playback_state(self, state: PlaybackState) -> None:
-        if state.request_id.startswith("ack-"):
+        if state.request_id.startswith(("ack-", "say-")):
             return
         before = self.turns.state
         for action in self.turns.handle_playback_state(state):
