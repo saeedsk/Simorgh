@@ -357,6 +357,27 @@ class TestReadingLines(unittest.IsolatedAsyncioTestCase):
                 await self._drive("\x1b[A\r\x04", history_path=path), ["first command"],
             )
 
+    async def test_exit_is_not_queued_behind_a_busy_turn(self):
+        # 2026-09-12: `exit` typed into a Sim mid-turn did nothing until
+        # the turn ended, because every line waits its turn in the queue.
+        from prompt_toolkit.application import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        seen: list[str] = []
+
+        async def slow_line(line: str) -> None:
+            seen.append(line)
+            await asyncio.sleep(30)  # a turn that will not finish in this test's lifetime
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+            prompt = Tui(on_line=slow_line)
+            inp.send_text("think hard\rexit\r")
+            started = asyncio.get_running_loop().time()
+            await asyncio.wait_for(prompt.run(), timeout=10)
+            self.assertLess(asyncio.get_running_loop().time() - started, 5.0, "exit waited behind the turn")
+        self.assertEqual(seen, ["think hard"], "the busy turn started; exit never went on the queue")
+
     async def test_the_footer_callback_is_what_the_toolbar_shows(self):
         prompt = Tui(on_line=self._noop_line, footer_text=lambda: "thinking [3s]")
         session = prompt._build_session()  # noqa: SLF001

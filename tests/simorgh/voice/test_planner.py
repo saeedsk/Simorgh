@@ -202,3 +202,36 @@ class TestThePlan(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnitsAndCurrencyTestCase(unittest.TestCase):
+    """Units and money read as a person reads them (the creator,
+    2026-09-12: "120ms" was "one twenty em es", "$104.32/bbl" was
+    "dollar ... slash be be el")."""
+
+    def test_the_creators_two_examples(self):
+        from simorgh.voice.planner import speak_units
+        self.assertEqual(speak_units("it took 120ms"), "it took 120 milliseconds")
+        self.assertEqual(speak_units("crude is at $104.32/bbl"), "crude is at 104 dollars and 32 cents per barrel")
+
+    def test_singular_plural_money_and_scales(self):
+        from simorgh.voice.planner import speak_units
+        self.assertEqual(speak_units("1ms then 2 ms"), "1 millisecond then 2 milliseconds")
+        self.assertEqual(speak_units("$120"), "120 dollars")
+        self.assertEqual(speak_units("$1.00"), "1 dollar")
+        self.assertEqual(speak_units("€2.5k/mo"), "2.5 thousand euros per month")
+        self.assertEqual(speak_units("£1,250.50"), "1250 pounds and 50 pence")
+        self.assertEqual(speak_units("5m 13s"), "5 minutes 13 seconds")
+        self.assertEqual(speak_units("14.5k tokens at 2.8x"), "14.5 thousand tokens at 2.8 times")
+        self.assertEqual(speak_units("3GB free, 20°C"), "3 gigabytes free, 20 degrees Celsius")
+
+    def test_letters_without_a_number_and_identifiers_are_left_alone(self):
+        from simorgh.voice.planner import speak_units
+        for text in ("the ms in the name", "GB", "x86", "af_bella", "5ms3"):
+            self.assertEqual(speak_units(text), text, text)
+
+    def test_the_whole_planner_says_it_and_then_words_the_decimal(self):
+        from simorgh.voice.planner import speakable
+        text, _ = speakable("Latency was 120ms and oil closed at $104.32/bbl.")
+        self.assertIn("120 milliseconds", text)
+        self.assertIn("104 dollars and 32 cents per barrel", text)

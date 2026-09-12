@@ -54,7 +54,7 @@ import time
 from pathlib import Path
 from typing import Awaitable, Callable, Iterable
 
-from .parser import COMMANDS as _PARSER_COMMANDS
+from .parser import COMMANDS as _PARSER_COMMANDS, parse as _parse
 
 DOUBLE_INTERRUPT_S = 2.0
 PROMPT_GLYPH = "❯"
@@ -490,6 +490,14 @@ class Tui:
                         break
                     if line is None or not line.strip():
                         continue
+                    command = _parse(line)
+                    if command is not None and command.name in ("exit", "quit"):
+                        # Not queued behind a busy turn: the creator typed
+                        # `exit` several times into a Sim that was mid-turn
+                        # (2026-09-12) and nothing happened until the turn
+                        # ended. Leaving is the one thing that must not wait.
+                        self._stopped = True
+                        break
                     queue.put_nowait(line)
         finally:
             worker.cancel()

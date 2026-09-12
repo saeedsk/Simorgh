@@ -107,6 +107,89 @@ def _int_words(n: int) -> str:
     return str(n)
 
 
+# Units and currency read as a person reads them, not letter by letter.
+# The creator, 2026-09-12: "120ms" came out as "one twenty em es", and
+# "$104.32/bbl" as "dollar ... slash be be el". A number followed by a
+# unit is the number and the unit's name, singular for one; a currency
+# sign before a number is the amount in dollars and cents; "/unit"
+# after an amount is "per unit". Nothing here guesses at a bare letter
+# with no number in front of it.
+_UNITS: dict[str, tuple[str, str]] = {
+    "ms": ("millisecond", "milliseconds"), "µs": ("microsecond", "microseconds"), "us": ("microsecond", "microseconds"),
+    "ns": ("nanosecond", "nanoseconds"), "s": ("second", "seconds"), "sec": ("second", "seconds"),
+    "secs": ("second", "seconds"), "min": ("minute", "minutes"), "mins": ("minute", "minutes"),
+    "h": ("hour", "hours"), "hr": ("hour", "hours"), "hrs": ("hour", "hours"),
+    "kb": ("kilobyte", "kilobytes"), "mb": ("megabyte", "megabytes"), "gb": ("gigabyte", "gigabytes"),
+    "tb": ("terabyte", "terabytes"), "kib": ("kibibyte", "kibibytes"), "mib": ("mebibyte", "mebibytes"),
+    "gib": ("gibibyte", "gibibytes"), "hz": ("hertz", "hertz"), "khz": ("kilohertz", "kilohertz"),
+    "mhz": ("megahertz", "megahertz"), "ghz": ("gigahertz", "gigahertz"),
+    "km": ("kilometre", "kilometres"), "cm": ("centimetre", "centimetres"), "mm": ("millimetre", "millimetres"),
+    "kg": ("kilogram", "kilograms"), "mg": ("milligram", "milligrams"), "lb": ("pound", "pounds"),
+    "lbs": ("pound", "pounds"), "mph": ("miles per hour", "miles per hour"), "kph": ("kilometres per hour",) * 2,
+    "fps": ("frames per second",) * 2, "px": ("pixel", "pixels"), "bps": ("bits per second",) * 2,
+    "kbps": ("kilobits per second",) * 2, "mbps": ("megabits per second",) * 2, "gbps": ("gigabits per second",) * 2,
+    "bbl": ("barrel", "barrels"), "°c": ("degrees Celsius",) * 2, "°f": ("degrees Fahrenheit",) * 2,
+    "°": ("degrees",) * 2, "x": ("times", "times"), "k": ("thousand", "thousand"),
+}
+_PER: dict[str, str] = {
+    "bbl": "per barrel", "kg": "per kilogram", "g": "per gram", "lb": "per pound", "h": "per hour", "hr": "per hour",
+    "s": "per second", "sec": "per second", "min": "per minute", "mo": "per month", "month": "per month",
+    "yr": "per year", "year": "per year", "day": "per day", "d": "per day", "km": "per kilometre",
+    "mile": "per mile", "mi": "per mile", "gal": "per gallon", "l": "per litre", "oz": "per ounce",
+    "unit": "per unit", "user": "per user", "seat": "per seat", "share": "per share", "ton": "per ton",
+    "tonne": "per tonne", "mwh": "per megawatt hour", "kwh": "per kilowatt hour", "token": "per token",
+}
+_CURRENCY = {"$": ("dollar", "dollars", "cent", "cents"), "€": ("euro", "euros", "cent", "cents"),
+             "£": ("pound", "pounds", "penny", "pence")}
+_UNIT_NAMES = "|".join(sorted((re.escape(u) for u in _UNITS), key=len, reverse=True))
+_PER_NAMES = "|".join(sorted((re.escape(u) for u in _PER), key=len, reverse=True))
+_NUMBER = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
+_MONEY = re.compile(rf"([$€£])\s?({_NUMBER})\s*([kKmMbB](?![A-Za-z]))?(?:\s*/\s*({_PER_NAMES}))?(?![A-Za-z0-9_])", re.I)
+_QUANTITY = re.compile(rf"(?<![\w.$€£])({_NUMBER})\s?({_UNIT_NAMES})(?:\s*/\s*({_PER_NAMES}))?(?![A-Za-z0-9_])", re.I)
+_MIN_SEC = re.compile(r"(?<![\w.])(\d+)m\s+(\d+)s(?![\w.])")
+_SCALE = {"k": "thousand", "m": "million", "b": "billion"}
+
+
+def _plural(count: str, names: tuple[str, str]) -> str:
+    one, many = names[0], names[-1]
+    return one if count in ("1", "1.0") else many
+
+
+def speak_units(text: str) -> str:
+    """`120ms` -> `120 milliseconds`; `$104.32/bbl` -> `104 dollars and
+    32 cents per barrel`; `5m 13s` -> `5 minutes 13 seconds`; `2.8x`
+    -> `2.8 times`; `14.5k` -> `14.5 thousand`. The number itself is
+    left for `speak_numbers`."""
+
+    def _money(match: re.Match) -> str:
+        sign, amount, scale, per = match.group(1), match.group(2).replace(",", ""), match.group(3), match.group(4)
+        one, many, cent, cents = _CURRENCY[sign]
+        if scale:
+            spoken = f"{amount} {_SCALE[scale.lower()]} {many}"
+        elif "." in amount:
+            whole, frac = amount.split(".", 1)
+            frac = (frac + "0")[:2]
+            spoken = f"{whole} {_plural(whole, (one, many))}"
+            if int(frac):
+                spoken += f" and {int(frac)} {_plural(str(int(frac)), (cent, cents))}"
+        else:
+            spoken = f"{amount} {_plural(amount, (one, many))}"
+        return spoken + (f" {_PER[per.lower()]}" if per else "")
+
+    def _quantity(match: re.Match) -> str:
+        amount, unit, per = match.group(1), match.group(2), match.group(3)
+        names = _UNITS.get(unit.lower()) or _UNITS.get(unit)
+        if names is None:
+            return match.group(0)
+        spoken = f"{amount} {_plural(amount.replace(',', ''), names)}"
+        return spoken + (f" {_PER[per.lower()]}" if per else "")
+
+    text = _MIN_SEC.sub(lambda m: f"{m.group(1)} {_plural(m.group(1), ('minute', 'minutes'))} "
+                                  f"{m.group(2)} {_plural(m.group(2), ('second', 'seconds'))}", text)
+    text = _MONEY.sub(_money, text)
+    return _QUANTITY.sub(_quantity, text)
+
+
 _DECIMAL = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})*|\d+)\.(\d+)(?![\w.])")
 _PERCENT = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?%")
 
@@ -166,6 +249,7 @@ def speakable(text: str) -> tuple[str, tuple[str, ...]]:
     for pattern, spoken in _ABBREVIATIONS:
         out = pattern.sub(spoken, out)
     out = _enumerate_lists(out)
+    out = speak_units(out)
     out = speak_numbers(out)
     out = _SPACES.sub(" ", out)
     lines = [line.strip() for line in out.splitlines()]
@@ -419,5 +503,5 @@ class SpokenResponsePlanner:
                           language=language)
 
 
-__all__ = ["CONNECTORS", "Chunk", "Context", "SpokenPlan", "SpokenResponsePlanner", "choose_connector",
+__all__ = ["CONNECTORS", "Chunk", "Context", "SpokenPlan", "SpokenResponsePlanner", "choose_connector", "speak_units",
            "chunk", "sentences", "speak_numbers", "speakable"]
