@@ -3,8 +3,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root { --bg:#0b0b0c; --fg:#d0d0d0; --dim:#6c6c6c; --warm:#ac7f4f; --green:#5faf5f; --cyan:#5fd7ff; --red:#d75f5f; --rule:#3a3a3a; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:22px/1.35 ui-monospace, Menlo, "SF Mono", monospace; }
-  #screen { display:grid; grid-template-rows: 1fr auto; height:100vh; padding:24px 32px; box-sizing:border-box; gap:12px; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:15px/1.4 ui-monospace, Menlo, "SF Mono", monospace; }
+  #screen { display:grid; grid-template-rows: 1fr auto; height:100vh; padding:16px 24px; box-sizing:border-box; gap:12px; }
   #main { display:grid; grid-template-columns: 1fr; gap:20px; min-height:0; }
   #main.framed { grid-template-columns: 3fr 2fr; }
   #transcript { overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; min-height:0; white-space:pre-wrap; word-break:break-word; }
@@ -13,8 +13,8 @@
   #frame { display:none; align-self:center; border:1px solid var(--rule); border-radius:6px; overflow:hidden; background:#000; aspect-ratio:16/9; }
   #main.framed #frame { display:block; }
   #frame video, #frame iframe { width:100%; height:100%; border:0; display:block; }
-  #frame .title { position:absolute; margin:8px 12px; color:var(--fg); text-shadow:0 0 6px #000; font-size:18px; }
-  #ribbon { border-top:1px solid var(--rule); padding-top:8px; color:var(--dim); font-size:20px; display:flex; gap:24px; }
+  #frame .title { position:absolute; margin:8px 12px; color:var(--fg); text-shadow:0 0 6px #000; font-size:13px; }
+  #ribbon { border-top:1px solid var(--rule); padding-top:6px; color:var(--dim); font-size:14px; display:flex; gap:24px; }
   #ribbon .spark { color:var(--warm); }
   #prompt { border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); padding:6px 0; color:#bcbcbc; }
 </style></head>
@@ -51,7 +51,7 @@
 
   async function refresh() {
     try {
-      const r = await fetch(q("/api/activity?limit=40")); const a = await r.json();
+      const r = await fetch(q("/api/activity?limit=80")); const a = await r.json();
       const events = (a.events || []).slice().reverse();
       el("transcript").innerHTML = events.map(line).join("");
       el("state").textContent = (a.pending_turns || []).length ? "thinking…" : "listening";

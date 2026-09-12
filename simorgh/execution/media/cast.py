@@ -352,6 +352,9 @@ class CastShowTool(_CastTool):
     args_schema = {"type": "object", "properties": {"device": {"type": "string"}, "url": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        target = str(args.get("target") or "").strip()  # the marker form: a URL or a device name
+        if target and not args.get("url") and not args.get("device"):
+            args = {**args, ("url" if target.lower().startswith(("http://", "https://")) else "device"): target}
         url = str(args.get("url") or "").strip() or self._page_url()
         try:
             backend = self._backend()
@@ -387,7 +390,14 @@ class CastPlayTool(_CastTool):
                                   "title": {"type": "string"}, "device": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        url = str(args.get("url") or "").strip()
+        words = str(args.get("url") or "").split()
+        url = words[0].strip("<>'\"") if words else ""
+        extra = [w for w in words[1:]]
+        if extra and not args.get("mode") and extra[0].lower() in ("full", "fullscreen", "frame", "framed", "box"):
+            args = {**args, "mode": "full" if extra[0].lower() in ("full", "fullscreen") else "frame"}
+            extra = extra[1:]
+        if extra and not args.get("device"):
+            args = {**args, "device": " ".join(extra)}
         if not url.lower().startswith(("http://", "https://")):
             return ToolResult(ok=False, error=(
                 "refused: `url` must be a link -- a YouTube page URL (web_search '<topic> youtube' and take the "
@@ -452,8 +462,12 @@ class CastVolumeTool(_CastTool):
                    "properties": {"level": {"type": "number"}, "device": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        raw = args.get("level")
+        if isinstance(raw, str) and raw.split()[1:] and not args.get("device"):
+            args = {**args, "device": " ".join(raw.split()[1:])}
+            raw = raw.split()[0]
         try:
-            level = int(float(args.get("level")))
+            level = int(float(str(raw).rstrip("%")))
         except (TypeError, ValueError):
             return ToolResult(ok=False, error="refused: `level` is a number from 0 to 100")
         level = max(0, min(100, level))

@@ -42,3 +42,14 @@ class JsonSurvivesATrailingSentenceTestCase(unittest.TestCase):
     def test_something_that_only_looks_like_json_is_still_text(self):
         args = args_from_text("remind", "tomorrow\n{not json at all")
         self.assertEqual(args["text"], "{not json at all")
+
+
+class CastMarkersTestCase(unittest.TestCase):
+    def test_every_cast_tool_has_a_marker_shape(self):
+        from simorgh.contracts.toolargs import MARKER_ARG_KEY, MARKER_NO_ARGS, args_from_text
+        for tool in ("cast_play", "cast_show", "cast_stop", "cast_volume", "cast_use", "cast_setup"):
+            self.assertIn(tool, MARKER_ARG_KEY, tool)
+        self.assertIn("cast_devices", MARKER_NO_ARGS)
+        self.assertEqual(args_from_text("cast_play", "https://www.youtube.com/watch?v=abc123 full"),
+                         {"url": "https://www.youtube.com/watch?v=abc123 full"})
+        self.assertEqual(args_from_text("cast_devices", ""), {})

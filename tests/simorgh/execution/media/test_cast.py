@@ -218,3 +218,30 @@ class YouTubeTestCase(unittest.IsolatedAsyncioTestCase):
         framed = await tools["cast_play"].run({"url": "https://youtu.be/Ph-wjyyq1nA"}, ctx=_ctx(bus))
         self.assertTrue(framed.ok)
         self.assertEqual(bus.published[-1].payload["mode"], "frame")
+
+
+class MarkerFormsTestCase(unittest.IsolatedAsyncioTestCase):
+    """The model writes one line after the marker; the tool reads the
+    rest of the line itself."""
+
+    async def test_one_line_forms(self):
+        cast = _FakeCast(("Living Room TV", "Bedroom"))
+        tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv", cast_device="Living Room TV",
+                                                      media_quiet_hours=""),
+                                               cast=cast, reachable=lambda url: True)}
+        bus = _Bus()
+        r = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=abc123 full Bedroom"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        self.assertEqual(cast.calls[-1], ("play_youtube", "Bedroom", "abc123"))
+        r = await tools["cast_play"].run({"url": "<https://x/clip.mp4>"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        self.assertEqual(bus.published[-1].payload["mode"], "frame")
+        r = await tools["cast_show"].run({"target": "Bedroom"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        self.assertEqual(cast.calls[-1][1], "Bedroom")
+        r = await tools["cast_show"].run({"target": "https://example.com/board"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        self.assertEqual(cast.calls[-1], ("show_page", "Living Room TV", "https://example.com/board"))
+        r = await tools["cast_volume"].run({"level": "35 Bedroom"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        self.assertEqual(cast.calls[-1], ("volume", "Bedroom", 0.35))

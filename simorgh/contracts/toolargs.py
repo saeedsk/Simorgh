@@ -29,6 +29,16 @@ import re
 #: (`orchestration/service.py::_on_tool_registered`), so the CLI's
 #: `tool` command understands those too without a second mechanism.
 MARKER_ARG_KEY: dict[str, str] = {
+    # The TV (execution/media/cast.py). One line of text each; the tool
+    # reads the rest of the line -- `<url> full`, `35 Bedroom` -- itself.
+    # Without these rows every spoken "cast it" arrived as no arguments
+    # and was refused three times in a row (the creator, 2026-09-12).
+    "cast_play": "url",
+    "cast_show": "target",
+    "cast_stop": "what",
+    "cast_volume": "level",
+    "cast_use": "device",
+    "cast_setup": "device",
     "energy_report": "range",
     "media_now": "where",
     "home_find": "query",
@@ -88,7 +98,7 @@ MARKER_ARG_KEY: dict[str, str] = {
 #: fails schema validation, so these must send `{}` rather than
 #: `{"": ""}` or `{"argument": ""}`.
 MARKER_NO_ARGS: frozenset[str] = frozenset({
-    "git_revert", "kb_status", "sec_self", "sec_posture", "energy_status",
+    "git_revert", "kb_status", "sec_self", "sec_posture", "energy_status", "cast_devices",
 })
 
 #: Tools whose argument is two parts: the first line, then everything
