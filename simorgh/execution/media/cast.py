@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import socket
 import time
 import urllib.request
@@ -162,6 +163,17 @@ class PyChromecast:
         cast.media_controller.play_media(url, content_type, title=title or None)
         cast.media_controller.block_until_active(timeout=10)
 
+    def play_youtube(self, name: str, video_id: str) -> None:
+        """YouTube full screen: the Cast protocol has its own YouTube
+        receiver, driven by video id -- a YouTube page URL is not a media
+        file the media controller could play."""
+        from pychromecast.controllers.youtube import YouTubeController
+
+        cast = self._cast(name)
+        controller = YouTubeController()
+        cast.register_handler(controller)
+        controller.play_video(video_id)
+
     def stop(self, name: str) -> None:
         cast = self._cast(name)
         cast.media_controller.stop()
@@ -169,6 +181,14 @@ class PyChromecast:
 
     def volume(self, name: str, level: float) -> None:
         self._cast(name).set_volume(level)
+
+
+_YOUTUBE = re.compile(r"(?:youtu\.be/|youtube\.com/(?:watch\?(?:.*&)?v=|embed/|shorts/|live/))([\w-]{6,})")
+
+
+def youtube_id(url: str) -> str:
+    match = _YOUTUBE.search(url or "")
+    return match.group(1) if match else ""
 
 
 def _content_type(url: str) -> str:
@@ -383,8 +403,12 @@ class CastPlayTool(_CastTool):
             return ToolResult(ok=False, error=f"refused: {exc}")
         if problem:
             return ToolResult(ok=False, error=problem)
+        video = youtube_id(url)
         try:
-            await asyncio.to_thread(backend.play, name, url, content_type=_content_type(url), title=title)
+            if video:
+                await asyncio.to_thread(backend.play_youtube, name, video)
+            else:
+                await asyncio.to_thread(backend.play, name, url, content_type=_content_type(url), title=title)
         except Exception as exc:  # noqa: BLE001
             return ToolResult(ok=False, error=f"refused: {name} would not play it ({exc})")
         await self._publish_state(ctx, "full", url=url, title=title)
@@ -566,5 +590,5 @@ def cast_tools(config, **kwargs) -> list:
 
 
 __all__ = ["CastDevicesTool", "CastPlayTool", "CastPreferences", "CastSetupTool", "CastShowTool", "CastStopTool", "CastUseTool",
-           "CastVolumeTool", "Device", "settings_paths",
+           "CastVolumeTool", "Device", "settings_paths", "youtube_id",
            "PyChromecast", "available", "cast_tools", "lan_address"]

@@ -80,7 +80,7 @@ STILL: dict[str, tuple[str, ...]] = {
 
 # Sim's names, as a person says them and as whisper writes them.
 # "Shin" is how whisper wrote the creator's "Sim" on 2026-09-11.
-_NAMED = re.compile(r"\b(?:sim|simorgh|simurgh|seemorgh|cyim|sym|shin|seem|sims)\b|سیم|سیمرغ", re.I)
+_NAMED = re.compile(r"\b(?:sim|simorgh|simurgh|seemorgh|cyim|sym|shin|seem|sims|asim)\b|سیم|سیمرغ", re.I)
 
 _QUESTION = re.compile(
     r"\?\s*$|^\s*(?:what|why|how|where|when|who|which|whose|is|are|was|were|do|does|did|can|could|would|"

@@ -53,7 +53,10 @@ CHAT = Profile(
            # resumes. Chat only: a task that starts tasks is a fork
            # bomb, and the tool refuses from inside one anyway.
            "start_task",
-           "propose_mcp_server"),
+           "propose_mcp_server",
+           # The TV (execution/media/cast.py): "put yourself on the TV",
+           # "play this on the TV" are chat requests too.
+           "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume"),
     # 6 was right for a profile that could only read. Writing a file
     # costs a step, installing what it needs costs another, running it a
     # third, and checking the result a fourth -- before a single wrong
@@ -176,8 +179,12 @@ SKILL = Profile(
 # dig.
 VOICE_CHAT = replace(
     CHAT,
-    tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task"),
-    max_steps=4,
+    tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task",
+           "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume"),
+    # Five: a search, a cast, and the answer (the creator, 2026-09-12,
+    # "find a youtube video about penguins and cast it on tv" -- Sim
+    # found it and said it had no TV control, because it had no tool).
+    max_steps=5,
 )
 
 

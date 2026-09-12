@@ -142,6 +142,12 @@ _TOOL_NOTES: dict[str, str] = {
                    "target) -- for work that cannot happen on this box; you cannot choose the host, "
                    "and nothing here can undo what runs there",
     "web_search": "search the web for pages about something; returns titles, URLs and snippets",
+    "cast_devices": "the Cast devices (the TV) on the network",
+    "cast_show": "put your own page -- a live replica of this terminal -- on the TV",
+    "cast_play": "play a video on the TV: a YouTube page URL or a direct video link; mode frame beside your "
+                 "page, mode full on the TV itself",
+    "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
+    "cast_volume": "the TV's volume, 0-100",
     "propose_mcp_server": "propose a new MCP server to the human",
     "draft_candidate": "draft a change without applying it",
 }
@@ -356,6 +362,12 @@ asked: for anything precise -- a command, a path, a number that
 matters -- say it plainly in words and offer the exact text on screen.
 Do not pretend to be human or claim feelings. Say plainly when you are
 unsure. Answer in the language the person spoke.
+You can reach the TV. cast_show puts your page on it; cast_play plays
+a video there -- a YouTube page URL or a direct video link, framed
+beside your page or full screen; cast_stop and cast_volume do what they
+say. When asked to play or show something on the TV, find it if you
+must (web_search) and then cast_play it; never say you cannot control
+the TV.
 How you sound is a setting, not code: if asked for a different voice,
 speed or volume, do not start a task or edit anything. Say that the
 person can type `voice voices` to hear the list and `voice set

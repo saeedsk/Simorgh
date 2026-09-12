@@ -18,6 +18,7 @@ class TestFixName(unittest.TestCase):
         self.assertEqual(fix_name("hey c, stop"), "hey Sim, stop")
         self.assertEqual(fix_name("Shin, are you there?"), "Sim, are you there?")
         self.assertEqual(fix_name("okay, shin, go on"), "okay, Sim, go on")
+        self.assertEqual(fix_name("Hello, Asim."), "Hello, Sim.")  # the creator's screen, 2026-09-12
 
     def test_english_that_happens_to_contain_those_words_is_left_alone(self) -> None:
         for text in ("They seem happy today", "I can see the file", "the team is here", "sin is a word"):

@@ -40,10 +40,10 @@ from simorgh.contracts import topics
 # sentence. "Seem" and "sin" are only Sim in that position -- "they
 # seem fine" is English.
 _NAME_LEAD = re.compile(
-    r"^(\s*(?:hey|hi|ok|okay|yo|so|and|now|please)?[\s,]*)"
-    r"(?:seem|seems|c|si|sym|sim's|simm|sims|cim|zim|shin|sheen|sem|seam)"
+    r"^(\s*(?:hey|hi|hello|ok|okay|yo|so|and|now|please)?[\s,]*)"
+    r"(?:seem|seems|c|si|sym|sim's|simm|sims|cim|zim|shin|sheen|sem|seam|asim|assim)"
     r"(?=[\s,.!?:]|$)([,.!:]?)", re.I)
-_NAME_VOCATIVE = re.compile(r"([,;]\s*)(?:seem|sym|simm|cim|zim|shin|sheen|seam)(?=[\s.!?]|$)", re.I)
+_NAME_VOCATIVE = re.compile(r"([,;]\s*)(?:seem|sym|simm|cim|zim|shin|sheen|seam|asim|assim)(?=[\s.!?]|$)", re.I)
 
 _WORD = re.compile(r"[A-Za-z']+")
 _CODEISH = re.compile(r"[/\\_.@:#`{}\[\]()<>=|~^$%&*+0-9]")

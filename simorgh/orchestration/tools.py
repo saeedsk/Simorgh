@@ -127,6 +127,20 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "media_now": ("read_only", True),
     "media_control": ("reversible", True),
     "media_play": ("reversible", True),
+
+    "cast_devices": ("read_only", True),
+
+    "cast_show": ("reversible", True),
+
+    "cast_play": ("reversible", True),
+
+    "cast_stop": ("reversible", True),
+
+    "cast_volume": ("reversible", True),
+
+    "cast_use": ("reversible", True),
+
+    "cast_setup": ("reversible", False),
     # The Mac's own Music app (execution/media/musicapp.py): the same
     # three shapes as the home players, on the laptop's own speakers.
     "music_now": ("read_only", True),

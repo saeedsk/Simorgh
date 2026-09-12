@@ -35,6 +35,9 @@ class _FakeCast:
     def play(self, name, url, *, content_type, title):
         self.calls.append(("play", name, url, content_type, title))
 
+    def play_youtube(self, name, video_id):
+        self.calls.append(("play_youtube", name, video_id))
+
     def stop(self, name):
         self.calls.append(("stop", name))
 
@@ -196,3 +199,22 @@ class SettingsPathsTestCase(unittest.TestCase):
         self.assertEqual(config_path.name, "simorgh.toml")
         self.assertEqual(secrets_path, config_path.parent / "secrets.toml")
         self.assertNotEqual(config_path.parent, Path(os.getcwd()).parent, "never the working directory's parent")
+
+
+class YouTubeTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_a_youtube_page_plays_full_screen_through_the_youtube_receiver(self):
+        from simorgh.execution.media.cast import youtube_id
+        self.assertEqual(youtube_id("https://www.youtube.com/watch?v=Ph-wjyyq1nA"), "Ph-wjyyq1nA")
+        self.assertEqual(youtube_id("https://youtu.be/Ph-wjyyq1nA?t=3"), "Ph-wjyyq1nA")
+        self.assertEqual(youtube_id("https://example.com/clip.mp4"), "")
+        cast = _FakeCast()
+        tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
+                                               reachable=lambda url: True)}
+        bus = _Bus()
+        full = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=Ph-wjyyq1nA", "mode": "full"},
+                                            ctx=_ctx(bus))
+        self.assertTrue(full.ok, full.error)
+        self.assertEqual(cast.calls[-1], ("play_youtube", "Living Room TV", "Ph-wjyyq1nA"))
+        framed = await tools["cast_play"].run({"url": "https://youtu.be/Ph-wjyyq1nA"}, ctx=_ctx(bus))
+        self.assertTrue(framed.ok)
+        self.assertEqual(bus.published[-1].payload["mode"], "frame")
