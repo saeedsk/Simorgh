@@ -148,6 +148,8 @@ _TOOL_NOTES: dict[str, str] = {
                  "page, mode full on the TV itself",
     "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
     "cast_volume": "the TV's volume, 0-100",
+    "cast_use": "remember which Cast device is the TV, by name",
+    "cast_setup": "one-time: open your API to the network with a token so the TV can fetch your page; then a restart",
     "propose_mcp_server": "propose a new MCP server to the human",
     "draft_candidate": "draft a change without applying it",
 }
