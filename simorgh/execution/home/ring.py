@@ -382,15 +382,22 @@ def _save_secrets(settings_home: Path | None, values: dict[str, str]) -> Path:
 
 class RingSetupTool(_RingTool):
     name = "ring_setup"
-    description = ("Log in to Ring once: `email` and `password`, then -- when Ring texts a code -- the same call with "
-                   "`code`. The token is kept in secrets.toml (owner-only); the password is not.")
-    args_schema = {"type": "object", "required": ["email", "password"],
-                   "properties": {"email": {"type": "string"}, "password": {"type": "string"}, "code": {"type": "string"}}}
+    description = ("Log in to Ring once: `email`, then -- when Ring texts a code -- the same call with `code`. The "
+                   "password is not an argument: the terminal's `ring setup <email>` asks for it hidden and hands it over "
+                   "out of the ledger. The token is kept in secrets.toml (owner-only); the password is not.")
+    args_schema = {"type": "object", "required": ["email"],
+                   "properties": {"email": {"type": "string"}, "code": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        email, password, code = (str(args.get(k) or "").strip() for k in ("email", "password", "code"))
-        if not (email and password):
-            return ToolResult(ok=False, error="refused: email and password are both needed")
+        from simorgh.contracts.settings import read_handoff
+
+        email, code = (str(args.get(k) or "").strip() for k in ("email", "code"))
+        password = str(args.get("password") or "").strip() or read_handoff("ring", self._settings_home).get("password", "")
+        if not email:
+            return ToolResult(ok=False, error="refused: the account's email is needed")
+        if not password:
+            return ToolResult(ok=False, error="refused: no password was handed over; at the terminal, `ring setup <email>` "
+                                              "asks for it hidden (never put it on the command line)")
         if self._given is None:
             ok, why = available()
             if not ok:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import json
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -363,8 +364,7 @@ class RingCommandTestCase(unittest.IsolatedAsyncioTestCase):
         dispatch_mod._run_tool = _run_tool
         try:
             for line in ("ring", "ring list", "ring snapshot", "ring snapshot front door", "ring events", "ring events back yard 5",
-                         "ring light back yard on", "ring siren back yard 15", "ring watch", "ring watch off", "ring watch on 60",
-                         "ring setup a@b.c pw", "ring setup a@b.c pw 123456"):
+                         "ring light back yard on", "ring siren back yard 15", "ring watch", "ring watch off", "ring watch on 60"):
                 await dispatch_mod.dispatch(parse(line), bus=None, clock=_Clock(), session_id="s1", vitals=None, ledger=None)
         finally:
             dispatch_mod._run_tool = original
@@ -373,8 +373,50 @@ class RingCommandTestCase(unittest.IsolatedAsyncioTestCase):
             ("ring_events", {}), ("ring_events", {"camera": "back yard", "limit": 5}),
             ("ring_light", {"camera": "back yard", "on": True}), ("ring_siren", {"camera": "back yard", "seconds": 15}),
             ("ring_watch", {"on": True}), ("ring_watch", {"on": False}), ("ring_watch", {"on": True, "every_s": 60.0}),
-            ("ring_setup", {"email": "a@b.c", "password": "pw"}), ("ring_setup", {"email": "a@b.c", "password": "pw", "code": "123456"}),
-        ])
+        ])   # `ring setup` is its own test: it asks for the password hidden
+
+    async def test_setup_takes_the_password_hidden_and_never_on_the_line(self):
+        import os, tempfile
+        from simorgh.interface import dispatch as dispatch_mod
+        from simorgh.interface.parser import parse
+        from simorgh.contracts.settings import handoff_path
+        calls, asked = [], []
+
+        async def _run_tool(*, bus, ledger, tool, raw, session_id, timeout=300.0):
+            calls.append((tool, json.loads(raw)))
+            return dispatch_mod.Outcome("ok")
+
+        async def _hidden(prompt):
+            asked.append(prompt)
+            return "s3cret"
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "simorgh.toml").write_text("")
+            old_env = os.environ.get("SIMORGH_CONFIG")
+            os.environ["SIMORGH_CONFIG"] = str(Path(tmp) / "simorgh.toml")
+            original = (dispatch_mod._run_tool, dispatch_mod._hidden_input)
+            dispatch_mod._run_tool, dispatch_mod._hidden_input = _run_tool, _hidden
+            try:
+                out = await dispatch_mod.dispatch(parse("ring setup a@b.c hunter2"), bus=None, clock=_Clock(), session_id="s1", vitals=None, ledger=None)
+                self.assertIn("ledgered", out.text); self.assertEqual(calls, [])
+                out = await dispatch_mod.dispatch(parse("cameras setup 10.0.0.9 sim hunter2"), bus=None, clock=_Clock(), session_id="s1", vitals=None, ledger=None)
+                self.assertIn("ledgered", out.text); self.assertEqual(calls, [])
+                await dispatch_mod.dispatch(parse("ring setup a@b.c"), bus=None, clock=_Clock(), session_id="s1", vitals=None, ledger=None)
+                self.assertEqual(calls[-1], ("ring_setup", {"email": "a@b.c"}), "no password in the proposal")
+                self.assertEqual(json.loads(handoff_path("ring").read_text())["password"], "s3cret")
+                self.assertIn("hidden", asked[0])
+                await dispatch_mod.dispatch(parse("cameras setup 10.0.0.9 sim"), bus=None, clock=_Clock(), session_id="s1", vitals=None, ledger=None)
+                self.assertEqual(calls[-1], ("cam_setup", {"host": "10.0.0.9", "username": "sim"}))
+                self.assertTrue(handoff_path("reolink").exists())
+                # any tool call carrying a password is refused by the real runner before it touches the bus
+                dispatch_mod._run_tool = original[0]
+                out = await dispatch_mod.dispatch(parse('tool web_fetch {"url": "x", "password": "p"}'), bus=None, clock=_Clock(), session_id="s1", vitals=None, ledger=None)
+                self.assertIn("must not be passed", out.text)
+            finally:
+                dispatch_mod._run_tool, dispatch_mod._hidden_input = original
+                if old_env is None:
+                    os.environ.pop("SIMORGH_CONFIG", None)
+                else:
+                    os.environ["SIMORGH_CONFIG"] = old_env
 
 
 class CamerasCommandTestCase(unittest.IsolatedAsyncioTestCase):

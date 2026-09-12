@@ -274,9 +274,14 @@ class SchedulerTestCase(unittest.IsolatedAsyncioTestCase):
             (root / "notes.txt").write_bytes(b"x")
             (root / "ring").mkdir()
             (root / "ring" / "Porch-20260912-110000.jpg").write_bytes(b"4")
+            (root / "Garage-20260901-100000.jpg").write_bytes(b"5")
             import os
-            os.utime(root / "Front_Door-20260912-100000.jpg", (2_000_000_000, 2_000_000_000))
-            feeds = df.DashFeeds(fetcher=_Fetcher({}), clock=_Clock(), snapshot_root=root)
+            now = 2_000_000_000
+            os.utime(root / "Front_Door-20260912-100000.jpg", (now, now))
+            for name in ("Front_Door-20260912-090000.jpg", "Office-20260912-080000.jpg", "ring/Porch-20260912-110000.jpg"):
+                os.utime(root / name, (now - 600, now - 600))
+            os.utime(root / "Garage-20260901-100000.jpg", (now - 3 * 86400, now - 3 * 86400))   # days old: not a poster
+            feeds = df.DashFeeds(fetcher=_Fetcher({}), clock=_Clock(float(now)), snapshot_root=root)
             cams = feeds.cameras()
             self.assertEqual([c["name"] for c in cams][:1], ["Front Door"])
             self.assertEqual({c["name"] for c in cams}, {"Front Door", "Office", "Porch"})

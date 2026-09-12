@@ -90,11 +90,17 @@ class RingTestCase(unittest.IsolatedAsyncioTestCase):
         return tools, cloud, _Bus()
 
     async def test_setup_asks_for_the_code_then_saves_the_token_and_widens_the_scope(self):
+        from simorgh.contracts.settings import handoff_path, write_handoff
         tools, cloud, bus = self._tools()
-        first = await tools["ring_setup"].run({"email": "a@b.c", "password": "pw"}, ctx=_ctx(bus))
+        nothing = await tools["ring_setup"].run({"email": "a@b.c"}, ctx=_ctx(bus))
+        self.assertFalse(nothing.ok); self.assertIn("handed over", nothing.error)
+        write_handoff("ring", {"password": "pw"}, self.home)
+        first = await tools["ring_setup"].run({"email": "a@b.c"}, ctx=_ctx(bus))
         self.assertFalse(first.ok); self.assertIn("code", first.error)
+        self.assertFalse(handoff_path("ring", self.home).exists(), "consumed even when Ring wants the code")
         self.assertFalse((self.home / "secrets.toml").exists())
-        second = await tools["ring_setup"].run({"email": "a@b.c", "password": "pw", "code": "123456"}, ctx=_ctx(bus))
+        write_handoff("ring", {"password": "pw"}, self.home)
+        second = await tools["ring_setup"].run({"email": "a@b.c", "code": "123456"}, ctx=_ctx(bus))
         self.assertTrue(second.ok, second.error)
         self.assertIn("Front Door", second.output); self.assertNotIn("pw", second.output)
         import tomllib

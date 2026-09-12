@@ -284,15 +284,21 @@ class _CameraTool:
 class CamSetupTool(_CameraTool):
     name = "cam_setup"
     description = ("Set the NVR's address and login (kept in secrets.toml, owner-only), then check the connection "
-                   "and list the cameras. `host` may be an address or address:port.")
-    args_schema = {"type": "object", "required": ["host", "username", "password"],
-                   "properties": {"host": {"type": "string"}, "username": {"type": "string"},
-                                  "password": {"type": "string"}}}
+                   "and list the cameras. `host` may be an address or address:port. The password is not an argument: "
+                   "the terminal's `cameras setup <host> <user>` asks for it hidden and hands it over out of the ledger.")
+    args_schema = {"type": "object", "required": ["host", "username"],
+                   "properties": {"host": {"type": "string"}, "username": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        host, user, password = (str(args.get(k) or "").strip() for k in ("host", "username", "password"))
-        if not (host and user and password):
-            return ToolResult(ok=False, error="refused: host, username and password are all needed")
+        from simorgh.contracts.settings import read_handoff
+
+        host, user = (str(args.get(k) or "").strip() for k in ("host", "username"))
+        password = str(args.get("password") or "").strip() or read_handoff("reolink", self._settings_home).get("password", "")
+        if not (host and user):
+            return ToolResult(ok=False, error="refused: host and username are both needed")
+        if not password:
+            return ToolResult(ok=False, error="refused: no password was handed over; at the terminal, `cameras setup <host> "
+                                              "<username>` asks for it hidden (never put it on the command line)")
         from ..media.cast import settings_paths
         from simorgh.voice.settings import persist
 

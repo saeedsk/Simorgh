@@ -846,7 +846,7 @@ async def _cameras(args: str, *, bus: BusClient, ledger: LedgerClient, session_i
     rest = words[1:]
     usage = ("usage: cameras list | state [camera] | show <cameras|all> [grid|full|frame|stop] | snapshot <camera> | "
              "light <camera> on|off | ir <camera> on|off | siren <camera> [seconds] | ptz <camera> <move> | "
-             "recordings <camera> [today|yesterday|<n>h] | watch on|off | setup <host> <user> <password>")
+             "recordings <camera> [today|yesterday|<n>h] | watch on|off | setup <host> <user>")
 
     async def _run(tool: str, payload: dict, timeout: float = 120.0) -> Outcome:
         return await _run_tool(bus=bus, ledger=ledger, tool=tool, raw=json.dumps(payload), session_id=session_id,
@@ -890,10 +890,53 @@ async def _cameras(args: str, *, bus: BusClient, ledger: LedgerClient, session_i
     if verb == "watch":
         return await _run("cam_watch", {"on": not rest or rest[0].lower() not in ("off", "stop")})
     if verb == "setup":
-        if len(rest) < 3:
-            return Outcome("usage: cameras setup <host> <username> <password>")
-        return await _run("cam_setup", {"host": rest[0], "username": rest[1], "password": " ".join(rest[2:])}, timeout=60.0)
+        if len(rest) > 2:
+            return Outcome(_NO_PASSWORD_ON_THE_LINE.format(cmd=f"cameras setup {rest[0]} {rest[1]}"))
+        if len(rest) < 2:
+            return Outcome("usage: cameras setup <host> <username>   (the password is asked for, hidden)")
+        handed = await _hand_off_password("reolink", "Reolink NVR password")
+        if handed is not None:
+            return handed
+        return await _run("cam_setup", {"host": rest[0], "username": rest[1]}, timeout=60.0)
     return Outcome(f"cameras: unknown verb {verb!r} -- {usage}")
+
+
+_NO_PASSWORD_ON_THE_LINE = ("refused: a password on the command line would be ledgered with the tool call. Run `{cmd}` "
+                            "and type it when asked -- it is not echoed, not logged, and reaches the tool through a file "
+                            "only you can read, deleted once used.")
+_SECRET_ARG_KEYS = frozenset({"password", "passwd", "pass", "secret", "api_key", "apikey", "token"})
+
+
+async def _hidden_input(prompt: str) -> str | None:
+    """A line typed with echo off, or None when there is no terminal to
+    ask on (a chat turn, a pipe). Runs off the loop; the TUI's prompt is
+    idle while a command is being handled."""
+    import asyncio
+    import getpass
+    import sys
+
+    if not (sys.stdin and sys.stdin.isatty()):
+        return None
+    try:
+        return await asyncio.to_thread(getpass.getpass, prompt)
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+async def _hand_off_password(name: str, what: str) -> Outcome | None:
+    """Ask for `what` hidden and write it for the tool to read once.
+    Returns an Outcome when the command must stop here (no terminal, or
+    nothing typed); None when the tool call can proceed."""
+    from simorgh.contracts.settings import write_handoff
+
+    typed = await _hidden_input(f"{what} (hidden, not logged): ")
+    if typed is None:
+        return Outcome("refused: the password has to be typed at Sim's terminal, where it can be asked for hidden; "
+                       "this channel cannot take it safely")
+    if not typed.strip():
+        return Outcome("nothing typed; the login was not changed")
+    write_handoff(name, {"password": typed})
+    return None
 
 
 async def _ring(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: str) -> Outcome:
@@ -902,7 +945,7 @@ async def _ring(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: 
     verb = words[0].lower() if words else "list"
     rest = words[1:]
     usage = ("usage: ring list | snapshot <camera|all> | events [camera] [n] | light <camera> on|off | siren <camera> [seconds] | "
-             "watch on|off [seconds] | setup <email> <password> [code]")
+             "watch on|off [seconds] | setup <email> [code]")
 
     async def _run(tool: str, payload: dict, timeout: float = 120.0) -> Outcome:
         return await _run_tool(bus=bus, ledger=ledger, tool=tool, raw=json.dumps(payload), session_id=session_id,
@@ -938,11 +981,16 @@ async def _ring(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: 
             payload["every_s"] = float(rest[1])
         return await _run("ring_watch", payload)
     if verb in ("setup", "login"):
-        if len(rest) < 2:
-            return Outcome("usage: ring setup <email> <password> [code]")
-        payload = {"email": rest[0], "password": rest[1]}
-        if len(rest) > 2:
-            payload["code"] = rest[2]
+        if not rest:
+            return Outcome("usage: ring setup <email> [code]   (the password is asked for, hidden; the code once Ring texts it)")
+        if len(rest) > 2 or (len(rest) == 2 and not rest[1].isdigit()):
+            return Outcome(_NO_PASSWORD_ON_THE_LINE.format(cmd=f"ring setup {rest[0]}"))
+        handed = await _hand_off_password("ring", f"Ring password for {rest[0]}")
+        if handed is not None:
+            return handed
+        payload = {"email": rest[0]}
+        if len(rest) == 2:
+            payload["code"] = rest[1]
         return await _run("ring_setup", payload, timeout=90.0)
     return Outcome(f"ring: unknown verb {verb!r} -- {usage}")
 
@@ -1099,6 +1147,12 @@ async def _run_tool(*, bus: BusClient, ledger: LedgerClient, tool: str, raw: str
     args = cli_tool_args(tool, raw)
     if "__error__" in args:
         return Outcome(f"error: {args['__error__']}")
+    # No secret rides in a proposal: every proposal is ledgered. The
+    # setup commands hand passwords over another way (contracts/settings.py).
+    leaked = sorted(k for k in args if k.lower() in _SECRET_ARG_KEYS and args[k])
+    if leaked:
+        return Outcome(f"refused: {', '.join(leaked)} must not be passed as a tool argument -- it would be written to "
+                       f"the ledger. `cameras setup` and `ring setup` ask for a password hidden instead.")
 
     action_id = uuid.uuid4().hex[:12]
     loop = asyncio.get_running_loop()

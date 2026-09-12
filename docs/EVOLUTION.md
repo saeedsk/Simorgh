@@ -4865,3 +4865,19 @@ Still ahead, roughly in order:
     a live dashboard; after five missed polls (20 s) the page dims,
     says "Sim is offline", drops the video and the camera players, and
     picks everything up again on its own when Sim answers.
+
+154. **A password never rides in a tool call (2026-09-12, night).** "I
+    don't like that you ask for plain password from CLI, the password
+    may leak to sim logs." It did worse than that: `cameras setup <host>
+    <user> <password>` became a tool proposal, and every proposal is
+    ledgered -- the NVR's password sat in `action.proposed` payloads.
+    Now `cameras setup <host> <user>` and `ring setup <email> [code]`
+    ask for the password hidden (`getpass`, off the loop, refused with a
+    reason when there is no terminal to ask on), write it to an
+    owner-only hand-off file under the settings home
+    (`contracts/settings.py`), and the tool reads and deletes that file;
+    the proposal carries no password. A password typed on the line is
+    refused with the reason; any tool call carrying a `password`,
+    `secret` or `token` argument is refused by the runner before it
+    reaches the bus. Also: a still older than twelve hours is no longer
+    a poster (the morning's Office snapshot under the live feed).

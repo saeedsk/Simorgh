@@ -845,6 +845,9 @@ class DashFeeds:
     # -- the snapshot
 
     _STAMP = re.compile(r"-\d{8}-\d{6}$")
+    #: A still older than this is not shown: a poster from this morning
+    #: under a live feed reads as the feed (the creator, 2026-09-12).
+    STILL_MAX_AGE_S = 12 * 3600.0
 
     def cameras(self) -> list[dict]:
         """Every camera that has a still on disk, newest first: name,
@@ -870,7 +873,10 @@ class DashFeeds:
                     continue
                 if at > newest.get(safe, 0.0):
                     newest[safe] = at
+            now = self._clock()
             for safe, at in newest.items():
+                if now - at > self.STILL_MAX_AGE_S:
+                    continue
                 out.append({"name": safe.replace("_", " "), "safe": safe, "kind": kind, "at": at,
                             "url": prefix + urllib.parse.quote(safe)})
         out.sort(key=lambda c: c["at"], reverse=True)

@@ -209,10 +209,17 @@ class CamerasTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.nvr.subscribed)
 
     async def test_setup_stores_the_login_owner_only(self):
+        from simorgh.contracts.settings import handoff_path, write_handoff
         home = self.root / "home"
         tools = {t.name: t for t in cameras_tools(Config(), nvr=self.nvr, env={}, settings_home=home)}
-        result = await tools["cam_setup"].run({"host": "192.168.50.42", "username": "sim", "password": "pw"}, ctx=self.ctx)
+        # No password in the call: the terminal handed it over in an owner-only file the tool consumes.
+        refused = await tools["cam_setup"].run({"host": "192.168.50.42", "username": "sim"}, ctx=self.ctx)
+        self.assertFalse(refused.ok); self.assertIn("handed over", refused.error)
+        write_handoff("reolink", {"password": "pw"}, home)
+        self.assertEqual(stat.S_IMODE(handoff_path("reolink", home).stat().st_mode), 0o600)
+        result = await tools["cam_setup"].run({"host": "192.168.50.42", "username": "sim"}, ctx=self.ctx)
         self.assertTrue(result.ok, result.error)
+        self.assertFalse(handoff_path("reolink", home).exists(), "consumed once")
         self.assertIn("3 camera(s)", result.output)
         text = (home / "secrets.toml").read_text()
         self.assertIn('REOLINK_PASSWORD = "pw"', text)
