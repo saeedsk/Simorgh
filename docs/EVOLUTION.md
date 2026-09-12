@@ -4881,3 +4881,13 @@ Still ahead, roughly in order:
     `secret` or `token` argument is refused by the runner before it
     reaches the bus. Also: a still older than twelve hours is no longer
     a poster (the morning's Office snapshot under the live feed).
+
+    **The TV decodes two (2026-09-12, night):** "tv live 2 works but tv
+    live 3 doesn't". A Cast receiver on a TV chip runs about two hardware
+    video decodes at once, and the Home view's YouTube frame is one of
+    them. So every camera keeps its tile, `live_max` (default two) play
+    at a time, the live slots rotate through the cameras -- every five
+    seconds until each has shown a frame, then every twelve -- and a
+    tile that is not live shows the last frame captured from its own
+    playback, never grey while a relay exists. The video frame yields
+    one slot while it plays.

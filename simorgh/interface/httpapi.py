@@ -160,7 +160,7 @@ class HttpApi:
         # Where the dashboard should look (`ui.dash.state`): set by the
         # `dash_view` tool or the phone remote, polled by the page.
         self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "scale": 0,
-                                  "live_max": 8, "video_quality": "light", "since": 0.0}
+                                  "live_max": 2, "video_quality": "light", "since": 0.0}
         self._dash_sub = None
         self._remote_page = (_STATIC_DIR / "remote.html").read_text(encoding="utf-8")
         # Sim's logo (the creator's, 2026-09-12; keyed and shrunk from

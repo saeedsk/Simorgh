@@ -158,7 +158,7 @@ function applyState(st){
   if(st.symbol!=null) {SEL=st.symbol||""; if(SEL) PIN=SEL;}
   if(st.rotate_s!=null) setRotate(st.rotate_s|0);
   if(st.scale!=null){SCALE=Number(st.scale)||0;fitApp();}
-  if(st.live_max!=null&&Number(st.live_max)!==CAM_LIVE_MAX){CAM_LIVE_MAX=Number(st.live_max);CAMKEY="";CAMVIEWKEY="";refreshStrip();}
+  if(st.live_max!=null&&Number(st.live_max)!==CAM_LIVE_MAX){CAM_LIVE_MAX=Number(st.live_max);CAMKEY="";CAMVIEWKEY="";refreshStrip();if(CUR==="cameras")render();}
   if(st.video_quality&&st.video_quality!==VIDEO_QUALITY){VIDEO_QUALITY=st.video_quality;DK.np="";}
   const k=VIEW_KEYS[st.view||""];
   if(k&&k!==CUR) go(k); else render();
@@ -327,7 +327,21 @@ function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-temp
   +'</div></div>';}
 // ---- the camera strip: every relay that is live (cameras show all dash) plays through hls.js; a camera with
 // no relay shows its newest still. Rebuilt only when the set of feeds changes, so players are not restarted.
-let CAM_LIVE_MAX=8,VIDEO_QUALITY="light";let CAMKEY="",LIVE_ASKED=0;
+let CAM_LIVE_MAX=2,VIDEO_QUALITY="light";let CAMKEY="",LIVE_ASKED=0;
+// The TV decodes only a couple of videos at once (the creator: two feeds play, three do not). So every camera keeps
+// its tile, `live_max` of them play at a time, the live slots rotate every LIVE_ROTATE_S seconds, and a tile that is
+// not live shows the last frame captured from its own playback -- never grey while a relay exists.
+const LIVE_ROTATE_S=12,LIVE_SEED_S=5;const FRAMES={};   // name -> {url, at}
+function rotateS(){ // faster until every live-capable camera has shown a frame once
+  const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live);return streams.some(s=>!FRAMES[s.name])?LIVE_SEED_S:LIVE_ROTATE_S;}
+function captureFrames(){document.querySelectorAll(".ctile video").forEach(v=>{if(v.readyState<2||!v.videoWidth)return;const name=v.closest(".ctile")&&v.closest(".ctile").dataset.name;if(!name)return;
+  try{const c=captureFrames.c||(captureFrames.c=document.createElement("canvas"));c.width=320;c.height=Math.round(320*v.videoHeight/v.videoWidth);c.getContext("2d").drawImage(v,0,0,c.width,c.height);FRAMES[name]={url:c.toDataURL("image/jpeg",.7),at:Date.now()/1000};}catch(e){}});}
+function liveBudget(){ // decoders left for cameras: the Home view's video frame takes one while it plays
+  const video=CUR==="deck"&&DK.np&&!DK.np.startsWith("ambient|")?1:(CUR==="deck"&&DK.np&&DK.np.startsWith("ambient|")&&(DATA&&DATA.ambient||[]).length?1:0);
+  return Math.max(0,CAM_LIVE_MAX-video);}
+function liveWindow(n,budget){ // which of n live-capable tiles play now
+  if(n<=budget||budget<=0)return new Set([...Array(n).keys()].slice(0,budget>0?n:0));
+  const start=(Math.floor(Date.now()/1000/rotateS())*budget)%n;const on=new Set();for(let k=0;k<budget;k++)on.add((start+k)%n);return on;}
 // Two sets of players: the strip's and the Cameras view's. Each is torn down only by its own owner -- the strip's
 // refresh once destroyed the grid's players sixty milliseconds after they were mounted (the creator's screenshot).
 const PLAYERS={strip:{hls:[],rtc:[]},grid:{hls:[],rtc:[]}};
@@ -364,20 +378,24 @@ function mountLive(root,tiles,which){ // attach players to the tiles just render
     if(!t.live)return;
     if(window.Hls&&Hls.isSupported()){const h=new Hls({lowLatencyMode:true,liveSyncDurationCount:2,maxBufferLength:6,enableWorker:true});h.loadSource(q(t.url));h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play().catch(()=>{}));set.hls.push(h);}
     else if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=q(t.url);v.play().catch(()=>{});}});}
-function tileHTML(t,i){return '<div class="ctile" data-i="'+i+'">'+((t.live||t.rtc)?'<video muted autoplay playsinline'+(t.img?' poster="'+esc(t.img)+'?t='+Math.floor(t.at||0)+'"':'')+'></video>':(t.img?'<img src="'+esc(t.img)+'?t='+Math.floor((t.at||0))+'" alt="">':''))
-    +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+((t.live||t.rtc)?' live':'')+'">'+(t.live?"● live":t.rtc?"● ring live":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>';}
+function imgSrc(t){return t.img?(t.img.startsWith("data:")?t.img:esc(t.img)+"?t="+Math.floor(t.at||0)):"";}
+function tileHTML(t,i){const playing=t.live||t.rtc;
+  return '<div class="ctile" data-i="'+i+'" data-name="'+esc(t.name)+'">'+(playing?'<video muted autoplay playsinline'+(t.img?' poster="'+imgSrc(t)+'"':'')+'></video>':(t.img?'<img src="'+imgSrc(t)+'" alt="">':''))
+    +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+(playing?' live':'')+'">'+(t.live?"● live":t.rtc?"● ring live":t.frame?(ago(t.at)==="now"?"just now":ago(t.at)+" ago"):t.can?"waiting for its turn":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>';}
 function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live);const stills=(DATA&&DATA.cameras)||[];const ring=(DATA&&DATA.ring_cameras)||[];
-  const tiles=[];const named=new Set();let players=0;
-  streams.forEach(s=>{const st=stills.find(c=>c.name.toLowerCase()===s.name.toLowerCase());const live=players<CAM_LIVE_MAX;if(live)players++;
-    tiles.push({key:(live?"live:":"still:")+s.channel,name:s.name,live,url:s.url,img:st?st.url:null,at:st?st.at:0});named.add(s.name.toLowerCase());});
-  ring.forEach(c=>{const st=stills.find(x=>x.kind==="ring"&&x.name.toLowerCase()===c.name.toLowerCase());const rtc=players<CAM_LIVE_MAX&&!!window.RTCPeerConnection;if(rtc)players++;
-    tiles.push({key:(rtc?"ring:":"still:")+c.name,name:c.name,rtc,kind:"ring",img:st?st.url:null,at:st?st.at:0});named.add(c.name.toLowerCase());});
-  stills.forEach(c=>{if(!named.has(c.name.toLowerCase())){tiles.push({key:"still:"+c.name,name:c.name,live:false,img:c.url,at:c.at,kind:c.kind});named.add(c.name.toLowerCase());}});
+  const tiles=[];const named=new Set();
+  streams.forEach(s=>{const st=stills.find(c=>c.name.toLowerCase()===s.name.toLowerCase());tiles.push({key:"cam:"+s.channel,name:s.name,can:"hls",url:s.url,img:st?st.url:null,at:st?st.at:0});named.add(s.name.toLowerCase());});
+  ring.forEach(c=>{const st=stills.find(x=>x.kind==="ring"&&x.name.toLowerCase()===c.name.toLowerCase());tiles.push({key:"ring:"+c.name,name:c.name,can:window.RTCPeerConnection?"rtc":"",kind:"ring",img:st?st.url:null,at:st?st.at:0});named.add(c.name.toLowerCase());});
+  stills.forEach(c=>{if(!named.has(c.name.toLowerCase())){tiles.push({key:"still:"+c.name,name:c.name,can:"",img:c.url,at:c.at,kind:c.kind});named.add(c.name.toLowerCase());}});
+  // the live window: only `budget` of the live-capable tiles decode now; the others show their last frame
+  const capable=tiles.filter(t=>t.can);const on=liveWindow(capable.length,liveBudget());
+  capable.forEach((t,i)=>{const play=on.has(i);t.live=play&&t.can==="hls";t.rtc=play&&t.can==="rtc";
+    if(!play){const f=FRAMES[t.name];if(f){t.img=f.url;t.at=f.at;t.frame=true;}}});
   return tiles;}
 function refreshStrip(){const el=$("#camstrip");if(!el||OFFLINE)return;const tiles=stripTiles().slice(0,10);
   if(DATA&&!(DATA.streams||[]).some(s=>s.live)&&!DATA.off)ensureCamerasLive();
-  const key=tiles.map(t=>t.key+((t.live||t.rtc)?"":":"+Math.floor((t.at||0)/60))).join("|");if(key===CAMKEY)return;CAMKEY=key;
-  closeLive("strip");
+  const key=tiles.map(t=>t.key+((t.live||t.rtc)?":on":":"+Math.floor((t.at||0)/60))).join("|");if(key===CAMKEY)return;CAMKEY=key;
+  captureFrames();closeLive("strip");
   if(!tiles.length){el.innerHTML='<div class="faint" style="display:flex;align-items:center;justify-content:center;flex:1;font-size:12px;gap:14px;"><span class="hd">Cameras</span>no feeds yet — the Reolink relays are being asked for; <code style="color:var(--dim);">ring list</code> adds the Ring cameras</div>';return;}
   el.innerHTML=tiles.map(tileHTML).join("");
   mountLive(el,tiles,"strip");}
@@ -505,7 +523,7 @@ const RENDER={deck:viewDeck,discover:viewDiscover,cameras:viewCameras,news:viewN
 function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
   $("#dock").querySelectorAll(".dot").forEach(d=>d.onclick=()=>go(d.dataset.k));}
 function render(){try{if(CUR==="deck"){refreshDeck(true);return;}
-  if(CUR==="cameras"){const key=stripTiles().map(t=>t.key).join("|");if(key===CAMVIEWKEY&&$("#camgrid"))return;CAMVIEWKEY=key;closeLive("grid");}
+  if(CUR==="cameras"){const key=stripTiles().map(t=>t.key+((t.live||t.rtc)?":on":"")).join("|");if(key===CAMVIEWKEY&&$("#camgrid"))return;CAMVIEWKEY=key;captureFrames();closeLive("grid");}
   else if(CAMVIEWKEY){CAMVIEWKEY="";closeLive("grid");}
   $("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}catch(e){$("#stage").innerHTML='<div class="glass card red">render failed: '+esc(e.message)+'</div>';}}
 function go(k){if(!RENDER[k])return;CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
@@ -542,5 +560,7 @@ document.addEventListener("keydown",e=>{const i=VIEWS.findIndex(v=>v[0]===CUR);
   loadData();setInterval(loadData,60000);
   setInterval(pollStreams,10000);    // the strip follows the relays within ten seconds
   setInterval(watchPlayers,15000);
+  setInterval(captureFrames,3000);   // the last frame of each playing feed, for the tiles that are not live right now
+  setInterval(()=>{refreshStrip();if(CUR==="cameras")render();},1500);   // the live window rotates (5 s while seeding frames, then 12 s)
 })();
 </script></body></html>
