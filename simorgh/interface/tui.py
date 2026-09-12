@@ -160,6 +160,24 @@ def path_matches(fragment: str, *, root: Path, limit: int = _MAX_PATH_COMPLETION
     return out
 
 
+def _next_words(before: str) -> list[tuple[str, str]]:
+    """What may follow the words already typed: a command's subcommands
+    after its name, a voice setting's key after `voice set`."""
+    from .parser import subcommands
+
+    words = before.split()
+    if not words:
+        return []
+    command = words[0].lstrip("/")
+    if len(words) == 1:
+        return [(w, f"{command} {w}") for w in subcommands(command)]
+    if command == "voice" and words[1] == "set" and len(words) == 2:
+        from ..voice.settings import SAFE_KEYS
+
+        return [(key, spec[2]) for key, spec in sorted(SAFE_KEYS.items())]
+    return []
+
+
 def _make_completer(root: Path):
     pt = _pt()
 
@@ -177,8 +195,14 @@ def _make_completer(root: Path):
                 for path in path_matches(word, root=root):
                     yield pt["Completion"](f"@{path}", start_position=-len(word), display=path)
                 return
-            is_first_word = not document.text_before_cursor[: -len(word) or None].strip()
-            if not (word.startswith("/") or is_first_word):
+            before = document.text_before_cursor[: -len(word) or None]
+            is_first_word = not before.strip()
+            if not is_first_word and not word.startswith("/"):
+                # After a command, Tab offers what that command takes next:
+                # its subcommands, or for `voice set` the settings.
+                for option, meta in _next_words(before):
+                    if option.startswith(word):
+                        yield pt["Completion"](option, start_position=-len(word), display=option, display_meta=meta)
                 return
             lead = "/" if word.startswith("/") else ""
             for name, desc in _command_matches(word):

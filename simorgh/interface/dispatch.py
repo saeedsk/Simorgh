@@ -269,6 +269,12 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         return await _cancel(bus, task_id, session_id=session_id)
 
     if name == "tasks":
+        if args.strip() in ("clear", "clean", "erase", "wipe"):
+            return await _request(bus, topics.TASK_CLEAR_REQUEST, {"reason": f"cleared by cli:{session_id}"},
+                                  timeout=10.0, render=lambda p: (
+                f"cleared {p.get('cleared', 0)} task(s)"
+                + (f"; {p['cancelled']} running were told to stop" if p.get("cancelled") else "")
+                + " -- the ledger keeps their history"))
         if args.strip() == "work":
             return await _request(bus, topics.TASK_WORK_NEXT_REQUEST, {}, timeout=5.0, render=lambda p: (
                 f"working: {p['task_id']}" if p.get("task_id") else f"nothing to work on ({p.get('reason', 'idle')})"

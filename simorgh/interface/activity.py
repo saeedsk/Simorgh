@@ -178,6 +178,11 @@ class TaskBook:
         record.status = status
         return record
 
+    def clear(self) -> None:
+        """The backlog was wiped (`task.cleared`): nothing to show."""
+        self.tasks.clear()
+        self._order.clear()
+
     def running(self) -> list[TaskRecord]:
         return [t for t in self.tasks.values() if t.status == "running"]
 

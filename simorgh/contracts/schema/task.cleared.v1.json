@@ -1,0 +1,26 @@
+{
+  "$id": "https://simorgh.local/schema/task.cleared.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "The backlog was wiped: `cleared` records forgotten, `cancelled` of them were running.",
+  "properties": {
+    "cancelled": {
+      "type": "integer"
+    },
+    "cleared": {
+      "type": "integer"
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "cleared",
+    "cancelled"
+  ],
+  "title": "task.cleared",
+  "type": "object"
+}

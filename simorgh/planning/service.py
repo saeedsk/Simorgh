@@ -169,6 +169,7 @@ class Service:
             topics.TASK_FAILED: self._on_task_failed,
             topics.TASK_BLOCKED: self._on_task_blocked,
             topics.TASK_CANCEL: self._on_task_cancel,
+            topics.TASK_CLEAR_REQUEST: self._on_task_clear,
             topics.PLAN_REVIEWED: self._on_plan_reviewed,
             topics.UI_PROMPT_ANSWERED: self._on_prompt_answered,
             topics.RESEARCH_FINDING_RECORDED: self._on_research_finding,
@@ -425,6 +426,33 @@ class Service:
             topics.TASK_CANCEL, source=self._ctx.source, partition_key=f"task:{victim.id}",
             payload={"task_id": victim.id, "reason": reason, "requeue": True},
         ))
+
+    async def _on_task_clear(self, message: Message) -> None:
+        """`tasks clear`: the whole backlog, gone. A running task is
+        told to stop (the worker ends it at its next step boundary; its
+        later terminal event finds no record and is ignored); every
+        record is forgotten and the index snapshotted so it stays
+        forgotten across a restart. The ledger streams remain -- this
+        erases the backlog, not the history."""
+        reason = message.payload.get("reason") or "cleared"
+        cancelled = 0
+        for task in self._store.all():
+            if task.status in (IN_PROGRESS, CLAIMED):
+                cancelled += 1
+                await self._ctx.bus.publish(Message.new(
+                    topics.TASK_CANCEL, source=self._ctx.source,
+                    payload={"task_id": task.id, "reason": reason},
+                    partition_key=f"task:{task.id}", trace_id=task.id, clock=self._ctx.clock.now,
+                ))
+        gone = await self._store.forget_all()
+        self._ctx.logger.info("planning.cleared", cleared=len(gone), cancelled=cancelled, reason=reason)
+        await self._ctx.bus.publish(Message.new(
+            topics.TASK_CLEARED, source=self._ctx.source,
+            payload={"cleared": len(gone), "cancelled": cancelled, "reason": reason}, clock=self._ctx.clock.now,
+        ))
+        if message.reply_to:
+            await self._ctx.bus.reply(message, type=topics.TASK_CLEAR_REPLY,
+                                      payload={"cleared": len(gone), "cancelled": cancelled})
 
     async def _on_task_cancel(self, message: Message) -> None:
         """Stop a task nobody is waiting for any more.

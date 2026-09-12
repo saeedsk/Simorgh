@@ -130,6 +130,11 @@ TaskBlocked = define(t.TASK_BLOCKED, [
     # own verifier threw away (2026-09-08).
     O("result_summary", Str),
 ])
+TaskClearRequest = define(t.TASK_CLEAR_REQUEST, [O("reason", Str)],
+                          doc="Cancel every running task and forget every record; the ledger keeps the history.")
+TaskClearReply = define(t.TASK_CLEAR_REPLY, [F("cleared", Int), F("cancelled", Int)])
+TaskCleared = define(t.TASK_CLEARED, [F("cleared", Int), F("cancelled", Int), O("reason", Str)],
+                     doc="The backlog was wiped: `cleared` records forgotten, `cancelled` of them were running.")
 TaskCancel = define(t.TASK_CANCEL, [
     F("task_id", Str),
     O("reason", Str),

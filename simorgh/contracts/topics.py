@@ -76,6 +76,13 @@ TASK_BLOCKED = "task.blocked"
 # runner made it visible -- case 1 timed out, kept the worker, and cases
 # 2..n then timed out in turn against a worker that was never free.
 TASK_CANCEL = "task.cancel"
+# Wipe the backlog: every task -- queued, running, done, failed -- is
+# cancelled if it runs and forgotten by the index (its ledger stream
+# stays). The creator, 2026-09-12: "give me option to clean up and
+# erase all tasks (queued, performed, pending, all of them)".
+TASK_CLEAR_REQUEST = "task.clear.request"
+TASK_CLEAR_REPLY = "task.clear.reply"
+TASK_CLEARED = "task.cleared"
 # Keeps a claimed task's lease alive while a single step is still
 # running. `TASK_STEP` only fires once a tool call *completes*, so a
 # step that outlives `lease_seconds` on its own (a full `run_tests`, a

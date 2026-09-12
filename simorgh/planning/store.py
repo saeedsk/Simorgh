@@ -57,10 +57,18 @@ class TaskIndex:
     def __init__(self) -> None:
         self.tasks: dict[str, Task] = {}
         self.cursors: dict[str, int] = {}
+        self.forgotten: set[str] = set()
 
     def apply(self, stream: str, event: Event) -> None:
         task_id = stream.split(":", 1)[1]
         p = event.payload
+        if task_id in self.forgotten:
+            # Cleared (`forget`): its stream is history. A rebuild replays
+            # each stream from its cursor, and for a task that never
+            # started that is its own creation -- which brought it back
+            # (2026-09-12). Forgotten stays forgotten.
+            self.cursors[stream] = event.seq
+            return
         if event.type == "created":
             self.tasks[task_id] = Task(
                 id=task_id, kind=p["kind"], description=p["description"],
@@ -116,15 +124,23 @@ class TaskIndex:
         # separate "status_changed"/"created" event, so nothing to apply.
         self.cursors[stream] = event.seq
 
+    def forget(self, task_id: str) -> None:
+        """Drop the record for good: its events, replayed or new, are
+        ignored from here on, and the snapshot remembers that."""
+        self.tasks.pop(task_id, None)
+        self.forgotten.add(task_id)
+
     def snapshot_state(self) -> dict:
         return {
             "cursors": dict(self.cursors),
             "tasks": {tid: _task_to_dict(t) for tid, t in self.tasks.items()},
+            "forgotten": sorted(self.forgotten),
         }
 
     def load_snapshot_state(self, state: dict) -> None:
         self.cursors = dict(state.get("cursors") or {})
         self.tasks = {tid: _task_from_dict(tid, d) for tid, d in (state.get("tasks") or {}).items()}
+        self.forgotten = set(state.get("forgotten") or ())
 
 
 def _task_to_dict(t: Task) -> dict:
@@ -401,6 +417,18 @@ class TaskStore:
         # write records a decision; it is not a bid to win a race.
         seq = await self._ledger.append(stream, event)
         self.index.apply(stream, replace(event, seq=seq))
+
+    async def forget_all(self) -> list[Task]:
+        """Every record gone from the index, at once, durably: the
+        snapshot is taken now, with the cursors at the end of each
+        stream, so the next rebuild starts from nothing. The streams
+        themselves are history and stay."""
+        gone = self.all()
+        for task in gone:
+            self.index.forget(task.id)
+        self._events_since_snapshot = 0
+        await self._ledger.snapshot(self._index_stream, self.index.snapshot_state(), at_seq=0)
+        return gone
 
     def children(self, parent_id: str) -> list[Task]:
         return [t for t in self.index.tasks.values() if t.parent_id == parent_id]

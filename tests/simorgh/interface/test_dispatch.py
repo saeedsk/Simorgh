@@ -283,3 +283,31 @@ class VoiceSetSpellingsTestCase(unittest.IsolatedAsyncioTestCase):
         from simorgh.interface.voiceview import controlled
         out = controlled({"ok": False, "error": {"code": "refused", "detail": "did you mean tts_voice?", "retryable": False}})
         self.assertIn("did you mean tts_voice?", out)
+
+
+class _Clock:
+    def now(self) -> float:
+        return 0.0
+
+
+class TasksClearTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_clear_and_its_aliases_ask_planning_to_wipe_the_backlog(self):
+        from simorgh.interface import dispatch as dispatch_mod
+
+        seen = []
+
+        async def _request(bus, topic, payload, **kw):
+            seen.append((topic, payload))
+            return dispatch_mod.Outcome(kw["render"]({"cleared": 56, "cancelled": 2}))
+        original = dispatch_mod._request
+        dispatch_mod._request = _request
+        try:
+            from simorgh.interface.parser import parse
+            for word in ("clear", "clean", "erase"):
+                out = await dispatch_mod.dispatch(parse(f"tasks {word}"), bus=None, clock=_Clock(), session_id="s1",
+                                                  vitals=None, ledger=None)
+                self.assertIn("cleared 56 task(s); 2 running were told to stop", out.text)
+        finally:
+            dispatch_mod._request = original
+        self.assertTrue(all(topic == topics.TASK_CLEAR_REQUEST for topic, _p in seen))
+        self.assertEqual(len(seen), 3)

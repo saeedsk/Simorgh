@@ -6,6 +6,8 @@ near-miss first word is corrected *and announced*, never silently
 
 from __future__ import annotations
 
+import re
+
 import difflib
 from dataclasses import dataclass
 
@@ -24,7 +26,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("alerts", "[all]", "what the monitors have raised, and what is waiting for the digest"),
     ("config", "[section]", "the settings actually in force, and any nothing reads"),
     ("capabilities", "", "what Sim can actually reach: Node, Docker, optional packages"),
-    ("tasks", "[work]", "see the backlog, or advance the next item"),
+    ("tasks", "[all|work|clear]", "see the backlog (all of it), advance the next item, or wipe it"),
     ("cancel", "<task_id>", "stop a running task"),
     ("improve", "[path] <description>", "change something, tested before it lands"),
     ("skill", "<topic>", "draft a new reusable skill, audited before it lands"),
@@ -63,6 +65,28 @@ NO_ARGUMENT_COMMANDS: frozenset[str] = frozenset(
 #: useful first, so the splash is its head: twenty rows on the first
 #: screen someone sees is a wall, and `help` is one word away.
 SPLASH_COMMANDS = 8
+
+
+def subcommands(name: str) -> tuple[str, ...]:
+    """The words a command takes next, read off its own usage hint --
+    `[all|work|clear]` gives all, work, clear; `<topic>` gives nothing,
+    a free argument is not a word to offer. What Tab shows after a
+    command (the creator, 2026-09-12: "if I type tasks and press tab
+    at least I expect to see all")."""
+    for command, hint, _desc in COMMANDS:
+        if command != name.lstrip("/"):
+            continue
+        # `[name]` alone is a placeholder for a free argument; `[all]`
+        # alone is the one literal word; `a|b|c` are literal words.
+        if "|" not in hint and hint.strip() != "[all]":
+            return ()
+        words: list[str] = []
+        for alternative in re.split(r"\s*\|\s*", hint.strip().strip("[]")):
+            first = alternative.strip().split(" ", 1)[0].strip("[]")
+            if first and not first.startswith("<") and first.isalpha() and first not in words:
+                words.append(first)
+        return tuple(words)
+    return ()
 
 
 def command_help(limit: int | None = None) -> tuple[tuple[str, str], ...]:

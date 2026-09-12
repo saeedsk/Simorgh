@@ -133,6 +133,24 @@ class TestLongLinesDoNotFreezeCompletionOrLexing(unittest.TestCase):
         self.assertEqual(len(line), _MAX_LINE_FOR_COMPLETION_AND_LEXING)
         self.assertEqual(_lex_line(line, first_line=True), [("class:sim.path", line)])
 
+    def test_tab_after_a_command_offers_its_subcommands(self):
+        # The creator, 2026-09-12: "if I type tasks and press tab at
+        # least I expect to see all".
+        from prompt_toolkit.document import Document
+
+        completer = _make_completer(Path("."))
+
+        def offered(line: str) -> list[str]:
+            doc = Document(line, cursor_position=len(line))
+            return [c.text for c in completer.get_completions(doc, _FakeCompleteEvent())]
+        self.assertEqual(offered("tasks "), ["all", "work", "clear"])
+        self.assertEqual(offered("tasks c"), ["clear"])
+        self.assertEqual(offered("/voice "), ["status", "on", "off", "mute", "unmute", "barge", "listen", "test",
+                                              "voices", "devices", "models"])
+        self.assertIn("tts_voice", offered("voice set "))
+        self.assertEqual(offered("voice set tts"), ["tts", "tts_farsi_voice", "tts_speed", "tts_voice"])
+        self.assertEqual(offered("improve "), [], "a free argument is not a word to offer")
+
     def test_completer_yields_nothing_past_the_cap(self):
         from prompt_toolkit.document import Document
 

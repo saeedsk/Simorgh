@@ -231,6 +231,7 @@ class Service:
             await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_FAILED, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_BLOCKED, self._on_task_event),
+            await ctx.bus.subscribe(topics.TASK_CLEARED, self._on_task_cleared),
         ]
         self._live.start()
         if self._run_repl:
@@ -811,6 +812,15 @@ class Service:
     # recognized voice being typed in the console, also when sim talks I
     # don't see the transcript." Both sides are announced on the bus for
     # exactly this; the REPL just had to listen.
+    async def _on_task_cleared(self, message: Message) -> None:
+        p = message.payload
+        self._book.clear()
+        self._refresh_activity_footer()
+        note = f"backlog cleared: {p.get('cleared', 0)} task(s) forgotten"
+        if p.get("cancelled"):
+            note += f", {p['cancelled']} running told to stop"
+        self._out(render_mod.style(f"  {note}", "dim", enabled=self._color))
+
     async def _on_voice_transcript(self, message: Message) -> None:
         p = message.payload
         text = str(p.get("text") or "").strip()
