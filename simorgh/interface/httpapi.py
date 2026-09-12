@@ -39,6 +39,7 @@ enough for a handful of routes.
 from __future__ import annotations
 
 import asyncio
+import os
 import hmac
 import json
 import time
@@ -138,6 +139,12 @@ class HttpApi:
         self._tv_sub = None
         self._tv_speech: deque = deque(maxlen=40)   # (seq, ref, seconds, at): Sim's voice for the page
         self._tv_speech_sub = None
+        # Live camera video for the TV page (execution/home/cameras.py
+        # writes HLS under workspace/cameras/hls/<channel>/). Served on
+        # the LAN without the token: the Cast receiver fetches segments
+        # with no header and no query of its own.
+        self._hls_root = (Path.cwd() / "workspace" / "cameras" / "hls").resolve()
+        self._prefixes: list[tuple[str, str, RouteHandler]] = []
         self._pending_chats: dict[str, asyncio.Future] = {}
         self._turn_sub = None
         self._register_builtin_routes()
@@ -212,6 +219,24 @@ class HttpApi:
         self.register_route("GET", "/tv", _tv, auth=False)
         self.register_route("GET", "/api/tv/state", _tv_state)
         self.register_route("GET", "/api/tv/speech", _tv_speech)
+
+        async def _hook(query, body, headers, *, name: str = ""):
+            # An inbound webhook: whoever asked something to call this
+            # (`cam_watch`) listens for `ui.hook.received` with its name.
+            await self._bus.publish(Message.new(topics.UI_HOOK_RECEIVED, source="interface", payload={
+                "name": name, "body": body.decode("utf-8", errors="replace")[:_MAX_BODY_BYTES],
+                "content_type": headers.get("content-type", ""), "remote": headers.get("x-remote", "")}))
+            return 200, b"ok", "text/plain; charset=utf-8"
+
+        async def _hls(query, _body, _headers, *, rest: str = ""):
+            target = (self._hls_root / rest).resolve()
+            if not rest or not str(target).startswith(str(self._hls_root) + os.sep) or not target.is_file():
+                return 404, b"no such stream", "text/plain; charset=utf-8"
+            kind = "application/vnd.apple.mpegurl" if target.suffix == ".m3u8" else "video/mp2t"
+            return 200, target.read_bytes(), kind
+
+        self._prefixes.append(("POST", "/api/hooks/", _hook))
+        self._prefixes.append(("GET", "/tv/hls/", _hls))
         self.register_route("GET", "/api/history", _json_route(self._history_json))
         self.register_route("GET", "/api/logs", _json_route(self._logs_json))
         self.register_route("GET", "/api/benchmarks", _json_route(self._benchmarks_json))
@@ -399,6 +424,16 @@ class HttpApi:
         split = urlsplit(path)
         query = parse_qs(split.query)
         route = self._routes.get((method, split.path))
+        prefix_extra: dict = {}
+        if route is None:
+            for p_method, prefix, handler in self._prefixes:
+                if method == p_method and split.path.startswith(prefix):
+                    rest = split.path[len(prefix):]
+                    open_ = prefix == "/tv/hls/"
+                    route = Route(method=method, path=split.path, handler=handler, auth=not open_,
+                                  max_body=_MAX_BODY_BYTES if method == "POST" else None, rate=None)
+                    prefix_extra = {"name": rest.split("/", 1)[0]} if prefix == "/api/hooks/" else {"rest": rest}
+                    break
         if route is None:
             # A method this server does not speak at all is 405; a path
             # that simply does not route for a method it does speak is
@@ -444,7 +479,7 @@ class HttpApi:
                 await self._try_respond(writer, 400, b'{"error":"truncated body"}', "application/json")
                 return
 
-        status, payload, content_type = await route.handler(query, body_bytes, headers)
+        status, payload, content_type = await route.handler(query, body_bytes, headers, **prefix_extra)
         await self._try_respond(writer, status, payload, content_type)
 
     async def _benchmarks_json(self, query: dict) -> bytes:
@@ -603,7 +638,8 @@ class HttpApi:
     async def _on_tv_state(self, message) -> None:
         p = message.payload
         self._tv_state = {"mode": str(p.get("mode") or "none"), "url": str(p.get("url") or ""),
-                          "title": str(p.get("title") or ""), "since": self._now()}
+                          "title": str(p.get("title") or ""), "urls": list(p.get("urls") or []),
+                          "titles": list(p.get("titles") or []), "since": self._now()}
 
     @staticmethod
     def _q1(query: dict, key: str, default: str | None) -> str | None:

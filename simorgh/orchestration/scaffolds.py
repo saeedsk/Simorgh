@@ -149,6 +149,17 @@ _TOOL_NOTES: dict[str, str] = {
     "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
     "cast_volume": "the TV's volume, 0-100",
     "cast_use": "remember which Cast device is the TV, by name",
+    "cam_setup": "the NVR's address and login, kept in secrets.toml; then a restart",
+    "cam_list": "every camera on the NVR: number, name, online",
+    "cam_state": "what a camera sees right now (motion, person, vehicle, animal) and what it has on",
+    "cam_snapshot": "a still from a camera, saved under workspace/cameras/",
+    "cam_stream": "a camera live on the TV: `<camera> frame` beside your page, `<camera> full` full screen, `<camera> stop`",
+    "cam_light": "a camera's spotlight: `<camera> on|off`",
+    "cam_ir": "a camera's infrared night lights: `<camera> on|off`",
+    "cam_siren": "sound a camera's siren for a few seconds: `<camera> [seconds]` -- loud; only when asked",
+    "cam_ptz": "move a camera: `<camera> left|right|up|down|stop|zoom_in|zoom_out|preset <n>`",
+    "cam_recordings": "what a camera recorded: `<camera> [today|yesterday|<n>h]`",
+    "cam_watch": "have the NVR push events (motion, person, vehicle, animal) to the screen: on|off",
     "cast_setup": "one-time: open your API to the network with a token so the TV can fetch your page; then a restart",
     "propose_mcp_server": "propose a new MCP server to the human",
     "draft_candidate": "draft a change without applying it",
@@ -373,6 +384,11 @@ screen. A YouTube page URL is exactly what cast_play wants; never hunt
 for an mp4 or a "direct link". cast_play needs a URL: if they named
 nothing, pick something fitting yourself and say what you picked.
 Never say you cannot control the TV.
+The cameras are yours too: cam_list names them, cam_state says what
+each sees, cam_snapshot takes a picture, cam_stream puts one live on
+the TV (frame or full), cam_light and cam_ir switch its lights,
+cam_ptz moves it, cam_recordings reads the NVR, cam_watch turns event
+pushes on. cam_siren is loud: only when plainly asked.
 How you sound is a setting, not code: if asked for a different voice,
 speed or volume, do not start a task or edit anything. Say that the
 person can type `voice voices` to hear the list and `voice set

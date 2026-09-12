@@ -133,6 +133,9 @@ MEMORY_CONSOLIDATED = "memory.consolidated"
 MEMORY_FORGOTTEN = "memory.forgotten"
 # --- 4.10 world / self ----------------------------------------------------
 WORLD_ENV_QUERY = "world.env.query"
+# A camera saw something: motion, a person, a vehicle, an animal
+# (execution/home/cameras.py, from the NVR's event push).
+CAMERA_EVENT = "world.camera.event"
 WORLD_ENV_QUERY_REPLY = "world.env.query.reply"
 WORLD_ENV_OBSERVED = "world.env.observed"
 SELF_SUMMARY = "self.summary"
@@ -212,6 +215,10 @@ TV_STATE = "ui.tv.state"
 # Sim's own voice, for the TV page to play: one piece of a reply as it
 # is handed to the speaker, as a ledger blob (WAV). `[voice] output`.
 TV_SPEECH = "ui.tv.speech"
+# An inbound webhook the HTTP API received (`POST /api/hooks/<name>`),
+# body verbatim, for whichever subsystem asked something to call it --
+# the Reolink NVR's event push, first (execution/home/cameras.py).
+UI_HOOK_RECEIVED = "ui.hook.received"
 COGNITION_THINK = "cognition.think"
 COGNITION_THINK_REPLY = "cognition.think.reply"
 COGNITION_COMPACT_REQUEST = "cognition.compact.request"

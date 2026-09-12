@@ -33,6 +33,11 @@ MARKER_ARG_KEY: dict[str, str] = {
     # reads the rest of the line -- `<url> full`, `35 Bedroom` -- itself.
     # Without these rows every spoken "cast it" arrived as no arguments
     # and was refused three times in a row (the creator, 2026-09-12).
+    # The cameras (execution/home/cameras.py): one line, the camera's
+    # name first and the rest of the line read by the tool.
+    "cam_state": "camera", "cam_snapshot": "camera", "cam_stream": "camera", "cam_light": "camera",
+    "cam_ir": "camera", "cam_siren": "camera", "cam_ptz": "camera", "cam_recordings": "camera",
+    "cam_watch": "on",
     "cast_play": "url",
     "cast_show": "target",
     "cast_stop": "what",
@@ -98,12 +103,13 @@ MARKER_ARG_KEY: dict[str, str] = {
 #: fails schema validation, so these must send `{}` rather than
 #: `{"": ""}` or `{"argument": ""}`.
 MARKER_NO_ARGS: frozenset[str] = frozenset({
-    "git_revert", "kb_status", "sec_self", "sec_posture", "energy_status", "cast_devices",
+    "git_revert", "kb_status", "sec_self", "sec_posture", "energy_status", "cast_devices", "cam_list",
 })
 
 #: Tools whose argument is two parts: the first line, then everything
 #: after it. `("subject", "body")` means line one is the subject.
 MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
+    "cam_setup": ("host", "spec"),
     "apply_source_patch": ("subject", "code"),
     "replace_in_file": ("path", "code"),
     "start_task": ("goal", "spec"),
@@ -133,7 +139,7 @@ MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
 #: documented JSON arrived at the tool as that JSON's *string*
 #: rendering, and the tool had never once worked from the model's side.
 MARKER_JSON_REST: frozenset[str] = frozenset({
-    "start_task",
+    "start_task", "cam_setup",
     "search_listings", "install_package", "browse_page", "run_container",
     "kb_sources", "sec_findings", "home_call", "home_undo",
     "energy_tariff", "media_control", "media_play",

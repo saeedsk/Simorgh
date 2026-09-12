@@ -56,7 +56,8 @@ CHAT = Profile(
            "propose_mcp_server",
            # The TV (execution/media/cast.py): "put yourself on the TV",
            # "play this on the TV" are chat requests too.
-           "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume"),
+           "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume",
+           "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch"),
     # 6 was right for a profile that could only read. Writing a file
     # costs a step, installing what it needs costs another, running it a
     # third, and checking the result a fourth -- before a single wrong
@@ -180,7 +181,8 @@ SKILL = Profile(
 VOICE_CHAT = replace(
     CHAT,
     tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task",
-           "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume"),
+           "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume",
+           "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch"),
     # Six: a search, a cast, a retry, and the answer (the creator,
     # 2026-09-12: "cast something on TV" ran out at five, having listed
     # devices it did not need and hunted for an mp4 -- the rule now says

@@ -9,6 +9,7 @@ import asyncio
 import http.client
 import json
 import unittest
+from pathlib import Path
 
 from simorgh.contracts.envelope import Event
 from simorgh.interface.httpapi import HttpApi
@@ -979,3 +980,37 @@ class TvSpeechTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((status, body, ctype), (200, b"RIFF....WAVEfake", "audio/wav"))
         status, _b, _c = await asyncio.to_thread(_get, "/api/tv/speech?ref=blob:999")
         self.assertEqual(status, 404, "only refs the page was told about are served")
+
+
+class HooksAndHlsTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_a_webhook_lands_on_the_bus_and_hls_is_served_from_the_workspace(self):
+        import os
+        import tempfile
+        from simorgh.contracts import topics
+        bus = _FakeBus()
+        api = HttpApi(bus, ledger=None, host="127.0.0.1", port=0, token="tv-secret")
+        with tempfile.TemporaryDirectory() as tmp:
+            api._hls_root = Path(tmp).resolve()  # noqa: SLF001
+            (Path(tmp) / "7").mkdir()
+            (Path(tmp) / "7" / "index.m3u8").write_text("#EXTM3U\n")
+            await api.start()
+            self.addAsyncCleanup(api.stop)
+
+            def _req(method, path, body=None):
+                conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+                conn.request(method, path, body=body, headers={"Content-Type": "application/xml"} if body else {})
+                resp = conn.getresponse()
+                data = resp.read()
+                conn.close()
+                return resp.status, data
+            status, _ = await asyncio.to_thread(_req, "POST", "/api/hooks/reolink", b"<xml>channel1</xml>")
+            self.assertEqual(status, 401, "a hook needs the token too")
+            status, body = await asyncio.to_thread(_req, "POST", "/api/hooks/reolink?token=tv-secret", b"<xml>channel1</xml>")
+            self.assertEqual((status, body), (200, b"ok"))
+            hooks = [m for m in bus.published if m.type == topics.UI_HOOK_RECEIVED]
+            self.assertEqual(hooks[-1].payload["name"], "reolink")
+            self.assertIn("channel1", hooks[-1].payload["body"])
+            status, body = await asyncio.to_thread(_req, "GET", "/tv/hls/7/index.m3u8")
+            self.assertEqual((status, body), (200, b"#EXTM3U\n"), "a live stream is open on the LAN")
+            status, _ = await asyncio.to_thread(_req, "GET", "/tv/hls/../secrets.toml")
+            self.assertEqual(status, 404)

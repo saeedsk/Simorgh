@@ -4,7 +4,7 @@ as observation; it never writes."""
 
 from __future__ import annotations
 
-from ..fields import Enum, F, Float, O, Obj, Str
+from ..fields import List, Int, Enum, F, Float, O, Obj, Str
 from ..registry import define
 from .. import topics as t
 
@@ -21,3 +21,5 @@ WorldEnvObserved = define(t.WORLD_ENV_OBSERVED, [
     F("summary", Str),
     F("ref", Str),
 ])
+CameraEvent = define(t.CAMERA_EVENT, [F("channel", Int), F("camera", Str), F("kinds", List(Str)), O("host", Str)],
+                     doc="kinds: motion, person, vehicle, pet, face, package -- whatever the NVR reported.")

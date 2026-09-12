@@ -74,6 +74,7 @@ from .knowledge.tools import knowledge_tools
 from .pim.tools import pim_tools
 from .energy.tools import energy_tools
 from .home.tools import home_tools
+from .home.cameras import cameras_tools
 from .media.tools import media_tools
 from .security.tools import security_tools
 from .notify import NotifyTool
@@ -2352,6 +2353,8 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         # Assistant client the home_* tools use.
         *energy_tools(config, secrets=secrets),
         *media_tools(config, secrets=secrets),
+        # The cameras: a Reolink NVR and everything on it (execution/home/cameras.py).
+        *cameras_tools(config, secrets=secrets),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

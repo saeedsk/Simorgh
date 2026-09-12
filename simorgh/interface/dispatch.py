@@ -334,6 +334,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "tv":
         return await _tv(args, bus=bus, ledger=ledger, session_id=session_id)
 
+    if name == "cameras":
+        return await _cameras(args, bus=bus, ledger=ledger, session_id=session_id)
+
     if name == "schedule":
         return await _schedule_command(args, bus=bus, ledger=ledger, clock=clock)
 
@@ -786,6 +789,63 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     return Outcome(f"tv: unknown verb {verb!r} -- {usage}")
 
 
+async def _cameras(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: str) -> Outcome:
+    """`cameras ...`: sugar over the cam_* tools (execution/home/cameras.py)."""
+    words = (args or "").strip().split()
+    verb = words[0].lower() if words else "list"
+    rest = words[1:]
+    usage = ("usage: cameras list | state [camera] | show <cameras|all> [grid|full|frame|stop] | snapshot <camera> | "
+             "light <camera> on|off | ir <camera> on|off | siren <camera> [seconds] | ptz <camera> <move> | "
+             "recordings <camera> [today|yesterday|<n>h] | watch on|off | setup <host> <user> <password>")
+
+    async def _run(tool: str, payload: dict, timeout: float = 120.0) -> Outcome:
+        return await _run_tool(bus=bus, ledger=ledger, tool=tool, raw=json.dumps(payload), session_id=session_id,
+                               timeout=timeout)
+
+    if verb == "list":
+        return await _run("cam_list", {})
+    if verb == "state":
+        return await _run("cam_state", {"camera": " ".join(rest)})
+    if verb in ("show", "stream", "live"):
+        if not rest:
+            return Outcome(usage)
+        mode = rest[-1].lower() if rest[-1].lower() in ("frame", "grid", "full", "stop", "tiled") else ""
+        camera = " ".join(rest[:-1] if mode else rest) or "all"
+        return await _run("cam_stream", {"camera": camera, "mode": {"tiled": "grid"}.get(mode, mode) or "frame"})
+    if verb in ("snapshot", "snap", "picture"):
+        return await _run("cam_snapshot", {"camera": " ".join(rest)}) if rest else Outcome(usage)
+    if verb in ("light", "spotlight", "ir"):
+        if len(rest) < 2:
+            return Outcome(usage)
+        return await _run("cam_light" if verb != "ir" else "cam_ir",
+                          {"camera": " ".join(rest[:-1]), "on": rest[-1].lower() in ("on", "true", "1")})
+    if verb == "siren":
+        if not rest:
+            return Outcome(usage)
+        seconds = int(rest[-1]) if rest[-1].isdigit() else None
+        camera = " ".join(rest[:-1] if seconds is not None else rest)
+        return await _run("cam_siren", {"camera": camera, **({"seconds": seconds} if seconds else {})})
+    if verb in ("ptz", "move"):
+        if len(rest) < 2:
+            return Outcome(usage)
+        if rest[-1].isdigit() and len(rest) >= 3 and rest[-2].lower() == "preset":
+            return await _run("cam_ptz", {"camera": " ".join(rest[:-2]), "command": "preset", "preset": int(rest[-1])})
+        return await _run("cam_ptz", {"camera": " ".join(rest[:-1]), "command": rest[-1].lower()})
+    if verb == "recordings":
+        if not rest:
+            return Outcome(usage)
+        period = rest[-1].lower() if rest[-1].lower() in ("today", "yesterday") or re.fullmatch(r"\d+h", rest[-1].lower()) else ""
+        camera = " ".join(rest[:-1] if period else rest)
+        return await _run("cam_recordings", {"camera": camera, **({"period": period} if period else {})})
+    if verb == "watch":
+        return await _run("cam_watch", {"on": not rest or rest[0].lower() not in ("off", "stop")})
+    if verb == "setup":
+        if len(rest) < 3:
+            return Outcome("usage: cameras setup <host> <username> <password>")
+        return await _run("cam_setup", {"host": rest[0], "username": rest[1], "password": " ".join(rest[2:])}, timeout=60.0)
+    return Outcome(f"cameras: unknown verb {verb!r} -- {usage}")
+
+
 async def _tool_command(args: str, *, bus: BusClient, ledger: LedgerClient,
                         session_id: str, timeout: float = 300.0) -> Outcome:
     """Run any registered tool, from the terminal, through Guardian.
@@ -839,6 +899,7 @@ async def _tool_list(ledger: LedgerClient) -> Outcome:
 #: Prefix -> the heading it is listed under. A flat list of fifty names
 #: is not something anyone reads.
 _TOOL_GROUPS: tuple[tuple[str, str], ...] = (
+    ("cam_", "the cameras"),
     ("cast_", "media -- the TV"),
     ("kb_", "documents"), ("cal_", "calendar and mail"), ("mail_", "calendar and mail"),
     ("remind", "calendar and mail"), ("sec_", "security"), ("home_", "the house"),
@@ -857,7 +918,7 @@ def _tool_group(name: str) -> str:
 
 _NO_ARG_TOOLS = frozenset({"kb_status", "sec_self", "sec_posture", "energy_status",
                            "home_describe", "media_now", "self_map", "git_revert",
-                           "cast_devices", "cast_show", "cast_stop", "cast_setup"})
+                           "cast_devices", "cast_show", "cast_stop", "cast_setup", "cam_list"})
 
 
 async def _known_tools(ledger: LedgerClient) -> dict[str, dict]:

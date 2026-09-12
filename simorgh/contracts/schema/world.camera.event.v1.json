@@ -1,0 +1,33 @@
+{
+  "$id": "https://simorgh.local/schema/world.camera.event.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "kinds: motion, person, vehicle, pet, face, package -- whatever the NVR reported.",
+  "properties": {
+    "camera": {
+      "type": "string"
+    },
+    "channel": {
+      "type": "integer"
+    },
+    "host": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kinds": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "channel",
+    "camera",
+    "kinds"
+  ],
+  "title": "world.camera.event",
+  "type": "object"
+}

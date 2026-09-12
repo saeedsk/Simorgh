@@ -141,6 +141,39 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "cast_use": ("reversible", True),
 
     "cast_setup": ("reversible", False),
+
+
+    "cam_setup": ("reversible", True),
+
+
+    "cam_list": ("read_only", True),
+
+
+    "cam_state": ("read_only", True),
+
+
+    "cam_snapshot": ("reversible", True),
+
+
+    "cam_stream": ("reversible", True),
+
+
+    "cam_light": ("reversible", True),
+
+
+    "cam_ir": ("reversible", True),
+
+
+    "cam_siren": ("irreversible", True),
+
+
+    "cam_ptz": ("reversible", True),
+
+
+    "cam_recordings": ("read_only", True),
+
+
+    "cam_watch": ("reversible", True),
     # The Mac's own Music app (execution/media/musicapp.py): the same
     # three shapes as the home players, on the laptop's own speakers.
     "music_now": ("read_only", True),

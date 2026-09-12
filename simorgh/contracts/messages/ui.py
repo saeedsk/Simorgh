@@ -16,9 +16,13 @@ UiPrompt = define(t.UI_PROMPT, [
 ])
 UiPromptAnswered = define(t.UI_PROMPT_ANSWERED, [F("prompt_id", Str), F("answer", Str)])
 UiRendered = define(t.UI_RENDERED, [F("channel", Str), F("text", Str)])
-TvState = define(t.TV_STATE, [F("mode", Enum("none", "frame", "full")), O("url", Str), O("title", Str)],
+TvState = define(t.TV_STATE, [F("mode", Enum("none", "frame", "full", "grid")), O("url", Str), O("title", Str),
+                              O("urls", List(Str)), O("titles", List(Str))],
                  doc="frame: `url` plays inside the TV page's box; full: the cast device plays it itself; "
-                     "none: the terminal replica alone.")
+                     "grid: `urls` tiled across the whole page (the cameras); none: the terminal replica alone.")
 TvSpeech = define(t.TV_SPEECH, [F("ref", Str), F("seconds", Float), O("seq", Int), O("request_id", Str),
                                  O("text", Str)],
                   doc="One piece of Sim's reply, as a WAV blob in the ledger, for the TV page to play in order.")
+UiHookReceived = define(t.UI_HOOK_RECEIVED, [F("name", Str), F("body", Str), O("content_type", Str),
+                                             O("remote", Str)],
+                        doc="An inbound webhook, body verbatim (capped by the API's body limit).")

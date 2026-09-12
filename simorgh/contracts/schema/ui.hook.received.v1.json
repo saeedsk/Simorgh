@@ -1,0 +1,32 @@
+{
+  "$id": "https://simorgh.local/schema/ui.hook.received.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "An inbound webhook, body verbatim (capped by the API's body limit).",
+  "properties": {
+    "body": {
+      "type": "string"
+    },
+    "content_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "remote": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name",
+    "body"
+  ],
+  "title": "ui.hook.received",
+  "type": "object"
+}

@@ -7,6 +7,13 @@
   #screen { display:grid; grid-template-rows: 1fr auto; height:100vh; padding:16px 24px; box-sizing:border-box; gap:12px; }
   #main { display:grid; grid-template-columns: 1fr; gap:20px; min-height:0; }
   #main.framed { grid-template-columns: 3fr 2fr; }
+  #main.gridded { grid-template-columns: 1fr; }
+  #main.gridded #transcript { display:none; }
+  #grid { display:none; grid-gap:8px; min-height:0; }
+  #main.gridded #grid { display:grid; }
+  #grid .tile { position:relative; background:#000; border:1px solid var(--rule); border-radius:4px; overflow:hidden; }
+  #grid video { width:100%; height:100%; object-fit:cover; display:block; }
+  #grid .title { position:absolute; left:8px; top:6px; font-size:13px; color:var(--fg); text-shadow:0 0 6px #000; }
   #transcript { overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; min-height:0; white-space:pre-wrap; word-break:break-word; }
   #transcript .line { margin:2px 0; }
   .dim { color:var(--dim); } .warm { color:var(--warm); } .green { color:var(--green); } .cyan { color:var(--cyan); } .red { color:var(--red); }
@@ -22,6 +29,7 @@
   <div id="main">
     <div id="transcript"></div>
     <div id="frame"></div>
+    <div id="grid"></div>
   </div>
   <div>
     <div id="prompt">❯ <span class="dim">Sim is listening</span></div>
@@ -68,18 +76,50 @@
     } catch (e) {}
   }
 
-  let shown = "";
+  let shown = "", gridShown = "";
   function frame(tv) {
     const main = el("main"), box = el("frame");
+    grid(tv);
     if (tv.mode !== "frame" || !tv.url) { if (shown) { box.innerHTML = ""; shown = ""; } main.classList.remove("framed"); return; }
     main.classList.add("framed");
     if (shown === tv.url) return;
     shown = tv.url;
     const yt = tv.url.match(/(?:youtu\.be\/|v=|\/embed\/)([\w-]{6,})/);
     const title = tv.title ? `<div class="title">${esc(tv.title)}</div>` : "";
-    box.innerHTML = yt
-      ? `${title}<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&mute=0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`
-      : `${title}<video src="${esc(tv.url)}" autoplay playsinline controls></video>`;
+    if (yt) {
+      box.innerHTML = `${title}<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&mute=0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+      return;
+    }
+    box.innerHTML = `${title}<video autoplay playsinline controls muted></video>`;
+    const video = box.querySelector("video");
+    if (/\.m3u8(\?|$)/.test(tv.url) && !video.canPlayType("application/vnd.apple.mpegurl")) {
+      // A live camera (HLS) in a browser without native HLS: hls.js.
+      withHls(() => { const h = new Hls({ liveSyncDurationCount: 2 }); h.loadSource(tv.url); h.attachMedia(video); });
+    } else {
+      video.src = tv.url;
+    }
+  }
+  function grid(tv) {
+    const main = el("main"), box = el("grid");
+    const urls = tv.mode === "grid" ? (tv.urls || []) : [];
+    const key = urls.join("|");
+    if (!urls.length) { if (gridShown) { box.innerHTML = ""; gridShown = ""; } main.classList.remove("gridded"); return; }
+    main.classList.add("gridded");
+    if (gridShown === key) return;
+    gridShown = key;
+    const n = urls.length, cols = n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4;
+    box.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    box.innerHTML = urls.map((u, i) => `<div class="tile"><video autoplay playsinline muted></video><div class="title">${esc((tv.titles || [])[i] || "")}</div></div>`).join("");
+    withHls(() => box.querySelectorAll("video").forEach((video, i) => {
+      if (video.canPlayType("application/vnd.apple.mpegurl")) { video.src = urls[i]; return; }
+      const h = new Hls({ liveSyncDurationCount: 2 }); h.loadSource(urls[i]); h.attachMedia(video);
+    }));
+  }
+  function withHls(fn) {
+    if (window.Hls) { fn(); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"; s.onload = fn;
+    document.head.appendChild(s);
   }
 
   // Sim's voice, when routed here: each piece of a reply arrives as a

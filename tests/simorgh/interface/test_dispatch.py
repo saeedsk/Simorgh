@@ -340,3 +340,33 @@ class TvCommandTestCase(unittest.IsolatedAsyncioTestCase):
             ("cast_play", {"url": "https://x/clip.mp4", "mode": "full", "device": "Living Room TV"}),
             ("cast_stop", {}), ("cast_stop", {"what": "frame"}), ("cast_volume", {"level": 35.0}),
         ])
+
+
+class CamerasCommandTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_every_verb_is_a_camera_tool_call(self):
+        from simorgh.interface import dispatch as dispatch_mod
+        from simorgh.interface.parser import parse
+        import json as _json
+
+        calls = []
+
+        async def _run_tool(*, bus, ledger, tool, raw, session_id, timeout=300.0):
+            calls.append((tool, _json.loads(raw)))
+            return dispatch_mod.Outcome("ok")
+        original = dispatch_mod._run_tool
+        dispatch_mod._run_tool = _run_tool
+        try:
+            for line in ("cameras", "cameras show office", "cameras show front, office grid", "cameras show all",
+                         "cameras show pool full", "cameras show stop", "cameras light office on", "cameras siren pool 5",
+                         "cameras ptz office preset 2", "cameras recordings front yesterday", "cameras watch off"):
+                await dispatch_mod.dispatch(parse(line), bus=None, clock=_Clock(), session_id="s1", vitals=None, ledger=None)
+        finally:
+            dispatch_mod._run_tool = original
+        self.assertEqual(calls, [
+            ("cam_list", {}), ("cam_stream", {"camera": "office", "mode": "frame"}),
+            ("cam_stream", {"camera": "front, office", "mode": "grid"}), ("cam_stream", {"camera": "all", "mode": "frame"}),
+            ("cam_stream", {"camera": "pool", "mode": "full"}), ("cam_stream", {"camera": "all", "mode": "stop"}),
+            ("cam_light", {"camera": "office", "on": True}), ("cam_siren", {"camera": "pool", "seconds": 5}),
+            ("cam_ptz", {"camera": "office", "command": "preset", "preset": 2}),
+            ("cam_recordings", {"camera": "front", "period": "yesterday"}), ("cam_watch", {"on": False}),
+        ])
