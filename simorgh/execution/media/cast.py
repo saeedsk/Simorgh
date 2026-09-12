@@ -64,36 +64,73 @@ class Device:
 
 
 class PyChromecast:
-    """The real thing, behind a seam the tests replace."""
+    """The real thing, behind a seam the tests replace.
+
+    One zeroconf instance and one cast browser, started on first use and
+    kept for the life of this object: `stop_discovery()` closes the
+    zeroconf it was given, and a device found through it cannot connect
+    afterwards -- "Zeroconf instance loop must be running, was it
+    already stopped?" from the socket thread, and `wait` timing out
+    (the creator's screen, 2026-09-12). Discovery is paid once; later
+    calls read the browser's live table.
+    """
 
     def __init__(self, *, discovery_s: float = 5.0) -> None:
         self._discovery_s = discovery_s
+        self._zconf = None
+        self._browser = None
         self._casts: dict[str, object] = {}
 
-    def devices(self) -> list[Device]:
-        import pychromecast
+    def _start(self) -> None:
+        if self._browser is not None:
+            return
+        import zeroconf
+        from pychromecast.discovery import CastBrowser, SimpleCastListener
 
-        casts, browser = pychromecast.get_chromecasts(timeout=self._discovery_s)
-        try:
-            out = []
-            for cast in casts:
-                info = cast.cast_info
-                self._casts[info.friendly_name] = cast
-                out.append(Device(name=info.friendly_name, model=str(getattr(info, "model_name", "") or ""),
-                                  host=str(getattr(info, "host", "") or "")))
-            return out
-        finally:
-            browser.stop_discovery()
+        self._zconf = zeroconf.Zeroconf()
+        self._browser = CastBrowser(SimpleCastListener(), self._zconf)
+        self._browser.start_discovery()
+        deadline = time.monotonic() + self._discovery_s
+        while time.monotonic() < deadline:
+            time.sleep(0.25)
+            if self._browser.devices and time.monotonic() > deadline - self._discovery_s / 2:
+                break
+
+    def devices(self) -> list[Device]:
+        self._start()
+        out = []
+        for info in list(self._browser.devices.values()):
+            out.append(Device(name=info.friendly_name, model=str(getattr(info, "model_name", "") or ""),
+                              host=str(getattr(info, "host", "") or "")))
+        return sorted(out, key=lambda d: d.name.lower())
 
     def _cast(self, name: str):
+        import pychromecast
+
+        self._start()
         cast = self._casts.get(name)
         if cast is None:
-            self.devices()
-            cast = self._casts.get(name)
-        if cast is None:
-            raise LookupError(name)
+            info = next((i for i in self._browser.devices.values() if i.friendly_name == name), None)
+            if info is None:
+                raise LookupError(name)
+            cast = pychromecast.get_chromecast_from_cast_info(info, self._zconf)
+            self._casts[name] = cast
         cast.wait(timeout=10)
         return cast
+
+    def close(self) -> None:
+        for cast in self._casts.values():
+            try:
+                cast.disconnect(timeout=2)
+            except Exception:  # noqa: BLE001
+                pass
+        self._casts.clear()
+        if self._browser is not None:
+            try:
+                self._browser.stop_discovery()
+            except Exception:  # noqa: BLE001
+                pass
+        self._browser = self._zconf = None
 
     def show_page(self, name: str, url: str) -> None:
         from pychromecast.controllers.dashcast import DashCastController
@@ -146,6 +183,7 @@ class CastPreferences:
     to choose")."""
 
     device: str = ""
+    backend: object = None   # the one PyChromecast every cast tool shares, once started
 
 
 def settings_paths(home: Path | None = None) -> tuple[Path, Path]:
@@ -189,7 +227,9 @@ class _CastTool:
         ok, why = available()
         if not ok:
             raise RuntimeError(why)
-        return PyChromecast(discovery_s=float(getattr(self._config, "cast_discovery_s", 5.0)))
+        if self._prefs.backend is None:
+            self._prefs.backend = PyChromecast(discovery_s=float(getattr(self._config, "cast_discovery_s", 5.0)))
+        return self._prefs.backend
 
     def _device(self, backend, requested: str) -> tuple[str, str]:
         """`(name, problem)`: the device asked for, the configured one, or
