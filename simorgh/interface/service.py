@@ -869,7 +869,7 @@ class Service:
         # one line of noise per turn, and the transcript already marks
         # both.
         if message.payload.get("state") == "listening":
-            self._out(render_mod.style("  🎤 listening...", "dim", enabled=self._color))
+            self._out(render_mod.style("  🎤 listening...", "warm", enabled=self._color))
 
     async def _on_notice(self, message: Message) -> None:
         p = message.payload

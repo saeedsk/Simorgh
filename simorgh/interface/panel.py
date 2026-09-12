@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 
 from .activity import TaskBook, TaskRecord
 
@@ -259,6 +260,22 @@ def inflight_rows(record: TaskRecord, *, now: float, unicode: bool = True) -> li
             [("class:sim.footer", _line(f"{corner}running… {since:.0f}s"))]]
 
 
+_FOOTER_VERB = re.compile(r"^\s*[⏺*]?\s*([A-Za-z][\w-]*?)(?:\.{3}|…)\s*(.*)$")
+
+
+def footer_row(text: str, *, now: float, unicode: bool = True) -> list[tuple[str, str]]:
+    """The one-line status a turn renders before the task book knows it
+    is running ("⏺ Thinking...  [1s]"), given the same spark and wave
+    as a running task's line -- it was the one grey line left (the
+    creator, 2026-09-12: "still shows as solid gray color")."""
+    match = _FOOTER_VERB.match(text or "")
+    if match is None:
+        return [("class:sim.footer", _line(text))]
+    word, rest = match.group(1), match.group(2)
+    return [(breath_class(now), f"{spark(now, unicode=unicode)} "), *breathing_word(word, now, unicode=unicode),
+            ("class:sim.footer", f"  {rest}" if rest else "")]
+
+
 def done_row(last_done, *, unicode: bool = True) -> list[tuple[str, str]] | None:
     """After the last task of a turn: `✻ Baked for 61s · done 04:33`, kept
     until the next line is typed (Claude Code's own habit)."""
@@ -292,7 +309,7 @@ def live_rows(book: TaskBook, *, now: float, footer_text: str = "", last_done=No
         rows.append([("class:sim.footer", f"  … and {len(running) - MAX_RUNNING_ROWS} more running")])
     if not running:
         if footer_text:
-            rows.append([("class:sim.footer", _line(footer_text))])
+            rows.append(footer_row(footer_text, now=now, unicode=unicode))
         else:
             done = done_row(last_done, unicode=unicode)
             if done:
@@ -397,7 +414,7 @@ def budget_summary(budget: dict) -> str:
 __all__ = [
     "BREATH_PERIOD_S", "BREATH_ROTATE_S", "BREATH_SHADES", "BREATH_WORDS",
     "SPARK_FRAMES", "agent_row", "breath_class", "breath_shade", "breath_word", "breathing_word", "budget_summary",
-    "done_row", "flatten", "spark",
+    "done_row", "flatten", "footer_row", "spark",
     "footer_rows", "inflight_rows", "live_rows", "plain", "queued_row", "running_row", "status_row", "tree_end",
     "tree_note", "tree_start", "tree_step",
 ]

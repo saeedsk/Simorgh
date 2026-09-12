@@ -133,7 +133,11 @@ class BottomRowsTestCase(unittest.TestCase):
 
     def test_idle_shows_nothing_live_but_what_just_finished(self):
         self.assertEqual(panel.live_rows(TaskBook(), now=0.0), [])
-        self.assertEqual(panel.plain(panel.live_rows(TaskBook(), now=0.0, footer_text="Thinking… [4s]")), "Thinking… [4s]")
+        row = panel.live_rows(TaskBook(), now=0.0, footer_text="⏺ Thinking...  [4s]")[0]
+        self.assertIn(row[0][1].strip(), panel.SPARK_FRAMES, "the one-line status breathes too")
+        self.assertEqual("".join(ch for cls, ch in row if cls.startswith("class:sim.breath."))[2:], "Thinking…")
+        self.assertIn("[4s]", panel.plain([row]))
+        self.assertEqual(panel.plain(panel.live_rows(TaskBook(), now=0.0, footer_text="no verb here")), "no verb here")
         done = panel.plain(panel.live_rows(TaskBook(), now=0.0, last_done=("Baked", 61.0, "04:33")))
         self.assertEqual(done, "✻ Baked for 61s · done 04:33")
 

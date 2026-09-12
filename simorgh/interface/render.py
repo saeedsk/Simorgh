@@ -21,6 +21,10 @@ _RESET = "\x1b[0m"
 _COLORS = {
     "dim": "\x1b[2m", "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
     "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m", "bold": "\x1b[1m",
+    # The breathing line's muted tan (tui.BREATH_COLOURS), for the quiet
+    # lines that keep it company -- "listening..." was the one cold line
+    # left beside it (the creator, 2026-09-12).
+    "warm": "\x1b[38;2;172;127;79m",
 }
 _LEVEL_COLOR = {"info": "cyan", "warn": "yellow", "error": "red", "success": "green"}
 

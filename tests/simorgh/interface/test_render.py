@@ -312,3 +312,10 @@ class ReplyAndBlocksLikeClaudeCodeTestCase(unittest.TestCase):
         out = code_block("\n".join(f"line {i}" for i in range(30)), enabled=False)
         self.assertEqual(len(out.splitlines()), BLOCK_LINES + 2)
         self.assertIn(f"… +{30 - BLOCK_LINES} lines", out)
+
+
+class WarmTestCase(unittest.TestCase):
+    def test_warm_is_a_true_colour_and_off_when_colour_is_off(self):
+        from simorgh.interface.render import style
+        self.assertIn("38;2;", style("listening", "warm"))
+        self.assertEqual(style("listening", "warm", enabled=False), "listening")
