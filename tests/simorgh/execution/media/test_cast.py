@@ -154,3 +154,34 @@ class RememberedTvTestCase(unittest.IsolatedAsyncioTestCase):
             listed = await tools["cast_devices"].run({}, ctx=ctx)
             self.assertIn("* Living Room TV", listed.output)
             self.assertEqual(listed.metadata["default"], "Living Room TV")
+
+
+class SetupTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_setup_opens_the_api_mints_a_token_and_remembers_the_one_tv(self):
+        import stat
+        import tempfile
+        import tomllib
+        from simorgh.contracts.protocols import ToolContext
+        cast = _FakeCast(("Family Room TV",))
+        tools = {t.name: t for t in cast_tools(Config(), cast=cast, reachable=lambda url: True, env={})}
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            ctx = ToolContext(action_id="a1", task_id=None, scope={}, constraints={}, data_dir=home / "data",
+                              clock=None, logger=None, ledger=None, bus=_Bus())
+            result = await tools["cast_setup"].run({}, ctx=ctx)
+            self.assertTrue(result.ok, result.error)
+            config = tomllib.loads((home / "simorgh.toml").read_text())
+            self.assertEqual(config["interface"]["http_host"], "0.0.0.0")
+            self.assertIn("SIM_API_TOKEN", config["execution"]["secrets"])
+            self.assertEqual(config["execution"]["cast_device"], "Family Room TV")
+            secrets_path = home / "secrets.toml"
+            token = tomllib.loads(secrets_path.read_text())["SIM_API_TOKEN"]
+            self.assertGreaterEqual(len(token), 24)
+            self.assertEqual(stat.S_IMODE(secrets_path.stat().st_mode), 0o600)
+            self.assertIn("restart Sim", result.output)
+            self.assertNotIn(token, result.output, "the token is never printed")
+            # Run again: the token is kept, nothing is minted twice.
+            again = await tools["cast_setup"].run({}, ctx=ctx)
+            self.assertTrue(again.ok)
+            self.assertIn("already set", again.output)
+            self.assertEqual(tomllib.loads(secrets_path.read_text())["SIM_API_TOKEN"], token)

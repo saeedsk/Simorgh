@@ -415,14 +415,94 @@ class CastUseTool(_CastTool):
                           metadata={"device": name})
 
 
+class CastSetupTool(_CastTool):
+    name = "cast_setup"
+    description = ("Make the TV able to reach Sim: bind Sim's API to the network, mint a SIM_API_TOKEN if there "
+                   "is none, let the interface and execution read it, and remember the TV. Says what changed; "
+                   "takes effect at the next restart.")
+    args_schema = {"type": "object", "properties": {"device": {"type": "string"}}}
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        data_dir = getattr(ctx, "data_dir", None)
+        if not data_dir:
+            return ToolResult(ok=False, error="refused: no data directory to write settings into")
+        from simorgh.voice.settings import persist
+
+        home = Path(data_dir).parent
+        config_path, secrets_path = home / "simorgh.toml", home / "secrets.toml"
+        changed: list[str] = []
+        try:
+            persist(config_path, "http_host", "0.0.0.0", section="interface")
+            changed.append('[interface] http_host = "0.0.0.0"  (the API answers on the network, not only this machine)')
+            persist(config_path, "secrets", ["vault:*", "SIM_API_TOKEN"], section="execution")
+            changed.append("[execution] secrets includes SIM_API_TOKEN  (so the cast tools can put it in the page URL)")
+        except OSError as exc:
+            return ToolResult(ok=False, error=f"refused: could not write {config_path} ({exc})")
+        import tomllib
+
+        existing: dict = {}
+        if secrets_path.is_file():
+            try:
+                with secrets_path.open("rb") as handle:
+                    existing = tomllib.load(handle)
+            except Exception as exc:  # noqa: BLE001
+                return ToolResult(ok=False, error=f"refused: {secrets_path} could not be read ({exc})")
+        # The file, not the store: a token minted a moment ago is in the
+        # file and not yet in the store this process was booted with.
+        if not self._token() and not existing.get("SIM_API_TOKEN"):
+            import secrets as _secrets
+
+            existing["SIM_API_TOKEN"] = _secrets.token_urlsafe(24)
+            try:
+                secrets_path.parent.mkdir(parents=True, exist_ok=True)
+                body = "".join(f"{k} = {json.dumps(str(v))}\n" for k, v in existing.items())
+                tmp = secrets_path.with_suffix(".toml.part")
+                tmp.write_text(body)
+                tmp.chmod(0o600)
+                tmp.replace(secrets_path)
+                secrets_path.chmod(0o600)
+            except OSError as exc:
+                return ToolResult(ok=False, error=f"refused: could not write {secrets_path} ({exc})")
+            changed.append(f"SIM_API_TOKEN minted in {secrets_path}  (mode 600; the page URL carries it)")
+        else:
+            changed.append("SIM_API_TOKEN already set; kept")
+        wanted = str(args.get("device") or "").strip()
+        device_note = ""
+        try:
+            backend = self._backend()
+            devices = await asyncio.to_thread(backend.devices)
+        except Exception as exc:  # noqa: BLE001
+            devices, device_note = [], f"could not look for TVs ({exc})"
+        names = [d.name for d in devices]
+        if wanted or len(names) == 1:
+            name, problem = await asyncio.to_thread(self._device, backend, wanted or names[0])
+            if problem:
+                device_note = problem
+            else:
+                self._prefs.device = name
+                persist(config_path, "cast_device", name, section="execution")
+                changed.append(f"[execution] cast_device = {name!r}")
+        elif names:
+            device_note = f"found {', '.join(names)}: `tv use <name>` picks the TV"
+        elif not device_note:
+            device_note = "no Cast device found on this network yet"
+        lines = ["set up for the TV:"] + [f"  - {c}" for c in changed]
+        if device_note:
+            lines.append(f"  - {device_note}")
+        lines.append("restart Sim, then `tv show`")
+        return ToolResult(ok=True, output="\n".join(lines), side_effects=("cast_setup",),
+                          metadata={"changed": changed, "device": self._prefs.device})
+
+
 def cast_tools(config, **kwargs) -> list:
     kwargs = {k: v for k, v in kwargs.items() if k in ("cast", "env", "secrets", "clock", "reachable")}
     prefs = CastPreferences(device=str(getattr(config, "cast_device", "") or ""))
     return [CastDevicesTool(config, prefs=prefs, **kwargs), CastShowTool(config, prefs=prefs, **kwargs),
             CastPlayTool(config, prefs=prefs, **kwargs), CastStopTool(config, prefs=prefs, **kwargs),
-            CastVolumeTool(config, prefs=prefs, **kwargs), CastUseTool(config, prefs=prefs, **kwargs)]
+            CastVolumeTool(config, prefs=prefs, **kwargs), CastUseTool(config, prefs=prefs, **kwargs),
+            CastSetupTool(config, prefs=prefs, **kwargs)]
 
 
-__all__ = ["CastDevicesTool", "CastPlayTool", "CastPreferences", "CastShowTool", "CastStopTool", "CastUseTool",
+__all__ = ["CastDevicesTool", "CastPlayTool", "CastPreferences", "CastSetupTool", "CastShowTool", "CastStopTool", "CastUseTool",
            "CastVolumeTool", "Device",
            "PyChromecast", "available", "cast_tools", "lan_address"]

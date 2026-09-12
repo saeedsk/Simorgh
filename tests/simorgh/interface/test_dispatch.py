@@ -327,14 +327,14 @@ class TvCommandTestCase(unittest.IsolatedAsyncioTestCase):
         original = dispatch_mod._run_tool
         dispatch_mod._run_tool = _run_tool
         try:
-            for line in ("tv devices", "tv use Living Room TV", "tv show", "tv show Bedroom", "tv", "tv video https://x/clip.mp4",
+            for line in ("tv setup", "tv devices", "tv use Living Room TV", "tv show", "tv show Bedroom", "tv", "tv video https://x/clip.mp4",
                          "tv video https://x/clip.mp4 full Living Room TV", "tv stop", "tv stop frame", "tv volume 35"):
                 await dispatch_mod.dispatch(parse(line), bus=None, clock=_Clock(), session_id="s1", vitals=None,
                                             ledger=None)
         finally:
             dispatch_mod._run_tool = original
         self.assertEqual(calls, [
-            ("cast_devices", {}), ("cast_use", {"device": "Living Room TV"}), ("cast_show", {}),
+            ("cast_setup", {}), ("cast_devices", {}), ("cast_use", {"device": "Living Room TV"}), ("cast_show", {}),
             ("cast_show", {"device": "Bedroom"}), ("cast_show", {}),
             ("cast_play", {"url": "https://x/clip.mp4", "mode": "frame"}),
             ("cast_play", {"url": "https://x/clip.mp4", "mode": "full", "device": "Living Room TV"}),

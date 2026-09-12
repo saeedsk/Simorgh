@@ -69,6 +69,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "cast_stop"): "Stopping the TV",
     ("act", "cast_volume"): "Setting the TV volume",
     ("act", "cast_use"): "Remembering the TV",
+    ("act", "cast_setup"): "Setting up the TV",
     ("act", "music_now"): "Checking the music",
     ("act", "music_control"): "Controlling the music",
     ("act", "music_play"): "Putting music on",

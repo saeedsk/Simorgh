@@ -732,7 +732,7 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     words = (args or "").strip().split()
     verb = words[0].lower() if words else "show"
     rest = words[1:]
-    usage = ("usage: tv devices | use <device> | show [device] | video <url> [full|frame] [device] | stop [frame] "
+    usage = ("usage: tv setup [device] | devices | use <device> | show [device] | video <url> [full|frame] [device] | stop [frame] "
              "| volume <0-100> [device]")
 
     async def _run(tool: str, payload: dict) -> Outcome:
@@ -741,6 +741,8 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
 
     if verb == "devices":
         return await _run("cast_devices", {})
+    if verb == "setup":
+        return await _run("cast_setup", {"device": " ".join(rest)} if rest else {})
     if verb == "use":
         if not rest:
             return Outcome("usage: tv use <device name>   (`tv devices` lists them)")
@@ -855,7 +857,7 @@ def _tool_group(name: str) -> str:
 
 _NO_ARG_TOOLS = frozenset({"kb_status", "sec_self", "sec_posture", "energy_status",
                            "home_describe", "media_now", "self_map", "git_revert",
-                           "cast_devices", "cast_show", "cast_stop"})
+                           "cast_devices", "cast_show", "cast_stop", "cast_setup"})
 
 
 async def _known_tools(ledger: LedgerClient) -> dict[str, dict]:
