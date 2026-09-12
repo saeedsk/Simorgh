@@ -692,8 +692,8 @@ class ReplThreadOrderingTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             events,
-            ["input_requested:first", "printed:reply to first",
-             "input_requested:second", "printed:reply to second"],
+            ["input_requested:first", "printed:● reply to first",
+             "input_requested:second", "printed:● reply to second"],
         )
 
 
@@ -907,8 +907,8 @@ class LiveStatusIntegrationTestCase(unittest.IsolatedAsyncioTestCase):
         # One branch of the task's tree (`panel.py`): the tool, what it
         # touched, and the outcome mark -- ASCII here because tests run
         # with unicode off.
-        self.assertIn("|- read_file read docs/SOUL.md", out)
-        self.assertRegex(out, r"read docs/SOUL.md\s+ok")
+        self.assertIn("* read_file(read docs/SOUL.md)", out)
+        self.assertRegex(out, r"read docs/SOUL.md\)\s+ok")
         self.assertNotIn("step 1 (act)", out)
 
     async def test_a_failed_step_folds_into_a_permanent_line_with_the_failure_icon(self):
@@ -926,8 +926,8 @@ class LiveStatusIntegrationTestCase(unittest.IsolatedAsyncioTestCase):
         sub = await self.other.subscribe(topics.PERCEPT_TEXT_RECEIVED, _responder)
         out = await self._line("propose something")
         await sub.unsubscribe()
-        self.assertIn("|- propose_mcp_server denied: nope", out)
-        self.assertRegex(out, r"denied: nope\s+FAILED")
+        self.assertIn("* propose_mcp_server(denied: nope)", out)
+        self.assertRegex(out, r"denied: nope\)\s+FAILED")
 
     async def test_an_in_flight_step_updates_the_footer_with_a_breathing_verb(self):
         async def _responder(message):

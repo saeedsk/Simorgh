@@ -273,3 +273,42 @@ class RenderTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReplyAndBlocksLikeClaudeCodeTestCase(unittest.TestCase):
+    """The creator, 2026-09-12, with Claude Code beside Sim: answers as a
+    filled bullet with the rest indented under it, lists as real nested
+    bullets, and never a flood of diff or source on screen."""
+
+    def test_a_reply_leads_with_a_bullet_and_indents_the_rest(self):
+        from simorgh.interface.render import reply_block
+        out = reply_block("Done.\n\nWhat changed:\n- one\n  - nested\n- two", enabled=False)
+        self.assertEqual(out.splitlines()[0], "● Done.")
+        self.assertIn("  • one", out)
+        self.assertIn("    ◦ nested", out)
+        self.assertIn("  • two", out)
+        self.assertEqual(out.splitlines()[1], "", "paragraph breaks survive")
+
+    def test_markdown_turns_dashes_into_bullets_but_leaves_a_dash_dash_alone(self):
+        from simorgh.interface.render import markdown
+        self.assertEqual(markdown("- a\n* b\n-- not a bullet", enabled=False), "• a\n• b\n-- not a bullet")
+
+    def test_a_long_diff_shows_an_excerpt_and_a_count(self):
+        from simorgh.interface.render import BLOCK_LINES, diff_block
+        lines = ["--- a/x.py", "+++ b/x.py", "@@ -1 +1 @@"] + [f"+line {i}" for i in range(40)]
+        out = diff_block(lines, label="x.py", enabled=False)
+        self.assertEqual(len(out.splitlines()), BLOCK_LINES + 2)  # header, the excerpt, the count
+        self.assertTrue(out.splitlines()[-1].startswith("… +"), out.splitlines()[-1])
+        self.assertIn(f"+{43 - BLOCK_LINES} lines", out)
+
+    def test_a_short_diff_has_no_count_and_a_long_line_is_clipped(self):
+        from simorgh.interface.render import BLOCK_LINE_CHARS, diff_block
+        out = diff_block(["+" + "x" * 400], enabled=False)
+        self.assertNotIn("… +", out)
+        self.assertLessEqual(max(len(line) for line in out.splitlines()), BLOCK_LINE_CHARS)
+
+    def test_code_blocks_are_capped_the_same_way(self):
+        from simorgh.interface.render import BLOCK_LINES, code_block
+        out = code_block("\n".join(f"line {i}" for i in range(30)), enabled=False)
+        self.assertEqual(len(out.splitlines()), BLOCK_LINES + 2)
+        self.assertIn(f"… +{30 - BLOCK_LINES} lines", out)

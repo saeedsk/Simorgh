@@ -57,6 +57,7 @@ from typing import Awaitable, Callable, Iterable
 from .parser import COMMANDS as _PARSER_COMMANDS
 
 DOUBLE_INTERRUPT_S = 2.0
+PROMPT_GLYPH = "❯"
 _MAX_PATH_COMPLETIONS = 40
 
 # No real command name or repo-relative path is anywhere near this long, so
@@ -268,7 +269,10 @@ def _style():
         "sim.path": "#5faf5f",
         "sim.string": "#87af87",
         "sim.flag": "#d7af5f",
-        "sim.prompt": "#00afd7 bold",
+        # The prompt glyph: light grey, a shade under white (the creator,
+        # 2026-09-12: "❯ ... in light gray color ... a bit on darker shade
+        # compared to full white").
+        "sim.prompt": "#bcbcbc",
         "sim.rule": "#3a3a3a",
         "sim.footer": "#6c6c6c",
         "sim.status": "#8a8a8a",
@@ -378,13 +382,18 @@ class Tui:
         The rule is what separates the transcript above from the line
         being typed, the way Claude Code boxes its input."""
         cols = shutil.get_terminal_size((80, 24)).columns
-        return [("class:sim.rule", "─" * max(10, cols - 1) + "\n"), ("class:sim.prompt", "> ")]
+        return [("class:sim.rule", "─" * max(10, cols - 1) + "\n"), ("class:sim.prompt", f"{PROMPT_GLYPH} ")]
 
     def _toolbar(self):
+        """The activity panel under the input, behind a rule of its own:
+        transcript, rule, input, rule, panel -- the input boxed between
+        two lines the way Claude Code's is (the creator, 2026-09-12)."""
+        cols = shutil.get_terminal_size((80, 24)).columns
+        rule = [("class:sim.rule", "─" * max(10, cols - 1) + "\n")]
         text = self._footer_text()
         if isinstance(text, str):
-            return [("class:sim.footer", text or "")]
-        return list(text or [("class:sim.footer", "")])
+            return rule + [("class:sim.footer", text or "")]
+        return rule + list(text or [("class:sim.footer", "")])
 
     async def run(self) -> None:
         """Read lines until EOF, Ctrl-D, or `stop()`.

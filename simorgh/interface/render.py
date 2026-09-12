@@ -141,13 +141,31 @@ def notice(level: str, text: str, source: str, *, enabled: bool = True) -> str:
     return f"{tag} {text} {src}".rstrip()
 
 
-def code_block(code: str, *, label: str = "", max_lines: int = 30) -> str:
+# How much of a diff or a code block the transcript shows before it says
+# "… +N lines". Was 30 for code and 60 for a diff; the creator, 2026-09-12,
+# with Claude Code beside it: the console must not be flooded with source
+# -- a short, coloured excerpt and a count, the way Claude Code does it.
+BLOCK_LINES = 12
+BLOCK_LINE_CHARS = 160
+
+
+def _more(lines: list[str], shown: int, *, enabled: bool = True) -> str:
+    rest = len(lines) - shown
+    return style(f"… +{rest} line{'s' if rest != 1 else ''}", "dim", enabled=enabled) if rest > 0 else ""
+
+
+def _clip(line: str, limit: int = BLOCK_LINE_CHARS) -> str:
+    return line if len(line) <= limit else line[: limit - 1] + "…"
+
+
+def code_block(code: str, *, label: str = "", max_lines: int = BLOCK_LINES, enabled: bool = True) -> str:
     lines = code.splitlines() or [""]
-    truncated = len(lines) > max_lines
-    body = "\n".join(lines[:max_lines])
-    header = f"--- {label} ---" if label else "---"
-    footer = f"[truncated: {len(lines) - max_lines} more line(s)]" if truncated else "---"
-    return f"{header}\n{body}\n{footer}"
+    shown = [_clip(line) for line in lines[:max_lines]]
+    header = style(f"--- {label} ---" if label else "---", "dim", enabled=enabled)
+    parts = [header, *shown]
+    more = _more(lines, len(shown), enabled=enabled)
+    parts.append(more if more else style("---", "dim", enabled=enabled))
+    return "\n".join(parts)
 
 
 _MD_FENCE_RE = re.compile(r"```[a-zA-Z0-9_+-]*\n(.*?)```", re.DOTALL)
@@ -176,10 +194,11 @@ def markdown(text: str, *, enabled: bool = True) -> str:
     blocks: list[str] = []
 
     def _stash_fence(match: "re.Match[str]") -> str:
-        blocks.append(code_block(match.group(1).rstrip("\n")))
+        blocks.append(code_block(match.group(1).rstrip("\n"), enabled=enabled))
         return _MD_FENCE_PLACEHOLDER.format(len(blocks) - 1)
 
     working = _MD_FENCE_RE.sub(_stash_fence, text)
+    working = _bullets(working)
     working = _MD_HEADER_RE.sub(lambda m: style(m.group(2), "bold", enabled=enabled), working)
     working = _MD_BOLD_RE.sub(lambda m: style(m.group(1), "bold", enabled=enabled), working)
     working = _MD_CODE_RE.sub(lambda m: style(m.group(1), "cyan", enabled=enabled), working)
@@ -188,21 +207,52 @@ def markdown(text: str, *, enabled: bool = True) -> str:
     return working
 
 
-def diff_block(lines: list[str], *, label: str = "", max_lines: int = 60, enabled: bool = True) -> str:
-    truncated = len(lines) > max_lines
-    shown = lines[:max_lines]
+def diff_block(lines: list[str], *, label: str = "", max_lines: int = BLOCK_LINES, enabled: bool = True) -> str:
+    """A diff as Claude Code shows one: added lines green, removed red,
+    the first `max_lines` only and then "… +N lines". The `---`/`+++`
+    file header and hunk markers are dimmed, not coloured as changes."""
     out = []
-    for line in shown:
-        if line.startswith("+") and not line.startswith("+++"):
+    for line in lines[:max_lines]:
+        line = _clip(line)
+        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+            out.append(style(line, "dim", enabled=enabled))
+        elif line.startswith("+"):
             out.append(style(line, "green", enabled=enabled))
-        elif line.startswith("-") and not line.startswith("---"):
+        elif line.startswith("-"):
             out.append(style(line, "red", enabled=enabled))
         else:
             out.append(line)
-    header = f"--- {label} ---" if label else "---"
-    body = "\n".join(out)
-    footer = f"[truncated: {len(lines) - max_lines} more line(s)]" if truncated else "---"
-    return f"{header}\n{body}\n{footer}"
+    header = style(f"--- {label} ---" if label else "---", "dim", enabled=enabled)
+    more = _more(lines, len(out), enabled=enabled)
+    return "\n".join([header, *out, more] if more else [header, *out])
+
+
+_MD_BULLET_RE = re.compile(r"^(\s*)[-*•]\s+(.*)$")
+_BULLETS = ("•", "◦", "▪")
+
+
+def _bullets(text: str) -> str:
+    """`- item` becomes `• item`, and an indented one `◦ item` under it:
+    the nested bullets a report reads best in, instead of raw dashes."""
+    out = []
+    for line in text.splitlines():
+        match = _MD_BULLET_RE.match(line)
+        if match is None or line.lstrip().startswith(("- [", "-- ")):
+            out.append(line)
+            continue
+        depth = min(len(match.group(1).replace("\t", "  ")) // 2, len(_BULLETS) - 1)
+        out.append(f"{'  ' * depth}{_BULLETS[depth]} {match.group(2)}")
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+def reply_block(text: str, *, enabled: bool = True, unicode: bool = True) -> str:
+    """Sim's answer the way Claude Code prints its own: a filled bullet
+    on the first line, the rest indented under it, markdown rendered
+    and lists as real bullets. Blank lines between paragraphs stay."""
+    body = markdown(text or "", enabled=enabled)
+    lead = "● " if unicode else "* "
+    lines = body.splitlines() or [""]
+    return "\n".join([f"{lead}{lines[0]}"] + [f"  {line}" if line else "" for line in lines[1:]])
 
 
 def prompt_banner(question: str, options: list[str], *, enabled: bool = True) -> str:

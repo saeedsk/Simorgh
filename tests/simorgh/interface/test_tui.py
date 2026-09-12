@@ -360,7 +360,9 @@ class TestReadingLines(unittest.IsolatedAsyncioTestCase):
     async def test_the_footer_callback_is_what_the_toolbar_shows(self):
         prompt = Tui(on_line=self._noop_line, footer_text=lambda: "thinking [3s]")
         session = prompt._build_session()  # noqa: SLF001
-        self.assertEqual(session.bottom_toolbar(), [("class:sim.footer", "thinking [3s]")])
+        toolbar = session.bottom_toolbar()
+        self.assertEqual(toolbar[0][0], "class:sim.rule", "a rule boxes the input from below")
+        self.assertEqual(toolbar[1:], [("class:sim.footer", "thinking [3s]")])
 
     async def _noop_line(self, line: str) -> None: ...
 
@@ -463,7 +465,9 @@ class TestThePanelToolbar(unittest.IsolatedAsyncioTestCase):
         rows = [("class:sim.breath.3", "✻ Osmosing…"), ("class:sim.footer", "  patch · x · 3s"), ("", "\n"), ("class:sim.status", "auto on")]
         prompt = Tui(on_line=self._noop_line, footer_text=lambda: rows)
         session = prompt._build_session()  # noqa: SLF001
-        self.assertEqual(session.bottom_toolbar(), rows)
+        toolbar = session.bottom_toolbar()
+        self.assertEqual(toolbar[0][0], "class:sim.rule")
+        self.assertEqual(toolbar[1:], rows)
 
     async def test_the_input_bar_has_a_rule_above_the_prompt(self):
         prompt = Tui(on_line=self._noop_line)
@@ -472,7 +476,7 @@ class TestThePanelToolbar(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message[0][0], "class:sim.rule")
         self.assertTrue(message[0][1].startswith("─"))
         self.assertTrue(message[0][1].endswith("\n"))
-        self.assertEqual(message[-1], ("class:sim.prompt", "> "))
+        self.assertEqual(message[-1], ("class:sim.prompt", "❯ "))
 
     async def test_every_breathing_shade_has_a_colour(self):
         from simorgh.interface import panel

@@ -543,7 +543,7 @@ class Service:
         while not self._stop_repl.is_set():
             self._input_pending = True
             try:
-                line = input("> ")
+                line = input("❯ " if render_mod.unicode_mode(self.config.unicode) != "off" else "> ")
             except EOFError:
                 break
             except KeyboardInterrupt:
@@ -645,30 +645,37 @@ class Service:
             return True
         return bool(self.config.narrate_autonomous)
 
-    def _narrate_autonomous(self, message: Message, record) -> None:
+    def _narrate_autonomous(self, message: Message, record, took: float | None = None) -> None:
+        """Work this REPL did not start -- a spoken turn, Sim's own
+        curiosity -- drawn as the same tree a typed turn gets
+        (`panel.py`): the root, a branch per finished tool call with its
+        timing, a coloured excerpt of any diff inside the rail, and the
+        corner that closes it. Until 2026-09-12 these printed the older
+        flat `→` lines while typed turns got the tree, and the creator's
+        spoken sessions saw only the flat kind."""
         unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+        p = message.payload
         if message.type == topics.TASK_STARTED:
-            self._out(render_mod.style(
-                activity_mod.started_line(record, unicode=unicode), "cyan", enabled=self._color,
-            ))
+            self._out(render_mod.style(panel_mod.tree_start(record, unicode=unicode), "cyan", enabled=self._color))
             return
         if message.type == topics.TASK_STEP:
-            if not self.config.narrate_steps:
-                return
-            p = message.payload
-            self._out(render_mod.style(activity_mod.step_line(
-                record, tool=p.get("tool"), summary=p.get("summary", ""), ok=p.get("ok"),
-                unicode=unicode,
-            ), "dim", enabled=self._color))
+            if not self.config.narrate_steps or p.get("ok") is None:
+                return  # a step in flight breathes in the footer; the branch prints when it lands
+            head, sep, diff_body = str(p.get("summary", "")).partition("\n\n--- a/")
+            line = panel_mod.tree_step(tool=p.get("tool"), head=head, ok=p.get("ok"), took=took, unicode=unicode)
+            self._out(render_mod.style(line, "green" if p.get("ok") else "red", enabled=self._color))
+            if sep:
+                block = render_mod.diff_block((sep[2:] + diff_body).splitlines(), label=head,
+                                              enabled=self._color).splitlines()
+                self._out("\n".join(panel_mod.tree_note(block, unicode=unicode)))
             return
         elapsed = None
         if record.started_at is not None:
             elapsed = time.monotonic() - record.started_at
-        detail = message.payload.get("result_summary") or message.payload.get("reason") or ""
+        detail = p.get("result_summary") or p.get("reason") or ""
         colour = "green" if record.status == "completed" else "yellow"
-        self._out(render_mod.style(activity_mod.finished_line(
-            record, elapsed=elapsed, detail=detail, unicode=unicode,
-        ), colour, enabled=self._color))
+        self._out(render_mod.style(panel_mod.tree_end(record, elapsed=elapsed, detail=detail, unicode=unicode),
+                                   colour, enabled=self._color))
 
     def _refresh_activity_footer(self) -> None:
         """Keep the line under the prompt current: what is running, and
@@ -744,7 +751,8 @@ class Service:
             reply_text = await asyncio.wait_for(fut, timeout=self.config.chat_reply_timeout_s)
             self._live.clear()
             if reply_text:
-                print(render_mod.markdown(reply_text, enabled=self._color))
+                unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+                print(render_mod.reply_block(reply_text, enabled=self._color, unicode=unicode))
             else:
                 # An honest-floor completion (no real provider answered in
                 # time) resolves the future with "", same as a real reply
@@ -1047,7 +1055,7 @@ class Service:
             # Autonomous work: a start and an outcome always, steps only
             # when asked for. Told as a short, complete story rather than
             # folded into the footer, which only ever shows one thing.
-            self._narrate_autonomous(message, record)
+            self._narrate_autonomous(message, record, took)
             return
         elapsed = time.monotonic() - self._turn_started.get(task_id, time.monotonic())
 
@@ -1162,7 +1170,9 @@ class Service:
                     why = " ".join((p.get("reason") or "").split())
                     if why:
                         header = f"{header}\n  {render_mod.style(why, 'yellow', enabled=self._color)}"
-                self._out(f"{header}\n{render_mod.markdown(reply_text, enabled=self._color)}" if reply_text else header)
+                unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+                self._out(f"{header}\n{render_mod.reply_block(reply_text, enabled=self._color, unicode=unicode)}"
+                          if reply_text else header)
                 return
             if self._live.enabled:  # the reply itself prints from _handle_chat
                 return

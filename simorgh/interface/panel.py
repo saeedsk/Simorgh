@@ -19,20 +19,29 @@ Layout, bottom to top:
 
     ┌ transcript ─────────────────────────────────────────────┐
     │ ⏺ patch · human · add a docstring to vitals.py  [a88b70] │
-    │   ├─ read_file simorgh/interface/vitals.py     ✓  0.3s   │
-    │   ├─ apply_source_patch simorgh/interface/vit… ✓  1.2s   │
-    │   │  --- a/simorgh/interface/vitals.py                   │
-    │   │  +++ b/simorgh/interface/vitals.py                   │
-    │   │  +\"\"\"A real local projection …\"\"\"                     │
-    │   ├─ run_tests                                 ✓ 42.0s   │
-    │   ╰─ ✅ completed in 60s                                  │
+    │   ⏺ read_file(simorgh/interface/vitals.py)     ✓  0.3s   │
+    │   ⏺ apply_source_patch(simorgh/interface/vit…) ✓  1.2s   │
+    │     ⎿  --- a/simorgh/interface/vitals.py                 │
+    │        +\"\"\"A real local projection …\"\"\"                   │
+    │        … +14 lines                                       │
+    │   ⏺ run_tests(tests/simorgh/interface)         ✓ 42.0s   │
+    │   ⎿  ✅ completed in 60s                                  │
+    │                                                          │
+    │ ● Docstring added and the tests pass.                    │
+    │   • vitals.py gained a module docstring                  │
     ├ input ──────────────────────────────────────────────────┤
-    │ > _                                                      │
+    │ ❯ _                                                      │
     ├ activity ───────────────────────────────────────────────┤
     │ ✻ Osmosing…  research · what does memory export · 12s    │
     │   ↳ 2 queued: tighten the retry loop; plan web access    │
-    │ auto on · guarded · GLM-5.3-Flash · together 12/200      │
+    │ ⏵⏵ auto on · guarded · GLM-5.3-Flash · together 12/200   │
     └──────────────────────────────────────────────────────────┘
+
+The glyphs are Claude Code's own since 2026-09-12, when the creator
+pasted its transcript as "a perfect example of what I'm looking for":
+a `⏺` per call, `⎿` for what hangs under it, `●` for an answer, `❯` for
+the prompt in light grey, and a diff shown as a short coloured excerpt
+with "… +N lines" rather than the whole thing.
 """
 
 from __future__ import annotations
@@ -139,16 +148,18 @@ def tree_start(record: TaskRecord, *, unicode: bool = True) -> str:
 
 def tree_step(*, tool: str | None, head: str, ok: bool | None, took: float | None,
               width: int | None = None, unicode: bool = True) -> str:
-    """One tool call as a branch: `├─ tool what  ✓ 0.3s`.
+    """One tool call: `  ⏺ tool(what)  ✓ 0.3s`.
 
-    Every step is a `├─` because when it prints nobody knows yet whether
-    it is the last; the end line (`tree_end`) closes the tree with `╰─`.
+    Box-drawing rails (`├─`, `╰─`) until 2026-09-12; the creator then
+    pasted Claude Code's own transcript as "a perfect example of what
+    I'm looking for": a `⏺` per call, with what hangs under it -- output,
+    a diff, the outcome -- behind a `⎿`. Same shape here.
     """
     from .render import terminal_width
 
     width = (terminal_width() - _TREE_OVERHEAD) if width is None else width
-    branch = "  ├─ " if unicode else "  |- "
-    what = f"{tool} {head}" if tool else head
+    branch = "  ⏺ " if unicode else "  * "
+    what = f"{tool}({head})" if tool and head else (tool or head)
     from .render import display_width as _dw
 
     what = _fit(what, width - _dw(branch) - _dw(f"{_OK.get(ok, '…')} {_took(took)}") - 2)
@@ -164,14 +175,18 @@ def tree_note(lines: list[str], *, unicode: bool = True) -> list[str]:
     """Lines that belong *under* a branch -- a diff, a test summary --
     kept inside the tree's rail so the eye can follow it."""
     # A long diff line used to run past the terminal and wrap, breaking
-    # the tree's own rail (observer, 2026-09-08).
-    rail = "  │  " if unicode else "  |  "
-    return [_line(f"{rail}{line}") for line in lines]
+    # the tree's own rail (observer, 2026-09-08). The first line hangs
+    # from the call by a `⎿`, the rest sit under it.
+    if not lines:
+        return []
+    first = "    ⎿  " if unicode else "    `- "
+    rest = "       "
+    return [_line(f"{first}{lines[0]}")] + [_line(f"{rest}{line}") for line in lines[1:]]
 
 
 def tree_end(record: TaskRecord, *, elapsed: float | None, detail: str = "", unicode: bool = True) -> str:
     icon = _END_ICON.get(record.status, "•") if unicode else ""
-    corner = "  ╰─ " if unicode else "  `- "
+    corner = "  ⎿  " if unicode else "  `- "
     took = f" in {_took(elapsed)}" if elapsed is not None else ""
     tail = f" -- {detail}" if detail else ""
     return _line(f"{corner}{icon} {record.status}{took}{tail}")
@@ -215,7 +230,7 @@ def status_row(*, auto: str, posture: str, model: str, budget: str, hint: str = 
     eleven observers had missed it."""
     from .render import display_width, terminal_width
 
-    parts = [f"auto {auto}"]
+    parts = [f"⏵⏵ auto {auto}" if auto == "on" else f"auto {auto}"]
     if posture and posture != "unknown":
         parts.append(posture)
     if model:

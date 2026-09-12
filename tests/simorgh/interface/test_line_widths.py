@@ -111,7 +111,7 @@ class PanelFitsTestCase(unittest.TestCase):
     def test_the_tree_rail_survives_a_long_diff_line(self):
         with _at(60):
             [noted] = panel.tree_note(["+" + LONG])
-        self.assertTrue(noted.startswith("  │  "))
+        self.assertTrue(noted.startswith("    ⎿  ") or noted.startswith("       "))
         self.assertLessEqual(display_width(noted), 60)
 
 

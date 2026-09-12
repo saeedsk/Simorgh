@@ -51,7 +51,7 @@ class TreeTestCase(unittest.TestCase):
 
     def test_a_step_is_a_branch_with_its_outcome_and_timing_at_the_right(self):
         line = panel.tree_step(tool="read_file", head="simorgh/x.py", ok=True, took=0.31, width=60)
-        self.assertTrue(line.startswith("  ├─ read_file simorgh/x.py"))
+        self.assertTrue(line.startswith("  ⏺ read_file(simorgh/x.py)"), line)
         self.assertTrue(line.endswith("✓ 0.3s"))
         self.assertEqual(len(line), 60)
 
@@ -63,16 +63,16 @@ class TreeTestCase(unittest.TestCase):
 
     def test_ascii_when_unicode_is_off(self):
         line = panel.tree_step(tool="read_file", head="a.py", ok=True, took=1.0, unicode=False)
-        self.assertTrue(line.startswith("  |- "))
+        self.assertTrue(line.startswith("  * "))
         self.assertTrue(line.endswith("ok 1.0s"))
 
     def test_notes_sit_inside_the_rail(self):
-        self.assertEqual(panel.tree_note(["+x", "-y"]), ["  │  +x", "  │  -y"])
+        self.assertEqual(panel.tree_note(["+x", "-y"]), ["    ⎿  +x", "       -y"])
 
     def test_the_end_closes_the_tree_with_the_outcome_and_duration(self):
         record = TaskRecord(task_id="t1", status="completed")
         line = panel.tree_end(record, elapsed=61.0)
-        self.assertIn("╰─ ✅ completed in 61s", line)
+        self.assertIn("⎿  ✅ completed in 61s", line)
         blocked = panel.tree_end(TaskRecord(task_id="t1", status="blocked"), elapsed=3.0, detail="no budget")
         self.assertIn("⏸ blocked in 3.0s -- no budget", blocked)
 
@@ -80,7 +80,7 @@ class TreeTestCase(unittest.TestCase):
 class BottomRowsTestCase(unittest.TestCase):
     def test_idle_with_nothing_queued_is_idle_plus_the_status_row(self):
         rows = panel.footer_rows(TaskBook(), now=0.0, auto="on")
-        self.assertEqual(panel.plain(rows), "idle\nauto on")
+        self.assertEqual(panel.plain(rows), "idle\n⏵⏵ auto on")
 
     def test_a_running_task_gets_a_breathing_word_its_topic_and_its_age(self):
         book = _running(started=0.0, steps=2)
