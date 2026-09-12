@@ -457,6 +457,44 @@ class TestDelivery(unittest.IsolatedAsyncioTestCase):
         self.assertFalse([p for p in bus.of(topics.VOICE_SPOKEN) if p.get("register") == "hum"])
 
 
+class TestVoiceToTheTv(unittest.IsolatedAsyncioTestCase):
+    """`[voice] output = both|tv`: each piece of a reply goes to the ledger
+    as a WAV and is announced for the TV page (the creator, 2026-09-12:
+    "route its voice to TV")."""
+
+    async def test_each_piece_is_stored_and_announced_in_order(self) -> None:
+        class _Ledger:
+            def __init__(self) -> None:
+                self.blobs: list[tuple[bytes, str]] = []
+
+            async def put_blob(self, data: bytes, *, content_type: str) -> str:
+                self.blobs.append((data, content_type))
+                return f"blob:{len(self.blobs)}"
+
+            async def append(self, *a, **k) -> None:
+                pass
+
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["First sentence. Second sentence here."])
+        session, bus, speaker, tts = _session(_config(output="both", keep_transcripts=False), script, replies)
+        session._pipeline._ledger = _Ledger()  # noqa: SLF001
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        spoken = bus.of(topics.TV_SPEECH)
+        self.assertGreaterEqual(len(spoken), 1, "at least one piece went to the TV")
+        self.assertEqual([p["seq"] for p in spoken], list(range(1, len(spoken) + 1)))
+        self.assertTrue(all(p["ref"].startswith("blob:") for p in spoken))
+        self.assertTrue(all(ct == "audio/wav" for _d, ct in session._pipeline._ledger.blobs))  # noqa: SLF001
+        self.assertTrue(all(d[:4] == b"RIFF" for d, _ct in session._pipeline._ledger.blobs))  # noqa: SLF001
+        self.assertGreater(session._echo.lag_s, 0.0, "the echo window allows for the TV's delay")  # noqa: SLF001
+
+    async def test_laptop_output_ships_nothing(self) -> None:
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["Twelve."])
+        session, bus, speaker, tts = _session(_config(), script, replies)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        self.assertEqual(bus.of(topics.TV_SPEECH), [])
+
+
 class TestSpokenCommands(unittest.IsolatedAsyncioTestCase):
     """"Stop" and "voice off", said aloud, are obeyed at once and never
     sent to the model (the creator, 2026-09-11: saying "voice off"

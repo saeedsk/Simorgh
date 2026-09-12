@@ -273,6 +273,31 @@ class CommandSpeaker:
                 proc.terminate()
 
 
+class SilentSpeaker:
+    """A speaker that makes no sound and takes exactly as long as the
+    audio would: for `[voice] output = "tv"`, where the TV page plays
+    the voice and the local player only has to keep time -- the turn
+    state, the "speaking" flag and the echo gate all follow it."""
+
+    name = "silent"
+
+    def __init__(self) -> None:
+        self._stop: asyncio.Event | None = None
+
+    async def play(self, audio: Audio) -> None:
+        self._stop = asyncio.Event()
+        try:
+            await asyncio.wait_for(self._stop.wait(), timeout=max(0.0, audio.seconds))
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            self._stop = None
+
+    async def stop(self) -> None:
+        if self._stop is not None:
+            self._stop.set()
+
+
 def open_microphone(preferred: str = "auto") -> tuple[object | None, str]:
     """`(microphone, why not)`: the first capture path that works."""
     order = {"auto": (SounddeviceMicrophone, FfmpegMicrophone), "sounddevice": (SounddeviceMicrophone,),

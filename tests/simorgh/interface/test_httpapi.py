@@ -942,3 +942,40 @@ class TvPageTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         state = json.loads(body)
         self.assertEqual((state["mode"], state["url"], state["title"]), ("frame", "https://x/clip.mp4", "Clip"))
+
+
+class TvSpeechTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_a_piece_of_speech_is_listed_in_the_state_and_served_from_the_ledger(self):
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+
+        class _Ledger:
+            async def get_blob(self, ref):
+                if ref != "blob:7":
+                    raise KeyError(ref)
+                return b"RIFF....WAVEfake"
+        bus = _FakeBus()
+        api = HttpApi(bus, ledger=_Ledger(), host="127.0.0.1", port=0)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        handler = next(entry[1] for entry in bus._subs if entry[0] == topics.TV_SPEECH)  # noqa: SLF001
+        await handler(Message.new(topics.TV_SPEECH, source="voice",
+                                  payload={"ref": "blob:7", "seconds": 1.5, "seq": 1, "request_id": "r1"}))
+
+        def _get(path):
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            body = resp.read()
+            ctype = resp.getheader("Content-Type")
+            conn.close()
+            return resp.status, body, ctype
+        status, body, _ = await asyncio.to_thread(_get, "/api/tv/state")
+        self.assertEqual(status, 200)
+        state = json.loads(body)
+        self.assertEqual(state["speech"][0]["seq"], 1)
+        self.assertEqual(state["speech"][0]["url"], "/api/tv/speech?ref=blob:7")
+        status, body, ctype = await asyncio.to_thread(_get, "/api/tv/speech?ref=blob:7")
+        self.assertEqual((status, body, ctype), (200, b"RIFF....WAVEfake", "audio/wav"))
+        status, _b, _c = await asyncio.to_thread(_get, "/api/tv/speech?ref=blob:999")
+        self.assertEqual(status, 404, "only refs the page was told about are served")

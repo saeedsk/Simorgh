@@ -1,0 +1,38 @@
+{
+  "$id": "https://simorgh.local/schema/ui.tv.speech.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "One piece of Sim's reply, as a WAV blob in the ledger, for the TV page to play in order.",
+  "properties": {
+    "ref": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "seq": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "ref",
+    "seconds"
+  ],
+  "title": "ui.tv.speech",
+  "type": "object"
+}

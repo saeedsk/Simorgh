@@ -90,6 +90,14 @@ class Config:
     # `stt_provider` is `stt`, `voice_id` is `tts_voice`, `language` is
     # `stt_language`.
     volume: float = 1.0                # playback gain, 0.2 .. 2.0
+    # Where Sim's voice comes out: this machine's speaker, the TV page
+    # (each piece of a reply travels as a ledger blob the page plays --
+    # the creator, 2026-09-12: "route its voice to TV"), or both. With
+    # "tv" the local player is silent but keeps time, so turns and the
+    # echo gate behave as they do; `tv_audio_lag_s` is how much later
+    # the TV's sound reaches the microphone than the local player would.
+    output: str = "laptop"             # laptop | tv | both
+    tv_audio_lag_s: float = 2.5
     auto_listen: bool = True           # after a reply, listen again without being asked
     vad_sensitivity: str = "balanced"  # low | balanced | high (vad.threshold_for); overrides vad_threshold
     min_speech_ms: int = 250           # shorter than this is a breath or a chair, not a turn

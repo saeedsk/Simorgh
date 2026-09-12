@@ -67,3 +67,10 @@ class NearestKeyTestCase(unittest.TestCase):
         value, problem = parse("ttc_voice", "af_kore")
         self.assertIsNone(value)
         self.assertIn("did you mean tts_voice?", problem)
+
+
+class OutputSettingTestCase(unittest.TestCase):
+    def test_output_takes_laptop_tv_or_both(self):
+        from simorgh.voice.settings import parse
+        self.assertEqual(parse("output", "tv")[0], "tv")
+        self.assertIsNone(parse("output", "radio")[0])

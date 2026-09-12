@@ -181,10 +181,11 @@ VOICE_CHAT = replace(
     CHAT,
     tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task",
            "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume"),
-    # Five: a search, a cast, and the answer (the creator, 2026-09-12,
-    # "find a youtube video about penguins and cast it on tv" -- Sim
-    # found it and said it had no TV control, because it had no tool).
-    max_steps=5,
+    # Eight: a search, a cast, a retry, and the answer (the creator,
+    # 2026-09-12: "cast something on TV" ran out at five). The silence
+    # a longer spoken turn used to mean is covered now: the backchannel
+    # says "still on it" while the work goes on.
+    max_steps=8,
 )
 
 

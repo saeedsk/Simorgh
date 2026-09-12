@@ -389,7 +389,9 @@ class CastPlayTool(_CastTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         url = str(args.get("url") or "").strip()
         if not url.lower().startswith(("http://", "https://")):
-            return ToolResult(ok=False, error="refused: `url` must be an http(s) link the TV can fetch")
+            return ToolResult(ok=False, error=(
+                "refused: `url` must be a link -- a YouTube page URL (web_search '<topic> youtube' and take the "
+                "first youtube.com/watch result) or a direct video link. Do not look for an mp4 file."))
         mode = str(args.get("mode") or "frame").strip().lower()
         title = str(args.get("title") or "")
         if mode == "frame":

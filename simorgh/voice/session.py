@@ -120,7 +120,9 @@ class VoiceSession:
         # from what is playing (vad.EchoTracker) -- the bar a person
         # must clear to interrupt, and the reason Sim's echo is not a
         # turn. Fed by every playback, the ack and `say` included.
-        self._echo = EchoTracker(calibrate_frames=max(1, config.barge_in_calibrate_ms // 30))
+        self._echo = EchoTracker(calibrate_frames=max(1, config.barge_in_calibrate_ms // 30),
+                                 lag_s=config.tv_audio_lag_s if config.output in ("tv", "both") else 0.0)
+        self._tv_seq = 0
         self._detector = None
         self._vad: FrameVad | None = None
         self._turns_since_connector = 99
@@ -695,13 +697,37 @@ class VoiceSession:
 
     async def _play(self, chunks, *, request_id: str, **kw):
         """Every playback goes through here so the echo tracker is told
-        what the room is about to hear -- a reply, the ack, `say`."""
+        what the room is about to hear -- a reply, the ack, `say` -- and
+        so the TV page gets each piece the moment it goes to the speaker
+        (`[voice] output` tv or both)."""
         self._echo.start()
+        to_tv = self._config.output in ("tv", "both")
 
-        def _reference(audio: Audio) -> None:
+        async def _reference(audio: Audio) -> None:
             self._echo.play(audio, at=self._now())
+            if to_tv:
+                await self._ship_to_tv(audio, request_id)
 
         return await self._player.play_stream(chunks, request_id=request_id, on_play=_reference, **kw)
+
+    async def _ship_to_tv(self, audio: Audio, request_id: str) -> None:
+        """One run of the voice as a WAV blob in the ledger, announced on
+        the bus for the TV page to fetch and play in order. Best effort:
+        no ledger, or a blob that will not store, costs the TV a piece
+        and nothing else."""
+        ledger = getattr(self._pipeline, "_ledger", None)
+        if ledger is None:
+            return
+        from .audio import wav_bytes
+
+        try:
+            ref = await ledger.put_blob(wav_bytes(audio), content_type="audio/wav")
+        except Exception as exc:  # noqa: BLE001
+            self._log("warning", "voice.tv_speech_not_stored", error=repr(exc))
+            return
+        self._tv_seq += 1
+        await self._pipeline._publish(topics.TV_SPEECH, {  # noqa: SLF001
+            "ref": ref, "seconds": round(audio.seconds, 3), "seq": self._tv_seq, "request_id": request_id})
 
     async def _on_playback_state(self, state: PlaybackState) -> None:
         if state.request_id.startswith(("ack-", "say-", "hum-")):

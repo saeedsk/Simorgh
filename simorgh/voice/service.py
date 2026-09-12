@@ -54,7 +54,7 @@ _PRODUCES = (
 # the running session and applies in place.
 _ENGINE_KEYS = frozenset({"stt", "tts", "tts_farsi_voice", "vad_sensitivity", "microphone", "speaker"})
 _SESSION_KEYS = frozenset({"barge_in", "endpoint_silence_ms", "min_speech_ms", "stt_partials", "connectors",
-                           "max_spoken_sentences"})
+                           "max_spoken_sentences", "output"})
 
 
 def presence_probes() -> list[dict]:
@@ -258,8 +258,13 @@ class Service:
             if hasattr(mic, "stream"):
                 from .session import VoiceSession
 
+                speaker = pipeline._speaker  # noqa: SLF001
+                if self.config.output == "tv":
+                    from .audio import SilentSpeaker
+
+                    speaker = SilentSpeaker()  # the TV page plays the voice; this one keeps time
                 self._session = VoiceSession(
-                    pipeline=pipeline, config=self.config, microphone=mic, speaker=pipeline._speaker,  # noqa: SLF001
+                    pipeline=pipeline, config=self.config, microphone=mic, speaker=speaker,
                     recogniser=pipeline._stt, synthesiser=pipeline._tts,  # noqa: SLF001
                     detector_factory=pipeline._detector_factory,  # noqa: SLF001
                     clock=self._ctx.clock if self._ctx else None, logger=self._ctx.logger if self._ctx else None,

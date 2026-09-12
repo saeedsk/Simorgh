@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..fields import Enum, F, Float, List, O, Str
+from ..fields import Enum, F, Float, Int, List, O, Str
 from ..registry import define
 from .. import topics as t
 
@@ -19,3 +19,6 @@ UiRendered = define(t.UI_RENDERED, [F("channel", Str), F("text", Str)])
 TvState = define(t.TV_STATE, [F("mode", Enum("none", "frame", "full")), O("url", Str), O("title", Str)],
                  doc="frame: `url` plays inside the TV page's box; full: the cast device plays it itself; "
                      "none: the terminal replica alone.")
+TvSpeech = define(t.TV_SPEECH, [F("ref", Str), F("seconds", Float), O("seq", Int), O("request_id", Str),
+                                 O("text", Str)],
+                  doc="One piece of Sim's reply, as a WAV blob in the ledger, for the TV page to play in order.")

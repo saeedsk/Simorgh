@@ -136,6 +136,8 @@ class HttpApi:
         self._tv_page = (_STATIC_DIR / "tv.html").read_text(encoding="utf-8")
         self._tv_state: dict = {"mode": "none", "url": "", "title": "", "since": 0.0}
         self._tv_sub = None
+        self._tv_speech: deque = deque(maxlen=40)   # (seq, ref, seconds, at): Sim's voice for the page
+        self._tv_speech_sub = None
         self._pending_chats: dict[str, asyncio.Future] = {}
         self._turn_sub = None
         self._register_builtin_routes()
@@ -189,12 +191,27 @@ class HttpApi:
             return 200, self._tv_page.encode("utf-8"), "text/html; charset=utf-8"
 
         async def _tv_state(_query, _body, _headers):
-            return 200, json.dumps({"now": self._now(), **self._tv_state}).encode("utf-8"), "application/json"
+            now = self._now()
+            speech = [{"seq": seq, "url": f"/api/tv/speech?ref={ref}", "seconds": seconds}
+                      for seq, ref, seconds, at in self._tv_speech if now - at < 30.0]
+            return 200, json.dumps({"now": now, **self._tv_state, "speech": speech}).encode("utf-8"), "application/json"
+
+        async def _tv_speech(query, _body, _headers):
+            ref = self._q1(query, "ref", "") or ""
+            known = any(ref == r for _s, r, _sec, _at in self._tv_speech)
+            if not ref or not known or self._ledger is None:
+                return 404, b"no such speech", "text/plain; charset=utf-8"
+            try:
+                data = await self._ledger.get_blob(ref)
+            except Exception:  # noqa: BLE001
+                return 404, b"no such speech", "text/plain; charset=utf-8"
+            return 200, data, "audio/wav"
 
         self.register_route("GET", "/", _page, auth=False)
         self.register_route("GET", "/api/status", _status, auth=False)
         self.register_route("GET", "/tv", _tv, auth=False)
         self.register_route("GET", "/api/tv/state", _tv_state)
+        self.register_route("GET", "/api/tv/speech", _tv_speech)
         self.register_route("GET", "/api/history", _json_route(self._history_json))
         self.register_route("GET", "/api/logs", _json_route(self._logs_json))
         self.register_route("GET", "/api/benchmarks", _json_route(self._benchmarks_json))
@@ -261,6 +278,7 @@ class HttpApi:
     async def start(self) -> None:
         self._turn_sub = await self._bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
         self._tv_sub = await self._bus.subscribe(topics.TV_STATE, self._on_tv_state)
+        self._tv_speech_sub = await self._bus.subscribe(topics.TV_SPEECH, self._on_tv_speech)
         # Live activity feed (07-post-cutover-review.md §3.9): the same
         # events the REPL narrates, kept in a small in-memory ring so
         # `/api/activity` answers "what is Sim doing right now / just did"
@@ -576,6 +594,11 @@ class HttpApi:
                 return {"text": "", "floor": True, "error": "no response in time"}
         finally:
             self._pending_chats.pop(session_id, None)
+
+    async def _on_tv_speech(self, message) -> None:
+        p = message.payload
+        self._tv_speech.append((int(p.get("seq") or 0), str(p.get("ref") or ""), float(p.get("seconds") or 0.0),
+                                self._now()))
 
     async def _on_tv_state(self, message) -> None:
         p = message.payload

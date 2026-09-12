@@ -394,8 +394,11 @@ class EchoTracker:
     AFTER_S = 0.15
     MIN_REFERENCE = 100.0  # below this the reference is silence; it teaches no gain
 
-    def __init__(self, *, calibrate_frames: int = 40, gain: float = 0.0) -> None:
+    def __init__(self, *, calibrate_frames: int = 40, gain: float = 0.0, lag_s: float = 0.0) -> None:
         self._calibrate = max(1, int(calibrate_frames))
+        # Extra delay before the reference reaches the microphone: a TV
+        # playing the voice is seconds behind the local player.
+        self.lag_s = max(0.0, float(lag_s))
         self._runs: list[tuple[float, float, list[float]]] = []  # (started_at, frame_s, levels)
         self._ends_at = 0.0
         self.gain = float(gain)      # mic RMS per reference RMS; 0 = not yet learnt
@@ -427,7 +430,7 @@ class EchoTracker:
 
     def active(self, now: float) -> bool:
         """Whether the microphone may still be hearing Sim at `now`."""
-        return bool(self._runs) and now <= self._ends_at + self.BEFORE_S
+        return bool(self._runs) and now <= self._ends_at + self.BEFORE_S + self.lag_s
 
     @property
     def calibrating(self) -> bool:
@@ -437,7 +440,7 @@ class EchoTracker:
 
     def reference(self, now: float) -> float:
         """The loudest reference frame that could be reaching the mic now."""
-        lo, hi = now - self.BEFORE_S, now + self.AFTER_S
+        lo, hi = now - self.BEFORE_S - self.lag_s, now + self.AFTER_S
         peak = 0.0
         for started, frame_s, levels in self._runs:
             first = max(0, int((lo - started) / frame_s))

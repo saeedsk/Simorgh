@@ -209,6 +209,9 @@ UI_RENDERED = "ui.rendered"
 # cast device itself is playing full screen. Published by the cast
 # tools (execution/media/cast.py), read by the interface's HTTP API.
 TV_STATE = "ui.tv.state"
+# Sim's own voice, for the TV page to play: one piece of a reply as it
+# is handed to the speaker, as a ledger blob (WAV). `[voice] output`.
+TV_SPEECH = "ui.tv.speech"
 COGNITION_THINK = "cognition.think"
 COGNITION_THINK_REPLY = "cognition.think.reply"
 COGNITION_COMPACT_REQUEST = "cognition.compact.request"

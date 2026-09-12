@@ -26,6 +26,7 @@ SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),
     "tts_speed": (float, (0.5, 2.0), "speaking rate, 1.0 = normal"),
     "volume": (float, (0.2, 2.0), "playback gain"),
+    "output": (str, ("laptop", "tv", "both"), "where the voice comes out: this machine, the TV page, or both"),
     "auto_listen": (bool, None, "listen again after each reply"),
     "barge_in": (bool, None, "interrupt Sim by talking"),
     "endpoint_silence_ms": (int, (200, 3000), "silence that ends your turn"),
