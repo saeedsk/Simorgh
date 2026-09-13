@@ -8,6 +8,8 @@ speech in 4.7 s -- an expressive lane, not a fast one."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .subproc import DEFAULT_VENV_DIR, SubprocessSynthesiser, create_venv, engine_available
 
 PACKAGES = ("setuptools", "wheel", "chatterbox-tts")
@@ -31,7 +33,19 @@ def install(venv_dir: str = DEFAULT_VENV_DIR, *, log=print):
     return create_venv(venv_dir, "chatterbox", packages=PACKAGES, log=log)
 
 
+#: What a reference voice says, once, when it is rendered from a Kokoro
+#: voice: eight seconds or so, plain, a question at the end for range.
+REFERENCE_TEXT = ("Hello, this is how I sound. The pool is warm tonight, the garden lights are on, and dinner "
+                  "will be ready at six. Shall we go outside for a while, or stay in and read?")
+
+
 class ChatterboxSynthesiser(SubprocessSynthesiser):
+    """Chatterbox has one voice of its own and clones any other from a
+    few seconds of audio. So its voice list is: `default`, every WAV in
+    `workspace/voice/references/`, and -- when Kokoro's model is here --
+    every Kokoro voice, rendered once into a reference clip on first use
+    (the creator, 2026-09-13: "I can't see the list of supported voices")."""
+
     name = "chatterbox"
     module = "chatterbox"
     server = "chatterbox_server.py"
@@ -41,6 +55,54 @@ class ChatterboxSynthesiser(SubprocessSynthesiser):
                          reference=str(getattr(config, "chatterbox_reference", "") or ""),
                          timeout_s=float(getattr(config, "expressive_timeout_s", 180.0)))
         self._exaggeration = float(getattr(config, "chatterbox_exaggeration", 0.0) or 0.0)
+        self._config = config
+        self._references = Path(getattr(config, "references_dir", "workspace/voice/references")).expanduser()
+        self._kokoro = None
+        self._kokoro_tried = False
+
+    def _kokoro_engine(self):
+        if self._kokoro is None and not self._kokoro_tried:
+            self._kokoro_tried = True
+            try:
+                from .kokoro import KokoroSynthesiser
+
+                self._kokoro = KokoroSynthesiser(self._config)
+            except Exception:  # noqa: BLE001 -- no Kokoro: the list is the WAVs on disk
+                self._kokoro = None
+        return self._kokoro
+
+    def voices(self) -> list[str]:
+        names = ["default"]
+        if self._references.is_dir():
+            names += sorted(p.stem for p in self._references.glob("*.wav") if not p.name.startswith("."))
+        kokoro = self._kokoro_engine()
+        if kokoro is not None:
+            names += [v for v in kokoro.voices() if v not in names]
+        return names
+
+    async def reference_for(self, voice: str) -> str:
+        voice = (voice or "").strip()
+        if not voice or voice in ("default", "chatterbox"):
+            return self._reference
+        own = self._references / f"{voice}.wav"
+        if own.is_file():
+            return str(own)
+        kokoro = self._kokoro_engine()
+        if kokoro is None or voice not in kokoro.voices():
+            return self._reference
+        # Render the Kokoro voice once into a reference clip Chatterbox can clone.
+        import wave
+
+        audio = await kokoro.synthesise(REFERENCE_TEXT, voice=voice, speed=1.0)
+        self._references.mkdir(parents=True, exist_ok=True)
+        tmp = own.with_suffix(".wav.part")
+        with wave.open(str(tmp), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(audio.sample_rate)
+            handle.writeframes(audio.pcm)
+        tmp.replace(own)
+        return str(own)
 
     def params_for(self, tone: str) -> dict:
         params = dict(TONES.get((tone or "neutral").lower(), TONES["neutral"]))
@@ -49,4 +111,4 @@ class ChatterboxSynthesiser(SubprocessSynthesiser):
         return params
 
 
-__all__ = ["ChatterboxSynthesiser", "PACKAGES", "TONES", "available", "install"]
+__all__ = ["ChatterboxSynthesiser", "PACKAGES", "REFERENCE_TEXT", "TONES", "available", "install"]

@@ -162,5 +162,7 @@ class ArgumentHintsMatchTheDispatcherTestCase(unittest.TestCase):
     def test_commands_that_ignore_arguments_declare_nothing(self):
         from simorgh.interface.parser import NO_ARGUMENT_COMMANDS
 
-        for name in ("status", "help", "capabilities", "pause", "resume", "exit"):
+        for name in ("status", "capabilities", "pause", "resume", "exit"):
             self.assertIn(name, NO_ARGUMENT_COMMANDS)
+        # `help voice` is a topic, so `help` declares one (2026-09-13).
+        self.assertNotIn("help", NO_ARGUMENT_COMMANDS)

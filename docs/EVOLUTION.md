@@ -5015,3 +5015,22 @@ Still ahead, roughly in order:
     numpy) did not resolve here and its weights want a 24 GB GPU; the
     engine stays as the option it was asked to be. Samples to hear:
     `workspace/voice/samples/chatterbox-bright.wav`, `-sorry.wav`.
+
+159. **Chatterbox gets a voice list; `help voice` (2026-09-13, night).**
+    "Chatterbox came alive, but I can't see the list of supported voices
+    to change the voice model." Chatterbox has one voice of its own and
+    clones any other from a few seconds of audio, so its list is now
+    `default`, every WAV in `workspace/voice/references/`, and all 54 of
+    Kokoro's voices: `voice set tts_voice af_jessica` renders Kokoro's
+    Jessica once into a reference clip (1.5 s) and Chatterbox speaks as
+    her from then on (`ChatterboxSynthesiser.voices()/reference_for()`;
+    the reference travels per request). A voice named loosely --
+    `Jessica` -- resolves to the engine's spelling before it can be
+    refused. A command's code in a spoken reply is now "the command on
+    screen", not the sentence that used to break the grammar; a
+    misspelt `voice` verb gets the nearest one. And the creator asked
+    for "help voice" to show "all the sub commands related to voice":
+    `help <command>` shows one command's usage and words alone,
+    `<command> help` is the same screen, `help work|control|...` shows a
+    section, Tab after `help` offers the commands, and `help me plan the
+    week` is still a sentence. Heard: `workspace/voice/samples/chatterbox-jessica.wav`.

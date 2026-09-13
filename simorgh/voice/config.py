@@ -182,7 +182,8 @@ class Config:
     # their own virtual environments under `venv_dir`; a reference WAV
     # clones a voice; `expressive_timeout_s` bounds one sentence.
     venv_dir: str = "workspace/voice/venvs"
-    chatterbox_reference: str = ""
+    chatterbox_reference: str = ""          # the WAV Chatterbox's `default` voice clones; "" for its own
+    references_dir: str = "workspace/voice/references"   # named reference clips (Kokoro voices rendered once, or yours)
     chatterbox_exaggeration: float = 0.0    # 0 = the tone table decides; else a fixed dial 0.1-1.0
     miso_reference: str = ""
     miso_repo: str = "workspace/voice/engines/MisoTTS"

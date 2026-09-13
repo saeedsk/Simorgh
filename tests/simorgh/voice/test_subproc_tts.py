@@ -94,3 +94,72 @@ class SubprocessEngineTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertIn(tone, chatterbox.TONES)
             self.assertIn("exaggeration", chatterbox.TONES[tone])
         self.assertIn("temperature", miso.MisoSynthesiser.params_for(None, "bright"))   # the table needs no engine
+
+
+class ChatterboxVoicesTestCase(unittest.IsolatedAsyncioTestCase):
+    """Chatterbox has one voice and clones the rest: its list is
+    `default`, the reference WAVs on disk, and Kokoro's voices, each
+    rendered once into a reference clip on first use (the creator,
+    2026-09-13: "I can't see the list of supported voices")."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        _fake_venv(self.root, "chatterbox")
+        self._servers, subproc.SERVERS_DIR = subproc.SERVERS_DIR, FIXTURE.parent
+        # `engine_available` looks for `<engine>_server.py` beside the others
+        alias = FIXTURE.parent / "chatterbox_server.py"
+        if not alias.exists():
+            alias.symlink_to(FIXTURE)
+        self._alias = alias
+        self._server, chatterbox.ChatterboxSynthesiser.server = chatterbox.ChatterboxSynthesiser.server, "fakecbx_server.py"
+        self._module, chatterbox.ChatterboxSynthesiser.module = chatterbox.ChatterboxSynthesiser.module, "json"
+
+    def tearDown(self):
+        subproc.SERVERS_DIR = self._servers
+        chatterbox.ChatterboxSynthesiser.server = self._server
+        chatterbox.ChatterboxSynthesiser.module = self._module
+        self._alias.unlink(missing_ok=True)
+        self.tmp.cleanup()
+
+    def _engine(self):
+        from simorgh.voice.api import Audio
+
+        class _Kokoro:
+            calls: list[str] = []
+
+            def voices(self):
+                return ["af_jessica", "am_adam"]
+
+            async def synthesise(self, text, *, voice="", speed=1.0, tone=""):
+                self.calls.append(voice)
+                return Audio(b"\x00\x10" * 2400, 24000)
+
+        eng = chatterbox.ChatterboxSynthesiser(Config(venv_dir=str(self.root), references_dir=str(self.root / "refs")))
+        eng._kokoro, eng._kokoro_tried = _Kokoro(), True
+        return eng
+
+    async def test_the_list_is_default_plus_references_plus_kokoros_voices(self):
+        (self.root / "refs").mkdir()
+        (self.root / "refs" / "grandma.wav").write_bytes(b"RIFF")
+        eng = self._engine()
+        try:
+            self.assertEqual(eng.voices(), ["default", "grandma", "af_jessica", "am_adam"])
+            self.assertEqual(await eng.reference_for("default"), "")
+            self.assertEqual(await eng.reference_for("grandma"), str(self.root / "refs" / "grandma.wav"))
+            self.assertEqual(await eng.reference_for("nobody"), "", "an unknown name is the default voice")
+        finally:
+            await eng.close()
+
+    async def test_a_kokoro_voice_is_rendered_once_and_sent_as_the_reference(self):
+        eng = self._engine()
+        try:
+            first = await eng.reference_for("af_jessica")
+            again = await eng.reference_for("af_jessica")
+            self.assertEqual(first, again)
+            self.assertTrue(Path(first).is_file())
+            self.assertEqual(eng._kokoro.calls, ["af_jessica"], "rendered once, then read from disk")
+            audio = await eng.synthesise("Ten chars!", voice="af_jessica", tone="neutral")
+            self.assertEqual(audio.sample_rate, 16000)
+        finally:
+            await eng.close()

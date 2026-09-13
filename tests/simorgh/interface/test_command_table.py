@@ -207,3 +207,88 @@ class HelpPanelTestCase(unittest.TestCase):
                 self.assertIn(name, COMMAND_NAMES, name)
         for name in SUBCOMMANDS:
             self.assertIn(name, COMMAND_NAMES, name)
+
+
+class HelpTopicTestCase(unittest.TestCase):
+    """`help voice` shows one command's words alone (the creator,
+    2026-09-13: "when I type 'help voice' it shows all the sub commands
+    related to voice"); `help me plan the week` is still a sentence."""
+
+    def test_help_with_a_command_parses_as_a_topic(self):
+        command = parse("help voice")
+        self.assertEqual((command.name, command.args), ("help", "voice"))
+
+    def test_help_followed_by_a_sentence_is_chat(self):
+        self.assertIsNone(parse("help me plan the week").name)
+
+    def test_the_command_panel_lists_only_that_commands_words(self):
+        from simorgh.interface.parser import SUBCOMMANDS
+        from simorgh.interface.render import command_panel
+        text = command_panel("voice", enabled=False)
+        for sub, meaning in SUBCOMMANDS["voice"]:
+            self.assertIn(f"voice {sub}", text)
+            self.assertIn(meaning, text)
+        self.assertNotIn("tv show", text)
+        self.assertNotIn("Look around", text)
+
+    def test_a_section_word_shows_that_section(self):
+        from simorgh.interface.render import command_panel
+        text = command_panel("control", enabled=False)
+        self.assertIn("auto on", text)
+        self.assertNotIn("voice enroll", text)
+
+    def test_an_unknown_topic_offers_the_nearest_command(self):
+        from simorgh.interface.render import command_panel
+        text = command_panel("vioce", enabled=False)
+        self.assertIn("help voice", text)
+        self.assertNotIn("voice enroll", text, "not the whole manual")
+
+    def test_tab_after_help_offers_the_commands(self):
+        from simorgh.interface.parser import subcommands
+        words = subcommands("help")
+        self.assertIn("voice", words)
+        self.assertIn("work", words)
+        self.assertNotIn("help", words)
+
+
+
+
+class CommandHelpTestCase(unittest.IsolatedAsyncioTestCase):
+    """`voice help` and `help voice` are the same screen."""
+
+    async def asyncSetUp(self):
+        from simorgh.bus.config import Config as BusConfig
+        from simorgh.bus.factory import make_backend, make_client
+        from simorgh.ledger.factory import make_ledger
+
+        from tests.simorgh.helpers import FakeClock
+
+        self.clock = FakeClock()
+        self.ledger = make_ledger({"backend": "memory"}, clock=self.clock.now)
+        await self.ledger.start()
+        backend = make_backend(BusConfig(backend="memory"), clock=self.clock.now)
+        self.bus = make_client(backend, source="interface", ledger=self.ledger, clock=self.clock.now)
+        await self.bus.start()
+
+    async def asyncTearDown(self):
+        await self.bus.stop()
+        await self.ledger.stop()
+
+    async def _run(self, line):
+        from simorgh.interface.dispatch import dispatch
+        from simorgh.interface.vitals import VitalsCache
+
+        return await dispatch(parse(line), bus=self.bus, clock=self.clock, session_id="s1",
+                              vitals=VitalsCache(), ledger=self.ledger)
+
+    async def test_help_voice_and_voice_help_agree(self):
+        a = await self._run("help voice")
+        b = await self._run("voice help")
+        self.assertEqual(a.text, b.text)
+        self.assertIn("voice enroll", a.text)
+        self.assertNotIn("tv show", a.text)
+
+    async def test_bare_help_is_still_the_whole_manual(self):
+        text = (await self._run("help")).text
+        self.assertIn("Look around", text)
+        self.assertIn("help <command>", text)

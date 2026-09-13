@@ -43,7 +43,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),
     ("pause", "", "hold everything"),
     ("resume", "", "let it continue"),
-    ("help", "", "list everything"),
+    ("help", "[command]", "list everything, or one command's words: help voice"),
     ("exit", "", "leave (Ctrl-D also detaches)"),
 )
 
@@ -157,7 +157,20 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
 }
 
 
+def help_topics() -> tuple[str, ...]:
+    """What `help <topic>` accepts: every command, and each section's
+    first word (`help work`, `help control`)."""
+    words = [name for name, _h, _d in COMMANDS if name != "help"]
+    for title, _names in SECTIONS:
+        first = title.split(",")[0].split()[0].lower()
+        if first not in words:
+            words.append(first)
+    return tuple(words)
+
+
 def subcommands(name: str) -> tuple[str, ...]:
+    if name.lstrip("/") == "help":
+        return help_topics()
     """The words a command takes next, read off its own usage hint --
     `[all|work|clear]` gives all, work, clear; `<topic>` gives nothing,
     a free argument is not a word to offer. What Tab shows after a
@@ -252,6 +265,11 @@ def _swallows_a_sentence(name: str, rest: str) -> bool:
     Typing the slash overrides this, as it does everywhere else here:
     `/exit the meeting overran` is a person saying "this is a command",
     reason and all."""
+    if name == "help":
+        # `help voice` asks for one command's words; `help me plan the
+        # week` is a sentence (the creator, 2026-09-13: "when I type
+        # 'help voice' it shows all the sub commands related to voice").
+        return len(rest.split()) > 1
     return bool(rest.strip()) and name in NO_ARGUMENT_COMMANDS
 
 

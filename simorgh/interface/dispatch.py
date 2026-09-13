@@ -199,8 +199,16 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         return Outcome(await _status_panel(bus, vitals))
 
     if name == "help":
+        if args.strip():
+            return Outcome(render_mod.command_panel(args, enabled=render_mod.color_enabled(),
+                                                    unicode=render_mod.unicode_mode() != "off"))
         return Outcome(render_mod.help_panel(enabled=render_mod.color_enabled(),
                                              unicode=render_mod.unicode_mode() != "off"))
+
+    if args.strip().lower() in ("help", "?", "--help", "-h") and name:
+        # `voice help` is `help voice`; every command answers it the same way.
+        return Outcome(render_mod.command_panel(name, enabled=render_mod.color_enabled(),
+                                                unicode=render_mod.unicode_mode() != "off"))
 
     if name == "improve":
         args, steps = _pop_steps(args)
@@ -476,6 +484,13 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
     if verb == "bench":
         return await _request(bus, topics.VOICE_BENCH_REQUEST, {"play": "quiet" not in rest},
                               timeout=600.0, render=voiceview.bench)
+    import difflib
+
+    close = difflib.get_close_matches(verb, ["status", "on", "off", "mute", "unmute", "barge", "listen", "test", "say",
+                                             "voices", "devices", "models", "set", "bench", "enroll", "people", "whois",
+                                             "forget", "pronounce"], n=1, cutoff=0.6)
+    if close:
+        return Outcome(f"voice: unknown verb {verb!r} -- did you mean `voice {close[0]}`?")
     return Outcome(f"voice: unknown verb {verb!r} -- status | on | off | mute | unmute | listen [seconds] [only] "
                    f"| test <text> | voices | devices | models [name] | set [key value] | bench [quiet]")
 

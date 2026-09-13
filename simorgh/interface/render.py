@@ -917,6 +917,57 @@ def _task_line(task: dict, *, enabled: bool = True) -> str:
 
 
 
+def command_panel(topic: str, *, enabled: bool = True, unicode: bool = True) -> str:
+    """`help voice`: that command's usage and every word it takes, alone
+    on the screen; `help work`: one section. An unknown topic gets the
+    nearest names, never the whole manual (the creator, 2026-09-13)."""
+    import difflib
+
+    from .parser import COMMANDS, SECTIONS, SUBCOMMANDS
+
+    topic = (topic or "").strip().lstrip("/").lower()
+    by_name = {name: (hint, desc) for name, hint, desc in COMMANDS}
+    if topic in by_name:
+        hint, desc = by_name[topic]
+        lines = [f"{style(f'{topic} {hint}'.strip(), 'warm', enabled=enabled)}  {desc}"]
+        subs = SUBCOMMANDS.get(topic, ())
+        if subs:
+            lines.append("")
+            lines.extend(_subcommand_rows(topic, subs, enabled=enabled, unicode=unicode))
+        elif hint:
+            lines.append(style("  no sub-commands; the words in brackets are its arguments", "dim", enabled=enabled))
+        else:
+            lines.append(style("  takes nothing after it", "dim", enabled=enabled))
+        return "\n".join(lines)
+    for title, names in SECTIONS:
+        if topic == title.split(",")[0].split()[0].lower():
+            lines = [style(title, "bold", enabled=enabled)]
+            lines.extend(_section_rows(names, by_name, SUBCOMMANDS, enabled=enabled, unicode=unicode))
+            return "\n".join(lines)
+    near = difflib.get_close_matches(topic, list(by_name), n=3, cutoff=0.5)
+    hint = f"; did you mean {', '.join(f'help {n}' for n in near)}?" if near else ""
+    return f"no command called {topic!r}{hint} -- `help` alone lists everything"
+
+
+def _subcommand_rows(name: str, subs, *, enabled: bool, unicode: bool) -> list[str]:
+    corner = "⎿" if unicode else "`-"
+    width = max((len(f"{name} {sub}".strip()) for sub, _m in subs), default=0)
+    return [f"    {style(corner, 'dim', enabled=enabled)} {style(f'{name} {sub}'.strip().ljust(width), 'warm', enabled=enabled)}"
+            f"  {style(meaning, 'dim', enabled=enabled)}" for sub, meaning in subs]
+
+
+def _section_rows(names, by_name, subcommands, *, enabled: bool, unicode: bool) -> list[str]:
+    usages = {name: (f"{name} {by_name[name][0]}".strip() if by_name[name][0] and name not in subcommands
+                     else name) for name in names}
+    column = max(len(u) for u in usages.values())
+    rows: list[str] = []
+    for name in names:
+        _hint, desc = by_name[name]
+        rows.append(f"  {style(usages[name].ljust(column), 'warm', enabled=enabled)}  {desc}")
+        rows.extend(_subcommand_rows(name, subcommands.get(name, ()), enabled=enabled, unicode=unicode))
+    return rows
+
+
 def help_panel(*, enabled: bool = True, unicode: bool = True) -> str:
     """The help screen: commands in sections, each with its words and
     what they mean, the way a person reads a manual -- not one flat
@@ -928,25 +979,12 @@ def help_panel(*, enabled: bool = True, unicode: bool = True) -> str:
     placed = {name for _title, names in SECTIONS for name in names}
     sections = list(SECTIONS) + ([("More", tuple(n for n in by_name if n not in placed))]
                                  if set(by_name) - placed else [])
-    corner = "⎿" if unicode else "`-"
-    lines = [style(f"{len(by_name)} commands. A leading / is optional everywhere; Tab completes.", "dim",
-                   enabled=enabled)]
+    lines = [style(f"{len(by_name)} commands. A leading / is optional everywhere; Tab completes; "
+                   f"`help <command>` shows one command's words.", "dim", enabled=enabled)]
     for title, names in sections:
         lines.append("")
         lines.append(style(title, "bold", enabled=enabled))
-        usages = {name: (f"{name} {by_name[name][0]}".strip() if by_name[name][0] and name not in SUBCOMMANDS
-                         else name) for name in names}
-        column = max(len(u) for u in usages.values())
-        for name in names:
-            hint, desc = by_name[name]
-            usage = usages[name]
-            lines.append(f"  {style(usage.ljust(column), 'warm', enabled=enabled)}  {desc}")
-            subs = SUBCOMMANDS.get(name, ())
-            width = max((len(f"{name} {sub}".strip()) for sub, _m in subs), default=0)
-            for sub, meaning in subs:
-                form = f"{name} {sub}".strip()
-                lines.append(f"    {style(corner, 'dim', enabled=enabled)} {style(form.ljust(width), 'warm', enabled=enabled)}"
-                             f"  {style(meaning, 'dim', enabled=enabled)}")
+        lines.extend(_section_rows(names, by_name, SUBCOMMANDS, enabled=enabled, unicode=unicode))
     lines.append("")
     lines.append(f"  {style('!<shell command>', 'warm', enabled=enabled)}  run a shell command directly")
     lines.append(f"  {style('anything else', 'warm', enabled=enabled)}      is chat")

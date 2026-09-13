@@ -139,11 +139,17 @@ class SubprocessSynthesiser:
     async def close(self) -> None:
         await self._stop()
 
+    async def reference_for(self, voice: str) -> str:
+        """The reference WAV for `voice`: the configured one by default;
+        subclasses may render one per named voice."""
+        return self._reference
+
     async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
+        reference = await self.reference_for(voice)
         async with self._lock:
             for attempt in (1, 2):
                 try:
-                    return await self._one(text, tone=tone, speed=speed)
+                    return await self._one(text, tone=tone, speed=speed, reference=reference)
                 except (BrokenPipeError, ConnectionResetError, RuntimeError) as exc:
                     if attempt == 2:
                         raise
@@ -151,12 +157,12 @@ class SubprocessSynthesiser:
                     await self._stop()
             raise RuntimeError("unreachable")
 
-    async def _one(self, text: str, *, tone: str, speed: float) -> Audio:
+    async def _one(self, text: str, *, tone: str, speed: float, reference: str = "") -> Audio:
         await self._start()
         assert self._proc is not None and self._proc.stdin is not None and self._proc.stdout is not None
         self._seq += 1
         out = Path(tempfile.gettempdir()) / f"simorgh-{self.name}-{os.getpid()}-{self._seq}.wav"
-        request = {"id": str(self._seq), "text": text, "tone": tone, "speed": speed, "reference": self._reference,
+        request = {"id": str(self._seq), "text": text, "tone": tone, "speed": speed, "reference": reference,
                    "params": self.params_for(tone), "out": str(out)}
         started = time.monotonic()
         self._proc.stdin.write((json.dumps(request) + "\n").encode("utf-8"))

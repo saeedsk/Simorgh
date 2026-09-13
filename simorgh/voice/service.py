@@ -430,6 +430,7 @@ class Service:
         if problem:
             return False, problem
         if key in ("tts_voice", "tts_farsi_voice"):
+            value = await self._canonical_voice(str(value))
             problem = await self._unknown_voice(str(value))
             if problem:
                 return False, problem
@@ -480,6 +481,27 @@ class Service:
                 if key == "auto_listen":
                     session.turns.auto_listen = bool(value)
         return True, f"{key} = {value!r}{where}{restarted}"
+
+    async def _canonical_voice(self, name: str) -> str:
+        """`Jessica` -> `af_jessica`: the engine's own spelling of a name
+        given loosely (case, a missing family prefix)."""
+        tts = self._injected["synthesiser"]
+        if tts is None:
+            pipeline, _why = await self._pipeline_ready()
+            tts = pipeline._tts if pipeline is not None else None  # noqa: SLF001
+        if tts is None:
+            return name
+        try:
+            voices = [str(v) for v in tts.voices()]
+        except Exception:  # noqa: BLE001
+            return name
+        if name in voices:
+            return name
+        low = name.strip().lower()
+        exact = [v for v in voices if v.lower() == low]
+        suffix = [v for v in voices if v.lower().endswith("_" + low) or v.lower().split("_", 1)[-1] == low]
+        match = exact or suffix
+        return match[0] if len(match) == 1 else name
 
     async def _unknown_voice(self, name: str) -> str:
         """Why `name` cannot be set as a voice, or "" when it can: the

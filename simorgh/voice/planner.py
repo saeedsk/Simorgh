@@ -241,7 +241,7 @@ def speakable(text: str) -> tuple[str, tuple[str, ...]]:
         if len(token) <= 24 and " " not in token.strip():
             return token
         omitted.append("code")
-        return " the exact command is on screen "
+        return " the command on screen "
     out = _INLINE_CODE.sub(_inline, out)
     if _PATHISH.search(out):
         omitted.append("path")
