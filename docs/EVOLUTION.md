@@ -5126,3 +5126,18 @@ Still ahead, roughly in order:
     Sim answers. One voice, or a short turn, and the whole-turn verdict
     stands as before. Pure and tested with a fake embedder that reads
     the speaker off the audio itself.
+
+163. **"The build is running in the background" -- it was not (2026-09-13,
+    night).** The creator asked Sim by voice for five cartoon splash
+    screens, "go ahead, you don't need to wait for my approval", and
+    watched for the live progress a task shows on the terminal. Nothing
+    came: the task sat at `available`. A chat-spawned task is Sim's own
+    (`origin = assistant`, since the misheard "Benchmark" of 2026-09-11)
+    and `auto off` holds it -- correctly -- but `start_task` said
+    "started" and Sim repeated it. Two fixes. The create reply now says
+    `held` and why; the tool then reports "queued, NOT running: auto is
+    off" and tells the model to say so. And `start_task` takes
+    `authorised=true` -- only when the person said in so many words to
+    go ahead without their approval -- which makes the task a human's,
+    so it runs at once. Also: one "hearing:" line every three seconds
+    per turn instead of one per partial (a long turn drew thirty).

@@ -101,6 +101,9 @@ def _match_pending_answer(typed: str, options: list[str]) -> str | None:
     return None
 
 
+#: seconds between two "hearing:" lines for one turn
+_PARTIAL_EVERY_S = 3.0
+
 class Service:
     name = "interface"
     version = VERSION
@@ -832,14 +835,26 @@ class Service:
             note += f", {p['cancelled']} running told to stop"
         self._out(render_mod.style(f"  {note}", "dim", enabled=self._color))
 
+    _partial_turn = None
+    _partial_at = 0.0
+
     async def _on_voice_transcript(self, message: Message) -> None:
         p = message.payload
         text = str(p.get("text") or "").strip()
         if p.get("partial"):
             # What is being heard so far, provisional: dim, and never
             # mistakable for a turn (the creator's screen, 2026-09-11,
-            # showed three "you:" lines for one sentence).
-            if text:
+            # showed three "you:" lines for one sentence). And not every
+            # partial: a long turn produced thirty near-identical lines
+            # (2026-09-13), so one every few seconds, or when the turn
+            # changes.
+            import time as _time
+
+            now = _time.monotonic()
+            turn = p.get("turn")
+            due = (turn != self._partial_turn or now - self._partial_at >= _PARTIAL_EVERY_S)
+            if text and due:
+                self._partial_turn, self._partial_at = turn, now
                 self._out(render_mod.style(f"  🎤 hearing: {text[:80]}{'…' if len(text) > 80 else ''} …",
                                            "dim", enabled=self._color))
             return

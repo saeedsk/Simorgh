@@ -191,3 +191,31 @@ class TheTaskIsSimsNotThePersonsTestCase(unittest.IsolatedAsyncioTestCase):
         await StartTaskTool(Config()).run({"goal": "work the benchmark cases"}, ctx=_ctx(bus))
         self.assertEqual(bus.requests[0].payload["origin"], "assistant")
 
+
+
+class HeldAndAuthorisedTestCase(unittest.IsolatedAsyncioTestCase):
+    """A task `auto off` holds is called queued, never started; a person's
+    explicit go-ahead makes it theirs, so it runs (2026-09-13)."""
+
+    def setUp(self):
+        self.tool = StartTaskTool(Config())
+
+    async def test_a_held_task_is_reported_as_queued_not_running(self):
+        bus = _Bus({"task_id": "t-7", "held": True, "held_reason": "auto is off, and this is Sim's own task"})
+        result = await self.tool.run({"goal": "five cartoon splash screens"}, ctx=_ctx(bus))
+        self.assertTrue(result.ok)
+        self.assertIn("queued task t-7", result.output)
+        self.assertIn("NOT running", result.output)
+        self.assertIn("auto is off", result.output)
+        self.assertNotIn("started task", result.output)
+        self.assertTrue(result.metadata.get("held"))
+
+    async def test_an_explicit_go_ahead_makes_the_task_a_humans(self):
+        bus = _Bus()
+        result = await self.tool.run({"goal": "five cartoon splash screens", "authorised": True}, ctx=_ctx(bus))
+        self.assertTrue(result.ok)
+        self.assertEqual(bus.requests[0].payload["origin"], "human")
+        self.assertIn("started task", result.output)
+        bus = _Bus()
+        await self.tool.run({"goal": "the same, guessed"}, ctx=_ctx(bus))
+        self.assertEqual(bus.requests[0].payload["origin"], "assistant", "without the words, it is Sim's")

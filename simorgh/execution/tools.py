@@ -1725,6 +1725,10 @@ class StartTaskTool:
             "subject": {"type": "string", "description": "the file it will mostly write"},
             "steps": {"type": "integer"},
             "kind": {"type": "string", "enum": ["patch", "research", "project"]},
+            "authorised": {"type": "boolean",
+                           "description": "true ONLY when the person explicitly said to go ahead without waiting "
+                                          "for approval, do it now, or the like; the task then runs even while "
+                                          "auto is off. A guess at what they meant is not that."},
         },
     }
 
@@ -1776,8 +1780,13 @@ class StartTaskTool:
         # upstream fix for a benchmark case, with autonomy off
         # (2026-09-11), because a task started from a chat inherited the
         # chat's `human` origin and the switch never saw it.
-        payload = {"kind": kind, "description": goal, "origin": "assistant", "mode": "execute",
-                   "max_steps": steps}
+        # ...unless the person said, in so many words, to go ahead without
+        # them: "change it, you don't need to wait for my approval" (the
+        # creator, 2026-09-13, whose task then sat behind `auto off`).
+        # That is a human's decision, so the task is a human's.
+        authorised = bool(args.get("authorised"))
+        payload = {"kind": kind, "description": goal, "origin": "human" if authorised else "assistant",
+                   "mode": "execute", "max_steps": steps}
         subject = str(args.get("subject") or "").strip()
         if subject:
             payload["subject"] = subject
@@ -1803,6 +1812,16 @@ class StartTaskTool:
                 output=(f"that is already task {existing} -- it is on the backlog rather than "
                         f"being started twice. `tasks` shows it."),
                 metadata={"task_id": existing, "deduplicated": True})
+        if answer.get("held"):
+            why = str(answer.get("held_reason") or "auto is off")
+            return ToolResult(
+                ok=True,
+                output=(f"queued task {task_id} with {steps} steps: {goal}\n"
+                        f"It is NOT running: {why}. It starts when auto is on (`auto on`, or `auto now` "
+                        f"for one round) -- or if the person says to go ahead, start it again with "
+                        f"authorised=true. Tell the person it is queued, not running."),
+                side_effects=(f"task {task_id} created (held)",),
+                metadata={"task_id": task_id, "steps": steps, "kind": kind, "held": True})
         return ToolResult(
             ok=True,
             output=(f"started task {task_id} with {steps} steps: {goal}\n"
@@ -1810,7 +1829,7 @@ class StartTaskTool:
                     f"start over the way a chat reply does. `tasks` shows progress; "
                     f"`cancel {task_id}` stops it."),
             side_effects=(f"task {task_id} created",),
-            metadata={"task_id": task_id, "steps": steps, "kind": kind})
+            metadata={"task_id": task_id, "steps": steps, "kind": kind, "authorised": authorised})
 
 
 class ReplaceInFileTool:

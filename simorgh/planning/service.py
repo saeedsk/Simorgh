@@ -229,6 +229,16 @@ class Service:
             await self._announce_created(result.task)
             await self._preempt_for(result.task)
             payload = {"task_id": result.task.id, "backlog": result.backlog}
+            # A task `auto off` holds is created, not running; the caller
+            # must be able to say so (the creator, 2026-09-13, was told
+            # "the build is running in the background" about a task that
+            # sat at `available` until someone typed `auto on`).
+            held = (self._scheduler.paused
+                    or (self._scheduler.autonomous_paused and result.task.origin in self._intake._autonomous))  # noqa: SLF001
+            if held:
+                payload["held"] = True
+                payload["held_reason"] = ("everything is paused" if self._scheduler.paused
+                                          else "auto is off, and this is Sim's own task")
         elif result.deferred:
             self._ctx.logger.info("planning.candidate_deferred", origin=p.get("origin", "curiosity"),
                                   reason=result.deferred)

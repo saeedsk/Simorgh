@@ -129,7 +129,10 @@ _TOOL_NOTES: dict[str, str] = {
                            "notes and half-finished work belong",
     "start_task": "hand a BUILD off to a background task with its own step budget, which "
                    "resumes where it left off instead of starting over -- for an app, a game, a "
-                   "long document, anything too big for one reply",
+                   "long document, anything too big for one reply. authorised=true only when the "
+                   "person said in so many words to go ahead without their approval; the result "
+                   "says whether the task is running or queued -- repeat that, never say running "
+                   "when it says queued",
     "replace_in_file": "change PART of an existing file by finding exact text and replacing "
                         "it -- always use this rather than apply_source_patch when the file "
                         "already exists and you are editing it, or you will truncate it",

@@ -133,3 +133,24 @@ class TaskCreateTestCase(unittest.IsolatedAsyncioTestCase):
                 clock=self.clock.now))
             await self._pump()
         self.assertEqual(self.logger.errors, [])
+
+
+class HeldReplyTestCase(TaskCreateTestCase):
+    """The reply says when the new task will not run (2026-09-13)."""
+
+    async def test_an_assistant_task_under_auto_off_is_marked_held_and_a_humans_is_not(self):
+        self.service._scheduler.autonomous_paused = True  # noqa: SLF001 -- `auto off`
+        reply = await self.other.request(Message.new(topics.TASK_CREATE, source="execution", payload={
+            "kind": "patch", "description": "five cartoon splash screens", "origin": "assistant", "mode": "execute"}),
+            timeout=5.0)
+        self.assertTrue(reply.payload.get("held"))
+        self.assertIn("auto is off", reply.payload.get("held_reason", ""))
+        reply = await self.other.request(Message.new(topics.TASK_CREATE, source="execution", payload={
+            "kind": "patch", "description": "a different thing the person asked for by name", "origin": "human",
+            "mode": "execute"}), timeout=5.0)
+        self.assertFalse(reply.payload.get("held"))
+        self.service._scheduler.autonomous_paused = False  # noqa: SLF001
+        reply = await self.other.request(Message.new(topics.TASK_CREATE, source="execution", payload={
+            "kind": "patch", "description": "a third, quite unlike the others, about cameras", "origin": "assistant",
+            "mode": "execute"}), timeout=5.0)
+        self.assertFalse(reply.payload.get("held"))
