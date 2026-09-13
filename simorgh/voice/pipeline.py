@@ -302,7 +302,9 @@ class Pipeline:
 
         plan = SpokenResponsePlanner(max_sentences=self._config.max_spoken_sentences,
                                      connectors=False).plan(text)
-        said = plan.text
+        from .pronounce import strip_marks
+
+        said = strip_marks(plan.text, for_voice=False)   # the screen and the echo check see the name
         request_id = session_id or str(uuid.uuid4())
         if not isinstance(self._tts, StreamingSynthesiser):
             self._tts = StreamingSynthesiser(self._tts, lookahead=self._config.tts_lookahead)

@@ -95,33 +95,23 @@ class LaneRuleTestCase(unittest.TestCase):
 
         class _S:
             _config = Config(**cfg)
-            _last_voice_turn_at = -1e9
-
-            def _now(self):
-                return 0.0
         return lambda text, spoken: VoiceSession._lane_for(_S(), text, spoken_turn=spoken)
 
-    def test_auto_sends_spoken_turns_quick_and_typed_replies_expressive(self):
+    def test_auto_is_quick_for_spoken_and_typed_turns_and_slow_only_for_a_long_answer(self):
         rule = self._rule()
         self.assertEqual(rule("Loud and clear.", True), "fast")
-        self.assertEqual(rule("Loud and clear.", False), "expressive")
-        self.assertEqual(rule("x" * 400, True), "expressive", "a long answer earns the slow lane")
+        self.assertEqual(rule("Loud and clear.", False), "fast", "the person is reading it already")
+        self.assertEqual(rule("x" * 400, True), "expressive", "a long spoken answer earns the slow lane")
 
-    def test_always_and_off_override(self):
-        self.assertEqual(self._rule(expressive_lane="always")("Hi.", True), "expressive")
-        self.assertEqual(self._rule(expressive_lane="off")("x" * 900, False), "fast")
-
-
-class RecentVoiceRuleTestCase(unittest.TestCase):
-    def test_a_typed_reply_is_quick_while_people_are_talking(self):
+    def test_voice_test_asks_for_the_expressive_lane_on_purpose(self):
         from simorgh.voice.session import VoiceSession
 
         class _S:
             _config = Config()
-            _last_voice_turn_at = 100.0
+        self.assertEqual(VoiceSession._lane_for(_S(), "Hi.", spoken_turn=False, explicit=True), "expressive")
+        self.assertEqual(VoiceSession._lane_for(type("C", (), {"_config": Config(expressive_lane="off")})(), "Hi.",
+                                                spoken_turn=False, explicit=True), "fast", "off means off")
 
-            def _now(self):
-                return 130.0
-        self.assertEqual(VoiceSession._lane_for(_S(), "Done.", spoken_turn=False), "fast")
-        _S._last_voice_turn_at = -1e9
-        self.assertEqual(VoiceSession._lane_for(_S(), "Done.", spoken_turn=False), "expressive")
+    def test_always_and_off_override(self):
+        self.assertEqual(self._rule(expressive_lane="always")("Hi.", True), "expressive")
+        self.assertEqual(self._rule(expressive_lane="off")("x" * 900, False), "fast")

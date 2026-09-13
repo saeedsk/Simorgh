@@ -444,7 +444,7 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
             return Outcome("usage: voice forget <name>")
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "forget", "name": rest.strip()}, timeout=10.0,
                               render=voiceview.controlled)
-    if verb in ("people", "who"):
+    if verb in ("people", "who", "family"):
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "people"}, timeout=10.0, render=voiceview.controlled)
     if verb == "whois":
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "whois"}, timeout=10.0, render=voiceview.controlled)
@@ -487,7 +487,7 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
     import difflib
 
     close = difflib.get_close_matches(verb, ["status", "on", "off", "mute", "unmute", "barge", "listen", "test", "say",
-                                             "voices", "devices", "models", "set", "bench", "enroll", "people", "whois",
+                                             "voices", "devices", "models", "set", "bench", "enroll", "people", "family", "whois",
                                              "forget", "pronounce"], n=1, cutoff=0.6)
     if close:
         return Outcome(f"voice: unknown verb {verb!r} -- did you mean `voice {close[0]}`?")

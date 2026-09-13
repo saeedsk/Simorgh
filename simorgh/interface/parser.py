@@ -100,7 +100,7 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
               ("unmute", "listen again"), ("barge on|off", "whether talking over Sim stops it"),
               ("listen [s]", "one push-to-talk turn"), ("test <text>", "say something aloud"),
               ("enroll <name> [as <relation>]", "learn a person's voice from three sentences; Sim then knows who is speaking"),
-              ("people", "who Sim knows by voice"), ("whois", "say something; Sim tells who it sounded like, with scores"),
+              ("people", "who Sim knows by voice (also `voice family`)"), ("whois", "say something; Sim tells who it sounded like, with scores"),
               ("forget <name>", "drop a person's voice"),
               ("pronounce <name> <as>", "how Sim says a name aloud (voice pronounce Ira Ay-raa); the screen keeps the spelling"),
               ("models chatterbox|miso", "install an expressive engine in its own environment; then `voice set tts chatterbox`"),

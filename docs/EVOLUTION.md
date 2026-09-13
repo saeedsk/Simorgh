@@ -5084,3 +5084,10 @@ Still ahead, roughly in order:
     a child -- to be kind, plain, encouraging and safe. A family member
     introducing themselves is asked their relation once, may skip it,
     and is never asked again once it is known.
+    Seen on the creator's screen the same hour: a typed reply's voice
+    ten seconds behind its text, with the IPA marks showing -- the
+    typed reply had taken the expressive lane. Now a typed reply is
+    quick too (the person is already reading it; Kokoro says the IPA
+    exactly), only `voice test` and a long spoken answer take the slow
+    lane, and both speak paths show the name, never the mark.
+    `voice family` is `voice people`.

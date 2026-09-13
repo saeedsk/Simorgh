@@ -565,7 +565,7 @@ class Service:
             await self._reply(message, topics.VOICE_SPEAK_REPLY, {"ok": False, "detail": why})
             return
         try:
-            said = await self._say(text)
+            said = await self._say(text, lane="expressive")   # `voice test`: the expressive engine, on purpose
         except Exception as exc:  # noqa: BLE001 -- an engine failure is an answer, not a crash
             await self._reply(message, topics.VOICE_SPEAK_REPLY, {"ok": False, "detail": f"could not speak: {exc!r}"})
             return
@@ -651,13 +651,13 @@ class Service:
         except Exception as exc:  # noqa: BLE001 -- speech is best effort; the reply was already printed
             self._ctx.logger.warning("voice.reply_not_spoken", error=repr(exc))
 
-    async def _say(self, text: str, *, session_id: str = "") -> str:
+    async def _say(self, text: str, *, session_id: str = "", lane: str = "") -> str:
         """Speak through the running session when there is one -- so it
         knows Sim is talking and does not hear itself -- else through
         the pipeline. Both take the one speech lock."""
         session = self._session
         if session is not None and self._enabled and self._loop_task is not None and not self._loop_task.done():
-            return await session.say(text)
+            return await session.say(text, lane=lane)
         pipeline, why = await self._pipeline_ready()
         if pipeline is None:
             raise RuntimeError(why)

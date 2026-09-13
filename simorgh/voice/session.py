@@ -101,12 +101,9 @@ def _looks_like_question(text: str) -> bool:
 #: an unknown voice this close to an enrolled person is asked "is that you?"
 #: rather than "what is your name?" (the threshold itself is 0.5)
 GUESS_FLOOR = 0.22
-#: a typed reply within this many seconds of a spoken turn is said quickly
-RECENT_VOICE_S = 120.0
 
 
 class VoiceSession:
-    _last_voice_turn_at: float = -1e9   # when a spoken turn was last answered
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
                  detector_factory, clock=None, logger=None, embedder=None, speakers=None) -> None:
         self._pipeline = pipeline
@@ -861,23 +858,20 @@ class VoiceSession:
                 register_for_reply(user_text, reply, valence=valence, arousal=arousal, is_error=is_error)
         return base.with_base(self._config.tts_speed, self._config.volume)
 
-    def _lane_for(self, text: str, *, spoken_turn: bool) -> str:
-        """Which engine says this when two are open (tts/lanes.py): a
-        spoken turn takes the quick lane unless the reply is long; a
-        typed turn's reply or `voice test` takes the expressive one.
-        `expressive_lane` always/off overrides; asides never wait."""
+    def _lane_for(self, text: str, *, spoken_turn: bool, explicit: bool = False) -> str:
+        """Which engine says this when two are open (tts/lanes.py). The
+        quick lane for a spoken turn, an aside, and a typed turn's reply
+        -- the person is already reading that one, and a voice ten
+        seconds behind the text is noise (the creator's screen,
+        2026-09-13). The expressive lane when asked for it (`voice
+        test`), for a long spoken answer, or always/off by setting."""
         mode = str(getattr(self._config, "expressive_lane", "auto") or "auto")
         if mode == "off":
             return "fast"
-        if mode == "always":
+        if mode == "always" or explicit:
             return "expressive"
         if not spoken_turn:
-            # A typed reply spoken while a voice conversation is going
-            # would arrive twenty seconds late, after the next exchange
-            # (the creator's screen, 2026-09-13): quick while people talk.
-            if self._now() - self._last_voice_turn_at < RECENT_VOICE_S:
-                return "fast"
-            return "expressive"
+            return "fast"
         threshold = int(getattr(self._config, "expressive_min_chars", 400) or 0)
         return "expressive" if threshold and len(text) >= threshold else "fast"
 
@@ -951,7 +945,6 @@ class VoiceSession:
         from simorgh.contracts.tone import split_tone
 
         tone, reply = split_tone(reply)
-        self._last_voice_turn_at = self._now()
         plan = self._planner.plan(reply, context)
         if plan.connector:
             self._turns_since_connector = 0
@@ -1015,7 +1008,7 @@ class VoiceSession:
         ))
         self._clocks.pop(turn_id, None)
 
-    async def say(self, text: str, *, request_id: str = "") -> str:
+    async def say(self, text: str, *, request_id: str = "", lane: str = "") -> str:
         """Speak something that is not a reply to a spoken turn -- a typed
         turn's reply, `voice test` -- THROUGH the session, so the turn
         manager knows Sim is talking and the microphone's echo of it is
@@ -1024,7 +1017,7 @@ class VoiceSession:
         request = TtsRequest(request_id=request_id or f"say-{uuid.uuid4().hex[:8]}",
                              pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
                              voice=self._config.tts_voice, speed=self._config.tts_speed,
-                             lane=self._lane_for(plan.text, spoken_turn=False))
+                             lane=lane or self._lane_for(plan.text, spoken_turn=False, explicit=lane == "expressive"))
         entered_from = self.turns.state
         if entered_from == LISTENING:
             self.turns.state = AGENT_SPEAKING
@@ -1040,11 +1033,14 @@ class VoiceSession:
             if self.turns.state == AGENT_SPEAKING and entered_from == LISTENING:
                 self.turns.state = LISTENING
                 await self._announce(self.turns.state)
-        self._pipeline.last_said = plan.text
+        from .pronounce import strip_marks
+
+        shown = strip_marks(plan.text, for_voice=False)
+        self._pipeline.last_said = shown
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
-            "text": plan.text, "seconds": report.seconds, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
+            "text": shown, "seconds": report.seconds, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
             "device": self._config.device, "interrupted": report.interrupted})
-        return plan.text
+        return shown
 
     async def _play(self, chunks, *, request_id: str, **kw):
         """Every playback goes through here so the echo tracker is told
