@@ -863,7 +863,8 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         if device:
             payload["device"] = " ".join(device)
         return await _run("cast_play", payload)
-    if verb == "stop":
+    if verb in ("stop", "off", "quit", "close"):
+        # `tv off` is what a person types (the creator, 2026-09-13, at 15:13).
         payload = {"what": "frame"} if rest and rest[0].lower() in ("frame", "framed", "box") else {}
         return await _run("cast_stop", payload)
     if verb == "volume":
@@ -877,6 +878,12 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         if rest[1:]:
             payload["device"] = " ".join(rest[1:])
         return await _run("cast_volume", payload)
+    import difflib
+
+    close = difflib.get_close_matches(verb, ["setup", "devices", "use", "show", "view", "rotate", "scale", "live",
+                                             "quality", "remote", "link", "video", "stop", "volume"], n=1, cutoff=0.6)
+    if close:
+        return Outcome(f"tv: unknown verb {verb!r} -- did you mean `tv {close[0]}`?")
     return Outcome(f"tv: unknown verb {verb!r} -- {usage}")
 
 

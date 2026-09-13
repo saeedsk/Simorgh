@@ -107,6 +107,15 @@ class LaneSynthesiser:
         return time.monotonic() - started
 
     async def _warm_expressive(self) -> None:
+        # Not at once: Chatterbox loading beside whisper and Kokoro at
+        # boot starved them -- the first spoken turn after a restart
+        # waited 45 s for its transcription (2026-09-13, 15:14). The
+        # quick lane gets the machine first; the slow one warms later.
+        import asyncio
+
+        delay = float(getattr(self._config, "expressive_warm_delay_s", 90.0) or 0.0)
+        if delay > 0:
+            await asyncio.sleep(delay)
         voice = str(getattr(self._config, "tts_voice", "") or "")
         started = time.monotonic()
         try:

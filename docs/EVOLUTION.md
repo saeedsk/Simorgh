@@ -5171,3 +5171,18 @@ Still ahead, roughly in order:
     is not prefixed with a speaker again by Memory. Seen and left: the
     machine slows to 2-3 s per transcription while a task runs the test
     suite beside the conversation.
+
+165. **The battery (2026-09-13, 15:14).** After the restart every spoken
+    turn took 45-50 s to hear. whisper-cli itself had gone from 0.6 s to
+    8.7 s on the same clip; a Metal matrix multiply ran at 0.3 TFLOPS.
+    The MacBook's battery was at 2% and macOS had throttled the GPU to a
+    fifteenth of its speed, charger or not. Nothing in Sim could say so.
+    `voice/health.py` reads the power state; `voice status` lists it
+    among its problems and a hearing over 8 s gets the reason on its
+    line. Also: `tv off` is `tv stop`; Chatterbox warms 90 s after
+    `voice on` instead of at once (three engines loading together
+    starved the first turns); silent voice learning now needs a take
+    0.2 above the threshold and 0.15 clear of everyone else -- the
+    creator's voice was filed under Aran for a few turns and each became
+    one of Aran's takes (the three learnt ones were removed); the
+    timestamped whisper segments cost a second encoder pass, noted.

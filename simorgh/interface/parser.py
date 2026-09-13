@@ -144,7 +144,7 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
            ("link", "the dashboard's link for a browser, token included (without it the Sim box shows only the banner)"),
            ("video <url>", "play a video framed inside Sim's page (a direct link or a YouTube page)"),
            ("video <url> full", "play it full screen on the TV itself"),
-           ("stop", "stop the TV's playback and close its app"),
+           ("stop", "stop the TV's playback and close its app (also: tv off)"),
            ("stop frame", "clear the framed video; Sim's page stays"),
            ("volume <0-100>", "the TV's volume, within the media limits")),
     "schedule": (("<15m> <label>", "a reminder later"), ("every <15m> <label>", "a reminder on a repeat"),

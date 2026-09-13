@@ -216,6 +216,7 @@ class Config:
     # and asides take the quick lane (Kokoro). "always" = everything
     # through the expressive engine, slow first sound and all; "off" =
     # never, the quick lane only.
+    expressive_warm_delay_s: float = 90.0   # the slow engine loads this long after `voice on`, so hearing comes first
     expressive_lane: str = "auto"
     expressive_min_chars: int = 0     # 0 = a spoken turn never takes the slow lane in auto (it held the floor 78 s once)
     keep_audio: bool = False

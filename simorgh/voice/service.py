@@ -303,6 +303,12 @@ class Service:
             last_said=p.last_said if p else "", problems=list(self._problems),
         )
         out = asdict(state)
+        try:
+            from .health import machine_notes
+
+            out["problems"] = list(out.get("problems") or []) + machine_notes()
+        except Exception:  # noqa: BLE001 -- a health note is never a failed status
+            pass
         if session is not None:
             out["state"] = session.state
             out["interruptions"] = session.stats.interruptions

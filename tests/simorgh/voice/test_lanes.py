@@ -43,7 +43,7 @@ class _Quick(FakeSynthesiser):
 class LaneSynthesiserTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.quick, self.slow = _Quick(), _Slow()
-        self.lanes = LaneSynthesiser(self.quick, self.slow, Config(tts_voice="af_jessica"))
+        self.lanes = LaneSynthesiser(self.quick, self.slow, Config(tts_voice="af_jessica", expressive_warm_delay_s=0))
 
     async def test_the_lane_picks_the_engine_and_the_default_is_quick(self):
         await self.lanes.synthesise("Hi.", voice="af_jessica", tone="bright", lane="fast")

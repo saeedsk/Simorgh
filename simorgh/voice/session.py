@@ -600,6 +600,12 @@ class VoiceSession:
         who = {"speaker": speaker}
         if segments:
             who["segments"] = [seg.as_dict() for seg in segments]
+        if clock.final_at and clock.speech_end and clock.final_at - clock.speech_end >= 8.0:
+            from .health import slow_hearing_note
+
+            note = slow_hearing_note(clock.final_at - clock.speech_end)
+            if note:
+                who["speaker_note"] = (who.get("speaker_note", "") + "; " if who.get("speaker_note") else "") + note
         if identification is not None:
             who["speaker_score"] = round(identification.score, 3)
             if identification.probable:

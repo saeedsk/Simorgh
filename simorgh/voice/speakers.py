@@ -61,6 +61,11 @@ DEFAULT_LEAN = 0.3
 MAX_TAKES = 12
 #: a confident take closer than this to one already kept adds nothing
 REFINE_NOVELTY = 0.9
+#: a take teaches only this far above the threshold, and this clear of
+#: everyone else -- the creator's voice was filed under Aran for a few
+#: turns (2026-09-13) and each of them became one of Aran's takes
+REFINE_ABOVE = 0.2
+REFINE_CLEAR = 0.15
 #: An utterance shorter than this carries too little voice to judge...
 MIN_SECONDS = 0.8
 #: ...and an enrolment take shorter than this is not worth keeping.
@@ -360,10 +365,14 @@ class SpeakerBook:
         if person is None or not person.embeddings:
             return False
         vector = [float(x) for x in embedding]
-        if self.score(vector, person) >= REFINE_NOVELTY:
+        own = self.score(vector, person)
+        if own >= REFINE_NOVELTY:
             return False
-        if self.score(vector, person) < self.threshold:
-            return False    # only a confident take teaches
+        if own < self.threshold + REFINE_ABOVE:
+            return False    # only a clearly confident take teaches
+        others = [self.score(vector, o) for o in self._people.values() if o is not person and o.embeddings]
+        if others and own - max(others) < REFINE_CLEAR:
+            return False    # too close to somebody else's voice to be sure whose lesson this is
         person.embeddings.append(vector)
         if len(person.embeddings) > MAX_TAKES:
             del person.embeddings[3]

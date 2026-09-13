@@ -133,19 +133,27 @@ class LeanAndRefineTestCase(unittest.TestCase):
         self.assertEqual(book.identify(_vec(1.1)).name, "")
 
     def test_a_confident_turn_becomes_a_take_and_a_near_copy_does_not(self):
-        self.assertTrue(self.book.refine("Saeed", _vec(0.6)))      # 0.83: confident and new
+        self.assertTrue(self.book.refine("Saeed", _vec(0.6)))      # 0.83: clearly confident, and new
         self.assertEqual(len(self.book.get("Saeed").embeddings), 2)
         self.assertFalse(self.book.refine("Saeed", _vec(0.01)), "a near copy of a take teaches nothing")
         self.assertFalse(self.book.refine("Saeed", _vec(-1.1)), "an unsure take never teaches")
+        self.assertFalse(self.book.refine("Saeed", _vec(-0.85)), "0.66 is confident but not clearly so")
         self.assertFalse(self.book.refine("Nobody", _vec(0.0)))
+
+    def test_a_take_near_someone_elses_voice_teaches_nobody(self):
+        self.book.enroll("Aran", _vec(0.7), insist=True)          # a voice 0.76 from Saeed's take
+        self.assertFalse(self.book.refine("Saeed", _vec(0.35)), "0.94 to Saeed but 0.94 to Aran too: whose lesson?")
+        self.assertFalse(self.book.refine("Aran", _vec(0.35)))
 
     def test_learnt_takes_are_capped_and_the_enrolment_stays(self):
         from simorgh.voice.speakers import MAX_TAKES
+        self.book.forget("Soodeh")                                 # alone in the book: nobody to be too close to
         self.book.enroll("Saeed", _vec(0.05)); self.book.enroll("Saeed", _vec(-0.05))
         first_three = [list(v) for v in self.book.get("Saeed").embeddings]
-        # each take half a radian on from the last: confident against it (0.88), new enough (< 0.9)
-        accepted = sum(self.book.refine("Saeed", _vec(0.5 * k)) for k in range(1, 12))
-        self.assertEqual(accepted, 10, "the first, 0.90 from an enrolment take, is a near copy; ten are new")
+        # each take 0.55 rad on from the last: clearly confident against it (0.85), new enough (< 0.9);
+        # the eleventh comes round the circle onto an enrolment take and is a near copy
+        accepted = sum(self.book.refine("Saeed", _vec(0.55 * k)) for k in range(1, 12))
+        self.assertEqual(accepted, 10)
         person = self.book.get("Saeed")
         self.assertEqual(len(person.embeddings), MAX_TAKES)
         self.assertEqual(person.embeddings[:3], first_three)
