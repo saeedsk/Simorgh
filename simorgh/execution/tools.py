@@ -1784,7 +1784,7 @@ class StartTaskTool:
         # them: "change it, you don't need to wait for my approval" (the
         # creator, 2026-09-13, whose task then sat behind `auto off`).
         # That is a human's decision, so the task is a human's.
-        authorised = bool(args.get("authorised"))
+        authorised = _truthy(args.get("authorised"))
         payload = {"kind": kind, "description": goal, "origin": "human" if authorised else "assistant",
                    "mode": "execute", "max_steps": steps}
         subject = str(args.get("subject") or "").strip()
@@ -1804,6 +1804,9 @@ class StartTaskTool:
         answer = getattr(reply, "payload", {}) or {}
         task_id = str(answer.get("task_id") or "")
         if not task_id:
+            deferred = str(answer.get("deferred") or "").strip()
+            if deferred:
+                return ToolResult(ok=False, error=f"the task was not created: {deferred}. Tell the person that, plainly.")
             return ToolResult(ok=False, error="the task was not created (no id came back)")
         existing = answer.get("deduplicated_against")
         if existing:
@@ -1817,9 +1820,11 @@ class StartTaskTool:
             return ToolResult(
                 ok=True,
                 output=(f"queued task {task_id} with {steps} steps: {goal}\n"
-                        f"It is NOT running: {why}. It starts when auto is on (`auto on`, or `auto now` "
-                        f"for one round) -- or if the person says to go ahead, start it again with "
-                        f"authorised=true. Tell the person it is queued, not running."),
+                        f"It is NOT running: {why}. "
+                        + ("It starts when the system resumes (`resume`). " if authorised or "paused" in why
+                           else "It starts when auto is on (`auto on`, or `auto now` for one round) -- or if the "
+                                "person says to go ahead, start it again with authorised=true. ")
+                        + "Tell the person it is queued, not running."),
                 side_effects=(f"task {task_id} created (held)",),
                 metadata={"task_id": task_id, "steps": steps, "kind": kind, "held": True})
         return ToolResult(
@@ -1833,6 +1838,13 @@ class StartTaskTool:
 
 
 _TASK_TERMINAL = frozenset({"completed", "failed", "cancelled"})
+
+
+def _truthy(value) -> bool:
+    """A model writes booleans as words: "false" is False (observer, 2026-09-13)."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "on", "1")
+    return bool(value)
 
 
 async def _task_list(ctx: ToolContext) -> tuple[list[dict], str]:
@@ -1862,7 +1874,7 @@ class ListTasksTool:
     reversibility = "read_only"
     description = ("The tasks Sim has: id, status, origin, description -- the running and waiting ones "
                    "by default. Read this before saying anything about what is queued or running.")
-    input_schema = {"type": "object", "properties": {
+    args_schema = {"type": "object", "properties": {
         "all": {"type": "boolean", "description": "include finished and failed tasks too"}}}
 
     def __init__(self, config: Config) -> None:
@@ -1872,8 +1884,12 @@ class ListTasksTool:
         tasks, why = await _task_list(ctx)
         if why:
             return ToolResult(ok=False, error=why)
-        show_all = bool(args.get("all"))
+        show_all = _truthy(args.get("all"))
         rows = [t for t in tasks if show_all or str(t.get("status") or "") not in _TASK_TERMINAL]
+        # Running first, then the newest: the store lists oldest first and a
+        # cut at forty dropped the task just asked about (observer, 2026-09-13).
+        rows.sort(key=lambda t: (0 if str(t.get("status") or "") == "in_progress" else 1,
+                                 -float(t.get("created_at") or t.get("updated_at") or 0.0)))
         if not rows:
             return ToolResult(ok=True, output="no tasks are running or waiting" if not show_all else "no tasks at all",
                               metadata={"count": 0})
@@ -1897,7 +1913,7 @@ class CancelTaskTool:
     description = ("Stop tasks. Give `task_id` (a prefix is enough), or `origin` (curiosity, reflection, "
                    "research, project, assistant, human) to stop every running or waiting task of that "
                    "origin, or `keep` (a task id) to stop everything else. Says what it stopped; repeat that.")
-    input_schema = {"type": "object", "properties": {
+    args_schema = {"type": "object", "properties": {
         "task_id": {"type": "string"}, "origin": {"type": "string"}, "keep": {"type": "string"},
         "reason": {"type": "string"}}}
 
@@ -1923,6 +1939,9 @@ class CancelTaskTool:
 
         if task_id:
             targets = [t for t in live if _matches(t, task_id)]
+            if len(targets) > 1:
+                ids = ", ".join(str(t.get("task_id") or "")[:12] for t in targets)
+                return ToolResult(ok=False, error=f"{task_id!r} is a prefix of {len(targets)} tasks ({ids}); give more of the id")
             if not targets:
                 done = [t for t in tasks if _matches(t, task_id)]
                 if done:
@@ -1932,9 +1951,13 @@ class CancelTaskTool:
         elif origin:
             targets = [t for t in live if str(t.get("origin") or "").lower() == origin]
         else:
-            targets = [t for t in live if not _matches(t, keep)]
-            if not any(_matches(t, keep) for t in live):
+            kept = [t for t in live if _matches(t, keep)]
+            if not kept:
                 return ToolResult(ok=False, error=f"no running or waiting task {keep!r} to keep -- list_tasks shows them")
+            if len(kept) > 1:
+                ids = ", ".join(str(t.get("task_id") or "")[:12] for t in kept)
+                return ToolResult(ok=False, error=f"{keep!r} is a prefix of {len(kept)} tasks ({ids}); give more of the id")
+            targets = [t for t in live if not _matches(t, keep)]
         if not targets:
             return ToolResult(ok=True, output="nothing to stop: no running or waiting task matches", metadata={"cancelled": []})
         reason = str(args.get("reason") or "").strip() or "the person asked Sim to stop it"

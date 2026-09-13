@@ -278,8 +278,10 @@ def parse_rss(raw: bytes, *, source: str, limit: int = 12) -> list[dict]:
     text = raw.decode("utf-8", errors="replace")
     try:
         root = ET.fromstring(text)
-    except ET.ParseError:
-        return []
+    except ET.ParseError as exc:
+        # An anti-bot HTML page is a failed fetch, recorded as one -- not
+        # an empty feed that looks healthy (observer, 2026-09-13).
+        raise ValueError(f"not RSS/Atom: {str(exc)[:80]}") from exc
     items: list[dict] = []
     ns_atom = "{http://www.w3.org/2005/Atom}"
     for item in list(root.iter("item")) + list(root.iter(f"{ns_atom}entry")):

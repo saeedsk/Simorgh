@@ -376,20 +376,23 @@ answer, and you do not route around it."""
 def who_is_here(speaker: str, relation: str, room: str) -> str:
     """The lines that tell the model who it is talking to and what it
     overheard (voice/speakers.py, voice/session.py)."""
-    from simorgh.contracts.household import FAMILY, WITH_A_CHILD, describe, member, roster
+    from simorgh.contracts.household import FAMILY, STRANGER, WITH_A_CHILD, describe, is_child, member, roster
 
-    lines = [FAMILY.format(roster=roster())]
+    lines = []
     if speaker:
+        # The household, with its children's ages, is for the household
+        # and for people it knows -- not for a voice nobody can name.
+        lines.append(FAMILY.format(roster=roster()))
         relation = relation or describe(speaker)
         who = f"{speaker} ({relation})" if relation else speaker
         lines.append(f"You are speaking with {who}. You know their voice. Use their name the way a person would -- "
                      "now and then, not every sentence. What you remember with them is in your memory, labelled with "
                      "their name; what others told you stays theirs.")
         known = member(speaker)
-        if known is not None and known.age is not None and known.age < 16:
+        if known is not None and is_child(speaker):
             lines.append(WITH_A_CHILD.format(name=known.name, age=known.age))
     else:
-        lines.append("You do not know this voice. Do not guess a name; do not ask for one -- that is handled elsewhere.")
+        lines.append(STRANGER)
     if room:
         lines.append("Said in the room lately, not to you (oldest first) -- context, not questions:\n" + room)
     return "\n".join(lines)
@@ -477,7 +480,7 @@ _BY_SCAFFOLD: dict[str, str] = {
 
 def render(profile: Profile, *, subject: str | None = None, task: str | None = None,
            unavailable: str = "", channel: str = "", speaker: str = "", speaker_relation: str = "",
-           room: str = "") -> str:
+           room: str = "", offered: tuple[str, ...] | None = None) -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -489,12 +492,15 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         # pair this text tells the model to reach for -- was never shown
         # it.
         body = f"{body}\n\n{_RESOURCEFUL}"
-    if profile.scaffold == "chat" or channel == "voice":
-        body = f"{BREVITY}\n\n{body}" if body else BREVITY
     if channel == "voice":
-        body = f"{VOICE}\n\n{body}" if body else VOICE
-        if speaker or room:
-            body = f"{who_is_here(speaker, speaker_relation, room)}\n\n{body}"
+        # A spoken turn is not the typed chat's workflow read aloud: the
+        # _CHAT body named tools the voice profile does not have and asked
+        # for nested bullets under a VOICE block that forbids them; the
+        # prompt ran to 12k characters (observer, 2026-09-13). VOICE says
+        # what brevity says, and more.
+        body = f"{who_is_here(speaker, speaker_relation, room)}\n\n{VOICE}"
+    elif profile.scaffold == "chat":
+        body = f"{BREVITY}\n\n{body}" if body else BREVITY
     if task:
         # The task belongs in `task_rules` because that block is
         # *protected* -- never compacted (04 section 4.6). As a plain user
@@ -516,7 +522,9 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
             f"The file is `{subject}`. You already have it -- read that file first and "
             f"do not go looking for it.\n\n" + body
         )
-    offered = offered_tools(profile.tools)
+    # `offered=()` means none at all (the chat wrap-up); None means "the
+    # profile's, plus every skill", which `offered_tools(())` also says.
+    offered = offered_tools(profile.tools) if offered is None else tuple(offered)
     lines = [f"- {name}: {_TOOL_NOTES[name]}" if name in _TOOL_NOTES else f"- {name}" for name in offered]
     if not lines:
         return body

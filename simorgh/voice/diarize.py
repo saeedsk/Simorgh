@@ -99,10 +99,21 @@ def _merge(labelled):
     for name, probable, word in labelled:
         if runs and runs[-1][0] == name:
             runs[-1][2].append(word)
-            runs[-1][1] = runs[-1][1] and probable
+            runs[-1][1] = runs[-1][1] or probable   # one guessed word makes the run a guess
         else:
             runs.append([name, probable, [word]])
     return runs
+
+
+#: a run of nobody longer than this stays "someone": a guest between two
+#: stretches of one voice is not that voice (observer, 2026-09-13)
+MAX_NOBODY_ABSORB_S = 1.0
+#: a one-word run this long, heard confidently, is its own voice's ("Okay.")
+MIN_LONE_WORD_S = 0.45
+
+
+def _seconds(words) -> float:
+    return max(0.0, float(words[-1].end) - float(words[0].start)) if words else 0.0
 
 
 def _absorb_short(runs):
@@ -114,16 +125,21 @@ def _absorb_short(runs):
     while changed and len(runs) > 1:
         changed = False
         for i, run in enumerate(runs):
-            short = len(run[2]) < MIN_RUN_WORDS
+            # a lone word heard confidently and long enough to be one is a
+            # second person's "Okay.", not noise
+            short = len(run[2]) < MIN_RUN_WORDS and (run[1] or _seconds(run[2]) < MIN_LONE_WORD_S or not run[0])
             before = runs[i - 1] if i > 0 else None
             after = runs[i + 1] if i + 1 < len(runs) else None
             if short and before is not None and after is not None and before[0] == after[0] and before[0] != run[0]:
                 before[2].extend(run[2]); before[2].extend(after[2])
-                before[1] = before[1] and after[1]
+                before[1] = before[1] or after[1] or run[1]
                 del runs[i:i + 2]
                 changed = True
                 break
-            if run[0] == "" and (before is not None or after is not None):
+            straddles = (run[0] == "" and before is not None and after is not None and before[0] and after[0]
+                         and before[0] != after[0] and _seconds(run[2]) <= WINDOW_S + HOP_S)
+            if run[0] == "" and (straddles or (_seconds(run[2]) <= MAX_NOBODY_ABSORB_S
+                                               and (before is not None or after is not None))):
                 if before is not None and after is not None:
                     half = len(run[2]) // 2
                     before[2].extend(run[2][:half])

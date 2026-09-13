@@ -50,6 +50,26 @@ def step_cap(requested, default: int) -> int:
 _CANCEL_MEMORY = 256
 
 
+
+#: the two reasons a turn ends because it was cancelled -- exact, so a
+#: verification note that merely contains the word does not count
+_CANCEL_REASONS = frozenset({"the task was cancelled", "the turn was cancelled before it finished"})
+
+
+def _turn_text(outcome, cancelled: bool) -> str:
+    """What the person is told. A cancelled turn says nothing; a blocked
+    outcome that carries the model's words keeps the reason beside them
+    -- "I edited x.py for you" alone hid "finished with uncommitted
+    changes" (observer, 2026-09-13)."""
+    if cancelled:
+        return ""
+    summary = (outcome.result_summary or "").strip()
+    if outcome.kind == "blocked" and summary and outcome.reason:
+        return f"{summary}\n\n(Not finished: {outcome.reason})"
+    if summary:
+        return summary
+    return f"I could not finish this one: {outcome.reason}" if outcome.reason else ""
+
 class Worker:
     def __init__(
         self, bus, ledger, *, clock=None, worker_id: str | None = None,
@@ -168,7 +188,10 @@ class Worker:
             self._cancelled.popitem(last=False)
 
     async def _on_state_changed(self, message: Message) -> None:
-        self._paused = message.payload.get("state") == "paused"
+        # "stopping" is paused too: a session that kept taking steps
+        # while the system stopped had every action denied and left a
+        # worktree it could not close (observer, 2026-09-13).
+        self._paused = message.payload.get("state") in ("paused", "stopping", "stopped")
 
     async def _on_available(self, message: Message) -> None:
         task_id = message.payload["task_id"]
@@ -407,7 +430,7 @@ class Worker:
         # `_pending_turns` map, which nothing but a live chat prompt
         # ever populates -- a non-chat task_id simply finds no waiter
         # and the message is a no-op there, exactly as before.
-        cancelled = bool(outcome.reason) and "cancelled" in str(outcome.reason)
+        cancelled = str(outcome.reason or "") in _CANCEL_REASONS
         turn = Message.new(
             topics.TURN_COMPLETED, source=self._bus.source,
             payload={
@@ -422,10 +445,7 @@ class Worker:
                 # the older ask) has no answer, and "I could not finish
                 # this one: the task was cancelled" was spoken and
                 # remembered as one (the creator's screen, 2026-09-13).
-                "text": outcome.result_summary or (
-                    f"I could not finish this one: {outcome.reason}"
-                    if outcome.reason and not cancelled else ""
-                ),
+                "text": _turn_text(outcome, cancelled),
                 "cancelled": cancelled,
                 "floor": outcome.floor,
                 "tool_steps": len(session.steps), "user_text": session.user_text,

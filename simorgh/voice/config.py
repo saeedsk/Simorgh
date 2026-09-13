@@ -164,12 +164,12 @@ class Config:
     # threshold/margin are the cosine rules the SpeakerBook applies;
     # `voice whois` shows the live scores so a household can tune them.
     speaker_id: str = "auto"
-    speaker_threshold: float = 0.5
+    speaker_threshold: float = 0.6     # TitaNet: same voice ~0.87, another voice ~0.31 (measured 2026-09-13)
     speaker_margin: float = 0.06
     # Under the threshold but at least this close, and clear of the
     # runner-up: "probably <name>" -- the turn is theirs, marked so.
     # 0 turns the lean off (unknown is unknown).
-    speaker_lean: float = 0.3
+    speaker_lean: float = 0.45
     # A turn Sim is sure about becomes one more take for that person,
     # silently (voice/speakers.py `refine`): the voice model tunes itself
     # to the room without ever asking for training sentences.
@@ -211,11 +211,11 @@ class Config:
     miso_device: str = ""                   # "" = cuda, else mps, else cpu
     expressive_timeout_s: float = 180.0
     # Which replies the expressive engine speaks when `tts` names one
-    # (voice/tts/lanes.py): "auto" = typed-turn replies, `voice test`
-    # and anything at least `expressive_min_chars` long; spoken turns
-    # and asides take the quick lane (Kokoro). "always" = everything
-    # through the expressive engine, slow first sound and all; "off" =
-    # never, the quick lane only.
+    # (voice/tts/lanes.py): "auto" = `voice test` only (and a spoken
+    # reply at least `expressive_min_chars` long, when that is set);
+    # spoken turns, typed-turn replies and asides take the quick lane
+    # (Kokoro). "always" = everything through the expressive engine,
+    # slow first sound and all; "off" = never, the quick lane only.
     expressive_warm_delay_s: float = 90.0   # the slow engine loads this long after `voice on`, so hearing comes first
     expressive_lane: str = "auto"
     expressive_min_chars: int = 0     # 0 = a spoken turn never takes the slow lane in auto (it held the floor 78 s once)

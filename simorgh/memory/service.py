@@ -141,7 +141,7 @@ class Service:
                 # what it is. Until 2026-09-10 `score` WAS the decay, so a
                 # no-hit query answered with two identical 1.0000s and
                 # nothing downstream could tell relevant from recent.
-                {"ref": i.ref, "kind": i.kind, "content": i.content,
+                {"ref": i.ref, "kind": i.kind, "content": i.content, "tags": list(getattr(i, "tags", ()) or ()),
                  "score": i.score,
                  "confidence_now": i.score_confidence(
                      now=self._ctx.clock.now(), half_life_seconds=self._config.half_life_seconds),
@@ -197,12 +197,22 @@ class Service:
         who = speaker or "User"
         # A turn two people spoke arrives already as "Saeed: ... / Soodeh: ..."
         # (voice/diarize.py); a prefix on top of that named one of them twice.
-        named_lines = bool(_re.match(r"^[A-Z][\w' -]{0,30}: ", user_text or "")) and "\n" in (user_text or "")
+        # (voice/diarize.py writes `someone:` for a voice nobody matched, so
+        # the first letter may be lower case.)
+        named = [ln for ln in (user_text or "").splitlines() if _re.match(r"^[A-Za-z][\w' -]{0,30}: ", ln)]
+        named_lines = len(named) >= 2 and len(named) == len([ln for ln in user_text.splitlines() if ln.strip()])
         content = (f"{user_text}\nSim: {reply_text}" if named_lines else f"{who}: {user_text}\nSim: {reply_text}") \
-            if user_text else reply_text
+            if user_text else (f"Sim: {reply_text}" if reply_text else "")
+        voices = [speaker] if speaker else []
+        if named_lines:
+            # Every named voice in the turn can find it again under their own name.
+            for line in user_text.splitlines():
+                m = _re.match(r"^([A-Za-z][\w' -]{0,30}): ", line)
+                if m and m.group(1) not in ("someone", "User", "Sim") and m.group(1) not in voices:
+                    voices.append(m.group(1))
         # The person's name is a tag as well as a label, so a recall can
         # ask for "what I remember with Ira" (orchestration/context.py).
-        tags = [payload.get("session_id", "")] + ([f"person:{speaker}"] if speaker else [])
+        tags = [payload.get("session_id", "")] + [f"person:{name}" for name in voices]
         ref = await self.engine.store(kind="episodic", content=content, tags=tags,
                                       source_ref=payload.get("task_id", ""), confidence=None)
         await self._ctx.bus.publish(Message.new(

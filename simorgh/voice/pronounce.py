@@ -20,20 +20,21 @@ from __future__ import annotations
 import re
 
 MARK = re.compile(r"⟦([^|⟧]*)\|([^⟧]*)⟧")
-_ASCII_RESPELLING = re.compile(r"^[A-Za-z][A-Za-z' -]*$")
+_ASCII_RESPELLING = re.compile(r"^[A-Za-z0-9][A-Za-z0-9' -]*$")
+_TRAILING_PUNCT = ".,;:!?"
 
 
 def normalise(say_as: str) -> str:
     """`/sæ'iːd/` -> `sæˈiːd`: slashes off, the typewriter apostrophe
     that stands for primary stress made the real mark."""
-    text = (say_as or "").strip().strip("/").strip()
+    text = (say_as or "").strip().strip("/").strip().rstrip(_TRAILING_PUNCT).strip()
     if is_ipa(text):
         text = text.replace("'", "ˈ").replace("`", "ˈ").replace(",", "ˌ")
     return text
 
 
 def is_ipa(say_as: str) -> bool:
-    text = (say_as or "").strip().strip("/")
+    text = (say_as or "").strip().strip("/").strip().rstrip(_TRAILING_PUNCT).strip()
     return bool(text) and not _ASCII_RESPELLING.match(text)
 
 

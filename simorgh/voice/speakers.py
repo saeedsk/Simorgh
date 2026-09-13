@@ -47,15 +47,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, Sequence
 
-SPEAKER_MODEL = "wespeaker_en_voxceleb_CAM++_LM.onnx"
+#: NVIDIA TitaNet-small (NeMo), ONNX via sherpa-onnx. Chosen 2026-09-13
+#: after an observer measured the CAM++ model on 24 Kokoro clips: same
+#: voice 0.46, different voice 0.47 -- it could not tell speakers apart,
+#: which is why the creator was filed under Aran that afternoon. On the
+#: same clips TitaNet: same voice 0.87 (min 0.79), different 0.31 (max
+#: 0.54). 192 dimensions; takes made with another model do not compare.
+SPEAKER_MODEL = "nemo_en_titanet_small.onnx"
 SPEAKER_MODEL_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
                      + SPEAKER_MODEL)
-DEFAULT_THRESHOLD = 0.5
+DEFAULT_THRESHOLD = 0.6
 DEFAULT_MARGIN = 0.06
 #: under the threshold but at least this close, and clear of the runner-up,
 #: a voice is "probably" that person -- attributed, not asked (the creator,
 #: 2026-09-13: "map it to the closest voice saved, or call it unknown")
-DEFAULT_LEAN = 0.3
+DEFAULT_LEAN = 0.45
 #: takes kept per person; the first three are the enrolment, the rest are
 #: learnt from confident turns (`refine`)
 MAX_TAKES = 12
@@ -211,6 +217,7 @@ class SpeakerBook:
             return
         self._loaded = True
         if not self._folder.is_dir():
+            self._seed()     # the household is known by name on a fresh machine too
             return
         for path in sorted(self._folder.glob("*.json")):
             try:
@@ -220,6 +227,12 @@ class SpeakerBook:
             if person.name:
                 self._people[person.name.lower()] = person
         self._seed()
+
+    def has_voices(self) -> bool:
+        """Whether anyone in the book has a take -- the embedder and the
+        attribution are only worth opening then."""
+        self._load()
+        return any(p.embeddings for p in self._people.values())
 
     def _seed(self) -> None:
         """The household's names, relations and pronunciations are known
@@ -330,7 +343,10 @@ class SpeakerBook:
         (the creator's own three: 0.28 to 0.76 to each other), so the
         mean of them sits far from every one; the nearest take is the
         fair comparison."""
-        return max((cosine(embedding, v) for v in person.embeddings), default=0.0)
+        # Only takes of the same length compare: a book made with one
+        # model (CAM++, 512) must not be scored by another (TitaNet, 192).
+        n = len(embedding)
+        return max((cosine(embedding, v) for v in person.embeddings if len(v) == n), default=0.0)
 
     def identify(self, embedding: Sequence[float]) -> Identification:
         self._load()

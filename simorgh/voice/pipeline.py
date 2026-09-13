@@ -281,6 +281,10 @@ class Pipeline:
         await self._publish(topics.PERCEPT_TEXT_RECEIVED, payload)
         try:
             return await asyncio.wait_for(fut, timeout=self._config.reply_timeout_s)
+        except asyncio.CancelledError:
+            if fut.cancelled():
+                return ""    # the ask itself was cancelled (the person moved on): nothing to say
+            raise
         except asyncio.TimeoutError:
             if self._logger is not None:
                 self._logger.warning("voice.reply_timeout", session_id=session_id, seconds=self._config.reply_timeout_s)

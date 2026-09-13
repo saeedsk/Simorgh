@@ -154,3 +154,65 @@ class HeldReplyTestCase(TaskCreateTestCase):
             "kind": "patch", "description": "a third, quite unlike the others, about cameras", "origin": "assistant",
             "mode": "execute"}), timeout=5.0)
         self.assertFalse(reply.payload.get("held"))
+
+
+class CancelAndPauseLifecycleTestCase(TaskCreateTestCase):
+    """Three things an observer found on 2026-09-13: a cancelled running
+    task whose worker never reports came back with its lease; a task
+    paused by a system pause never resumed; a paused task could not be
+    cancelled."""
+
+    async def _create(self, description, origin="human"):
+        reply = await self.other.request(Message.new(topics.TASK_CREATE, source="execution", payload={
+            "kind": "patch", "description": description, "origin": origin, "mode": "execute"}), timeout=5.0)
+        return reply.payload["task_id"]
+
+    async def _tick(self, seconds: float):
+        self.clock.advance(seconds)
+        await self.other.publish(Message.new(topics.SYSTEM_TICK_SECOND, source="kernel", payload={"n": 1, "ts": self.clock.now()}))
+        await asyncio.sleep(0.05)
+
+    async def test_a_cancelled_running_task_ends_when_its_lease_expires(self):
+        store = self.service._store  # noqa: SLF001
+        task_id = await self._create("a running task whose worker vanishes")
+        claim = await store.claim(task_id, "w1", lease_seconds=30.0)
+        self.assertTrue(claim.granted, claim.reason)
+        await self.other.publish(Message.new(topics.TASK_STARTED, source="orchestration",
+                                             payload={"task_id": task_id, "worker_id": "w1"}))
+        await asyncio.sleep(0.05)
+        await self.other.publish(Message.new(topics.TASK_CANCEL, source="interface",
+                                             payload={"task_id": task_id, "reason": "cancelled by cli:s1"}))
+        await asyncio.sleep(0.05)
+        self.assertEqual((await store.get(task_id)).status, "in_progress", "the worker is left to end it")
+        # ...but the worker never reports; the lease runs out
+        await self._tick(60.0)
+        await self._tick(1.0)
+        task = await store.get(task_id)
+        self.assertEqual(task.status, "failed", task.note)
+        self.assertIn("cancelled", task.note)
+
+    async def test_a_system_paused_task_resumes_when_the_system_runs_again(self):
+        store = self.service._store  # noqa: SLF001
+        task_id = await self._create("a task the pause parked")
+        await store.claim(task_id, "w1", lease_seconds=30.0)
+        await self.other.publish(Message.new(topics.TASK_PAUSED, source="orchestration",
+                                             payload={"task_id": task_id, "reason": "system paused", "resume_from_step": 2}))
+        await asyncio.sleep(0.05)
+        self.assertEqual((await store.get(task_id)).status, "paused")
+        await self.other.publish(Message.new(topics.SYSTEM_STATE_CHANGED, source="kernel", payload={"state": "paused"}))
+        await asyncio.sleep(0.05)
+        await self.other.publish(Message.new(topics.SYSTEM_STATE_CHANGED, source="kernel", payload={"state": "running"}))
+        await asyncio.sleep(0.05)
+        self.assertEqual((await store.get(task_id)).status, "available")
+
+    async def test_a_paused_task_can_be_cancelled(self):
+        store = self.service._store  # noqa: SLF001
+        task_id = await self._create("a parked task nobody wants")
+        await store.claim(task_id, "w1", lease_seconds=30.0)
+        await self.other.publish(Message.new(topics.TASK_PAUSED, source="orchestration",
+                                             payload={"task_id": task_id, "reason": "system paused", "resume_from_step": 1}))
+        await asyncio.sleep(0.05)
+        await self.other.publish(Message.new(topics.TASK_CANCEL, source="interface",
+                                             payload={"task_id": task_id, "reason": "cancelled by cli:s1"}))
+        await asyncio.sleep(0.05)
+        self.assertEqual((await store.get(task_id)).status, "failed")

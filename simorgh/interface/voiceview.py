@@ -70,7 +70,9 @@ def bench(payload: dict) -> str:
         lines.append(f"  first audio {s['first_audio_s']:.2f}s · rtf {rtf} · {s['audio_s']:.1f}s of audio "
                      f"({s.get('engine', '')})  \"{s['text']}\"")
     if result.get("first_audio_s_median") is not None:
-        lines.append(f"  median: first audio {result['first_audio_s_median']:.2f}s · rtf {result.get('rtf_median')}x")
+        rtf_median = result.get("rtf_median")
+        lines.append(f"  median: first audio {result['first_audio_s_median']:.2f}s"
+                     + (f" · rtf {rtf_median}x" if rtf_median is not None else ""))
     t = result.get("transcription")
     if t:
         if "error" in t:

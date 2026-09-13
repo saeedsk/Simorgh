@@ -140,6 +140,7 @@ class Service:
         # constructs the service with one is unaffected.
         if self._config_from_caller is None and ctx.config:
             self.config = Config.from_mapping(dict(ctx.config))
+        self._cancel_requested: dict[str, str] = {}   # task id -> reason, while a worker holds it
         self._store = TaskStore(ctx.ledger, ctx.clock)
         await self._store.rebuild()
         self._intake = Intake(self._store, dedupe_threshold=self.config.dedupe_similarity_threshold,
@@ -355,7 +356,12 @@ class Service:
     async def _on_task_paused(self, message: Message) -> None:
         p = message.payload
         task = await self._store.get(p["task_id"])
-        if task is not None and task.status in ("claimed", IN_PROGRESS):
+        if task is not None and task.status == "claimed":
+            # claimed -> paused is not a legal step; the raise was swallowed
+            # by the bus and the task stayed claimed (found 2026-09-13).
+            await self._store.transition(p["task_id"], IN_PROGRESS, note="")
+            task = await self._store.get(p["task_id"])
+        if task is not None and task.status == IN_PROGRESS:
             await self._store.transition(p["task_id"], PAUSED, note=p.get("reason", ""))
 
     async def _on_task_completed(self, message: Message) -> None:
@@ -497,8 +503,18 @@ class Service:
             # work had stopped and the edit had been discarded, and the
             # human then saw two different failure lines for one task
             # (observer, 2026-09-08). A worker that never reports is
-            # covered by lease expiry, as it always was.
+            # covered by lease expiry -- which used to put the task back
+            # on the queue and run it again (observer, 2026-09-13): the
+            # cancel is remembered, and the expiry ends the task instead.
+            self._cancel_requested[task_id] = reason
             return
+        if task.status == PAUSED:
+            # Parked, and now cancelled: paused -> failed is not a legal
+            # step, and the raise was swallowed by the bus, so the task
+            # could neither resume nor be cancelled (observer, 2026-09-13).
+            # paused -> available -> blocked -> failed is the legal road.
+            await self._store.transition(task_id, AVAILABLE, note=reason)
+            task = await self._store.get(task_id) or task
         # `available -> failed` and `pending -> failed` are not legal
         # transitions, so cancelling a task that had not started yet
         # raised, was swallowed by the bus, and left the task on the
@@ -905,6 +921,7 @@ class Service:
         self._tick_n += 1
         if self._scheduler is not None:
             await self._scheduler.scan_leases()
+        await self._end_cancelled_after_expiry()
         await self._reconsider_blocked()
         await self._reconsider_awaiting_human()
         # A ready task used to be offered in exactly two places: the
@@ -968,8 +985,39 @@ class Service:
                 continue
             await self._store.transition(task.id, AVAILABLE, note=f"retrying after being blocked: {task.note}")
 
+    async def _end_cancelled_after_expiry(self) -> None:
+        """A task cancelled while a worker held it, whose worker never
+        reported: its lease has expired and the store put it back to
+        AVAILABLE. It was cancelled; it ends."""
+        for task_id, reason in list(self._cancel_requested.items()):
+            task = await self._store.get(task_id)
+            if task is None or task.status in TERMINAL_STATUSES:
+                self._cancel_requested.pop(task_id, None)
+                continue
+            if task.status in (AVAILABLE, PENDING, BLOCKED):
+                if task.status != BLOCKED:
+                    await self._store.transition(task_id, BLOCKED, note=reason)
+                await self._store.transition(task_id, FAILED, note=f"{reason} (the worker never reported)")
+                await self._ctx.bus.publish(Message.new(
+                    topics.TASK_FAILED, source=self._ctx.source, partition_key=f"task:{task_id}",
+                    payload={"task_id": task_id, "reason": reason, "terminal": True, "attempts": task.attempts}))
+                self._cancel_requested.pop(task_id, None)
+
+    async def _resume_paused_tasks(self) -> None:
+        """The system is running again: tasks parked by a system pause go
+        back to the queue. Nothing did this; a paused task stayed paused
+        for good (observer, 2026-09-13)."""
+        for task in list(self._store.index.tasks.values()):
+            # A plan waiting on a person's approval stays parked; that is a
+            # different wait (`_reconsider_awaiting_human`).
+            if task.status == PAUSED and "approval" not in str(task.note or ""):
+                await self._store.transition(task.id, AVAILABLE, note="resumed with the system")
+
     async def _on_state_changed(self, message: Message) -> None:
         state = message.payload.get("state")
+        if state == "running" and getattr(self, "_was_paused", False):
+            await self._resume_paused_tasks()
+        self._was_paused = state in ("paused", "stopping", "stopped")
         if self._scheduler is not None:
             self._scheduler.paused = state in ("paused", "stopping", "stopped")
             # `system.state.changed` has always carried this; nothing

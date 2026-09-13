@@ -234,7 +234,7 @@ class _CameraTool:
                 raise RuntimeError(why)
             host, user, password = self._secret(SECRET_HOST), self._secret(SECRET_USER), self._secret(SECRET_PASSWORD)
             if not (host and user and password):
-                raise RuntimeError("the NVR is not set up: `cameras setup <host> <username> <password>`")
+                raise RuntimeError("the NVR is not set up: `cameras setup <host> <username>` at the terminal (it asks for the password hidden)")
             self._prefs.nvr = ReolinkNvr(host, user, password)
         return self._prefs.nvr
 

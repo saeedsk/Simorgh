@@ -25,7 +25,7 @@ SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "tts_farsi_voice": (str, None, "the Piper voice for Farsi"),
     "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),
     "tts_speed": (float, (0.5, 2.0), "speaking rate, 1.0 = normal"),
-    "speaker_id": (str, None, "auto | on | off -- recognise who is speaking (needs `voice enroll`)"),
+    "speaker_id": (str, ("auto", "on", "off"), "auto | on | off -- recognise who is speaking (needs `voice enroll`)"),
     "speaker_threshold": (float, (0.2, 0.95), "how alike a voice must be to count as an enrolled person (cosine)"),
     "speaker_margin": (float, (0.0, 0.5), "how far the best match must beat the second before it counts"),
     "speaker_lean": (float, (0.0, 0.95), "under the threshold but at least this close, a voice is 'probably' that person; 0 = never lean"),

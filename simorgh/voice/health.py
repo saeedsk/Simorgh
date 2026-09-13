@@ -35,10 +35,11 @@ def power_state() -> dict:
     if pmset:
         try:
             out = subprocess.run([pmset, "-g", "batt"], capture_output=True, text=True, timeout=3).stdout
-            m = re.search(r"(\d+)%;\s*([a-z ]+?);", out)
+            m = re.search(r"(\d+)%;\s*([A-Za-z ]+?);", out)
             if m:
                 state["battery_pct"] = int(m.group(1))
-                state["charging"] = "charging" in m.group(2) and "dis" not in m.group(2)
+                phase = m.group(2).lower()
+                state["charging"] = ("charging" in phase or "charged" in phase) and "dis" not in phase and "not " not in phase
             src = re.search(r"drawing from '([^']+)'", out)
             if src:
                 state["source"] = src.group(1)

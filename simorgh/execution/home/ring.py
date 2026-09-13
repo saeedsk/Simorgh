@@ -288,7 +288,7 @@ class _RingTool:
                 raise RuntimeError(why)
             raw = self._secret(SECRET_TOKEN)
             if not raw:
-                raise RuntimeError("Ring is not set up: `ring setup <email> <password>` (then the code Ring sends)")
+                raise RuntimeError("Ring is not set up: `ring setup <email>` at the terminal (it asks for the password hidden, then the code Ring sends)")
             try:
                 token = json.loads(raw)
             except ValueError as exc:

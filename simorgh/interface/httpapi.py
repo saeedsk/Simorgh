@@ -107,6 +107,33 @@ class Route:
     rate: tuple[int, float] | None = None
 
 
+
+def _dash_state_problems(payload: dict) -> str:
+    """Why a dashboard state change cannot be applied, or "". Types the
+    schema (ui.dash.state.v1) will not take are refused here, before
+    anything changes."""
+    import math
+
+    for key in ("rotate_s", "live_max", "scale"):
+        if key in payload:
+            value = payload[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                return f"{key} must be a number"
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return f"{key} must be a number"
+            if math.isnan(number) or math.isinf(number):
+                return f"{key} must be a finite number"
+            if key != "scale" and not float(number).is_integer():
+                return f"{key} must be a whole number of seconds" if key == "rotate_s" else f"{key} must be a whole number"
+    for key in ("view", "timeframe", "symbol", "video_quality"):
+        if key in payload and not isinstance(payload[key], str):
+            return f"{key} must be text"
+    if "video_quality" in payload and str(payload["video_quality"]).strip().lower() not in ("light", "full"):
+        return "video_quality must be light or full"
+    return ""
+
 class HttpApi:
     def __init__(
         self, bus, *, ledger=None, host: str = "127.0.0.1", port: int = 8765,
@@ -285,8 +312,16 @@ class HttpApi:
             if not isinstance(asked, dict):
                 return 400, b'{"error": "body must be a JSON object"}', "application/json"
             payload = {k: asked[k] for k in ("view", "timeframe", "symbol", "rotate_s", "scale", "live_max", "video_quality") if k in asked}
+            bad = _dash_state_problems(payload)
+            if bad:
+                return 400, json.dumps({"error": bad}).encode("utf-8"), "application/json"
             self._apply_dash_state(payload)
-            await self._bus.publish(Message.new(topics.DASH_STATE, source="interface", payload=payload))
+            # What was APPLIED goes on the bus, in the schema's own types --
+            # the raw body once failed validation after the state had
+            # already changed, and the remote was told 500 (observer, 2026-09-13).
+            applied = {k: self._dash_state[k] for k in ("view", "timeframe", "symbol", "rotate_s", "scale", "live_max", "video_quality")
+                       if k in payload and k in self._dash_state}
+            await self._bus.publish(Message.new(topics.DASH_STATE, source="interface", payload=applied))
             return 200, json.dumps({"now": self._now(), **self._dash_state}).encode("utf-8"), "application/json"
 
         async def _remote(_query, _body, _headers):
@@ -374,6 +409,8 @@ class HttpApi:
         async def _hook(query, body, headers, *, name: str = ""):
             # An inbound webhook: whoever asked something to call this
             # (`cam_watch`) listens for `ui.hook.received` with its name.
+            if not name.strip():
+                return 400, b"a hook needs a name: /api/hooks/<name>", "text/plain; charset=utf-8"
             await self._bus.publish(Message.new(topics.UI_HOOK_RECEIVED, source="interface", payload={
                 "name": name, "body": body.decode("utf-8", errors="replace")[:_MAX_BODY_BYTES],
                 "content_type": headers.get("content-type", ""), "remote": headers.get("x-remote", "")}))
@@ -391,7 +428,9 @@ class HttpApi:
 
         async def _wall(query, _body, _headers, *, rest: str = ""):
             import mimetypes
-            name = rest.split("/", 1)[0].split("?", 1)[0]
+            from urllib.parse import unquote
+
+            name = unquote(rest.split("/", 1)[0].split("?", 1)[0])
             target = (self._wallpaper_root / name).resolve()
             if (not name or "/" in rest.rstrip("/") or not str(target).startswith(str(self._wallpaper_root) + os.sep)
                     or not target.is_file() or target.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp", ".avif")):
@@ -578,19 +617,19 @@ class HttpApi:
         if "rotate_s" in payload:
             try:
                 self._dash_state["rotate_s"] = max(0, min(3600, int(float(payload.get("rotate_s") or 0))))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 pass
         if "scale" in payload:
             # 0 = fit the viewport; else a fixed factor for a receiver that misreports its size.
             try:
                 self._dash_state["scale"] = max(0.0, min(4.0, float(payload.get("scale") or 0)))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 pass
         if "live_max" in payload:
             # How many camera feeds decode at once; the TV's browser also plays the ambient video.
             try:
                 self._dash_state["live_max"] = max(0, min(16, int(float(payload.get("live_max") or 0))))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 pass
         quality = str(payload.get("video_quality") or "").strip().lower()
         if quality in ("light", "full"):
@@ -764,7 +803,7 @@ class HttpApi:
     #: What an unauthenticated caller may see of the status reply when a
     #: token is configured: that the system is up, and what it is doing
     #: at the coarsest level. Never counters, never task ids.
-    _PUBLIC_STATUS_KEYS = ("state", "version", "uptime_s", "started_at", "error")
+    _PUBLIC_STATUS_KEYS = ("state", "mode", "uptime_seconds", "autonomous_paused", "version", "uptime_s", "started_at", "error")
 
     async def _status_json(self, *, public_only: bool = False) -> bytes:
         req = Message.new(topics.SYSTEM_STATUS_REQUEST, source="interface", payload={}, clock=self._clock)

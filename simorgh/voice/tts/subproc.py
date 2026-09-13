@@ -68,6 +68,12 @@ def engine_available(engine: str, module: str, venv_dir: Path | str = DEFAULT_VE
     return True, ""
 
 
+class SynthesisRefused(Exception):
+    """The server answered the request with an error: bad reference, empty
+    text. The server is fine; restarting it (12 s of model load) taught
+    nothing (observer, 2026-09-13)."""
+
+
 class SubprocessSynthesiser:
     """Base for an engine served from its own venv. Subclasses set `name`,
     `module`, `server` and `params_for(tone)`."""
@@ -169,6 +175,8 @@ class SubprocessSynthesiser:
             for attempt in (1, 2):
                 try:
                     return await self._one(text, tone=tone, speed=speed, reference=reference)
+                except SynthesisRefused:
+                    raise
                 except (BrokenPipeError, ConnectionResetError, RuntimeError) as exc:
                     if attempt == 2:
                         raise
@@ -195,7 +203,7 @@ class SubprocessSynthesiser:
             raise RuntimeError(f"{self.name} exited (code {self._proc.returncode})")
         reply = json.loads(line.decode("utf-8"))
         if reply.get("error"):
-            raise RuntimeError(str(reply["error"])[:300])
+            raise SynthesisRefused(str(reply["error"])[:300])
         path = Path(reply.get("path") or out)
         try:
             with wave.open(str(path), "rb") as handle:
@@ -267,4 +275,4 @@ def create_venv(venv_dir: Path | str, engine: str, *, python: str = "", packages
     return py, ""
 
 
-__all__ = ["DEFAULT_VENV_DIR", "SERVERS_DIR", "SubprocessSynthesiser", "create_venv", "engine_available", "venv_python"]
+__all__ = ["DEFAULT_VENV_DIR", "SERVERS_DIR", "SubprocessSynthesiser", "SynthesisRefused", "create_venv", "engine_available", "venv_python"]

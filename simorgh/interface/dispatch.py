@@ -491,8 +491,9 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
                                              "forget", "pronounce"], n=1, cutoff=0.6)
     if close:
         return Outcome(f"voice: unknown verb {verb!r} -- did you mean `voice {close[0]}`?")
-    return Outcome(f"voice: unknown verb {verb!r} -- status | on | off | mute | unmute | listen [seconds] [only] "
-                   f"| test <text> | voices | devices | models [name] | set [key value] | bench [quiet]")
+    return Outcome(f"voice: unknown verb {verb!r} -- status | on | off | mute | unmute | barge on|off | listen [s] "
+                   f"| test <text> | enroll <name> | people | whois | forget <name> | pronounce <name> <as> "
+                   f"| voices | devices | models [name] | set [key value] | bench [quiet]  (`help voice`)")
 
 
 def _benchmark_word(args: str) -> tuple[str, str]:
@@ -1303,7 +1304,7 @@ async def _domains_command(ledger: LedgerClient, args: str = "") -> Outcome:
     known = {name for name, _ in _DOMAIN_BLURB}
     if wanted and wanted not in known:
         near = difflib.get_close_matches(wanted, sorted(known), n=3, cutoff=0.4)
-        hint = f"; did you mean {', '.join(near)}?" if near else ""
+        hint = f" -- did you mean {', '.join(near)}?" if near else ""
         return Outcome(f"no domain called {wanted!r}{hint}. "
                        f"They are: {', '.join(sorted(known))}.")
 
@@ -1634,7 +1635,7 @@ async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock
         ))
         return Outcome(f"approved: wrote {proposal['name']!r} to {_SIMORGH_TOML_PATH} -- restart Sim to load it")
 
-    if sub == "reject":
+    if sub in ("reject", "deny"):
         if len(parts) < 2 or not parts[1].strip():
             return Outcome("usage: mcp reject <proposal_id> [reason]")
         rest = parts[1].split(None, 1)

@@ -927,7 +927,7 @@ def command_panel(topic: str, *, enabled: bool = True, unicode: bool = True) -> 
 
     from .parser import COMMANDS, SECTIONS, SUBCOMMANDS
 
-    topic = (topic or "").strip().lstrip("/").lower()
+    topic = (topic or "").strip().lstrip("/").lower().split()[0] if (topic or "").strip() else ""
     by_name = {name: (hint, desc) for name, hint, desc in COMMANDS}
     if topic in by_name:
         hint, desc = by_name[topic]

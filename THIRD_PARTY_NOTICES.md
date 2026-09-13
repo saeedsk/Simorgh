@@ -14,7 +14,8 @@ All inference is local; the network is used once, to fetch these.
 | Whisper `large-v3-turbo` | `ggml-large-v3-turbo.bin` (1.6 GB) | ggerganov/whisper.cpp on Hugging Face (converted from openai/whisper) | MIT (OpenAI Whisper weights) | speech recognition, all languages |
 | Whisper `base.en` | `ggml-base.en.bin` | same | MIT | English-only recognition (smaller, faster, cannot hear Farsi) |
 | Silero VAD | silero-vad 6.2.1 (bundled weights) | snakers4/silero-vad | MIT | voice activity detection |
-| WeSpeaker CAM++ (VoxCeleb, large-margin) | `wespeaker_en_voxceleb_CAM++_LM.onnx` (29 MB) | wenet-e2e/wespeaker, ONNX export via k2-fsa/sherpa-onnx releases | Apache-2.0 | speaker embeddings: who is speaking (voice/speakers.py) |
+| NVIDIA NeMo TitaNet-small | `nemo_en_titanet_small.onnx` (40 MB) | NVIDIA NeMo, ONNX export via k2-fsa/sherpa-onnx releases | CC-BY-4.0 (model), Apache-2.0 (NeMo) | speaker embeddings: who is speaking (voice/speakers.py); replaced CAM++ on 2026-09-13 after it failed to separate voices |
+| WeSpeaker CAM++ (VoxCeleb, large-margin) | `wespeaker_en_voxceleb_CAM++_LM.onnx` (29 MB) | wenet-e2e/wespeaker, ONNX export via k2-fsa/sherpa-onnx releases | Apache-2.0 | former speaker model, still on disk; not used |
 
 ## Packages
 

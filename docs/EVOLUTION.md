@@ -5186,3 +5186,48 @@ Still ahead, roughly in order:
     creator's voice was filed under Aran for a few turns and each became
     one of Aran's takes (the three learnt ones were removed); the
     timestamped whisper segments cost a second encoder pass, noted.
+
+166. **Ten observers, ninety-four findings, one afternoon (2026-09-13).**
+    "Start testing Sim in observer mode with ten concurrent instances and
+    fix the bugs you find." Ten sandbox clones, one area each (voice
+    session flows, task-tool honesty in real trials, chat budget and
+    cancellation, the terminal end to end, the real speech engines,
+    prompts and per-person memory, the HTTP API and dashboard, the voice
+    service's settings, planning and worker lifecycle, an adversarial
+    re-test); 41 distinct issues. The two blockers: `cancel_task` and
+    `list_tasks` were in no marker table, so the model's every call
+    arrived with no arguments -- eighteen refusals in one trial before
+    Sim honestly gave up (a `key=value` grammar now, with a bare word as
+    the default key, and `authorised=true` on start_task's second line
+    finally means it); and the speaker model could not tell voices
+    apart -- on 24 Kokoro clips the CAM++ embedding scored the same
+    voice 0.46 and a different one 0.47, which is why the creator was
+    filed under Aran that afternoon. NVIDIA's TitaNet-small, measured
+    on the same clips at 0.87 against 0.31, replaces it; thresholds
+    moved to 0.6 / lean 0.45; takes of another model do not compare;
+    the household's old takes were dropped -- everyone enrols again.
+    Fixed with them: the spoken prompt no longer carries the typed
+    chat's whole workflow (12k characters, tools the voice profile does
+    not have); per-person memory is isolated in recall, not just asked
+    for in a sentence; the household roster is not shown to a voice
+    nobody can name; a two-voice turn is tagged for both voices; a
+    reply held while someone starts talking is spoken late rather than
+    lost; "stop" is obeyed during an enrolment (it had become two of
+    Aran's takes); the chat wrap-up refuses a bare marker as an answer
+    and its instruction now reaches the model; a blocked chat keeps its
+    reason beside the model's words; the dashboard publishes the state
+    it applied and refuses junk types with 400; wallpapers with spaces
+    load; the status card reads the fields the kernel sends; a cancelled
+    running task whose worker never reports ends at lease expiry instead
+    of running again; a task paused by a system pause resumes when the
+    system does; a paused task can be cancelled; the worker treats
+    "stopping" as paused; a 4xx from whisper-server no longer restarts
+    it; a refused Chatterbox request no longer reloads the model; an
+    engine that cannot open is not written to disk as the choice; a
+    setting changed while voice is off applies at the next `voice on`;
+    and twenty smaller things (`mcp deny`, `help voice set`, `tv volume
+    -5`, "for Kian" on the dashboard, the Farsi voice judged by the
+    English engine, booleans the model writes as words...). Left open,
+    recorded in the findings file: the eight cosmetics not worth a line
+    here, the double encoder pass for timestamped whisper segments, and
+    a self-test of the speaker model at load.

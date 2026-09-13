@@ -206,7 +206,44 @@ def json_rest(rest: str, second: str) -> dict:
             # extra options -- assign it to the one field it belongs to
             # rather than trying (and failing) to merge a list.
             return {second: parsed}
+    pairs = key_values(stripped)
+    if pairs:
+        # `authorised=true` / `steps=40` on the second line: what the
+        # prompt's prose teaches, and what the model writes (observer,
+        # 2026-09-13) -- read it as the options it is.
+        return pairs
     return {second: rest}
+
+
+_KEY_VALUE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s,;]+)")
+
+
+def key_values(text: str) -> dict:
+    """`origin=curiosity keep=e78175` -> {"origin": "curiosity", "keep": "e78175"};
+    true/false/numbers typed. {} when the text has no such pair."""
+    out: dict = {}
+    for key, value in _KEY_VALUE.findall(text or ""):
+        value = value.strip("\"'")
+        low = value.lower()
+        if low in ("true", "yes", "on"):
+            out[key] = True
+        elif low in ("false", "no", "off"):
+            out[key] = False
+        else:
+            try:
+                out[key] = int(value) if re.fullmatch(r"-?\d+", value) else float(value) if re.fullmatch(r"-?\d+\.\d+", value) else value
+            except ValueError:
+                out[key] = value
+    return out
+
+
+#: Tools whose argument is `key=value` pairs (or a JSON object), with one
+#: bare word meaning the named default key: `CANCEL_TASK: e7817596bb18`
+#: is a task id; `LIST_TASKS: all` shows finished ones too.
+MARKER_KEY_VALUES: dict[str, str] = {
+    "cancel_task": "task_id",
+    "list_tasks": "all",
+}
 
 
 def args_from_text(tool: str, raw: str) -> dict:
@@ -233,6 +270,17 @@ def args_from_text(tool: str, raw: str) -> dict:
         if tool in ("run_python_sandboxed", "run_js_sandboxed", "run_script"):
             raw = strip_code_fence(str(raw))
         return {MARKER_ARG_KEY[tool]: raw}
+    if tool in MARKER_KEY_VALUES:
+        text = str(raw).strip()
+        if not text:
+            return {}
+        parsed = json_rest(text, MARKER_KEY_VALUES[tool])
+        if MARKER_KEY_VALUES[tool] in parsed and parsed[MARKER_KEY_VALUES[tool]] == text and "=" not in text:
+            word = text.split()[0]
+            if tool == "list_tasks":
+                return {"all": word.lower() in ("all", "true", "yes", "everything")}
+            return {MARKER_KEY_VALUES[tool]: word}
+        return parsed
     return {}
 
 
@@ -247,9 +295,11 @@ def describe_arguments(tool: str) -> str:
         return f"<{first}> then <{second}> on the following lines"
     if tool in MARKER_ARG_KEY:
         return f"<{MARKER_ARG_KEY[tool]}>"
+    if tool in MARKER_KEY_VALUES:
+        return f"<{MARKER_KEY_VALUES[tool]}> or key=value pairs"
     return "key=value pairs, or a JSON object"
 
 
-__all__ = ["MARKER_ARG_KEY", "MARKER_CODE_REST", "MARKER_JSON_REST", "MARKER_NO_ARGS",
-           "MARKER_SPLIT_FIRST_LINE", "args_from_text", "describe_arguments", "json_rest",
+__all__ = ["MARKER_ARG_KEY", "MARKER_CODE_REST", "MARKER_JSON_REST", "MARKER_KEY_VALUES", "MARKER_NO_ARGS",
+           "MARKER_SPLIT_FIRST_LINE", "args_from_text", "describe_arguments", "json_rest", "key_values",
            "strip_code_fence"]

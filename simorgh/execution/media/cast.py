@@ -483,7 +483,8 @@ class CastVolumeTool(_CastTool):
             level = int(float(str(raw).rstrip("%")))
         except (TypeError, ValueError):
             return ToolResult(ok=False, error="refused: `level` is a number from 0 to 100")
-        level = max(0, min(100, level))
+        if level < 0 or level > 100:
+            return ToolResult(ok=False, error=f"refused: `level` is a number from 0 to 100, not {level}")
         from .tools import _MediaTool
 
         verdict = _MediaTool(self._config, secrets=self._secrets, env=self._env, clock=self._clock)._volume_verdict(level)

@@ -135,8 +135,8 @@ class VoiceSession:
                                          household=HOUSEHOLD, lean=config.speaker_lean)
         # The engine is opened only once somebody is enrolled (or enrolment
         # starts): a household that never enrolled pays nothing per turn.
-        if self._embedder is None and self._speakers is not None and self._speakers.people():
-            self._open_embedder()
+        if self._embedder is None and self._speakers is not None and self._speakers.has_voices():
+            self._open_embedder()   # a household known by name only pays nothing per turn
         # Meeting someone by conversation (voice/introduce.py).
         self._intro = None
         self._unknown = None
@@ -257,6 +257,9 @@ class VoiceSession:
             await self._teardown()
 
     async def _teardown(self) -> None:
+        # A chat still running for a turn nobody will hear is stopped too.
+        with contextlib.suppress(Exception):
+            await self._cancel_outstanding(before=10**9)
         for task in (self._stt_task, self._ask_task, self._speak_task, self._ack_task, self._still_task,
                      self._hum_task):
             if task is not None and not task.done():
@@ -446,6 +449,8 @@ class VoiceSession:
             self._timed.pop(turn_id, None)
             self._log("warning", "voice.transcribe_failed", error=repr(exc))
             self.turns.state = LISTENING
+            self._settled.set()      # a reply held for this candidate may go ahead
+            await self._announce(self.turns.state)
 
     # ------------------------------------------------------------- answering
     async def _identify(self, turn_id: int):
@@ -479,7 +484,7 @@ class VoiceSession:
         if kept is None or not self._config.diarize or self._embedder is None or self._speakers is None:
             return []
         audio, words = kept
-        if len(audio) / 32000.0 < float(self._config.diarize_min_s) or not self._speakers.people():
+        if len(audio) / 32000.0 < float(self._config.diarize_min_s) or not self._speakers.has_voices():
             return []
         from .diarize import attribute, speakers_in
 
@@ -567,6 +572,16 @@ class VoiceSession:
         session_id = str(uuid.uuid4())
         clock = self._clocks.get(turn_id) or TurnClock(turn_id=turn_id)
         identification, vector = await self._identify(turn_id)
+        if self._enrolling is not None or self._intro is not None:
+            # "stop" / "voice off" are obeyed here too -- they became takes
+            # 1 and 2 of Aran's voice once (observer, 2026-09-13).
+            self._timed.pop(turn_id, None)
+            command = spoken_command(text)
+            if command is not None:
+                self._enrolling = None
+                self._intro = None
+                await self._obey(turn_id, command)
+                return
         if self._enrolling is not None:
             await self._enroll_take(turn_id, text, vector)
             return
@@ -579,6 +594,7 @@ class VoiceSession:
 
             wanted = learn_request(text, speaker=speaker)
             if wanted:
+                self._timed.pop(turn_id, None)
                 await self._begin_introduction(turn_id, text, vector, name="" if wanted == "?" else wanted)
                 return
         segments = await self._attribute(turn_id, identification)
@@ -600,18 +616,18 @@ class VoiceSession:
         who = {"speaker": speaker}
         if segments:
             who["segments"] = [seg.as_dict() for seg in segments]
-        if clock.final_at and clock.speech_end and clock.final_at - clock.speech_end >= 8.0:
-            from .health import slow_hearing_note
-
-            note = slow_hearing_note(clock.final_at - clock.speech_end)
-            if note:
-                who["speaker_note"] = (who.get("speaker_note", "") + "; " if who.get("speaker_note") else "") + note
         if identification is not None:
             who["speaker_score"] = round(identification.score, 3)
             if identification.probable:
                 who["speaker_probable"] = True
             if identification.reason and (not speaker or identification.probable):
                 who["speaker_note"] = identification.reason
+        if clock.final_at and clock.speech_end and clock.final_at - clock.speech_end >= 8.0:
+            from .health import slow_hearing_note
+
+            note = slow_hearing_note(clock.final_at - clock.speech_end)
+            if note:   # beside the speaker note, never instead of it
+                who["speaker_note"] = (who["speaker_note"] + "; " if who.get("speaker_note") else "") + note
         if self._whois:
             self._whois = False
             scores = self._speakers.scores(vector) if vector is not None else []
@@ -983,6 +999,18 @@ class VoiceSession:
             try:
                 await asyncio.wait_for(self._settled.wait(), timeout=self._config.max_turn_ms / 1000 + 2.0)
             except asyncio.TimeoutError:
+                # Nothing settled the hold: the candidate turn is neither a
+                # turn nor a blip yet. Ask once more; if it still holds,
+                # speak anyway -- a late answer beats one lost in silence
+                # (observer, 2026-09-13: THINKING for 36 s, nothing said).
+                actions = self.turns.reply_ready(turn_id)
+                if any(a.kind == Actions.HOLD_REPLY for a in actions):
+                    self._log("info", "voice.hold_expired", turn=turn_id)
+                    self.turns.handle_playback_state(PlaybackState("started", "0"))  # no-op nudge; the manager may ignore it
+                    actions = [a for a in actions if a.kind != Actions.HOLD_REPLY] or actions
+                    if not any(a.kind == Actions.SPEAK for a in actions):
+                        self.turns.state = THINKING
+                        actions = self.turns.reply_ready(turn_id)
                 break
             actions = self.turns.reply_ready(turn_id)
         speak = next((a for a in actions if a.kind == Actions.SPEAK), None)
@@ -1071,7 +1099,7 @@ class VoiceSession:
         request = TtsRequest(request_id=request_id or f"say-{uuid.uuid4().hex[:8]}",
                              pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
                              voice=self._config.tts_voice, speed=self._config.tts_speed,
-                             lane=lane or self._lane_for(plan.text, spoken_turn=False, explicit=lane == "expressive"))
+                             lane=self._lane_for(plan.text, spoken_turn=False, explicit=lane == "expressive"))
         entered_from = self.turns.state
         if entered_from == LISTENING:
             self.turns.state = AGENT_SPEAKING

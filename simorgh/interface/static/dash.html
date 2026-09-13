@@ -319,7 +319,7 @@ function mktBoxHTML(idx){const m=mk();
   return newsBoxHTML("Market & AI hot topics","Bloomberg",merged("bloomberg_markets","bloomberg_technology").slice(0,DECK_ITEMS),true);}
 function qjHTML(){const qt=DATA&&DATA.quote,jokes=(DATA&&DATA.jokes)||[];const jk=jokes.length?jokes[Math.floor(Date.now()/600000)%jokes.length]:"";
   return '<div class="col fade" style="flex:1;min-width:0;">'+head("Quote of the day")+(qt&&qt.text?'<div style="font-size:13px;line-height:1.45;">“'+esc(qt.text)+'”</div><div class="faint" style="font-size:10.5px;margin-top:3px;">— '+esc(qt.author)+'</div>':empty("waiting…"))
-    +'<div style="border-top:1px solid var(--stroke2);margin:10px 0 8px;"></div>'+head("Joke","for Kian")+(jk?'<div style="font-size:13px;line-height:1.45;">'+esc(jk)+'</div>':empty("waiting for a good one…"))+'</div>';}
+    +'<div style="border-top:1px solid var(--stroke2);margin:10px 0 8px;"></div>'+head("Joke","for the house")+(jk?'<div style="font-size:13px;line-height:1.45;">'+esc(jk)+'</div>':empty("waiting for a good one…"))+'</div>';}
 function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-template-columns:1fr 2fr;gap:12px;height:100%;min-height:0;">'
   +'<div class="glass card col" id="dk-term">'+head("Sim","live")+'<div class="fill" id="dk-term-body"></div></div>'
   +'<div style="display:grid;grid-template-columns:1.7fr 3.3fr;grid-template-rows:3.2fr 1.8fr;gap:12px;min-height:0;min-width:0;">'
@@ -500,7 +500,7 @@ function viewMedia(){
 }
 function viewTerminal(){
   const s=STATUS||{};const rows=[];
-  for(const k of ["state","model","version","uptime_s","tasks_running","tasks_queued","workers","memory_mb","load"]){if(s[k]!=null&&typeof s[k]!=="object")rows.push(kv(k.replace(/_/g," "),esc(String(s[k]))));}
+  for(const k of ["state","mode","uptime_seconds","autonomous_paused","model","version"]){if(s[k]!=null&&typeof s[k]!=="object")rows.push(kv(k.replace(/_/g," "),esc(String(s[k]))));}
   const tools=ACT.filter(e=>e.type==="action.result").slice(-8).reverse().map(e=>'<div class="tr"><span class="l">'+esc(e.tool||"tool")+'</span><span class="'+(e.ok===false?"red":"green")+'">'+(e.ok===false?"✗":"✓")+(e.duration_ms?' '+Math.round(e.duration_ms)+'ms':'')+'</span></div>').join("");
   const side='<div class="glass card col" style="flex:1;min-width:0;">'+head("Sim","status")+(rows.join("")||empty("status needs the token"))+'<div class="hd" style="margin:10px 0 4px;">Recent tools</div>'+(tools||empty("nothing yet"))+'<div style="margin-top:auto;">'+weatherNow()+'</div></div>';
   return '<div style="display:flex;gap:12px;height:100%;"><div class="glass card" style="flex:3.2;display:flex;">'+termHTML(true)+'</div>'+side+'</div>';

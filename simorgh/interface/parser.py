@@ -169,13 +169,13 @@ def help_topics() -> tuple[str, ...]:
 
 
 def subcommands(name: str) -> tuple[str, ...]:
-    if name.lstrip("/") == "help":
-        return help_topics()
     """The words a command takes next, read off its own usage hint --
     `[all|work|clear]` gives all, work, clear; `<topic>` gives nothing,
     a free argument is not a word to offer. What Tab shows after a
     command (the creator, 2026-09-12: "if I type tasks and press tab
     at least I expect to see all")."""
+    if name.lstrip("/") == "help":
+        return help_topics()
     listed = SUBCOMMANDS.get(name.lstrip("/"))
     if listed:
         words = tuple(dict.fromkeys(sub.split(" ", 1)[0] for sub, _m in listed
@@ -266,10 +266,14 @@ def _swallows_a_sentence(name: str, rest: str) -> bool:
     `/exit the meeting overran` is a person saying "this is a command",
     reason and all."""
     if name == "help":
-        # `help voice` asks for one command's words; `help me plan the
-        # week` is a sentence (the creator, 2026-09-13: "when I type
-        # 'help voice' it shows all the sub commands related to voice").
-        return len(rest.split()) > 1
+        # `help voice` asks for one command's words, and so does `help
+        # voice set`; `help me plan the week` is a sentence (the creator,
+        # 2026-09-13: "when I type 'help voice' it shows all the sub
+        # commands related to voice").
+        words = rest.split()
+        if words and words[0].lower() in ("me", "us", "him", "her", "them", "with", "please"):
+            return True
+        return len(words) > 1 and words[0].lower().lstrip("/") not in COMMAND_NAMES
     return bool(rest.strip()) and name in NO_ARGUMENT_COMMANDS
 
 

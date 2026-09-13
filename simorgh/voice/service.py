@@ -210,8 +210,8 @@ class Service:
         tts = self._injected["synthesiser"]
         if tts is None:
             tts, why = open_synthesiser(cfg)
-            if tts is None:
-                problems.append(why)
+            if tts is None or why:
+                problems.append(why if tts is None else f"tts {cfg.tts!r} fell back to {getattr(tts, 'name', '?')}: {why}")
         mic = self._injected["microphone"]
         if mic is None:
             if cfg.microphone == "fake":
@@ -445,14 +445,40 @@ class Service:
         value, problem = settings.parse(key, raw)
         if problem:
             return False, problem
-        if key in ("tts_voice", "tts_farsi_voice"):
+        if key == "tts_voice":
             value = await self._canonical_voice(str(value))
             problem = await self._unknown_voice(str(value))
             if problem:
                 return False, problem
+        previous = self.config
         self.config = settings.apply(self.config, key, value)
         if self._pipeline is not None:
             self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
+        restarted = ""
+        if key in _ENGINE_KEYS and not self._enabled and self._pipeline is not None:
+            # Voice is off but the engines are open (a `voice voices`, a
+            # voice check): drop them, so the next `voice on` opens the
+            # engine just chosen rather than the old one (observer, 2026-09-13).
+            await self._pipeline.stop()
+            self._pipeline = None
+            restarted = " (applies at the next `voice on`)"
+        if self._enabled and key in _ENGINE_KEYS:
+            # A different engine or detector: everything is reopened --
+            # and a pick that cannot open is NOT kept, or every later
+            # `voice on` would fail on it (observer, 2026-09-13).
+            await self._turn_off()
+            if self._pipeline is not None:
+                await self._pipeline.stop()
+                self._pipeline = None
+            ok, why = await self._turn_on()
+            if not ok:
+                self.config = previous
+                if self._pipeline is not None:
+                    await self._pipeline.stop()
+                    self._pipeline = None
+                await self._turn_on()
+                return False, f"refused: {key} = {value!r} could not be opened ({why}); kept {getattr(previous, key)!r}"
+            restarted = " (engines reopened; listening again)"
         where = ""
         if self._ctx is not None and getattr(self._ctx, "data_dir", None):
             path = Path(self._ctx.data_dir).parent / "simorgh.toml"
@@ -461,7 +487,6 @@ class Service:
                 where = f"; saved to {path}"
             except OSError as exc:
                 where = f"; NOT saved ({exc})"
-        restarted = ""
         if key == "enabled":
             if value and not self._enabled:
                 ok, why = await self._turn_on()
@@ -470,13 +495,7 @@ class Service:
                 await self._turn_off()
                 restarted = " (off)"
         elif self._enabled and key in _ENGINE_KEYS:
-            # A different engine or detector: everything is reopened.
-            await self._turn_off()
-            if self._pipeline is not None:
-                await self._pipeline.stop()
-                self._pipeline = None
-            ok, why = await self._turn_on()
-            restarted = " (engines reopened; listening again)" if ok else f" (could not restart: {why})"
+            pass    # reopened above
         elif self._enabled and key in _SESSION_KEYS:
             # The conversation's rules changed; the engines have not.
             await self._turn_off()

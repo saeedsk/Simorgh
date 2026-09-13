@@ -171,6 +171,14 @@ def _transcript_echo(text: str) -> str:
     return ""
 
 
+_MARKER_LINE = re.compile(r"^\s*[A-Z][A-Z0-9_]{2,}:\s", re.M)
+
+
+def _marker_shaped(text: str) -> bool:
+    """Whether a reply is (or opens with) a tool marker line -- `READ_FILE: ...`."""
+    return bool(_MARKER_LINE.search(text or ""))
+
+
 def unhonoured_marker(text: str, offered: tuple[str, ...]) -> str:
     """A tool the model asked for in the middle of a sentence, or "".
 
@@ -650,6 +658,13 @@ class SessionRunner:
                 step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
                 session.record(step)
                 await self._record_step(session, step)
+                if session.profile.scaffold == "chat":
+                    # A chat has no next attempt: the person asked for the
+                    # edit and gets told what was done, not "step budget
+                    # exhausted" (observer, 2026-09-13).
+                    answer = await self._wrap_up(session)
+                    if answer:
+                        return Outcome("completed", result_summary=answer)
                 return Outcome(
                     "blocked",
                     reason=f"{CONTINUATION_REASON}; the edit is applied and waiting to be committed",
@@ -819,15 +834,17 @@ class SessionRunner:
 
         saved = session.profile
         session.profile = replace(saved, tools=())
+        session.extra_rules = WRAP_UP_TEXT
         try:
             reply = await self._think(session, WRAP_UP_TEXT, last_step=True, no_tools=True)
         finally:
             session.profile = saved
+            session.extra_rules = ""
         if reply is None or reply.payload.get("floor"):
             return ""
         text = str(reply.payload.get("text") or "").strip()
-        if not text or reply.payload.get("tool_calls") or unhonoured_marker(text, ()):
-            return ""
+        if not text or reply.payload.get("tool_calls") or _marker_shaped(text):
+            return ""   # a marker on its own line is a tool request, not an answer (observer, 2026-09-13)
         return text
 
     async def _think(self, session: Session, user_text: str, *, last_step: bool, no_tools: bool = False) -> Message | None:
@@ -852,7 +869,8 @@ class SessionRunner:
                     session.profile, subject=session.subject, task=session.user_text,
                     unavailable=scaffolds.unavailable_note(offered), channel=session.channel,
                     speaker=session.speaker, speaker_relation=session.speaker_relation, room=session.room,
-                ),
+                    offered=() if no_tools else None,
+                ) + (f"\n\n{session.extra_rules}" if getattr(session, "extra_rules", "") else ""),
                 # Live-caught: this request never actually asked Cognition
                 # to parse tool calls -- `expected` was never set, so
                 # `cognition/service.py::_expected_spec` always fell

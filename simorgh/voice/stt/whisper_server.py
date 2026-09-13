@@ -22,6 +22,7 @@ import os
 import shutil
 import socket
 import time
+import urllib.error
 import uuid
 from pathlib import Path
 
@@ -165,6 +166,9 @@ class WhisperServerRecogniser:
             return json.loads(response.read().decode("utf-8") or "{}")
 
     async def transcribe(self, audio: Audio, *, language: str = "") -> Utterance:
+        if audio.seconds < 0.1:
+            return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
+                             language=language or self._language)
         body, content_type = _multipart({"response_format": "verbose_json", "language": language or self._language,
                                          "temperature": "0.0"}, "file", "turn.wav", wav_bytes(audio))
         started = time.monotonic()
@@ -175,6 +179,16 @@ class WhisperServerRecogniser:
                     await self._start()
                     reply = await asyncio.to_thread(self._post, body, content_type)
                     break
+                except urllib.error.HTTPError as exc:
+                    if 400 <= exc.code < 500:
+                        # The request was refused; the server is fine. Restarting
+                        # it reloaded 1.6 GB for nothing (observer, 2026-09-13).
+                        return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
+                                         language=language or self._language)
+                    if attempt == 2:
+                        raise RuntimeError(f"whisper-server failed: HTTP {exc.code}") from exc
+                    self.problems.append(f"whisper-server restarted: HTTP {exc.code}")
+                    await self._stop()
                 except (OSError, RuntimeError, ValueError) as exc:
                     if attempt == 2:
                         raise RuntimeError(f"whisper-server failed: {exc}") from exc
@@ -186,8 +200,9 @@ class WhisperServerRecogniser:
         words = tuple(_words(reply))
         text = "".join(str(s.get("text") or "") for s in (reply.get("segments") or [])) if reply.get("segments") \
             else str(reply.get("text") or "")
+        heard_language = str(reply.get("detected_language") or reply.get("language") or "") or (language or self._language)
         return Utterance(text=clean_transcript(text), confidence=1.0, seconds=audio.seconds,
-                         engine=self.name, language=language or self._language, words=words)
+                         engine=self.name, language=heard_language, words=words)
 
 
 __all__ = ["WhisperServerRecogniser", "free_port"]

@@ -88,6 +88,8 @@ class Session:
     kind: str
     mode: Literal["plan", "execute"]
     profile: Profile
+    #: a line added to the rules for one call (the chat wrap-up: "no more tools, answer now")
+    extra_rules: str = ""
     worker_id: str = ""
     user_text: str = ""
     # The file this task is already about, when the task named one.

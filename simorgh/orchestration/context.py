@@ -279,6 +279,19 @@ class Assembler:
         # dropped here was found by similarity and will be found again
         # next turn, while a recent one that gets dropped is simply gone
         # until it happens to become lexically relevant.
+        # A turn spoken by one person is theirs: it comes back for them
+        # (the third recall) and for nobody else -- not for another
+        # family member, not for a voice Sim does not know. Until this an
+        # observer found the block for Ira, Aran and a stranger byte-
+        # identical, Ira's "secret hideout" line included (2026-09-13).
+        # Typed turns carry no person tag and stay shared.
+        def _theirs(item: dict) -> bool:
+            owners = [t[len("person:"):] for t in (item.get("tags") or []) if str(t).startswith("person:")]
+            return not owners or (bool(speaker) and speaker in owners)
+
+        if str(getattr(session, "channel", "") or "") == "voice":
+            recent_items = [i for i in recent_items if _theirs(i)]
+            matched_items = [i for i in matched_items if _theirs(i)]
         chosen: dict[str, dict] = {}
         for item in [*recent_items[:_MEMORY_RECENT_K], *person_items[:_MEMORY_PERSON_K], *matched_items[:_MEMORY_MATCHED_K]]:
             ref = str(item.get("ref", ""))

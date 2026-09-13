@@ -180,9 +180,13 @@ def open_synthesiser(config: Config) -> tuple[object | None, str]:
                 break
             except ImportError as exc:
                 reasons.append(f"{cls.name}: {exc}")
+    # A first choice that fell through is said, not swallowed: `tts =
+    # chatterbox` without its environment came up as Kokoro with
+    # `problems=[]` (observer, 2026-09-13).
+    why = "; ".join(reasons) if reasons else ""
     if not config.tts_by_language or config.tts == "piper":
-        return primary, ""
-    return PolyglotSynthesiser(primary, config), ""
+        return primary, why
+    return PolyglotSynthesiser(primary, config), why
 
 
 __all__ = ["PolyglotSynthesiser", "open_synthesiser"]
