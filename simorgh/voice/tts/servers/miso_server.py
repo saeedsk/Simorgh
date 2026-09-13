@@ -51,8 +51,12 @@ def main() -> None:
             if reference:
                 context = context_cache.get(reference)
                 if context is None:
-                    from generator import Segment
-
+                    try:
+                        from generator import Segment
+                    except ImportError:
+                        Segment = None  # noqa: N806
+                    if Segment is None:
+                        raise RuntimeError("MisoTTS's Segment is not importable; is MISO_REPO right?")
                     audio, sr = ta.load(reference)
                     audio = ta.functional.resample(audio.squeeze(0), orig_freq=sr, new_freq=rate)
                     context = [Segment(text=str(params.get("reference_text") or ""), speaker=0, audio=audio)]
