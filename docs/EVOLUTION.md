@@ -5034,3 +5034,53 @@ Still ahead, roughly in order:
     `<command> help` is the same screen, `help work|control|...` shows a
     section, Tab after `help` offers the commands, and `help me plan the
     week` is still a sentence. Heard: `workspace/voice/samples/chatterbox-jessica.wav`.
+
+160. **Where the seconds went, and two lanes (2026-09-13, night).** "Sim
+    voice using Chatterbox has some unnatural hiccups; the response is
+    also slow -- how can we make Sim super responsive?" Read from the
+    `voice:turns` stream, not guessed: a Kokoro turn answered 3.5-5.4 s
+    after the person stopped (recogniser 1.6-3.0, model 1.2-2.6, first
+    sound 0.4-1.2); a Chatterbox turn 10-19 s, first sound 6.7-15 s, with
+    1-2 underruns -- the hiccups, each piece played on its own as the
+    next one rendered. Measured: whisper-cli spends 3.35 s on a clip it
+    transcribes in 1.27 -- starting, mapping the model, warming Metal,
+    every turn; whisper.cpp's own `whisper-server`, kept loaded, does
+    the same words in 0.69 s (`voice/stt/whisper_server.py`, first in
+    `auto`, started at `voice on`). Chatterbox renders 1.8-2.8 s per
+    spoken second on this GPU; no dial closes that, so
+    `voice/tts/lanes.py`: Kokoro speaks every spoken turn and aside,
+    Chatterbox the typed-turn replies, `voice test` and answers over
+    `expressive_min_chars` -- both as the same cloned Jessica --
+    `expressive_lane = auto | always | off`. The slow lane banks audio
+    before its first piece plays (`hold_seconds`, from the engine's
+    running pace) so a reply is late once rather than gapped thrice;
+    every piece is faded 5 ms at both edges (the clicks); the Chatterbox
+    server conditions on a reference once, not per sentence, and keeps
+    four CPU threads so the player beside it is not starved; it warms
+    behind the quick lane instead of making `voice on` wait 35 s. Then
+    the names: "Saeed's pronunciation is sæ'iːd" typed into `voice
+    pronounce` made Chatterbox read symbols as letters -- chopped noise.
+    `voice/pronounce.py`: a pronunciation is a respelling or IPA; IPA
+    travels as ⟦Saeed|sæˈiːd⟧, Kokoro speaks it as phonemes spliced into
+    the phonemized sentence, an engine that reads letters gets `sa-eed`,
+    the screen gets the name. "Saeed -- Saa-eed", the model spelling the
+    name after itself, is said once. A stray `[ciallo_05]` the model
+    opened with is not read. And a voice within 0.22 of an enrolled
+    person hears "you sound a little like Saeed -- is that you?" and a
+    yes keeps the turn as their take, instead of "what is your name?"
+    to a man the house knows. The family's IPA is in the book: sæˈiːd,
+    ɑːˈɹɑːn, ˈaɪɹɪs, ˈaɪɹə, ˈsuːdɛ. Heard: `kokoro-names-ipa.wav`,
+    `chatterbox-names-respelled.wav`, `chatterbox-lane-warm.wav`.
+    Then, "make sure Sim knows the family names by default" and "treat
+    the kids nice, with respect; Sim can consider itself part of the
+    family" -- and, on the first draft, "use male or female to identify
+    people, not son, daughter, wife; relations are optional and can be
+    learnt during the conversation." `contracts/household.py` is the
+    roster: a name, male or female, an age for a child, the IPA, and only
+    the one relation that is certain (Saeed, Sim's creator). The voice
+    book opens with the five named and pronounced, voiceless until they
+    speak; the model is told the household every spoken turn, that it is
+    part of it, to learn how people are related as it talks, and -- with
+    a child -- to be kind, plain, encouraging and safe. A family member
+    introducing themselves is asked their relation once, may skip it,
+    and is never asked again once it is known.

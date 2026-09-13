@@ -205,3 +205,54 @@ class TestSynthesisFailures(unittest.IsolatedAsyncioTestCase):
         chunks = [c async for c in synth.synthesise_stream(request)]
         self.assertEqual(chunks, [])
         self.assertIn("no model", synth.last_error)
+
+
+class _Laggard(_SlowSynth):
+    """Renders slower than it speaks: pace 2, like Chatterbox on a Mac."""
+
+    def pace_ratio(self) -> float:
+        return 2.0
+
+
+class TestSlowEnginePacing(unittest.IsolatedAsyncioTestCase):
+    async def test_a_slow_engine_banks_audio_before_the_first_piece_plays(self) -> None:
+        synth = _Laggard(delay=0.01)
+        streaming = StreamingSynthesiser(synth, lookahead=1)
+        request = _request("A first sentence of some length here.", "A second one, also long enough.", "The third.")
+        hold = streaming.hold_seconds(request)
+        self.assertGreater(hold, 0.0)
+        first_seen_after = None
+        async for chunk in streaming.synthesise_stream(request):
+            if first_seen_after is None:
+                first_seen_after = synth.calls
+        # The fake's pieces are a few hundredths of a second each, far
+        # short of the hold, so the whole reply is banked before it plays.
+        self.assertEqual(first_seen_after, 3, "every piece was rendered before the first played")
+        self.assertEqual(streaming.last_hold_s, hold)
+
+    async def test_an_engine_that_keeps_up_is_not_held(self) -> None:
+        synth = _SlowSynth(delay=0.01)
+        streaming = StreamingSynthesiser(synth, lookahead=1)
+        request = _request("One.", "Two.", "Three.")
+        self.assertEqual(streaming.hold_seconds(request), 0.0)
+        first_seen_after = None
+        async for _chunk in streaming.synthesise_stream(request):
+            if first_seen_after is None:
+                first_seen_after = synth.calls
+        # The producer may already be on the second piece when the first
+        # is handed over; it is never on the third.
+        self.assertLessEqual(first_seen_after, 2)
+
+    def test_every_piece_is_faded_at_its_edges(self) -> None:
+        from simorgh.voice.tts.streaming import edged
+
+        pcm = (3000).to_bytes(2, "little", signed=True) * 4800   # 0.2 s at 24 kHz, a hard step
+        out = edged(pcm, 24000)
+        first = int.from_bytes(out[:2], "little", signed=True)
+        last = int.from_bytes(out[-2:], "little", signed=True)
+        middle = int.from_bytes(out[len(out) // 2:len(out) // 2 + 2], "little", signed=True)
+        self.assertEqual(first, 0)
+        self.assertLess(abs(last), 100)
+        self.assertEqual(middle, 3000)
+        tiny = (3000).to_bytes(2, "little", signed=True) * 40
+        self.assertEqual(edged(tiny, 24000), tiny, "a piece shorter than two ramps is left alone")

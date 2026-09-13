@@ -179,7 +179,8 @@ class SpeakerBook:
     """The household's voices: enrolment, identification, persistence."""
 
     def __init__(self, folder: Path | str = "workspace/voice/speakers", *, threshold: float = DEFAULT_THRESHOLD,
-                 margin: float = DEFAULT_MARGIN, clock=time.time) -> None:
+                 margin: float = DEFAULT_MARGIN, clock=time.time, household=None) -> None:
+        self._household = tuple(household or ())
         self._folder = Path(folder)
         self.threshold = float(threshold)
         self.margin = float(margin)
@@ -202,6 +203,28 @@ class SpeakerBook:
                 continue
             if person.name:
                 self._people[person.name.lower()] = person
+        self._seed()
+
+    def _seed(self) -> None:
+        """The household's names, relations and pronunciations are known
+        before any voice is (contracts/household.py); a person already
+        in the book keeps what was written about them."""
+        for m in self._household:
+            person = self._people.get(m.name.lower())
+            changed = False
+            if person is None:
+                person = Person(name=m.name, relation=m.relation, enrolled_at=self._clock())
+                self._people[m.name.lower()] = person
+                changed = True
+            if not person.relation and m.relation:
+                person.relation, changed = m.relation, True
+            if not person.say_as and m.say_as:
+                person.say_as, changed = m.say_as, True
+            if changed:
+                try:
+                    self._save(person)
+                except OSError:
+                    pass
 
     def _save(self, person: Person) -> None:
         self._folder.mkdir(parents=True, exist_ok=True)

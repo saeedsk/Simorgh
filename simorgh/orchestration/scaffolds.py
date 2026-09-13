@@ -360,12 +360,18 @@ answer, and you do not route around it."""
 def who_is_here(speaker: str, relation: str, room: str) -> str:
     """The lines that tell the model who it is talking to and what it
     overheard (voice/speakers.py, voice/session.py)."""
-    lines = []
+    from simorgh.contracts.household import FAMILY, WITH_A_CHILD, describe, member, roster
+
+    lines = [FAMILY.format(roster=roster())]
     if speaker:
+        relation = relation or describe(speaker)
         who = f"{speaker} ({relation})" if relation else speaker
         lines.append(f"You are speaking with {who}. You know their voice. Use their name the way a person would -- "
                      "now and then, not every sentence. What you remember with them is in your memory, labelled with "
                      "their name; what others told you stays theirs.")
+        known = member(speaker)
+        if known is not None and known.age is not None and known.age < 16:
+            lines.append(WITH_A_CHILD.format(name=known.name, age=known.age))
     else:
         lines.append("You do not know this voice. Do not guess a name; do not ask for one -- that is handled elsewhere.")
     if room:

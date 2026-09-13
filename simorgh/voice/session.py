@@ -26,6 +26,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 
+from simorgh.contracts.household import HOUSEHOLD
 from simorgh.contracts import topics
 
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
@@ -97,7 +98,15 @@ def _looks_like_question(text: str) -> bool:
     return text.endswith(("?", "؟")) or bool(_QUESTION_WORDS.match(text))
 
 
+#: an unknown voice this close to an enrolled person is asked "is that you?"
+#: rather than "what is your name?" (the threshold itself is 0.5)
+GUESS_FLOOR = 0.22
+#: a typed reply within this many seconds of a spoken turn is said quickly
+RECENT_VOICE_S = 120.0
+
+
 class VoiceSession:
+    _last_voice_turn_at: float = -1e9   # when a spoken turn was last answered
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
                  detector_factory, clock=None, logger=None, embedder=None, speakers=None) -> None:
         self._pipeline = pipeline
@@ -124,7 +133,8 @@ class VoiceSession:
         if self._speakers is None and str(config.speaker_id).lower() != "off":
             from .speakers import SpeakerBook
 
-            self._speakers = SpeakerBook(config.speakers_dir, threshold=config.speaker_threshold, margin=config.speaker_margin)
+            self._speakers = SpeakerBook(config.speakers_dir, threshold=config.speaker_threshold, margin=config.speaker_margin,
+                                         household=HOUSEHOLD)
         # The engine is opened only once somebody is enrolled (or enrolment
         # starts): a household that never enrolled pays nothing per turn.
         if self._embedder is None and self._speakers is not None and self._speakers.people():
@@ -230,6 +240,12 @@ class VoiceSession:
             self.stats.warmup_seconds = await self._tts.warmup()
         except Exception as exc:  # noqa: BLE001 -- a cold first reply is slower, not fatal
             self._log("warning", "voice.warmup_failed", error=repr(exc))
+        try:
+            warm_stt = getattr(self._stt, "warmup", None)
+            if callable(warm_stt):
+                self.stats.warmup_seconds += float(await warm_stt())
+        except Exception as exc:  # noqa: BLE001 -- the first turn starts the server instead
+            self._log("warning", "voice.stt_warmup_failed", error=repr(exc))
         await self._announce(self.turns.state)
         stream = self._mic.stream()
         try:
@@ -672,6 +688,14 @@ class VoiceSession:
         self._intro = Introduction()
         self._intro.vectors.append(list(vector))
         self._unknown.clear()
+        guess = getattr(identification, "runner_up", "") or ""
+        close = float(getattr(identification, "runner_up_score", 0.0) or 0.0)
+        if guess and close >= GUESS_FLOOR and self._speakers is not None and self._speakers.get(guess) is not None:
+            # Nearly someone: ask them, do not make them introduce themselves
+            # to a house that knows them (the creator, 2026-09-13: "you know me").
+            self._intro.stage = "confirm"
+            self._intro.guess = guess
+            return f"{reply.rstrip()} By the way, you sound a little like {guess}, but I am not sure. Is that you?"
         return f"{reply.rstrip()} By the way, I do not know your voice yet. What is your name?"
 
     async def _begin_introduction(self, turn_id: int, text: str, vector, *, name: str) -> None:
@@ -837,6 +861,26 @@ class VoiceSession:
                 register_for_reply(user_text, reply, valence=valence, arousal=arousal, is_error=is_error)
         return base.with_base(self._config.tts_speed, self._config.volume)
 
+    def _lane_for(self, text: str, *, spoken_turn: bool) -> str:
+        """Which engine says this when two are open (tts/lanes.py): a
+        spoken turn takes the quick lane unless the reply is long; a
+        typed turn's reply or `voice test` takes the expressive one.
+        `expressive_lane` always/off overrides; asides never wait."""
+        mode = str(getattr(self._config, "expressive_lane", "auto") or "auto")
+        if mode == "off":
+            return "fast"
+        if mode == "always":
+            return "expressive"
+        if not spoken_turn:
+            # A typed reply spoken while a voice conversation is going
+            # would arrive twenty seconds late, after the next exchange
+            # (the creator's screen, 2026-09-13): quick while people talk.
+            if self._now() - self._last_voice_turn_at < RECENT_VOICE_S:
+                return "fast"
+            return "expressive"
+        threshold = int(getattr(self._config, "expressive_min_chars", 400) or 0)
+        return "expressive" if threshold and len(text) >= threshold else "fast"
+
     def _maybe_hum(self, spoken_ms: int) -> None:
         """The person paused mid-story: a listener's "uh-huh", half loud,
         under them -- once they have been talking a while, not at the end
@@ -863,7 +907,7 @@ class VoiceSession:
         delivery = (delivery or Delivery()) if self._config.expressive else Delivery()
         delivery = delivery.with_base(self._config.tts_speed, self._config.volume)
         request = TtsRequest(request_id=request_id, pieces=((self._planner.pronounced(text), 0),), voice=self._config.tts_voice,
-                             speed=delivery.speed, gain=delivery.gain)
+                             speed=delivery.speed, gain=delivery.gain, lane="fast")
         lock = self._pipeline.speech_lock
         if lock.locked():
             return False
@@ -907,6 +951,7 @@ class VoiceSession:
         from simorgh.contracts.tone import split_tone
 
         tone, reply = split_tone(reply)
+        self._last_voice_turn_at = self._now()
         plan = self._planner.plan(reply, context)
         if plan.connector:
             self._turns_since_connector = 0
@@ -914,10 +959,12 @@ class VoiceSession:
         else:
             self._turns_since_connector += 1
         delivery = self._delivery_for(context.user_text, plan.text, is_error=context.is_error, tone=tone)
+        lane = self._lane_for(plan.text, spoken_turn=True)
         request = TtsRequest(request_id=response_id,
                              pieces=tuple((c.text, int(c.pause_ms * delivery.pause_scale)) for c in plan.chunks),
                              voice=self._config.tts_voice, speed=delivery.speed, gain=delivery.gain,
-                             tone=tone or (delivery.register if delivery.register in ("warm", "bright") else ""))
+                             tone=tone or (delivery.register if delivery.register in ("warm", "bright") else ""),
+                             lane=lane)
         self._pipeline.speaking = True
 
         def _first_audio(seconds: float) -> None:
@@ -938,7 +985,9 @@ class VoiceSession:
         self._pipeline.speaking = False
         self._sim_spoke_at = self._now()
         await self._report_synthesis(report)
-        said = plan.text
+        from .pronounce import strip_marks
+
+        said = strip_marks(plan.text, for_voice=False)
         self._pipeline.last_said = said
         self.stats.turns += 1
         metrics = clock.metrics(report)
@@ -947,6 +996,8 @@ class VoiceSession:
         metrics["connector"] = bool(plan.connector)
         metrics["register"] = delivery.register
         metrics["tone"] = tone
+        metrics["lane"] = lane
+        metrics["held"] = round(float(getattr(self._tts, "last_hold_s", 0.0)), 2)
         metrics["omitted"] = list(plan.omitted)
         self.stats.last_metrics = metrics
         engine = getattr(self._tts, "last_engine", "") or self._tts.name
@@ -972,7 +1023,8 @@ class VoiceSession:
         plan = self._planner.plan(text, Context())
         request = TtsRequest(request_id=request_id or f"say-{uuid.uuid4().hex[:8]}",
                              pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
-                             voice=self._config.tts_voice, speed=self._config.tts_speed)
+                             voice=self._config.tts_voice, speed=self._config.tts_speed,
+                             lane=self._lane_for(plan.text, spoken_turn=False))
         entered_from = self.turns.state
         if entered_from == LISTENING:
             self.turns.state = AGENT_SPEAKING

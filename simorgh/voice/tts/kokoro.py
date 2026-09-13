@@ -110,17 +110,41 @@ class KokoroSynthesiser:
         except Exception:  # noqa: BLE001 -- a blend that fails is a plain voice, never a failed reply
             return None
 
+    #: reads ⟦Name|ipa⟧ marks (voice/pronounce.py) as phonemes
+    speaks_ipa = True
+
+    def _phonemes(self, text: str) -> str | None:
+        """The text as phonemes when it carries an IPA mark and the
+        library can phonemize the rest; None to speak it as text."""
+        from ..pronounce import phonemes_for, strip_marks
+
+        if "⟦" not in text:
+            return None
+        tokenizer = getattr(self._kokoro, "tokenizer", None)
+        if tokenizer is None or not hasattr(tokenizer, "phonemize"):
+            return None
+        try:
+            return phonemes_for(text, lambda plain: tokenizer.phonemize(plain, lang="en-us"))
+        except Exception:  # noqa: BLE001 -- then the respelling, as any other engine
+            return None
+
     async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
         try:
             import numpy as np
         except ImportError as exc:  # pragma: no cover -- kokoro-onnx depends on numpy
             raise RuntimeError("kokoro needs numpy") from exc
+        from ..pronounce import strip_marks
+
+        phonemes = self._phonemes(text)
+        if phonemes is None:
+            text = strip_marks(text)
 
         def _run():
             name = voice or self._voice
             style = self.style_for(name, tone)
-            samples, rate = self._kokoro.create(text, voice=style if style is not None else name,
-                                                speed=speed or self._speed, lang="en-us")
+            samples, rate = self._kokoro.create(phonemes if phonemes is not None else text,
+                                                voice=style if style is not None else name,
+                                                speed=speed or self._speed, lang="en-us", is_phonemes=phonemes is not None)
             pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
             return pcm, int(rate)
 

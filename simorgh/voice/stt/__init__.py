@@ -11,16 +11,20 @@ def open_recogniser(config: Config, *, repo_root=None) -> tuple[object | None, s
     cloud engine (design section 0)."""
     from .faster_whisper import FasterWhisperRecogniser
     from .whisper_cli import WhisperCliRecogniser
+    from .whisper_server import WhisperServerRecogniser
 
     if config.stt == "fake":
         from ..fakes import FakeRecogniser
 
         return FakeRecogniser(config.fake_transcript), ""
-    order = {"auto": (FasterWhisperRecogniser, WhisperCliRecogniser),
+    # The server before the CLI: same model, same words, 2.5 s less per
+    # turn (whisper_server.py has the measurement).
+    order = {"auto": (FasterWhisperRecogniser, WhisperServerRecogniser, WhisperCliRecogniser),
              "faster_whisper": (FasterWhisperRecogniser,),
+             "whisper_server": (WhisperServerRecogniser,),
              "whisper_cli": (WhisperCliRecogniser,)}.get(config.stt)
     if order is None:
-        return None, f"unknown stt engine {config.stt!r} (auto | faster_whisper | whisper_cli | fake)"
+        return None, f"unknown stt engine {config.stt!r} (auto | faster_whisper | whisper_server | whisper_cli | fake)"
     reasons = []
     for cls in order:
         try:

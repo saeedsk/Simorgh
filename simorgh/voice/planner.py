@@ -63,6 +63,7 @@ class SpokenPlan:
 # -- speakable text -----------------------------------------------------------------------------
 
 _CODE_BLOCK = re.compile(r"```.*?```", re.S)
+_STRAY_TAG = re.compile(r"^\s*\[[A-Za-z][A-Za-z0-9_-]{0,23}\]\s*")
 _TABLE = re.compile(r"(?m)^\s*\|.*\|\s*$(?:\n^\s*\|.*\|\s*$)+")
 _URL = re.compile(r"(?:https?://|www\.)\S+")
 _MD_LINK = re.compile(r"\[([^\]]+)\]\((?:[^)]+)\)")
@@ -219,6 +220,9 @@ def speakable(text: str) -> tuple[str, tuple[str, ...]]:
     enumeration. Numbers stay intelligible. Meaning is never changed."""
     omitted: list[str] = []
     out = text or ""
+    # A stray tag the model opened with -- `[ciallo_05]`, `[thinking]` --
+    # is not a word; the known feelings were taken off before this.
+    out = _STRAY_TAG.sub("", out)
 
     def _drop(pattern: re.Pattern, kind: str, replacement: str) -> None:
         nonlocal out
@@ -335,6 +339,22 @@ def sentences(text: str) -> list[str]:
     if tail:
         out.append(tail)
     return out
+
+
+def _drop_self_respelling(text: str, name: str) -> str:
+    """`Saeed -- Saa-eed`, `Saeed (SAH-eed)`, `Saeed, pronounced Sah-eed`:
+    the respelling after the name goes when it is the name's own sound
+    (letters alike), so the household's pronunciation is said once."""
+    import difflib
+
+    def _alike(candidate: str) -> bool:
+        a = re.sub(r"[^a-z]", "", name.lower())
+        b = re.sub(r"[^a-z]", "", candidate.lower())
+        return bool(a and b) and (b[0] == a[0]) and difflib.SequenceMatcher(None, a, b).ratio() >= 0.45
+
+    pattern = re.compile(r"\b(" + re.escape(name) + r")\b\s*(?:[—–-]+|\(|,?\s*(?:pronounced|said)\s+)\s*"
+                         r"([A-Za-z]+(?:[-'][A-Za-z]+)*)\)?", re.IGNORECASE)
+    return pattern.sub(lambda m: m.group(1) if _alike(m.group(2)) else m.group(0), text)
 
 
 def _split_long(sentence: str, limit: int) -> list[str]:
@@ -485,14 +505,21 @@ class SpokenResponsePlanner:
 
     def pronounced(self, text: str) -> str:
         """Names replaced by the way the household says them, whole words
-        only, case kept for the first letter -- the screen shows the
-        name as written; only the voice hears "Ay-raa"."""
+        only -- the screen shows the name as written; only the voice
+        hears "Ay-raa". An IPA pronunciation becomes a mark the engine
+        reads (voice/pronounce.py). And "Saeed -- Saa-eed", the model
+        spelling the name out after itself, is said once: the creator
+        heard his name twice (2026-09-13)."""
+        from .pronounce import is_ipa, mark
+
         table = self._pronunciations() if callable(self._pronunciations) else (self._pronunciations or {})
         for name, say_as in table.items():
             if not name or not say_as:
                 continue
+            text = _drop_self_respelling(text, name)
+            say = mark(name, say_as) if is_ipa(say_as) else say_as
             pattern = re.compile(r"\b" + re.escape(name) + r"\b", re.IGNORECASE)
-            text = pattern.sub(lambda m, say=say_as: say if m.group(0)[:1].isupper() or True else say, text)
+            text = pattern.sub(lambda _m, s=say: s, text)
         return text
 
     def plan(self, text: str, context: Context | None = None) -> SpokenPlan:

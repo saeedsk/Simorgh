@@ -148,6 +148,9 @@ class TtsRequest:
     #: blends a share of a differently coloured voice into the base voice,
     #: Piper changes its expressiveness, an engine without either ignores it
     tone: str = ""
+    #: which engine speaks it when two are open (voice/tts/lanes.py):
+    #: "fast" | "expressive" | "" for the engine's own choice
+    lane: str = ""
 
 
 @dataclass(frozen=True)

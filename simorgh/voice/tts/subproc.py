@@ -77,6 +77,9 @@ class SubprocessSynthesiser:
     server = ""
     #: sample rate the server reports; kept for `Audio`
     load_timeout_s = 240.0
+    #: seconds of rendering per second of speech before the first piece
+    #: has been measured (Chatterbox on the M3 Pro: 1.8-2.8, 2026-09-13)
+    nominal_pace = 2.0
 
     def __init__(self, config, *, venv_dir: str | None = None, reference: str = "", timeout_s: float = 180.0) -> None:
         self._venv_dir = Path(venv_dir or getattr(config, "venv_dir", DEFAULT_VENV_DIR)).expanduser()
@@ -96,6 +99,22 @@ class SubprocessSynthesiser:
 
     def voices(self) -> list[str]:
         return [self.name] + ([Path(self._reference).stem] if self._reference else [])
+
+    #: running rendering-seconds-per-spoken-second over pieces of a
+    #: second or more (a one-word warm-up is all fixed cost and would
+    #: say 16); bounded, because the guard that reads it plans a wait
+    _pace = 0.0
+
+    def pace_ratio(self) -> float:
+        """Rendering seconds per spoken second, a running figure over
+        the pieces long enough to mean something; nominal until one."""
+        return float(self._pace or self.nominal_pace)
+
+    def _note_pace(self, took_s: float, seconds: float) -> None:
+        if seconds < 1.0 or took_s <= 0:
+            return
+        ratio = min(4.0, max(1.0, took_s / seconds))
+        self._pace = ratio if not self._pace else 0.6 * self._pace + 0.4 * ratio
 
     def params_for(self, tone: str) -> dict:  # pragma: no cover -- subclasses
         return {}
@@ -184,8 +203,14 @@ class SubprocessSynthesiser:
                 pcm = handle.readframes(handle.getnframes())
                 if handle.getsampwidth() != 2:
                     raise RuntimeError(f"{self.name} wrote {handle.getsampwidth() * 8}-bit audio; 16-bit expected")
-                if handle.getnchannels() != 1:
-                    pcm = pcm[::handle.getnchannels()]  # crude but these engines are mono
+                channels = handle.getnchannels()
+                if channels != 1:
+                    # Take the first channel, sample by sample -- slicing the
+                    # bytes would have taken every Nth BYTE.
+                    import array
+
+                    frames = array.array("h", pcm)
+                    pcm = frames[::channels].tobytes()
         finally:
             try:
                 path.unlink()
@@ -193,6 +218,7 @@ class SubprocessSynthesiser:
                 pass
         self.last_took_s = round(time.monotonic() - started, 2)
         self.last_seconds = len(pcm) / 2 / float(rate or 24000)
+        self._note_pace(self.last_took_s, self.last_seconds)
         return Audio(pcm, int(rate))
 
 

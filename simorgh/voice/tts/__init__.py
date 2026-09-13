@@ -16,12 +16,17 @@ from ..lang import ENGLISH, language_of
 class PolyglotSynthesiser:
     """One synthesiser per language, chosen by the reply's script.
 
+    Marks for IPA pass through; each engine underneath says whether it
+    reads them (`speaks_ipa`) and `_with_tone` respells for one that does not.
+
     `primary` speaks everything the table does not route elsewhere.
     Engines for other languages are opened lazily, once, and a language
     whose engine cannot be opened is SAID -- in the primary voice --
     rather than mangled or dropped: "I cannot speak Farsi yet: piper
     voice not found ...". A refusal you can hear is one that gets fixed.
     """
+
+    speaks_ipa = True
 
     def __init__(self, primary, config: Config, *, openers: dict | None = None) -> None:
         self._primary = primary
@@ -62,30 +67,61 @@ class PolyglotSynthesiser:
     def problems(self) -> dict[str, str]:
         return dict(self._problems)
 
-    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "", lane: str = "") -> Audio:
         language = language_of(text)
         engine = self.engine_for(language)
         if engine is None:
             self.last_engine = getattr(self._primary, "name", "")
             excuse = f"I cannot speak {_LANGUAGE_NAMES.get(language, language)} yet: {self._problems[language]}"
-            return await _with_tone(self._primary, excuse, voice=voice, speed=speed, tone=tone)
-        self.last_engine = getattr(engine, "name", "")
+            return await _with_tone(self._primary, excuse, voice=voice, speed=speed, tone=tone, lane=lane)
         if engine is self._primary:
-            return await _with_tone(engine, text, voice=voice, speed=speed, tone=tone)
-        return await _with_tone(engine, text, voice="", speed=speed, tone=tone)
+            audio = await _with_tone(engine, text, voice=voice, speed=speed, tone=tone, lane=lane)
+        else:
+            audio = await _with_tone(engine, text, voice="", speed=speed, tone=tone)
+        # The engine that actually spoke -- a lane pair reports the lane's engine.
+        self.last_engine = getattr(engine, "last_engine", None) or getattr(engine, "name", "")
+        return audio
+
+    def pace_ratio(self, lane: str = "") -> float:
+        own = getattr(self._primary, "pace_ratio", None)
+        return float(own(lane)) if callable(own) else 0.0
+
+    async def warmup(self) -> float:
+        own = getattr(self._primary, "warmup", None)
+        if callable(own):
+            return float(await own())
+        await self._primary.synthesise("Okay.", speed=1.0)
+        return 0.0
+
+    async def close(self) -> None:
+        for engine in self._engines.values():
+            close = getattr(engine, "close", None)
+            if callable(close):
+                try:
+                    await close()
+                except Exception:  # noqa: BLE001
+                    pass
 
 
-async def _with_tone(engine, text: str, *, voice: str, speed: float, tone: str) -> Audio:
-    """Call an engine's synthesise, with the tone when it takes one."""
+async def _with_tone(engine, text: str, *, voice: str, speed: float, tone: str, lane: str = "") -> Audio:
+    """Call an engine's synthesise, with the tone (and lane) when it takes
+    one, and the IPA marks respelled for an engine that reads letters."""
     import inspect
 
+    if not getattr(engine, "speaks_ipa", False):
+        from ..pronounce import strip_marks
+
+        text = strip_marks(text)
     kwargs = {"speed": speed}
     if voice:
         kwargs["voice"] = voice
     try:
         params = inspect.signature(engine.synthesise).parameters
-        if tone and ("tone" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())):
+        takes_any = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if tone and ("tone" in params or takes_any):
             kwargs["tone"] = tone
+        if lane and ("lane" in params or takes_any):
+            kwargs["lane"] = lane
     except (TypeError, ValueError):
         pass
     return await engine.synthesise(text, **kwargs)
@@ -132,6 +168,18 @@ def open_synthesiser(config: Config) -> tuple[object | None, str]:
             reasons.append(f"{cls.name}: {exc}")
     if primary is None:
         return None, "no speech synthesiser (" + "; ".join(reasons) + ") -- pip install kokoro-onnx, or use macOS `say`"
+    if isinstance(primary, (ChatterboxSynthesiser, MisoSynthesiser)) and \
+            str(getattr(config, "expressive_lane", "auto")) != "always":
+        # The expressive engine answers in seconds; a spoken turn cannot
+        # wait for it. Kokoro (else `say`) takes the turns beside it.
+        from .lanes import LaneSynthesiser
+
+        for cls in (KokoroSynthesiser, SaySynthesiser):
+            try:
+                primary = LaneSynthesiser(cls(config), primary, config)
+                break
+            except ImportError as exc:
+                reasons.append(f"{cls.name}: {exc}")
     if not config.tts_by_language or config.tts == "piper":
         return primary, ""
     return PolyglotSynthesiser(primary, config), ""

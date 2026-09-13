@@ -23,7 +23,8 @@ class Config:
     enabled: bool | str = "auto"
     # Engines. "auto" = the best one whose package or binary is present;
     # never a cloud engine (section 0: local first for speech).
-    stt: str = "auto"                  # auto | faster_whisper | whisper_cli | fake
+    stt: str = "auto"                  # auto | faster_whisper | whisper_server | whisper_cli | fake
+    stt_server_port: int = 0           # whisper_server's port; 0 = a free one
     stt_model: str = "large-v3-turbo"  # faster_whisper model name; whisper_cli: a ggml file name or path
     # "" = detect. Pinned to "en" until 2026-09-11, which made Farsi
     # unrecognisable: whisper was told every utterance was English.
@@ -189,6 +190,14 @@ class Config:
     miso_repo: str = "workspace/voice/engines/MisoTTS"
     miso_device: str = ""                   # "" = cuda, else mps, else cpu
     expressive_timeout_s: float = 180.0
+    # Which replies the expressive engine speaks when `tts` names one
+    # (voice/tts/lanes.py): "auto" = typed-turn replies, `voice test`
+    # and anything at least `expressive_min_chars` long; spoken turns
+    # and asides take the quick lane (Kokoro). "always" = everything
+    # through the expressive engine, slow first sound and all; "off" =
+    # never, the quick lane only.
+    expressive_lane: str = "auto"
+    expressive_min_chars: int = 400
     keep_audio: bool = False
     audio_dir: str = "workspace/voice/audio"
     keep_transcripts: bool = True

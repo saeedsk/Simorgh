@@ -154,6 +154,20 @@ inside a conversational turn. So **two lanes**:
 Both lanes read the same `TtsRequest.tone`; the choice of lane is the
 planner's (`SpokenPlan.lane`), from length, mode (`story`) and urgency.
 
+**Built 2026-09-13 (night), measured first.** From the `voice:turns`
+stream: a Kokoro turn's first sound 0.4-1.2 s after the reply, a
+Chatterbox turn's 6.7-15 s with underruns. So `voice/tts/lanes.py` is the
+two lanes above, chosen per request by `TtsRequest.lane` from
+`VoiceSession._lane_for` (`expressive_lane = auto|always|off`,
+`expressive_min_chars`); the slow lane banks audio before playing
+(`StreamingSynthesiser.hold_seconds`, from the engine's running pace);
+every piece is edge-faded. The recogniser's own 2.6 s of process start
+per turn went the same night (`stt/whisper_server.py`). What remains of
+the turn: whisper encode ~0.7 s, the model 1-2.6 s (5.9 s on the Claude
+CLI failover), Kokoro 0.4 s. The next second to win is the model's:
+start the ask on the last partial transcript rather than the final one,
+and let a fast small model answer the short turns.
+
 ## 4. Order of work
 
 1. `voice/conversation.py` with `Conversation`, modes, addressed-to and the

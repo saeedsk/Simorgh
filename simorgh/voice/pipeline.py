@@ -164,6 +164,15 @@ class Pipeline:
             if not fut.done():
                 fut.cancel()
         self._pending.clear()
+        # Engines that run a process (whisper-server, Chatterbox) end
+        # with the pipeline; the service opens fresh ones next time.
+        for engine in (self._stt, self._tts):
+            close = getattr(engine, "close", None)
+            if callable(close):
+                try:
+                    await close()
+                except Exception:  # noqa: BLE001 -- a stubborn process is not a failed stop
+                    pass
 
     async def _on_task_event(self, message) -> None:
         """A chat turn's task id IS its session id (`interface/service.py`

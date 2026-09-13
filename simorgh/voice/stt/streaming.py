@@ -33,6 +33,11 @@ class IncrementalRecogniser:
         self._inflight: asyncio.Task | None = None
         self.partials_made = 0
 
+    async def warmup(self) -> float:
+        """Start an engine that runs a server (whisper-server) now."""
+        own = getattr(self._inner, "warmup", None)
+        return float(await own()) if callable(own) else 0.0
+
     @property
     def name(self) -> str:
         return f"incremental:{getattr(self._inner, 'name', '')}"

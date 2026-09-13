@@ -40,7 +40,7 @@ _NAME_PATTERNS = (
     re.compile(r"\b(?:my name is|my name's|i am|i'm|im|this is|it's|its|call me|they call me|name is)\s+([A-Za-z][A-Za-z'\-]{1,30})", re.I),
     re.compile(r"^\s*(?:it is|it's)?\s*([A-Za-z][A-Za-z'\-]{1,30})\s*[.!]?\s*$", re.I),
 )
-_NOT_NAMES = {"skip", "no", "yes", "nobody", "none", "stop", "quiet", "sim", "simorgh", "okay", "ok", "hello", "hi",
+_NOT_NAMES = {"me", "skip", "no", "yes", "nobody", "none", "stop", "quiet", "sim", "simorgh", "okay", "ok", "hello", "hi",
               "what", "why", "who", "sorry", "nothing", "never", "mind", "nevermind", "cancel", "not", "just", "here",
               "so", "going", "also", "a", "an", "the", "very", "really", "fine", "good", "done", "back", "home", "sure",
               "afraid", "tired", "busy", "hungry", "his", "her", "their", "my", "your", "this", "that", "it"}
@@ -84,6 +84,10 @@ def learn_request(text: str, *, speaker: str = "") -> str:
     return ""
 
 
+_YES = re.compile(r"^\W*(?:yes|yeah|yep|yup|correct|right|exactly|indeed|it'?s me|that'?s me|i am|this is me|sure)\b", re.I)
+_NO = re.compile(r"^\W*(?:no|nope|nah|not|wrong|it'?s not|that'?s not)\b", re.I)
+
+
 @dataclass
 class Step:
     """What the session should do after feeding a turn to the introduction."""
@@ -98,8 +102,9 @@ class Step:
 class Introduction:
     """One person being met. `vectors` are the takes gathered so far."""
 
-    stage: str = "ask_name"    # ask_name | ask_relation | take
+    stage: str = "ask_name"    # confirm | ask_name | ask_relation | take
     name: str = ""
+    guess: str = ""            # stage confirm: who the voice nearly was
     relation: str = ""
     vectors: list = field(default_factory=list)
     accepted: int = 0
@@ -107,6 +112,40 @@ class Introduction:
 
     def feed(self, text: str, vector, book) -> Step:
         text = (text or "").strip()
+        if self.stage == "confirm":
+            # "You sound a little like Saeed. Is that you?" -- yes means
+            # this voice IS that person's, in a room or a mood the takes
+            # so far did not cover: keep the turn as a take, on their word.
+            named = name_in(text)
+            if named.lower() in ("me", self.guess.lower()):
+                named = ""       # "yes, it's me" names nobody new
+            if _YES.match(text) and not named:
+                self.name = self.guess
+                self.stage = "take"
+                self.refused = 1     # their word beats "sounds like someone else"
+                if vector is not None:
+                    self.vectors.append(vector)
+                step = self._enrol_gathered(book)
+                step.say = f"Good, {self.name}. " + step.say
+                return step
+            if named:
+                self.name = named
+                if vector is not None:
+                    self.vectors.append(vector)
+                self.stage = "ask_relation" if book.get(named) is None else "take"
+                if self.stage == "take":
+                    self.refused = 1
+                    step = self._enrol_gathered(book)
+                    step.say = f"Ah, {named}. " + step.say
+                    return step
+                return Step(say=f"Nice to meet you, {named}. How are you related to the family? Or say skip.")
+            if _NO.match(text):
+                self.stage = "ask_name"
+                return Step(say="Then who is this? Say: my name is, and then your name.")
+            self.misses += 1
+            if self.misses >= 2:
+                return Step(say="No problem, we can do this another time.", done=True)
+            return Step(say=f"Is that you, {self.guess}? Yes or no -- or tell me your name.")
         if self.stage == "ask_name":
             name = name_in(text)
             if not name:
@@ -117,6 +156,15 @@ class Introduction:
             self.name = name
             if vector is not None:
                 self.vectors.append(vector)
+            known = book.get(name)
+            if known is not None and known.relation:
+                # The house knows this name (contracts/household.py, or an
+                # earlier introduction): straight to the voice, no quiz.
+                self.relation = known.relation
+                self.stage = "take"
+                step = self._enrol_gathered(book)
+                step.say = f"Hello, {name}! " + step.say
+                return step
             self.stage = "ask_relation"
             return Step(say=f"Nice to meet you, {name}. How are you related to the family? Or say skip.")
         if self.stage == "ask_relation":

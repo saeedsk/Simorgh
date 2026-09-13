@@ -19,6 +19,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from simorgh.contracts.household import HOUSEHOLD
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import Context, Health
@@ -381,7 +382,7 @@ class Service:
         session = self._session
         book = getattr(session, "_speakers", None) if session is not None else None
         if book is None:
-            book = SpeakerBook(self.config.speakers_dir, threshold=self.config.speaker_threshold,
+            book = SpeakerBook(self.config.speakers_dir, threshold=self.config.speaker_threshold, household=HOUSEHOLD,
                                margin=self.config.speaker_margin)
         name = str(payload.get("name") or "").strip()
         if action == "people":
@@ -392,14 +393,23 @@ class Service:
             for p in people:
                 heard = f", heard {p.heard}x" if p.heard else ""
                 said = f", said \"{p.say_as}\"" if p.say_as else ""
-                lines.append(f"  {p.name}" + (f" ({p.relation})" if p.relation else "") + f" -- {len(p.embeddings)} take(s){heard}{said}")
+                from simorgh.contracts.household import describe
+
+                about = p.relation or describe(p.name)
+                lines.append(f"  {p.name}" + (f" ({about})" if about else "") + f" -- {len(p.embeddings)} take(s){heard}{said}")
             return True, "\n".join(lines)
         if action == "pronounce":
             say_as = str(payload.get("value") or "").strip()
             if not name or not say_as:
                 return False, "usage: voice pronounce <name> <how to say it>   (voice pronounce Ira Ay-raa)"
+            from .pronounce import is_ipa, normalise, respell
+
+            say_as = normalise(say_as)
             person = book.pronounce(name, say_as, relation=str(payload.get("relation") or ""))
-            return True, f"{person.name} is said \"{say_as}\" from now on"
+            how = (f"{person.name} is said \"{say_as}\" from now on -- IPA: Kokoro speaks it exactly, "
+                   f"an engine that reads letters says \"{respell(say_as)}\"") if is_ipa(say_as) else \
+                f"{person.name} is said \"{say_as}\" from now on"
+            return True, how
         if action == "forget":
             if not name:
                 return False, "usage: voice forget <name>"
