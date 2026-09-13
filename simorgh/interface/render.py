@@ -377,8 +377,10 @@ def splash(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
     with foreground = top pixel and background = bottom pixel (24-bit
     SGR); a transparent half uses `▀`/`▄` with only one color, and a
     fully transparent cell is a space. With color disabled the shape is
-    drawn in plain block glyphs, so the silhouette still reads."""
-    from . import splash_art
+    drawn in plain block glyphs, so the silhouette still reads. A second
+    splash -- one of five Unicode cartoons, picked at random -- follows
+    the logo rows, so every startup shows the logo then a cartoon."""
+    from . import cartoon_splash, splash_art
 
     rows: list[str] = []
     pad = " " * max(0, (width - splash_art.WIDTH) // 2)
