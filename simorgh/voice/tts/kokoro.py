@@ -42,6 +42,21 @@ def download_kokoro(model_dir: Path, *, timeout: float = 900.0) -> tuple[Path | 
     return model_dir / "kokoro-v1.0.onnx", ""
 
 
+#: A feeling as a share of another Kokoro voice mixed into the base voice
+#: (the same speaker, coloured): tone -> (voice by family, weight). The
+#: families are Kokoro's own prefixes: af/am American, bf/bm British.
+#: Measured 2026-09-13: a 0.3-0.4 blend changes the audio by ~7% mean
+#: absolute difference and costs nothing extra.
+TONE_BLENDS: dict[str, tuple[dict[str, str], float]] = {
+    "warm": ({"af": "af_heart", "am": "am_michael", "bf": "bf_emma", "bm": "bm_george"}, 0.4),
+    "bright": ({"af": "af_bella", "am": "am_puck", "bf": "bf_lily", "bm": "bm_lewis"}, 0.4),
+    "calm": ({"af": "af_nicole", "am": "am_onyx", "bf": "bf_alice", "bm": "bm_daniel"}, 0.3),
+    "serious": ({"af": "af_sarah", "am": "am_eric", "bf": "bf_isabella", "bm": "bm_george"}, 0.35),
+    "playful": ({"af": "af_sky", "am": "am_adam", "bf": "bf_lily", "bm": "bm_fable"}, 0.4),
+    "sorry": ({"af": "af_nicole", "am": "am_michael", "bf": "bf_alice", "bm": "bm_daniel"}, 0.25),
+}
+
+
 class KokoroSynthesiser:
     name = "kokoro"
 
@@ -57,6 +72,8 @@ class KokoroSynthesiser:
         self._kokoro = Kokoro(str(model), str(voices))
         self._voice = config.tts_voice
         self._speed = config.tts_speed
+        self._blend = float(getattr(config, "tone_blend", 1.0))
+        self._styles: dict[str, object] = {}
 
     def voices(self) -> list[str]:
         try:
@@ -64,14 +81,46 @@ class KokoroSynthesiser:
         except Exception:  # noqa: BLE001
             return [self._voice]
 
-    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
+    def style_for(self, voice: str, tone: str):
+        """The style Kokoro speaks with: the voice's own, or a blend of it
+        with the tone's voice of the same family; None means "the name".
+        The blend weight is scaled by `[voice] tone_blend` (1.0 = as
+        tabled, 0 = plain voice)."""
+        spec = TONE_BLENDS.get((tone or "").lower())
+        if spec is None or self._blend <= 0.0:
+            return None
+        family = voice[:2] if len(voice) > 2 and voice[2] == "_" else "af"
+        other = spec[0].get(family) or spec[0]["af"]
+        weight = max(0.0, min(0.6, spec[1] * self._blend))
+        if other == voice or weight <= 0.0:
+            return None
+        try:
+            import numpy as np
+
+            key = f"{voice}+{other}@{weight:.2f}"
+            style = self._styles.get(key)
+            if style is None:
+                names = set(self._kokoro.get_voices())
+                if voice not in names or other not in names:
+                    return None
+                style = ((1.0 - weight) * self._kokoro.get_voice_style(voice)
+                         + weight * self._kokoro.get_voice_style(other)).astype(np.float32)
+                self._styles[key] = style
+            return style
+        except Exception:  # noqa: BLE001 -- a blend that fails is a plain voice, never a failed reply
+            return None
+
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
         try:
             import numpy as np
         except ImportError as exc:  # pragma: no cover -- kokoro-onnx depends on numpy
             raise RuntimeError("kokoro needs numpy") from exc
 
         def _run():
-            samples, rate = self._kokoro.create(text, voice=voice or self._voice, speed=speed or self._speed, lang="en-us")
+            name = voice or self._voice
+            style = self.style_for(name, tone)
+            samples, rate = self._kokoro.create(text, voice=style if style is not None else name,
+                                                speed=speed or self._speed, lang="en-us")
             pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
             return pcm, int(rate)
 

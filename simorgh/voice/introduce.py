@@ -131,22 +131,25 @@ class Introduction:
         self.vectors.append(vector)
         return self._enrol_gathered(book)
 
+    refused: int = 0
+
     def _enrol_gathered(self, book) -> Step:
         note = ""
         while self.vectors and self.accepted < TAKES:
             vector = self.vectors.pop(0)
             try:
-                _person, note = book.enroll(self.name, vector, relation=self.relation)
+                _person, note = book.enroll(self.name, vector, relation=self.relation, insist=self.refused >= 1)
             except Exception as exc:  # noqa: BLE001
                 note = f"refused: {exc}"
             if note:
                 break
             self.accepted += 1
         if note:
-            plain = note.replace("refused: ", "").split(";")[0]
-            if "sounds like" in note:
-                return Step(say=f"{plain}. I will leave the voices as they are.", done=True)
-            return Step(say=f"{plain}. Say another sentence.", enrolled=self.name)
+            # Once: say who it sounded like and ask again. Twice: they said
+            # who they are; take their word (2026-09-13).
+            self.refused += 1
+            who = note.split("sounds like ", 1)[1].split(" (")[0] if "sounds like " in note else "someone else"
+            return Step(say=f"That sounded like {who}. Once more, {self.name}?", enrolled=self.name)
         if self.accepted >= TAKES:
             return Step(say=f"Thank you, {self.name}. I will know your voice now.", enrolled=self.name, done=True)
         left = TAKES - self.accepted

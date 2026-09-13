@@ -78,17 +78,28 @@ class PiperSynthesiser:
     def voices(self) -> list[str]:
         return [self._voice]
 
-    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
+    #: tone -> (noise_scale, noise_w_scale): Piper's two expressiveness knobs
+    #: (defaults 0.667 / 0.8); more noise is livelier, less is flatter.
+    TONE_NOISE: dict[str, tuple[float, float]] = {
+        "warm": (0.6, 0.9), "bright": (0.8, 1.0), "calm": (0.5, 0.7), "serious": (0.55, 0.7),
+        "playful": (0.85, 1.1), "sorry": (0.5, 0.75),
+    }
+
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
         """`voice` is ignored: a Piper synthesiser IS one voice, and the
         Kokoro voice id the pipeline passes for every reply means
-        nothing here."""
+        nothing here. `tone` sets the expressiveness."""
         def _run() -> Audio:
             config = None
             rate = speed or self._speed
-            if rate and rate != 1.0:
+            noise = self.TONE_NOISE.get((tone or "").lower())
+            if (rate and rate != 1.0) or noise:
                 try:
                     from piper.config import SynthesisConfig
-                    config = SynthesisConfig(length_scale=1.0 / rate)
+                    kwargs = {"length_scale": 1.0 / rate} if rate and rate != 1.0 else {}
+                    if noise:
+                        kwargs["noise_scale"], kwargs["noise_w_scale"] = noise
+                    config = SynthesisConfig(**kwargs)
                 except (ImportError, TypeError):
                     config = None
             chunks = list(self._piper.synthesize(text, config) if config else self._piper.synthesize(text))

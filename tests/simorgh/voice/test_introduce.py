@@ -79,13 +79,16 @@ class IntroductionTestCase(unittest.TestCase):
         step = intro.feed("why do you ask", _vec(0.0), self.book)
         self.assertTrue(step.done); self.assertIn("another time", step.say); self.assertEqual(self.book.people(), [])
 
-    def test_a_voice_that_sounds_like_someone_enrolled_is_not_merged(self):
+    def test_a_voice_that_sounds_like_someone_enrolled_is_asked_once_then_believed(self):
         self.book.enroll("Ira", _vec(0.0))
         intro = Introduction(); intro.vectors.append(_vec(0.02))
         intro.feed("I'm Iris", _vec(0.03), self.book)
         step = intro.feed("her twin", _vec(0.01), self.book)
-        self.assertTrue(step.done); self.assertIn("sounds like Ira", step.say)
+        self.assertFalse(step.done); self.assertIn("That sounded like Ira. Once more, Iris?", step.say)
         self.assertIsNone(self.book.get("Iris"))
+        step = intro.feed("it is me, Iris", _vec(0.02), self.book)   # she insists: her word counts
+        self.assertEqual(step.enrolled, "Iris"); self.assertTrue(step.done)
+        self.assertEqual(len(self.book.get("Iris").embeddings), 3)
 
     def test_unknown_voices_are_counted_by_likeness_within_the_window(self):
         clock = [1000.0]

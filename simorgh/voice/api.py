@@ -144,6 +144,10 @@ class TtsRequest:
     voice: str = ""
     speed: float = 1.0
     gain: float = 1.0   # loudness multiplier on the synthesised PCM (voice/delivery.py)
+    #: the feeling the reply is delivered with (contracts/tone.py): Kokoro
+    #: blends a share of a differently coloured voice into the base voice,
+    #: Piper changes its expressiveness, an engine without either ignores it
+    tone: str = ""
 
 
 @dataclass(frozen=True)

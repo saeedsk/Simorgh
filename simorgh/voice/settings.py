@@ -30,6 +30,7 @@ SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "speaker_margin": (float, (0.0, 0.5), "how far the best match must beat the second before it counts"),
     "introduce_after_turns": (int, (0, 10), "turns from an unknown voice before Sim asks who it is (0 = never ask)"),
     "bystander": (bool, None, "stay quiet while two known people talk to each other, unless named"),
+    "tone_blend": (float, (0.0, 2.0), "how much a feeling colours the voice (Kokoro blends voices); 0 = plain, 1 = normal"),
     "volume": (float, (0.2, 2.0), "playback gain"),
     "output": (str, ("laptop", "tv", "both"), "where the voice comes out: this machine, the TV page, or both"),
     "auto_listen": (bool, None, "listen again after each reply"),

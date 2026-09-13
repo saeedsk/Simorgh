@@ -59,13 +59,18 @@ class SpeakerBookTestCase(unittest.TestCase):
         person, note = self.book.enroll("Iris", _vec(0.05))
         self.assertIn("sounds like Ira", note); self.assertEqual(person.embeddings, [])
         self.assertIsNone(self.book.get("Iris"))
-        # and a take nothing like a person's own earlier takes is refused too
+        # a take unlike a person's own earlier takes is kept: real voices vary that much across a room
         self.book.enroll("Ira", _vec(0.1))
-        person, note = self.book.enroll("Ira", _vec(1.7))   # cos 1.7 = -0.13
-        self.assertIn("does not sound like Ira", note); self.assertEqual(len(person.embeddings), 2)
-        # ...while a take merely far from the mean but near one earlier take is a person's normal range
+        person, note = self.book.enroll("Ira", _vec(1.7))   # cos 1.7 = -0.13 to her other takes
+        self.assertEqual(note, ""); self.assertEqual(len(person.embeddings), 3)
         self.book.enroll("Ira", _vec(0.9)); self.book.enroll("Ira", _vec(-0.7))
         self.assertEqual(self.book.identify(_vec(0.85)).name, "Ira", "the nearest take decides, not the mean")
+        # and when the person insists, even a take that sounds like someone else is theirs
+        self.book.enroll("Saeed", _vec(-2.5))
+        person, note = self.book.enroll("Iris", _vec(-2.52))
+        self.assertIn("sounds like Saeed", note)
+        person, note = self.book.enroll("Iris", _vec(-2.52), insist=True)
+        self.assertEqual(note, ""); self.assertEqual(len(self.book.get("Iris").embeddings), 1)
 
     def test_the_book_is_plain_json_and_survives_a_new_instance(self):
         self.book.enroll("Ira", _vec(0.0), relation="daughter")

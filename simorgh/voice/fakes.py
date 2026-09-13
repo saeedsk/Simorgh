@@ -128,13 +128,15 @@ class FakeSynthesiser:
     def __init__(self) -> None:
         self.spoken: list[str] = []
         self.speeds: list[float] = []  # the speed each piece was asked for (voice/delivery.py)
+        self.tones: list[str] = []     # the feeling each piece was asked for (contracts/tone.py)
 
     def voices(self) -> list[str]:
         return ["fake", "af_bella", "af_heart", "af_jessica", "af_kore", "bf_lily"]
 
-    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
         self.spoken.append(text)
         self.speeds.append(speed)
+        self.tones.append(tone)
         return silence(max(0.1, len(text) / 20.0))
 
 

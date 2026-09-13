@@ -155,7 +155,7 @@ class TestTheVoiceChannel(unittest.TestCase):
         self.assertIn("A YouTube page URL is exactly what cast_play wants", spoken)
         self.assertNotIn("You are answering by voice", typed)
         self.assertNotIn("You are answering by voice", scaffolds.render(profiles.CHAT))
-        self.assertIn("[warm] [bright]", spoken, "the feeling tag the voice turns into delivery")
+        self.assertIn("Open EVERY reply with one feeling", spoken, "the feeling tag the voice turns into delivery")
         self.assertIn("talking to each other, stay QUIET", spoken)
 
     def test_the_speaker_and_the_room_are_told_to_the_voice_channel_only(self) -> None:

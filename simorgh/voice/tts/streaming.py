@@ -95,6 +95,25 @@ class StreamingSynthesiser:
     def voices(self) -> list[str]:  # the old protocol, for callers that still use it
         return self.list_voices()
 
+    async def _synth(self, text: str, *, voice: str, speed: float, tone: str):
+        """The engine's synthesise, with the tone when it takes one."""
+        if tone and self._takes_tone():
+            return await self._inner.synthesise(text, voice=voice, speed=speed, tone=tone)
+        return await self._inner.synthesise(text, voice=voice, speed=speed)
+
+    def _takes_tone(self) -> bool:
+        cached = getattr(self, "_tone_ok", None)
+        if cached is None:
+            import inspect
+
+            try:
+                params = inspect.signature(self._inner.synthesise).parameters
+                cached = "tone" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+            except (TypeError, ValueError):
+                cached = False
+            self._tone_ok = cached
+        return cached
+
     async def warmup(self) -> float:
         """Load the model by speaking one short phrase into nothing, so
         the first real reply does not pay for it. Returns the seconds it
@@ -132,14 +151,14 @@ class StreamingSynthesiser:
         after `voice set tts_voice af_bellae`, a voice that does not
         exist); the reply then showed on screen and was never heard."""
         try:
-            return await self._inner.synthesise(text, voice=request.voice, speed=request.speed)
+            return await self._synth(text, voice=request.voice, speed=request.speed, tone=request.tone)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 -- the engine's failure, whatever it is
             first = exc
         if request.voice:
             try:
-                audio = await self._inner.synthesise(text, voice="", speed=request.speed)
+                audio = await self._synth(text, voice="", speed=request.speed, tone=request.tone)
                 self.fell_back = (request.voice, f"{first}")
                 return audio
             except asyncio.CancelledError:

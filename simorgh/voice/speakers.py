@@ -52,8 +52,10 @@ SPEAKER_MODEL_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/sp
                      + SPEAKER_MODEL)
 DEFAULT_THRESHOLD = 0.5
 DEFAULT_MARGIN = 0.06
-#: An utterance shorter than this carries too little voice to judge.
+#: An utterance shorter than this carries too little voice to judge...
 MIN_SECONDS = 0.8
+#: ...and an enrolment take shorter than this is not worth keeping.
+ENROLL_MIN_SECONDS = 1.5
 
 
 class SpeakerEmbedder(Protocol):
@@ -251,11 +253,13 @@ class SpeakerBook:
             pass
         return True
 
-    def enroll(self, name: str, embedding: Sequence[float], *, relation: str = "") -> tuple[Person, str]:
+    def enroll(self, name: str, embedding: Sequence[float], *, relation: str = "", insist: bool = False) -> tuple[Person, str]:
         """Add one take to `name`. Returns the person and a note: "" when
-        the take was accepted, else why it was refused (it sounds like
-        someone else, or it does not sound like this person's other
-        takes)."""
+        the take was accepted, else why it was refused -- only ever
+        because it sounds like someone already enrolled, and not even then
+        with `insist` (the person has said it was them). A take unlike the
+        person's own earlier takes is kept: real voices vary that much
+        across a room, and the nearest-take rule copes."""
         self._load()
         name = (name or "").strip()
         if not name:
@@ -267,7 +271,7 @@ class SpeakerBook:
             if other.name.lower() == name.lower() or not other.embeddings:
                 continue
             score = self.score(vector, other)
-            if score >= self.threshold + self.margin:
+            if score >= self.threshold + self.margin and not insist:
                 target = person or Person(name=name, relation=relation)
                 return target, (f"refused: that take sounds like {other.name} (score {score:.2f}); "
                                 f"if it was {name}, their voices are too close for me to tell apart in this room")
@@ -276,11 +280,6 @@ class SpeakerBook:
             self._people[name.lower()] = person
         elif relation and not person.relation:
             person.relation = relation
-        if person.embeddings:
-            score = self.score(vector, person)
-            if score < 0.15:   # nothing like this person's other takes: another voice, or a noise
-                return person, (f"refused: that take does not sound like {name}'s earlier takes (score {score:.2f}); "
-                                "try again closer to the microphone, or `voice forget` and start over")
         person.embeddings.append(vector)
         self._save(person)
         return person, ""
@@ -333,5 +332,5 @@ def seconds_of(pcm: Sequence[float], sample_rate: int) -> float:
     return len(pcm) / float(sample_rate or 16000)
 
 
-__all__ = ["DEFAULT_MARGIN", "DEFAULT_THRESHOLD", "Identification", "MIN_SECONDS", "Person", "SPEAKER_MODEL",
+__all__ = ["DEFAULT_MARGIN", "DEFAULT_THRESHOLD", "Identification", "ENROLL_MIN_SECONDS", "MIN_SECONDS", "Person", "SPEAKER_MODEL",
            "SherpaEmbedder", "SpeakerBook", "SpeakerEmbedder", "available", "cosine", "seconds_of"]

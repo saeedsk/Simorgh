@@ -62,6 +62,11 @@ def _session(config, script, replies, embedder, book):
     pipeline.ask = replies.ask  # type: ignore[method-assign]
     session = VoiceSession(pipeline=pipeline, config=config, microphone=mic, speaker=speaker, recogniser=stt,
                            synthesiser=tts, detector_factory=lambda: script, embedder=embedder, speakers=book)
+    # The fake microphone runs sixty times faster than the clock the echo
+    # tracker keeps, so Sim's last words would "still be audible" for the
+    # whole of the next scripted turn and no speech frame would be kept
+    # for the speaker's voice. Real rooms keep real time; the tests do not.
+    session._echo.active = lambda now: False  # type: ignore[method-assign]  # noqa: SLF001
     return session, bus, tts
 
 
@@ -77,21 +82,21 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_an_enrolled_voice_is_named_on_the_transcript_and_in_the_ask(self):
         self.book.enroll("Ira", _vec(0.0)); self.book.enroll("Saeed", _vec(2.0))
         self.embedder.vector = _vec(0.05)
-        script = _Script((True, 40), (False, 15), (False, 10_000))   # 1.2 s of speech: enough voice to judge
+        script = _Script((True, 60), (False, 110), (False, 10_000))   # 1.8 s of speech: enough voice to judge
         replies = _Replies()
         session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
         await _run_until(session, lambda: session.stats.turns >= 1, timeout=6.0)
         self.assertEqual(replies.asked[0][1], "Ira", "the ask carries the speaker")
         finals = [p for p in bus.of(topics.VOICE_TRANSCRIPT) if p.get("session_id")]
         self.assertEqual(finals[0]["speaker"], "Ira"); self.assertGreater(finals[0]["speaker_score"], 0.9)
-        self.assertGreaterEqual(self.embedder.seconds[0], 1.0, "the whole turn's audio was embedded, preroll included")
+        self.assertGreaterEqual(self.embedder.seconds[0], 1.5, "the turn's speech frames were embedded")
         self.assertEqual(self.book.get("Ira").heard, 1)
         self.assertEqual(session.last_speaker, "Ira")
 
     async def test_an_unknown_voice_stays_you_with_the_reason(self):
         self.book.enroll("Ira", _vec(0.0))
         self.embedder.vector = _vec(1.5)
-        script = _Script((True, 40), (False, 15), (False, 10_000))
+        script = _Script((True, 60), (False, 110), (False, 10_000))
         replies = _Replies()
         session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
         await _run_until(session, lambda: session.stats.turns >= 1, timeout=6.0)
@@ -109,7 +114,7 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replies.asked[0][1], "")
 
     async def test_enrolment_takes_three_sentences_instead_of_asking(self):
-        script = _Script(*[(True, 40), (False, 15)] * 3, (False, 10_000))
+        script = _Script(*[(True, 60), (False, 110)] * 3, (False, 10_000))
         replies = _Replies()
         session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
         self.assertEqual(session.enroll("Ira", relation="daughter", takes=3), "")
@@ -125,7 +130,7 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_whois_reports_the_scores_aloud_and_does_not_ask(self):
         self.book.enroll("Ira", _vec(0.0)); self.book.enroll("Saeed", _vec(2.0))
         self.embedder.vector = _vec(0.02)
-        script = _Script((True, 40), (False, 15), (False, 10_000))
+        script = _Script((True, 60), (False, 110), (False, 10_000))
         replies = _Replies()
         session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
         self.assertEqual(session.whois_next(), "")
@@ -139,7 +144,7 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.book.enroll("Ira", _vec(0.0))
         self.embedder.vector = _vec(2.0)                      # somebody new, every time
         # five turns: question, question (asked who), "my name is Aran", "his son", one more sentence
-        script = _Script(*[(True, 40), (False, 15)] * 5, (False, 10_000))
+        script = _Script(*[(True, 60), (False, 110)] * 5, (False, 10_000))
         replies = _Replies("It is three o'clock.")
         stt = FakeRecogniser("what time is it", 0.95)
         session, bus, tts = _session(_config(introduce_after_turns=2), script, replies, self.embedder, self.book)
@@ -163,7 +168,7 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_learn_someones_voice_by_saying_so(self):
         self.book.enroll("Saeed", _vec(2.0))
         self.embedder.vector = _vec(2.0)
-        script = _Script(*[(True, 40), (False, 15)] * 4, (False, 10_000))
+        script = _Script(*[(True, 60), (False, 110)] * 4, (False, 10_000))
         replies = _Replies()
         session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
         heard = iter(["Sim, learn Iris's voice", "hello Sim", "the garden lights are on", "and the pool is warm"])
@@ -182,7 +187,7 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.book.enroll("Ira", _vec(0.0), relation="daughter, 9"); self.book.enroll("Saeed", _vec(2.0), relation="the creator")
         voices = iter([_vec(0.02), _vec(2.02), _vec(2.03), _vec(0.03)])
         heard = iter(["what time is it", "I think it is late", "we should go to bed", "Sim, what did we decide"])
-        script = _Script(*[(True, 40), (False, 15)] * 4, (False, 10_000))
+        script = _Script(*[(True, 60), (False, 110)] * 4, (False, 10_000))
         replies = _Replies("It is nine.")
         session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
 
@@ -204,7 +209,7 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_feeling_named_by_the_model_shapes_the_voice_and_is_not_spoken(self):
         self.book.enroll("Ira", _vec(0.0))
         self.embedder.vector = _vec(0.02)
-        script = _Script((True, 40), (False, 15), (False, 10_000))
+        script = _Script((True, 60), (False, 110), (False, 10_000))
         replies = _Replies("[sorry] I cannot open the pool gate at night.")
         session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
         await _run_until(session, lambda: session.stats.turns >= 1 and bool(bus.of(topics.VOICE_SPOKEN)), timeout=6.0)
@@ -214,6 +219,7 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(spoken["metrics"]["tone"], "sorry"); self.assertEqual(spoken["metrics"]["register"], "sorry")
         self.assertNotIn("[sorry]", spoken["text"])
         self.assertLess(tts.speeds[-1], 1.0, "sorry is slower than plain")
+        self.assertEqual(tts.tones[-1], "sorry", "the engine is told the feeling")
 
     async def test_without_an_engine_enrolment_says_what_is_missing(self):
         script = _Script((False, 10_000))

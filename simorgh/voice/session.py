@@ -277,6 +277,14 @@ class VoiceSession:
         actions = self.turns.handle_vad(event)
         if self.turns.state in (USER_SPEAKING,) and self._frames is not None:
             self._frames.put_nowait(frame)
+            # For the speaker's voice, only the frames the detector calls
+            # speech and only while Sim is not audible: a child's take
+            # captured over Sim's own prompt and the room's silence scored
+            # 0.68 against her father and 0.2 against herself (2026-09-13).
+            keep = self._audio.get(getattr(self, "_capturing", None))
+            if keep is not None and event.kind in ("speech_start", "speech") and not self._echo.active(now) \
+                    and len(keep) < int(self._config.max_utterance_s * 16000 * 2):
+                keep += frame
         else:
             self._preroll.append(frame)
         for action in actions:
@@ -294,6 +302,9 @@ class VoiceSession:
             for frame in self._preroll:  # the onset, from before the VAD noticed
                 self._frames.put_nowait(frame)
             self._preroll.clear()
+            self._capturing = action.turn_id
+            if self._embedder is not None and self._speakers is not None:
+                self._audio[action.turn_id] = bytearray()   # the speaker's own speech frames, filled by _on_frame
             previous = self._stt_task
             if previous is not None and not previous.done():
                 # A transcription still waiting on the old queue would never
@@ -380,19 +391,13 @@ class VoiceSession:
 
     # ------------------------------------------------------------- hearing
     async def _frames_until_end(self, queue: asyncio.Queue, turn_id: int | None = None):
-        keep = self._audio.get(turn_id) if turn_id is not None else None
-        limit = int(self._config.max_utterance_s * 16000 * 2)
         while True:
             frame = await queue.get()
             if frame is _END:
                 return
-            if keep is not None and len(keep) < limit:
-                keep += frame
             yield frame
 
     async def _transcribe(self, turn_id: int, queue: asyncio.Queue) -> None:
-        if self._embedder is not None and self._speakers is not None:
-            self._audio[turn_id] = bytearray()
         try:
             async for event in self._stt.start_stream(self._frames_until_end(queue, turn_id), turn_id=turn_id,
                                                       language=self._config.stt_language):
@@ -430,12 +435,16 @@ class VoiceSession:
         None when there is nothing to judge with. The audio is dropped
         here either way -- it is kept for this and nothing else."""
         pcm = self._audio.pop(turn_id, None)
+        self._last_speech_s = 0.0
         if pcm is None or self._embedder is None or self._speakers is None:
             return None, None
         from .speakers import MIN_SECONDS, seconds_of
 
-        samples = [x / 32768.0 for x in memoryview(pcm).cast("h")]
-        if seconds_of(samples, 16000) < MIN_SECONDS:
+        if len(pcm) % 2:
+            pcm = pcm[:-1]
+        samples = [x / 32768.0 for x in memoryview(bytes(pcm)).cast("h")]
+        self._last_speech_s = seconds_of(samples, 16000)
+        if self._last_speech_s < MIN_SECONDS:
             return None, None
         try:
             vector = await asyncio.to_thread(self._embedder.embed, samples, 16000)
@@ -450,18 +459,25 @@ class VoiceSession:
         job = self._enrolling
         if job is None:
             return
-        if vector is None:
-            await self._say_aside(f"say-{turn_id}", "I did not get enough voice from that. Say a full sentence, please.")
+        from .speakers import ENROLL_MIN_SECONDS
+
+        if vector is None or getattr(self, "_last_speech_s", 0.0) < ENROLL_MIN_SECONDS:
+            await self._say_aside(f"say-{turn_id}", "That was short. A whole sentence, please.")
             return
         try:
-            person, note = self._speakers.enroll(job["name"], vector, relation=job.get("relation", ""))
+            person, note = self._speakers.enroll(job["name"], vector, relation=job.get("relation", ""),
+                                                 insist=job.get("refused", 0) >= 1)
         except Exception as exc:  # noqa: BLE001
             note = f"refused: {exc}"
         await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
             "text": text, "confidence": 1.0, "seconds": 0.0, "engine": "", "device": self._config.device,
             "turn": turn_id, "enrolling": job["name"], "speaker_note": note})
         if note:
-            await self._say_aside(f"say-{turn_id}", note.replace("refused: ", "").split(";")[0] + ".")
+            # Once: "that sounded like Saeed". Twice: take it anyway -- a
+            # child kept being told she sounded like her father (2026-09-13).
+            job["refused"] = job.get("refused", 0) + 1
+            who = note.split("sounds like ", 1)[1].split(" (")[0] if "sounds like " in note else "someone else"
+            await self._say_aside(f"say-{turn_id}", f"That sounded like {who}. Once more, {job['name']}?")
             return
         job["done"] += 1
         if job["done"] >= job["takes"]:
@@ -900,7 +916,8 @@ class VoiceSession:
         delivery = self._delivery_for(context.user_text, plan.text, is_error=context.is_error, tone=tone)
         request = TtsRequest(request_id=response_id,
                              pieces=tuple((c.text, int(c.pause_ms * delivery.pause_scale)) for c in plan.chunks),
-                             voice=self._config.tts_voice, speed=delivery.speed, gain=delivery.gain)
+                             voice=self._config.tts_voice, speed=delivery.speed, gain=delivery.gain,
+                             tone=tone or (delivery.register if delivery.register in ("warm", "bright") else ""))
         self._pipeline.speaking = True
 
         def _first_audio(seconds: float) -> None:

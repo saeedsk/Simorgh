@@ -4968,3 +4968,27 @@ Still ahead, roughly in order:
     the mean, with threshold 0.5 and margin 0.06; the recogniser's
     "Said" was folded into Saeed on disk; a question or a sentence is no
     longer taken as a relation.
+
+157. **Enrolment that does not fight the child, and a voice that changes
+    colour (2026-09-13, evening).** Iris's three takes scored 0.18-0.29
+    against each other and 0.68 against her father; Sim refused take
+    after take ("does not sound like Iris's earlier takes") until she
+    told it "you're not a good learner". What was embedded was the
+    problem: a take begins the instant Sim's prompt ends, so the buffer
+    held Sim's own voice through the speaker plus room silence, and a
+    child's few words drowned in it. Now only the frames the detector
+    calls speech, captured while Sim is not audible, go to the
+    embedder; a take under 1.5 s is asked again ("That was short. A
+    whole sentence, please."); a take unlike the person's earlier ones
+    is kept -- real voices vary that much -- and a take that sounds like
+    someone else is doubted once, then believed. "What happened to
+    emotion in the voice": speed and pauses were all Kokoro had, and
+    the model used a tag only when one fit. Kokoro can blend voice
+    styles; each feeling now mixes a share of a differently coloured
+    voice of the same family into the base voice (warm: af_heart,
+    bright: af_bella, calm: af_nicole, serious: af_sarah, playful:
+    af_sky, sorry: af_nicole; the am/bf/bm families have their own),
+    measured at ~7% change in the audio for no extra time; Piper's
+    expressiveness knobs move with the tone; `TtsRequest.tone` carries
+    it; `[voice] tone_blend` scales it; and the model is told to open
+    EVERY reply with a feeling, neutral only for a flat fact.

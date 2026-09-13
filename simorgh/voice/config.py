@@ -174,6 +174,10 @@ class Config:
     # Two known people talking to each other: Sim keeps the thread and
     # stays quiet unless named or mid-exchange (voice/session.py).
     bystander: bool = True
+    # How much of a feeling shows in the voice: Kokoro blends that share
+    # of a differently coloured voice into yours (1.0 = as tabled in
+    # tts/kokoro.py, 0 = always the plain voice; 2.0 is a lot).
+    tone_blend: float = 1.0
     keep_audio: bool = False
     audio_dir: str = "workspace/voice/audio"
     keep_transcripts: bool = True

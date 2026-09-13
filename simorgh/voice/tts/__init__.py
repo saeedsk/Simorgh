@@ -62,17 +62,33 @@ class PolyglotSynthesiser:
     def problems(self) -> dict[str, str]:
         return dict(self._problems)
 
-    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
         language = language_of(text)
         engine = self.engine_for(language)
         if engine is None:
             self.last_engine = getattr(self._primary, "name", "")
             excuse = f"I cannot speak {_LANGUAGE_NAMES.get(language, language)} yet: {self._problems[language]}"
-            return await self._primary.synthesise(excuse, voice=voice, speed=speed)
+            return await _with_tone(self._primary, excuse, voice=voice, speed=speed, tone=tone)
         self.last_engine = getattr(engine, "name", "")
         if engine is self._primary:
-            return await engine.synthesise(text, voice=voice, speed=speed)
-        return await engine.synthesise(text, speed=speed)
+            return await _with_tone(engine, text, voice=voice, speed=speed, tone=tone)
+        return await _with_tone(engine, text, voice="", speed=speed, tone=tone)
+
+
+async def _with_tone(engine, text: str, *, voice: str, speed: float, tone: str) -> Audio:
+    """Call an engine's synthesise, with the tone when it takes one."""
+    import inspect
+
+    kwargs = {"speed": speed}
+    if voice:
+        kwargs["voice"] = voice
+    try:
+        params = inspect.signature(engine.synthesise).parameters
+        if tone and ("tone" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())):
+            kwargs["tone"] = tone
+    except (TypeError, ValueError):
+        pass
+    return await engine.synthesise(text, **kwargs)
 
 
 _LANGUAGE_NAMES = {"fa": "Farsi", "en": "English"}
