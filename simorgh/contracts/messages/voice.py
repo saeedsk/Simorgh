@@ -25,9 +25,12 @@ _STATE = (
 VoiceStatusRequest = define(t.VOICE_STATUS_REQUEST, [])
 VoiceStatusReply = define(t.VOICE_STATUS_REPLY, [*_STATE])
 VoiceControlRequest = define(t.VOICE_CONTROL_REQUEST, [
-    F("action", Enum("on", "off", "mute", "unmute", "barge_on", "barge_off", "aec_on", "aec_off", "set")),
-    O("key", Str), O("value", Str)],
-    doc="set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it.")
+    F("action", Enum("on", "off", "mute", "unmute", "barge_on", "barge_off", "aec_on", "aec_off", "set",
+                     "enroll", "forget", "people", "whois", "pronounce")),
+    O("key", Str), O("value", Str), O("name", Str), O("relation", Str), O("takes", Int)],
+    doc="set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it. "
+        "enroll: learn `name`'s voice from the next `takes` utterances (voice/speakers.py); forget: drop them; "
+        "people: who is enrolled; whois: say who the next utterance sounds like, with scores; pronounce: `value` is how to say `name`.")
 VoiceControlReply = define(t.VOICE_CONTROL_REPLY, [O("detail", Str), *_STATE])
 VoiceSpeakRequest = define(t.VOICE_SPEAK_REQUEST, [F("text", Str), O("voice", Str)])
 VoiceSpeakReply = define(t.VOICE_SPEAK_REPLY, [O("seconds", Float), O("engine", Str), O("detail", Str)])
@@ -56,7 +59,10 @@ VoiceBenchReply = define(t.VOICE_BENCH_REPLY, [O("detail", Str), O("result", Obj
 VoiceTranscript = define(t.VOICE_TRANSCRIPT, [
     F("text", Str), F("confidence", Float), F("seconds", Float), F("engine", Str), F("device", Str),
     O("session_id", Str), O("echo", Bool), O("partial", Bool), O("turn", Int), O("corrected", Bool),
-], doc="echo=true: the words were Sim's own reply coming back through the microphone; not a turn. "
+    O("speaker", Str), O("speaker_score", Float), O("speaker_note", Str), O("enrolling", Str),
+], doc="speaker: who the voice book says spoke (\"\" = unknown), with the cosine score and, when unknown, why. "
+       "enrolling: this utterance was a take for that person, not a turn. "
+       "echo=true: the words were Sim's own reply coming back through the microphone; not a turn. "
        "corrected=true: the same turn, read through the recogniser's mistakes (cognition/tidy.py). "
        "partial=true: provisional, replaced by the next transcript for the same turn.")
 VoiceSpoken = define(t.VOICE_SPOKEN, [F("text", Str), F("seconds", Float), F("engine", Str), F("device", Str),

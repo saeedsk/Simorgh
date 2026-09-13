@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/voice.control.request.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it.",
+  "description": "set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it. enroll: learn `name`'s voice from the next `takes` utterances (voice/speakers.py); forget: drop them; people: who is enrolled; whois: say who the next utterance sounds like, with scores; pronounce: `value` is how to say `name`.",
   "properties": {
     "action": {
       "enum": [
@@ -14,13 +14,36 @@
         "barge_off",
         "aec_on",
         "aec_off",
-        "set"
+        "set",
+        "enroll",
+        "forget",
+        "people",
+        "whois",
+        "pronounce"
       ],
       "type": "string"
     },
     "key": {
       "type": [
         "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "relation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "takes": {
+      "type": [
+        "integer",
         "null"
       ]
     },

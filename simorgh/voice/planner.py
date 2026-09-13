@@ -475,14 +475,29 @@ class SpokenResponsePlanner:
     so it can be tested without a synthesiser."""
 
     def __init__(self, *, max_sentences: int = 6, connectors: bool = True,
-                 max_chars: int = MAX_CHUNK_CHARS, first_chars: int = FIRST_CHUNK_CHARS) -> None:
+                 max_chars: int = MAX_CHUNK_CHARS, first_chars: int = FIRST_CHUNK_CHARS, pronunciations=None) -> None:
+        # name -> how to say it (voice/speakers.py); a dict, or a callable that returns one
+        self._pronunciations = pronunciations
         self._max_sentences = max(1, max_sentences)
         self._connectors = connectors
         self._max_chars = max_chars
         self._first_chars = first_chars
 
+    def pronounced(self, text: str) -> str:
+        """Names replaced by the way the household says them, whole words
+        only, case kept for the first letter -- the screen shows the
+        name as written; only the voice hears "Ay-raa"."""
+        table = self._pronunciations() if callable(self._pronunciations) else (self._pronunciations or {})
+        for name, say_as in table.items():
+            if not name or not say_as:
+                continue
+            pattern = re.compile(r"\b" + re.escape(name) + r"\b", re.IGNORECASE)
+            text = pattern.sub(lambda m, say=say_as: say if m.group(0)[:1].isupper() or True else say, text)
+        return text
+
     def plan(self, text: str, context: Context | None = None) -> SpokenPlan:
         context = context or Context()
+        text = self.pronounced(text)
         clean, omitted = speakable(text)
         language = context.language or language_of(clean)
         if not clean:

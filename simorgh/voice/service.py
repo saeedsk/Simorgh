@@ -358,8 +358,10 @@ class Service:
                               "spoke (experimental)" if action == "aec_on" else "echo cancellation off -- back to the level gate")
             if self._pipeline is not None:
                 self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
+        elif action in ("enroll", "forget", "people", "whois", "pronounce"):
+            ok, detail = await self._people_action(action, message.payload)
         else:
-            ok, detail = False, f"unknown action {action!r} (on | off | mute | unmute | set)"
+            ok, detail = False, f"unknown action {action!r} (on | off | mute | unmute | set | enroll | forget | people | whois)"
         if not ok:
             # The reply contract's error branch: `ok: false` may only
             # travel with an `error` object. `{"ok": False, "detail": ...,
@@ -371,6 +373,50 @@ class Service:
             await self._reply(message, topics.VOICE_CONTROL_REPLY, error_reply_payload("refused", detail))
             return
         await self._reply(message, topics.VOICE_CONTROL_REPLY, {"ok": True, "detail": detail, **self._state()})
+
+    async def _people_action(self, action: str, payload: dict) -> tuple[bool, str]:
+        """`voice enroll|forget|people|whois` (voice/speakers.py)."""
+        from .speakers import SpeakerBook
+
+        session = self._session
+        book = getattr(session, "_speakers", None) if session is not None else None
+        if book is None:
+            book = SpeakerBook(self.config.speakers_dir, threshold=self.config.speaker_threshold,
+                               margin=self.config.speaker_margin)
+        name = str(payload.get("name") or "").strip()
+        if action == "people":
+            people = book.people()
+            if not people:
+                return True, "nobody is enrolled yet -- `voice enroll <name> [as <relation>]`, then say three sentences"
+            lines = ["people I know by voice:"]
+            for p in people:
+                heard = f", heard {p.heard}x" if p.heard else ""
+                said = f", said \"{p.say_as}\"" if p.say_as else ""
+                lines.append(f"  {p.name}" + (f" ({p.relation})" if p.relation else "") + f" -- {len(p.embeddings)} take(s){heard}{said}")
+            return True, "\n".join(lines)
+        if action == "pronounce":
+            say_as = str(payload.get("value") or "").strip()
+            if not name or not say_as:
+                return False, "usage: voice pronounce <name> <how to say it>   (voice pronounce Ira Ay-raa)"
+            person = book.pronounce(name, say_as, relation=str(payload.get("relation") or ""))
+            return True, f"{person.name} is said \"{say_as}\" from now on"
+        if action == "forget":
+            if not name:
+                return False, "usage: voice forget <name>"
+            return (True, f"forgot {name}'s voice") if book.forget(name) else (False, f"nobody called {name!r} is enrolled")
+        if session is None or not getattr(session, "run", None) or self._loop_task is None:
+            return False, "the microphone is not listening -- `voice on` first"
+        if action == "enroll":
+            if not name:
+                return False, "usage: voice enroll <name> [as <relation>]"
+            why = session.enroll(name, relation=str(payload.get("relation") or ""), takes=int(payload.get("takes") or 3))
+            if why:
+                return False, why
+            takes = session._enrolling["takes"]  # noqa: SLF001
+            await session.say(f"{name}, say a sentence for me. {takes} takes.", request_id="say-enroll")
+            return True, f"enrolling {name}: say {takes} sentences; each take is confirmed aloud"
+        why = session.whois_next()
+        return (False, why) if why else (True, "say something; I will tell you who it sounded like, with the scores")
 
     async def _set(self, key: str, raw: str) -> tuple[bool, str]:
         """`voice set key value`: a safe setting, applied live and written

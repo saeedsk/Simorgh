@@ -4898,3 +4898,31 @@ Still ahead, roughly in order:
     flow), and the slots turn every eight seconds -- two would show
     mostly loading, since a segment has to buffer and the relays cut at
     the cameras' keyframes.
+
+155. **Sim knows who is speaking (2026-09-13).** The creator: "recognise
+    the voice of different family members ... when my daughter talks to
+    her, know who she is", and then "can Sim conversationally enrol a
+    new family member instead of the owner typing commands". The wire
+    and the ledger had carried a `speaker` field since the voice
+    subsystem was built; nothing had ever filled it. `voice/speakers.py`
+    fills it: a turn's audio (kept only until it is judged) becomes a
+    512-vector through WeSpeaker's CAM++ model run by sherpa-onnx
+    (~60 ms on the M3 Pro), and the `SpeakerBook` -- JSON per person
+    under `workspace/voice/speakers/`, deletable by hand -- names it by
+    cosine against each person's mean, with a threshold and a margin
+    over the runner-up, or says unknown and why. The name rides on the
+    transcript (`🎤 Ira: ...`) and into the ask (`speaker_name`, so the
+    prompt can know), and the ledgered `VoiceTurn.speaker` is real.
+    Enrolment two ways: `voice enroll <name> [as <relation>]` takes
+    three sentences; or by conversation (`voice/introduce.py`) -- an
+    unknown voice that has spoken twice in ten minutes is asked its
+    name after the answer it came for, then how it is related, and the
+    sentences already heard are its first takes; "Sim, learn Aran's
+    voice" starts the same for a named person. A take that sounds like
+    someone already enrolled is refused aloud, never merged. Each
+    person carries `say_as` -- Ira is "Ay-raa", Iris "Ay-rees", Soodeh
+    "Soo-deh", Aran "Aa-raan" -- and the planner substitutes it before
+    the voice while the screen keeps the spelling. `voice people`,
+    `voice whois` (the live scores), `voice forget`, `voice pronounce`.
+    The engine opens only once somebody is enrolled. Not yet: per-person
+    memory, who-is-talking-to-whom, emotion in the voice (next).

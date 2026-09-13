@@ -14,6 +14,7 @@ All inference is local; the network is used once, to fetch these.
 | Whisper `large-v3-turbo` | `ggml-large-v3-turbo.bin` (1.6 GB) | ggerganov/whisper.cpp on Hugging Face (converted from openai/whisper) | MIT (OpenAI Whisper weights) | speech recognition, all languages |
 | Whisper `base.en` | `ggml-base.en.bin` | same | MIT | English-only recognition (smaller, faster, cannot hear Farsi) |
 | Silero VAD | silero-vad 6.2.1 (bundled weights) | snakers4/silero-vad | MIT | voice activity detection |
+| WeSpeaker CAM++ (VoxCeleb, large-margin) | `wespeaker_en_voxceleb_CAM++_LM.onnx` (29 MB) | wenet-e2e/wespeaker, ONNX export via k2-fsa/sherpa-onnx releases | Apache-2.0 | speaker embeddings: who is speaking (voice/speakers.py) |
 
 ## Packages
 
@@ -22,6 +23,7 @@ All inference is local; the network is used once, to fetch these.
 | kokoro-onnx | 0.6.1 | MIT | runs Kokoro through onnxruntime; brings `onnxruntime` (MIT) and `numpy` (BSD-3) |
 | piper-tts | 1.8.0 | **GPL-3.0** | the maintained Piper (OHF-Voice/piper1-gpl); the original rhasspy/piper is archived. It bundles espeak-ng (GPL-3.0) for phonemisation. Used as an optional, separately installed engine; nothing in this repository links against it, and a machine without it simply has no Farsi voice. Anyone redistributing a bundle that includes it must honour the GPL. |
 | silero-vad | 6.2.1 | MIT | brings `torch` |
+| sherpa-onnx | 1.13.8 | Apache-2.0 | runs the speaker-embedding model through onnxruntime; optional, refused by name when missing |
 | sounddevice | 0.5.6 | MIT | PortAudio binding (PortAudio: MIT-style) |
 | soundfile | 0.14.0 | BSD-3 | libsndfile (LGPL-2.1) |
 | whisper.cpp (`whisper-cli`) | 1.9.1, Homebrew | MIT | recognition on Apple Silicon with Metal |

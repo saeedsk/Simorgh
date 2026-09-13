@@ -89,19 +89,45 @@ class SessionStats:
 
 class VoiceSession:
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
-                 detector_factory, clock=None, logger=None) -> None:
+                 detector_factory, clock=None, logger=None, embedder=None, speakers=None) -> None:
         self._pipeline = pipeline
         self._config = config
+        self._audio: dict[int, bytearray] = {}      # a turn's frames, kept only until it is identified
+        self._enrolling: dict | None = None          # {"name", "relation", "takes", "done"} while `voice enroll` runs
+        self._whois = False                          # `voice whois`: the next turn reports its scores instead of asking
+        self.last_speaker = ""
+        self.last_identification = None
         self._mic = microphone
         self._detector_factory = detector_factory
         self._clock = clock
         self._logger = logger
+        # Who is speaking (voice/speakers.py): the embedder turns a turn's
+        # audio into a vector, the book says whose it is. Both optional;
+        # with neither, every turn is simply "you", as before.
+        self._embedder = embedder
+        self._speakers = speakers
+        if self._speakers is None and str(config.speaker_id).lower() != "off":
+            from .speakers import SpeakerBook
+
+            self._speakers = SpeakerBook(config.speakers_dir, threshold=config.speaker_threshold, margin=config.speaker_margin)
+        # The engine is opened only once somebody is enrolled (or enrolment
+        # starts): a household that never enrolled pays nothing per turn.
+        if self._embedder is None and self._speakers is not None and self._speakers.people():
+            self._open_embedder()
+        # Meeting someone by conversation (voice/introduce.py).
+        self._intro = None
+        self._unknown = None
+        if self._speakers is not None:
+            from .introduce import UnknownVoices
+
+            self._unknown = UnknownVoices(threshold=config.speaker_threshold, clock=lambda: self._now())
         self._stt = IncrementalRecogniser(recogniser, partials=config.stt_partials,
                                           partial_every_ms=config.stt_partial_every_ms)
         self._tts = synthesiser if isinstance(synthesiser, StreamingSynthesiser) else StreamingSynthesiser(
             synthesiser, lookahead=config.tts_lookahead)
         self._player = StreamingPlayer(speaker, on_state=self._on_playback_state)
-        self._planner = SpokenResponsePlanner(max_sentences=config.max_spoken_sentences, connectors=config.connectors)
+        self._planner = SpokenResponsePlanner(max_sentences=config.max_spoken_sentences, connectors=config.connectors,
+                                              pronunciations=lambda: self._speakers.pronunciations() if self._speakers else {})
         self.turns = TurnManager(Policy(
             end_of_turn_silence_ms=config.endpoint_silence_ms, min_speech_ms=config.min_speech_ms,
             max_turn_ms=config.max_turn_ms, semantic_silence_factor=config.semantic_silence_factor,
@@ -330,16 +356,22 @@ class VoiceSession:
                 self._log("info", "voice.ask_cancelled", turn=turn)
 
     # ------------------------------------------------------------- hearing
-    async def _frames_until_end(self, queue: asyncio.Queue):
+    async def _frames_until_end(self, queue: asyncio.Queue, turn_id: int | None = None):
+        keep = self._audio.get(turn_id) if turn_id is not None else None
+        limit = int(self._config.max_utterance_s * 16000 * 2)
         while True:
             frame = await queue.get()
             if frame is _END:
                 return
+            if keep is not None and len(keep) < limit:
+                keep += frame
             yield frame
 
     async def _transcribe(self, turn_id: int, queue: asyncio.Queue) -> None:
+        if self._embedder is not None and self._speakers is not None:
+            self._audio[turn_id] = bytearray()
         try:
-            async for event in self._stt.start_stream(self._frames_until_end(queue), turn_id=turn_id,
+            async for event in self._stt.start_stream(self._frames_until_end(queue, turn_id), turn_id=turn_id,
                                                       language=self._config.stt_language):
                 if event.kind == "partial":
                     self.partial = event.text
@@ -368,12 +400,129 @@ class VoiceSession:
             self.turns.state = LISTENING
 
     # ------------------------------------------------------------- answering
+    async def _identify(self, turn_id: int):
+        """Who spoke turn `turn_id`, from its audio: an Identification, or
+        None when there is nothing to judge with. The audio is dropped
+        here either way -- it is kept for this and nothing else."""
+        pcm = self._audio.pop(turn_id, None)
+        if pcm is None or self._embedder is None or self._speakers is None:
+            return None, None
+        from .speakers import MIN_SECONDS, seconds_of
+
+        samples = [x / 32768.0 for x in memoryview(pcm).cast("h")]
+        if seconds_of(samples, 16000) < MIN_SECONDS:
+            return None, None
+        try:
+            vector = await asyncio.to_thread(self._embedder.embed, samples, 16000)
+        except Exception as exc:  # noqa: BLE001 -- a failed embedding is an unknown speaker, not a failed turn
+            self._log("warning", "voice.speaker_embed_failed", error=repr(exc))
+            return None, None
+        return self._speakers.identify(vector), vector
+
+    async def _enroll_take(self, turn_id: int, text: str, vector) -> None:
+        """One take of `voice enroll <name>`: the turn's voice goes into
+        the book instead of being asked; Sim says where the enrolment is."""
+        job = self._enrolling
+        if job is None:
+            return
+        if vector is None:
+            await self._say_aside(f"say-{turn_id}", "I did not get enough voice from that. Say a full sentence, please.")
+            return
+        try:
+            person, note = self._speakers.enroll(job["name"], vector, relation=job.get("relation", ""))
+        except Exception as exc:  # noqa: BLE001
+            note = f"refused: {exc}"
+        await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
+            "text": text, "confidence": 1.0, "seconds": 0.0, "engine": "", "device": self._config.device,
+            "turn": turn_id, "enrolling": job["name"], "speaker_note": note})
+        if note:
+            await self._say_aside(f"say-{turn_id}", note.replace("refused: ", "").split(";")[0] + ".")
+            return
+        job["done"] += 1
+        if job["done"] >= job["takes"]:
+            self._enrolling = None
+            await self._say_aside(f"say-{turn_id}", f"Thank you, {job['name']}. I will know your voice now.")
+        else:
+            await self._say_aside(f"say-{turn_id}", f"Take {job['done']} of {job['takes']}. Say another sentence.")
+        self.turns.state = LISTENING
+        await self._announce(self.turns.state)
+
+    def _open_embedder(self) -> str:
+        """Open the speaker engine if it can be; "" or why not."""
+        if self._embedder is not None:
+            return ""
+        from .speakers import SherpaEmbedder, available as _speaker_available
+
+        ok, why = _speaker_available(self._config.model_dir)
+        if not ok:
+            return why
+        self._embedder = SherpaEmbedder(self._config.model_dir)
+        return ""
+
+    def enroll(self, name: str, *, relation: str = "", takes: int = 3) -> str:
+        """Start `voice enroll <name>`; returns "" or why not."""
+        if self._speakers is None:
+            return "speaker recognition is off ([voice] speaker_id)"
+        why = self._open_embedder()
+        if why:
+            return why
+        name = (name or "").strip()
+        if not name:
+            return "a name is needed"
+        self._enrolling = {"name": name, "relation": relation.strip(), "takes": max(1, min(10, int(takes))), "done": 0}
+        return ""
+
+    def whois_next(self) -> str:
+        if self._speakers is None:
+            return "speaker recognition is off ([voice] speaker_id)"
+        why = self._open_embedder()
+        if why:
+            return why
+        self._whois = True
+        return ""
+
     async def _ask_and_speak(self, turn_id: int, text: str) -> None:
         session_id = str(uuid.uuid4())
         clock = self._clocks.get(turn_id) or TurnClock(turn_id=turn_id)
+        identification, vector = await self._identify(turn_id)
+        if self._enrolling is not None:
+            await self._enroll_take(turn_id, text, vector)
+            return
+        speaker = identification.name if identification is not None else ""
+        if self._intro is not None:
+            await self._introduce_step(turn_id, text, vector)
+            return
+        if self._speakers is not None and self._embedder is not None:
+            from .introduce import learn_request
+
+            wanted = learn_request(text, speaker=speaker)
+            if wanted:
+                await self._begin_introduction(turn_id, text, vector, name="" if wanted == "?" else wanted)
+                return
+        self.last_identification = identification
+        if speaker:
+            self.last_speaker = speaker
+            self._speakers.heard(speaker)
+        who = {"speaker": speaker}
+        if identification is not None:
+            who["speaker_score"] = round(identification.score, 3)
+            if not speaker and identification.reason:
+                who["speaker_note"] = identification.reason
+        if self._whois:
+            self._whois = False
+            scores = self._speakers.scores(vector) if vector is not None else []
+            line = ", ".join(f"{n} {sc:.2f}" for n, sc in scores[:4]) or "nobody is enrolled"
+            await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
+                "text": text, "confidence": clock.confidence, "seconds": 0.0, "engine": clock.engine_stt,
+                "device": self._config.device, "turn": turn_id, **who, "speaker_note": f"scores: {line}"})
+            said = f"That sounded like {speaker}." if speaker else "I do not know that voice."
+            await self._say_aside(f"say-{turn_id}", f"{said} Scores: {line}.")
+            self.turns.state = LISTENING
+            await self._announce(self.turns.state)
+            return
         await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
             "text": text, "confidence": clock.confidence, "seconds": 0.0, "engine": clock.engine_stt,
-            "device": self._config.device, "session_id": session_id, "turn": turn_id})
+            "device": self._config.device, "session_id": session_id, "turn": turn_id, **who})
         if self._pipeline.last_said and is_echo(text, self._pipeline.last_said):
             await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
                 "text": text, "confidence": clock.confidence, "seconds": 0.0, "engine": clock.engine_stt,
@@ -398,7 +547,8 @@ class VoiceSession:
         self._still_task = still
         self._outstanding[turn_id] = session_id
         try:
-            reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence)
+            reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
+                                             speaker_name=speaker)
         finally:
             self._outstanding.pop(turn_id, None)
             still.cancel()
@@ -414,7 +564,58 @@ class VoiceSession:
                           turns_since_connector=self._turns_since_connector,
                           previous_connector=self._previous_connector, reply_seconds=took,
                           is_error=reply.startswith(("Sorry, I couldn't", "I'm still working")))
+        reply = self._maybe_ask_who(reply, identification, vector)
         await self._speak_reply(turn_id, reply, clock, context)
+
+    # ------------------------------------------------------------- meeting someone
+    def _maybe_ask_who(self, reply: str, identification, vector) -> str:
+        """An unknown voice that keeps talking gets asked its name, after
+        the answer it came for (voice/introduce.py)."""
+        if (self._unknown is None or vector is None or identification is None or identification.known
+                or self._intro is not None or int(self._config.introduce_after_turns) <= 0):
+            return reply
+        if self._unknown.note(vector) < int(self._config.introduce_after_turns):
+            return reply
+        from .introduce import Introduction
+
+        self._intro = Introduction()
+        self._intro.vectors.append(list(vector))
+        self._unknown.clear()
+        return f"{reply.rstrip()} By the way, I do not know your voice yet. What is your name?"
+
+    async def _begin_introduction(self, turn_id: int, text: str, vector, *, name: str) -> None:
+        """"Sim, learn Aran's voice": the introduction starts at the takes
+        when the name is known, at the name when it is not."""
+        from .introduce import Introduction
+
+        self._intro = Introduction()
+        if name:
+            self._intro.name = name
+            self._intro.stage = "take"
+            say = f"{name}, say a sentence for me, and then two more."
+        else:
+            say = "Gladly. What is your name?"
+        await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
+            "text": text, "confidence": 1.0, "seconds": 0.0, "engine": "", "device": self._config.device,
+            "turn": turn_id, "enrolling": name or "?", "speaker_note": "introduction started"})
+        await self._say_aside(f"say-{turn_id}", say)
+        self.turns.state = LISTENING
+        await self._announce(self.turns.state)
+
+    async def _introduce_step(self, turn_id: int, text: str, vector) -> None:
+        intro = self._intro
+        step = intro.feed(text, vector, self._speakers)
+        await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
+            "text": text, "confidence": 1.0, "seconds": 0.0, "engine": "", "device": self._config.device,
+            "turn": turn_id, "enrolling": intro.name or "?", "speaker_note": step.say})
+        if step.done:
+            self._intro = None
+            if step.enrolled:
+                self.last_speaker = step.enrolled
+        if step.say:
+            await self._say_aside(f"say-{turn_id}", step.say)
+        self.turns.state = LISTENING
+        await self._announce(self.turns.state)
 
     async def _acknowledge(self, turn_id: int, partial: str) -> None:
         """The sound of having heard -- "Aha.", "Let me check.", "Sure,
@@ -568,7 +769,7 @@ class VoiceSession:
         speaking, when an aside over it would be noise. True if said."""
         delivery = (delivery or Delivery()) if self._config.expressive else Delivery()
         delivery = delivery.with_base(self._config.tts_speed, self._config.volume)
-        request = TtsRequest(request_id=request_id, pieces=((text, 0),), voice=self._config.tts_voice,
+        request = TtsRequest(request_id=request_id, pieces=((self._planner.pronounced(text), 0),), voice=self._config.tts_voice,
                              speed=delivery.speed, gain=delivery.gain)
         lock = self._pipeline.speech_lock
         if lock.locked():
@@ -657,7 +858,7 @@ class VoiceSession:
             **({"metrics": metrics} if self._config.diagnostics else {}),
         })
         await self._pipeline._record(VoiceTurn(  # noqa: SLF001
-            session_id=f"turn-{turn_id}", device=self._config.device, speaker="", heard=clock.text,
+            session_id=f"turn-{turn_id}", device=self._config.device, speaker=self.last_speaker if self.last_identification is not None and self.last_identification.name else "", heard=clock.text,
             confidence=clock.confidence, said=said,
             heard_at=(self._clock.now() if self._clock is not None else time.time()) - max(0.0, self._now() - clock.speech_end) if clock.speech_end else 0.0,
             answered_at=self._clock.now() if self._clock is not None else time.time(),

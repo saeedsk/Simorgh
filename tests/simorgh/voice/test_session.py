@@ -85,7 +85,8 @@ class _Replies:
 
 def _config(**kw) -> Config:
     base = dict(stt="fake", tts="fake", endpoint_silence_ms=300, min_speech_ms=150, barge_in_speech_ms=300,
-                stt_partials=False, backchannel=False, reply_timeout_s=5.0, keep_transcripts=False)
+                stt_partials=False, backchannel=False, reply_timeout_s=5.0, keep_transcripts=False,
+                speaker_id="off")   # who-is-speaking has its own tests (test_speaker_session.py)
     base.update(kw)
     return Config(**base)
 

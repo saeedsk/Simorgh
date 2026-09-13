@@ -414,6 +414,32 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
                                   render=voiceview.controlled)
         return Outcome("usage: voice barge on|off  (interrupt Sim by talking) | voice barge aec on|off "
                        "(cancel Sim's own voice first -- steadier in a loud room, experimental)")
+    if verb in ("enroll", "enrol", "learn"):
+        words = rest.strip().split()
+        if not words:
+            return Outcome("usage: voice enroll <name> [as <relation>]   (then say three sentences)")
+        relation = ""
+        if "as" in [w.lower() for w in words[1:]]:
+            i = [w.lower() for w in words].index("as", 1)
+            relation, words = " ".join(words[i + 1:]), words[:i]
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST,
+                              {"action": "enroll", "name": " ".join(words), **({"relation": relation} if relation else {})},
+                              timeout=30.0, render=voiceview.controlled)
+    if verb in ("pronounce", "say-as"):
+        words = rest.strip().split()
+        if len(words) < 2:
+            return Outcome("usage: voice pronounce <name> <how to say it>   (voice pronounce Ira Ay-raa)")
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "pronounce", "name": words[0], "value": " ".join(words[1:])},
+                              timeout=10.0, render=voiceview.controlled)
+    if verb == "forget":
+        if not rest.strip():
+            return Outcome("usage: voice forget <name>")
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "forget", "name": rest.strip()}, timeout=10.0,
+                              render=voiceview.controlled)
+    if verb in ("people", "who"):
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "people"}, timeout=10.0, render=voiceview.controlled)
+    if verb == "whois":
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "whois"}, timeout=10.0, render=voiceview.controlled)
     if verb in ("test", "say"):
         if not rest:
             return Outcome("usage: voice test <text to speak>")

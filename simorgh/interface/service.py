@@ -853,9 +853,17 @@ class Service:
         if p.get("corrected"):
             self._out(render_mod.style(f"  ↳ read as: {text}", "dim", enabled=self._color))
             return
+        if p.get("enrolling"):
+            note = str(p.get("speaker_note") or "")
+            self._out(render_mod.style(f"  🎤 take for {p['enrolling']}: {text[:60]}" + (f" -- {note}" if note else " ✓"),
+                                       "dim", enabled=self._color))
+            return
         conf = p.get("confidence")
         tail = f"  ({conf:.0%})" if isinstance(conf, (int, float)) and conf < 0.999 else ""
-        self._out(render_mod.style(f"🎤 you: {text}{tail}", "cyan", enabled=self._color))
+        who = str(p.get("speaker") or "") or "you"
+        self._out(render_mod.style(f"🎤 {who}: {text}{tail}", "cyan", enabled=self._color))
+        if p.get("speaker_note"):
+            self._out(render_mod.style(f"  ↳ {p['speaker_note']}", "dim", enabled=self._color))
         session_id = str(p.get("session_id") or "")
         if session_id:
             # Otherwise the activity feed narrates the turn as

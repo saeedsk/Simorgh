@@ -1,0 +1,184 @@
+"""Who is speaking, in the live session: a turn's audio is embedded and
+named, the name rides on the transcript and into the ask, `voice
+enroll` takes three sentences instead of asking, and `voice whois`
+reports the scores."""
+
+from __future__ import annotations
+
+import asyncio
+import math
+import tempfile
+import unittest
+from pathlib import Path
+
+from simorgh.contracts import topics
+from simorgh.voice.fakes import FakeMicrophone, FakeRecogniser, FakeSpeaker, FakeSynthesiser, silence
+from simorgh.voice.pipeline import Pipeline
+from simorgh.voice.session import VoiceSession
+from simorgh.voice.speakers import SpeakerBook
+
+from tests.simorgh.voice.test_session import _Bus, _Script, _config, _run_until
+
+
+def _vec(angle: float, dim: int = 8) -> list[float]:
+    v = [0.0] * dim
+    v[0], v[1] = math.cos(angle), math.sin(angle)
+    return v
+
+
+class _Embedder:
+    """Returns whatever vector the test set last; records the audio length."""
+
+    dim = 8
+
+    def __init__(self) -> None:
+        self.vector = _vec(0.0)
+        self.seconds: list[float] = []
+
+    def embed(self, pcm, sample_rate):
+        self.seconds.append(len(pcm) / sample_rate)
+        return list(self.vector)
+
+
+class _Replies:
+    def __init__(self, reply: str = "Hello there.") -> None:
+        self.reply = reply
+        self.asked: list[tuple[str, str]] = []
+
+    async def ask(self, text, *, session_id=None, speaker_name: str = "", confidence: float = 1.0) -> str:
+        self.asked.append((text, speaker_name))
+        return self.reply
+
+
+def _session(config, script, replies, embedder, book):
+    bus = _Bus()
+    mic = FakeMicrophone(silence(0.03), frame_delay=0.0005)
+    speaker, stt, tts = FakeSpeaker(), FakeRecogniser("what time is it", 0.95), FakeSynthesiser()
+    pipeline = Pipeline(bus=bus, clock=None, logger=None, ledger=None, config=config, microphone=mic, speaker=speaker,
+                        recogniser=stt, synthesiser=tts, detector_factory=lambda: script)
+    pipeline.ask = replies.ask  # type: ignore[method-assign]
+    session = VoiceSession(pipeline=pipeline, config=config, microphone=mic, speaker=speaker, recogniser=stt,
+                           synthesiser=tts, detector_factory=lambda: script, embedder=embedder, speakers=book)
+    return session, bus, tts
+
+
+class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.55, margin=0.08)
+        self.embedder = _Embedder()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    async def test_an_enrolled_voice_is_named_on_the_transcript_and_in_the_ask(self):
+        self.book.enroll("Ira", _vec(0.0)); self.book.enroll("Saeed", _vec(2.0))
+        self.embedder.vector = _vec(0.05)
+        script = _Script((True, 40), (False, 15), (False, 10_000))   # 1.2 s of speech: enough voice to judge
+        replies = _Replies()
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=6.0)
+        self.assertEqual(replies.asked[0][1], "Ira", "the ask carries the speaker")
+        finals = [p for p in bus.of(topics.VOICE_TRANSCRIPT) if p.get("session_id")]
+        self.assertEqual(finals[0]["speaker"], "Ira"); self.assertGreater(finals[0]["speaker_score"], 0.9)
+        self.assertGreaterEqual(self.embedder.seconds[0], 1.0, "the whole turn's audio was embedded, preroll included")
+        self.assertEqual(self.book.get("Ira").heard, 1)
+        self.assertEqual(session.last_speaker, "Ira")
+
+    async def test_an_unknown_voice_stays_you_with_the_reason(self):
+        self.book.enroll("Ira", _vec(0.0))
+        self.embedder.vector = _vec(1.5)
+        script = _Script((True, 40), (False, 15), (False, 10_000))
+        replies = _Replies()
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=6.0)
+        self.assertEqual(replies.asked[0][1], "")
+        final = [p for p in bus.of(topics.VOICE_TRANSCRIPT) if p.get("session_id")][0]
+        self.assertEqual(final["speaker"], ""); self.assertIn("under the threshold", final["speaker_note"])
+
+    async def test_a_short_turn_is_not_judged(self):
+        self.book.enroll("Ira", _vec(0.0))
+        script = _Script((True, 12), (False, 15), (False, 10_000))   # 360 ms
+        replies = _Replies()
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=6.0)
+        self.assertEqual(self.embedder.seconds, [], "too little voice: no embedding, no guess")
+        self.assertEqual(replies.asked[0][1], "")
+
+    async def test_enrolment_takes_three_sentences_instead_of_asking(self):
+        script = _Script(*[(True, 40), (False, 15)] * 3, (False, 10_000))
+        replies = _Replies()
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        self.assertEqual(session.enroll("Ira", relation="daughter", takes=3), "")
+        await _run_until(session, lambda: self.book.get("Ira") is not None and len(self.book.get("Ira").embeddings) >= 3, timeout=8.0)
+        self.assertEqual(replies.asked, [], "takes are not questions")
+        self.assertIsNone(session._enrolling)  # noqa: SLF001
+        said = " ".join(tts.spoken)
+        self.assertIn("Take 1 of 3", said); self.assertIn("Take 2 of 3", said); self.assertIn("know your voice", said)
+        takes = [p for p in bus.of(topics.VOICE_TRANSCRIPT) if p.get("enrolling")]
+        self.assertEqual(len(takes), 3); self.assertEqual(takes[0]["enrolling"], "Ira")
+        self.assertEqual(self.book.get("Ira").relation, "daughter")
+
+    async def test_whois_reports_the_scores_aloud_and_does_not_ask(self):
+        self.book.enroll("Ira", _vec(0.0)); self.book.enroll("Saeed", _vec(2.0))
+        self.embedder.vector = _vec(0.02)
+        script = _Script((True, 40), (False, 15), (False, 10_000))
+        replies = _Replies()
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        self.assertEqual(session.whois_next(), "")
+        await _run_until(session, lambda: any("sounded like" in s for s in tts.spoken), timeout=6.0)
+        self.assertEqual(replies.asked, [])
+        self.assertTrue(any("Ira" in s and "Scores" in s for s in tts.spoken))
+        note = [p for p in bus.of(topics.VOICE_TRANSCRIPT) if p.get("speaker_note", "").startswith("scores")][0]
+        self.assertIn("Ira", note["speaker_note"])
+
+    async def test_an_unknown_voice_heard_twice_is_asked_its_name_and_enrolled_by_conversation(self):
+        self.book.enroll("Ira", _vec(0.0))
+        self.embedder.vector = _vec(2.0)                      # somebody new, every time
+        # five turns: question, question (asked who), "my name is Aran", "his son", one more sentence
+        script = _Script(*[(True, 40), (False, 15)] * 5, (False, 10_000))
+        replies = _Replies("It is three o'clock.")
+        stt = FakeRecogniser("what time is it", 0.95)
+        session, bus, tts = _session(_config(introduce_after_turns=2), script, replies, self.embedder, self.book)
+        heard = iter(["what time is it", "and the date", "my name is Aran", "I am his son", "the pool is warm tonight"])
+        original = session._stt._inner.transcribe if hasattr(session._stt, "_inner") else None  # noqa: SLF001
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.2, engine="fake")
+        inner = getattr(session._stt, "_inner", None) or getattr(session._stt, "_recogniser", None)  # noqa: SLF001
+        self.assertIsNotNone(inner, "the incremental recogniser wraps the fake")
+        inner.transcribe = _transcribe  # type: ignore[method-assign]
+        await _run_until(session, lambda: self.book.get("Aran") is not None and len(self.book.get("Aran").embeddings) >= 3, timeout=12.0)
+        said = " ".join(tts.spoken)
+        self.assertIn("What is your name", said, "asked after the second unknown turn, appended to the answer")
+        self.assertIn("Nice to meet you, Aran", said); self.assertIn("know your voice", said)
+        self.assertEqual(len(replies.asked), 2, "the two questions were answered; the introduction turns were not asked")
+        self.assertEqual(self.book.get("Aran").relation, "his son")
+        self.assertIsNone(session._intro)  # noqa: SLF001
+
+    async def test_learn_someones_voice_by_saying_so(self):
+        self.book.enroll("Saeed", _vec(2.0))
+        self.embedder.vector = _vec(2.0)
+        script = _Script(*[(True, 40), (False, 15)] * 4, (False, 10_000))
+        replies = _Replies()
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        heard = iter(["Sim, learn Iris's voice", "hello Sim", "the garden lights are on", "and the pool is warm"])
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.2, engine="fake")
+        inner = getattr(session._stt, "_inner", None) or getattr(session._stt, "_recogniser", None)  # noqa: SLF001
+        inner.transcribe = _transcribe  # type: ignore[method-assign]
+        self.embedder.vector = _vec(1.0)   # Iris's takes come from a different voice than Saeed's request
+        await _run_until(session, lambda: self.book.get("Iris") is not None and len(self.book.get("Iris").embeddings) >= 3, timeout=12.0)
+        self.assertEqual(replies.asked, [], "none of it was a question for the model")
+        self.assertIn("Iris, say a sentence", " ".join(tts.spoken))
+
+    async def test_without_an_engine_enrolment_says_what_is_missing(self):
+        script = _Script((False, 10_000))
+        replies = _Replies()
+        session, bus, tts = _session(_config(speaker_id="off", model_dir=self.tmp.name), script, replies, None, None)
+        self.assertIn("off", session.enroll("Ira"))
+        session, bus, tts = _session(_config(speaker_id="auto", model_dir=self.tmp.name, speakers_dir=self.tmp.name), script, replies, None, None)
+        self.assertIn("needs", session.enroll("Ira"), "with the book but no model: says what is missing")

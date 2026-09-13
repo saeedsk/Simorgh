@@ -158,6 +158,19 @@ class Config:
     # acting (the never-guess rule).
     min_confidence: float = 0.6
     # Privacy (section 6).
+    # Who is speaking (voice/speakers.py): "auto" identifies when the
+    # engine and model are there and somebody is enrolled; "off" never.
+    # threshold/margin are the cosine rules the SpeakerBook applies;
+    # `voice whois` shows the live scores so a household can tune them.
+    speaker_id: str = "auto"
+    speaker_threshold: float = 0.55
+    speaker_margin: float = 0.08
+    speakers_dir: str = "workspace/voice/speakers"
+    # Meeting a voice Sim does not know (voice/introduce.py): after this
+    # many turns from the same unknown voice, Sim asks who it is talking
+    # to and enrols them by conversation. 0 turns off the asking; "Sim,
+    # learn Aran's voice" still works.
+    introduce_after_turns: int = 2
     keep_audio: bool = False
     audio_dir: str = "workspace/voice/audio"
     keep_transcripts: bool = True

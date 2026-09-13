@@ -51,7 +51,8 @@ def controlled(payload: dict) -> str:
         error = payload.get("error") or {}
         return f"voice: {payload.get('detail') or error.get('detail') or 'could not do that'}"
     detail = payload.get("detail") or ""
-    if detail.startswith(("barge-in", "echo cancellation", "settings you can change")) or " = " in detail:
+    if detail.startswith(("barge-in", "echo cancellation", "settings you can change", "people I know", "nobody is enrolled",
+                          "enrolling", "forgot", "say something")) or " = " in detail or " is said " in detail:
         return f"voice: {detail}"
     return status(payload)
 
