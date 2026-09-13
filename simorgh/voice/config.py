@@ -166,12 +166,25 @@ class Config:
     speaker_id: str = "auto"
     speaker_threshold: float = 0.5
     speaker_margin: float = 0.06
+    # Under the threshold but at least this close, and clear of the
+    # runner-up: "probably <name>" -- the turn is theirs, marked so.
+    # 0 turns the lean off (unknown is unknown).
+    speaker_lean: float = 0.3
+    # A turn Sim is sure about becomes one more take for that person,
+    # silently (voice/speakers.py `refine`): the voice model tunes itself
+    # to the room without ever asking for training sentences.
+    speaker_refine: bool = True
     speakers_dir: str = "workspace/voice/speakers"
     # Meeting a voice Sim does not know (voice/introduce.py): after this
     # many turns from the same unknown voice, Sim asks who it is talking
     # to and enrols them by conversation. 0 turns off the asking; "Sim,
     # learn Aran's voice" still works.
-    introduce_after_turns: int = 2
+    # 0 (the default since 2026-09-13): Sim never asks an unknown voice
+    # who it is on its own -- "it continuously detected our voices as
+    # new people and asked for three sentences" (the creator). A voice
+    # is enrolled by `voice enroll <name>` or by being asked: "Sim, learn
+    # Aran's voice". A number above 0 restores the asking.
+    introduce_after_turns: int = 0
     # Two known people talking to each other: Sim keeps the thread and
     # stays quiet unless named or mid-exchange (voice/session.py).
     bystander: bool = True

@@ -861,6 +861,8 @@ class Service:
         conf = p.get("confidence")
         tail = f"  ({conf:.0%})" if isinstance(conf, (int, float)) and conf < 0.999 else ""
         who = str(p.get("speaker") or "") or "you"
+        if p.get("speaker_probable"):
+            who += "?"      # named by the lean rule, under the threshold
         self._out(render_mod.style(f"🎤 {who}: {text}{tail}", "cyan", enabled=self._color))
         if p.get("speaker_note"):
             self._out(render_mod.style(f"  ↳ {p['speaker_note']}", "dim", enabled=self._color))

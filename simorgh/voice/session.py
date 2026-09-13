@@ -131,7 +131,7 @@ class VoiceSession:
             from .speakers import SpeakerBook
 
             self._speakers = SpeakerBook(config.speakers_dir, threshold=config.speaker_threshold, margin=config.speaker_margin,
-                                         household=HOUSEHOLD)
+                                         household=HOUSEHOLD, lean=config.speaker_lean)
         # The engine is opened only once somebody is enrolled (or enrolment
         # starts): a household that never enrolled pays nothing per turn.
         if self._embedder is None and self._speakers is not None and self._speakers.people():
@@ -557,10 +557,17 @@ class VoiceSession:
         if speaker:
             self.last_speaker = speaker
             self._speakers.heard(speaker)
+            from .speakers import MIN_SECONDS
+
+            if (vector is not None and not identification.probable and self._config.speaker_refine
+                    and self._last_speech_s >= MIN_SECONDS and self._speakers.refine(speaker, vector)):
+                self._log("debug", "voice.speaker_refined", speaker=speaker, score=round(identification.score, 3))
         who = {"speaker": speaker}
         if identification is not None:
             who["speaker_score"] = round(identification.score, 3)
-            if not speaker and identification.reason:
+            if identification.probable:
+                who["speaker_probable"] = True
+            if identification.reason and (not speaker or identification.probable):
                 who["speaker_note"] = identification.reason
         if self._whois:
             self._whois = False

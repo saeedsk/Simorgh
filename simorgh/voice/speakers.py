@@ -52,6 +52,15 @@ SPEAKER_MODEL_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/sp
                      + SPEAKER_MODEL)
 DEFAULT_THRESHOLD = 0.5
 DEFAULT_MARGIN = 0.06
+#: under the threshold but at least this close, and clear of the runner-up,
+#: a voice is "probably" that person -- attributed, not asked (the creator,
+#: 2026-09-13: "map it to the closest voice saved, or call it unknown")
+DEFAULT_LEAN = 0.3
+#: takes kept per person; the first three are the enrolment, the rest are
+#: learnt from confident turns (`refine`)
+MAX_TAKES = 12
+#: a confident take closer than this to one already kept adds nothing
+REFINE_NOVELTY = 0.9
 #: An utterance shorter than this carries too little voice to judge...
 MIN_SECONDS = 0.8
 #: ...and an enrolment take shorter than this is not worth keeping.
@@ -169,6 +178,7 @@ class Identification:
     runner_up: str = ""
     runner_up_score: float = 0.0
     reason: str = ""
+    probable: bool = False   # named by the lean rule, under the threshold
 
     @property
     def known(self) -> bool:
@@ -179,8 +189,9 @@ class SpeakerBook:
     """The household's voices: enrolment, identification, persistence."""
 
     def __init__(self, folder: Path | str = "workspace/voice/speakers", *, threshold: float = DEFAULT_THRESHOLD,
-                 margin: float = DEFAULT_MARGIN, clock=time.time, household=None) -> None:
+                 margin: float = DEFAULT_MARGIN, clock=time.time, household=None, lean: float = DEFAULT_LEAN) -> None:
         self._household = tuple(household or ())
+        self.lean = float(lean)
         self._folder = Path(folder)
         self.threshold = float(threshold)
         self.margin = float(margin)
@@ -326,12 +337,38 @@ class SpeakerBook:
         second_score, second = (scored[1][0], scored[1][1]) if len(scored) > 1 else (0.0, None)
         runner = second.name if second is not None else ""
         if best_score < self.threshold:
+            clear = second is None or best_score - second_score >= self.margin
+            if self.lean and best_score >= self.lean and clear:
+                return Identification(name=best.name, score=best_score, runner_up=runner, runner_up_score=second_score,
+                                      probable=True,
+                                      reason=f"probably {best.name} at {best_score:.2f} (under the threshold {self.threshold:.2f})")
             return Identification(name="", score=best_score, runner_up=best.name, runner_up_score=best_score,
                                   reason=f"closest is {best.name} at {best_score:.2f}, under the threshold {self.threshold:.2f}")
         if second is not None and best_score - second_score < self.margin:
             return Identification(name="", score=best_score, runner_up=runner, runner_up_score=second_score,
                                   reason=f"{best.name} {best_score:.2f} and {runner} {second_score:.2f} are too close to call")
         return Identification(name=best.name, score=best_score, runner_up=runner, runner_up_score=second_score)
+
+    def refine(self, name: str, embedding: Sequence[float]) -> bool:
+        """A confident turn becomes a take, quietly: the room, the mood,
+        the distance that this take covers and the enrolment did not.
+        Nothing is said to the person (the creator, 2026-09-13). Kept only
+        when it is new enough to matter, never past MAX_TAKES -- the
+        oldest learnt take goes, the three enrolment takes stay."""
+        self._load()
+        person = self._people.get((name or "").lower())
+        if person is None or not person.embeddings:
+            return False
+        vector = [float(x) for x in embedding]
+        if self.score(vector, person) >= REFINE_NOVELTY:
+            return False
+        if self.score(vector, person) < self.threshold:
+            return False    # only a confident take teaches
+        person.embeddings.append(vector)
+        if len(person.embeddings) > MAX_TAKES:
+            del person.embeddings[3]
+        self._save(person)
+        return True
 
     def heard(self, name: str) -> None:
         person = self.get(name)

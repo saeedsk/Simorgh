@@ -5091,3 +5091,21 @@ Still ahead, roughly in order:
     exactly), only `voice test` and a long spoken answer take the slow
     lane, and both speak paths show the name, never the mark.
     `voice family` is `voice people`.
+
+161. **Sim stops asking strangers their names, and learns its family
+    quietly (2026-09-13, night).** "Sim continuously detected our voice
+    as a new person, assigned a random name it collected from our
+    speech, and asked us to say three sentences." So: `introduce_after_turns`
+    is 0 -- an unknown voice is never asked who it is unless someone says
+    "Sim, learn my voice" or types `voice enroll`. Under the threshold, a
+    voice at least `speaker_lean` (0.3) close to one person and clear of
+    the runner-up is *probably* them: the turn is theirs, shown as
+    "🎤 Saeed?:" with the score, never a stranger. And a turn Sim is sure
+    about becomes one more take for that person, silently
+    (`SpeakerBook.refine`: only when it is new enough to matter, capped
+    at twelve, the three enrolment takes kept) -- "no need to tell the
+    person their voice parameters are being updated." Then the persona:
+    "the character of Sim had better be defined to summarise, have short
+    answers, be concise" -- a spoken reply that runs long arrives late
+    and reads as Sim not answering. `BREVITY` in the chat and voice
+    prompts, and "Brief by character" in SOUL.md's Personality.

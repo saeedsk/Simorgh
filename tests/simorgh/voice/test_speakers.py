@@ -96,3 +96,56 @@ class SpeakerBookTestCase(unittest.TestCase):
     def test_cosine(self):
         self.assertAlmostEqual(cosine([1, 0], [1, 0]), 1.0)
         self.assertAlmostEqual(cosine([1, 0], [0, 1]), 0.0)
+
+
+class LeanAndRefineTestCase(unittest.TestCase):
+    """Under the threshold, a voice is 'probably' the nearest person or
+    unknown -- never a stranger to be enrolled; a confident turn teaches
+    the book quietly (the creator, 2026-09-13). Saeed's take is at angle
+    0, Soodeh's at 2.5 (cosine -0.8 to Saeed's)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.5, margin=0.06, lean=0.3)
+        self.book.enroll("Saeed", _vec(0.0))
+        self.book.enroll("Soodeh", _vec(2.5))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_voice_between_lean_and_threshold_is_probably_the_nearest(self):
+        who = self.book.identify(_vec(1.1))           # 0.45 to Saeed, 0.17 to Soodeh
+        self.assertEqual((who.name, who.probable), ("Saeed", True))
+        self.assertIn("probably Saeed", who.reason)
+        far = self.book.identify(_vec(-1.4))          # 0.17 to Saeed, -0.72 to Soodeh: nobody
+        self.assertEqual((far.name, far.probable), ("", False))
+        self.assertIn("closest is", far.reason)
+
+    def test_no_lean_when_the_runner_up_is_too_close(self):
+        self.book.enroll("Aran", _vec(2.55), insist=True)   # a voice as close to Soodeh's as twins
+        who = self.book.identify(_vec(1.35))          # Soodeh 0.41, Aran 0.36: within the margin, so no lean
+        self.assertEqual(who.name, "")
+        self.assertIn("closest is", who.reason)
+        self.assertEqual(self.book.identify(_vec(0.6)).name, "Saeed", "a confident match is untouched")
+
+    def test_lean_off_means_unknown_is_unknown(self):
+        book = SpeakerBook(self.book._folder, threshold=0.5, margin=0.06, lean=0.0)  # noqa: SLF001
+        self.assertEqual(book.identify(_vec(1.1)).name, "")
+
+    def test_a_confident_turn_becomes_a_take_and_a_near_copy_does_not(self):
+        self.assertTrue(self.book.refine("Saeed", _vec(0.6)))      # 0.83: confident and new
+        self.assertEqual(len(self.book.get("Saeed").embeddings), 2)
+        self.assertFalse(self.book.refine("Saeed", _vec(0.01)), "a near copy of a take teaches nothing")
+        self.assertFalse(self.book.refine("Saeed", _vec(-1.1)), "an unsure take never teaches")
+        self.assertFalse(self.book.refine("Nobody", _vec(0.0)))
+
+    def test_learnt_takes_are_capped_and_the_enrolment_stays(self):
+        from simorgh.voice.speakers import MAX_TAKES
+        self.book.enroll("Saeed", _vec(0.05)); self.book.enroll("Saeed", _vec(-0.05))
+        first_three = [list(v) for v in self.book.get("Saeed").embeddings]
+        # each take half a radian on from the last: confident against it (0.88), new enough (< 0.9)
+        accepted = sum(self.book.refine("Saeed", _vec(0.5 * k)) for k in range(1, 12))
+        self.assertEqual(accepted, 10, "the first, 0.90 from an enrolment take, is a near copy; ten are new")
+        person = self.book.get("Saeed")
+        self.assertEqual(len(person.embeddings), MAX_TAKES)
+        self.assertEqual(person.embeddings[:3], first_three)

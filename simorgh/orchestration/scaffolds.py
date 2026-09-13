@@ -281,6 +281,15 @@ Name a real path you have actually looked at. Anything that is not one
 of those two line shapes is discarded, so no preamble, no headings, no
 prose after the list -- the list is the whole answer."""
 
+BREVITY = """\
+Say the least that carries the information. One or two sentences is the
+norm for a remark, a question, a confirmation; a paragraph only when the
+person asked for detail. Give the answer, not the path to it; summarise
+rather than enumerate; no preamble, no restating the question, no closing
+offer of more. Every sentence should tell the person something they did
+not have. (The creator, 2026-09-13: Sim's replies are spoken, and a long
+one arrives late; "messages should be short in nature.")"""
+
 _CHAT = """\
 Answer the person. Use a tool when it would make the answer true rather
 than plausible, and skip the tools when you already know. Do not open
@@ -473,6 +482,8 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         # pair this text tells the model to reach for -- was never shown
         # it.
         body = f"{body}\n\n{_RESOURCEFUL}"
+    if profile.scaffold == "chat" or channel == "voice":
+        body = f"{BREVITY}\n\n{body}" if body else BREVITY
     if channel == "voice":
         body = f"{VOICE}\n\n{body}" if body else VOICE
         if speaker or room:
