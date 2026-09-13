@@ -109,6 +109,7 @@ class VoiceSession:
         self._pipeline = pipeline
         self._config = config
         self._audio: dict[int, bytearray] = {}      # a turn's frames, kept only until it is identified
+        self._timed: dict[int, tuple] = {}          # a turn's (audio, timed words), kept until attributed
         self._enrolling: dict | None = None          # {"name", "relation", "takes", "done"} while `voice enroll` runs
         self._whois = False                          # `voice whois`: the next turn reports its scores instead of asking
         # What the room said lately: (speaker, text, when, asked?) -- the
@@ -426,6 +427,8 @@ class VoiceSession:
                         clock.text = event.text
                         clock.confidence = event.confidence
                         clock.engine_stt = event.engine
+                    if event.words and event.audio:
+                        self._timed[turn_id] = (event.audio, event.words)
                     self.partial = ""
                     if self._config.keep_audio:
                         pass  # the streaming path keeps no raw audio: see the privacy note in the README
@@ -436,9 +439,11 @@ class VoiceSession:
                     await self._announce(self.turns.state)
         except asyncio.CancelledError:
             self._audio.pop(turn_id, None)
+            self._timed.pop(turn_id, None)
             raise
         except Exception as exc:  # noqa: BLE001 -- one failed hearing must not end the session
             self._audio.pop(turn_id, None)
+            self._timed.pop(turn_id, None)
             self._log("warning", "voice.transcribe_failed", error=repr(exc))
             self.turns.state = LISTENING
 
@@ -465,6 +470,29 @@ class VoiceSession:
             self._log("warning", "voice.speaker_embed_failed", error=repr(exc))
             return None, None
         return self._speakers.identify(vector), vector
+
+    async def _attribute(self, turn_id: int, identification) -> list:
+        """Who said which words of the turn (voice/diarize.py), when it
+        is long enough to hold two people and the book knows anyone.
+        [] means: one voice, the whole-turn verdict stands."""
+        kept = self._timed.pop(turn_id, None)
+        if kept is None or not self._config.diarize or self._embedder is None or self._speakers is None:
+            return []
+        audio, words = kept
+        if len(audio) / 32000.0 < float(self._config.diarize_min_s) or not self._speakers.people():
+            return []
+        from .diarize import attribute, speakers_in
+
+        try:
+            segments = await asyncio.to_thread(attribute, audio, 16000, words, self._embedder.embed,
+                                               self._speakers.identify)
+        except Exception as exc:  # noqa: BLE001 -- attribution is a refinement, never the turn's failure
+            self._log("warning", "voice.attribute_failed", error=repr(exc))
+            return []
+        names = speakers_in(segments)
+        if len(names) < 2:
+            return []       # one voice: the whole-turn identification is the better judge
+        return segments
 
     async def _enroll_take(self, turn_id: int, text: str, vector) -> None:
         """One take of `voice enroll <name>`: the turn's voice goes into
@@ -553,6 +581,13 @@ class VoiceSession:
             if wanted:
                 await self._begin_introduction(turn_id, text, vector, name="" if wanted == "?" else wanted)
                 return
+        segments = await self._attribute(turn_id, identification)
+        if segments:
+            from .diarize import lines, speakers_in
+
+            names = speakers_in(segments)
+            speaker = names[-1] if names else speaker     # the last voice is the one Sim answers
+            text = lines(segments)
         self.last_identification = identification
         if speaker:
             self.last_speaker = speaker
@@ -563,6 +598,8 @@ class VoiceSession:
                     and self._last_speech_s >= MIN_SECONDS and self._speakers.refine(speaker, vector)):
                 self._log("debug", "voice.speaker_refined", speaker=speaker, score=round(identification.score, 3))
         who = {"speaker": speaker}
+        if segments:
+            who["segments"] = [seg.as_dict() for seg in segments]
         if identification is not None:
             who["speaker_score"] = round(identification.score, 3)
             if identification.probable:

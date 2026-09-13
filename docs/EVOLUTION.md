@@ -5109,3 +5109,20 @@ Still ahead, roughly in order:
     answers, be concise" -- a spoken reply that runs long arrives late
     and reads as Sim not answering. `BREVITY` in the chat and voice
     prompts, and "Brief by character" in SOUL.md's Personality.
+
+162. **Who said which words (2026-09-13, night).** "Sim will be engaged
+    in multi-person conversation; when it listens, each chunk of a
+    sentence, or even each word, may come from a different person."
+    whisper-server now answers with its timed segments (free: 1.28 s on
+    the six-second clip with or without them; one segment per word,
+    `diarize_words`, is finer and half a second slower). `voice/diarize.py`
+    slides a 1.2 s window over a turn's audio, identifies each window
+    against the book, gives every timed piece the verdict of the window
+    nearest its middle, merges runs, hands a stray word between two runs
+    of one voice back to that voice and splits a window that heard the
+    change of voice between its neighbours. A turn at least 3.5 s long
+    with two named voices reaches the model as "Saeed: ... / Soodeh: ..."
+    and the screen as one 🎤 line per voice; the last voice is the one
+    Sim answers. One voice, or a short turn, and the whole-turn verdict
+    stands as before. Pure and tested with a fake embedder that reads
+    the speaker off the audio itself.

@@ -23,7 +23,11 @@ class _Handler(BaseHTTPRequestHandler):
         text = " Hello there. [BLANK_AUDIO]" if b"turn.wav" in body else " no file"
         if b"name=\"language\"\r\n\r\nfa" in body:
             text = " salam"
-        reply = json.dumps({"text": text}).encode()
+        words = [w for w in text.split(" ") if w]
+        step = 0.4
+        segments = [{"id": i, "text": " " + w, "start": round(i * step, 2), "end": round((i + 1) * step, 2)}
+                    for i, w in enumerate(words)]
+        reply = json.dumps({"text": text, "segments": segments}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(reply)))

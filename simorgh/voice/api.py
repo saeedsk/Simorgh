@@ -33,6 +33,15 @@ class Audio:
 
 
 @dataclass(frozen=True)
+class Word:
+    """One recognised word and when it was said, in seconds of the audio."""
+
+    text: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True)
 class Utterance:
     """What the recogniser heard."""
 
@@ -41,6 +50,7 @@ class Utterance:
     seconds: float     # of audio
     engine: str
     language: str = ""
+    words: tuple = ()  # timed words, when the engine gives them (voice/diarize.py reads them)
 
 
 @dataclass(frozen=True)
@@ -105,6 +115,8 @@ class TranscriptEvent:
     language: str = ""
     audio_seconds: float = 0.0
     engine: str = ""
+    words: tuple = ()          # a final's timed words, when the engine gives them
+    audio: bytes = b""         # a final's audio, for attributing the words to voices
 
 
 @dataclass(frozen=True)

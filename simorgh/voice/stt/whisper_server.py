@@ -25,7 +25,7 @@ import time
 import uuid
 from pathlib import Path
 
-from ..api import Audio, Utterance
+from ..api import Audio, Utterance, Word
 from ..audio import wav_bytes
 from .whisper_cli import _TEST_MODEL, clean_transcript, find_model
 
@@ -49,6 +49,22 @@ def _multipart(fields: dict[str, str], file_field: str, filename: str, data: byt
     return bytes(out), f"multipart/form-data; boundary={boundary}"
 
 
+def _words(reply: dict) -> list[Word]:
+    out: list[Word] = []
+    for seg in reply.get("segments") or []:
+        text = str(seg.get("text") or "")
+        if not text.strip():
+            continue
+        try:
+            start, end = float(seg.get("start") or 0.0), float(seg.get("end") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        cleaned = clean_transcript(text)
+        if end > start and cleaned:
+            out.append(Word(cleaned, start, end))
+    return out
+
+
 class WhisperServerRecogniser:
     name = "whisper_server"
 
@@ -69,6 +85,7 @@ class WhisperServerRecogniser:
         self._model = model
         self._language = config.stt_language or "auto"
         self._port = int(port or getattr(config, "stt_server_port", 0) or 0)
+        self._by_word = bool(getattr(config, "diarize_words", False))
         self._proc: asyncio.subprocess.Process | None = None
         self._lock = asyncio.Lock()
         self.problems: list[str] = []
@@ -89,7 +106,13 @@ class WhisperServerRecogniser:
             return
         if not self._port:
             self._port = free_port()
-        args = [*self._command, "-m", str(self._model), "--host", "127.0.0.1", "--port", str(self._port), "-nt"]
+        # Timed segments are what voice/diarize.py attributes to voices.
+        # whisper's own segments cost nothing over none (1.28 s either
+        # way on the six-second clip, 2026-09-13); one segment per word
+        # (`-ml 1 -sow`) is finer and 0.3-1.4 s slower -- `diarize_words`.
+        args = [*self._command, "-m", str(self._model), "--host", "127.0.0.1", "--port", str(self._port)]
+        if self._by_word:
+            args += ["-ml", "1", "-sow"]
         quiet = None if os.environ.get("SIMORGH_STT_DEBUG") else asyncio.subprocess.DEVNULL
         self._proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.DEVNULL, stdout=quiet, stderr=quiet)
         deadline = time.monotonic() + READY_TIMEOUT_S
@@ -142,7 +165,7 @@ class WhisperServerRecogniser:
             return json.loads(response.read().decode("utf-8") or "{}")
 
     async def transcribe(self, audio: Audio, *, language: str = "") -> Utterance:
-        body, content_type = _multipart({"response_format": "json", "language": language or self._language,
+        body, content_type = _multipart({"response_format": "verbose_json", "language": language or self._language,
                                          "temperature": "0.0"}, "file", "turn.wav", wav_bytes(audio))
         started = time.monotonic()
         async with self._lock:
@@ -160,9 +183,11 @@ class WhisperServerRecogniser:
         self.last_took_s = round(time.monotonic() - started, 3)
         if reply.get("error"):
             raise RuntimeError(f"whisper-server: {reply['error']}")
-        text = str(reply.get("text") or "")
+        words = tuple(_words(reply))
+        text = "".join(str(s.get("text") or "") for s in (reply.get("segments") or [])) if reply.get("segments") \
+            else str(reply.get("text") or "")
         return Utterance(text=clean_transcript(text), confidence=1.0, seconds=audio.seconds,
-                         engine=self.name, language=language or self._language)
+                         engine=self.name, language=language or self._language, words=words)
 
 
 __all__ = ["WhisperServerRecogniser", "free_port"]

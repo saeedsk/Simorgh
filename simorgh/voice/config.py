@@ -174,6 +174,13 @@ class Config:
     # silently (voice/speakers.py `refine`): the voice model tunes itself
     # to the room without ever asking for training sentences.
     speaker_refine: bool = True
+    # A turn long enough may hold two people (voice/diarize.py): its
+    # words are attributed by voice, window by window, and the model is
+    # told "Saeed: ... / Soodeh: ...". Off, or too short, and the whole
+    # turn is one voice.
+    diarize: bool = True
+    diarize_min_s: float = 3.5
+    diarize_words: bool = False    # whisper times every word (finer cuts, ~0.5 s slower a turn) instead of its own segments
     speakers_dir: str = "workspace/voice/speakers"
     # Meeting a voice Sim does not know (voice/introduce.py): after this
     # many turns from the same unknown voice, Sim asks who it is talking

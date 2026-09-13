@@ -86,7 +86,8 @@ class IncrementalRecogniser:
             return
         final = await self._inner.transcribe(Audio(bytes(buffer)), language=language)
         yield TranscriptEvent("final", final.text, turn_id, confidence=final.confidence, language=final.language,
-                              audio_seconds=final.seconds, engine=final.engine or engine)
+                              audio_seconds=final.seconds, engine=final.engine or engine,
+                              words=tuple(getattr(final, "words", ()) or ()), audio=bytes(buffer))
 
 
 __all__ = ["IncrementalRecogniser"]

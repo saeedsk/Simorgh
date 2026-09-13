@@ -30,6 +30,8 @@ SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "speaker_margin": (float, (0.0, 0.5), "how far the best match must beat the second before it counts"),
     "speaker_lean": (float, (0.0, 0.95), "under the threshold but at least this close, a voice is 'probably' that person; 0 = never lean"),
     "speaker_refine": (bool, None, "a turn Sim is sure about quietly becomes another take for that person"),
+    "diarize": (bool, None, "a long turn's words are attributed to who said them, voice by voice"),
+    "diarize_words": (bool, None, "time every word for finer attribution (about half a second slower a turn)"),
     "introduce_after_turns": (int, (0, 10), "turns from an unknown voice before Sim asks who it is (0 = never ask; enrol with `voice enroll` or 'Sim, learn my voice')"),
     "bystander": (bool, None, "stay quiet while two known people talk to each other, unless named"),
     "tone_blend": (float, (0.0, 2.0), "how much a feeling colours the voice (Kokoro blends voices); 0 = plain, 1 = normal"),

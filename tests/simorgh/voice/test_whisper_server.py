@@ -37,6 +37,8 @@ class WhisperServerTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(eng.running)
             heard = await eng.transcribe(Audio(b"\0\0" * 16000, 16000))
             self.assertEqual(heard.text, "Hello there.")
+            self.assertEqual([(w.text, w.start, w.end) for w in heard.words], [("Hello", 0.0, 0.4), ("there.", 0.4, 0.8)],
+                             "timed words, the annotation dropped")
             self.assertEqual(heard.engine, "whisper_server:base.en")
             self.assertAlmostEqual(heard.seconds, 1.0)
             self.assertTrue(eng.running)
