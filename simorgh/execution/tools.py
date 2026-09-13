@@ -1832,6 +1832,125 @@ class StartTaskTool:
             metadata={"task_id": task_id, "steps": steps, "kind": kind, "authorised": authorised})
 
 
+_TASK_TERMINAL = frozenset({"completed", "failed", "cancelled"})
+
+
+async def _task_list(ctx: ToolContext) -> tuple[list[dict], str]:
+    """Planning's task list, or why it could not be had."""
+    from simorgh.contracts import topics as _topics
+    from simorgh.contracts.envelope import Message as _Message
+
+    if ctx.bus is None:
+        return [], "the task list needs the bus, which this session has not got"
+    try:
+        reply = await ctx.bus.request(_Message.new(_topics.TASK_LIST_REQUEST, source="execution", payload={}), timeout=5.0)
+    except Exception as exc:  # noqa: BLE001
+        return [], f"Planning did not answer: {exc!r}"
+    return list((getattr(reply, "payload", {}) or {}).get("tasks", []) or []), ""
+
+
+class ListTasksTool:
+    """What is on the backlog and what is running, for the model.
+
+    The creator asked Sim by voice to keep one task and clear the rest
+    (2026-09-13); Sim said "both are cleared" with no way to see the
+    list, let alone act on it. `tasks` on the terminal had this all
+    along; the model gets the same view."""
+
+    name = "list_tasks"
+    read_only = True
+    reversibility = "read_only"
+    description = ("The tasks Sim has: id, status, origin, description -- the running and waiting ones "
+                   "by default. Read this before saying anything about what is queued or running.")
+    input_schema = {"type": "object", "properties": {
+        "all": {"type": "boolean", "description": "include finished and failed tasks too"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        tasks, why = await _task_list(ctx)
+        if why:
+            return ToolResult(ok=False, error=why)
+        show_all = bool(args.get("all"))
+        rows = [t for t in tasks if show_all or str(t.get("status") or "") not in _TASK_TERMINAL]
+        if not rows:
+            return ToolResult(ok=True, output="no tasks are running or waiting" if not show_all else "no tasks at all",
+                              metadata={"count": 0})
+        lines = [f"{str(t.get('task_id') or '?')[:12]}  {str(t.get('status') or '?'):<10s} {str(t.get('origin') or '?'):<10s} "
+                 f"{str(t.get('description') or '')[:110]}" for t in rows[:40]]
+        head = f"{len(rows)} task(s)" + (f", showing 40" if len(rows) > 40 else "")
+        return ToolResult(ok=True, output=head + "\n" + "\n".join(lines),
+                          metadata={"count": len(rows), "task_ids": [str(t.get("task_id") or "") for t in rows[:40]]})
+
+
+class CancelTaskTool:
+    """Stop tasks: one by id, every waiting task of an origin, or all but one.
+
+    The same `task.cancel` the terminal's `cancel <id>` publishes; a task
+    ends after its current step. The result names exactly what was asked
+    to stop and what was not found, so the reply can be true."""
+
+    name = "cancel_task"
+    read_only = False
+    reversibility = "reversible"
+    description = ("Stop tasks. Give `task_id` (a prefix is enough), or `origin` (curiosity, reflection, "
+                   "research, project, assistant, human) to stop every running or waiting task of that "
+                   "origin, or `keep` (a task id) to stop everything else. Says what it stopped; repeat that.")
+    input_schema = {"type": "object", "properties": {
+        "task_id": {"type": "string"}, "origin": {"type": "string"}, "keep": {"type": "string"},
+        "reason": {"type": "string"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        from simorgh.contracts import topics as _topics
+        from simorgh.contracts.envelope import Message as _Message
+
+        task_id = str(args.get("task_id") or "").strip()
+        origin = str(args.get("origin") or "").strip().lower()
+        keep = str(args.get("keep") or "").strip()
+        if not (task_id or origin or keep):
+            return ToolResult(ok=False, error="say which: task_id, origin, or keep=<the one task to leave running>")
+        tasks, why = await _task_list(ctx)
+        if why:
+            return ToolResult(ok=False, error=why)
+        live = [t for t in tasks if str(t.get("status") or "") not in _TASK_TERMINAL]
+
+        def _matches(t: dict, prefix: str) -> bool:
+            return bool(prefix) and str(t.get("task_id") or "").startswith(prefix)
+
+        if task_id:
+            targets = [t for t in live if _matches(t, task_id)]
+            if not targets:
+                done = [t for t in tasks if _matches(t, task_id)]
+                if done:
+                    return ToolResult(ok=True, output=f"{task_id} is already {done[0].get('status')} -- nothing to stop",
+                                      metadata={"cancelled": []})
+                return ToolResult(ok=False, error=f"no task {task_id!r} -- list_tasks shows them")
+        elif origin:
+            targets = [t for t in live if str(t.get("origin") or "").lower() == origin]
+        else:
+            targets = [t for t in live if not _matches(t, keep)]
+            if not any(_matches(t, keep) for t in live):
+                return ToolResult(ok=False, error=f"no running or waiting task {keep!r} to keep -- list_tasks shows them")
+        if not targets:
+            return ToolResult(ok=True, output="nothing to stop: no running or waiting task matches", metadata={"cancelled": []})
+        reason = str(args.get("reason") or "").strip() or "the person asked Sim to stop it"
+        stopped = []
+        for t in targets:
+            tid = str(t.get("task_id") or "")
+            await ctx.bus.publish(_Message.new(_topics.TASK_CANCEL, source="execution",
+                                               payload={"task_id": tid, "reason": reason}))
+            stopped.append(tid)
+        lines = [f"{tid[:12]}  {str(t.get('description') or '')[:90]}" for tid, t in zip(stopped, targets)]
+        return ToolResult(ok=True,
+                          output=f"asked {len(stopped)} task(s) to stop; each ends after its current step:\n" + "\n".join(lines),
+                          side_effects=tuple(f"task {tid} cancelled" for tid in stopped),
+                          metadata={"cancelled": stopped})
+
+
 class ReplaceInFileTool:
     """Change PART of a file, without re-sending the whole thing.
 
@@ -2342,7 +2461,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
-        ReplaceInFileTool(config), StartTaskTool(config),
+        ReplaceInFileTool(config), StartTaskTool(config), ListTasksTool(config), CancelTaskTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),

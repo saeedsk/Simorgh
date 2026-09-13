@@ -5141,3 +5141,33 @@ Still ahead, roughly in order:
     go ahead without their approval -- which makes the task a human's,
     so it runs at once. Also: one "hearing:" line every three seconds
     per turn instead of one per partial (a long turn drew thirty).
+
+164. **Watching the creator talk to Sim for an hour (2026-09-13,
+    afternoon).** "Monitor my conversation with Sim; multiple bugs to
+    fix there." Tailing the episodic and spoken-turn streams while they
+    talked found six. (1) Sim went silent for ninety seconds: one long
+    spoken reply (over 400 characters) had taken the expressive lane by
+    the rule written that morning, Chatterbox held the speech lock 78 s
+    under a loaded machine, and every reply behind it waited or was
+    dropped as stale. A spoken turn never takes the slow lane on its own
+    now (`expressive_min_chars` defaults to 0). (2) A voice question
+    about a failed test spent the turn's six steps on searches and Sim
+    spoke "step budget exhausted before the task was finished": a chat
+    turn whose lookups use its budget now gets one last call with no
+    tools -- `SessionRunner._wrap_up` -- and says what it found. (3) A
+    turn the person moved past was answered "I could not finish this
+    one: the task was cancelled" and remembered as such; a cancelled
+    chat turn is now no answer at all (`cancelled` on turn.completed,
+    skipped by Memory, dropped by the voice pipeline). (4) Sim said
+    "both are cleared" about tasks it had no way to see or stop:
+    `list_tasks` and `cancel_task` (by id, by origin, or all but one)
+    join the chat profiles, and the prompt says to repeat what they
+    report. (5) A task's own model session was remembered as a
+    conversation ("User: add five funny Unicode cartoon splash
+    screens..."): Memory keeps only chat turns. (6) "Them" and "Nimqa"
+    -- a pronoun and a misheard word the old introduction had enrolled
+    as people -- were still in the book and being "heard"; pronouns are
+    not names, and both entries were set aside. Also: a two-voice turn
+    is not prefixed with a speaker again by Memory. Seen and left: the
+    machine slows to 2-3 s per transcription while a task runs the test
+    suite beside the conversation.

@@ -182,6 +182,11 @@ class Pipeline:
         if fut is None or fut.done():
             return
         reason = str(payload.get("reason") or payload.get("note") or "it did not work")
+        if "cancelled" in reason:
+            # The ask was cancelled because the person went on; the
+            # waiter is dropped as stale, and no "sorry" is minted.
+            fut.cancel()
+            return
         fut.set_result(f"Sorry, I couldn't do that: {reason}")
 
     # ------------------------------------------------------------- one turn

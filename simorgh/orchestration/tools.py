@@ -61,6 +61,10 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # Puts work on the backlog. Reversible: `cancel <id>` undoes it, and
     # nothing has run yet at the moment it is created.
     "start_task": ("reversible", False),
+    # Reading the backlog costs nothing; stopping a task is undone by
+    # starting it again -- the work done so far stays in its branch.
+    "list_tasks": ("read_only", False),
+    "cancel_task": ("reversible", False),
     "apply_skill": ("reversible", False),
     "git_commit": ("reversible", False),
     "git_revert": ("reversible", False),

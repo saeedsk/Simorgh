@@ -217,7 +217,7 @@ class Config:
     # through the expressive engine, slow first sound and all; "off" =
     # never, the quick lane only.
     expressive_lane: str = "auto"
-    expressive_min_chars: int = 400
+    expressive_min_chars: int = 0     # 0 = a spoken turn never takes the slow lane in auto (it held the floor 78 s once)
     keep_audio: bool = False
     audio_dir: str = "workspace/voice/audio"
     keep_transcripts: bool = True

@@ -44,6 +44,9 @@ ACTION_TIMEOUT_S = 30.0
 # the task soon (`planning/service.py::CONTINUATION_REASON`, same text;
 # the packages may not import each other).
 CONTINUATION_REASON = "step budget exhausted"
+#: what the model is told when its lookups have used a chat turn's budget
+WRAP_UP_TEXT = ("Your lookups are over -- no more tools this turn. Answer the person now, in one or two "
+                "sentences, from what you found; say plainly what you could not check.")
 VERIFICATION_REASON = "verification failed"
 # The task's branch could not be put on main: a rebase conflict, a red
 # whole-suite gate, or a live checkout in the way. The worktree stays,
@@ -743,6 +746,18 @@ class SessionRunner:
                 continue
 
             text = think_reply.payload.get("text", "")
+            if tool_calls and is_last and session.profile.scaffold == "chat":
+                # A person asked a question and the model spent every step
+                # looking things up. "Step budget exhausted" is not an
+                # answer -- it was spoken aloud to the creator, 2026-09-13,
+                # about a failed test -- so one more call, with no tools,
+                # says what was found.
+                answer = await self._wrap_up(session)
+                if answer:
+                    step = Step(step_no, "act", "answered from what was found; the lookups had used the budget", ok=True)
+                    session.record(step)
+                    await self._record_step(session, step)
+                    return Outcome("completed", result_summary=answer)
             if tool_calls and is_last:
                 # The budget ran out while the model was still asking for
                 # a tool. That is not a finished task, and recording it as
@@ -797,9 +812,29 @@ class SessionRunner:
 
     # -- phases -----------------------------------------------------------------------------
 
-    async def _think(self, session: Session, user_text: str, *, last_step: bool) -> Message | None:
+    async def _wrap_up(self, session: Session) -> str:
+        """One model call with no tools: the answer from what the steps
+        so far found. "" when the model has nothing (or no provider)."""
+        from dataclasses import replace
+
+        saved = session.profile
+        session.profile = replace(saved, tools=())
+        try:
+            reply = await self._think(session, WRAP_UP_TEXT, last_step=True, no_tools=True)
+        finally:
+            session.profile = saved
+        if reply is None or reply.payload.get("floor"):
+            return ""
+        text = str(reply.payload.get("text") or "").strip()
+        if not text or reply.payload.get("tool_calls") or unhonoured_marker(text, ()):
+            return ""
+        return text
+
+    async def _think(self, session: Session, user_text: str, *, last_step: bool, no_tools: bool = False) -> Message | None:
         steps_left = session.budget.steps_left
-        offered = offered_tools(session.profile.tools)
+        # `offered_tools(())` means "every registered tool" (skills arrive
+        # that way); the wrap-up call wants none at all.
+        offered = () if no_tools else offered_tools(session.profile.tools)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
         is_chat = session.profile.name == "chat"
         req = Message.new(

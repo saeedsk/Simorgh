@@ -127,6 +127,10 @@ _TOOL_NOTES: dict[str, str] = {
     "apply_source_patch": "write a change to a source file -- or to workspace/, which is scratch: "
                            "not committed, not reviewed, and still there next session, so it is where "
                            "notes and half-finished work belong",
+    "list_tasks": "what is running and waiting: id, status, origin, description -- read it before "
+                  "saying anything about the queue",
+    "cancel_task": "stop tasks by id, by origin (curiosity, reflection, ...), or all but one (`keep`); "
+                   "the result says what stopped -- repeat exactly that, never claim a clearing it does not list",
     "start_task": "hand a BUILD off to a background task with its own step budget, which "
                    "resumes where it left off instead of starting over -- for an app, a game, a "
                    "long document, anything too big for one reply. authorised=true only when the "

@@ -372,3 +372,59 @@ class AMarkerBuriedMidSentenceIsCorrectedNotAcceptedTestCase(unittest.TestCase):
     def test_a_tool_that_was_not_offered_is_not_reported(self):
         text = "I would run GIT_COMMIT: something here"
         self.assertEqual(unhonoured_marker(text, self.OFFERED), "")
+
+
+class TestAChatThatRunsOutOfStepsStillAnswers(unittest.IsolatedAsyncioTestCase):
+    """The creator asked, by voice, why a test failed; the model spent the
+    turn's six steps searching and Sim spoke "step budget exhausted
+    before the task was finished" (2026-09-13). A chat turn now ends
+    with one call without tools: the answer from what was found."""
+
+    @run
+    async def test_the_last_step_asks_for_an_answer_without_tools(self):
+        from dataclasses import replace
+
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            cognition = FakeCognition(h.client("cognition"), script=[
+                {"tool_calls": [{"tool": "search_code", "args": {"query": "test_security"}}]},
+                {"tool_calls": [{"tool": "search_code", "args": {"query": "SecSelfTestCase"}}]},
+                {"text": "The self-scan test fails because two findings are open; I could not read the second."},
+            ])
+            gx = FakeGuardianExecution(h.client("guardian"))
+            await cognition.start()
+            await gx.start()
+            runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+            from simorgh.orchestration.api import Budget
+            session = Session(task_id="t-wrap", kind="chat", mode="execute",
+                              profile=replace(profiles.CHAT, max_steps=2), budget=Budget(max_steps=2))
+            outcome = await runner.run(session, user_text="why did that test fail?")
+            self.assertEqual(outcome.kind, "completed")
+            self.assertIn("self-scan test fails", outcome.result_summary)
+            self.assertEqual(len(cognition.calls), 3)
+            self.assertEqual(cognition.calls[-1].payload["tools"], [], "the wrap-up offers no tools")
+            self.assertEqual(session.profile.tools, profiles.CHAT.tools, "the profile is restored")
+            await cognition.stop()
+            await gx.stop()
+
+    @run
+    async def test_a_patch_task_still_blocks_with_the_continuation_reason(self):
+        from dataclasses import replace
+
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            cognition = FakeCognition(h.client("cognition"), script=[
+                {"tool_calls": [{"tool": "read_file", "args": {"path": "src/x.py"}}]},
+            ])
+            gx = FakeGuardianExecution(h.client("guardian"))
+            await cognition.start()
+            await gx.start()
+            runner = SessionRunner(bus, h.ledger, clock=h.clock.now)
+            from simorgh.orchestration.api import Budget
+            session = Session(task_id="t-patch", kind="patch", mode="execute",
+                              profile=replace(profiles.PATCH, max_steps=2), budget=Budget(max_steps=2))
+            outcome = await runner.run(session, user_text="change x")
+            self.assertEqual(outcome.kind, "blocked")
+            self.assertIn("step budget exhausted", outcome.reason)
+            await cognition.stop()
+            await gx.stop()

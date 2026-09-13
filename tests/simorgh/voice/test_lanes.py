@@ -101,7 +101,8 @@ class LaneRuleTestCase(unittest.TestCase):
         rule = self._rule()
         self.assertEqual(rule("Loud and clear.", True), "fast")
         self.assertEqual(rule("Loud and clear.", False), "fast", "the person is reading it already")
-        self.assertEqual(rule("x" * 400, True), "expressive", "a long spoken answer earns the slow lane")
+        self.assertEqual(rule("x" * 900, True), "fast", "a long spoken answer stays quick unless expressive_min_chars is set")
+        self.assertEqual(self._rule(expressive_min_chars=400)("x" * 400, True), "expressive")
 
     def test_voice_test_asks_for_the_expressive_lane_on_purpose(self):
         from simorgh.voice.session import VoiceSession

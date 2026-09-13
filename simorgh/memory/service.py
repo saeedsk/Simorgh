@@ -4,6 +4,7 @@ sections 5, 9): wires `memory.retrieve`/`.store` and consolidation on
 
 from __future__ import annotations
 
+import re as _re
 import asyncio
 
 from simorgh.contracts import topics
@@ -181,12 +182,24 @@ class Service:
         reply_text = payload.get("text", "")
         if not user_text and not reply_text:
             return
+        if payload.get("cancelled"):
+            return   # the person moved on before an answer; nothing was said
+        if str(payload.get("kind") or "chat") != "chat":
+            # A task's own model session ends with turn.completed too; its
+            # description is not something a person said (the creator's
+            # memory, 2026-09-13, held "User: add five funny Unicode
+            # cartoon splash screens ..." as a conversation).
+            return
         from simorgh.contracts.tone import strip_tone
 
         speaker = str(payload.get("speaker") or "").strip()
         reply_text = strip_tone(reply_text)
         who = speaker or "User"
-        content = f"{who}: {user_text}\nSim: {reply_text}" if user_text else reply_text
+        # A turn two people spoke arrives already as "Saeed: ... / Soodeh: ..."
+        # (voice/diarize.py); a prefix on top of that named one of them twice.
+        named_lines = bool(_re.match(r"^[A-Z][\w' -]{0,30}: ", user_text or "")) and "\n" in (user_text or "")
+        content = (f"{user_text}\nSim: {reply_text}" if named_lines else f"{who}: {user_text}\nSim: {reply_text}") \
+            if user_text else reply_text
         # The person's name is a tag as well as a label, so a recall can
         # ask for "what I remember with Ira" (orchestration/context.py).
         tags = [payload.get("session_id", "")] + ([f"person:{speaker}"] if speaker else [])

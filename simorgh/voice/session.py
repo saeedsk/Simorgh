@@ -916,7 +916,11 @@ class VoiceSession:
             return "expressive"
         if not spoken_turn:
             return "fast"
-        threshold = int(getattr(self._config, "expressive_min_chars", 400) or 0)
+        # `expressive_min_chars` is 0 unless someone sets it: the one long
+        # spoken reply that took the slow lane held the speech lock for
+        # 78 s and every reply behind it waited or was dropped (the
+        # creator, 2026-09-13: "I didn't hear anything from you").
+        threshold = int(getattr(self._config, "expressive_min_chars", 0) or 0)
         return "expressive" if threshold and len(text) >= threshold else "fast"
 
     def _maybe_hum(self, spoken_ms: int) -> None:

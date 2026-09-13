@@ -40,7 +40,7 @@ _NAME_PATTERNS = (
     re.compile(r"\b(?:my name is|my name's|i am|i'm|im|this is|it's|its|call me|they call me|name is)\s+([A-Za-z][A-Za-z'\-]{1,30})", re.I),
     re.compile(r"^\s*(?:it is|it's)?\s*([A-Za-z][A-Za-z'\-]{1,30})\s*[.!]?\s*$", re.I),
 )
-_NOT_NAMES = {"me", "skip", "no", "yes", "nobody", "none", "stop", "quiet", "sim", "simorgh", "okay", "ok", "hello", "hi",
+_NOT_NAMES = {"me", "them", "us", "you", "her", "him", "it", "someone", "anyone", "everyone", "skip", "no", "yes", "nobody", "none", "stop", "quiet", "sim", "simorgh", "okay", "ok", "hello", "hi",
               "what", "why", "who", "sorry", "nothing", "never", "mind", "nevermind", "cancel", "not", "just", "here",
               "so", "going", "also", "a", "an", "the", "very", "really", "fine", "good", "done", "back", "home", "sure",
               "afraid", "tired", "busy", "hungry", "his", "her", "their", "my", "your", "this", "that", "it"}

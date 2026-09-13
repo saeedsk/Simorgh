@@ -407,6 +407,7 @@ class Worker:
         # `_pending_turns` map, which nothing but a live chat prompt
         # ever populates -- a non-chat task_id simply finds no waiter
         # and the message is a no-op there, exactly as before.
+        cancelled = bool(outcome.reason) and "cancelled" in str(outcome.reason)
         turn = Message.new(
             topics.TURN_COMPLETED, source=self._bus.source,
             payload={
@@ -417,9 +418,15 @@ class Worker:
                 # "(no real answer this turn -- floor reply)" --
                 # indistinguishable from having no provider at all
                 # (observer, 2026-09-08).
+                # A turn the person moved past (voice/session.py cancels
+                # the older ask) has no answer, and "I could not finish
+                # this one: the task was cancelled" was spoken and
+                # remembered as one (the creator's screen, 2026-09-13).
                 "text": outcome.result_summary or (
-                    f"I could not finish this one: {outcome.reason}" if outcome.reason else ""
+                    f"I could not finish this one: {outcome.reason}"
+                    if outcome.reason and not cancelled else ""
                 ),
+                "cancelled": cancelled,
                 "floor": outcome.floor,
                 "tool_steps": len(session.steps), "user_text": session.user_text,
                 # Who this reply is to. A typed turn is `channel == "cli"`,

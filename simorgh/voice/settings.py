@@ -52,7 +52,7 @@ SAFE_KEYS: dict[str, tuple[type, object, str]] = {
             "the recogniser: whisper_server keeps the model loaded (fast), whisper_cli reloads it every turn"),
     "expressive_lane": (str, ("auto", "always", "off"),
                         "when Chatterbox/Miso speaks: auto = typed replies, tests and long answers only (spoken turns stay quick); always; off"),
-    "expressive_min_chars": (int, (0, 5000), "a spoken reply at least this long goes to the expressive engine in auto"),
+    "expressive_min_chars": (int, (0, 5000), "0 = never (default); else a spoken reply at least this long goes to the slow engine -- it can hold the floor a minute"),
     "stt_partials": (bool, None, "show what is heard while you are still talking"),
     "connectors": (bool, None, "the rare Okay / Yeah lead-ins"),
     "backchannel": (bool, None, "say Aha / Let me check the moment your turn ends, before thinking"),
