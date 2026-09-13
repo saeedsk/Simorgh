@@ -68,7 +68,7 @@ def _session(config, script, replies, embedder, book):
 class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.55, margin=0.08)
+        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.5, margin=0.06)
         self.embedder = _Embedder()
 
     def tearDown(self):

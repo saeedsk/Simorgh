@@ -294,6 +294,14 @@ class VoiceSession:
             for frame in self._preroll:  # the onset, from before the VAD noticed
                 self._frames.put_nowait(frame)
             self._preroll.clear()
+            previous = self._stt_task
+            if previous is not None and not previous.done():
+                # A transcription still waiting on the old queue would never
+                # end: nothing feeds that queue again. Left alone it is a
+                # pending task garbage-collected mid-await -- "Task was
+                # destroyed but it is pending" and an async generator closed
+                # while running, on the terminal (2026-09-13).
+                previous.cancel()
             self._stt_task = asyncio.create_task(self._transcribe(action.turn_id, self._frames))
         elif kind == Actions.FINALISE:
             clock = self._clocks.get(action.turn_id)
@@ -409,8 +417,10 @@ class VoiceSession:
                 if before != self.turns.state:
                     await self._announce(self.turns.state)
         except asyncio.CancelledError:
+            self._audio.pop(turn_id, None)
             raise
         except Exception as exc:  # noqa: BLE001 -- one failed hearing must not end the session
+            self._audio.pop(turn_id, None)
             self._log("warning", "voice.transcribe_failed", error=repr(exc))
             self.turns.state = LISTENING
 

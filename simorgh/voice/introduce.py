@@ -67,8 +67,8 @@ def relation_in(text: str) -> str:
     """"" for skip, else the relation as the person said it, trimmed of
     "I'm" and the like: "Saeed's son", "the mother", "a friend"."""
     text = (text or "").strip().rstrip(".!")
-    if not text or _SKIP.match(text):
-        return ""
+    if not text or _SKIP.match(text) or text.endswith("?") or len(text.split()) > 6:
+        return ""   # "Okay, do you want to learn my voice?" is not a relation (the creator's book, 2026-09-13)
     return _RELATION_LEAD.sub("", text).strip()[:60]
 
 

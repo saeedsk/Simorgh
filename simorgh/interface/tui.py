@@ -377,6 +377,42 @@ class Tui:
                 app.exit(exception=EOFError, style="class:exiting")
 
     # -- the loop -----------------------------------------------------------
+    _loop_errors = 0
+
+    def _on_loop_exception(self, loop, context: dict) -> None:
+        """asyncio's escaped-exception hook: log everything we can learn
+        (message, exception, the task or async generator and its
+        traceback), show one dim line, never block."""
+        import traceback
+
+        exc = context.get("exception")
+        message = str(context.get("message") or "")
+        subject = context.get("task") or context.get("asyncgen") or context.get("future") or context.get("handle")
+        lines = [f"--- {time.strftime('%Y-%m-%d %H:%M:%S')}  {message}", f"exception: {exc!r}", f"subject: {subject!r}"]
+        if exc is not None and getattr(exc, "__traceback__", None):
+            lines.append("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+        if context.get("source_traceback"):
+            lines.append("created at:\n" + "".join(traceback.format_list(context["source_traceback"])))
+        try:
+            path = self._loop_errors_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+            where = str(path)
+        except OSError:
+            where = "(could not write the log)"
+        self._loop_errors += 1
+        if self._loop_errors <= 3 or self._loop_errors % 20 == 0:
+            what = repr(exc) if exc is not None else message
+            print(f"  ⚠ a background error escaped ({what[:90]}) -- details in {where}")
+
+    def _loop_errors_path(self):
+        from pathlib import Path
+
+        base = getattr(self, "_history_path", None)
+        base = Path(base).parent if base else Path("workspace")
+        return base / "loop-errors.log"
+
     def _build_session(self):
         pt = _pt()
         bindings = pt["KeyBindings"]()
@@ -497,6 +533,14 @@ class Tui:
                     queue.task_done()
 
         worker = asyncio.ensure_future(_drain())
+        # prompt_toolkit's own loop exception handler prints the error and
+        # then waits for ENTER -- with a voice session running, one leaked
+        # exception per turn stopped the whole screen on "Press ENTER to
+        # continue..." (the creator, 2026-09-13). Ours logs the full story
+        # to loop-errors.log under the data directory, says one dim line,
+        # and moves on; the log is what finds the culprit.
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(self._on_loop_exception)
         try:
             # `patch_stdout` is what makes the prompt a real sticky footer:
             # every print in the process, including the ones the bus
@@ -505,7 +549,7 @@ class Tui:
             with patch_stdout(raw=True):
                 while not self._stopped:
                     try:
-                        line = await self._session.prompt_async()
+                        line = await self._session.prompt_async(set_exception_handler=False)
                     except (EOFError, KeyboardInterrupt):
                         break
                     except asyncio.CancelledError:

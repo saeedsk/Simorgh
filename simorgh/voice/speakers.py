@@ -15,8 +15,8 @@ embedding*) through an open-source speaker-verification model --
 project, run by `sherpa-onnx` on the CPU; 29 MB, ~60 ms for a sentence
 on the M3 Pro). Two vectors of the same person are close (cosine near
 0.6-0.9 for real voices); different people sit lower. The `SpeakerBook`
-keeps, per enrolled person, every enrolment vector and their mean, and
-decides by cosine against each mean:
+keeps, per enrolled person, every enrolment vector, and decides by the
+cosine to the nearest take:
 
     top score >= threshold  AND  top - second >= margin   -> that person
     otherwise                                             -> unknown
@@ -50,8 +50,8 @@ from typing import Protocol, Sequence
 SPEAKER_MODEL = "wespeaker_en_voxceleb_CAM++_LM.onnx"
 SPEAKER_MODEL_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
                      + SPEAKER_MODEL)
-DEFAULT_THRESHOLD = 0.55
-DEFAULT_MARGIN = 0.08
+DEFAULT_THRESHOLD = 0.5
+DEFAULT_MARGIN = 0.06
 #: An utterance shorter than this carries too little voice to judge.
 MIN_SECONDS = 0.8
 
@@ -266,7 +266,7 @@ class SpeakerBook:
         for other in self._people.values():
             if other.name.lower() == name.lower() or not other.embeddings:
                 continue
-            score = cosine(vector, other.mean)
+            score = self.score(vector, other)
             if score >= self.threshold + self.margin:
                 target = person or Person(name=name, relation=relation)
                 return target, (f"refused: that take sounds like {other.name} (score {score:.2f}); "
@@ -277,17 +277,26 @@ class SpeakerBook:
         elif relation and not person.relation:
             person.relation = relation
         if person.embeddings:
-            score = cosine(vector, person.mean)
-            if score < self.threshold - 0.25:
+            score = self.score(vector, person)
+            if score < 0.15:   # nothing like this person's other takes: another voice, or a noise
                 return person, (f"refused: that take does not sound like {name}'s earlier takes (score {score:.2f}); "
                                 "try again closer to the microphone, or `voice forget` and start over")
         person.embeddings.append(vector)
         self._save(person)
         return person, ""
 
+    @staticmethod
+    def score(embedding: Sequence[float], person: Person) -> float:
+        """How alike `embedding` is to `person`: the nearest take, not the
+        mean. A real person's takes vary a lot with distance and noise
+        (the creator's own three: 0.28 to 0.76 to each other), so the
+        mean of them sits far from every one; the nearest take is the
+        fair comparison."""
+        return max((cosine(embedding, v) for v in person.embeddings), default=0.0)
+
     def identify(self, embedding: Sequence[float]) -> Identification:
         self._load()
-        scored = sorted(((cosine(embedding, p.mean), p) for p in self._people.values() if p.embeddings),
+        scored = sorted(((self.score(embedding, p), p) for p in self._people.values() if p.embeddings),
                         key=lambda t: t[0], reverse=True)
         if not scored:
             return Identification(name="", score=0.0, reason="nobody is enrolled")
@@ -312,7 +321,7 @@ class SpeakerBook:
     def scores(self, embedding: Sequence[float]) -> list[tuple[str, float]]:
         """Every enrolled person's score, best first -- for `voice people test`."""
         self._load()
-        return sorted(((p.name, cosine(embedding, p.mean)) for p in self._people.values() if p.embeddings),
+        return sorted(((p.name, self.score(embedding, p)) for p in self._people.values() if p.embeddings),
                       key=lambda t: t[1], reverse=True)
 
 

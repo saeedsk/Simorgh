@@ -24,7 +24,7 @@ def _vec(angle: float, dim: int = 8) -> list[float]:
 class SpeakerBookTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.55, margin=0.08, clock=lambda: 1_000.0)
+        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.5, margin=0.06, clock=lambda: 1_000.0)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -47,12 +47,11 @@ class SpeakerBookTestCase(unittest.TestCase):
         self.book.enroll("Ira", _vec(0.0))
         far = self.book.identify(_vec(1.5))   # cos 1.5 rad = 0.07
         self.assertFalse(far.known); self.assertIn("under the threshold", far.reason); self.assertEqual(far.runner_up, "Ira")
-        self.book.enroll("Iris", _vec(0.3))   # cos 0.3 = 0.955 from Ira: alike but enrolable (below threshold+margin? no: 0.955 > 0.63)
-        # Iris's take was refused for sounding like Ira: the book has one person still
+        self.book.enroll("Iris", _vec(0.3))   # cos 0.3 = 0.955 from Ira: refused, it sounds like her
         self.assertEqual([p.name for p in self.book.people()], ["Ira"])
         # two voices that are legitimately distinct, and a test sample between them
-        self.book.enroll("Iris", _vec(1.0))   # cos 1.0 = 0.54 from Ira: under threshold+margin, accepted
-        between = self.book.identify(_vec(0.5))   # cos 0.5 = 0.88 to both
+        self.book.enroll("Iris", _vec(1.1))   # cos 1.1 = 0.45 from Ira: under threshold+margin, accepted
+        between = self.book.identify(_vec(0.55))   # cos 0.55 = 0.85 to both
         self.assertFalse(between.known); self.assertIn("too close to call", between.reason)
 
     def test_a_take_that_sounds_like_someone_else_is_refused_with_the_name(self):
@@ -60,10 +59,13 @@ class SpeakerBookTestCase(unittest.TestCase):
         person, note = self.book.enroll("Iris", _vec(0.05))
         self.assertIn("sounds like Ira", note); self.assertEqual(person.embeddings, [])
         self.assertIsNone(self.book.get("Iris"))
-        # and a take far from a person's own earlier takes is refused too
+        # and a take nothing like a person's own earlier takes is refused too
         self.book.enroll("Ira", _vec(0.1))
-        person, note = self.book.enroll("Ira", _vec(2.5))
+        person, note = self.book.enroll("Ira", _vec(1.7))   # cos 1.7 = -0.13
         self.assertIn("does not sound like Ira", note); self.assertEqual(len(person.embeddings), 2)
+        # ...while a take merely far from the mean but near one earlier take is a person's normal range
+        self.book.enroll("Ira", _vec(0.9)); self.book.enroll("Ira", _vec(-0.7))
+        self.assertEqual(self.book.identify(_vec(0.85)).name, "Ira", "the nearest take decides, not the mean")
 
     def test_the_book_is_plain_json_and_survives_a_new_instance(self):
         self.book.enroll("Ira", _vec(0.0), relation="daughter")

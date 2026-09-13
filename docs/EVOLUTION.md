@@ -4952,3 +4952,19 @@ Still ahead, roughly in order:
     warm-up -- too slow for a turn that waits, so not wired; the door
     is the `TtsRequest`. Tests across contracts, voice, memory,
     orchestration and the scaffold.
+
+    **From the first real session (2026-09-13, later):** the terminal
+    filled with "Press ENTER to continue..." -- prompt_toolkit's loop
+    exception handler, which prints and then blocks -- around two
+    escaped errors, "aclose(): asynchronous generator is already
+    running" and a bare None (asyncio's "Task was destroyed but it is
+    pending"). The TUI now owns the loop's exception handler: the full
+    context goes to `loop-errors.log` beside the CLI history, one dim
+    line says so, nothing blocks. A transcription still pending when the
+    next capture starts is cancelled rather than dropped (the likely
+    source). The creator's own three takes scored 0.28-0.76 against each
+    other and his voice came back "closest is Said at 0.50, under the
+    threshold 0.55": a person is now matched by the nearest take, not
+    the mean, with threshold 0.5 and margin 0.06; the recogniser's
+    "Said" was folded into Saeed on disk; a question or a sentence is no
+    longer taken as a relation.

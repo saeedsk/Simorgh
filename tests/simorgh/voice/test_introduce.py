@@ -30,6 +30,8 @@ class ParsersTestCase(unittest.TestCase):
         self.assertEqual(relation_in("I'm Saeed's son."), "Saeed's son")
         self.assertEqual(relation_in("the mother"), "mother")
         self.assertEqual(relation_in("skip"), ""); self.assertEqual(relation_in("no thanks"), ""); self.assertEqual(relation_in(""), "")
+        self.assertEqual(relation_in("Okay, do you want to learn my voice?"), "", "a question is not a relation")
+        self.assertEqual(relation_in("well I suppose you could say I live here most days"), "", "nor is a sentence")
 
     def test_learn_requests(self):
         self.assertEqual(learn_request("Sim, learn Aran's voice"), "Aran")
@@ -44,7 +46,7 @@ class ParsersTestCase(unittest.TestCase):
 class IntroductionTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.55, margin=0.08)
+        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.5, margin=0.06)
 
     def tearDown(self):
         self.tmp.cleanup()
