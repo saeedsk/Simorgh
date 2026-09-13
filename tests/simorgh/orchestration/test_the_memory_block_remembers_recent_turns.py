@@ -121,6 +121,35 @@ class TestRecentTurnsTravelWithEveryTurn(unittest.TestCase):
             self.assertEqual(recent[0]["kinds"], ["episodic"])
 
 
+class TestTheSpeakerGetsTheirOwnRecall(unittest.TestCase):
+    @run
+    async def test_a_spoken_turn_with_a_known_speaker_also_recalls_what_was_said_with_them(self):
+        async with Harness() as h:
+            memory_bus = h.client("memory")
+            seen: list[dict] = []
+
+            async def _responder(message):
+                seen.append(dict(message.payload))
+                items = []
+                if (message.payload.get("filters") or {}).get("tags") == ["person:Ira"]:
+                    items = [{"ref": "episodic:9", "content": "Ira: I have a soccer game Saturday\nSim: Good luck.",
+                              "kind": "episodic", "score": 0.3, "confidence": 1.0, "ts": 5.0}]
+                await memory_bus.reply(message, type=topics.MEMORY_RETRIEVE_REPLY, payload={"items": items, "truncated": False})
+
+            sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
+            assembler = Assembler(h.client("orchestration"))
+            session = Session(task_id="t3", kind="chat", mode="execute", profile=profiles.VOICE_CHAT, channel="voice", speaker="Ira")
+            mem, _why = await assembler._memory_block("weather", session)  # noqa: SLF001
+            plain = Session(task_id="t4", kind="chat", mode="execute", profile=profiles.CHAT)
+            before = len(seen)
+            await assembler._memory_block("weather", plain)  # noqa: SLF001
+            await sub.unsubscribe()
+            person = [p for p in seen if (p.get("filters") or {}).get("tags") == ["person:Ira"]]
+            self.assertEqual(len(person), 1); self.assertEqual(person[0]["kinds"], ["episodic", "semantic"])
+            self.assertIn("soccer game", mem)
+            self.assertEqual(len(seen) - before, 2, "a turn without a speaker issues the two recalls it always did")
+
+
 class TestACorrectionOutranksWhatItCorrects(unittest.TestCase):
     @run
     async def test_the_block_is_rendered_oldest_first(self):

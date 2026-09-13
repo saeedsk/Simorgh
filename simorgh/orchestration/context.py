@@ -64,6 +64,8 @@ _MEMORY_MATCHED_K = 8
 #: Both are the same missing thing. Six is small enough to cost little
 #: and enough to cover a correction plus the digression it survived.
 _MEMORY_RECENT_K = 6
+#: what Sim remembers with the person who is speaking (tag person:<name>)
+_MEMORY_PERSON_K = 5
 
 #: The memory block's own header. It says two things the bare "Relevant
 #: memory:" could not: what order the lines are in, and what to do when
@@ -251,11 +253,26 @@ class Assembler:
             {"query": "", "kinds": ["episodic"], "k": _MEMORY_RECENT_K},
             trace_id=session.task_id,
         )
-        (matched, why), (recent, _recent_why) = await asyncio.gather(matched_call, recent_call)
-        if matched is None and recent is None:
+        speaker = str(getattr(session, "speaker", "") or "")
+        calls = [matched_call, recent_call]
+        if speaker:
+            # A third recall, for a spoken turn whose speaker is known: what
+            # was said with this person, whatever the topic -- a family of
+            # several is several histories, not one (2026-09-13).
+            calls.append(self._request_with_reason(
+                topics.MEMORY_RETRIEVE,
+                {"query": query, "kinds": ["episodic", "semantic"], "k": _MEMORY_PERSON_K,
+                 "filters": {"tags": [f"person:{speaker}"]}},
+                trace_id=session.task_id,
+            ))
+        results = await asyncio.gather(*calls)
+        (matched, why), (recent, _recent_why) = results[0], results[1]
+        person = results[2][0] if speaker else None
+        if matched is None and recent is None and person is None:
             return "", why
         matched_items = list(matched.payload.get("items", [])) if matched is not None else []
         recent_items = list(recent.payload.get("items", [])) if recent is not None else []
+        person_items = list(person.payload.get("items", [])) if person is not None else []
 
         # Recent first in the *selection* order, because those are the
         # ones nothing else can bring back: a matched item that gets
@@ -263,7 +280,7 @@ class Assembler:
         # next turn, while a recent one that gets dropped is simply gone
         # until it happens to become lexically relevant.
         chosen: dict[str, dict] = {}
-        for item in [*recent_items[:_MEMORY_RECENT_K], *matched_items[:_MEMORY_MATCHED_K]]:
+        for item in [*recent_items[:_MEMORY_RECENT_K], *person_items[:_MEMORY_PERSON_K], *matched_items[:_MEMORY_MATCHED_K]]:
             ref = str(item.get("ref", ""))
             key = ref or f"anon:{len(chosen)}"
             if key not in chosen:

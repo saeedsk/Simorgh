@@ -232,7 +232,8 @@ class TestPerceptTextRunsAChatTurnWithNoPlanningTask(unittest.TestCase):
             from simorgh.contracts.envelope import Message
             await h.client("interface").publish(Message.new(
                 topics.PERCEPT_TEXT_RECEIVED, source="interface",
-                payload={"channel": "cli", "text": "hi there", "session_id": "sess-1"},
+                payload={"channel": "voice", "text": "hi there", "session_id": "sess-1", "speaker": "Ira",
+                         "speaker_relation": "daughter, 9", "room": "Saeed: dinner is at six"},
                 clock=h.clock.now,
             ))
             # No worldmodel/persona/memory fake is running in this harness,
@@ -244,6 +245,7 @@ class TestPerceptTextRunsAChatTurnWithNoPlanningTask(unittest.TestCase):
             self.assertIn("turn", completed)
             self.assertEqual(completed["turn"].payload["session_id"], "sess-1")
             self.assertEqual(completed["turn"].payload["text"], "hello back")
+            self.assertEqual(completed["turn"].payload["speaker"], "Ira", "who spoke travels to the turn, so memory is per person")
             self.assertEqual(planning._tasks, {})  # confirms this never touched Planning's task store
 
             await sub.unsubscribe()

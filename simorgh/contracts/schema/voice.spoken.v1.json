@@ -4,8 +4,26 @@
   "additionalProperties": true,
   "description": "Payload of `voice.spoken` (catalog v1).",
   "properties": {
+    "aside": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "command": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "device": {
       "type": "string"
+    },
+    "dropped": {
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "engine": {
       "type": "string"
@@ -28,6 +46,18 @@
       "required": [],
       "type": [
         "object",
+        "null"
+      ]
+    },
+    "quiet": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
         "null"
       ]
     },
@@ -54,6 +84,12 @@
     },
     "text": {
       "type": "string"
+    },
+    "tone": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "turn": {
       "type": [

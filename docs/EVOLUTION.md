@@ -4926,3 +4926,29 @@ Still ahead, roughly in order:
     `voice whois` (the live scores), `voice forget`, `voice pronounce`.
     The engine opens only once somebody is enrolled. Not yet: per-person
     memory, who-is-talking-to-whom, emotion in the voice (next).
+
+156. **Memory per person, a room with several people in it, and a
+    feeling in the voice (2026-09-13).** With the speaker known, the
+    name now travels: `percept.text.received` carries `speaker`, the
+    person's relation and `room` (what was said lately that was not for
+    Sim); Orchestration threads them into the `Session`, the prompt
+    (`scaffolds.who_is_here`: "You are speaking with Ira (daughter,
+    9)... Said in the room lately, not to you") and `turn.completed`.
+    Memory stores a spoken turn as "Ira: ... / Sim: ..." tagged
+    `person:Ira`, and the memory block issues a third recall for a
+    known speaker -- what was said with this person, whatever the topic
+    -- so a family of several is several histories. In the room: two
+    known people talking to each other are heard and kept, not
+    answered -- Sim was not named, the words are not a question, and
+    the follow-up window after Sim spoke belongs to the person it
+    answered (`[voice] bystander`); the model is told the same rule and
+    may still say QUIET. A feeling: the model may open a spoken reply
+    with `[warm]`, `[bright]`, `[calm]`, `[serious]`, `[playful]` or
+    `[sorry]` (`contracts/tone.py`); the voice strips it, keeps it in the
+    metrics, and delivers it as speed, loudness and pauses
+    (`delivery.register_for_tone`), which is what Kokoro and Piper can
+    do. Chatterbox, an expressive open-source engine, was measured in an
+    isolated venv on the M3 Pro: 2.6 s of audio in 4.7 s after a 19 s
+    warm-up -- too slow for a turn that waits, so not wired; the door
+    is the `TtsRequest`. Tests across contracts, voice, memory,
+    orchestration and the scaffold.

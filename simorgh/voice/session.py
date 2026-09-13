@@ -19,6 +19,7 @@ a person cutting in to the speaker going quiet.
 from __future__ import annotations
 
 import asyncio
+import re
 import contextlib
 import time
 import uuid
@@ -30,7 +31,7 @@ from simorgh.contracts import topics
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
 from .backchannel import GREETING, Backchannel, addressed, classify, is_quiet, strip_lead
 from .commands import MUTE, OFF, STOP, spoken_command
-from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply
+from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply, register_for_tone
 from .config import Config
 from .lang import language_of
 from .pipeline import NOT_SURE, Pipeline, is_echo
@@ -87,6 +88,15 @@ class SessionStats:
     last_interruption_s: float = -1.0
 
 
+_QUESTION_WORDS = re.compile(r"^\s*(?:what|when|where|who|whom|whose|why|how|which|is|are|am|was|were|can|could|do|does|did|"
+                             r"will|would|should|shall|may|might|have|has|had|چی|چه|کی|کجا|چرا|چطور|آیا)\b", re.I)
+
+
+def _looks_like_question(text: str) -> bool:
+    text = (text or "").strip()
+    return text.endswith(("?", "؟")) or bool(_QUESTION_WORDS.match(text))
+
+
 class VoiceSession:
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
                  detector_factory, clock=None, logger=None, embedder=None, speakers=None) -> None:
@@ -95,6 +105,11 @@ class VoiceSession:
         self._audio: dict[int, bytearray] = {}      # a turn's frames, kept only until it is identified
         self._enrolling: dict | None = None          # {"name", "relation", "takes", "done"} while `voice enroll` runs
         self._whois = False                          # `voice whois`: the next turn reports its scores instead of asking
+        # What the room said lately: (speaker, text, when, asked?) -- the
+        # lines not asked of Sim go to the model as context, and two
+        # people talking to each other is a reason to stay quiet.
+        self._room: deque = deque(maxlen=16)
+        self._last_asked_speaker = ""
         self.last_speaker = ""
         self.last_identification = None
         self._mic = microphone
@@ -523,6 +538,11 @@ class VoiceSession:
         await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
             "text": text, "confidence": clock.confidence, "seconds": 0.0, "engine": clock.engine_stt,
             "device": self._config.device, "session_id": session_id, "turn": turn_id, **who})
+        # Two people talking to each other: Sim listens and keeps the
+        # thread, but does not ask the model and does not speak, unless
+        # named or mid-exchange (voice/backchannel.py::addressed).
+        if await self._bystander(turn_id, speaker, text):
+            return
         if self._pipeline.last_said and is_echo(text, self._pipeline.last_said):
             await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
                 "text": text, "confidence": clock.confidence, "seconds": 0.0, "engine": clock.engine_stt,
@@ -546,9 +566,16 @@ class VoiceSession:
         still = asyncio.create_task(self._still_thinking(turn_id, language))
         self._still_task = still
         self._outstanding[turn_id] = session_id
+        relation = ""
+        if speaker and self._speakers is not None:
+            person = self._speakers.get(speaker)
+            relation = person.relation if person is not None else ""
+        room = self._room_lines(exclude_text=text)
+        self._room.append((speaker or "someone", text, self._now(), True))
+        self._last_asked_speaker = speaker or ""
         try:
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
-                                             speaker_name=speaker)
+                                             speaker_name=speaker, speaker_relation=relation, room=room)
         finally:
             self._outstanding.pop(turn_id, None)
             still.cancel()
@@ -566,6 +593,44 @@ class VoiceSession:
                           is_error=reply.startswith(("Sorry, I couldn't", "I'm still working")))
         reply = self._maybe_ask_who(reply, identification, vector)
         await self._speak_reply(turn_id, reply, clock, context)
+
+    # ------------------------------------------------------------- the room
+    def _room_lines(self, *, exclude_text: str = "", within_s: float = 180.0) -> str:
+        now = self._now()
+        lines = [f"{who}: {said}" for who, said, at, asked in self._room
+                 if not asked and now - at <= within_s and said != exclude_text]
+        return "\n".join(lines[-8:])
+
+    async def _bystander(self, turn_id: int, speaker: str, text: str) -> bool:
+        """True when these words were two people talking to each other and
+        Sim should keep listening: Sim was not named, Sim did not speak a
+        moment ago, and another known person spoke within the last little
+        while. Off with `[voice] bystander = false`."""
+        if not self._config.bystander or self._speakers is None or self._embedder is None:
+            return False
+        now = self._now()
+        me = speaker or "someone"
+        # Named, or a question: for Sim. The follow-up window after Sim spoke
+        # belongs to the person it answered -- somebody else's statement in
+        # that window is them talking to that person, not to Sim.
+        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0) or _looks_like_question(text):
+            return False
+        in_window = 0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s
+        if in_window and me == (self._last_asked_speaker or me):
+            return False
+        others = {who for who, _said, at, _asked in self._room
+                  if now - at <= self._config.exchange_window_s * 2 and who != me and who != "someone"}
+        if not others:
+            return False
+        self._room.append((me, text, now, False))
+        partner = sorted(others)[0]
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
+            "reason": f"{me} and {partner} are talking to each other"})
+        self.stats.turns += 1
+        self.turns.state = LISTENING
+        await self._announce(self.turns.state)
+        return True
 
     # ------------------------------------------------------------- meeting someone
     def _maybe_ask_who(self, reply: str, identification, vector) -> str:
@@ -736,12 +801,14 @@ class VoiceSession:
         if await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language)):
             self._last_aside_at = self._now()
 
-    def _delivery_for(self, user_text: str, reply: str, *, is_error: bool = False) -> Delivery:
+    def _delivery_for(self, user_text: str, reply: str, *, is_error: bool = False, tone: str = "") -> Delivery:
         base = Delivery()
         if self._config.expressive:
             mood = getattr(self._pipeline, "mood", None) or {}
-            base = register_for_reply(user_text, reply, valence=float(mood.get("valence", 0.0)),
-                                      arousal=float(mood.get("arousal", 0.0)), is_error=is_error)
+            valence, arousal = float(mood.get("valence", 0.0)), float(mood.get("arousal", 0.0))
+            # The feeling the model named wins; the words decide otherwise.
+            base = (register_for_tone(tone, valence=valence, arousal=arousal) if tone else None) or \
+                register_for_reply(user_text, reply, valence=valence, arousal=arousal, is_error=is_error)
         return base.with_base(self._config.tts_speed, self._config.volume)
 
     def _maybe_hum(self, spoken_ms: int) -> None:
@@ -811,13 +878,16 @@ class VoiceSession:
             # "Okay." was already said aloud; "Okay, ..." again is a stutter.
             self._acknowledged.discard(turn_id)
             reply = strip_lead(reply)
+        from simorgh.contracts.tone import split_tone
+
+        tone, reply = split_tone(reply)
         plan = self._planner.plan(reply, context)
         if plan.connector:
             self._turns_since_connector = 0
             self._previous_connector = next((k for k, v in CONNECTORS.items() if plan.connector in v.values()), "")
         else:
             self._turns_since_connector += 1
-        delivery = self._delivery_for(context.user_text, plan.text, is_error=context.is_error)
+        delivery = self._delivery_for(context.user_text, plan.text, is_error=context.is_error, tone=tone)
         request = TtsRequest(request_id=response_id,
                              pieces=tuple((c.text, int(c.pause_ms * delivery.pause_scale)) for c in plan.chunks),
                              voice=self._config.tts_voice, speed=delivery.speed, gain=delivery.gain)
@@ -849,6 +919,7 @@ class VoiceSession:
             metrics["interruption"] = round(clock.stopped_at - clock.interrupted_at, 3)
         metrics["connector"] = bool(plan.connector)
         metrics["register"] = delivery.register
+        metrics["tone"] = tone
         metrics["omitted"] = list(plan.omitted)
         self.stats.last_metrics = metrics
         engine = getattr(self._tts, "last_engine", "") or self._tts.name

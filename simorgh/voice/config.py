@@ -171,6 +171,9 @@ class Config:
     # to and enrols them by conversation. 0 turns off the asking; "Sim,
     # learn Aran's voice" still works.
     introduce_after_turns: int = 2
+    # Two known people talking to each other: Sim keeps the thread and
+    # stays quiet unless named or mid-exchange (voice/session.py).
+    bystander: bool = True
     keep_audio: bool = False
     audio_dir: str = "workspace/voice/audio"
     keep_transcripts: bool = True

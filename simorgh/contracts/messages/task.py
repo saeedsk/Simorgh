@@ -107,8 +107,9 @@ TurnCompleted = define(t.TURN_COMPLETED, [
     O("verification_ref", Str),
     O("confidence", Float),
     O("user_text", Str),
-    O("kind", Str), O("channel", Str),
-], doc="The chat-turn counterpart of task.completed (Flow 1). "
+    O("kind", Str), O("channel", Str), O("speaker", Str),
+], doc="The chat-turn counterpart of task.completed (Flow 1). `speaker` is who spoke the turn when the voice "
+       "knew (voice/speakers.py), so memory can be kept per person. "
        "`user_text` is the human's own message for this turn -- optional "
        "so older producers/consumers built against v1 of this catalog "
        "entry still validate; Memory's episodic write (milestone 104) is "

@@ -7,7 +7,7 @@ import array
 import unittest
 
 from simorgh.voice.backchannel import EMPATHY, HEARD, POOLS, QUESTION, REQUEST, Backchannel, classify
-from simorgh.voice.delivery import REGISTERS, Delivery, apply_gain, register_for_backchannel, register_for_reply
+from simorgh.voice.delivery import REGISTERS, Delivery, apply_gain, register_for_backchannel, register_for_reply, register_for_tone
 
 
 class TestRegisterForReply(unittest.TestCase):
@@ -68,3 +68,14 @@ class TestApplyGain(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ToneRegisterTestCase(unittest.TestCase):
+    def test_a_named_feeling_has_its_own_delivery_and_a_non_tone_has_none(self) -> None:
+        for tone in ("warm", "bright", "calm", "serious", "playful", "sorry", "neutral"):
+            self.assertEqual(register_for_tone(tone).register, tone, tone)
+        self.assertLess(register_for_tone("sorry").speed, register_for_tone("playful").speed)
+        self.assertGreater(register_for_tone("calm").pause_scale, register_for_tone("bright").pause_scale)
+        self.assertIsNone(register_for_tone("hum")); self.assertIsNone(register_for_tone("angry")); self.assertIsNone(register_for_tone(""))
+        shaded = register_for_tone("warm", valence=-0.5)
+        self.assertLess(shaded.speed, REGISTERS["warm"].speed, "the mood still shades the named feeling a little")

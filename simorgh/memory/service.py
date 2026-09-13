@@ -181,11 +181,17 @@ class Service:
         reply_text = payload.get("text", "")
         if not user_text and not reply_text:
             return
-        content = f"User: {user_text}\nSim: {reply_text}" if user_text else reply_text
-        ref = await self.engine.store(
-            kind="episodic", content=content, tags=[payload.get("session_id", "")],
-            source_ref=payload.get("task_id", ""), confidence=None,
-        )
+        from simorgh.contracts.tone import strip_tone
+
+        speaker = str(payload.get("speaker") or "").strip()
+        reply_text = strip_tone(reply_text)
+        who = speaker or "User"
+        content = f"{who}: {user_text}\nSim: {reply_text}" if user_text else reply_text
+        # The person's name is a tag as well as a label, so a recall can
+        # ask for "what I remember with Ira" (orchestration/context.py).
+        tags = [payload.get("session_id", "")] + ([f"person:{speaker}"] if speaker else [])
+        ref = await self.engine.store(kind="episodic", content=content, tags=tags,
+                                      source_ref=payload.get("task_id", ""), confidence=None)
         await self._ctx.bus.publish(Message.new(
             topics.MEMORY_STORED, source=self._ctx.source, payload={"ref": ref, "kind": "episodic"},
         ))

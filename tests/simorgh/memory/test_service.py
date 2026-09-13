@@ -124,6 +124,32 @@ class MemoryServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("hello there", reply.payload["items"][0]["content"])
         self.assertIn("hello back", reply.payload["items"][0]["content"])
 
+    async def test_a_spoken_turn_is_remembered_under_the_speakers_name_without_the_tone_tag(self):
+        stored: list[Message] = []
+
+        async def _on_stored(message: Message) -> None:
+            stored.append(message)
+
+        sub = await self.bus.subscribe(topics.MEMORY_STORED, _on_stored)
+        await self.bus.publish(Message.new(topics.TURN_COMPLETED, source="orchestration", payload={
+            "session_id": "sess-2", "task_id": "sess-2", "text": "[warm] Nine o'clock, Ira.",
+            "floor": False, "tool_steps": 0, "user_text": "what time is it", "channel": "voice", "speaker": "Ira",
+        }))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        await sub.unsubscribe()
+        self.assertEqual(len(stored), 1)
+        reply = await self.bus.request(Message.new(topics.MEMORY_RETRIEVE, source="test", payload={
+            "query": "time", "kinds": ["episodic"], "k": 5, "filters": {"tags": ["person:Ira"]},
+        }), timeout=2.0)
+        items = reply.payload["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["content"], "Ira: what time is it\nSim: Nine o'clock, Ira.")
+        other = await self.bus.request(Message.new(topics.MEMORY_RETRIEVE, source="test", payload={
+            "query": "time", "kinds": ["episodic"], "k": 5, "filters": {"tags": ["person:Saeed"]},
+        }), timeout=2.0)
+        self.assertEqual(other.payload["items"], [], "what Ira said is not Saeed's")
+
     async def test_turn_completed_with_no_text_either_side_is_not_stored(self):
         """The honest-floor path (`floor: true`, empty `text`) must not
         pollute episodic memory with a blank record."""

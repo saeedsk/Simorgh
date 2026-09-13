@@ -68,4 +68,5 @@ VoiceTranscript = define(t.VOICE_TRANSCRIPT, [
 VoiceSpoken = define(t.VOICE_SPOKEN, [F("text", Str), F("seconds", Float), F("engine", Str), F("device", Str),
                                        O("session_id", Str), O("interrupted", Bool), O("turn", Int), O("register", Str),
                                        O("response", Int), O("metrics", Obj()), O("first_audio_s", Float),
-                                       O("underruns", Int)])
+                                       O("underruns", Int), O("quiet", Bool), O("reason", Str), O("tone", Str),
+                                       O("dropped", Bool), O("aside", Bool), O("command", Str)])

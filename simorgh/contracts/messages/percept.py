@@ -18,8 +18,14 @@ PerceptTextReceived = define(t.PERCEPT_TEXT_RECEIVED, [
     O("device", Str),
     O("speaker", Str),
     O("confidence", Float),
+    # Who the speaker is to the household ("daughter, 9"), and what was
+    # said in the room lately that was not for Sim (voice/session.py),
+    # so the reply can know who it is talking to and what it overheard.
+    O("speaker_relation", Str),
+    O("room", Str),
 ], doc="channel=command + command for routed commands; steer=true marks a mid-task correction; "
-       "channel=voice carries device/speaker/confidence from the voice pipeline.")
+       "channel=voice carries device/speaker/confidence from the voice pipeline, plus the speaker's relation "
+       "and the room's recent lines that were not addressed to Sim.")
 PerceptFileChanged = define(t.PERCEPT_FILE_CHANGED, [
     F("path", Str),
     F("change", Enum("created", "modified", "deleted")),

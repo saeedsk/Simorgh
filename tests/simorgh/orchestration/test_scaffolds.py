@@ -155,3 +155,17 @@ class TestTheVoiceChannel(unittest.TestCase):
         self.assertIn("A YouTube page URL is exactly what cast_play wants", spoken)
         self.assertNotIn("You are answering by voice", typed)
         self.assertNotIn("You are answering by voice", scaffolds.render(profiles.CHAT))
+        self.assertIn("[warm] [bright]", spoken, "the feeling tag the voice turns into delivery")
+        self.assertIn("talking to each other, stay QUIET", spoken)
+
+    def test_the_speaker_and_the_room_are_told_to_the_voice_channel_only(self) -> None:
+        from simorgh.orchestration import profiles, scaffolds
+
+        with_who = scaffolds.render(profiles.VOICE_CHAT, channel="voice", speaker="Ira", speaker_relation="daughter, 9",
+                                    room="Saeed: dinner is at six\nIra: I am not hungry")
+        self.assertIn("You are speaking with Ira (daughter, 9)", with_who)
+        self.assertIn("Said in the room lately, not to you", with_who); self.assertIn("Saeed: dinner is at six", with_who)
+        unknown = scaffolds.render(profiles.VOICE_CHAT, channel="voice", speaker="", room="Saeed: hi")
+        self.assertIn("You do not know this voice", unknown)
+        self.assertNotIn("speaking with", scaffolds.render(profiles.VOICE_CHAT, channel="voice"))
+        self.assertNotIn("speaking with", scaffolds.render(profiles.CHAT, channel="cli", speaker="Ira"))

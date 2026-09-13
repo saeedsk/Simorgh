@@ -288,7 +288,8 @@ class Worker:
         finally:
             self.current_task_id, self.current_kind = None, None
 
-    async def run_percept_chat(self, session_id: str, text: str, *, channel: str = "") -> None:
+    async def run_percept_chat(self, session_id: str, text: str, *, channel: str = "", speaker: str = "",
+                               speaker_relation: str = "", room: str = "") -> None:
         """Flow 1 (02 section 5): a plain conversational percept has no
         Planning task behind it -- only the `batch`/`evolve`/`plan`
         commands go through `intent.goal.stated` -> Intake -> a real
@@ -305,6 +306,7 @@ class Worker:
         session = Session(
             task_id=session_id, kind="chat", mode="execute", profile=profile,
             worker_id=self.worker_id, user_text=text, channel=channel,
+            speaker=speaker, speaker_relation=speaker_relation, room=room,
         )
         session.budget.max_steps = profile.max_steps
         session.budget.max_revisions = profile.max_revisions
@@ -425,6 +427,9 @@ class Worker:
                 # the first is for the voice subsystem to read aloud
                 # (2026-09-11: it read a benchmark's "FINAL ANSWER: 3").
                 "kind": session.kind, "channel": getattr(session, "channel", "") or "",
+                # Who spoke it, when the voice knew (voice/speakers.py):
+                # memory is kept per person on this.
+                "speaker": getattr(session, "speaker", "") or "",
             },
             partition_key=f"task:{session.task_id}", trace_id=session.task_id, clock=self._clock,
         )

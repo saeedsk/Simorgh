@@ -153,6 +153,11 @@ class Session:
     # spoken turn. A spoken reply is written for listening
     # (`scaffolds.VOICE`), a typed one for reading.
     channel: str = ""
+    # A spoken turn's speaker, how they are related to the household, and
+    # what the room said lately that was not for Sim (voice/session.py).
+    speaker: str = ""
+    speaker_relation: str = ""
+    room: str = ""
 
     def next_step_no(self) -> int:
         return len(self.steps) + 1

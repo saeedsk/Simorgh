@@ -816,6 +816,7 @@ class SessionRunner:
                 "task_rules": scaffolds.render(
                     session.profile, subject=session.subject, task=session.user_text,
                     unavailable=scaffolds.unavailable_note(offered), channel=session.channel,
+                    speaker=session.speaker, speaker_relation=session.speaker_relation, room=session.room,
                 ),
                 # Live-caught: this request never actually asked Cognition
                 # to parse tool calls -- `expected` was never set, so

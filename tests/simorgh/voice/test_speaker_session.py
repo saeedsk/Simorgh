@@ -44,9 +44,12 @@ class _Replies:
     def __init__(self, reply: str = "Hello there.") -> None:
         self.reply = reply
         self.asked: list[tuple[str, str]] = []
+        self.calls: list[dict] = []
 
-    async def ask(self, text, *, session_id=None, speaker_name: str = "", confidence: float = 1.0) -> str:
+    async def ask(self, text, *, session_id=None, speaker_name: str = "", confidence: float = 1.0,
+                  speaker_relation: str = "", room: str = "") -> str:
         self.asked.append((text, speaker_name))
+        self.calls.append({"text": text, "speaker": speaker_name, "relation": speaker_relation, "room": room})
         return self.reply
 
 
@@ -174,6 +177,43 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         await _run_until(session, lambda: self.book.get("Iris") is not None and len(self.book.get("Iris").embeddings) >= 3, timeout=12.0)
         self.assertEqual(replies.asked, [], "none of it was a question for the model")
         self.assertIn("Iris, say a sentence", " ".join(tts.spoken))
+
+    async def test_two_people_talking_to_each_other_are_heard_not_answered_and_the_room_reaches_the_next_ask(self):
+        self.book.enroll("Ira", _vec(0.0), relation="daughter, 9"); self.book.enroll("Saeed", _vec(2.0), relation="the creator")
+        voices = iter([_vec(0.02), _vec(2.02), _vec(2.03), _vec(0.03)])
+        heard = iter(["what time is it", "I think it is late", "we should go to bed", "Sim, what did we decide"])
+        script = _Script(*[(True, 40), (False, 15)] * 4, (False, 10_000))
+        replies = _Replies("It is nine.")
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            self.embedder.vector = next(voices, _vec(0.0))
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.2, engine="fake")
+        session._stt._inner.transcribe = _transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: len(replies.asked) >= 2, timeout=12.0)
+        # Ira's question was asked; Saeed's two statements to her, right after Sim answered her, were not
+        self.assertEqual([a[1] for a in replies.asked], ["Ira", "Ira"])
+        self.assertEqual(replies.calls[0]["relation"], "daughter, 9")
+        quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet")]
+        self.assertEqual(len(quiet), 2); self.assertIn("Saeed and Ira are talking to each other", quiet[0]["reason"])
+        # ...and when Ira names Sim, what was said in the room comes along as context
+        self.assertIn("Saeed: I think it is late", replies.calls[1]["room"]); self.assertIn("Saeed: we should go to bed", replies.calls[1]["room"])
+        self.assertNotIn("what did we decide", replies.calls[1]["room"])
+
+    async def test_a_feeling_named_by_the_model_shapes_the_voice_and_is_not_spoken(self):
+        self.book.enroll("Ira", _vec(0.0))
+        self.embedder.vector = _vec(0.02)
+        script = _Script((True, 40), (False, 15), (False, 10_000))
+        replies = _Replies("[sorry] I cannot open the pool gate at night.")
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        await _run_until(session, lambda: session.stats.turns >= 1 and bool(bus.of(topics.VOICE_SPOKEN)), timeout=6.0)
+        said = " ".join(tts.spoken)
+        self.assertNotIn("[sorry]", said); self.assertIn("I cannot open the pool gate", said)
+        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("quiet")][0]
+        self.assertEqual(spoken["metrics"]["tone"], "sorry"); self.assertEqual(spoken["metrics"]["register"], "sorry")
+        self.assertNotIn("[sorry]", spoken["text"])
+        self.assertLess(tts.speeds[-1], 1.0, "sorry is slower than plain")
 
     async def test_without_an_engine_enrolment_says_what_is_missing(self):
         script = _Script((False, 10_000))

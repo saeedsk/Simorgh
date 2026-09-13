@@ -357,6 +357,22 @@ answer, and you do not route around it."""
 # "voice"`). The spoken-response planner (voice/planner.py) strips what
 # a screen needs anyway; this is the model writing for the ear in the
 # first place, which no amount of stripping can do afterwards.
+def who_is_here(speaker: str, relation: str, room: str) -> str:
+    """The lines that tell the model who it is talking to and what it
+    overheard (voice/speakers.py, voice/session.py)."""
+    lines = []
+    if speaker:
+        who = f"{speaker} ({relation})" if relation else speaker
+        lines.append(f"You are speaking with {who}. You know their voice. Use their name the way a person would -- "
+                     "now and then, not every sentence. What you remember with them is in your memory, labelled with "
+                     "their name; what others told you stays theirs.")
+    else:
+        lines.append("You do not know this voice. Do not guess a name; do not ask for one -- that is handled elsewhere.")
+    if room:
+        lines.append("Said in the room lately, not to you (oldest first) -- context, not questions:\n" + room)
+    return "\n".join(lines)
+
+
 VOICE = """\
 You are answering by voice: the person hears this, they do not read it.
 
@@ -380,6 +396,17 @@ your whole reply is the single word QUIET -- nothing before or after
 it. It is not spoken, and staying quiet and attentive is the right
 thing. Never say aloud that words were a fragment or were not for you;
 either answer them or reply QUIET. When in doubt, answer, briefly.
+Several people live here and you know their voices; earlier turns in
+your memory are labelled with the speaker's name. When two people are
+talking to each other, stay QUIET unless one of them names you or the
+question is plainly yours; when you have just asked something, the
+next words are for you. Answer the person who spoke, not the room.
+You may open with one feeling in square brackets -- [warm] [bright]
+[calm] [serious] [playful] [sorry] -- and it shapes how you sound; it
+is never spoken. Use it when it fits: warm for a hurt or a worry,
+bright for good news, calm for a child or for instructions, serious for
+a warning, playful for banter, sorry for a refusal or bad news. No tag
+means plain.
 No markdown, headings, bullets, citations, raw URLs or code unless
 asked: for anything precise -- a command, a path, a number that
 matters -- say it plainly in words and offer the exact text on screen.
@@ -425,7 +452,8 @@ _BY_SCAFFOLD: dict[str, str] = {
 
 
 def render(profile: Profile, *, subject: str | None = None, task: str | None = None,
-           unavailable: str = "", channel: str = "") -> str:
+           unavailable: str = "", channel: str = "", speaker: str = "", speaker_relation: str = "",
+           room: str = "") -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -439,6 +467,8 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         body = f"{body}\n\n{_RESOURCEFUL}"
     if channel == "voice":
         body = f"{VOICE}\n\n{body}" if body else VOICE
+        if speaker or room:
+            body = f"{who_is_here(speaker, speaker_relation, room)}\n\n{body}"
     if task:
         # The task belongs in `task_rules` because that block is
         # *protected* -- never compacted (04 section 4.6). As a plain user

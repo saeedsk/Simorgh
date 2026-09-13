@@ -55,7 +55,31 @@ REGISTERS: dict[str, Delivery] = {
     "unsure": Delivery("unsure", 0.88, 0.9, 1.2),
     "brisk": Delivery("brisk", 1.12, 1.0, 0.8),
     "hum": Delivery("hum", 1.0, 0.45, 1.0),
+    # The feelings the model may name at the head of a reply
+    # (contracts/tone.py): carried by speed, loudness and pauses, which
+    # is what Kokoro and Piper can do.
+    "calm": Delivery("calm", 0.93, 0.92, 1.3),
+    "serious": Delivery("serious", 0.96, 1.0, 1.2),
+    "playful": Delivery("playful", 1.08, 1.0, 0.85),
+    "sorry": Delivery("sorry", 0.9, 0.85, 1.4),
 }
+
+
+def register_for_tone(tone: str, *, valence: float = 0.0, arousal: float = 0.0) -> Delivery | None:
+    """The delivery for a feeling the model named, mood-shaded the same
+    small way `register_for_reply` shades; None when the word is not a
+    tone (then the words decide, as before)."""
+    base = REGISTERS.get((tone or "").lower())
+    if base is None or tone == "hum":
+        return None
+    speed = base.speed
+    if valence < -0.15:
+        speed -= 0.03
+    if arousal > 0.3:
+        speed += 0.04
+    elif arousal < -0.3:
+        speed -= 0.03
+    return Delivery(base.register, round(max(0.8, min(1.2, speed)), 3), base.gain, base.pause_scale)
 
 # Feelings, not states of the system: "the pool is exhausted", "the
 # build failed" and "the link is dead" are engineering, not a hurt.

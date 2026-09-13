@@ -76,7 +76,7 @@ class _Replies:
         self.delay = delay
         self.asked: list[str] = []
 
-    async def ask(self, text: str, *, session_id=None, speaker_name: str = "", confidence: float = 1.0) -> str:
+    async def ask(self, text, *, session_id=None, speaker_name: str = "", confidence: float = 1.0, **kw) -> str:
         self.asked.append(text)
         if self.delay:
             await asyncio.sleep(self.delay)
