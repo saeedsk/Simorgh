@@ -181,7 +181,13 @@ class RingCloud:
         with Ring's servers; Sim only carries the signalling). The answer
         carries Ring's ICE candidates; the offer must carry the browser's."""
         await self.connect()
-        return await self._dev(cam_id).generate_webrtc_stream(sdp_offer, keep_alive_timeout=keep_alive_s)
+        dev = self._dev(cam_id)
+        answer = await dev.generate_webrtc_stream(sdp_offer, keep_alive_timeout=keep_alive_s)
+        session = _sdp_session(sdp_offer)
+        stream = getattr(dev, "_webrtc_streams", {}).get(session)
+        if stream is not None:
+            harden_webrtc_stream(stream)
+        return answer
 
     async def webrtc_keepalive(self, cam_id: str, session: str) -> None:
         await self.connect()
@@ -206,6 +212,25 @@ class RingCloud:
             except Exception:  # noqa: BLE001
                 pass
         self._auth = self._ring = None
+
+
+def harden_webrtc_stream(stream) -> None:
+    """ring_doorbell 0.9.14: when Ring ends a live view, the stream's reader
+    task handles the close message and `_close()` awaits `read_task` --
+    itself -- and the event loop reports "Task cannot await on itself"
+    (the creator's terminal, 2026-09-13). The reader closing the stream
+    must not wait for the reader; everything else in `_close` stands."""
+    original = getattr(stream, "_close", None)
+    if original is None or getattr(stream, "_simorgh_hardened", False):
+        return
+
+    async def _close(*, closed_by_self: bool) -> None:
+        if getattr(stream, "read_task", None) is asyncio.current_task():
+            stream.read_task = None
+        await original(closed_by_self=closed_by_self)
+
+    stream._close = _close  # noqa: SLF001 -- the library's own name, on this instance only
+    stream._simorgh_hardened = True  # noqa: SLF001
 
 
 def _cap(dev, name: str) -> bool:
@@ -750,4 +775,4 @@ def ring_tools(config, **kwargs) -> list:
 
 
 __all__ = ["RingCamera", "RingCloud", "RingEventsTool", "RingLightTool", "RingListTool", "RingLiveTool", "RingPreferences",
-           "RingSetupTool", "RingSirenTool", "RingSnapshotTool", "RingWatchTool", "available", "ring_tools"]
+           "RingSetupTool", "RingSirenTool", "RingSnapshotTool", "RingWatchTool", "available", "harden_webrtc_stream", "ring_tools"]

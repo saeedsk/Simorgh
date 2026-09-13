@@ -213,6 +213,31 @@ class RingTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(bad.ok)
         self.assertFalse((await tools["ring_live"].run({"camera": "front", "action": "keepalive"}, ctx=_ctx(bus))).ok)
 
+    async def test_a_stream_closed_by_its_own_reader_does_not_await_itself(self):
+        import asyncio
+        from simorgh.execution.home.ring import harden_webrtc_stream
+
+        class _Stream:
+            def __init__(self):
+                self.read_task = None
+                self.closed = []
+
+            async def _close(self, *, closed_by_self):
+                self.closed.append(closed_by_self)
+                if self.read_task is not None and not self.read_task.done():
+                    await self.read_task          # the library's line: awaiting the reader
+
+        stream = _Stream()
+        harden_webrtc_stream(stream)
+        harden_webrtc_stream(stream)   # idempotent
+
+        async def reader():
+            await stream._close(closed_by_self=True)   # Ring's close message, handled by the reader itself
+        stream.read_task = asyncio.create_task(reader())
+        await asyncio.wait_for(stream.read_task, 2.0)
+        self.assertEqual(stream.closed, [True])
+        self.assertIsNone(stream.read_task)
+
     async def test_list_writes_the_camera_file_the_dashboard_reads(self):
         tools, cloud, bus = self._tools()
         result = await tools["ring_list"].run({}, ctx=_ctx(bus, self.root))
