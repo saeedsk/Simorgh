@@ -643,7 +643,24 @@ class Service:
         name = str(message.payload.get("name") or "base.en").strip()
         model_dir = Path(self.config.model_dir)
         piper_names = {f"piper-{lang}": voice for lang, voice in PIPER_VOICES.items()}
-        available = [*KNOWN_MODELS, "kokoro", *piper_names]
+        available = [*KNOWN_MODELS, "kokoro", *piper_names, "chatterbox", "miso"]
+        if name in ("chatterbox", "miso"):
+            # The expressive engines: a virtual environment of their own
+            # (torch 2.6 / Python 3.10 do not fit the repository's), built
+            # here in a thread -- minutes, and gigabytes, the first time.
+            from .tts import chatterbox as _cbx, miso as _miso
+
+            installer = _cbx.install if name == "chatterbox" else _miso.install
+            notes: list[str] = []
+            path, problem = await asyncio.to_thread(installer, self.config.venv_dir, log=notes.append)
+            if path is None:
+                await self._reply(message, topics.VOICE_MODELS_REPLY, {"ok": False, "detail": problem, "available": available})
+                return
+            detail = (f"{name} is installed at {path.parent.parent}; `voice set tts {name}` speaks with it "
+                      f"(the model's weights download on first use" + (" -- 16 GB for miso" if name == "miso" else "") + ")")
+            await self._reply(message, topics.VOICE_MODELS_REPLY, {"ok": True, "path": str(path), "bytes": 0,
+                                                                   "detail": detail, "available": available})
+            return
         if name == "kokoro":
             path, problem = await asyncio.to_thread(download_kokoro, model_dir)
         elif name in piper_names or name.startswith("piper-"):

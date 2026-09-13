@@ -32,7 +32,7 @@ class Config:
     # cannot hear Farsi at all -- `voice models large-v3-turbo`.
     stt_language: str = ""
     stt_compute: str = "auto"          # faster_whisper: int8 | float16 | auto
-    tts: str = "auto"                  # auto | kokoro | piper | say | fake
+    tts: str = "auto"                  # auto | kokoro | piper | say | chatterbox | miso | fake
     tts_voice: str = "af_jessica"      # Kokoro voice id (the creator's pick); a `say -v` name for `say`
     tts_speed: float = 1.0
     # A reply is spoken by the engine for ITS language (voice/lang.py):
@@ -178,6 +178,16 @@ class Config:
     # of a differently coloured voice into yours (1.0 = as tabled in
     # tts/kokoro.py, 0 = always the plain voice; 2.0 is a lot).
     tone_blend: float = 1.0
+    # The expressive engines (voice/tts/chatterbox.py, miso.py) live in
+    # their own virtual environments under `venv_dir`; a reference WAV
+    # clones a voice; `expressive_timeout_s` bounds one sentence.
+    venv_dir: str = "workspace/voice/venvs"
+    chatterbox_reference: str = ""
+    chatterbox_exaggeration: float = 0.0    # 0 = the tone table decides; else a fixed dial 0.1-1.0
+    miso_reference: str = ""
+    miso_repo: str = "workspace/voice/engines/MisoTTS"
+    miso_device: str = ""                   # "" = cuda, else mps, else cpu
+    expressive_timeout_s: float = 180.0
     keep_audio: bool = False
     audio_dir: str = "workspace/voice/audio"
     keep_transcripts: bool = True

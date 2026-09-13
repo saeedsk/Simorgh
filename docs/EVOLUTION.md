@@ -4992,3 +4992,26 @@ Still ahead, roughly in order:
     expressiveness knobs move with the tone; `TtsRequest.tone` carries
     it; `[voice] tone_blend` scales it; and the model is told to open
     EVERY reply with a feeling, neutral only for a flat fact.
+
+158. **The expressive lane, two engines behind one door (2026-09-13,
+    night).** "Let's build the system for both Miso and Chatterbox; I
+    like to experiment with both and decide later" -- then, reading the
+    numbers, "Miso needs a GPU which is not available on this MacBook,
+    so Chatterbox is a better choice." Neither fits the repository's
+    Python (Chatterbox pins torch 2.6 against kokoro's 2.14; MisoTTS
+    wants Python 3.10), so `voice/tts/subproc.py` runs an engine as a
+    line server in its own venv under `workspace/voice/venvs/<engine>/`
+    -- a JSON request per sentence, the audio through a file, a ready
+    handshake that absorbs the model load, one restart after a crash.
+    `voice/tts/chatterbox.py` maps each tone to Chatterbox's own dials
+    (`exaggeration`, `cfg_weight`) and clones a voice from
+    `[voice] chatterbox_reference`; `voice/tts/miso.py` does the same
+    shape for MisoTTS 8B (temperature by tone, a reference clip as
+    context). `voice models chatterbox|miso` builds the environment;
+    `voice set tts chatterbox` speaks with it, falling back to Kokoro
+    with the reason when the environment is missing. Measured through
+    the real server on the M3 Pro: 14 s to warm up and say "Okay.", then
+    2.4 s of speech in 3.9-4.5 s. Miso's dependencies (datasets, pyarrow,
+    numpy) did not resolve here and its weights want a 24 GB GPU; the
+    engine stays as the option it was asked to be. Samples to hear:
+    `workspace/voice/samples/chatterbox-bright.wav`, `-sorry.wav`.

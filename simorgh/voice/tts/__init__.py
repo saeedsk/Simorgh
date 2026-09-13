@@ -110,10 +110,18 @@ def open_synthesiser(config: Config) -> tuple[object | None, str]:
         from ..fakes import FakeSynthesiser
 
         return FakeSynthesiser(), ""
+    from .chatterbox import ChatterboxSynthesiser
+    from .miso import MisoSynthesiser
+
+    # The expressive engines fall back to Kokoro when their environment is
+    # missing, so `tts = "chatterbox"` before `voice models chatterbox`
+    # still speaks -- and says why in the boot line.
     order = {"auto": (KokoroSynthesiser, SaySynthesiser), "kokoro": (KokoroSynthesiser,),
-             "piper": (PiperSynthesiser,), "say": (SaySynthesiser,)}.get(config.tts)
+             "piper": (PiperSynthesiser,), "say": (SaySynthesiser,),
+             "chatterbox": (ChatterboxSynthesiser, KokoroSynthesiser, SaySynthesiser),
+             "miso": (MisoSynthesiser, KokoroSynthesiser, SaySynthesiser)}.get(config.tts)
     if order is None:
-        return None, f"unknown tts engine {config.tts!r} (auto | kokoro | piper | say | fake)"
+        return None, f"unknown tts engine {config.tts!r} (auto | kokoro | piper | say | chatterbox | miso | fake)"
     reasons = []
     primary = None
     for cls in order:

@@ -24,6 +24,8 @@ All inference is local; the network is used once, to fetch these.
 | piper-tts | 1.8.0 | **GPL-3.0** | the maintained Piper (OHF-Voice/piper1-gpl); the original rhasspy/piper is archived. It bundles espeak-ng (GPL-3.0) for phonemisation. Used as an optional, separately installed engine; nothing in this repository links against it, and a machine without it simply has no Farsi voice. Anyone redistributing a bundle that includes it must honour the GPL. |
 | silero-vad | 6.2.1 | MIT | brings `torch` |
 | sherpa-onnx | 1.13.8 | Apache-2.0 | runs the speaker-embedding model through onnxruntime; optional, refused by name when missing |
+| chatterbox-tts (Resemble AI) | 0.1.7, in its own venv under `workspace/voice/venvs/chatterbox` (torch 2.6.0) | MIT; the model weights download from Hugging Face (ResembleAI/chatterbox) on first use; output is watermarked by the library (Perth) | the expressive engine (`[voice] tts = "chatterbox"`): feeling by `exaggeration`, voice cloning from a reference WAV |
+| MisoTTS 8B (Miso Labs) | checkout under `workspace/voice/engines/MisoTTS`, venv `venvs/miso` (Python 3.10) | open weights (MisoLabs/MisoTTS, ~16 GB bf16); no licence text found in the repository as of 2026-09-13 -- check before any use beyond experiment | the second expressive engine, built as an option; its dependency set did not resolve cleanly here (datasets/pyarrow/numpy) and it wants a 24 GB GPU |
 | sounddevice | 0.5.6 | MIT | PortAudio binding (PortAudio: MIT-style) |
 | soundfile | 0.14.0 | BSD-3 | libsndfile (LGPL-2.1) |
 | whisper.cpp (`whisper-cli`) | 1.9.1, Homebrew | MIT | recognition on Apple Silicon with Metal |
