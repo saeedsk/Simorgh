@@ -55,6 +55,11 @@ class TurnClock:
     final_at: float = 0.0
     reply_at: float = 0.0
     first_audio_at: float = 0.0
+    # when the reply reached the speech lock and when it got it: the gap
+    # is an aside or another reply still being said (first_audio ran to
+    # 4-10 s on turns beside a playing TV, 2026-09-13, cause unknown)
+    lock_wait_at: float = 0.0
+    lock_got_at: float = 0.0
     interrupted_at: float = 0.0
     stopped_at: float = 0.0
     text: str = ""
@@ -69,6 +74,12 @@ class TurnClock:
             out["llm"] = round(self.reply_at - self.final_at, 3)
         if self.reply_at and self.first_audio_at:
             out["first_audio"] = round(self.first_audio_at - self.reply_at, 3)
+        if self.lock_wait_at and self.lock_got_at:
+            out["lock_wait"] = round(self.lock_got_at - self.lock_wait_at, 3)
+        if self.reply_at and self.lock_wait_at:
+            out["before_lock"] = round(self.lock_wait_at - self.reply_at, 3)     # planning, delivery, lane
+        if self.lock_got_at and self.first_audio_at:
+            out["synth_first"] = round(self.first_audio_at - self.lock_got_at, 3)   # the engine's own time
         if self.speech_end and self.first_audio_at:
             out["response"] = round(self.first_audio_at - self.speech_end, 3)
         if report is not None:
@@ -1183,7 +1194,9 @@ class VoiceSession:
             clock.first_audio_at = self._now()
 
         try:
+            clock.lock_wait_at = self._now()
             async with self._pipeline.speech_lock:
+                clock.lock_got_at = self._now()
                 report = await self._play(self._tts.synthesise_stream(request), request_id=response_id,
                                           on_first_audio=_first_audio)
         except Exception as exc:  # noqa: BLE001 -- a reply that could not be spoken is logged, not fatal
