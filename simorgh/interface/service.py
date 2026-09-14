@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+import os
 import sys
 import threading
 import time
@@ -558,6 +559,12 @@ class Service:
         restart = getattr(self._tui, "stop_reason", None) == "restart"
         try:
             if restart:
+                # See `dispatch.py`'s own `restart` branch for why this
+                # matters: only `simloader.py` (via `SIMORGH_LOADER_NOTES`
+                # in this process's environment) brings Sim back up.
+                if not os.environ.get("SIMORGH_LOADER_NOTES"):
+                    self._out("restarting -- but this process was not started through simloader.py, so "
+                              "nothing is watching for it to come back. Run `./sim.sh` again to bring it up.")
                 await self._ctx.bus.publish(self._ctx.bus.new(
                     topics.SYSTEM_RESTART, {"reason": "repl_restart", "self_check_passed": True},
                 ))

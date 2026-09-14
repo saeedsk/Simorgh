@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import re
 import uuid
 import subprocess
@@ -193,10 +194,24 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         # that it uses the new source code from local dir").
         # `self_check_passed=True` because that gate -- not this command
         # -- is what actually verifies the new source before it runs.
+        # `simloader.py` only ever catches this if it is the one that
+        # launched Sim (`launch_sim` sets `SIMORGH_LOADER_NOTES` in the
+        # child's environment) -- run directly (`SIMORGH_NO_LOADER=1`, or
+        # `python -m simorgh run` by hand), and this process just stops,
+        # the same as `exit`, with nobody to bring it back (live-caught,
+        # 2026-09-14: the creator's own running Sim was not loader-managed
+        # and did not come back after `restart`).
+        loader_managed = bool(os.environ.get("SIMORGH_LOADER_NOTES"))
         await bus.publish(bus.new(topics.SYSTEM_RESTART, {
             "reason": args or "user requested restart", "self_check_passed": True,
         }, priority=9))
-        return Outcome("restarting -- Sim will come back up on the current source...", exit_repl=True)
+        if loader_managed:
+            return Outcome("restarting -- Sim will come back up on the current source...", exit_repl=True)
+        return Outcome(
+            "restarting -- but this process was not started through simloader.py, so nothing is "
+            "watching for it to come back. Sim is stopping now; run `./sim.sh` again to bring it back up.",
+            exit_repl=True,
+        )
 
     if name == "pause":
         await bus.publish(bus.new(topics.SYSTEM_PAUSE, {

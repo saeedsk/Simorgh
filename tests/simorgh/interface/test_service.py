@@ -266,6 +266,69 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(seen[0].payload["self_check_passed"])
         self.assertTrue(self.service._stop_repl.is_set())
 
+    async def test_restart_warns_when_nothing_is_watching_for_it(self):
+        """Live-caught, 2026-09-14: the creator's own running Sim was not
+        started through `simloader.py` (no `SIMORGH_LOADER_NOTES` in this
+        process's environment -- `python -m simorgh run` directly, or
+        `SIMORGH_NO_LOADER=1`), so after `restart` published `system.
+        restart` and the Kernel drained, nothing relaunched it -- Sim just
+        stopped, with no explanation on screen. `restart` must say so."""
+        import os
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SIMORGH_LOADER_NOTES", None)
+            out = await self._line("restart")
+        self.assertIn("nothing is watching", out)
+        self.assertIn("./sim.sh", out)
+
+    async def test_restart_says_it_will_come_back_when_loader_managed(self):
+        import os
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"SIMORGH_LOADER_NOTES": "/tmp/notes"}):
+            out = await self._line("restart")
+        self.assertIn("will come back up", out)
+        self.assertNotIn("nothing is watching", out)
+
+    async def test_tui_restart_warns_when_nothing_is_watching_for_it(self):
+        """The TUI's own `restart` fast path (`tui.py`'s read loop never
+        routes `restart` through `dispatch()` -- see `_request_stop`'s own
+        docstring), covered separately from the readline path above."""
+        import os
+        from unittest import mock
+
+        class _FakeTui:
+            stop_reason = "restart"
+
+            def stop(self) -> None:
+                pass
+
+        self.service._tui = _FakeTui()
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SIMORGH_LOADER_NOTES", None)
+            with contextlib.redirect_stdout(buf):
+                await self.service._request_stop()
+        self.assertIn("nothing is watching", buf.getvalue())
+
+    async def test_tui_restart_is_quiet_when_loader_managed(self):
+        import os
+        from unittest import mock
+
+        class _FakeTui:
+            stop_reason = "restart"
+
+            def stop(self) -> None:
+                pass
+
+        self.service._tui = _FakeTui()
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, {"SIMORGH_LOADER_NOTES": "/tmp/notes"}):
+            with contextlib.redirect_stdout(buf):
+                await self.service._request_stop()
+        self.assertEqual(buf.getvalue(), "")
+
     async def test_status_renders_a_real_reply(self):
         """07-post-cutover-review.md §3.8: `status` absorbs `vitals`/
         `budget`/`skills` into one panel -- health, posture, tools, and
