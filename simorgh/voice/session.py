@@ -101,6 +101,8 @@ def _looks_like_question(text: str) -> bool:
 #: an unknown voice this close to an enrolled person is asked "is that you?"
 #: rather than "what is your name?" (the threshold itself is 0.5)
 GUESS_FLOOR = 0.22
+#: "no, this is Ira" / "I'm Iris" / "it's Saeed" -- a claim of identity, taken as a take when the name is known
+_I_AM = re.compile(r"\b(?:this is|it'?s|i'?m|i am|my name is)\s+([A-Z][a-z]+)\b(?!\s+(?:voice|question|game))", re.I)
 #: "who is talking / speaking / am I / is this" -- answered from the identification, not the model
 _WHO_IS_SPEAKING = re.compile(r"\bwho(?:'s| is| am)\s+(?:i\b|(?:this|that|it)\b|(?:talking|speaking)\b|(?:one\s+of\s+us\s+is\s+)?(?:talking|speaking))|which\s+(?:one\s+)?of\s+us\s+is\s+(?:talking|speaking)", re.I)
 
@@ -668,6 +670,14 @@ class VoiceSession:
             # model guessed "Iris" at the creator (2026-09-13).
             await self._answer_who(turn_id, text, identification, clock)
             return
+        claimed = self._identity_claim(text)
+        if claimed and vector is not None and self._speakers is not None and claimed.lower() != speaker.lower():
+            # "No, this is Ira. Remember the voice." A person of the house
+            # saying who they are is a take for that voice, taken on their
+            # word -- the model had said "I'm writing it down" and nothing
+            # was written (2026-09-13). Only for a name the book knows.
+            await self._take_correction(turn_id, text, claimed, vector, clock)
+            return
         text = await self._tidy(text, turn_id)
         if clock.confidence < self._config.min_confidence:
             reply = NOT_SURE.format(text=text)
@@ -850,6 +860,28 @@ class VoiceSession:
                 "device": self._config.device, "corrected": True, "turn": turn_id})
             self._last_user_text = tidied.text
         return tidied.text
+
+    def _identity_claim(self, text: str) -> str:
+        """The name in "no, this is Ira" / "I'm Iris" / "it's Saeed", when the
+        book knows it; "" otherwise."""
+        m = _I_AM.search(text or "")
+        if not m or self._speakers is None:
+            return ""
+        name = m.group(1)
+        person = self._speakers.get(name)
+        return person.name if person is not None else ""
+
+    async def _take_correction(self, turn_id: int, text: str, name: str, vector, clock: TurnClock) -> None:
+        try:
+            _person, note = self._speakers.enroll(name, vector, insist=True)
+        except Exception as exc:  # noqa: BLE001
+            note = f"refused: {exc}"
+        self.last_speaker = name
+        self._speakers.heard(name)
+        self._log("info", "voice.identity_corrected", name=name, note=note)
+        said = f"Got it, {name}. I'll know your voice better now." if not note else f"Got it, {name}."
+        clock.reply_at = self._now()
+        await self._speak_reply(turn_id, said, clock, Context(user_text=text))
 
     async def _answer_who(self, turn_id: int, text: str, identification, clock: TurnClock) -> None:
         """The identification, said plainly, without a model call."""
