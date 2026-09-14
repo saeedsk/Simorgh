@@ -56,7 +56,7 @@ from typing import Protocol, Sequence
 SPEAKER_MODEL = "nemo_en_titanet_small.onnx"
 SPEAKER_MODEL_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
                      + SPEAKER_MODEL)
-DEFAULT_THRESHOLD = 0.6
+DEFAULT_THRESHOLD = 0.5
 DEFAULT_MARGIN = 0.06
 #: under the threshold but at least this close, and clear of the runner-up,
 #: a voice is "probably" that person -- attributed, not asked (the creator,

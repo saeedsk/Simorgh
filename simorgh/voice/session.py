@@ -443,6 +443,14 @@ class VoiceSession:
             if await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language_of(text))):
                 self._last_aside_at = self._now()
 
+    def _tv_is_playing(self) -> bool:
+        state = getattr(self._pipeline, "tv_state", None) or {}
+        return str(state.get("mode") or "none") in ("full", "frame")
+
+    @staticmethod
+    def _names_sim(text: str) -> bool:
+        return bool(re.search(r"\b(?:sim|simorgh|sam|seem)\b", text or "", re.I))
+
     def _other_language(self, heard: str) -> str:
         """The language code whisper heard, when it is not one of the
         house's (`[voice] stt_languages`); "" otherwise."""
@@ -654,6 +662,14 @@ class VoiceSession:
             await self._enroll_take(turn_id, text, vector)
             return
         speaker = identification.name if identification is not None else ""
+        if not speaker and self._tv_is_playing() and not self._names_sim(text):
+            # Live 2026-09-13: a KATSEYE video's own dialogue ("my wife
+            # Michelle will judge the drawings") was heard, transcribed and
+            # answered. While the TV plays, a voice Sim cannot place that
+            # does not name Sim is the TV.
+            self._log("info", "voice.tv_audio", turn=turn_id, text=text[:60])
+            await self._stay_quiet(turn_id, reason="the TV is playing and this is not a voice I know -- the TV, most likely")
+            return
         if self._intro is not None:
             await self._introduce_step(turn_id, text, vector)
             return
@@ -1023,7 +1039,7 @@ class VoiceSession:
             await self._pipeline._publish(topics.UI_NOTICE, {  # noqa: SLF001
                 "level": "warn", "source": "voice", "text": f"could not synthesise the reply: {error}"})
 
-    async def _stay_quiet(self, turn_id: int) -> None:
+    async def _stay_quiet(self, turn_id: int, reason: str = "") -> None:
         """The model heard words that were not for it. Nothing is said;
         the floor goes back to listening, and the screen shows why
         there was no reply."""
@@ -1038,10 +1054,10 @@ class VoiceSession:
         self._answered.discard(turn_id)
         self._acknowledged.discard(turn_id)
         self._clocks.pop(turn_id, None)
-        self._log("info", "voice.stayed_quiet", turn=turn_id)
+        self._log("info", "voice.stayed_quiet", turn=turn_id, reason=reason)
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "interrupted": False,
-            "quiet": True, "turn": turn_id})
+            "quiet": True, "turn": turn_id, **({"reason": reason} if reason else {})})
 
     async def _still_thinking(self, turn_id: int, language: str) -> None:
         """`still_after_s` into a wait with no answer yet: one more short

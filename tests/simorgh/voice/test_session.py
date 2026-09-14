@@ -785,3 +785,17 @@ class OtherLanguageTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("heard tr, not a language of this house", quiet[0]["reason"])
         self.assertEqual(session._other_language("auto"), "")  # noqa: SLF001
         self.assertEqual(session._other_language(""), "")  # noqa: SLF001
+
+
+class TvAudioTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_while_the_tv_plays_an_unplaced_voice_that_does_not_name_sim_is_the_tv(self) -> None:
+        # Live 2026-09-13: a music video's dialogue was heard and answered.
+        script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["yes?"])
+        session, bus, speaker, tts = _session(_config(), script, replies)
+        replies.tv_state = {"mode": "full", "title": "KATSEYE - Gnarly", "native": "YouTube"}
+        _distinct_questions(session, ["my wife Michelle will judge the drawings", "Sim, what time is it"])
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        self.assertEqual(replies.asked, ["Sim, what time is it"], "the TV's line is not asked; a line naming Sim is")
+        quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet")]
+        self.assertIn("the TV is playing", quiet[0]["reason"])

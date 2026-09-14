@@ -176,7 +176,7 @@ class Config:
     # threshold/margin are the cosine rules the SpeakerBook applies;
     # `voice whois` shows the live scores so a household can tune them.
     speaker_id: str = "auto"
-    speaker_threshold: float = 0.6     # TitaNet: same voice ~0.87, another voice ~0.31 (measured 2026-09-13)
+    speaker_threshold: float = 0.5     # TitaNet: same voice ~0.87, another ~0.31 (2026-09-13); the creator asked for 0.5
     speaker_margin: float = 0.06
     # Under the threshold but at least this close, and clear of the
     # runner-up: "probably <name>" -- the turn is theirs, marked so.
