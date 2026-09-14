@@ -42,6 +42,7 @@ import asyncio
 import os
 import re
 import hmac
+import ipaddress
 import json
 import time
 import uuid
@@ -49,7 +50,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
@@ -58,7 +59,7 @@ from simorgh.contracts.streamnames import is_valid_stream, stream_name_rule
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 _REASONS = {
-    200: "OK", 206: "Partial Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+    200: "OK", 206: "Partial Content", 302: "Found", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
     416: "Range Not Satisfiable",
     405: "Method Not Allowed", 409: "Conflict", 413: "Payload Too Large",
     429: "Too Many Requests", 500: "Internal Server Error",
@@ -534,6 +535,23 @@ class HttpApi:
         from_query = self._q1(query or {}, "token", "") or ""
         return bool(from_query) and hmac.compare_digest(from_query.strip(), self._token)
 
+    @staticmethod
+    def _local_viewer(writer: asyncio.StreamWriter, headers: dict[str, str]) -> bool:
+        """This machine's own browser: a loopback peer that asked for a
+        loopback host. The `Host` check keeps a web page that rebinds its
+        own DNS name to 127.0.0.1 from being handed the token."""
+        peer = writer.get_extra_info("peername")
+        try:
+            address = ipaddress.ip_address(peer[0])
+        except (TypeError, IndexError, ValueError):
+            return False
+        mapped = getattr(address, "ipv4_mapped", None)
+        if not (address.is_loopback or (mapped is not None and mapped.is_loopback)):
+            return False
+        host = headers.get("host", "").strip().lower()
+        name = host[1:host.find("]")] if host.startswith("[") else host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+        return name in ("127.0.0.1", "localhost", "::1")
+
     def _rate_limited(self, route: Route) -> bool:
         if route.rate is None:
             return False
@@ -818,6 +836,19 @@ class HttpApi:
                 await self._try_respond(writer, 405, b"method not allowed", "text/plain; charset=utf-8")
             else:
                 await self._try_respond(writer, 404, b"not found", "text/plain; charset=utf-8")
+            return
+
+        if (method == "GET" and split.path == "/dash" and self._token and not self._q1(query, "token", "")
+                and self._local_viewer(writer, headers)):
+            # A browser on this machine opened the plain address. The TV
+            # is handed a URL with the token; without it the page's own
+            # activity requests are refused and its Sim box shows only a
+            # warning (the creator, 2026-09-14: "the dash on tv and the
+            # dash on local browser show two different sim tui messages").
+            query_items = [(k, v) for k, vals in query.items() for v in vals] + [("token", self._token)]
+            location = "/dash?" + urlencode(query_items)
+            await self._try_respond(writer, 302, b"", "text/plain; charset=utf-8",
+                                    extra_headers=(f"Location: {location}",))
             return
 
         if route.auth and not self._authorized(headers, query):

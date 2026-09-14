@@ -1072,7 +1072,7 @@ class DashAndWallpapersTestCase(unittest.IsolatedAsyncioTestCase):
                 c=http.client.HTTPConnection("127.0.0.1",api.port,timeout=5)
                 c.request("GET",path,headers=hdr or {}); r=c.getresponse(); b=r.read(); ct=r.getheader("Content-Type"); c.close()
                 return r.status,b,ct
-            st,b,_=await asyncio.to_thread(g,"/dash")
+            st,b,_=await asyncio.to_thread(g,"/dash",{"Host":"192.168.50.33:8765"})  # a LAN viewer: no redirect
             self.assertEqual(st,200); self.assertIn(b"Simorgh",b)  # open, no token
             st,b,_=await asyncio.to_thread(g,"/api/wallpapers")
             self.assertEqual(st,200); self.assertEqual(json.loads(b)["wallpapers"],["beach.jpg"])  # dotfile skipped
@@ -1183,7 +1183,7 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
             st, b, ct = await asyncio.to_thread(self._g, api, path)
             self.assertEqual((st, ct), (200, "image/png"), path)
             self.assertTrue(b.startswith(b"\x89PNG"), path)
-        st, b, _ = await asyncio.to_thread(self._g, api, "/dash")
+        st, b, _ = await asyncio.to_thread(self._g, api, "/dash", {"Host": "192.168.50.33:8765"})
         self.assertIn(b'src="/logo.png"', b)
 
     async def test_the_startup_banner_is_served_for_the_terminal_box(self):
@@ -1357,3 +1357,48 @@ class ActivityFeedTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_an_ordinary_tool_result_still_does(self):
         events = await self._activity(self._result("cam_light", "Front Window: spotlight off"))
         self.assertEqual([e["summary"] for e in events], ["Front Window: spotlight off"])
+
+
+class LocalBrowserGetsTheTokenTestCase(unittest.IsolatedAsyncioTestCase):
+    """A browser on this machine opening http://127.0.0.1:8765/dash is sent
+    to the tokened address the TV already uses, so both show the same Sim
+    box (the creator, 2026-09-14)."""
+
+    TOKEN = "local-browser-token-123"
+
+    async def _get(self, path: str, *, host: str | None = None) -> tuple[int, str]:
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0, token=self.TOKEN)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+
+        def _do():
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=10)
+            conn.putrequest("GET", path, skip_host=True)
+            conn.putheader("Host", host or f"127.0.0.1:{api.port}")
+            conn.endheaders()
+            resp = conn.getresponse()
+            resp.read()
+            conn.close()
+            return resp.status, resp.getheader("Location") or ""
+
+        return await asyncio.to_thread(_do)
+
+    async def test_a_local_browser_is_sent_to_the_tokened_dash(self):
+        status, location = await self._get("/dash")
+        self.assertEqual(status, 302)
+        self.assertEqual(location, f"/dash?token={self.TOKEN}")
+
+    async def test_other_query_words_survive_the_redirect(self):
+        status, location = await self._get("/dash?view=cameras")
+        self.assertEqual((status, location), (302, f"/dash?view=cameras&token={self.TOKEN}"))
+
+    async def test_localhost_by_name_counts_too(self):
+        self.assertEqual((await self._get("/dash", host="localhost:8765"))[0], 302)
+
+    async def test_a_page_that_already_has_the_token_is_served(self):
+        self.assertEqual(await self._get(f"/dash?token={self.TOKEN}"), (200, ""))
+
+    async def test_a_foreign_host_name_is_not_handed_the_token(self):
+        """A site that points its own name at 127.0.0.1 still sends its
+        own name as Host."""
+        self.assertEqual(await self._get("/dash", host="attacker.example:8765"), (200, ""))
