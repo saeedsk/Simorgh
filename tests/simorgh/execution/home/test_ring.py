@@ -238,6 +238,64 @@ class RingTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream.closed, [True])
         self.assertIsNone(stream.read_task)
 
+    async def test_an_ordinary_ping_timeout_close_never_reaches_the_loops_handler(self):
+        """Ring's own idle/abandoned-session timeout ("4000 Ping timeout")
+        is what an ordinary end-of-live-view looks like from inside
+        `ping_task`/`read_task`, not a bug -- it must not spam the TUI's
+        "a background error escaped" the way an unretrieved task
+        exception otherwise would (the creator's terminal, 2026-09-14)."""
+        import asyncio
+
+        from websockets.exceptions import ConnectionClosedError
+        from websockets.frames import Close
+
+        from simorgh.execution.home.ring import harden_webrtc_stream
+
+        class _Stream:
+            async def _close(self, *, closed_by_self):
+                pass
+
+        async def _times_out():
+            raise ConnectionClosedError(Close(4000, "Ping timeout, correlation ID: x"), None)
+
+        stream = _Stream()
+        stream.ping_task = asyncio.create_task(_times_out())
+        stream.read_task = asyncio.create_task(_times_out())
+        harden_webrtc_stream(stream)
+
+        handled = []
+        asyncio.get_running_loop().set_exception_handler(lambda loop, context: handled.append(context))
+        await asyncio.gather(stream.ping_task, stream.read_task, return_exceptions=True)
+        await asyncio.sleep(0)  # let the done-callbacks run
+        self.assertEqual(handled, [])
+
+    async def test_a_genuinely_unexpected_task_failure_still_reaches_the_loops_handler(self):
+        """The quieting is specific to an ordinary closed connection --
+        anything else Ring's library's background tasks might raise is
+        still worth knowing about, through the loop's usual error path."""
+        import asyncio
+
+        from simorgh.execution.home.ring import harden_webrtc_stream
+
+        class _Stream:
+            async def _close(self, *, closed_by_self):
+                pass
+
+        async def _breaks():
+            raise RuntimeError("something else broke")
+
+        stream = _Stream()
+        stream.ping_task = None
+        stream.read_task = asyncio.create_task(_breaks())
+        harden_webrtc_stream(stream)
+
+        handled = []
+        asyncio.get_running_loop().set_exception_handler(lambda loop, context: handled.append(context))
+        await asyncio.gather(stream.read_task, return_exceptions=True)
+        await asyncio.sleep(0)
+        self.assertEqual(len(handled), 1)
+        self.assertIsInstance(handled[0]["exception"], RuntimeError)
+
     async def test_list_writes_the_camera_file_the_dashboard_reads(self):
         tools, cloud, bus = self._tools()
         result = await tools["ring_list"].run({}, ctx=_ctx(bus, self.root))

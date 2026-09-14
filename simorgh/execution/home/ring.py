@@ -219,7 +219,20 @@ def harden_webrtc_stream(stream) -> None:
     task handles the close message and `_close()` awaits `read_task` --
     itself -- and the event loop reports "Task cannot await on itself"
     (the creator's terminal, 2026-09-13). The reader closing the stream
-    must not wait for the reader; everything else in `_close` stands."""
+    must not wait for the reader; everything else in `_close` stands.
+
+    Separately: `ping_task`/`read_task` are the library's own
+    fire-and-forget background tasks (`connect()` starts them with
+    `asyncio.create_task` and nothing ever awaits them). Ring's signalling
+    server eventually times out an idle or abandoned session and closes
+    with "4000 Ping timeout" -- ordinary, not a bug -- but because nobody
+    retrieves that exception, asyncio reports it as an unhandled "Task
+    exception was never retrieved" once the task is garbage collected,
+    which reached the TUI as a repeating "a background error escaped"
+    (the creator's terminal, 2026-09-14: live camera tiles rotate through
+    several of these a minute). Retrieving it here quietly for an
+    ordinary close, and still surfacing anything else through the loop's
+    own handler, is the fix."""
     original = getattr(stream, "_close", None)
     if original is None or getattr(stream, "_simorgh_hardened", False):
         return
@@ -231,6 +244,26 @@ def harden_webrtc_stream(stream) -> None:
 
     stream._close = _close  # noqa: SLF001 -- the library's own name, on this instance only
     stream._simorgh_hardened = True  # noqa: SLF001
+
+    def _quiet_expected_close(task: "asyncio.Task") -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()  # retrieves it either way -- the whole point
+        if exc is None:
+            return
+        from websockets.exceptions import ConnectionClosed
+
+        if isinstance(exc, ConnectionClosed):
+            return
+        loop = asyncio.get_event_loop()
+        loop.call_exception_handler({
+            "message": "ring webrtc background task ended unexpectedly", "exception": exc, "task": task,
+        })
+
+    for attr in ("ping_task", "read_task"):
+        task = getattr(stream, attr, None)
+        if isinstance(task, asyncio.Task):
+            task.add_done_callback(_quiet_expected_close)
 
 
 def _cap(dev, name: str) -> bool:
