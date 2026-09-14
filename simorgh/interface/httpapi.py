@@ -426,6 +426,41 @@ class HttpApi:
 
         self._run_for_page = _run_for_page
 
+        async def _cameras_main(_query, body, _headers):
+            # One camera opened full screen on the dashboard: its full-resolution relay (`start`), and back to the
+            # light sub streams when the page closes it (`stop`) -- the TV decodes only a couple of videos at once.
+            try:
+                asked = json.loads(body.decode("utf-8") or "{}")
+            except ValueError:
+                return 400, b'{"error": "body must be JSON"}', "application/json"
+            if not isinstance(asked, dict) or not str(asked.get("camera") or "").strip():
+                return 400, b'{"error": "camera is needed"}', "application/json"
+            action = str(asked.get("action") or "start").strip().lower()
+            if action not in ("start", "stop"):
+                return 400, b'{"error": "action is start or stop"}', "application/json"
+            camera = str(asked["camera"]).strip()[:80]
+            args = {"camera": camera, "mode": "dash" if action == "start" else "stop", "quality": "main"}
+            return await _run_for_page("cam_stream", args, 30.0)
+
+        async def _youtube_to_tv(_query, body, _headers):
+            # The dashboard's video, handed to the TV itself: cast_play full screen gives a YouTube page to the TV's
+            # own YouTube app when paired (the creator, 2026-09-14: the embedded player does not play on the TV).
+            try:
+                asked = json.loads(body.decode("utf-8") or "{}")
+            except ValueError:
+                return 400, b'{"error": "body must be JSON"}', "application/json"
+            video = str(asked.get("video") or "").strip() if isinstance(asked, dict) else ""
+            if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video):
+                return 400, b'{"error": "video is a YouTube video id"}', "application/json"
+            args = {"url": f"https://www.youtube.com/watch?v={video}", "mode": "full"}
+            title = str(asked.get("title") or "").strip()[:120]
+            if title:
+                args["title"] = title
+            return await _run_for_page("cast_play", args, 60.0)
+
+        self.register_route("POST", "/api/dash/cameras/main", _cameras_main, max_body=1024, rate=(30, 60.0))
+        self.register_route("POST", "/api/dash/youtube", _youtube_to_tv, max_body=1024, rate=(20, 60.0))
+
         async def _streams(_query, _body, _headers):
             # The strip's own poll: what is live, and the stills -- small
             # enough to ask every ten seconds, unlike the whole snapshot.

@@ -1475,3 +1475,48 @@ class DashKeyRelayTestCase(unittest.IsolatedAsyncioTestCase):
             api._push_dash_key("right")  # noqa: SLF001
         _, body = await asyncio.to_thread(self._g, api, "/api/dash/keys?after=0")
         self.assertEqual((len(body["keys"]), body["keys"][0]["seq"], body["seq"]), (32, 9, 40))
+
+
+class DashFullScreenRoutesTestCase(unittest.IsolatedAsyncioTestCase):
+    """A camera opened full screen asks for its main stream; a video opened
+    full screen goes to the TV's own YouTube app (2026-09-14)."""
+
+    def _p(self, api, path, body):
+        c = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+        c.request("POST", path, body=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        r = c.getresponse(); b = r.read(); c.close()
+        return r.status, b
+
+    async def test_both_routes_need_the_token_and_run_their_tool(self):
+        from simorgh.interface import dispatch as dispatch_mod
+        calls = []
+
+        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout, action_id=None):
+            calls.append((tool, json.loads(raw)))
+            return dispatch_mod.Outcome("ok")
+        original = dispatch_mod._run_tool
+        dispatch_mod._run_tool = _fake_run_tool
+        try:
+            api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
+            await api.start(); self.addAsyncCleanup(api.stop)
+            self.assertEqual((await asyncio.to_thread(self._p, api, "/api/dash/cameras/main", {"camera": "Office"}))[0], 401)
+            self.assertEqual((await asyncio.to_thread(self._p, api, "/api/dash/youtube", {"video": "Ph-wjyyq1nA"}))[0], 401)
+            st, _ = await asyncio.to_thread(self._p, api, "/api/dash/cameras/main?token=secret", {"camera": "Office"})
+            self.assertEqual(st, 200)
+            st, _ = await asyncio.to_thread(self._p, api, "/api/dash/cameras/main?token=secret",
+                                            {"camera": "Office", "action": "stop"})
+            self.assertEqual(st, 200)
+            self.assertEqual((await asyncio.to_thread(self._p, api, "/api/dash/cameras/main?token=secret",
+                                                      {"camera": "Office", "action": "zoom"}))[0], 400)
+            st, _ = await asyncio.to_thread(self._p, api, "/api/dash/youtube?token=secret",
+                                            {"video": "Ph-wjyyq1nA", "title": "A song"})
+            self.assertEqual(st, 200)
+            self.assertEqual((await asyncio.to_thread(self._p, api, "/api/dash/youtube?token=secret",
+                                                      {"video": "https://evil"}))[0], 400)
+        finally:
+            dispatch_mod._run_tool = original
+        self.assertEqual(calls, [
+            ("cam_stream", {"camera": "Office", "mode": "dash", "quality": "main"}),
+            ("cam_stream", {"camera": "Office", "mode": "stop", "quality": "main"}),
+            ("cast_play", {"url": "https://www.youtube.com/watch?v=Ph-wjyyq1nA", "mode": "full", "title": "A song"}),
+        ])

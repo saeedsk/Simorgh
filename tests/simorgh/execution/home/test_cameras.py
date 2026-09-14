@@ -187,6 +187,28 @@ class CamerasTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bus.published[-1].payload["mode"], "none")
         self.assertEqual(self.tools["cam_stream"]._prefs.streams, {})  # noqa: SLF001
 
+    async def test_a_main_stream_relays_beside_the_sub_streams_and_stops_alone(self):
+        """A camera opened full screen on the dashboard gets its full-resolution
+        stream; the strip's sub streams keep running (2026-09-14)."""
+        stream = self.tools["cam_stream"]
+        asked = []
+        real = self.nvr.stream_url
+
+        async def _spy(ch, stream_kind="sub"):
+            asked.append((ch, stream_kind))
+            return await real(ch, stream_kind)
+        self.nvr.stream_url = _spy
+        self.assertTrue((await stream.run({"camera": "all", "mode": "dash"}, ctx=self.ctx)).ok)
+        main = await stream.run({"camera": "office", "mode": "dash", "quality": "main"}, ctx=self.ctx)
+        self.assertTrue(main.ok, main.error)
+        self.assertEqual(main.metadata["urls"], ["http://10.0.0.5:8765/tv/hls/7-main/index.m3u8"])
+        self.assertIn((7, "main"), asked)
+        self.assertTrue((self.root / "workspace/cameras/hls/7-main/index.m3u8").exists())
+        self.assertEqual(set(stream._prefs.streams), {1, 7, "7-main"}, "the sub streams keep running")  # noqa: SLF001
+        stopped = await stream.run({"camera": "office", "mode": "stop", "quality": "main"}, ctx=self.ctx)
+        self.assertTrue(stopped.ok, stopped.error)
+        self.assertEqual(set(stream._prefs.streams), {1, 7}, "only the main relay ended")  # noqa: SLF001
+
     async def test_watch_subscribes_with_the_token_and_relays_events(self):
         on = await self.tools["cam_watch"].run({"on": True}, ctx=self.ctx)
         self.assertTrue(on.ok, on.error)

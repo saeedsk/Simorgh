@@ -425,10 +425,13 @@ class CamStreamTool(_CameraTool):
     description = ("Live video on the TV. `camera` is one camera, several separated by commas, or `all`; `mode` "
                    "frame (one camera inside Sim's page), grid (the cameras tiled across the TV), full (one camera "
                    "full screen), dash (live in the dashboard's camera strip, the TV's page untouched), or stop. "
-                   "Uses ffmpeg to relay each camera's stream as HLS.")
+                   "Uses ffmpeg to relay each camera's stream as HLS. `quality` main relays the camera's full-"
+                   "resolution stream beside the light sub stream (the dashboard's full-screen camera); with mode "
+                   "stop it ends only those main relays.")
     args_schema = {"type": "object", "required": ["camera"],
                    "properties": {"camera": {"type": "string"},
-                                  "mode": {"type": "string", "enum": ["frame", "grid", "full", "dash", "stop"]}}}
+                                  "mode": {"type": "string", "enum": ["frame", "grid", "full", "dash", "stop"]},
+                                  "quality": {"type": "string", "enum": ["sub", "main"]}}}
 
     def _binary(self) -> str:
         return self._ffmpeg or shutil.which("ffmpeg") or ""
@@ -440,6 +443,23 @@ class CamStreamTool(_CameraTool):
             mode, words = words[-1].lower(), words[:-1]
         mode = {"tiled": "grid", "tile": "grid", "dashboard": "dash", "background": "dash"}.get(mode, mode) or "frame"
         wanted = " ".join(words)
+        # The full-resolution stream (the creator, 2026-09-14: a camera opened full screen on the dashboard was the
+        # low-res sub stream). It relays beside the sub stream, in `hls/<channel>-main/`, which the strip ignores.
+        quality = "main" if str(args.get("quality") or "").strip().lower() in ("main", "high", "full", "hd") else "sub"
+        if mode == "stop" and quality == "main":
+            if wanted.strip().lower() in ("", "all", "every", "everything", "*"):
+                keys = [k for k in self._prefs.streams if str(k).endswith("-main")]
+            else:
+                try:
+                    picked = await self._pick(self._nvr(), wanted)
+                except Exception as exc:  # noqa: BLE001
+                    return ToolResult(ok=False, error=f"refused: {exc}")
+                if isinstance(picked, str):
+                    return ToolResult(ok=False, error=picked)
+                keys = [f"{c.channel}-main" for c in picked]
+            stopped = sum(self._stop(k) for k in keys)
+            return ToolResult(ok=True, output=f"stopped {stopped} full-resolution stream(s)",
+                              side_effects=("cam_stream:stop-main",))
         if mode == "stop":
             stopped = self._stop(None)
             await self._publish(ctx, topics.TV_STATE, {"mode": "none"})
@@ -458,15 +478,15 @@ class CamStreamTool(_CameraTool):
             mode = "grid"
         if len(cameras) > 1 and mode == "full":
             return ToolResult(ok=False, error="refused: full screen takes one camera; use grid for several")
-        if mode not in ("grid", "dash"):
+        if mode not in ("grid", "dash") and quality == "sub":
             self._stop(None)
         root = Path(getattr(ctx, "root", None) or getattr(ctx, "data_dir", ".") or ".")
         started: list[tuple[Camera, str]] = []
         failures: list[str] = []
 
         async def _one(cam: Camera):
-            rtsp = await nvr.stream_url(cam.channel, "sub")
-            return cam, await self._relay(binary, root, cam, rtsp)
+            rtsp = await nvr.stream_url(cam.channel, quality)
+            return cam, await self._relay(binary, root, cam, rtsp, quality)
 
         # All at once: each relay waits up to 12 s for its first playlist,
         # and seven of them in a row left the dashboard's strip half grey
@@ -515,9 +535,10 @@ class CamStreamTool(_CameraTool):
                 out.append(cam)
         return out or "refused: say which camera; cam_list names them"
 
-    async def _relay(self, binary: str, root: Path, cam: Camera, rtsp: str) -> str:
-        folder = root / HLS_DIR / str(cam.channel)
-        self._stop(cam.channel)
+    async def _relay(self, binary: str, root: Path, cam: Camera, rtsp: str, quality: str = "sub") -> str:
+        key = cam.channel if quality == "sub" else f"{cam.channel}-main"
+        folder = root / HLS_DIR / str(key)
+        self._stop(key)
         shutil.rmtree(folder, ignore_errors=True)
         folder.mkdir(parents=True, exist_ok=True)
         # The folder is named by channel; the dashboard wants the name.
@@ -527,7 +548,7 @@ class CamStreamTool(_CameraTool):
                "-c:v", "copy", "-c:a", "aac", "-ac", "1", "-f", "hls", "-hls_time", "2", "-hls_list_size", "6",
                "-hls_flags", "delete_segments+omit_endlist", "-y", str(folder / "index.m3u8")]
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        self._prefs.streams[cam.channel] = proc
+        self._prefs.streams[key] = proc
         deadline = time.monotonic() + 12.0
         while time.monotonic() < deadline and not (folder / "index.m3u8").exists():
             if proc.poll() is not None:
@@ -535,9 +556,9 @@ class CamStreamTool(_CameraTool):
                 raise RuntimeError(f"ffmpeg could not open the stream ({err or 'no detail'})")
             await asyncio.sleep(0.25)
         if not (folder / "index.m3u8").exists():
-            self._stop(cam.channel)
+            self._stop(key)
             raise RuntimeError("the stream did not start within 12 s")
-        return f"{self._page_base()}/tv/hls/{cam.channel}/index.m3u8"
+        return f"{self._page_base()}/tv/hls/{key}/index.m3u8"
 
     def _stop(self, which) -> int:
         count = 0
