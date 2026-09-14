@@ -371,8 +371,11 @@ async function pollStreams(){ // the strip's own poll: what is live now, every t
   try{const r=await (await fetch(q("/api/dash/streams"))).json();if(!DATA)return;DATA.streams=r.streams||[];DATA.cameras=r.cameras||[];DATA.ring_cameras=r.ring_cameras||[];refreshStrip();
     if(CUR==="cameras")render();}catch(e){}}
 function watchPlayers(){ // a live tile that has shown no frame for a while gets its player rebuilt
-  document.querySelectorAll(".ctile video").forEach(v=>{if(v.readyState>=2){v._stuck=0;return;}v._stuck=(v._stuck||0)+1;
-    if(v._stuck>=3){v._stuck=0;if(v.closest("#camstrip")){CAMKEY="";refreshStrip();}else{CAMVIEWKEY="";if(CUR==="cameras")render();}}});}
+  document.querySelectorAll(".ctile video").forEach(v=>{if(v.readyState>=2&&v.videoWidth){v._stuck=0;return;}v._stuck=(v._stuck||0)+1;
+    if(v._stuck>=3){v._stuck=0;const tile=v.closest(".ctile");const tag=tile&&tile.querySelector(".tag");
+      if(v.srcObject){if(tag)tag.textContent="ring · connected, no picture";return;}   // a Ring camera answering with nothing (dark, asleep): say so, do not restart everything
+      const inStrip=!!(tile&&tile.closest("#camstrip"));const root=inStrip?$("#camstrip"):$("#camgrid");const set=inStrip?PLAYERS.strip:PLAYERS.grid;const i=tile?Number(tile.dataset.i):-1;
+      if(root&&i>=0){const t=stripTiles()[i];if(t&&(t.live||t.rtc)){unmountTile(root,i,set);mountTile(root,t,i,set);}}}});}
 async function ensureCamerasLive(){ // no Reolink relay is live: ask Sim to start them (cam_stream mode dash, through Guardian)
   if(Date.now()-LIVE_ASKED<90*1000)return;LIVE_ASKED=Date.now();
   try{const r=await fetch(q("/api/dash/cameras/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
@@ -432,7 +435,10 @@ function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live)
   capable.forEach((t,i)=>{const play=on.has(i);t.live=play&&t.can==="hls";t.rtc=play&&t.can==="rtc";
     if(!play){const f=FRAMES[t.name];if(f){t.img=f.url;t.at=f.at;t.frame=true;}}});
   return tiles;}
-function refreshStrip(){const el=$("#camstrip");if(!el||OFFLINE)return;const tiles=stripTiles().slice(0,10);
+function refreshStrip(){const el=$("#camstrip");if(!el||OFFLINE)return;
+  if(CUR==="cameras"){if(el.style.display!=="none"){el.style.display="none";closeLive("strip");CAMKEY="";el.innerHTML="";}return;}
+  if(el.style.display==="none")el.style.display="";
+  const tiles=stripTiles().slice(0,10);
   if(DATA&&!(DATA.streams||[]).some(s=>s.live)&&!DATA.off)ensureCamerasLive();
   const key=tiles.map(t=>t.key).join("|");   // the layout: which tiles, in what order -- never which are live
   if(key===CAMKEY&&el.querySelector(".ctile")){syncLive(el,tiles,"strip");return;}
@@ -454,14 +460,15 @@ function refreshDeck(force){
 }
 function viewDeck(){return deckSkeleton();}
 let CAMVIEWKEY="";
+// The Cameras view (the creator, 2026-09-14): no strip above, no events panel beside -- the whole stage, tiled so
+// every camera gets the largest equal 16:9 tile that fits.
+function bestGrid(n,W,H){let best=[1,n,0];for(let c=1;c<=n;c++){const r=Math.ceil(n/c);const w=W/c,h=H/r;const fit=Math.min(w,h*16/9);if(fit>best[2])best=[c,r,fit];}return best;}
 function viewCameras(){
-  const tiles=stripTiles();const n=Math.max(tiles.length,1);const cols=n<=1?1:n<=2?2:n<=4?3:4;
-  const grid=tiles.length?tiles.map((t,i)=>tileHTML(t,i).replace('class="ctile"','class="ctile" style="max-width:none;"')).join(""):'<div class="glass card faint" style="display:flex;align-items:center;justify-content:center;">no cameras have sent a still yet — `cameras show all dash` (Reolink) or `ring list` (Ring)</div>';
-  const events=(DATA&&DATA.events)||[];
-  const feedCol='<div class="glass card col" style="flex:1;">'+head("Events",events.length?"latest":"")+'<div class="fill">'+(events.length?events.slice(0,14).map(e=>'<div class="rowitem"><span class="'+(e.kind==="person"||e.kind==="ding"?"red":"gold")+'" style="flex:none;">•</span><div class="t">'+esc(e.camera)+' · '+esc(e.kind)+'</div><span class="m">'+ago(e.at)+'</span></div>').join(""):empty("no camera events yet — Ring events and the NVR's pushes land here"))+'</div>'
-    +'<div style="border-top:1px solid var(--stroke2);padding-top:8px;margin-top:6px;">'+weatherNow()+'</div></div>';
+  const tiles=stripTiles();const n=Math.max(tiles.length,1);const st=$("#stage");const W=st?st.clientWidth||1600:1600,H=st?st.clientHeight||880:880;
+  const [cols,rows]=bestGrid(n,W-12,H-12);
+  const grid=tiles.length?tiles.map((t,i)=>tileHTML(t,i).replace('class="ctile"','class="ctile" style="max-width:none;"')).join(""):'<div class="glass card faint" style="display:flex;align-items:center;justify-content:center;grid-column:1/-1;">no cameras have sent a still yet — `cameras show all dash` (Reolink) or `ring list` (Ring)</div>';
   setTimeout(()=>{const root=$("#camgrid");if(root){closeLive("grid");mountLive(root,tiles,"grid");}},30);
-  return '<div style="display:flex;gap:12px;height:100%;"><div id="camgrid" class="grid" style="flex:3;grid-template-columns:repeat('+cols+',1fr);grid-auto-rows:1fr;grid-auto-flow:dense;">'+grid+'</div>'+feedCol+'</div>';
+  return '<div id="camgrid" class="grid" style="height:100%;grid-template-columns:repeat('+cols+',1fr);grid-template-rows:repeat('+rows+',1fr);gap:8px;">'+grid+'</div>';
 }
 window.selTF=t=>{TF=t;render();};window.pinStock=s=>{PIN=PIN===s?"":s;render();};
 function majorCard(s){
