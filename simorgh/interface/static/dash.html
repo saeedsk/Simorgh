@@ -531,23 +531,78 @@ function viewMarkets(){
 // Charts (the creator, 2026-09-13): K-pop and US pop, separate columns, the chart's videos auto-playing. On the
 // TV the playing is Sim's (tv_charts: the TV's own YouTube app when paired, else the files one after another, full
 // screen); the page marks what is on. In a browser the top video plays here, muted, as browsers allow.
-function chartRail(ch,key){const on=ytId(TV.url||"");const label=ch?esc(ch.label):(key==="kpop"?"K-pop":"US pop");
+function chartRail(ch,key){const on=ytId(TV.url||"")||CHARTS_PLAYING;const label=ch?esc(ch.label):(key==="kpop"?"K-pop":"US pop");
   return '<div style="flex:1;min-height:0;display:flex;flex-direction:column;"><div class="hd" style="margin:0 0 4px;">'+label+'</div>'+((ch&&ch.songs||[]).length?'<div style="flex:1;min-height:0;overflow:hidden;">'+ch.songs.slice(0,10).map(s=>'<div class="rowitem" style="align-items:center;padding:3px 2px;gap:6px;border-bottom:none;'+(on&&s.video===on?"background:rgba(240,189,131,.18);border-radius:6px;":"")+'"><span class="gold" style="width:14px;font-size:10.5px;">'+(on&&s.video===on?"▶":s.rank)+'</span><div class="art" style="background-image:url(\''+esc(s.thumb||s.art)+'\');width:40px;height:23px;border-radius:4px;"></div><div style="min-width:0;flex:1;"><div style="font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.name)+'</div><div class="faint" style="font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.artist)+'</div></div></div>').join("")+'</div>':empty("waiting…"))+'</div>';}
-// The big frame. YouTube's player picks its resolution from the frame it is given: full size here, never the
-// "light" half-size trick the Home view uses beside the camera feeds, and vq=hd2160 asks for 4K where the video has
-// it. Browsers allow autoplay only muted; one tap on the frame turns the sound on. On the TV's Cast receiver no
-// in-page video draws at all, so there the chart plays in the TV's own YouTube app (Sim starts it when this view
-// is chosen) and the frame shows what is on.
-function chartsFrame(id){const muted=!soundAllowed();return '<iframe id="chartsyt" src="https://www.youtube.com/embed/'+id+'?autoplay=1&mute='+(muted?1:0)+'&controls=1&rel=0&iv_load_policy=3&modestbranding=1&playsinline=1&vq=hd2160&loop=1&playlist='+id+'&enablejsapi=1" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>'
-  +(muted&&SOUND?'<div id="unmute" style="position:absolute;right:14px;top:12px;padding:8px 12px;border-radius:12px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);font-size:12px;">🔇 tap anywhere for sound</div>':'');}
-function viewCharts(){const ch=(DATA&&DATA.charts)||{};const kp=ch.kpop,us=ch.uspop;const all=[].concat(kp&&kp.songs||[],us&&us.songs||[]);
-  const top=(kp&&kp.songs||[]).find(s=>s.video)||(us&&us.songs||[]).find(s=>s.video);const m=TV.mode||"none";const id=ytId(TV.url||"");let player;
-  if((m==="full"||m==="frame")&&id){const playing=all.find(s=>s.video===id);
-    player=stillHTML(id,esc(playing?playing.name+" — "+playing.artist:(TV.title||"")),TV.native?"playing in the TV's "+esc(TV.native)+" app, full screen":(TV.fetching?"fetching the video for the TV…":"playing on the TV"),"now playing");}
-  else if(CAST_RECEIVER)player=top?stillHTML(top.video,esc(top.name+" — "+top.artist),"starting in the TV's YouTube app… (or say “Sim, play the K-pop chart”)","charts"):thumb("<b>Charts</b>","charts");
-  else player=top?chartsFrame(top.video):thumb("<b>Charts</b><br><span class=\"faint\">waiting for the chart…</span>","charts");
-  return '<div style="display:flex;gap:10px;height:100%;"><div class="glass" style="flex:1;min-width:0;padding:0;overflow:hidden;position:relative;background:#000;">'+player+'</div>'
-    +'<div class="glass card col" style="flex:none;width:218px;min-width:0;padding:10px 10px;gap:8px;">'+chartRail(kp,"kpop")+'<div style="height:1px;background:var(--stroke2);"></div>'+chartRail(us,"uspop")+'</div></div>';}
+// The big frame, in a browser: a real YouTube player (the iframe API, not a bare <iframe>), so a video that
+// fails -- removed, private, region-blocked, the "video is not available" placard the creator saw, 2026-09-14 --
+// or simply ends is caught and the chart moves on to the next song by itself, the way it already promised to.
+// Rebuilding a bare iframe on every ~4 s dashboard-state poll never gave a video the chance to start in the first
+// place; now the player is mounted once and only ever told to load a different id in place. On the TV's Cast
+// receiver no in-page video draws at all, so there the chart plays in the TV's own YouTube app instead (Sim
+// starts it when this view is chosen) and the frame only shows what is on.
+let CHARTS_PLAYING="",CHARTS_KEY="",CHARTS_PLAYER=null;const CHARTS_BAD=new Set();
+function chartQueue(){ // every song either chart has a video for, K-pop first then US pop, in chart order
+  const ch=(DATA&&DATA.charts)||{};const list=[];
+  [["kpop",ch.kpop],["uspop",ch.uspop]].forEach(([key,c])=>(c&&c.songs||[]).forEach(s=>{if(s.video)list.push({video:s.video,name:s.name,artist:s.artist,chart:key});}));
+  return list;}
+function chartsNextAfter(video){ // the next entry after `video` in queue order, wrapping, skipping known-bad ones
+  const all=chartQueue();if(!all.length)return null;
+  const usable=all.filter(e=>!CHARTS_BAD.has(e.video));if(!usable.length)return null;
+  const i=all.findIndex(e=>e.video===video);
+  for(let k=1;k<=all.length;k++){const cand=all[(i+k+all.length)%all.length];if(cand&&!CHARTS_BAD.has(cand.video))return cand;}
+  return usable[0];}
+function chartsAdvance(reason){ // the current video failed or ended: move to the next one that might actually play
+  if(reason==="error"&&CHARTS_PLAYING)CHARTS_BAD.add(CHARTS_PLAYING);
+  const nxt=chartsNextAfter(CHARTS_PLAYING);
+  if(!nxt){CHARTS_PLAYING="";render();return;}   // nothing left to try: fall back to the waiting placeholder
+  CHARTS_PLAYING=nxt.video;
+  if(CHARTS_PLAYER&&CHARTS_PLAYER.loadVideoById){try{CHARTS_PLAYER.loadVideoById(nxt.video);CHARTS_KEY="yt:"+nxt.video+":"+(soundAllowed()?"s":"m");setChartsCaption(nxt);return;}catch(e){}}
+  render();}
+function setChartsCaption(entry){const box=$("#charts-player");if(!box)return;let cap=box.querySelector(".capwrap");
+  const html=npOverlay(esc(entry?(entry.name+" — "+entry.artist):""),"","now playing");
+  if(cap)cap.outerHTML=html;else box.insertAdjacentHTML("beforeend",html);}
+function loadYT(cb){
+  if(window.YT&&window.YT.Player){cb();return;}
+  (window.__ytcb=window.__ytcb||[]).push(cb);
+  if(window.__ytloading)return;window.__ytloading=true;
+  window.onYouTubeIframeAPIReady=function(){(window.__ytcb||[]).forEach(f=>f());window.__ytcb=[];};
+  const s=document.createElement("script");s.src="https://www.youtube.com/iframe_api";document.head.appendChild(s);}
+function mountChartsYT(id){
+  loadYT(()=>{
+    const root=$("#charts-player");if(!root)return;   // the view changed while the API script was loading
+    if(CHARTS_PLAYER){try{CHARTS_PLAYER.destroy();}catch(e){}CHARTS_PLAYER=null;}
+    root.innerHTML='<div id="chartsyt" style="position:absolute;inset:0;"></div>';
+    setChartsCaption(chartQueue().find(e=>e.video===id));
+    try{
+      CHARTS_PLAYER=new YT.Player("chartsyt",{width:"100%",height:"100%",videoId:id,
+        playerVars:{autoplay:1,controls:1,rel:0,iv_load_policy:3,modestbranding:1,playsinline:1,vq:"hd2160",
+                    mute:soundAllowed()?0:1,origin:location.origin},
+        events:{onReady:e=>{if(soundAllowed())e.target.unMute();},
+                onStateChange:e=>{if(e.data===0)chartsAdvance("ended");},
+                onError:()=>chartsAdvance("error")}});
+    }catch(e){root.innerHTML=thumb("<b>Charts</b>","charts");}
+  });}
+function refreshCharts(force){
+  if(!$("#chartsroot")){$("#stage").innerHTML=chartsSkeleton();force=true;CHARTS_KEY="";}
+  const ch=(DATA&&DATA.charts)||{};const kp=ch.kpop,us=ch.uspop;
+  const railEl=$("#charts-rail");if(railEl)railEl.innerHTML=chartRail(kp,"kpop")+'<div style="height:1px;background:var(--stroke2);"></div>'+chartRail(us,"uspop");
+  const m=TV.mode||"none";const tvId=ytId(TV.url||"");const q=chartQueue();
+  let key;
+  if((m==="full"||m==="frame")&&tvId)key="tv:"+m+":"+tvId+":"+(TV.native||"")+":"+(TV.problem||"")+(TV.fetching?"f":"");
+  else if(CAST_RECEIVER)key="cast:"+(q[0]?q[0].video:"");
+  else{if(!CHARTS_PLAYING||CHARTS_BAD.has(CHARTS_PLAYING)||!q.find(e=>e.video===CHARTS_PLAYING))CHARTS_PLAYING=(q.find(e=>!CHARTS_BAD.has(e.video))||{}).video||"";
+    key="yt:"+CHARTS_PLAYING+":"+(soundAllowed()?"s":"m");}
+  if(!force&&key===CHARTS_KEY)return;
+  CHARTS_KEY=key;const root=$("#charts-player");if(!root)return;
+  if((m==="full"||m==="frame")&&tvId){const playing=q.find(e=>e.video===tvId);
+    root.innerHTML=stillHTML(tvId,esc(playing?playing.name+" — "+playing.artist:(TV.title||"")),TV.native?"playing in the TV's "+esc(TV.native)+" app, full screen":(TV.fetching?"fetching the video for the TV…":"playing on the TV"),"now playing");}
+  else if(CAST_RECEIVER){const t=q[0];root.innerHTML=t?stillHTML(t.video,esc(t.name+" — "+t.artist),"starting in the TV's YouTube app… (or say “Sim, play the K-pop chart”)","charts"):thumb("<b>Charts</b>","charts");}
+  else if(CHARTS_PLAYING)mountChartsYT(CHARTS_PLAYING);
+  else root.innerHTML=thumb("<b>Charts</b><br><span class=\"faint\">waiting for the chart…</span>","charts");}
+function chartsSkeleton(){return '<div id="chartsroot" style="display:flex;gap:10px;height:100%;min-height:0;">'
+  +'<div class="glass" id="charts-player" style="flex:1;min-width:0;padding:0;overflow:hidden;position:relative;background:#000;"></div>'
+  +'<div class="glass card col" id="charts-rail" style="flex:none;width:218px;min-width:0;padding:10px 10px;gap:8px;"></div></div>';}
+function viewCharts(){return chartsSkeleton();}   // render() always calls refreshCharts() first; this is only go()'s validity check
 function viewAmbient(){
   const w=DATA&&DATA.weather,qt=DATA&&DATA.quote,h=merged("bloomberg_markets","bbc_world")[0];
   const box=(inner,w)=>'<div class="glass" style="padding:14px 20px;text-align:center;'+(w?'min-width:'+w+'px;':'')+'">'+inner+'</div>';
@@ -563,7 +618,7 @@ function viewAmbient(){
     +(qt&&qt.text?'<div class="dim" style="font-size:15px;margin-top:14px;max-width:80vw;text-align:center;">“'+esc(qt.text)+'” <span class="faint">— '+esc(qt.author)+'</span></div>':'')
     +(h?'<div class="faint" style="font-size:12.5px;margin-top:6px;max-width:80vw;text-align:center;"><span class="amber">'+esc(h.source)+'</span> '+esc(h.title)+'</div>':'')+'</div>';
 }
-const RENDER={charts:viewCharts,deck:viewDeck,cameras:viewCameras,markets:viewMarkets,ambient:viewAmbient};
+const RENDER={charts:viewCharts,deck:viewDeck,cameras:viewCameras,markets:viewMarkets,ambient:viewAmbient};   // RENDER.charts is only go()'s validity check; render() intercepts CUR==="charts" above and never reaches it
 const VIEW_ALIAS={news:"deck",discover:"deck",terminal:"deck",home:"deck",media:"deck"};
 
 // ---- app ----
