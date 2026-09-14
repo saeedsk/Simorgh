@@ -11,7 +11,7 @@ from simorgh.contracts.protocols import Health
 from simorgh.kernel.config import ConfigError, LoadedConfig
 from simorgh.kernel.secrets import EnvSecretStore
 from simorgh.kernel.service import Kernel, KernelBootError, WorkerKernel
-from simorgh.kernel.state import PAUSED, RUNNING, STOPPED
+from simorgh.kernel.state import PAUSED, RUNNING, STOPPED, STOPPING
 from tests.simorgh.helpers import FakeClock
 
 
@@ -181,6 +181,26 @@ class TestPauseResumeStop(unittest.IsolatedAsyncioTestCase):
             payload={"reason": "shutdown", "requested_by": "interface"}, priority=9,
         ))
         await asyncio.wait_for(self.kernel.wait_for_stop(), timeout=1.0)
+
+    async def test_stop_message_leaves_restart_requested_false(self):
+        await self.kernel.bus.publish(Message.new(
+            topics.SYSTEM_STOP, source="interface",
+            payload={"reason": "shutdown", "requested_by": "interface"}, priority=9,
+        ))
+        await asyncio.wait_for(self.kernel.wait_for_stop(), timeout=1.0)
+        self.assertFalse(self.kernel.restart_requested)
+
+    async def test_restart_message_sets_the_stop_event_and_the_restart_flag(self):
+        # `kernel/cli.py::_cmd_run` reads `restart_requested` after this
+        # same event fires to choose the process exit code -- see its own
+        # `restart_requested` docstring and `RESTART_EXIT_CODE`.
+        await self.kernel.bus.publish(Message.new(
+            topics.SYSTEM_RESTART, source="interface",
+            payload={"reason": "user requested restart", "self_check_passed": True}, priority=9,
+        ))
+        await asyncio.wait_for(self.kernel.wait_for_stop(), timeout=1.0)
+        self.assertTrue(self.kernel.restart_requested)
+        self.assertEqual(self.kernel.state.state, STOPPING)
 
 
 class TestCriticalDown(unittest.IsolatedAsyncioTestCase):

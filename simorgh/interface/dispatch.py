@@ -183,6 +183,21 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         }, priority=9))
         return Outcome("stopping...", exit_repl=True)
 
+    if name == "restart":
+        # Not a stop for good: `kernel/cli.py::_cmd_run` exits with a
+        # distinguished code that `simloader.py` treats as "re-gate the
+        # checkout and hand off to Sim again" -- so a fix landed on disk
+        # while Sim was running is what comes back up, the same way a
+        # fresh `./sim.sh` would gate it (the creator, 2026-09-14: "I can
+        # run 'restart' command from sim tui, and sim restarts in a way
+        # that it uses the new source code from local dir").
+        # `self_check_passed=True` because that gate -- not this command
+        # -- is what actually verifies the new source before it runs.
+        await bus.publish(bus.new(topics.SYSTEM_RESTART, {
+            "reason": args or "user requested restart", "self_check_passed": True,
+        }, priority=9))
+        return Outcome("restarting -- Sim will come back up on the current source...", exit_repl=True)
+
     if name == "pause":
         await bus.publish(bus.new(topics.SYSTEM_PAUSE, {
             "reason": args or "user requested", "requested_by": f"cli:{session_id}", "scope": "all",

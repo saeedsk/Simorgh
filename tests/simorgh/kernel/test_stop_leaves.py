@@ -95,6 +95,69 @@ class _Slow:
         return Health.ok()
 
 
+class _StubKernel:
+    """Stands in for a booted `Kernel` in `_cmd_run` tests -- only the
+    surface `_cmd_run` actually touches, so the restart/stop exit-code
+    branch is testable without a real boot (bus, ledger, subsystems)."""
+
+    def __init__(self, *, restart_requested: bool) -> None:
+        self.restart_requested = restart_requested
+        self.bus = _Bus()
+        self.runtime = mock.MagicMock(stop_grace_s=0.01)
+
+    async def boot(self) -> None:
+        pass
+
+    async def wait_for_stop(self) -> None:
+        return
+
+    async def shutdown(self) -> None:
+        pass
+
+
+class _ProcessLeft(BaseException):
+    """What `os._exit` really does to the caller: nothing after it runs.
+    Raising here (rather than a mock that just returns) is the faithful
+    stand-in -- a plain no-op mock would also execute whatever
+    unreachable-in-production code follows the exit call, as this
+    function has more than one of (the same `_HARD_EXIT`-never-returns
+    idiom as the `asyncio.TimeoutError` branch just above it)."""
+
+
+class TestCmdRunExitCode(unittest.IsolatedAsyncioTestCase):
+    """`kernel/cli.py::_cmd_run` exits with `RESTART_EXIT_CODE` -- not
+    0 -- when the stop it waited on was a `restart` (`system.restart`,
+    `Kernel.restart_requested`), so `simloader.py`'s `cmd_run` can tell
+    "come back up on the current source" apart from "done for good" and
+    loop instead of returning to `sim.sh` (the creator, 2026-09-14: "I
+    can run 'restart' command from sim tui, and sim restarts...")."""
+
+    async def _run_with(self, *, restart_requested: bool) -> list[int]:
+        exits: list[int] = []
+
+        def _exit(code: int) -> None:
+            exits.append(code)
+            raise _ProcessLeft()
+
+        stub = _StubKernel(restart_requested=restart_requested)
+        with mock.patch.object(cli, "_HARD_EXIT", _exit), \
+             mock.patch.object(cli, "_terminate_children"), \
+             mock.patch.object(cli, "load_config", return_value=mock.MagicMock()), \
+             mock.patch.object(cli, "Kernel", return_value=stub), \
+             mock.patch("sys.stdin", None):
+            with self.assertRaises(_ProcessLeft):
+                await cli._cmd_run(None)
+        return exits
+
+    async def test_a_restart_exits_with_the_restart_code(self) -> None:
+        exits = await self._run_with(restart_requested=True)
+        self.assertEqual(exits, [cli.RESTART_EXIT_CODE])
+
+    async def test_a_plain_stop_exits_zero(self) -> None:
+        exits = await self._run_with(restart_requested=False)
+        self.assertEqual(exits, [0])
+
+
 class TestStopAllBudget(unittest.IsolatedAsyncioTestCase):
     async def test_the_grace_is_shared_across_layers_not_per_layer(self) -> None:
         sup = Supervisor(clock=mock.MagicMock(), logger=mock.MagicMock(), backoff_s=(0.1,),

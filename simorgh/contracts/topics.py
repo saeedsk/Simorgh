@@ -296,7 +296,7 @@ PUBLISH_PAYLOAD_CONSTRAINTS: dict[tuple[str, str], dict[str, frozenset[str]]] = 
     (ACTION_DENIED, "execution"): {"layer": frozenset({"token"})},
 }
 PREEMPT_PRIORITY = 9
-PREEMPTING_TYPES: frozenset[str] = frozenset({SYSTEM_PAUSE, SYSTEM_STOP, SYSTEM_RESUME})
+PREEMPTING_TYPES: frozenset[str] = frozenset({SYSTEM_PAUSE, SYSTEM_STOP, SYSTEM_RESUME, SYSTEM_RESTART})
 WILDCARD_ALL = "#"
 
 

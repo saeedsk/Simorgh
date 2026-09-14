@@ -85,6 +85,15 @@ async def _cmd_self_check() -> int:
 # by tests; never called by them.
 _HARD_EXIT = os._exit
 
+# What `_cmd_run` exits with when the stop was a *restart* (`system.restart`,
+# published by the `restart` REPL command) rather than a stop for good
+# (`system.stop`, `exit`). `simloader.py`'s `cmd_run` treats exactly this
+# code as "re-gate the checkout and relaunch me" instead of "I'm done" --
+# keep the literal in sync with that file's own `RESTART_EXIT_CODE`. It
+# cannot be imported from here: the loader is deliberately stdlib-only and
+# never imports `simorgh` (see its own module docstring).
+RESTART_EXIT_CODE = 75
+
 
 def _terminate_children() -> None:
     """SIGTERM to Sim's direct children -- a pytest, a whisper-cli, an
@@ -186,6 +195,8 @@ async def _cmd_run(config_path: str | None) -> int:
     except asyncio.TimeoutError:
         _exit_now(1, why=f"shutdown did not finish within {grace + 5.0:.0f}s -- exiting now")
     stopper.cancel()
+    if kernel.restart_requested:
+        _exit_now(RESTART_EXIT_CODE, why="restart requested -- relaunching from the current source")
     _exit_now(0)
     return 0
 

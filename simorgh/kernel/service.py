@@ -109,7 +109,8 @@ class Kernel:
     name = "kernel"
     version = VERSION
     consumes: tuple[str, ...] = (
-        topics.SYSTEM_PAUSE, topics.SYSTEM_RESUME, topics.SYSTEM_STOP, topics.SYSTEM_STATUS_REQUEST,
+        topics.SYSTEM_PAUSE, topics.SYSTEM_RESUME, topics.SYSTEM_STOP, topics.SYSTEM_RESTART,
+        topics.SYSTEM_STATUS_REQUEST,
         topics.SYSTEM_HEALTH, topics.SYSTEM_METRICS, topics.PERCEPT_TEXT_RECEIVED,
         topics.SYSTEM_SCHEDULE_ADD, topics.SYSTEM_SCHEDULE_CANCEL,
     )
@@ -133,6 +134,11 @@ class Kernel:
         self._hmac_secret = security.new_run_secret()
         self._boot_time = self._clock.now()
         self._stop_event = asyncio.Event()
+        # Set by `_on_restart`, read by `kernel/cli.py::_cmd_run` after
+        # `wait_for_stop()` returns, to choose the process exit code --
+        # a restart must come back up on the current on-disk source
+        # (`simloader.py` relaunches it), where a plain stop must not.
+        self.restart_requested = False
         self._supervisor = None
         self._scheduler: Scheduler | None = None
         self._status: StatusServer | None = None
@@ -288,6 +294,7 @@ class Kernel:
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_PAUSE, self._on_pause))
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_RESUME, self._on_resume))
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_STOP, self._on_stop))
+        self._subs.append(await self.bus.subscribe(topics.SYSTEM_RESTART, self._on_restart))
 
         self.progress.done()
         change = self.state.boot_complete()
@@ -419,6 +426,20 @@ class Kernel:
 
     async def _on_stop(self, message: Message) -> None:
         change = self.state.stop(reason=message.payload["reason"], requested_by=message.payload["requested_by"])
+        await self._append_state(change)
+        await self.bus.publish(validate(Message.new(
+            topics.SYSTEM_STATE_CHANGED, source="kernel", payload={"state": STOPPING}, clock=self._clock.now,
+        )))
+        self._stop_event.set()
+
+    async def _on_restart(self, message: Message) -> None:
+        # Same drain-and-stop as `_on_stop` -- the process-level distinction
+        # (relaunch from current source vs. leave for good) is not this
+        # state machine's concern; it lives in `restart_requested`, which
+        # `kernel/cli.py::_cmd_run` reads once `wait_for_stop()` returns.
+        self.restart_requested = True
+        change = self.state.stop(reason=message.payload.get("reason", "restart"),
+                                  requested_by=message.source or "unknown")
         await self._append_state(change)
         await self.bus.publish(validate(Message.new(
             topics.SYSTEM_STATE_CHANGED, source="kernel", payload={"state": STOPPING}, clock=self._clock.now,

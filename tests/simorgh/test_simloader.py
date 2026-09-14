@@ -256,6 +256,42 @@ class LoaderTestCase(unittest.TestCase):
         self.assertIn("watchdog", (self.notes / "decisions.jsonl").read_text())
         self.assertEqual(simloader.head(self.repo.path), simloader.tag_of(self.repo.path, "sim-good-0001"))
 
+    def test_a_restart_exit_code_re_gates_and_hands_off_again(self):
+        """The `restart` REPL command, end to end at this layer: Sim
+        exits `RESTART_EXIT_CODE` once (asking to come back up on
+        whatever is on disk now, not to be done for good), and `cmd_run`
+        gates the checkout again and launches it again, rather than
+        returning to `sim.sh` the way every other non-zero exit does."""
+        commits = []
+
+        def fake_sim(repo, notes, args):
+            commits.append(simloader.head(repo))
+            return simloader.RESTART_EXIT_CODE if len(commits) == 1 else 0
+
+        with self._gate([(True, "green"), (True, "green")]), \
+             mock.patch.object(simloader, "launch_sim", side_effect=fake_sim):
+            rc = simloader.cmd_run(
+                self.repo.path, self.notes, full=False, timeout_s=10, max_rollbacks=3,
+                watchdog_s=60, sim_args=[],
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(commits), 2, "Sim should have been handed off to twice")
+        self.assertIn("restart", (self.notes / "decisions.jsonl").read_text())
+
+    def test_a_restart_is_not_treated_as_a_bad_boot(self):
+        """`RESTART_EXIT_CODE` is non-zero, but it must never trip the
+        watchdog's "bad boot, roll back" path -- it means the opposite of
+        a crash."""
+        with self._gate([(True, "green"), (True, "green")]), \
+             mock.patch.object(simloader, "launch_sim",
+                                side_effect=[simloader.RESTART_EXIT_CODE, 0]):
+            rc = simloader.cmd_run(
+                self.repo.path, self.notes, full=False, timeout_s=10, max_rollbacks=3,
+                watchdog_s=9999, sim_args=[],  # a long watchdog: a real crash here would trip it
+            )
+        self.assertEqual(rc, 0)
+        self.assertNotIn("watchdog", (self.notes / "decisions.jsonl").read_text())
+
 
 class LoaderIsIndependentTestCase(unittest.TestCase):
     def test_it_never_imports_the_package_it_boots(self):

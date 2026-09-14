@@ -547,13 +547,24 @@ class Service:
         )))
 
     async def _request_stop(self) -> None:
-        """Leaving the prompt ends the run, the same way Ctrl-D did."""
+        """Leaving the prompt ends the run, the same way Ctrl-D did --
+        unless the prompt closed because `restart` was typed (`tui.py`'s
+        read loop breaks out immediately, without ever routing the line
+        through `dispatch()`, exactly like `exit`/`quit` -- see its own
+        comment), in which case this publishes `system.restart` so the
+        process comes back up on the current source instead of ending."""
         if self._ctx is None:
             return
+        restart = getattr(self._tui, "stop_reason", None) == "restart"
         try:
-            await self._ctx.bus.publish(self._ctx.bus.new(
-                topics.SYSTEM_STOP, {"reason": "repl_exit", "requested_by": "human"},
-            ))
+            if restart:
+                await self._ctx.bus.publish(self._ctx.bus.new(
+                    topics.SYSTEM_RESTART, {"reason": "repl_restart", "self_check_passed": True},
+                ))
+            else:
+                await self._ctx.bus.publish(self._ctx.bus.new(
+                    topics.SYSTEM_STOP, {"reason": "repl_exit", "requested_by": "human"},
+                ))
         except Exception:  # noqa: BLE001 -- shutting down anyway
             pass
 

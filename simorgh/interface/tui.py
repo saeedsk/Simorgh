@@ -350,6 +350,11 @@ class Tui:
         self._last_interrupt: float | None = None
         self._stopped = False
         self._session = None
+        # Set when `_stopped` was set by typing `restart` rather than
+        # `exit`/`quit`/Ctrl-D, so `service.py`'s `_request_stop` (which
+        # runs after `run()` returns, whatever caused that) can publish
+        # `system.restart` instead of `system.stop`.
+        self.stop_reason: str | None = None
 
     # -- interrupts ---------------------------------------------------------
     def interrupt(self, buffer_was_empty: bool) -> str:
@@ -559,11 +564,15 @@ class Tui:
                     if line is None or not line.strip():
                         continue
                     command = _parse(line)
-                    if command is not None and command.name in ("exit", "quit"):
+                    if command is not None and command.name in ("exit", "quit", "restart"):
                         # Not queued behind a busy turn: the creator typed
                         # `exit` several times into a Sim that was mid-turn
                         # (2026-09-12) and nothing happened until the turn
-                        # ended. Leaving is the one thing that must not wait.
+                        # ended. Leaving is the one thing that must not wait
+                        # -- and neither should `restart`, which is exit
+                        # followed by coming back up on whatever is on disk.
+                        if command.name == "restart":
+                            self.stop_reason = "restart"
                         self._stopped = True
                         break
                     queue.put_nowait(line)

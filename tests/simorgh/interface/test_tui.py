@@ -397,6 +397,44 @@ class TestReadingLines(unittest.IsolatedAsyncioTestCase):
             self.assertLess(asyncio.get_running_loop().time() - started, 5.0, "exit waited behind the turn")
         self.assertEqual(seen, ["think hard"], "the busy turn started; exit never went on the queue")
 
+    async def test_restart_is_not_queued_behind_a_busy_turn_and_marks_the_reason(self):
+        """`restart` gets `exit`'s own not-queued-behind-a-turn treatment
+        (same bug shape, same fix), and additionally records why the
+        prompt closed -- `service.py::_request_stop` reads `stop_reason`
+        to publish `system.restart` instead of `system.stop`."""
+        from prompt_toolkit.application import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        seen: list[str] = []
+
+        async def slow_line(line: str) -> None:
+            seen.append(line)
+            await asyncio.sleep(30)
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+            prompt = Tui(on_line=slow_line)
+            inp.send_text("think hard\rrestart\r")
+            started = asyncio.get_running_loop().time()
+            await asyncio.wait_for(prompt.run(), timeout=10)
+            self.assertLess(asyncio.get_running_loop().time() - started, 5.0, "restart waited behind the turn")
+        self.assertEqual(seen, ["think hard"], "the busy turn started; restart never went on the queue")
+        self.assertEqual(prompt.stop_reason, "restart")
+
+    async def test_exit_leaves_stop_reason_unset(self):
+        self.assertIsNone((await self._drive_and_keep("status\rexit\r")).stop_reason)
+
+    async def _drive_and_keep(self, keys: str) -> "Tui":
+        from prompt_toolkit.application import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+            prompt = Tui(on_line=self._noop_line)
+            inp.send_text(keys)
+            await asyncio.wait_for(prompt.run(), timeout=10)
+        return prompt
+
     async def test_the_footer_callback_is_what_the_toolbar_shows(self):
         prompt = Tui(on_line=self._noop_line, footer_text=lambda: "thinking [3s]")
         session = prompt._build_session()  # noqa: SLF001

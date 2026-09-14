@@ -47,6 +47,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("next", "", "skip the track playing on the TV (also: skip; `tv pause` / `tv play` for the rest)"),
     ("help", "[command]", "list everything, or one command's words: help voice"),
     ("exit", "", "leave (Ctrl-D also detaches)"),
+    ("restart", "", "come back up on the current source -- re-gated the same way `./sim.sh` gates a fresh boot"),
 )
 
 COMMAND_NAMES: tuple[str, ...] = tuple(name for name, _, _ in COMMANDS)
@@ -83,7 +84,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Work", ("tasks", "cancel", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("Voice, screen and cameras", ("voice", "tv", "next", "cameras", "ring")),
     ("Control", ("auto", "schedule", "mcp", "pause", "resume")),
-    ("Session", ("help", "exit")),
+    ("Session", ("help", "exit", "restart")),
 )
 SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
     "tasks": (("", "the backlog: the twenty most recent, with status and origin"),

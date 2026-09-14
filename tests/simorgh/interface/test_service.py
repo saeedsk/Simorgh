@@ -251,6 +251,21 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         await sub.unsubscribe(); await sub2.unsubscribe(); await sub3.unsubscribe()
         self.assertEqual(seen, [topics.SYSTEM_PAUSE, topics.SYSTEM_RESUME, topics.SYSTEM_STOP])
 
+    async def test_restart_publishes_system_restart_and_leaves_the_repl(self):
+        """`restart` (the creator, 2026-09-14) is exit-then-relaunch, not
+        exit: it publishes `system.restart`, not `system.stop`, but it
+        still ends this REPL's own read loop the same way `exit` does --
+        the process is coming back up as a new one, not staying up."""
+        seen = []
+        sub = await self.other.subscribe(topics.SYSTEM_RESTART, lambda m: seen.append(m) or asyncio.sleep(0))
+        self.assertFalse(self.service._stop_repl.is_set())
+        await self._line("restart")
+        await self._pump()
+        await sub.unsubscribe()
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0].payload["self_check_passed"])
+        self.assertTrue(self.service._stop_repl.is_set())
+
     async def test_status_renders_a_real_reply(self):
         """07-post-cutover-review.md §3.8: `status` absorbs `vitals`/
         `budget`/`skills` into one panel -- health, posture, tools, and

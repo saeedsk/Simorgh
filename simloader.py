@@ -765,6 +765,15 @@ def cmd_rollback(repo: Path, notes: Path, *, reason: str) -> int:
     return 0
 
 
+# What Sim exits with when it wants to come back up on the current
+# on-disk source rather than being done for good -- the `restart` REPL
+# command, via `system.restart` and `kernel/cli.py::_cmd_run`. Keep this
+# literal in sync with that file's own `RESTART_EXIT_CODE`; it cannot be
+# imported from here (this loader is deliberately stdlib-only and never
+# imports `simorgh` -- see the module docstring).
+RESTART_EXIT_CODE = 75
+
+
 def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollbacks: int,
             watchdog_s: float, sim_args: list[str]) -> int:
     rule("run")
@@ -773,60 +782,72 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
     if not tags:
         say("no known-good tag exists yet; gating HEAD as-is")
     rollbacks = 0
+    restarts = 0
     while True:
-        ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes, allow_skip=True)
-        if ok and SKIP_SENTINEL in why:
-            say(f"gate {why}; booting unverified, and nothing is being tagged")
-            write_note(notes, {"kind": "gate_skipped", "commit": head(repo), "why": why})
-            break
-        if ok:
-            say(f"gate passed: {why}")
-            commit = head(repo)
-            stray_code = untracked_code(repo)
-            if stray_code:
-                # Booting is fine -- this tree just passed. Tagging is
-                # not: the tag would name a commit that lacks these.
-                say(f"not tagging: the gate ran with untracked code ({', '.join(stray_code[:3])}"
-                    f"{' ...' if len(stray_code) > 3 else ''}) that {commit} does not contain")
-                write_note(notes, {"kind": "tag_withheld", "commit": commit, "untracked": stray_code[:20]})
-            elif not any(tag_of(repo, t) == commit for _n, t in good_tags(repo)) and not is_dirty(repo):
-                tag = next_tag(repo)
-                git("tag", "-a", tag, "-m", f"simloader: {why}", cwd=repo, check=True)
-                say(f"tagged {commit} as {tag}")
-                write_note(notes, {"kind": "blessed", "commit": commit, "tag": tag, "why": why})
-            break
-        say(f"gate FAILED: {why}")
-        write_note(notes, {"kind": "gate_failed", "commit": head(repo), "why": why})
-        if rollbacks >= max_rollbacks:
-            rule("giving up")
-            say(f"the gate failed after {rollbacks} rollback(s), and I am not going to keep trying.")
-            say(f"HEAD is {head(repo)}, which did NOT pass. Nothing here is blessed.")
-            tags = good_tags(repo)
-            if tags:
-                say(f"last known-good tag: {tags[-1][1]} ({tag_of(repo, tags[-1][1])})")
-                say(f"  git checkout {tags[-1][1]}     # go back to it by hand")
-            say(f"  {notes / 'last_unit.txt'}   # what the suite actually said")
-            say("  SIMORGH_NO_LOADER=1 ./sim.sh    # boot without the gate, to debug")
-            write_note(notes, {"kind": "gave_up", "commit": head(repo), "rollbacks": rollbacks, "why": why})
-            return 3
-        if cmd_rollback(repo, notes, reason=why) != 0:
-            say("could not roll back; stopping")
-            return 3
-        rollbacks += 1
+        while True:
+            ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes, allow_skip=True)
+            if ok and SKIP_SENTINEL in why:
+                say(f"gate {why}; booting unverified, and nothing is being tagged")
+                write_note(notes, {"kind": "gate_skipped", "commit": head(repo), "why": why})
+                break
+            if ok:
+                say(f"gate passed: {why}")
+                commit = head(repo)
+                stray_code = untracked_code(repo)
+                if stray_code:
+                    # Booting is fine -- this tree just passed. Tagging is
+                    # not: the tag would name a commit that lacks these.
+                    say(f"not tagging: the gate ran with untracked code ({', '.join(stray_code[:3])}"
+                        f"{' ...' if len(stray_code) > 3 else ''}) that {commit} does not contain")
+                    write_note(notes, {"kind": "tag_withheld", "commit": commit, "untracked": stray_code[:20]})
+                elif not any(tag_of(repo, t) == commit for _n, t in good_tags(repo)) and not is_dirty(repo):
+                    tag = next_tag(repo)
+                    git("tag", "-a", tag, "-m", f"simloader: {why}", cwd=repo, check=True)
+                    say(f"tagged {commit} as {tag}")
+                    write_note(notes, {"kind": "blessed", "commit": commit, "tag": tag, "why": why})
+                break
+            say(f"gate FAILED: {why}")
+            write_note(notes, {"kind": "gate_failed", "commit": head(repo), "why": why})
+            if rollbacks >= max_rollbacks:
+                rule("giving up")
+                say(f"the gate failed after {rollbacks} rollback(s), and I am not going to keep trying.")
+                say(f"HEAD is {head(repo)}, which did NOT pass. Nothing here is blessed.")
+                tags = good_tags(repo)
+                if tags:
+                    say(f"last known-good tag: {tags[-1][1]} ({tag_of(repo, tags[-1][1])})")
+                    say(f"  git checkout {tags[-1][1]}     # go back to it by hand")
+                say(f"  {notes / 'last_unit.txt'}   # what the suite actually said")
+                say("  SIMORGH_NO_LOADER=1 ./sim.sh    # boot without the gate, to debug")
+                write_note(notes, {"kind": "gave_up", "commit": head(repo), "rollbacks": rollbacks, "why": why})
+                return 3
+            if cmd_rollback(repo, notes, reason=why) != 0:
+                say("could not roll back; stopping")
+                return 3
+            rollbacks += 1
 
-    rule("handing off to Sim")
-    started = time.monotonic()
-    returncode = launch_sim(repo, notes, sim_args)
-    ran_for = time.monotonic() - started
-    if returncode != 0 and ran_for < watchdog_s:
-        why = f"Sim exited {returncode} after {ran_for:.0f}s, inside the {watchdog_s:.0f}s watchdog"
-        say(f"bad boot: {why}")
-        write_note(notes, {"kind": "watchdog", "commit": head(repo), "why": why})
-        if rollbacks < max_rollbacks and cmd_rollback(repo, notes, reason=why) == 0:
-            say("rolled back; run `simloader.py run` again to boot the previous image")
-        return 4
-    say(f"Sim exited {returncode} after {ran_for:.0f}s")
-    return returncode
+        rule("handing off to Sim" if not restarts else f"handing off to Sim (restart #{restarts})")
+        started = time.monotonic()
+        returncode = launch_sim(repo, notes, sim_args)
+        ran_for = time.monotonic() - started
+        if returncode == RESTART_EXIT_CODE:
+            # Sim asked to come back up on whatever is on disk *now* --
+            # gate it again (a `restart` is exactly how new code from this
+            # session reaches a running Sim) and hand off again, rather
+            # than returning to sim.sh, which the creator would have to
+            # notice and re-run by hand.
+            restarts += 1
+            say(f"Sim asked to restart (after {ran_for:.0f}s) -- re-gating the current checkout")
+            write_note(notes, {"kind": "restart", "commit": head(repo), "restarts": restarts})
+            continue
+        if returncode != 0 and ran_for < watchdog_s:
+            why = f"Sim exited {returncode} after {ran_for:.0f}s, inside the {watchdog_s:.0f}s watchdog"
+            say(f"bad boot: {why}")
+            write_note(notes, {"kind": "watchdog", "commit": head(repo), "why": why})
+            if rollbacks < max_rollbacks and cmd_rollback(repo, notes, reason=why) == 0:
+                say("rolled back; run `simloader.py run` again to boot the previous image")
+            return 4
+        say(f"Sim exited {returncode} after {ran_for:.0f}s")
+        return returncode
 
 
 def launch_sim(repo: Path, notes: Path, sim_args: list[str]) -> int:
