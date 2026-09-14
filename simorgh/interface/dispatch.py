@@ -1003,6 +1003,13 @@ async def _cameras(args: str, *, bus: BusClient, ledger: LedgerClient, session_i
         return await _run("cam_light" if verb != "ir" else "cam_ir",
                           {"camera": " ".join(rest[:-1]), "on": rest[-1].lower() in ("on", "true", "1")})
     if verb == "siren":
+        # "siren Office on" read the camera as "Office on" and was refused
+        # (2026-09-14, live): the siren is timed, so `on` means "sound it"
+        # and `off` gets an answer rather than a camera name.
+        if rest and rest[-1].lower() == "off":
+            return Outcome("a camera's siren stops by itself: it sounds for the seconds given (default 5, at most 30)")
+        if rest and rest[-1].lower() == "on":
+            rest = rest[:-1]
         if not rest:
             return Outcome(usage)
         seconds = int(rest[-1]) if rest[-1].isdigit() else None
@@ -1102,6 +1109,10 @@ async def _ring(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: 
             return Outcome(usage)
         return await _run("ring_light", {"camera": " ".join(rest[:-1]), "on": rest[-1].lower() in ("on", "true", "1")})
     if verb == "siren":
+        if rest and rest[-1].lower() == "off":
+            return Outcome("a Ring siren stops by itself: it sounds for the seconds given")
+        if rest and rest[-1].lower() == "on":
+            rest = rest[:-1]
         if not rest:
             return Outcome(usage)
         seconds = int(rest[-1]) if rest[-1].isdigit() else None
