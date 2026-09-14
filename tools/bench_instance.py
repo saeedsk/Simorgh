@@ -107,6 +107,12 @@ async def run(args) -> int:
     repo = stage(root)
     os.chdir(repo)
     data = root / "data"
+    # A fresh data dir every start. A restarted copy used to reopen the old
+    # one, and the task queue in it came back: a reflection patch task from
+    # the previous boot ran its full test suite (~2-5 GB) beside the cases,
+    # with reflection already switched off (2026-09-14). Results live in
+    # --out, not here, so nothing worth keeping is lost.
+    shutil.rmtree(data, ignore_errors=True)
     os.environ["SIMORGH_RUNTIME_DATA_DIR"] = str(data)
     os.environ["SIMORGH_COGNITION_PROVIDER_ORDER"] = "together,floor"
     kernel = Kernel(LoadedConfig({
