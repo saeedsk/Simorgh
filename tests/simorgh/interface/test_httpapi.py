@@ -1417,3 +1417,61 @@ class LocalBrowserGetsTheTokenTestCase(unittest.IsolatedAsyncioTestCase):
         """A site that points its own name at 127.0.0.1 still sends its
         own name as Host."""
         self.assertEqual(await self._get("/dash", host="attacker.example:8765"), (200, ""))
+
+
+class DashKeyRelayTestCase(unittest.IsolatedAsyncioTestCase):
+    """The TV's own remote never reaches a Cast receiver, so the dashboard's
+    remote keys go through Sim: the phone's D-pad and `dash_key` put them
+    here, and the page polls them by sequence (2026-09-14)."""
+
+    async def _api(self):
+        api = HttpApi(_FakeBus(), host="127.0.0.1", port=0, token="secret")
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        return api
+
+    def _g(self, api, path):
+        c = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+        c.request("GET", path); r = c.getresponse(); b = r.read(); c.close()
+        return r.status, json.loads(b)
+
+    def _p(self, api, path, body):
+        c = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+        c.request("POST", path, body=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        r = c.getresponse(); r.read(); c.close()
+        return r.status
+
+    async def test_a_key_needs_the_token_and_a_name_the_page_knows(self):
+        api = await self._api()
+        self.assertEqual(await asyncio.to_thread(self._p, api, "/api/dash/key", {"key": "left"}), 401)
+        self.assertEqual(await asyncio.to_thread(self._p, api, "/api/dash/key?token=secret", {"key": "LEFT"}), 200)
+        self.assertEqual(await asyncio.to_thread(self._p, api, "/api/dash/key?token=secret", {"key": "jump"}), 400)
+        st, body = await asyncio.to_thread(self._g, api, "/api/dash/keys?after=0")
+        self.assertEqual((st, [k["key"] for k in body["keys"]]), (200, ["left"]))
+
+    async def test_the_page_reads_only_keys_after_its_own_sequence(self):
+        api = await self._api()
+        for key in ("left", "ok"):
+            await asyncio.to_thread(self._p, api, "/api/dash/key?token=secret", {"key": key})
+        _, fresh = await asyncio.to_thread(self._g, api, "/api/dash/keys")
+        self.assertEqual((fresh["seq"], fresh["keys"]), (2, []), "a page that just loaded replays nothing")
+        _, one = await asyncio.to_thread(self._g, api, "/api/dash/keys?after=1")
+        self.assertEqual([k["key"] for k in one["keys"]], ["ok"])
+        _, none = await asyncio.to_thread(self._g, api, "/api/dash/keys?after=2")
+        self.assertEqual(none["keys"], [])
+
+    async def test_keys_from_sim_arrive_over_the_bus(self):
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+
+        api = await self._api()
+        await api._on_dash_key(Message.new(topics.UI_DASH_KEY, source="execution", payload={"key": "down"}))  # noqa: SLF001
+        _, body = await asyncio.to_thread(self._g, api, "/api/dash/keys?after=0")
+        self.assertEqual([k["key"] for k in body["keys"]], ["down"])
+
+    async def test_only_the_newest_keys_are_kept(self):
+        api = await self._api()
+        for _ in range(40):
+            api._push_dash_key("right")  # noqa: SLF001
+        _, body = await asyncio.to_thread(self._g, api, "/api/dash/keys?after=0")
+        self.assertEqual((len(body["keys"]), body["keys"][0]["seq"], body["seq"]), (32, 9, 40))

@@ -23,6 +23,10 @@ TvState = define(t.TV_STATE, [F("mode", Enum("none", "frame", "full", "grid")), 
 TvSpeech = define(t.TV_SPEECH, [F("ref", Str), F("seconds", Float), O("seq", Int), O("request_id", Str),
                                  O("text", Str)],
                   doc="One piece of Sim's reply, as a WAV blob in the ledger, for the TV page to play in order.")
+#: The keys the dashboard page understands (interface/static/dash.html's navKey).
+DASH_KEYS: tuple[str, ...] = ("left", "right", "up", "down", "ok", "back", "playpause", "next", "prev")
+UiDashKey = define(t.UI_DASH_KEY, [F("key", Enum(*DASH_KEYS))],
+                   doc="One remote-control key for the dashboard page: move, ok, back, or a media key.")
 DashState = define(t.DASH_STATE, [O("view", Str), O("timeframe", Str), O("symbol", Str), O("rotate_s", Int), O("scale", Float),
                                   O("live_max", Int), O("live_step_s", Float), O("video_quality", Enum("light", "full")),
                                   O("video_sound", Bool)],

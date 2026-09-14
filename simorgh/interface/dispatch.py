@@ -916,6 +916,15 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         if not rest or rest[0].lower() not in ("light", "full", "low", "high", "hd"):
             return Outcome("usage: tv quality light|full   (the embedded video's resolution; light is easier on the TV)")
         return await _run("dash_view", {"video_quality": "full" if rest[0].lower() in ("full", "high", "hd") else "light"})
+    if verb in ("nav", "press"):
+        if not rest:
+            return Outcome("usage: tv nav <left|right|up|down|ok|back|playpause|next|prev> [times]   "
+                           "(a remote key on the dashboard page itself)")
+        payload: dict = {"key": " ".join(w for w in rest if not w.isdigit())}
+        counts = [w for w in rest if w.isdigit()]
+        if counts:
+            payload["times"] = int(counts[0])
+        return await _run("dash_key", payload)
     if verb == "remote":
         return await _run("dash_view", {"action": "remote"})
     if verb in ("link", "url"):

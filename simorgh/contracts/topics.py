@@ -227,6 +227,11 @@ TV_SPEECH = "ui.tv.speech"
 # polls `/api/dash/state`. A Cast receiver gets no key events from the
 # TV's remote, so this is how the dashboard is steered.
 DASH_STATE = "ui.dash.state"
+# A remote-control key for the glass dashboard page: `{"key": "left"}`.
+# Published by the `dash_key` tool (execution/media/cast.py); the HTTP API
+# keeps the newest keys and the page polls `/api/dash/keys` -- the TV's own
+# remote never reaches a Cast receiver, so this is its remote.
+UI_DASH_KEY = "ui.dash.key"
 # An inbound webhook the HTTP API received (`POST /api/hooks/<name>`),
 # body verbatim, for whichever subsystem asked something to call it --
 # the Reolink NVR's event push, first (execution/home/cameras.py).

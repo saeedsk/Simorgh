@@ -171,6 +171,8 @@ _TOOL_NOTES: dict[str, str] = {
     "cast_volume": "the TV's volume, 0-100",
     "dash_view": "turn the dashboard on the TV to a view (home, news, markets, cameras, media, ambient...), a chart "
                  "timeframe or symbol, or set it rotating; action=remote gives the phone remote's link",
+    "dash_key": "press a remote key on the dashboard on the TV: left/right/up/down, ok (open a tab, a box or a "
+                "video full screen), back (step out), playpause/next/prev for the video; the TV's own remote cannot",
     "cast_use": "remember which Cast device is the TV, by name",
     "cam_setup": "the NVR's address and login, kept in secrets.toml; then a restart",
     "cam_list": "every camera on the NVR: number, name, online",

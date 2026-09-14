@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from simorgh.contracts import topics
+from simorgh.contracts.messages.ui import DASH_KEYS
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
@@ -1260,6 +1261,42 @@ class TvChartsTool(_CastTool):
         return await self._start_chart(ctx, str(args.get("chart") or "kpop"), str(args.get("device") or ""))
 
 
+class DashKeyTool(_CastTool):
+    """Press a remote-control key on the dashboard page. The TV's own
+    remote never reaches a Cast receiver, so Sim relays keys: this tool
+    publishes `ui.dash.key`, the HTTP API keeps it, the page polls it."""
+
+    name = "dash_key"
+    read_only = False
+    reversibility = "reversible"
+    ALIASES = {"enter": "ok", "select": "ok", "center": "ok", "open": "ok", "escape": "back", "esc": "back",
+               "return": "back", "exit": "back", "play": "playpause", "pause": "playpause", "play pause": "playpause",
+               "previous": "prev", "skip": "next", "forward": "next"}
+    description = ("Press a remote-control key on Sim's dashboard on the TV (the TV's own remote cannot reach it): "
+                   "`key` left/right/up/down moves (on the top ribbon left/right changes tabs), ok opens a tab or a "
+                   "box full screen or takes control of its video, back steps out one level, playpause/next/prev "
+                   "control the video. `times` repeats the key (1-10).")
+    args_schema = {"type": "object", "required": ["key"],
+                   "properties": {"key": {"type": "string"}, "times": {"type": "integer"}}}
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        raw = str(args.get("key") or args.get("target") or "").strip().lower()
+        key = self.ALIASES.get(raw, raw)
+        if key not in DASH_KEYS:
+            return ToolResult(ok=False, error=f"refused: no dashboard key {raw!r}; the keys are {', '.join(DASH_KEYS)}")
+        try:
+            times = max(1, min(10, int(args.get("times") or 1)))
+        except (TypeError, ValueError):
+            times = 1
+        bus = getattr(ctx, "bus", None)
+        if bus is None:
+            return ToolResult(ok=False, error="refused: no bus to reach the dashboard on")
+        for _ in range(times):
+            await bus.publish(Message.new(topics.UI_DASH_KEY, source="execution", payload={"key": key}))
+        return ToolResult(ok=True, output=f"pressed {key} on the dashboard" + (f" {times} times" if times > 1 else ""),
+                          side_effects=(f"dash_key:{key}",), metadata={"key": key, "times": times})
+
+
 def cast_tools(config, **kwargs) -> list:
     kwargs = {k: v for k, v in kwargs.items()
               if k in ("cast", "env", "secrets", "clock", "reachable", "settings_home", "fetch", "media_dir",
@@ -1268,11 +1305,11 @@ def cast_tools(config, **kwargs) -> list:
     return [CastDevicesTool(config, prefs=prefs, **kwargs), CastShowTool(config, prefs=prefs, **kwargs),
             CastPlayTool(config, prefs=prefs, **kwargs), CastStopTool(config, prefs=prefs, **kwargs),
             CastVolumeTool(config, prefs=prefs, **kwargs), CastUseTool(config, prefs=prefs, **kwargs),
-            CastSetupTool(config, prefs=prefs, **kwargs), DashViewTool(config, prefs=prefs, **kwargs),
+            CastSetupTool(config, prefs=prefs, **kwargs), DashViewTool(config, prefs=prefs, **kwargs), DashKeyTool(config, prefs=prefs, **kwargs),
             TvPairTool(config, prefs=prefs, **kwargs), TvAppTool(config, prefs=prefs, **kwargs),
             TvKeyTool(config, prefs=prefs, **kwargs), TvChartsTool(config, prefs=prefs, **kwargs)]
 
 
 __all__ = ["CastDevicesTool", "CastPlayTool", "CastPreferences", "CastSetupTool", "CastShowTool", "CastStopTool", "CastUseTool",
-           "CastVolumeTool", "DashViewTool", "Device", "settings_paths", "youtube_id",
+           "CastVolumeTool", "DashKeyTool", "DashViewTool", "Device", "settings_paths", "youtube_id",
            "PyChromecast", "available", "cast_tools", "lan_address"]

@@ -637,3 +637,28 @@ class WakeBeforeShowTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok, result.error)
         self.assertEqual(self.order, [("show_page", "Living Room TV")])
 
+
+class DashKeyTestCase(unittest.IsolatedAsyncioTestCase):
+    """`dash_key`: Sim presses the dashboard's remote keys for it."""
+
+    def _tool(self):
+        cast = _FakeCast()
+        tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
+                                               reachable=lambda url: True, env={"SIM_API_TOKEN": "s3"})}
+        return tools["dash_key"], cast
+
+    async def test_a_key_is_published_for_the_page_and_touches_no_device(self):
+        tool, cast = self._tool()
+        bus = _Bus()
+        result = await tool.run({"key": "Enter"}, ctx=_ctx(bus))
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual((bus.published[-1].type, bus.published[-1].payload), (topics.UI_DASH_KEY, {"key": "ok"}))
+        await tool.run({"key": "right", "times": 3}, ctx=_ctx(bus))
+        self.assertEqual([m.payload["key"] for m in bus.published], ["ok", "right", "right", "right"])
+        self.assertEqual(cast.calls, [])
+
+    async def test_an_unknown_key_or_no_bus_is_refused(self):
+        tool, _cast = self._tool()
+        bad = await tool.run({"key": "jump"}, ctx=_ctx(_Bus()))
+        self.assertFalse(bad.ok); self.assertIn("left", bad.error)
+        self.assertFalse((await tool.run({"key": "left"}, ctx=_ctx(None))).ok)

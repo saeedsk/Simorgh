@@ -54,6 +54,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
+from simorgh.contracts.messages.ui import DASH_KEYS
 from simorgh.contracts.streamnames import is_valid_stream, stream_name_rule
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -74,7 +75,7 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: boot banner already prints. Everything else is gated
 #: (platform-connectors-design.md section 4).
 _OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers", "/api/dash/data",
-                                          "/api/dash/state", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner",
+                                          "/api/dash/state", "/api/dash/keys", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner",
                                           "/api/dash/streams"})
 
 #: The response to an unauthenticated request. A JSON body, because
@@ -191,6 +192,11 @@ class HttpApi:
         self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "scale": 0,
                                   "live_max": 3, "live_step_s": 6.0, "video_quality": "light", "video_sound": True, "since": 0.0}
         self._dash_sub = None
+        # Remote-control keys for the dashboard page (`POST /api/dash/key`,
+        # `ui.dash.key`), newest last; the page polls them by sequence.
+        self._dash_keys: deque = deque(maxlen=32)
+        self._dash_key_seq = 0
+        self._dash_key_sub = None
         self._remote_page = (_STATIC_DIR / "remote.html").read_text(encoding="utf-8")
         # Sim's logo (the creator's, 2026-09-12; keyed and shrunk from
         # images/logo/Sim-Logo.png), for the pages' top bar and the tab icon.
@@ -348,7 +354,30 @@ class HttpApi:
         self.register_route("GET", "/dash", _dash, auth=False)
         self.register_route("GET", "/api/wallpapers", _wallpapers, auth=False)
         self.register_route("GET", "/api/dash/data", _dash_data, auth=False)
+        async def _dash_key_post(_query, body, _headers):
+            # The phone remote's D-pad: gated like every other side effect.
+            try:
+                asked = json.loads(body.decode("utf-8") or "{}")
+            except ValueError:
+                return 400, b'{"error": "body must be JSON"}', "application/json"
+            key = str(asked.get("key") or "").strip().lower() if isinstance(asked, dict) else ""
+            if key not in DASH_KEYS:
+                return 400, json.dumps({"error": f"key is one of {', '.join(DASH_KEYS)}"}).encode("utf-8"), "application/json"
+            return 200, json.dumps({"ok": True, "seq": self._push_dash_key(key)}).encode("utf-8"), "application/json"
+
+        async def _dash_keys_get(query, _body, _headers):
+            # `after` is the last sequence the page has seen; without one (a
+            # page that just loaded) nothing old is replayed, only `seq`.
+            try:
+                after = int(self._q1(query, "after", "-1") or -1)
+            except ValueError:
+                after = -1
+            keys = [k for k in self._dash_keys if after >= 0 and k["seq"] > after]
+            return 200, json.dumps({"seq": self._dash_key_seq, "keys": keys}).encode("utf-8"), "application/json"
+
         self.register_route("GET", "/api/dash/state", _dash_state_get, auth=False)
+        self.register_route("GET", "/api/dash/keys", _dash_keys_get, auth=False)
+        self.register_route("POST", "/api/dash/key", _dash_key_post, max_body=512, rate=(300, 60.0))
         self.register_route("POST", "/api/dash/state", _dash_state_post, max_body=4096, rate=(120, 60.0))
         self.register_route("GET", "/remote", _remote, auth=False)
         self.register_route("GET", "/logo.png", _logo, auth=False)
@@ -600,6 +629,7 @@ class HttpApi:
         self._tv_sub = await self._bus.subscribe(topics.TV_STATE, self._on_tv_state)
         self._tv_speech_sub = await self._bus.subscribe(topics.TV_SPEECH, self._on_tv_speech)
         self._dash_sub = await self._bus.subscribe(topics.DASH_STATE, self._on_dash_state)
+        self._dash_key_sub = await self._bus.subscribe(topics.UI_DASH_KEY, self._on_dash_key)
         if self._feeds is not None:
             await self._feeds.start()
         if self._cameras_live and self._feeds is not None:
@@ -634,6 +664,9 @@ class HttpApi:
         if self._dash_sub is not None:
             await self._dash_sub.unsubscribe()
             self._dash_sub = None
+        if self._dash_key_sub is not None:
+            await self._dash_key_sub.unsubscribe()
+            self._dash_key_sub = None
         if self._turn_sub is not None:
             await self._turn_sub.unsubscribe()
             self._turn_sub = None
@@ -721,6 +754,16 @@ class HttpApi:
 
     async def _on_dash_state(self, message: Message) -> None:
         self._apply_dash_state(dict(message.payload or {}))
+
+    def _push_dash_key(self, key: str) -> int:
+        self._dash_key_seq += 1
+        self._dash_keys.append({"seq": self._dash_key_seq, "key": key, "at": self._now()})
+        return self._dash_key_seq
+
+    async def _on_dash_key(self, message: Message) -> None:
+        key = str((message.payload or {}).get("key") or "").strip().lower()
+        if key in DASH_KEYS:
+            self._push_dash_key(key)
 
     _ACTIVITY_MAX = 200
     #: This server's own tool calls still awaiting a result; per instance

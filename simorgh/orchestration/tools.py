@@ -150,6 +150,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 
     "cast_volume": ("reversible", True),
     "dash_view": ("reversible", True),
+    "dash_key": ("reversible", True),
 
     "cast_use": ("reversible", True),
 
