@@ -26,9 +26,10 @@ background:linear-gradient(160deg,rgba(255,255,255,.22),transparent 75%);opacity
 .hd{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--faint);}
 .hd.bb{color:var(--amber);}
 .tag{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);border:1px solid var(--stroke2);border-radius:6px;padding:1px 6px;white-space:nowrap;}
-#bar{height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-radius:16px;}
-#dock{display:flex;gap:7px;}
-.dot{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+#bar{height:80px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 29px;border-radius:26px;}
+#bar .tag{font-size:17.5px;padding:2px 10px;border-radius:10px;}
+#dock{display:flex;gap:11px;}
+.dot{width:51px;height:51px;border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;
 background:rgba(255,255,255,.09);border:1px solid var(--stroke2);box-shadow:inset 0 1px 0 rgba(255,255,255,.2);transition:.2s;}
 .dot.on{background:rgba(240,189,131,.24);border-color:rgba(240,189,131,.6);}
 .dot svg{stroke:var(--dim);} .dot.on svg{stroke:var(--gold);}
@@ -100,14 +101,14 @@ a{color:var(--warm);}
 <div id="bg"></div><div id="bg2"></div><div id="scrim"></div>
 <div id="app">
   <div id="bar" class="glass">
-    <div style="display:flex;align-items:center;gap:10px;"><img src="/logo.png" alt="" style="height:36px;width:auto;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5));">
-      <span style="font-size:19px;letter-spacing:.5px;">Simorgh</span><span class="faint">·</span><span class="dim" id="viewname">Home</span>
+    <div style="display:flex;align-items:center;gap:16px;font-size:28px;"><img src="/logo.png" alt="" style="height:58px;width:auto;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5));">
+      <span style="font-size:30px;letter-spacing:.8px;">Simorgh</span><span class="faint">·</span><span class="dim" id="viewname">Home</span>
       <span class="tag" id="rot" style="display:none;"></span></div>
     <div id="dock"></div>
-    <div style="display:flex;align-items:center;gap:14px;font-size:15px;">
+    <div style="display:flex;align-items:center;gap:22px;font-size:24px;">
       <span class="dim" id="wx"></span>
-      <span class="green" id="net">● online</span><span class="gold" id="clock" style="font-size:19px;">--:--</span>
-      <span class="dim" id="date"></span><span class="faint" id="vp" style="font-size:11px;"></span></div>
+      <span class="green" id="net">● online</span><span class="gold" id="clock" style="font-size:30px;">--:--</span>
+      <span class="dim" id="date"></span><span class="faint" id="vp" style="font-size:17.5px;"></span></div>
   </div>
   <div id="camstrip" class="glass"></div>
   <div id="stage"></div>
@@ -625,7 +626,7 @@ const RENDER={charts:viewCharts,deck:viewDeck,cameras:viewCameras,markets:viewMa
 const VIEW_ALIAS={news:"deck",discover:"deck",terminal:"deck",home:"deck",media:"deck"};
 
 // ---- app ----
-function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
+function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="29" height="29" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
   $("#dock").querySelectorAll(".dot").forEach(d=>d.onclick=()=>go(d.dataset.k));}
 function render(){try{if(CUR==="deck"){refreshDeck(true);return;}
   if(CUR==="charts"){refreshCharts(!$("#chartsroot"));return;}
