@@ -389,8 +389,9 @@ def who_is_here(speaker: str, relation: str, room: str) -> str:
         relation = relation or describe(speaker)
         who = f"{speaker} ({relation})" if relation else speaker
         lines.append(f"You are speaking with {who}. You know their voice. Use their name the way a person would -- "
-                     "now and then, not every sentence. What you remember with them is in your memory, labelled with "
-                     "their name; what others told you stays theirs.")
+                     "now and then, not every sentence -- and when you do, it is THIS name: the words may mention "
+                     "other people, but the one talking to you is {speaker}. What you remember with them is in your "
+                     "memory, labelled with their name; what others told you stays theirs.".replace("{speaker}", speaker))
         known = member(speaker)
         if known is not None and is_child(speaker):
             lines.append(WITH_A_CHILD.format(name=known.name, age=known.age))
