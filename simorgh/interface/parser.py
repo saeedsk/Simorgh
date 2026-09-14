@@ -140,7 +140,8 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
            ("view <name> [1D|1W|1M|1Y] [symbol]", "turn the dashboard to a view (the TV's remote cannot); a timeframe or symbol picks the chart"),
            ("rotate <seconds|off>", "cycle the dashboard's views on a timer"),
            ("scale <factor|auto>", "fix the dashboard's zoom on a TV that shows only part of it (try 0.5); auto fits"),
-           ("live <n>", "how many camera feeds the dashboard plays at once (fewer if the TV stutters)"),
+           ("live <n> [seconds]", "how many camera feeds play at once (3), and how often the live window slides one camera on (1 s); "
+                                  "tiles keep their size either way"),
            ("quality light|full", "the embedded video's resolution; light is easier on the TV's browser"),
            ("remote", "the phone remote's link -- open it on a phone on this Wi-Fi"),
            ("link", "the dashboard's link for a browser, token included (without it the Sim box shows only the banner)"),

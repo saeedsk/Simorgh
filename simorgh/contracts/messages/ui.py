@@ -24,7 +24,7 @@ TvSpeech = define(t.TV_SPEECH, [F("ref", Str), F("seconds", Float), O("seq", Int
                                  O("text", Str)],
                   doc="One piece of Sim's reply, as a WAV blob in the ledger, for the TV page to play in order.")
 DashState = define(t.DASH_STATE, [O("view", Str), O("timeframe", Str), O("symbol", Str), O("rotate_s", Int), O("scale", Float),
-                                  O("live_max", Int), O("video_quality", Enum("light", "full"))],
+                                  O("live_max", Int), O("live_step_s", Float), O("video_quality", Enum("light", "full"))],
                    doc="Where the glass dashboard on the TV should look: a view name, the markets chart's timeframe "
                        "or symbol, a rotation period in seconds (0 stops). Any subset; the HTTP API merges it.")
 UiHookReceived = define(t.UI_HOOK_RECEIVED, [F("name", Str), F("body", Str), O("content_type", Str),

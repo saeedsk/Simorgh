@@ -910,6 +910,7 @@ class DashViewTool(_CastTool):
     args_schema = {"type": "object", "properties": {
         "view": {"type": "string"}, "timeframe": {"type": "string"}, "symbol": {"type": "string"},
         "rotate_s": {"type": "number"}, "scale": {"type": "number"}, "live_max": {"type": "integer"},
+        "live_step_s": {"type": "number"},
         "video_quality": {"type": "string", "enum": ["light", "full"]}, "action": {"type": "string", "enum": ["view", "remote", "link"]}}}
     VIEWS = DASH_VIEWS
     ALIASES = {**DASH_ALIASES, "tv": "media"}
@@ -958,6 +959,11 @@ class DashViewTool(_CastTool):
                 payload["live_max"] = max(0, min(16, int(float(args["live_max"]))))
             except (TypeError, ValueError):
                 return ToolResult(ok=False, error="refused: `live_max` is a count, 0-16")
+        if "live_step_s" in args and args["live_step_s"] is not None:
+            try:
+                payload["live_step_s"] = max(0.5, min(600.0, float(args["live_step_s"])))
+            except (TypeError, ValueError):
+                return ToolResult(ok=False, error="refused: `live_step_s` is seconds, 0.5-600")
         quality = str(args.get("video_quality") or "").strip().lower()
         if quality:
             if quality not in ("light", "full"):
@@ -965,7 +971,8 @@ class DashViewTool(_CastTool):
             payload["video_quality"] = quality
         if not payload:
             return ToolResult(ok=False, error="refused: say a `view` (home, discover, cameras, news, markets, media, terminal, "
-                                              "ambient), a `timeframe`, a `symbol`, `rotate_s`, `scale`, `live_max` or `video_quality`")
+                                              "ambient), a `timeframe`, a `symbol`, `rotate_s`, `scale`, `live_max`, `live_step_s` "
+                                              "or `video_quality`")
         bus = getattr(ctx, "bus", None)
         if bus is None:
             return ToolResult(ok=False, error="refused: no bus to reach the dashboard")
@@ -988,6 +995,8 @@ class DashViewTool(_CastTool):
             said.append(f"scale fixed at {payload['scale']:g}" if payload["scale"] else "scale fits the screen")
         if "live_max" in payload:
             said.append(f"up to {payload['live_max']} camera feeds play at once")
+        if "live_step_s" in payload:
+            said.append(f"the live window slides one camera every {payload['live_step_s']:g}s")
         if "video_quality" in payload:
             said.append(f"embedded video {payload['video_quality']}")
         return ToolResult(ok=True, output="; ".join(said), side_effects=("dash_view",), metadata=payload)

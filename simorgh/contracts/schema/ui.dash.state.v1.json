@@ -10,6 +10,12 @@
         "null"
       ]
     },
+    "live_step_s": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
     "rotate_s": {
       "type": [
         "integer",

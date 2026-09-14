@@ -862,8 +862,15 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         return await _run("dash_view", {"scale": scale})
     if verb in ("live", "feeds"):
         if not rest or not rest[0].isdigit():
-            return Outcome("usage: tv live <n>   (how many camera feeds play at once; fewer if the TV stutters)")
-        return await _run("dash_view", {"live_max": int(rest[0])})
+            return Outcome("usage: tv live <n> [seconds]   (how many camera feeds play at once, and how often the live "
+                           "window slides one camera on; fewer if the TV stutters)")
+        payload = {"live_max": int(rest[0])}
+        if len(rest) > 1:
+            try:
+                payload["live_step_s"] = float(rest[1])
+            except ValueError:
+                return Outcome("usage: tv live <n> [seconds]")
+        return await _run("dash_view", payload)
     if verb in ("quality", "video-quality"):
         if not rest or rest[0].lower() not in ("light", "full", "low", "high", "hd"):
             return Outcome("usage: tv quality light|full   (the embedded video's resolution; light is easier on the TV)")
