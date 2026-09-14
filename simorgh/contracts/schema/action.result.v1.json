@@ -36,6 +36,12 @@
     },
     "stdout_preview": {
       "type": "string"
+    },
+    "tool": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

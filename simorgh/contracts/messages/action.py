@@ -63,4 +63,9 @@ ActionResult = define(t.ACTION_RESULT, [
     # Optional because every producer before 2026-09-09 sent none, and
     # a replayed historical event must still validate.
     O("metadata_ref", Str),
+    # Which tool ran, as `ActionDenied.tool` already says for a refusal.
+    # Only `action.proposed` named it, and only Guardian may subscribe to
+    # that -- so a consumer such as the dashboard's activity feed could
+    # not tell a camera's WebRTC signalling from a real step.
+    O("tool", Str),
 ])

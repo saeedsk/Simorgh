@@ -696,10 +696,21 @@ class HttpApi:
 
     _ACTIVITY_MAX = 200
 
+    # Tools whose own result is internal plumbing, not something a person
+    # reads: `ring_live`'s `output` is a raw WebRTC SDP blob (hundreds of
+    # characters of `\r\n`-joined protocol lines), called on every camera
+    # rotation of the dashboard's own live grid -- shown verbatim in the
+    # dashboard's Sim-TUI box, it drowned out everything else there (the
+    # creator, 2026-09-14, a photo of the Home tab: "what are these
+    # messages on dash -> home tab -> sim tui?").
+    _ACTIVITY_SILENT_TOOLS = frozenset({"ring_live"})
+
     async def _on_activity(self, message: Message) -> None:
         p = message.payload
         entry = {"ts": self._now(), "type": message.type, "task_id": p.get("task_id") or p.get("session_id", "")}
         if message.type == topics.TASK_STEP:
+            if p.get("tool") in self._ACTIVITY_SILENT_TOOLS:
+                return
             entry.update(step_no=p.get("step_no"), phase=p.get("phase"), summary=p.get("summary", ""),
                          tool=p.get("tool"), ok=p.get("ok"))
         elif message.type == topics.TASK_COMPLETED:
@@ -707,9 +718,13 @@ class HttpApi:
         elif message.type in (topics.TASK_FAILED, topics.TASK_BLOCKED):
             entry.update(summary=p.get("reason", ""))
         elif message.type == topics.ACTION_RESULT:
+            if p.get("tool") in self._ACTIVITY_SILENT_TOOLS:
+                return
             entry.update(action_id=p.get("action_id"), ok=p.get("ok"), duration_ms=p.get("duration_ms"),
                          summary=(p.get("error") or p.get("stdout_preview") or "")[:160])
         elif message.type == topics.ACTION_DENIED:
+            if p.get("tool") in self._ACTIVITY_SILENT_TOOLS:
+                return
             entry.update(action_id=p.get("action_id"), ok=False, summary="denied: " + "; ".join(p.get("reasons", [])))
         elif message.type == topics.TURN_COMPLETED:
             entry.update(summary=(p.get("text") or "")[:160], floor=p.get("floor", False))

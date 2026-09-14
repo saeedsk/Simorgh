@@ -619,12 +619,13 @@ class Service:
         events = await self._ctx.ledger.read(INFLIGHT_STREAM)
         started = {e.payload["action_id"] for e in events if e.type == "started"}
         finished = {e.payload["action_id"] for e in events if e.type == "finished"}
+        tools = {e.payload["action_id"]: e.payload.get("tool") for e in events if e.type == "started"}
         for action_id in started - finished:
-            await self._ctx.bus.publish(Message.new(
-                topics.ACTION_RESULT, source="execution",
-                payload={"action_id": action_id, "ok": False, "output_ref": "", "stdout_preview": "",
-                         "duration_ms": 0, "side_effects": [], "error": "interrupted by restart"},
-            ))
+            payload = {"action_id": action_id, "ok": False, "output_ref": "", "stdout_preview": "",
+                       "duration_ms": 0, "side_effects": [], "error": "interrupted by restart"}
+            if tools.get(action_id):
+                payload["tool"] = tools[action_id]
+            await self._ctx.bus.publish(Message.new(topics.ACTION_RESULT, source="execution", payload=payload))
             await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "finished", {"action_id": action_id, "ok": False}))
 
     async def _fetch_proposed_args(self, action_id: str) -> dict | None:
@@ -895,6 +896,9 @@ class Service:
             "action_id": action_id, "ok": ok, "output_ref": output_ref, "stdout_preview": stdout_preview,
             "duration_ms": duration_ms, "side_effects": side_effects or [], "metadata_ref": metadata_ref,
         }
+        tool = (message.payload or {}).get("tool")
+        if isinstance(tool, str) and tool:
+            payload["tool"] = tool
         if error is not None:
             # A failing tool's reason usually lives on stderr, and the
             # metadata carrying it was dropped here, so the model saw

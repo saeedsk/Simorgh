@@ -1316,3 +1316,44 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(st, 404)
             st, _, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/../secrets")
             self.assertEqual(st, 404)
+
+
+class ActivityFeedTestCase(unittest.IsolatedAsyncioTestCase):
+    """The dashboard's Sim box reads `/api/activity`. Every camera
+    rotation's `ring_live` call used to land there as raw WebRTC SDP
+    text, dozens a minute (the creator's photo of the Home tab,
+    2026-09-14: "what are these messages on dash -> home tab -> sim
+    tui?")."""
+
+    async def _activity(self, *messages) -> list[dict]:
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        for message in messages:
+            await api._on_activity(message)  # noqa: SLF001
+
+        def _get():
+            conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=10)
+            conn.request("GET", "/api/activity")
+            body = conn.getresponse().read()
+            conn.close()
+            return body
+
+        return json.loads(await asyncio.to_thread(_get))["events"]
+
+    @staticmethod
+    def _result(tool: str, preview: str):
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+
+        return Message.new(topics.ACTION_RESULT, source="execution", payload={
+            "action_id": tool, "ok": True, "output_ref": "", "stdout_preview": preview,
+            "duration_ms": 900, "side_effects": [], "tool": tool})
+
+    async def test_ring_live_signalling_never_reaches_the_feed(self):
+        events = await self._activity(self._result("ring_live", '{"sdp": "v=0\\r\\no=- 631089374 2 IN IP4"}'))
+        self.assertEqual(events, [])
+
+    async def test_an_ordinary_tool_result_still_does(self):
+        events = await self._activity(self._result("cam_light", "Front Window: spotlight off"))
+        self.assertEqual([e["summary"] for e in events], ["Front Window: spotlight off"])
