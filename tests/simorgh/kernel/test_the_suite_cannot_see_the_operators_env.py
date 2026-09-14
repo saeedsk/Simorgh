@@ -39,9 +39,13 @@ from simorgh.kernel.config import LoadedConfig
 
 class TestNoAmbientSimorghEnv(unittest.TestCase):
     def test_no_simorgh_env_override_is_visible_during_a_test(self):
+        # conftest.py sets one on purpose: booted services answer from the
+        # offline floor, never a paid model. That value is the suite's own.
+        set_by_the_suite = {"SIMORGH_COGNITION_PROVIDER_ORDER": "floor"}
         leaked = sorted(
             key for key in os.environ
             if key.startswith("SIMORGH_") and key != "SIMORGH_OBSERVER_RUN_ID"
+            and os.environ[key] != set_by_the_suite.get(key)
         )
         self.assertEqual(leaked, [], f"conftest.py's session fixture is not stripping {leaked}")
 
