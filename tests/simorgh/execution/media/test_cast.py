@@ -399,3 +399,93 @@ class DashViewTestCase(unittest.IsolatedAsyncioTestCase):
         result = await tools["cast_show"].run({"target": "page=tv device=Living Room TV"}, ctx=_ctx(bus))
         self.assertTrue(result.ok, result.error)
         self.assertEqual(cast.calls[-1], ("show_page", "Living Room TV", "http://10.0.0.5:8765/tv?token=s3"))
+
+
+class AndroidTvToolsTestCase(unittest.IsolatedAsyncioTestCase):
+    """The TV's own apps (media/androidtv.py) through the tv_* tools and
+    cast_play: paired, YouTube plays in the TV's app at its best quality;
+    unpaired, the file path as before."""
+
+    def setUp(self) -> None:
+        import tempfile
+        from tests.simorgh.execution.media.test_androidtv import FakeRemote
+        from simorgh.execution.media import androidtv
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.certs = Path(self.tmp.name) / "tv"
+        self.media = Path(self.tmp.name) / "media"; self.media.mkdir()
+        FakeRemote.instances = []; androidtv._PENDING.clear()
+        self.FakeRemote = FakeRemote
+
+    def _tools(self, fetch=None):
+        cast = _FakeCast()
+        fetch = fetch or (lambda v, d: ((Path(d) / f"{v}.mp4").write_bytes(b"x") and None) or (Path(d) / f"{v}.mp4", ""))
+        tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
+                                               reachable=lambda url: True, fetch=fetch, media_dir=self.media,
+                                               remote_cls=self.FakeRemote, certs_dir=self.certs)}
+        for t in tools.values():
+            t.IDLE_POLL_S = 0.01
+        return tools, cast, _Bus()
+
+    async def test_pairing_through_the_tool_then_youtube_plays_in_the_tvs_own_app(self):
+        tools, cast, bus = self._tools()
+        first = await tools["tv_pair"].run({}, ctx=_ctx(bus))
+        self.assertTrue(first.ok, first.error)
+        self.assertIn("showing a code", first.output)
+        wrong = await tools["tv_pair"].run({"pin": "000000"}, ctx=_ctx(bus))
+        self.assertFalse(wrong.ok); self.assertIn("did not match", wrong.error)
+        done = await tools["tv_pair"].run({"pin": self.FakeRemote.pin}, ctx=_ctx(bus))
+        self.assertTrue(done.ok, done.error); self.assertIn("paired with Living Room TV", done.output)
+        again = await tools["tv_pair"].run({}, ctx=_ctx(bus))
+        self.assertIn("already paired", again.output)
+        # now a YouTube video goes to the TV's own app, at its best quality
+        r = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=RqfZ3UTC14c", "mode": "full",
+                                          "title": "Sugar Man"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        self.assertIn("own YouTube app", r.output); self.assertIn("4K", r.output)
+        self.assertEqual(r.metadata["native"], "YouTube")
+        launched = [c for rem in self.FakeRemote.instances for c in rem.calls if isinstance(c, tuple) and c[0] == "launch"]
+        self.assertEqual(launched, [("launch", "https://www.youtube.com/watch?v=RqfZ3UTC14c")])
+        self.assertFalse([c for c in cast.calls if c[0] == "play"], "no file, no plain player")
+        self.assertFalse(list(self.media.glob("*.mp4")), "nothing fetched")
+        self.assertEqual(bus.published[-1].payload, {"mode": "full", "url": "https://www.youtube.com/watch?v=RqfZ3UTC14c",
+                                                     "title": "Sugar Man", "native": "YouTube"})
+        # framed on the TV: the TV's app as well
+        r = await tools["cast_play"].run({"url": "https://youtu.be/RqfZ3UTC14c"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error); self.assertEqual(r.metadata.get("native"), "YouTube")
+        # the other apps and the keys
+        app = await tools["tv_app"].run({"app": "netflix"}, ctx=_ctx(bus))
+        self.assertTrue(app.ok, app.error); self.assertIn("opened on Living Room TV: netflix", app.output)
+        self.assertEqual(self.FakeRemote.instances[-1].calls[1], ("launch", "https://www.netflix.com/"))
+        nope = await tools["tv_app"].run({"app": "solitaire"}, ctx=_ctx(bus))
+        self.assertFalse(nope.ok); self.assertIn("no app called", nope.error)
+        key = await tools["tv_key"].run({"key": "volume up"}, ctx=_ctx(bus))
+        self.assertTrue(key.ok, key.error); self.assertEqual(key.metadata["key"], "VOLUME_UP")
+        self.assertEqual(self.FakeRemote.instances[-1].calls[1], ("key", "VOLUME_UP"))
+
+    async def test_unpaired_the_file_path_is_used_and_the_tools_say_how_to_pair(self):
+        tools, cast, bus = self._tools()
+        r = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=RqfZ3UTC14c", "mode": "full"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error); self.assertIn("fetching", r.output); self.assertNotIn("native", r.metadata)
+        await asyncio.gather(*tools["cast_play"]._fetches)  # noqa: SLF001
+        self.assertEqual([c for c in cast.calls if c[0] == "play"][-1][2], "http://10.0.0.5:8765/tv/media/RqfZ3UTC14c.mp4")
+        key = await tools["tv_key"].run({"key": "home"}, ctx=_ctx(bus))
+        self.assertFalse(key.ok); self.assertIn("`tv pair`", key.error)
+
+    async def test_an_earlier_videos_watcher_stands_down_when_the_tv_is_driven_again(self):
+        # Live 2026-09-13: four watchers from four videos; one saw an idle
+        # moment as the next video loaded and put the dashboard over it.
+        tools, cast, bus = self._tools()
+        cast.states = ["PLAYING"]      # the first video plays on and on
+        r = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=aaaaaaaaaaa", "mode": "full"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        await asyncio.sleep(0.05)      # the fetch is done; the watcher is polling
+        self.assertTrue([c for c in cast.calls if c[0] == "media_state"])
+        shown_before = len([c for c in cast.calls if c[0] == "show_page"])
+        # somebody drives the TV: a new video; the old video's player goes idle for a moment
+        cast.states = ["IDLE"]
+        r2 = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=bbbbbbbbbbb", "mode": "full"}, ctx=_ctx(bus))
+        await asyncio.sleep(0.05)
+        self.assertEqual(len([c for c in cast.calls if c[0] == "show_page"]), shown_before,
+                         "the first watcher did not put the dashboard over the second video")
+        for t in list(tools["cast_play"]._fetches):  # noqa: SLF001
+            t.cancel()

@@ -78,10 +78,19 @@ class PyChromecast:
     """
 
     def __init__(self, *, discovery_s: float = 5.0) -> None:
+        import threading
+
         self._discovery_s = discovery_s
         self._zconf = None
         self._browser = None
         self._casts: dict[str, object] = {}
+        # One socket per TV, one writer at a time. Every tool call runs in
+        # its own worker thread, and two writing the same TLS socket at
+        # once corrupted it -- "BAD_WRITE_RETRY", "CIPHER_OPERATION_FAILED",
+        # then "EOF occurred in violation of protocol" on every write
+        # after, and the video never came (the creator's terminal,
+        # 2026-09-13, while the idle watchers polled beside a play).
+        self._lock = threading.RLock()
 
     def _start(self) -> None:
         if self._browser is not None:
@@ -89,6 +98,11 @@ class PyChromecast:
         import zeroconf
         from pychromecast.discovery import CastBrowser, SimpleCastListener
 
+        import logging
+
+        # A broken socket logged one line per write to the terminal, over
+        # the conversation; the tool result says what failed.
+        logging.getLogger("pychromecast.socket_client").setLevel(logging.CRITICAL)
         self._zconf = zeroconf.Zeroconf()
         self._browser = CastBrowser(SimpleCastListener(), self._zconf)
         self._browser.start_discovery()
@@ -111,6 +125,14 @@ class PyChromecast:
 
         self._start()
         cast = self._casts.get(name)
+        if cast is not None and not self._alive(cast):
+            # A dead socket stays dead: drop it and connect afresh.
+            self._casts.pop(name, None)
+            try:
+                cast.disconnect(timeout=2)
+            except Exception:  # noqa: BLE001
+                pass
+            cast = None
         if cast is None:
             info = next((i for i in self._browser.devices.values() if i.friendly_name == name), None)
             if info is None:
@@ -119,6 +141,15 @@ class PyChromecast:
             self._casts[name] = cast
         cast.wait(timeout=10)
         return cast
+
+    @staticmethod
+    def _alive(cast) -> bool:
+        client = getattr(cast, "socket_client", None)
+        if client is None:
+            return True
+        connected = getattr(client, "is_connected", True)
+        stopped = getattr(getattr(client, "stop", None), "is_set", lambda: False)()
+        return bool(connected) and not stopped
 
     def close(self) -> None:
         for cast in self._casts.values():
@@ -135,63 +166,76 @@ class PyChromecast:
         self._browser = self._zconf = None
 
     def show_page(self, name: str, url: str) -> None:
-        from pychromecast.controllers.dashcast import DashCastController
+        with self._lock:
+            from pychromecast.controllers.dashcast import DashCastController
 
-        cast = self._cast(name)
-        controller = DashCastController()
-        cast.register_handler(controller)
-        done = {}
+            cast = self._cast(name)
+            controller = DashCastController()
+            cast.register_handler(controller)
+            done = {}
 
-        def _cb(ok, *_rest):  # the library hands (ok, data)
-            done["ok"] = ok
-        # `force`: the receiver navigates to the page itself instead of
-        # framing it. The receiver runs over HTTPS and Sim's page is plain
-        # HTTP on the LAN, and a framed HTTP page inside an HTTPS receiver
-        # is mixed content Chromium refuses -- the TV showed DashCast's
-        # own splash and nothing else (the creator, 2026-09-12).
-        controller.load_url(url, force=True, callback_function=_cb)
-        # A forced load navigates the receiver away, so no callback ever
-        # comes back: a couple of seconds for the command to land is all
-        # there is to wait for.
-        deadline = time.monotonic() + 2.5
-        while "ok" not in done and time.monotonic() < deadline:
-            time.sleep(0.2)
-        if done.get("ok") is False:
-            raise RuntimeError("the device did not load the page")
+            def _cb(ok, *_rest):  # the library hands (ok, data)
+                done["ok"] = ok
+            # `force`: the receiver navigates to the page itself instead of
+            # framing it. The receiver runs over HTTPS and Sim's page is plain
+            # HTTP on the LAN, and a framed HTTP page inside an HTTPS receiver
+            # is mixed content Chromium refuses -- the TV showed DashCast's
+            # own splash and nothing else (the creator, 2026-09-12).
+            controller.load_url(url, force=True, callback_function=_cb)
+            # A forced load navigates the receiver away, so no callback ever
+            # comes back: a couple of seconds for the command to land is all
+            # there is to wait for.
+            deadline = time.monotonic() + 2.5
+            while "ok" not in done and time.monotonic() < deadline:
+                time.sleep(0.2)
+            if done.get("ok") is False:
+                raise RuntimeError("the device did not load the page")
 
     def play(self, name: str, url: str, *, content_type: str, title: str) -> None:
-        cast = self._cast(name)
-        cast.media_controller.play_media(url, content_type, title=title or None)
-        cast.media_controller.block_until_active(timeout=10)
+        with self._lock:
+            cast = self._cast(name)
+            cast.media_controller.play_media(url, content_type, title=title or None)
+            cast.media_controller.block_until_active(timeout=10)
 
     def media_state(self, name: str) -> str:
         """The device's player state: PLAYING, PAUSED, BUFFERING, IDLE,
-        UNKNOWN -- for knowing when a video has ended."""
-        cast = self._cast(name)
-        try:
-            cast.media_controller.update_status()
-        except Exception:  # noqa: BLE001 -- the last known status is the answer then
-            pass
-        return str(getattr(cast.media_controller.status, "player_state", "") or "UNKNOWN").upper()
+        STOPPED, UNKNOWN -- for knowing when a video has ended."""
+        with self._lock:
+            cast = self._cast(name)
+            try:
+                cast.media_controller.update_status()
+            except Exception:  # noqa: BLE001 -- the last known status is the answer then
+                pass
+            status = cast.media_controller.status
+            state = str(getattr(status, "player_state", "") or "UNKNOWN").upper()
+            if state == "IDLE":
+                reason = str(getattr(status, "idle_reason", "") or "").upper()
+                # FINISHED is the video ending; CANCELLED / INTERRUPTED / ERROR
+                # is somebody else's doing and not a cue to put the dashboard back
+                return "IDLE" if reason in ("", "FINISHED") else "STOPPED"
+            return state
 
     def play_youtube(self, name: str, video_id: str) -> None:
-        """YouTube full screen: the Cast protocol has its own YouTube
-        receiver, driven by video id -- a YouTube page URL is not a media
-        file the media controller could play."""
-        from pychromecast.controllers.youtube import YouTubeController
+        """YouTube full screen through the Cast protocol's own YouTube
+        receiver -- which answers "400 screen_ids parameter error" since
+        2026-09; kept for the day it works again."""
+        with self._lock:
+            from pychromecast.controllers.youtube import YouTubeController
 
-        cast = self._cast(name)
-        controller = YouTubeController()
-        cast.register_handler(controller)
-        controller.play_video(video_id)
+            cast = self._cast(name)
+            controller = YouTubeController()
+            cast.register_handler(controller)
+            controller.play_video(video_id)
 
     def stop(self, name: str) -> None:
-        cast = self._cast(name)
-        cast.media_controller.stop()
-        cast.quit_app()
+        with self._lock:
+            cast = self._cast(name)
+            cast.media_controller.stop()
+            cast.quit_app()
 
     def volume(self, name: str, level: float) -> None:
-        self._cast(name).set_volume(level)
+        with self._lock:
+            self._cast(name).set_volume(level)
 
 
 _YOUTUBE = re.compile(r"(?:youtu\.be/|youtube\.com/(?:watch\?(?:.*&)?v=|embed/|shorts/|live/))([\w-]{6,})")
@@ -223,6 +267,10 @@ class CastPreferences:
 
     device: str = ""
     backend: object = None   # the one PyChromecast every cast tool shares, once started
+    #: bumped by every show/play/stop; a watcher from an earlier video
+    #: that sees it changed stands down (live 2026-09-13: four such
+    #: watchers, and one put the dashboard over a video just started)
+    generation: int = 0
 
 
 def settings_paths(home: Path | None = None) -> tuple[Path, Path]:
@@ -251,12 +299,16 @@ class _CastTool:
 
     def __init__(self, config, *, cast=None, env=None, secrets=None, clock=time.time, reachable=None,
                  prefs: CastPreferences | None = None, settings_home: Path | None = None, fetch=None,
-                 media_dir: Path | None = None) -> None:
+                 media_dir: Path | None = None, remote_cls=None, certs_dir: Path | None = None) -> None:
         self._config = config
         # tvmedia.fetch, or a fake: a YouTube video as a file for the TV
         self._fetch = fetch
         self._media_dir = media_dir
         self._fetches: set[asyncio.Task] = set()
+        # the Android TV remote protocol (media/androidtv.py): the library's
+        # class or a fake, and where the pairing certificate lives
+        self._remote_cls = remote_cls
+        self._certs_dir = certs_dir
         self._given = cast
         self._env = env
         self._secrets = secrets
@@ -264,6 +316,25 @@ class _CastTool:
         self._reachable = reachable
         self._prefs = prefs or CastPreferences(device=str(getattr(config, "cast_device", "") or ""))
         self._settings_home = settings_home
+
+    def _bump(self) -> int:
+        self._prefs.generation += 1
+        return self._prefs.generation
+
+    def _androidtv(self, host: str):
+        from .androidtv import AndroidTv
+
+        certs = self._certs_dir or settings_paths(self._settings_home)[0].parent / "tv"
+        return AndroidTv(host, certs_dir=certs, remote_cls=self._remote_cls)
+
+    def _host_of(self, backend, name: str) -> str:
+        try:
+            for device in backend.devices():
+                if device.name == name:
+                    return str(device.host or "")
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
 
     def _backend(self):
         if self._given is not None:
@@ -343,6 +414,31 @@ class _CastTool:
         payload.update({k: v for k, v in extra.items() if v not in ("", None, False)})
         await bus.publish(Message.new(topics.TV_STATE, source="execution", payload=payload))
 
+    async def _native_youtube(self, ctx: ToolContext, backend, name: str, video: str, url: str,
+                              title: str) -> ToolResult | None:
+        """The TV's own YouTube app, when Sim is paired with the TV
+        (media/androidtv.py): it plays at the best quality the video has,
+        4K included, which no Cast path can. None when not paired or the
+        TV would not take it -- the caller falls back to the file."""
+        from .androidtv import youtube_link
+
+        host = self._host_of(backend, name)
+        if not host:
+            return None
+        tv = self._androidtv(host)
+        if not tv.paired():
+            return None
+        problem = await tv.launch(youtube_link(video))
+        if problem:
+            await self._publish_state(ctx, "full", url=url, title=title, problem=problem)
+            return None
+        self._bump()
+        await self._publish_state(ctx, "full", url=url, title=title, native="YouTube")
+        return ToolResult(ok=True, output=(f"playing in {name}'s own YouTube app, at the best quality the video has "
+                                           f"(4K when it is there): {title or url}. Say \"show your dashboard\" to come back"),
+                          side_effects=(f"cast_play:{name}",), metadata={"mode": "full", "url": url, "device": name,
+                                                                         "video": video, "native": "YouTube"})
+
     def _media_url(self, name: str) -> str:
         """Where the TV fetches a cached video from: Sim's API, the same
         host the page comes from; the route is open on the LAN."""
@@ -383,6 +479,7 @@ class _CastTool:
             # on the TV a framed video is full screen, and the dashboard
             # comes back when it ends.
             mode = "full"
+        generation = self._bump()
         try:
             await asyncio.to_thread(backend.play, device, self._media_url(path.name), content_type="video/mp4",
                                     title=title)
@@ -390,22 +487,27 @@ class _CastTool:
             await self._publish_state(ctx, "full", url=url, title=title, problem=f"{device} would not play it ({exc})")
             return
         await self._publish_state(ctx, "full", url=url, title=title, stream=stream)
-        await self._dashboard_back_after(ctx, backend, device)
+        await self._dashboard_back_after(ctx, backend, device, generation)
 
     #: how often the TV is asked whether the video has ended
-    IDLE_POLL_S = 5.0
+    IDLE_POLL_S = 10.0
     #: give up watching after this long (a film, and then some)
     WATCH_MAX_S = 4 * 3600.0
 
-    async def _dashboard_back_after(self, ctx: ToolContext, backend, device: str) -> None:
+    async def _dashboard_back_after(self, ctx: ToolContext, backend, device: str, generation: int) -> None:
         """When the video ends the plain player sits on its idle card;
-        the dashboard is put back. Polls the device's player state."""
+        the dashboard is put back. Polls the device's player state.
+        Stands down when another show/play/stop has happened since
+        (`generation`), or when the video was stopped rather than
+        finished -- somebody else is driving the TV then."""
         if not hasattr(backend, "media_state"):
             return
         started = time.monotonic()
         seen_playing = False
         while time.monotonic() - started < self.WATCH_MAX_S:
             await asyncio.sleep(self.IDLE_POLL_S)
+            if self._prefs.generation != generation:
+                return
             try:
                 state = await asyncio.to_thread(backend.media_state, device)
             except Exception:  # noqa: BLE001 -- the TV went away; nothing to put back
@@ -413,7 +515,12 @@ class _CastTool:
             if state in ("PLAYING", "PAUSED", "BUFFERING"):
                 seen_playing = True
                 continue
+            if state == "STOPPED":
+                return
             if state in ("IDLE", "UNKNOWN") and (seen_playing or time.monotonic() - started > 30.0):
+                if self._prefs.generation != generation:
+                    return
+                self._bump()
                 try:
                     await asyncio.to_thread(backend.show_page, device, self._page_url("dash"))
                 except Exception:  # noqa: BLE001
@@ -511,6 +618,7 @@ class CastShowTool(_CastTool):
                     f"refused: the TV could not fetch Sim's page at {url.split('?')[0]} ({why}). "
                     "Sim's API is probably bound to loopback: set [interface] http_host = \"0.0.0.0\" and a "
                     "SIM_API_TOKEN, then restart."))
+        self._bump()
         try:
             await asyncio.to_thread(backend.show_page, name, url)
         except Exception as exc:  # noqa: BLE001
@@ -552,6 +660,15 @@ class CastPlayTool(_CastTool):
         if mode == "frame":
             video = youtube_id(url)
             if video:
+                try:
+                    backend = self._backend()
+                    name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
+                except Exception:  # noqa: BLE001
+                    backend, name, problem = None, "", "no TV"
+                if backend is not None and not problem:
+                    native = await self._native_youtube(ctx, backend, name, video, url, title)
+                    if native:
+                        return native
                 # YouTube's embedded player is blank and silent inside a
                 # Cast receiver (the creator's TV, 2026-09-13): the page
                 # gets the video as a file instead, fetched now.
@@ -575,6 +692,9 @@ class CastPlayTool(_CastTool):
             return ToolResult(ok=False, error=problem)
         video = youtube_id(url)
         if video:
+            native = await self._native_youtube(ctx, backend, name, video, url, title)
+            if native:
+                return native
             # YouTube's Cast receiver stopped taking Sim's requests ("400
             # screen_ids parameter error", the creator's TV, 2026-09-13):
             # the video goes to the TV as a file through its plain media
@@ -617,6 +737,7 @@ class CastStopTool(_CastTool):
         if problem:
             return ToolResult(ok=False, error=problem)
         try:
+            self._bump()
             await asyncio.to_thread(backend.stop, name)
         except Exception as exc:  # noqa: BLE001
             return ToolResult(ok=False, error=f"refused: {name} would not stop ({exc})")
@@ -861,14 +982,118 @@ class CastSetupTool(_CastTool):
                           metadata={"changed": changed, "device": self._prefs.device})
 
 
+class TvPairTool(_CastTool):
+    """`tv pair` / `tv pair <code>`: pair Sim with the TV's own remote
+    protocol, once. The person's to run: the code is on the TV."""
+
+    name = "tv_pair"
+    description = ("Pair with the TV's own remote protocol (Android TV), once: without a `pin` the TV shows a code; "
+                   "with the `pin` the pairing finishes. Unlocks the TV's own apps -- YouTube at 4K, Netflix -- and its "
+                   "keys. `device` names the TV when there are several.")
+    args_schema = {"type": "object", "properties": {"pin": {"type": "string"}, "device": {"type": "string"}}}
+    reversibility = "reversible"
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        try:
+            backend = self._backend()
+            name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(ok=False, error=f"refused: {exc}")
+        if problem:
+            return ToolResult(ok=False, error=problem)
+        host = self._host_of(backend, name)
+        if not host:
+            return ToolResult(ok=False, error=f"refused: no address known for {name}")
+        tv = self._androidtv(host)
+        pin = str(args.get("pin") or "").strip()
+        if not pin:
+            if tv.paired():
+                return ToolResult(ok=True, output=f"already paired with {name} ({host}); `tv pair <code>` again only if the TV forgot Sim",
+                                  metadata={"device": name, "host": host, "paired": True})
+            problem = await tv.pair_start()
+            if problem:
+                return ToolResult(ok=False, error=f"refused: {problem}")
+            return ToolResult(ok=True, output=f"{name} is showing a code on its screen; type `tv pair <code>` to finish",
+                              metadata={"device": name, "host": host, "paired": False})
+        problem = await tv.pair_finish(pin)
+        if problem:
+            return ToolResult(ok=False, error=f"refused: {problem}")
+        return ToolResult(ok=True, output=(f"paired with {name}: Sim can open its apps (\"play ... on YouTube\" now uses "
+                                           "the TV's own app, at 4K) and press its keys"),
+                          side_effects=(f"tv_pair:{name}",), metadata={"device": name, "host": host, "paired": True})
+
+
+class TvAppTool(_CastTool):
+    name = "tv_app"
+    description = ("Open one of the TV's own apps, or a deep link in one: `app` youtube, netflix, disney, prime, spotify, "
+                   "plex, or `url` such as https://www.youtube.com/watch?v=... (the YouTube app plays it at its best "
+                   "quality). Needs `tv pair` once. `device` names the TV when there are several.")
+    args_schema = {"type": "object", "properties": {"app": {"type": "string"}, "url": {"type": "string"},
+                                                    "device": {"type": "string"}}}
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        from .androidtv import APPS, app_link
+
+        target = str(args.get("url") or args.get("app") or "").strip()
+        link = app_link(target)
+        if not link:
+            return ToolResult(ok=False, error=f"refused: no app called {target!r}; the apps are {', '.join(sorted(k for k in APPS if k != 'home'))}, or give a link")
+        try:
+            backend = self._backend()
+            name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(ok=False, error=f"refused: {exc}")
+        if problem:
+            return ToolResult(ok=False, error=problem)
+        host = self._host_of(backend, name)
+        tv = self._androidtv(host)
+        problem = await tv.launch(link)
+        if problem:
+            return ToolResult(ok=False, error=f"refused: {problem}")
+        self._bump()
+        await self._publish_state(ctx, "full", url=link, title=target, native=target)
+        return ToolResult(ok=True, output=f"opened on {name}: {target}. Say \"show your dashboard\" to come back",
+                          side_effects=(f"tv_app:{name}",), metadata={"device": name, "link": link})
+
+
+class TvKeyTool(_CastTool):
+    name = "tv_key"
+    description = ("Press a key on the TV as its remote would: home, back, up/down/left/right, ok, play, pause, stop, "
+                   "next, previous, mute, volume up/down, power. Needs `tv pair` once.")
+    args_schema = {"type": "object", "required": ["key"], "properties": {"key": {"type": "string"}, "device": {"type": "string"}}}
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        from .androidtv import KEYS, key_code
+
+        key = str(args.get("key") or "").strip()
+        if not key_code(key):
+            return ToolResult(ok=False, error=f"refused: which key? one of {', '.join(sorted(KEYS))}")
+        try:
+            backend = self._backend()
+            name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(ok=False, error=f"refused: {exc}")
+        if problem:
+            return ToolResult(ok=False, error=problem)
+        tv = self._androidtv(self._host_of(backend, name))
+        problem = await tv.key(key)
+        if problem:
+            return ToolResult(ok=False, error=f"refused: {problem}")
+        return ToolResult(ok=True, output=f"pressed {key} on {name}", side_effects=(f"tv_key:{name}",),
+                          metadata={"device": name, "key": key_code(key)})
+
+
 def cast_tools(config, **kwargs) -> list:
     kwargs = {k: v for k, v in kwargs.items()
-              if k in ("cast", "env", "secrets", "clock", "reachable", "settings_home", "fetch", "media_dir")}
+              if k in ("cast", "env", "secrets", "clock", "reachable", "settings_home", "fetch", "media_dir",
+                       "remote_cls", "certs_dir")}
     prefs = CastPreferences(device=str(getattr(config, "cast_device", "") or ""))
     return [CastDevicesTool(config, prefs=prefs, **kwargs), CastShowTool(config, prefs=prefs, **kwargs),
             CastPlayTool(config, prefs=prefs, **kwargs), CastStopTool(config, prefs=prefs, **kwargs),
             CastVolumeTool(config, prefs=prefs, **kwargs), CastUseTool(config, prefs=prefs, **kwargs),
-            CastSetupTool(config, prefs=prefs, **kwargs), DashViewTool(config, prefs=prefs, **kwargs)]
+            CastSetupTool(config, prefs=prefs, **kwargs), DashViewTool(config, prefs=prefs, **kwargs),
+            TvPairTool(config, prefs=prefs, **kwargs), TvAppTool(config, prefs=prefs, **kwargs),
+            TvKeyTool(config, prefs=prefs, **kwargs)]
 
 
 __all__ = ["CastDevicesTool", "CastPlayTool", "CastPreferences", "CastSetupTool", "CastShowTool", "CastStopTool", "CastUseTool",

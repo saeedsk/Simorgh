@@ -69,6 +69,8 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "cast_devices"): "Finding the TV",
     ("act", "cast_show"): "Putting Sim on the TV",
     ("act", "cast_play"): "Playing on the TV",
+    ("act", "tv_app"): "Opening an app on the TV",
+    ("act", "tv_key"): "Pressing a key on the TV",
     ("act", "cast_stop"): "Stopping the TV",
     ("act", "cast_volume"): "Setting the TV volume",
     ("act", "dash_view"): "Turning the dashboard",

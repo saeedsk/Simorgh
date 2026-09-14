@@ -32,6 +32,9 @@ All inference is local; the network is used once, to fetch these.
 | whisper.cpp (`whisper-cli`) | 1.9.1, Homebrew | MIT | recognition on Apple Silicon with Metal |
 | ffmpeg | system, Homebrew | LGPL-2.1+ / GPL-2+ depending on build | capture fallback and decoding; not linked, invoked |
 | faster-whisper | optional | MIT | CTranslate2 Whisper, when whisper.cpp is not wanted |
+| pychromecast | 14.0.10 | MIT | Sim on the TV over the Cast protocol (`execution/media/cast.py`); optional, refused by name when missing. Its YouTube controller (casttube 0.2.1, MIT) is broken against YouTube as of 2026-09-13 and is no longer the path for YouTube |
+| yt-dlp | system (2026.08.19) | Unlicense | fetches a YouTube video as a file for the TV's own player (`execution/media/tvmedia.py`); invoked, not linked. YouTube's terms frown on downloading; the file is for the TV in this house, kept under `workspace/tv/media`, newest 3 GB |
+| androidtvremote2 | 0.3.2 | Apache-2.0 | the Android TV remote protocol (`execution/media/androidtv.py`): pair once with the code the TV shows, then open the TV's own apps by deep link (YouTube at 4K) and press keys; optional, refused by name when missing |
 
 ## What is deliberately not here
 

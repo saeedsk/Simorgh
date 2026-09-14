@@ -735,3 +735,20 @@ class TestTurnCompletedFiresForEveryKindNotJustChat(unittest.TestCase):
             await planning.stop()
             await cognition.stop()
             await verification.stop()
+
+
+class TurnTextTestCase(unittest.TestCase):
+    def test_a_label_the_model_invented_is_not_said(self):
+        # Live 2026-09-13: Sim spoke "FINAL ANSWER: without a body".
+        from simorgh.orchestration.api import Outcome
+        from simorgh.orchestration.worker import _turn_text
+        said = _turn_text(Outcome("completed", result_summary=(
+            "Still bodyless and fine with it -- the virtual kisses keep coming anyway.\n\nFINAL ANSWER: without a body")), False)
+        self.assertEqual(said, "Still bodyless and fine with it -- the virtual kisses keep coming anyway.")
+        self.assertEqual(_turn_text(Outcome("completed", result_summary="FINAL ANSWER: It is nine o'clock."), False),
+                         "It is nine o'clock.")
+        self.assertEqual(_turn_text(Outcome("completed", result_summary="**Answer:** yes, it is running."), False),
+                         "yes, it is running.")
+        self.assertEqual(_turn_text(Outcome("completed", result_summary="Final call is at six."), False),
+                         "Final call is at six.", "a sentence that starts with the word is not a label")
+        self.assertEqual(_turn_text(Outcome("completed", result_summary="QUIET"), False), "QUIET")

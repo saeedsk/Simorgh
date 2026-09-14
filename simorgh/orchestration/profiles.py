@@ -56,7 +56,7 @@ CHAT = Profile(
            "propose_mcp_server",
            # The TV (execution/media/cast.py): "put yourself on the TV",
            # "play this on the TV" are chat requests too.
-           "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view",
+           "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "tv_app", "tv_key",
            "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
            "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch"),
     # 6 was right for a profile that could only read. Writing a file
@@ -182,7 +182,7 @@ SKILL = Profile(
 VOICE_CHAT = replace(
     CHAT,
     tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task", "list_tasks", "cancel_task",
-           "voice_setting", "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view",
+           "voice_setting", "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "tv_app", "tv_key",
            "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
            "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch"),
     # Six: a search, a cast, a retry, and the answer (the creator,

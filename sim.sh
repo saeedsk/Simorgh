@@ -20,6 +20,10 @@ PYTHON_BIN="${SIMORGH_PYTHON:-python3}"
 # means in-place edits, as before 2026-09-11. Every path through this
 # script -- loader or not -- runs Sim from this checkout, so name it.
 export SIMORGH_EXECUTION_REPO_ROOT="${SIMORGH_EXECUTION_REPO_ROOT:-$REPO_ROOT}"
+# protobuf's C++ implementation (anaconda's default) lacks what the Android
+# TV remote library needs; upb is the wheel default everywhere else
+# (execution/media/androidtv.py, 2026-09-13).
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION="${PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION:-upb}"
 
 if [[ "${SIMORGH_NO_LOADER:-0}" == "1" ]]; then
   exec "$PYTHON_BIN" -m simorgh run "$@"

@@ -140,6 +140,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "cast_show": ("reversible", True),
 
     "cast_play": ("reversible", True),
+    "tv_pair": ("reversible", True),
+    "tv_app": ("reversible", True),
+    "tv_key": ("reversible", True),
 
     "cast_stop": ("reversible", True),
 

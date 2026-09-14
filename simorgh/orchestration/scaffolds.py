@@ -158,6 +158,11 @@ _TOOL_NOTES: dict[str, str] = {
                  "fetched as a file first and starts full screen a few seconds later, with sound; the dashboard "
                  "comes back when it ends -- say so. The TV cannot draw a video inside your page",
     "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
+    "tv_app": "open one of the TV's own apps (youtube, netflix, disney, prime, spotify, plex) or a link in one; "
+              "needs the person to have run `tv pair` once -- if it is refused for that, say so",
+    "tv_key": "press a key on the TV: home, back, ok, play, pause, next, mute, volume up, power",
+    "tv_pair": "the person's one-time pairing with the TV's own remote protocol (`tv pair`, then `tv pair <code>`); "
+               "tell them to type it rather than running it yourself",
     "cast_volume": "the TV's volume, 0-100",
     "dash_view": "turn the dashboard on the TV to a view (home, news, markets, cameras, media, ambient...), a chart "
                  "timeframe or symbol, or set it rotating; action=remote gives the phone remote's link",

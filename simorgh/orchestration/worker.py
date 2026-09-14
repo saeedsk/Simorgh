@@ -13,6 +13,7 @@ README).
 from __future__ import annotations
 
 import asyncio
+import re
 import json
 import uuid
 from collections import OrderedDict
@@ -63,12 +64,29 @@ def _turn_text(outcome, cancelled: bool) -> str:
     changes" (observer, 2026-09-13)."""
     if cancelled:
         return ""
-    summary = (outcome.result_summary or "").strip()
+    summary = _unlabelled((outcome.result_summary or "").strip())
     if outcome.kind == "blocked" and summary and outcome.reason:
         return f"{summary}\n\n(Not finished: {outcome.reason})"
     if summary:
         return summary
     return f"I could not finish this one: {outcome.reason}" if outcome.reason else ""
+
+_LABEL = re.compile(r"^\s*(?:\*\*)?(?:FINAL ANSWER|FINAL|ANSWER|RESPONSE|REPLY)\s*(?::\s*(?:\*\*)?|(?:\*\*)\s*:?)\s*", re.I)
+_TRAILING_LABEL = re.compile(r"\n+\s*(?:\*\*)?FINAL ANSWER\s*:?(?:\*\*)?.*\Z", re.I | re.S)
+
+
+def _unlabelled(text: str) -> str:
+    """The model's answer without a label it invented around it. Live
+    2026-09-13: "... the virtual kisses keep coming anyway.\n\nFINAL
+    ANSWER: without a body" -- and the label was spoken. A label at the
+    end (with whatever follows it, an echo of the question) goes; a
+    label at the start goes; the words stay."""
+    body = text or ""
+    if "\n" in body.strip():
+        body = _TRAILING_LABEL.sub("", body)
+    body = _LABEL.sub("", body, count=1) if _LABEL.match(body) and len(body) > 14 else body
+    return body.strip() or (text or "").strip()
+
 
 class Worker:
     def __init__(
