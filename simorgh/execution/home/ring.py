@@ -122,6 +122,12 @@ class RingCloud:
         except ImportError as exc:
             raise RuntimeError(available()[1]) from exc
 
+        try:
+            from ring_doorbell.webrtcstream import RingWebRtcStream
+
+            harden_webrtc_stream_class(RingWebRtcStream)
+        except ImportError:  # an older ring_doorbell without live view: nothing to harden
+            pass
         self._auth = Auth(USER_AGENT, self._token, self._on_token)
         self._ring = Ring(self._auth)
         await self._ring.async_create_session()
@@ -188,8 +194,7 @@ class RingCloud:
         dev = self._dev(cam_id)
         answer = await dev.generate_webrtc_stream(sdp_offer, keep_alive_timeout=keep_alive_s)
         session = _sdp_session(sdp_offer)
-        stream = getattr(dev, "_webrtc_streams", {}).get(session)
-        if stream is not None:
+        for stream in list(getattr(dev, "_webrtc_streams", {}).values()):
             harden_webrtc_stream(stream)
         return answer
 
@@ -216,6 +221,27 @@ class RingCloud:
             except Exception:  # noqa: BLE001
                 pass
         self._auth = self._ring = None
+
+
+def harden_webrtc_stream_class(cls) -> None:
+    """The reader-closes-itself fix below, for every stream the library
+    will ever make. Patching each stream after `generate_webrtc_stream`
+    returned came too late: the library starts the stream's reader inside
+    `generate()`, before Sim can see the stream, so a close message from
+    Ring during setup still made the reader await itself -- and the lookup
+    by session id could miss the stream entirely ("Task cannot await on
+    itself" in the creator's terminal again, 2026-09-14). Idempotent."""
+    if getattr(cls, "_simorgh_hardened_class", False):
+        return
+    original = cls._close
+
+    async def _close(self, *, closed_by_self: bool) -> None:
+        if getattr(self, "read_task", None) is asyncio.current_task():
+            self.read_task = None
+        await original(self, closed_by_self=closed_by_self)
+
+    cls._close = _close  # noqa: SLF001 -- the library's own name
+    cls._simorgh_hardened_class = True
 
 
 def harden_webrtc_stream(stream) -> None:
@@ -823,4 +849,4 @@ def ring_tools(config, **kwargs) -> list:
 
 
 __all__ = ["RingCamera", "RingCloud", "RingEventsTool", "RingLightTool", "RingListTool", "RingLiveTool", "RingPreferences",
-           "RingSetupTool", "RingSirenTool", "RingSnapshotTool", "RingWatchTool", "available", "harden_webrtc_stream", "ring_tools"]
+           "RingSetupTool", "RingSirenTool", "RingSnapshotTool", "RingWatchTool", "available", "harden_webrtc_stream", "harden_webrtc_stream_class", "ring_tools"]

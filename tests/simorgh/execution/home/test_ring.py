@@ -262,6 +262,34 @@ class RingTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream.closed, [True])
         self.assertIsNone(stream.read_task)
 
+    async def test_a_stream_hardened_at_the_class_never_awaits_itself_even_before_sim_sees_it(self):
+        """The library starts a stream's reader inside `generate()`, before
+        Sim can patch that stream -- so the fix has to be on the class."""
+        import asyncio
+
+        from simorgh.execution.home.ring import harden_webrtc_stream_class
+
+        class _Stream:
+            def __init__(self):
+                self.read_task = None
+                self.closed = []
+
+            async def _close(self, *, closed_by_self):
+                self.closed.append(closed_by_self)
+                if self.read_task is not None and not self.read_task.done():
+                    await self.read_task          # the library's line: awaiting the reader
+
+        harden_webrtc_stream_class(_Stream)
+        harden_webrtc_stream_class(_Stream)   # idempotent
+        stream = _Stream()                    # created after hardening, never patched itself
+
+        async def reader():
+            await stream._close(closed_by_self=True)
+        stream.read_task = asyncio.create_task(reader())
+        await asyncio.wait_for(stream.read_task, 2.0)
+        self.assertEqual(stream.closed, [True])
+        self.assertIsNone(stream.read_task)
+
     async def test_an_ordinary_ping_timeout_close_never_reaches_the_loops_handler(self):
         """Ring's own idle/abandoned-session timeout ("4000 Ping timeout")
         is what an ordinary end-of-live-view looks like from inside
