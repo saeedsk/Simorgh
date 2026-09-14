@@ -375,7 +375,8 @@ async function ringLive(tile,video,set){ // Ring live view: WebRTC with Ring's s
   const offer=await pc.createOffer();await pc.setLocalDescription(offer);
   await new Promise(res=>{if(pc.iceGatheringState==="complete")return res();const t=setTimeout(res,3000);pc.onicegatheringstatechange=()=>{if(pc.iceGatheringState==="complete"){clearTimeout(t);res();}};});
   const r=await fetch(q("/api/dash/ring/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:tile.name,action:"offer",sdp:pc.localDescription.sdp})});
-  const body=await r.json();if(!r.ok||!body.sdp)throw new Error(body.text||body.error||"no answer");
+  let body=await r.json();if(!body.sdp&&typeof body.text==="string"&&body.text.trim().startsWith("{")){try{body=Object.assign({},body,JSON.parse(body.text.replace(/\s*\(\d+ ms\)\s*$/,"")));}catch(e){}}
+  if(!r.ok||!body.sdp)throw new Error(body.error||"no answer from Ring");
   await pc.setRemoteDescription({type:"answer",sdp:body.sdp});
   const session=body.session;pc._session=session;pc._camera=tile.name;
   pc._keep=setInterval(()=>{fetch(q("/api/dash/ring/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:tile.name,action:"keepalive",session})}).catch(()=>{});},20000);

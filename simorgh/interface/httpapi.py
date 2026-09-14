@@ -362,6 +362,11 @@ class HttpApi:
             outcome = await _run_tool(bus=self._bus, ledger=self._ledger, tool=tool, raw=json.dumps(args),
                                       session_id="dash", timeout=timeout)
             text = outcome.text or ""
+            # The terminal's runner appends "  (1234 ms)" to a result that
+            # took a while. Ring's signalling always does, so the JSON the
+            # page needed never parsed and came back wrapped as {"text":
+            # ...} -- the Ring tiles showed no live view (2026-09-13).
+            text = re.sub(r"\s*\(\d+ ms\)\s*$", "", text)
             body: dict
             try:
                 parsed = json.loads(text)
