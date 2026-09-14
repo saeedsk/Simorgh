@@ -1200,7 +1200,7 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         from simorgh.interface import dispatch as dispatch_mod
         calls = []
 
-        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout):
+        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout, action_id=None):
             calls.append((tool, json.loads(raw), session_id))
             if tool == "ring_live":
                 # the terminal's runner appends the time a slow call took; the page needs the JSON regardless
@@ -1229,7 +1229,7 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         from simorgh.interface import dispatch as dispatch_mod
         calls = []
 
-        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout):
+        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout, action_id=None):
             calls.append((tool, json.loads(raw)))
             return dispatch_mod.Outcome("live in the dashboard's camera strip: Office")
 
@@ -1268,7 +1268,7 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         from simorgh.interface import dispatch as dispatch_mod
         calls = []
 
-        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout):
+        async def _fake_run_tool(*, bus, ledger, tool, raw, session_id, timeout, action_id=None):
             calls.append(tool)
             return dispatch_mod.Outcome("refused: the NVR is not set up: `cameras setup <host> <username> <password>`")
 
@@ -1353,6 +1353,21 @@ class ActivityFeedTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_ring_live_signalling_never_reaches_the_feed(self):
         events = await self._activity(self._result("ring_live", '{"sdp": "v=0\\r\\no=- 631089374 2 IN IP4"}'))
         self.assertEqual(events, [])
+
+    async def test_the_pages_own_tool_calls_stay_out_but_the_same_tool_from_sim_shows(self):
+        """The TV's Sim box showed the dashboard keeping its own camera strip
+        live, twice (2026-09-14). The same tool asked for by Sim still shows."""
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0)
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        api._page_actions = {"page-1"}  # noqa: SLF001 -- as `_run_for_page` records its own call
+        page = self._result("cam_stream", "live in the dashboard's camera strip: Front Window")
+        page.payload["action_id"] = "page-1"
+        await api._on_activity(page)  # noqa: SLF001
+        await api._on_activity(self._result("cam_stream", "Front Window on the TV"))  # noqa: SLF001
+        summaries = [e.get("summary") for e in api._activity]  # noqa: SLF001
+        self.assertEqual(summaries, ["Front Window on the TV"])
+        self.assertEqual(api._page_actions, set(), "the page's id is forgotten once its result is seen")  # noqa: SLF001
 
     async def test_an_ordinary_tool_result_still_does(self):
         events = await self._activity(self._result("cam_light", "Front Window: spotlight off"))

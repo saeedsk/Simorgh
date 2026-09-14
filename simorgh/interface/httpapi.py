@@ -358,10 +358,20 @@ class HttpApi:
         async def _run_for_page(tool: str, args: dict, timeout: float) -> tuple[int, bytes, str]:
             # The page asks for a tool the way the terminal does: a proposal
             # Guardian sees, the result read back (interface/dispatch.py).
+            import uuid
+
             from .dispatch import _run_tool
 
+            # The page's own calls -- a camera rotation's signalling, the
+            # strip kept live -- are plumbing, not something Sim did. Their
+            # results stay out of the activity feed the TV's Sim box reads
+            # (the creator, 2026-09-14: two cam_stream lines on the TV).
+            action_id = uuid.uuid4().hex[:12]
+            if not isinstance(self._page_actions, set):
+                self._page_actions = set()
+            self._page_actions.add(action_id)
             outcome = await _run_tool(bus=self._bus, ledger=self._ledger, tool=tool, raw=json.dumps(args),
-                                      session_id="dash", timeout=timeout)
+                                      session_id="dash", timeout=timeout, action_id=action_id)
             text = outcome.text or ""
             # The terminal's runner appends "  (1234 ms)" to a result that
             # took a while. Ring's signalling always does, so the JSON the
@@ -713,6 +723,9 @@ class HttpApi:
         self._apply_dash_state(dict(message.payload or {}))
 
     _ACTIVITY_MAX = 200
+    #: This server's own tool calls still awaiting a result; per instance
+    #: (see `_run_for_page`), never shared between servers.
+    _page_actions: frozenset | set = frozenset()
 
     # Tools whose own result is internal plumbing, not something a person
     # reads: `ring_live`'s `output` is a raw WebRTC SDP blob (hundreds of
@@ -736,11 +749,17 @@ class HttpApi:
         elif message.type in (topics.TASK_FAILED, topics.TASK_BLOCKED):
             entry.update(summary=p.get("reason", ""))
         elif message.type == topics.ACTION_RESULT:
+            if p.get("action_id") in self._page_actions:
+                self._page_actions.discard(p.get("action_id"))
+                return
             if p.get("tool") in self._ACTIVITY_SILENT_TOOLS:
                 return
             entry.update(action_id=p.get("action_id"), ok=p.get("ok"), duration_ms=p.get("duration_ms"),
                          summary=(p.get("error") or p.get("stdout_preview") or "")[:160])
         elif message.type == topics.ACTION_DENIED:
+            if p.get("action_id") in self._page_actions:
+                self._page_actions.discard(p.get("action_id"))
+                return
             if p.get("tool") in self._ACTIVITY_SILENT_TOOLS:
                 return
             entry.update(action_id=p.get("action_id"), ok=False, summary="denied: " + "; ".join(p.get("reasons", [])))

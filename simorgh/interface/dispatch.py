@@ -1263,7 +1263,7 @@ def _coerce(value: str):
 
 
 async def _run_tool(*, bus: BusClient, ledger: LedgerClient, tool: str, raw: str,
-                    session_id: str, timeout: float) -> Outcome:
+                    session_id: str, timeout: float, action_id: str | None = None) -> Outcome:
     import asyncio
 
     args = cli_tool_args(tool, raw)
@@ -1276,7 +1276,7 @@ async def _run_tool(*, bus: BusClient, ledger: LedgerClient, tool: str, raw: str
         return Outcome(f"refused: {', '.join(leaked)} must not be passed as a tool argument -- it would be written to "
                        f"the ledger. `cameras setup` and `ring setup` ask for a password hidden instead.")
 
-    action_id = uuid.uuid4().hex[:12]
+    action_id = action_id or uuid.uuid4().hex[:12]
     loop = asyncio.get_running_loop()
     done: asyncio.Future = loop.create_future()
 
