@@ -299,8 +299,12 @@ class _CastTool:
 
     def __init__(self, config, *, cast=None, env=None, secrets=None, clock=time.time, reachable=None,
                  prefs: CastPreferences | None = None, settings_home: Path | None = None, fetch=None,
-                 media_dir: Path | None = None, remote_cls=None, certs_dir: Path | None = None) -> None:
+                 media_dir: Path | None = None, remote_cls=None, certs_dir: Path | None = None,
+                 charts_source=None) -> None:
         self._config = config
+        # the dashboard's charts (interface/dashfeeds.py), read over Sim's
+        # own API; a callable returning the same dict in tests
+        self._charts_source = charts_source
         # tvmedia.fetch, or a fake: a YouTube video as a file for the TV
         self._fetch = fetch
         self._media_dir = media_dir
@@ -439,6 +443,100 @@ class _CastTool:
                           side_effects=(f"cast_play:{name}",), metadata={"mode": "full", "url": url, "device": name,
                                                                          "video": video, "native": "YouTube"})
 
+    def _charts(self) -> dict:
+        """`{"kpop": {"label", "sub", "songs": [...]}, "uspop": {...}}` from
+        the dashboard's feeds, over Sim's API (the tool and the page are
+        one process apart on purpose)."""
+        if self._charts_source is not None:
+            return dict(self._charts_source() or {})
+        import json as _json
+        import urllib.request
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(self._page_url("dash"))
+        url = f"{parts.scheme}://{parts.netloc}/api/dash/data" + (f"?{parts.query}" if parts.query else "")
+        with urllib.request.urlopen(url, timeout=8) as response:
+            return dict((_json.loads(response.read().decode("utf-8")) or {}).get("charts") or {})
+
+    async def _start_chart(self, ctx: ToolContext, chart: str, device: str = "") -> ToolResult:
+        """Play a chart on the TV, top to bottom: the TV's own YouTube app
+        when paired (YouTube rolls on from the first), else the files
+        one after another, full screen, the dashboard back at the end.
+        The dashboard turns to the Charts view either way."""
+        key = CHART_NAMES.get((chart or "kpop").strip().lower(), "")
+        if not key:
+            return ToolResult(ok=False, error=f"refused: no chart called {chart!r}; the charts are kpop and uspop")
+        try:
+            backend = self._backend()
+            name, problem = await asyncio.to_thread(self._device, backend, device)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(ok=False, error=f"refused: {exc}")
+        if problem:
+            return ToolResult(ok=False, error=problem)
+        try:
+            charts = await asyncio.to_thread(self._charts)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(ok=False, error=f"refused: could not read the charts from the dashboard ({exc})")
+        entry = charts.get(key) or {}
+        songs = [s for s in (entry.get("songs") or []) if s.get("video")]
+        if not songs:
+            return ToolResult(ok=False, error=f"refused: the {entry.get('label') or key} chart has not been fetched yet; "
+                                              "the dashboard fills it within a few minutes of starting")
+        label = str(entry.get("label") or key)
+        bus = getattr(ctx, "bus", None)
+        if bus is not None:
+            await bus.publish(Message.new(topics.DASH_STATE, source="execution", payload={"view": "charts"}))
+        items = [(str(s["video"]), f"{s['name']} — {s['artist']}") for s in songs]
+        host = self._host_of(backend, name)
+        tv = self._androidtv(host) if host else None
+        first = items[0]
+        if tv is not None and tv.paired():
+            from .androidtv import youtube_link
+
+            problem = await tv.launch(youtube_link(first[0]))
+            if not problem:
+                self._bump()
+                await self._publish_state(ctx, "full", url=youtube_link(first[0]), title=first[1], native="YouTube",
+                                          queue=[t for _v, t in items])
+                return ToolResult(ok=True, output=(f"the {label} chart is playing in {name}'s YouTube app, from #1: "
+                                                   f"{first[1]}; YouTube rolls on from there. Say \"next\" to skip"),
+                                  side_effects=(f"tv_charts:{name}",),
+                                  metadata={"chart": key, "device": name, "native": "YouTube", "count": len(items)})
+        task = asyncio.create_task(self._play_queue(ctx, backend, name, items, label))
+        self._fetches.add(task)
+        task.add_done_callback(self._fetches.discard)
+        return ToolResult(ok=True, output=(f"playing the {label} chart on {name}, full screen, one after another from #1: "
+                                           f"{first[1]} -- the first starts in a few seconds; the dashboard comes back "
+                                           "after the last"),
+                          side_effects=(f"tv_charts:{name}",), metadata={"chart": key, "device": name, "count": len(items)})
+
+    async def _play_queue(self, ctx: ToolContext, backend, device: str, items: list[tuple[str, str]], label: str) -> None:
+        from . import tvmedia
+
+        fetch = self._fetch or tvmedia.fetch
+        for index, (video, title) in enumerate(items):
+            await self._publish_state(ctx, "full", url=f"https://www.youtube.com/watch?v={video}", title=title,
+                                      fetching=True, queue=[t for _v, t in items[index:]])
+            try:
+                path, problem = await asyncio.to_thread(fetch, video, self._media_dir)
+            except Exception as exc:  # noqa: BLE001
+                path, problem = None, f"the fetch failed: {exc}"
+            if path is None:
+                continue        # a song without a fetchable video: the next one
+            generation = self._bump()
+            try:
+                await asyncio.to_thread(backend.play, device, self._media_url(path.name), content_type="video/mp4",
+                                        title=title)
+            except Exception as exc:  # noqa: BLE001
+                await self._publish_state(ctx, "full", url=f"https://www.youtube.com/watch?v={video}", title=title,
+                                          problem=f"{device} would not play it ({exc})")
+                return
+            await self._publish_state(ctx, "full", url=f"https://www.youtube.com/watch?v={video}", title=title,
+                                      stream=f"/tv/media/{path.name}", queue=[t for _v, t in items[index:]])
+            if not await self._wait_finished(backend, device, generation):
+                return          # somebody else drove the TV: the chart stops here
+        await self._dashboard_back(ctx, backend, device)
+
     def _media_url(self, name: str) -> str:
         """Where the TV fetches a cached video from: Sim's API, the same
         host the page comes from; the route is open on the LAN."""
@@ -496,37 +594,44 @@ class _CastTool:
 
     async def _dashboard_back_after(self, ctx: ToolContext, backend, device: str, generation: int) -> None:
         """When the video ends the plain player sits on its idle card;
-        the dashboard is put back. Polls the device's player state.
-        Stands down when another show/play/stop has happened since
-        (`generation`), or when the video was stopped rather than
-        finished -- somebody else is driving the TV then."""
+        the dashboard is put back."""
+        if await self._wait_finished(backend, device, generation):
+            await self._dashboard_back(ctx, backend, device)
+
+    async def _wait_finished(self, backend, device: str, generation: int) -> bool:
+        """True when the video on `device` has ended of itself. False
+        when another show/play/stop has happened since (`generation`),
+        when it was stopped rather than finished -- somebody else is
+        driving the TV then -- or when the TV went away. Polls the
+        device's player state."""
         if not hasattr(backend, "media_state"):
-            return
+            return False
         started = time.monotonic()
         seen_playing = False
         while time.monotonic() - started < self.WATCH_MAX_S:
             await asyncio.sleep(self.IDLE_POLL_S)
             if self._prefs.generation != generation:
-                return
+                return False
             try:
                 state = await asyncio.to_thread(backend.media_state, device)
-            except Exception:  # noqa: BLE001 -- the TV went away; nothing to put back
-                return
+            except Exception:  # noqa: BLE001
+                return False
             if state in ("PLAYING", "PAUSED", "BUFFERING"):
                 seen_playing = True
                 continue
             if state == "STOPPED":
-                return
+                return False
             if state in ("IDLE", "UNKNOWN") and (seen_playing or time.monotonic() - started > 30.0):
-                if self._prefs.generation != generation:
-                    return
-                self._bump()
-                try:
-                    await asyncio.to_thread(backend.show_page, device, self._page_url("dash"))
-                except Exception:  # noqa: BLE001
-                    return
-                await self._publish_state(ctx, "none")
-                return
+                return self._prefs.generation == generation
+        return False
+
+    async def _dashboard_back(self, ctx: ToolContext, backend, device: str) -> None:
+        self._bump()
+        try:
+            await asyncio.to_thread(backend.show_page, device, self._page_url("dash"))
+        except Exception:  # noqa: BLE001
+            return
+        await self._publish_state(ctx, "none")
 
 
 class CastDevicesTool(_CastTool):
@@ -554,10 +659,14 @@ class CastDevicesTool(_CastTool):
 
 
 #: The dashboard's views and the words people use for them (dash.html).
-DASH_VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "terminal", "ambient")
+DASH_VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "charts", "terminal", "ambient")
 DASH_ALIASES = {"deck": "home", "start": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
                 "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "video": "media",
-                "headlines": "news"}
+                "headlines": "news", "chart": "charts", "kpop": "charts", "k-pop": "charts", "music charts": "charts",
+                "top songs": "charts", "hits": "charts"}
+#: the charts the dashboard carries (interface/dashfeeds.py CHARTS) and how people name them
+CHART_NAMES = {"kpop": "kpop", "k-pop": "kpop", "korea": "kpop", "korean": "kpop", "us": "uspop", "uspop": "uspop",
+               "us pop": "uspop", "pop": "uspop", "american": "uspop", "america": "uspop", "usa": "uspop"}
 
 
 def _dash_view(word: str) -> str:
@@ -862,7 +971,14 @@ class DashViewTool(_CastTool):
             return ToolResult(ok=False, error="refused: no bus to reach the dashboard")
         await bus.publish(Message.new(topics.DASH_STATE, source="execution", payload=payload))
         said = []
-        if "view" in payload:
+        if payload.get("view") == "charts" and len(payload) == 1:
+            # The Charts view auto-plays (the creator, 2026-09-13): K-pop first.
+            started = await self._start_chart(ctx, "kpop")
+            if started.ok:
+                return ToolResult(ok=True, output=f"the dashboard shows charts; {started.output}",
+                                  side_effects=started.side_effects, metadata=started.metadata)
+            said.append(f"the dashboard shows charts (not playing: {started.error})")
+        elif "view" in payload:
             said.append(f"the dashboard shows {payload['view']}")
         if "timeframe" in payload or "symbol" in payload:
             said.append(" ".join(x for x in (payload.get("symbol", ""), payload.get("timeframe", "")) if x) + " on the chart")
@@ -1083,17 +1199,28 @@ class TvKeyTool(_CastTool):
                           metadata={"device": name, "key": key_code(key)})
 
 
+class TvChartsTool(_CastTool):
+    name = "tv_charts"
+    description = ("Play a music chart on the TV, top to bottom: `chart` kpop (Korea's most played) or uspop "
+                   "(America's). The dashboard turns to its Charts view; the videos play full screen one after "
+                   "another (in the TV's own YouTube app when paired). `device` names the TV when there are several.")
+    args_schema = {"type": "object", "properties": {"chart": {"type": "string"}, "device": {"type": "string"}}}
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        return await self._start_chart(ctx, str(args.get("chart") or "kpop"), str(args.get("device") or ""))
+
+
 def cast_tools(config, **kwargs) -> list:
     kwargs = {k: v for k, v in kwargs.items()
               if k in ("cast", "env", "secrets", "clock", "reachable", "settings_home", "fetch", "media_dir",
-                       "remote_cls", "certs_dir")}
+                       "remote_cls", "certs_dir", "charts_source")}
     prefs = CastPreferences(device=str(getattr(config, "cast_device", "") or ""))
     return [CastDevicesTool(config, prefs=prefs, **kwargs), CastShowTool(config, prefs=prefs, **kwargs),
             CastPlayTool(config, prefs=prefs, **kwargs), CastStopTool(config, prefs=prefs, **kwargs),
             CastVolumeTool(config, prefs=prefs, **kwargs), CastUseTool(config, prefs=prefs, **kwargs),
             CastSetupTool(config, prefs=prefs, **kwargs), DashViewTool(config, prefs=prefs, **kwargs),
             TvPairTool(config, prefs=prefs, **kwargs), TvAppTool(config, prefs=prefs, **kwargs),
-            TvKeyTool(config, prefs=prefs, **kwargs)]
+            TvKeyTool(config, prefs=prefs, **kwargs), TvChartsTool(config, prefs=prefs, **kwargs)]
 
 
 __all__ = ["CastDevicesTool", "CastPlayTool", "CastPreferences", "CastSetupTool", "CastShowTool", "CastStopTool", "CastUseTool",

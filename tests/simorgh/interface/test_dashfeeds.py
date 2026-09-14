@@ -97,6 +97,16 @@ class ParsersTestCase(unittest.TestCase):
         self.assertTrue(videos[1]["live"]); self.assertEqual(videos[1]["length"], "LIVE")
         self.assertEqual(df.parse_youtube_results(b"<html>consent</html>"), [])
 
+    def test_the_songs_video_is_the_official_one_or_the_artists_of_a_songs_length(self):
+        found = [{"id": "long", "title": "Golden 3 hour loop", "channel": "loops", "seconds": 10800},
+                 {"id": "cover", "title": "Golden (cover)", "channel": "someone", "seconds": 190},
+                 {"id": "mv", "title": "HUNTR/X - Golden (Official Music Video)", "channel": "Sony", "seconds": 200},
+                 {"id": "live", "title": "Golden LIVE", "channel": "x", "seconds": 0, "live": True}]
+        self.assertEqual(df.pick_music_video(found, "Golden", "HUNTR/X")["id"], "mv")
+        self.assertEqual(df.pick_music_video(found[:2], "Golden", "HUNTR/X")["id"], "cover", "of a song's length beats a loop")
+        self.assertEqual(df.pick_music_video([found[0]], "Golden", "HUNTR/X")["id"], "long", "else the first")
+        self.assertIsNone(df.pick_music_video([], "Golden", "HUNTR/X"))
+
     def test_cnbc_quotes_become_numbers_and_unknown_symbols_are_dropped(self):
         quotes = df.parse_cnbc_quotes(CNBC_QUOTES)
         self.assertEqual(sorted(quotes), ["EUR=", "NVDA"])
@@ -200,7 +210,10 @@ class SchedulerTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_every_feed_is_due_at_first_and_runs_on_its_own_cadence_after(self):
         # matched in order: the specific hosts first, the RSS catch-alls last
         feeds, fetcher, clock = self._feeds({"restQuote": CNBC_QUOTES, "bars/": CNBC_BARS,
-                                             "air-quality": AIR, "open-meteo": METEO, "songs.json": b'{"feed":{"results":[]}}',
+                                             "air-quality": AIR, "open-meteo": METEO,
+                                             "v2/kr/": b'{"feed":{"results":[{"name":"Golden","artistName":"HUNTR/X","artworkUrl100":"a","url":"u"}]}}',
+                                             "v2/us/": b'{"feed":{"results":[{"name":"Ordinary","artistName":"Alex Warren","artworkUrl100":"a","url":"u"}]}}',
+                                             "songs.json": b'{"feed":{"results":[]}}',
                                              "topmovies": b'{"feed":{"entry":[]}}', "the-numbers": THE_NUMBERS,
                                              "featured": WIKI, "apod": b'{"title":"Moon","media_type":"image","url":"u"}',
                                              "topstories": b"[1]", "item/1": b'{"title":"T","url":"u"}',
@@ -219,6 +232,14 @@ class SchedulerTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snap["weather"]["aqi"], 53)
         self.assertEqual((snap["jokes"], snap["quote"]["author"], snap["hn"][0]["title"]), (["J"], "A", "T"))
         self.assertEqual([v["id"] for v in snap["ambient"]], ["longone", "liveone"], "the same film from four queries, once")
+        # the Charts view: Korea's and America's most played, each song with its video from YouTube's results page
+        charts = snap["charts"]
+        self.assertEqual(sorted(charts), ["kpop", "uspop"])
+        self.assertEqual((charts["kpop"]["label"], charts["kpop"]["songs"][0]["name"], charts["kpop"]["songs"][0]["video"]),
+                         ("K-pop", "Golden", "shortone"), "a song-length result beats the five-hour film")
+        self.assertEqual(charts["uspop"]["songs"][0]["artist"], "Alex Warren")
+        searches = [u for u in fetcher.calls if "youtube.com/results" in u and "official+music+video" in u]
+        self.assertEqual(len(searches), 2, "one YouTube page per song")
         self.assertEqual(len(feeds._data["markets"]["history"][".SPX"]["1W"]), 11, "indices carry a 5-day series for Home")  # noqa: SLF001
         # 30 seconds later nothing is due; a minute later only the quotes.
         clock.t += 30

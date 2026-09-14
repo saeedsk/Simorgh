@@ -782,7 +782,7 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     rest = words[1:]
     usage = ("usage: tv setup [device] | devices | use <device> | show [tv|dash] [device] | view <home|discover|cameras|news|"
              "markets|media|terminal|ambient> [1D|1W|1M|1Y] [symbol] | rotate <seconds|off> | scale <factor|auto> | live <n> | "
-             "quality light|full | remote | link | pair [code] | app <name|url> | key <key> | "
+             "quality light|full | remote | link | pair [code] | app <name|url> | key <key> | charts [kpop|us] | "
              "video <url> [full|frame] [device] | stop [frame] | volume <0-100> [device]")
 
     async def _run(tool: str, payload: dict) -> Outcome:
@@ -801,6 +801,8 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         if not rest:
             return Outcome("usage: tv key <home|back|ok|up|down|left|right|play|pause|next|mute|volume up|power>")
         return await _run("tv_key", {"key": " ".join(rest)})
+    if verb in ("charts", "chart"):
+        return await _run("tv_charts", {"chart": " ".join(rest) or "kpop"})
     if verb == "setup":
         return await _run("cast_setup", {"device": " ".join(rest)} if rest else {})
     if verb == "use":

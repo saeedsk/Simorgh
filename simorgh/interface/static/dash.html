@@ -111,8 +111,8 @@ const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const token=new URLSearchParams(location.search).get("token")||"";
 const q=p=>p+(token?(p.includes("?")?"&":"?")+"token="+encodeURIComponent(token):"");
-const ICONS={deck:'<path d="M3 9.5 10 3l7 6.5M5 8.2V16h4v-4h2v4h4V8.2"/>',discover:'<circle cx="10" cy="10" r="7.2"/><path d="M10 4.6l1.5 3.9 3.9 1.5-3.9 1.5L10 15.4 8.5 11.5 4.6 10l3.9-1.5z"/>',cameras:'<rect x="2.5" y="5.5" width="10" height="9" rx="1.6"/><path d="M12.5 8.5l5-2.5v8l-5-2.5z"/>',news:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M5.5 7h6M5.5 10h9M5.5 13h9"/>',markets:'<path d="M3 15.5V4.5M3 15.5h13.5"/><path d="M6 12l3-3 2.5 2L16 6"/>',media:'<circle cx="10" cy="10" r="7"/><path d="M8.5 7l4.5 3-4.5 3z"/>',terminal:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l3 2.5L6 13M11 13h3"/>',ambient:'<circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.5"/>'};
-const VIEWS=[["deck","Home"],["discover","Discover"],["cameras","Cameras"],["news","News"],["markets","Markets"],["media","Media"],["terminal","Terminal"],["ambient","Ambient"]];
+const ICONS={charts:'<path d="M8 15.5V5l8-2v10.5"/><circle cx="6" cy="15.5" r="2"/><circle cx="14" cy="13.5" r="2"/>',deck:'<path d="M3 9.5 10 3l7 6.5M5 8.2V16h4v-4h2v4h4V8.2"/>',discover:'<circle cx="10" cy="10" r="7.2"/><path d="M10 4.6l1.5 3.9 3.9 1.5-3.9 1.5L10 15.4 8.5 11.5 4.6 10l3.9-1.5z"/>',cameras:'<rect x="2.5" y="5.5" width="10" height="9" rx="1.6"/><path d="M12.5 8.5l5-2.5v8l-5-2.5z"/>',news:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M5.5 7h6M5.5 10h9M5.5 13h9"/>',markets:'<path d="M3 15.5V4.5M3 15.5h13.5"/><path d="M6 12l3-3 2.5 2L16 6"/>',media:'<circle cx="10" cy="10" r="7"/><path d="M8.5 7l4.5 3-4.5 3z"/>',terminal:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l3 2.5L6 13M11 13h3"/>',ambient:'<circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.5"/>'};
+const VIEWS=[["deck","Home"],["discover","Discover"],["cameras","Cameras"],["news","News"],["markets","Markets"],["media","Media"],["charts","Charts"],["terminal","Terminal"],["ambient","Ambient"]];
 const VIEW_KEYS={home:"deck",deck:"deck",discover:"discover",cameras:"cameras",news:"news",markets:"markets",media:"media",terminal:"terminal",ambient:"ambient"};
 
 // ---- wallpapers ----
@@ -508,6 +508,19 @@ function viewMedia(){
     +(bo.length?'<div class="hd" style="margin:8px 0 4px;">Box office · weekend</div>'+bo.slice(0,5).map(b=>'<div class="tr"><span class="gold" style="width:16px;">'+b.rank+'</span><span class="l" style="flex:1;">'+esc(b.title)+'</span><span>'+esc(b.weekend)+'</span></div>').join(""):'')+'</div>';
   return '<div style="display:flex;gap:12px;height:100%;">'+now+music+films+'</div>';
 }
+// Charts (the creator, 2026-09-13): K-pop and US pop, separate columns, the chart's videos auto-playing. On the
+// TV the playing is Sim's (tv_charts: the TV's own YouTube app when paired, else the files one after another, full
+// screen); the page marks what is on. In a browser the top video plays here, muted, as browsers allow.
+function chartCol(ch,key){if(!ch)return '<div class="glass card col" style="flex:1;">'+head(key==="kpop"?"K-pop":"US pop","charts")+empty("waiting for the chart…")+'</div>';
+  const on=ytId(TV.url||"");
+  return '<div class="glass card col" style="flex:1;min-width:0;">'+head(esc(ch.label),esc(ch.sub))+((ch.songs||[]).length?ch.songs.slice(0,10).map(s=>'<div class="rowitem" style="align-items:center;padding:4px 0;'+(on&&s.video===on?"background:rgba(240,189,131,.14);border-radius:8px;":"")+'"><span class="gold" style="width:18px;">'+(on&&s.video===on?"▶":s.rank)+'</span><div class="art" style="background-image:url(\''+esc(s.thumb||s.art)+'\');width:56px;height:32px;border-radius:5px;"></div><div style="min-width:0;flex:1;"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.name)+'</div><div class="faint" style="font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.artist)+(s.length?' · '+esc(s.length):'')+(s.video?'':' · no video found')+'</div></div></div>').join(""):empty("waiting for the chart…"))+'</div>';}
+function viewCharts(){const ch=(DATA&&DATA.charts)||{};const kp=ch.kpop,us=ch.uspop;const top=(kp&&kp.songs||[]).find(s=>s.video)||(us&&us.songs||[]).find(s=>s.video);
+  const m=TV.mode||"none";const id=ytId(TV.url||"");let player;
+  if((m==="full"||m==="frame")&&id){const playing=[].concat(kp&&kp.songs||[],us&&us.songs||[]).find(s=>s.video===id);
+    player=stillHTML(id,esc(playing?playing.name+" — "+playing.artist:(TV.title||"")),TV.native?"playing in the TV's "+esc(TV.native)+" app":(TV.fetching?"fetching the video for the TV…":"playing on the TV"),"now playing");}
+  else if(CAST_RECEIVER)player=top?stillHTML(top.video,esc(top.name+" — "+top.artist),"say “Sim, play the K-pop chart” or “play the US chart” — the videos play full screen, one after another","charts"):thumb("<b>Charts</b>","charts");
+  else player=top?ytFrame(top.video,true)+npOverlay(esc(top.name+" — "+top.artist),"top of the chart · muted here; on the TV it plays with sound","charts"):thumb("<b>Charts</b>","charts");
+  return '<div style="display:flex;gap:12px;height:100%;"><div class="glass" style="flex:1.6;padding:0;overflow:hidden;position:relative;">'+player+'</div>'+chartCol(kp,"kpop")+chartCol(us,"uspop")+'</div>';}
 function viewTerminal(){
   const s=STATUS||{};const rows=[];
   for(const k of ["state","mode","uptime_seconds","autonomous_paused","model","version"]){if(s[k]!=null&&typeof s[k]!=="object")rows.push(kv(k.replace(/_/g," "),esc(String(s[k]))));}
@@ -530,7 +543,7 @@ function viewAmbient(){
     +(qt&&qt.text?'<div class="dim" style="font-size:15px;margin-top:14px;max-width:80vw;text-align:center;">“'+esc(qt.text)+'” <span class="faint">— '+esc(qt.author)+'</span></div>':'')
     +(h?'<div class="faint" style="font-size:12.5px;margin-top:6px;max-width:80vw;text-align:center;"><span class="amber">'+esc(h.source)+'</span> '+esc(h.title)+'</div>':'')+'</div>';
 }
-const RENDER={deck:viewDeck,discover:viewDiscover,cameras:viewCameras,news:viewNews,markets:viewMarkets,media:viewMedia,terminal:viewTerminal,ambient:viewAmbient};
+const RENDER={charts:viewCharts,deck:viewDeck,discover:viewDiscover,cameras:viewCameras,news:viewNews,markets:viewMarkets,media:viewMedia,terminal:viewTerminal,ambient:viewAmbient};
 
 // ---- app ----
 function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");

@@ -161,6 +161,8 @@ _TOOL_NOTES: dict[str, str] = {
     "tv_app": "open one of the TV's own apps (youtube, netflix, disney, prime, spotify, plex) or a link in one; "
               "needs the person to have run `tv pair` once -- if it is refused for that, say so",
     "tv_key": "press a key on the TV: home, back, ok, play, pause, next, mute, volume up, power",
+    "tv_charts": "play a music chart on the TV top to bottom: `TV_CHARTS: kpop` or `uspop` -- \"play the K-pop chart\", "
+                 "\"put the US hits on\"; the dashboard turns to Charts and the videos play one after another",
     "tv_pair": "the person's one-time pairing with the TV's own remote protocol (`tv pair`, then `tv pair <code>`); "
                "tell them to type it rather than running it yourself",
     "cast_volume": "the TV's volume, 0-100",

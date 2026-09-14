@@ -151,6 +151,16 @@ OPEN_METEO = ("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={
 OPEN_METEO_AIR = ("https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}"
                   "&current=us_aqi,pm2_5")
 APPLE_SONGS = "https://rss.applemarketingtools.com/api/v2/us/music/most-played/10/songs.json"
+#: The Charts view (the creator, 2026-09-13: "a new tab that shows and
+#: auto plays top music videos from K-pop and the US top pop chart,
+#: separate categories"): Apple Music's most-played by country, each
+#: song's video found on YouTube's results page.
+APPLE_CHART = "https://rss.applemarketingtools.com/api/v2/{cc}/music/most-played/10/songs.json"
+CHARTS: tuple[tuple[str, str, str, str], ...] = (
+    ("kpop", "kr", "K-pop", "Korea's most played · Apple Music"),
+    ("uspop", "us", "US pop", "America's most played · Apple Music"),
+)
+MUSIC_VIDEO_MIN_S, MUSIC_VIDEO_MAX_S = 60, 12 * 60
 ITUNES_MOVIES = "https://itunes.apple.com/us/rss/topmovies/limit=10/json"
 BOX_OFFICE = "https://www.the-numbers.com/weekend-box-office-chart"
 WIKI_FEATURED = "https://en.wikipedia.org/api/rest_v1/feed/featured/{yyyy}/{mm}/{dd}"
@@ -369,6 +379,27 @@ def parse_apple_songs(raw: bytes) -> list[dict]:
         out.append({"rank": i, "name": str(r.get("name") or ""), "artist": str(r.get("artistName") or ""),
                     "art": str(r.get("artworkUrl100") or ""), "url": str(r.get("url") or "")})
     return out
+
+
+def pick_music_video(found: list[dict], name: str, artist: str) -> dict | None:
+    """The result that is the song's video: an official one, or one that
+    names the artist, of a song's length; else the first. None when
+    nothing came back."""
+    if not found:
+        return None
+    first_artist = (artist or "").split(",")[0].split("&")[0].split("feat")[0].strip().lower()
+
+    def _fits(v: dict) -> bool:
+        seconds = int(v.get("seconds") or 0)
+        return not v.get("live") and MUSIC_VIDEO_MIN_S <= seconds <= MUSIC_VIDEO_MAX_S
+
+    fitting = [v for v in found if _fits(v)] or list(found)
+    for v in fitting:
+        title = str(v.get("title") or "").lower()
+        channel = str(v.get("channel") or "").lower()
+        if "official" in title or (first_artist and (first_artist in title or first_artist in channel)):
+            return v
+    return fitting[0]
 
 
 def parse_itunes_movies(raw: bytes) -> list[dict]:
@@ -665,6 +696,7 @@ class DashFeeds:
             Feed("jokes", 1800.0, self._run_jokes, part="jokes"),
             Feed("quote", 6 * 3600.0, lambda f: parse_zen(f(ZEN_TODAY)), part="quote"),
             Feed("ambient", 6 * 3600.0, self._run_ambient, part="ambient"),
+            Feed("charts", 6 * 3600.0, self._run_charts, part="charts"),
         ]
         return feeds
 
@@ -742,6 +774,39 @@ class DashFeeds:
                     out.append({**video, "query": query})
         if not out and errors:
             raise RuntimeError("; ".join(errors[:2]))
+        return out
+
+    def _run_charts(self, f: Fetcher) -> dict:
+        # (song, artist) -> the video found for it, kept across refreshes so a
+        # chart that barely moves costs one YouTube page per new entry
+        cache: dict[tuple[str, str], dict] = self.__dict__.setdefault("_video_cache", {})
+        out: dict = {}
+        errors: list[str] = []
+        for key, cc, label, sub in CHARTS:
+            try:
+                songs = parse_apple_songs(f(APPLE_CHART.format(cc=cc), accept="application/json"))
+            except Exception as exc:  # noqa: BLE001 -- one chart's failure must not lose the other
+                errors.append(f"{key}: {exc.__class__.__name__}")
+                continue
+            rows = []
+            for song in songs:
+                ident = (song["name"], song["artist"])
+                video = cache.get(ident)
+                if video is None:
+                    try:
+                        query = urllib.parse.quote_plus(f"{song['name']} {song['artist']} official music video")
+                        found = parse_youtube_results(f(YOUTUBE_SEARCH.format(query=query), accept="text/html"),
+                                                      min_seconds=MUSIC_VIDEO_MIN_S, limit=6)
+                        video = pick_music_video(found, song["name"], song["artist"]) or {}
+                    except Exception:  # noqa: BLE001 -- the song is still on the chart, just without a video
+                        video = {}
+                    if video:
+                        cache[ident] = video
+                rows.append({**song, "video": str(video.get("id") or ""), "video_title": str(video.get("title") or ""),
+                             "thumb": str(video.get("thumb") or ""), "length": str(video.get("length") or "")})
+            out[key] = {"label": label, "sub": sub, "songs": rows}
+        if not out and errors:
+            raise RuntimeError("; ".join(errors))
         return out
 
     def _run_jokes(self, f: Fetcher) -> list[str]:
@@ -993,6 +1058,7 @@ class DashFeeds:
             "jokes": self._data.get("jokes", []),
             "quote": self._data.get("quote"),
             "ambient": self._data.get("ambient", []),
+            "charts": self._data.get("charts", {}),
             "cameras": self.cameras(),
             "streams": self.streams(),
             "ring_cameras": self.ring_cameras(),

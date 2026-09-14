@@ -43,6 +43,7 @@ MARKER_ARG_KEY: dict[str, str] = {
     "cast_play": "url",
     "tv_app": "app",
     "tv_key": "key",
+    "tv_charts": "chart",
     "tv_pair": "pin",
     "cast_show": "target",
     "cast_stop": "what",

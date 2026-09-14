@@ -37,7 +37,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("voice", "[status|on|off|mute|unmute|barge on|off|listen [s]|test <text>|enroll <name>|people|whois|forget <name>|pronounce <name> <as>|voices|devices|models [name]|set <key> <value>|bench]", "talk to Sim: speech in, speech out, local engines; it learns who is speaking"),
     ("cameras", "[list|state [camera]|show <cameras> [grid|full|frame|stop]|snapshot <camera>|light <camera> on|off|ir <camera> on|off|siren <camera> [s]|ptz <camera> <move>|recordings <camera> [period]|watch on|off|setup <host> <user>]", "the Reolink cameras: live on the TV, pictures, lights, sirens, moves, recordings, events"),
     ("ring", "[list|snapshot <camera|all>|events [camera] [n]|light <camera> on|off|siren <camera> [s]|watch on|off|setup <email> [code]]", "the Ring cameras through Ring's cloud: stills for the dashboard, rings and motions, lights, sirens"),
-    ("tv", "[setup|devices|use <device>|show [tv|dash] [device]|view <name>|rotate <s>|scale <f>|live <n>|quality <q>|remote|link|pair [code]|app <name>|key <key>|video <url> [full|frame]|stop [frame]|volume <0-100>]", "Sim on the TV over Chromecast: its terminal or its glass dashboard on screen, a video framed in it or full screen"),
+    ("tv", "[setup|devices|use <device>|show [tv|dash] [device]|view <name>|rotate <s>|scale <f>|live <n>|quality <q>|remote|link|pair [code]|app <name>|key <key>|charts [kpop|us]|video <url> [full|frame]|stop [frame]|volume <0-100>]", "Sim on the TV over Chromecast: its terminal or its glass dashboard on screen, a video framed in it or full screen"),
     ("schedule", "[every] <15m> <label> | cancel <id>", "fire a reminder later, or on a repeat"),
     ("mcp", "[list|approve|deny]", "review external tools Sim has proposed"),
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),
@@ -150,7 +150,9 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
            ("pair [code]", "once: pair with the TV's own remote protocol -- the TV shows a code, `tv pair <code>` finishes; "
                            "then YouTube plays in the TV's own app at 4K"),
            ("app <name|url>", "open one of the TV's apps (youtube, netflix, disney, prime, spotify, plex) or a link in one"),
-           ("key <key>", "press a key on the TV: home, back, ok, play, pause, next, mute, volume up, power")),
+           ("key <key>", "press a key on the TV: home, back, ok, play, pause, next, mute, volume up, power"),
+           ("charts [kpop|us]", "play a music chart on the TV top to bottom -- K-pop (Korea's most played) or US pop; "
+                                "the dashboard turns to its Charts view; `tv view charts` does the same")),
     "schedule": (("<15m> <label>", "a reminder later"), ("every <15m> <label>", "a reminder on a repeat"),
                  ("cancel <id>", "drop one")),
     "mcp": (("list", "external tools Sim has proposed"), ("approve <id>", "let one in"), ("deny <id>", "keep one out")),

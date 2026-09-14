@@ -489,3 +489,79 @@ class AndroidTvToolsTestCase(unittest.IsolatedAsyncioTestCase):
                          "the first watcher did not put the dashboard over the second video")
         for t in list(tools["cast_play"]._fetches):  # noqa: SLF001
             t.cancel()
+
+
+class ChartsTestCase(unittest.IsolatedAsyncioTestCase):
+    """tv_charts (the creator, 2026-09-13): a chart plays on the TV top to
+    bottom, and the Charts view auto-plays."""
+
+    CHARTS = {"kpop": {"label": "K-pop", "sub": "Korea", "songs": [
+                  {"rank": 1, "name": "Golden", "artist": "HUNTR/X", "video": "aaaaaaaaaaa"},
+                  {"rank": 2, "name": "No video", "artist": "x", "video": ""},
+                  {"rank": 3, "name": "Soda Pop", "artist": "Saja Boys", "video": "bbbbbbbbbbb"}]},
+              "uspop": {"label": "US pop", "sub": "America", "songs": [
+                  {"rank": 1, "name": "Ordinary", "artist": "Alex Warren", "video": "ccccccccccc"}]}}
+
+    def _tools(self, charts=None, remote_cls=None, certs=None):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        media = Path(self.tmp.name) / "media"; media.mkdir()
+        cast = _FakeCast()
+        fetch = lambda v, d: ((Path(d) / f"{v}.mp4").write_bytes(b"x") and None) or (Path(d) / f"{v}.mp4", "")  # noqa: E731
+        kwargs = {"charts_source": lambda: (self.CHARTS if charts is None else charts), "fetch": fetch, "media_dir": media}
+        if remote_cls is not None:
+            kwargs.update(remote_cls=remote_cls, certs_dir=certs)
+        tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
+                                               reachable=lambda url: True, **kwargs)}
+        for t in tools.values():
+            t.IDLE_POLL_S = 0.01
+        return tools, cast, _Bus()
+
+    async def test_the_chart_plays_top_to_bottom_skipping_songs_without_a_video_then_the_dashboard_returns(self):
+        tools, cast, bus = self._tools()
+        cast.states = ["PLAYING", "IDLE", "PLAYING", "IDLE"]
+        r = await tools["tv_charts"].run({"chart": "k-pop"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        self.assertIn("K-pop chart", r.output); self.assertIn("Golden — HUNTR/X", r.output)
+        self.assertEqual(r.metadata["count"], 2, "songs without a video are not in the queue")
+        views = [m.payload for m in bus.published if m.type == topics.DASH_STATE]
+        self.assertEqual(views[-1], {"view": "charts"}, "the dashboard turns to Charts")
+        await asyncio.gather(*tools["tv_charts"]._fetches)  # noqa: SLF001
+        plays = [c[2] for c in cast.calls if c[0] == "play"]
+        self.assertEqual(plays, ["http://10.0.0.5:8765/tv/media/aaaaaaaaaaa.mp4", "http://10.0.0.5:8765/tv/media/bbbbbbbbbbb.mp4"])
+        self.assertEqual(cast.calls[-1], ("show_page", "Living Room TV", "http://10.0.0.5:8765/dash"), "back to the dashboard")
+        states = [m.payload for m in bus.published if m.type == topics.TV_STATE]
+        queued = [s.get("queue") for s in states if s.get("stream")]
+        self.assertEqual(queued, [["Golden — HUNTR/X", "Soda Pop — Saja Boys"], ["Soda Pop — Saja Boys"]])
+        self.assertEqual(states[-1], {"mode": "none"})
+
+    async def test_the_charts_view_auto_plays_kpop_and_an_empty_chart_is_refused_plainly(self):
+        tools, cast, bus = self._tools()
+        cast.states = ["IDLE"]
+        r = await tools["dash_view"].run({"view": "charts"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        self.assertIn("the dashboard shows charts", r.output); self.assertIn("K-pop chart", r.output)
+        for t in list(tools["dash_view"]._fetches):  # noqa: SLF001
+            t.cancel()
+        tools, cast, bus = self._tools(charts={"kpop": {"label": "K-pop", "songs": []}})
+        r = await tools["tv_charts"].run({"chart": "kpop"}, ctx=_ctx(bus))
+        self.assertFalse(r.ok); self.assertIn("has not been fetched yet", r.error)
+        r = await tools["tv_charts"].run({"chart": "jazz"}, ctx=_ctx(bus))
+        self.assertFalse(r.ok); self.assertIn("kpop and uspop", r.error)
+
+    async def test_paired_the_chart_starts_in_the_tvs_youtube_app(self):
+        import tempfile
+        from tests.simorgh.execution.media.test_androidtv import FakeRemote
+        from simorgh.execution.media import androidtv
+        FakeRemote.instances = []; androidtv._PENDING.clear()
+        certs = Path(tempfile.mkdtemp()) / "tv"
+        tools, cast, bus = self._tools(remote_cls=FakeRemote, certs=certs)
+        await tools["tv_pair"].run({}, ctx=_ctx(bus)); await tools["tv_pair"].run({"pin": FakeRemote.pin}, ctx=_ctx(bus))
+        r = await tools["tv_charts"].run({"chart": "us"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok, r.error)
+        self.assertIn("YouTube app", r.output); self.assertEqual(r.metadata["native"], "YouTube")
+        launched = [c for rem in FakeRemote.instances for c in rem.calls if isinstance(c, tuple) and c[0] == "launch"]
+        self.assertEqual(launched, [("launch", "https://www.youtube.com/watch?v=ccccccccccc")])
+        self.assertFalse([c for c in cast.calls if c[0] == "play"])
+        state = [m.payload for m in bus.published if m.type == topics.TV_STATE][-1]
+        self.assertEqual((state["native"], state["queue"]), ("YouTube", ["Ordinary — Alex Warren"]))

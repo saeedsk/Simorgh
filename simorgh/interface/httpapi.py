@@ -634,7 +634,7 @@ class HttpApi:
                     self._logger.info("dash_cameras_live_failed", error=f"{exc.__class__.__name__}: {exc}")
             await asyncio.sleep(self._cameras_live_every_s)
 
-    _DASH_VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "terminal", "ambient")
+    _DASH_VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "charts", "terminal", "ambient")
 
     def _apply_dash_state(self, payload: dict) -> None:
         view = str(payload.get("view") or "").strip().lower()
@@ -994,7 +994,8 @@ class HttpApi:
                           # a framed YouTube video as a file for the TV's own player (media/tvmedia.py):
                           # where it is, or why it is not coming, or that it is on its way
                           "stream": str(p.get("stream") or ""), "problem": str(p.get("problem") or ""),
-                          "fetching": bool(p.get("fetching"))}
+                          "fetching": bool(p.get("fetching")), "native": str(p.get("native") or ""),
+                          "queue": [str(t) for t in (p.get("queue") or [])][:20]}
 
     @staticmethod
     def _q1(query: dict, key: str, default: str | None) -> str | None:
