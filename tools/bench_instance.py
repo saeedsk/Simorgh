@@ -118,6 +118,7 @@ async def run(args) -> int:
     say(args.id, f"booted in {repo}")
 
     completed: asyncio.Queue = asyncio.Queue()
+    floored: dict[str, int] = {}  # run_id -> cases the offline floor answered (now skipped)
 
     async def _on_completed(message) -> None:
         await completed.put(message.payload)
@@ -125,6 +126,8 @@ async def run(args) -> int:
     async def _on_progress(message) -> None:
         p = message.payload
         verdict = "skipped" if p.get("case_skipped") else ("correct" if p.get("case_correct") else "wrong")
+        if p.get("case_skipped") and str(p.get("case_error") or "").startswith("not the model --"):
+            floored[p.get("run_id")] = floored.get(p.get("run_id"), 0) + 1
         err = f" error={str(p.get('case_error'))[:80]}" if p.get("case_error") else ""
         say(args.id, f"{p.get('suite')} case {p.get('index')}/{p.get('total')} {verdict} "
                      f"({p.get('correct')}/{p.get('attempted')} so far){err}")
@@ -153,6 +156,7 @@ async def run(args) -> int:
                 if error.get("code") == "no_cases" and offsets[suite] > 0:
                     say(args.id, f"{suite}: past the last case at offset {offsets[suite]}, back to the start")
                     offsets[suite] = 0
+                    turn -= 1  # this suite again, from the start, not a skipped turn
                     continue
                 say(args.id, f"{suite} refused: {error.get('code')} -- {str(error.get('detail'))[:160]}")
                 append(Path(args.out), {"wave": args.wave, "instance": args.id, "suite": suite, "refused": error,
@@ -191,11 +195,13 @@ async def run(args) -> int:
             # recording 0/10 runs a second apart (2026-09-14). Mark it, back off
             # so the provider's cooldown can pass, and give up after three.
             attempted = int(summary.get("attempted") or 0)
-            if attempted >= 3 and not summary.get("correct") and float(summary.get("seconds") or 0) < 3.0 * attempted:
+            row["floored"] = floored.pop(run_id, 0)
+            if row["floored"] >= 3 or (attempted >= 3 and not summary.get("correct")
+                                      and float(summary.get("seconds") or 0) < 3.0 * attempted):
                 row["suspect_floor"] = True
                 floor_runs += 1
             offsets[suite] += max(1, int(summary.get("attempted") or 0) + int(summary.get("skipped") or 0)) \
-                if not summary.get("partial") else 0
+                if not summary.get("partial") and not row["floored"] else 0
             append(Path(args.out), row)
             say(args.id, f"finished {suite}: {row.get('correct')}/{row.get('attempted')} correct, "
                          f"{row.get('skipped')} skipped, partial={row.get('partial')}")

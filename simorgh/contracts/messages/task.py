@@ -97,6 +97,9 @@ TaskCompleted = define(t.TASK_COMPLETED, [
     F("artifacts", List(Str)),
     F("verification_ref", Nullable(Str)),  # required key; null when no review ran (plan-mode)
     O("confidence", Float),
+    # True when the answer is Cognition's offline floor template, not a
+    # model's: the benchmark scored those as wrong answers (2026-09-14).
+    O("floor", Bool),
 ])
 TurnCompleted = define(t.TURN_COMPLETED, [
     F("session_id", Str),

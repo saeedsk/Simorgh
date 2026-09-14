@@ -412,6 +412,8 @@ class Worker:
             }
             if outcome.confidence is not None:
                 payload["confidence"] = outcome.confidence
+            if outcome.floor:
+                payload["floor"] = True
         elif outcome.kind == "failed":
             payload = {"task_id": session.task_id, "reason": outcome.reason, "terminal": True, "attempts": 1}
         else:

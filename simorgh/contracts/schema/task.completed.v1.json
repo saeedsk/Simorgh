@@ -16,6 +16,12 @@
         "null"
       ]
     },
+    "floor": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "result_summary": {
       "type": "string"
     },

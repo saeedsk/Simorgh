@@ -30,6 +30,10 @@ from .scoring import answer_format, score_case
 #: Prefix on the errors that mean the case was never actually put to
 #: the system. Those are unmeasured, not wrong.
 _UNASKED = "never asked --"
+# The task finished, but on Cognition's offline floor: a canned template,
+# not an answer. One dropped Together connection put a run on the floor
+# and 16 of its 20 cases were scored wrong in a second (2026-09-14).
+_FLOORED = "not the model --"
 
 
 class Runner:
@@ -118,7 +122,7 @@ class Runner:
         if error and not answer_text:
             return CaseResult(case_id=case.id, level=case.level, correct=False, expected=case.answer,
                               seconds=seconds, steps=steps, cost_usd=cost_usd, error=error,
-                              skipped=error.startswith(_UNASKED))
+                              skipped=error.startswith((_UNASKED, _FLOORED)))
         # There is an answer even though something of ours stopped it.
         # Score it: GAIA scores the answer, and our verifier is not part
         # of GAIA. Record the block, so "our verifier rejected a right
@@ -476,6 +480,8 @@ class _AnswerWatch:
         text = str(payload.get("result_summary") or "")
         if kind != "completed":
             return text, steps, str(payload.get("reason") or f"the task was {kind}")
+        if payload.get("floor"):
+            return "", steps, f"{_FLOORED} the offline floor answered, with no model available"
         return text, steps, ""
 
 
