@@ -96,6 +96,26 @@ body.offline #offline{display:flex;} body.offline #stage,body.offline #camstrip{
 .fade{animation:fadein .45s ease;}
 @keyframes fadein{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 a{color:var(--warm);}
+/* Remote control (the creator, 2026-09-14): a focus ring, a box opened full screen, a scrim behind it, a player HUD. */
+.navf{outline:3px solid var(--amber)!important;outline-offset:-3px;box-shadow:0 0 0 2px rgba(255,179,71,.35),0 0 28px rgba(255,179,71,.55)!important;}
+.navzoom{position:fixed!important;left:16px!important;top:16px!important;width:1888px!important;height:1048px!important;max-width:none!important;max-height:none!important;z-index:50!important;flex:none!important;}
+#navscrim{position:fixed;left:0;top:0;width:1920px;height:1080px;background:rgba(3,3,8,.74);z-index:49;}
+#navlayer{z-index:51!important;background:rgba(8,8,14,.84);}
+.navtext .hd{font-size:20px!important;}
+.navtext .nit{padding:10px 0!important;gap:18px!important;}
+.navtext .nit .th{width:120px!important;height:80px!important;font-size:20px!important;border-radius:14px!important;}
+.navtext .nit .ttl{font-size:30px!important;-webkit-line-clamp:3!important;}
+.navtext .nit .faint{font-size:18px!important;}
+.navtext .rowitem,.navtext .tr{font-size:26px!important;padding:8px 0!important;}
+.navtext .tag{font-size:18px!important;}
+.navtext .thumb .cap{font-size:34px!important;}
+.navtext #dk-term-body>div{font-size:22px!important;}
+.navtext.big{display:flex;align-items:center;justify-content:center;font-size:360px!important;}
+#navhud{position:absolute;left:50%;bottom:28px;transform:translateX(-50%);padding:12px 26px;border-radius:18px;background:rgba(0,0,0,.66);border:1px solid var(--stroke);font-size:26px;display:flex;gap:22px;align-items:center;white-space:nowrap;opacity:0;transition:opacity .3s;z-index:6;pointer-events:none;}
+#navhud.show{opacity:1;}
+#navhud .hot{color:var(--amber);}
+.navhint{position:absolute;left:0;right:0;bottom:16px;text-align:center;font-size:20px;color:var(--dim);text-shadow:0 1px 6px #000;pointer-events:none;}
+#navcam .ctile video,#navcam .ctile img{object-fit:contain;}
 </style></head>
 <body>
 <div id="bg"></div><div id="bg2"></div><div id="scrim"></div>
@@ -351,12 +371,12 @@ function qjHTML(){ // the picture of the day (NASA), where the quote of the day 
   const qt=DATA&&DATA.quote;
   return '<div class="col fade" style="flex:1;min-width:0;">'+head("Picture of the day","NASA")+(ap&&ap.title?'<div style="font-size:16px;line-height:1.45;">'+esc(ap.title)+'</div><div class="faint" style="font-size:13px;margin-top:3px;">today\'s picture is a video — NASA shows it on their site</div>':(qt&&qt.text?'<div style="font-size:16px;line-height:1.45;">“'+esc(qt.text)+'”</div><div class="faint" style="font-size:13px;margin-top:3px;">— '+esc(qt.author)+'</div>':empty("waiting for NASA…")))+'</div>';}
 function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-template-columns:1fr 2fr;gap:12px;height:100%;min-height:0;">'
-  +'<div class="glass card col" id="dk-term">'+head("Sim","live")+'<div class="fill" id="dk-term-body"></div></div>'
+  +'<div class="glass card col" id="dk-term" data-nav="home:term">'+head("Sim","live")+'<div class="fill" id="dk-term-body"></div></div>'
   +'<div style="display:grid;grid-template-columns:1.7fr 3.3fr;grid-template-rows:3fr 2fr;gap:12px;min-height:0;min-width:0;">'
-  +'<div class="glass card" id="dk-newsA" style="display:flex;"></div>'
-  +'<div class="glass" id="dk-np" style="padding:0;overflow:hidden;position:relative;min-height:0;"></div>'
-  +'<div class="glass card" id="dk-newsB" style="display:flex;"></div>'
-  +'<div style="display:flex;gap:12px;min-height:0;min-width:0;"><div class="glass card" id="dk-mkt" style="flex:1.25;display:flex;min-width:0;"></div><div class="glass card" id="dk-qj" style="flex:1.3;display:flex;min-width:0;"></div></div>'
+  +'<div class="glass card" id="dk-newsA" data-nav="home:newsA" style="display:flex;"></div>'
+  +'<div class="glass" id="dk-np" data-nav="home:np" style="padding:0;overflow:hidden;position:relative;min-height:0;"></div>'
+  +'<div class="glass card" id="dk-newsB" data-nav="home:newsB" style="display:flex;"></div>'
+  +'<div style="display:flex;gap:12px;min-height:0;min-width:0;"><div class="glass card" id="dk-mkt" data-nav="home:mkt" style="flex:1.25;display:flex;min-width:0;"></div><div class="glass card" id="dk-qj" data-nav="home:qj" style="flex:1.3;display:flex;min-width:0;"></div></div>'
   +'</div></div>';}
 // ---- the camera strip: every relay that is live (cameras show all dash) plays through hls.js; a camera with
 // no relay shows its newest still. Rebuilt only when the set of feeds changes, so players are not restarted.
@@ -384,7 +404,7 @@ function liveWindow(n,budget){ // which of n live-capable tiles play now: a wind
   const start=Math.floor(Date.now()/1000/rotateS())%n;const on=new Set();for(let k=0;k<budget;k++)on.add((start+k)%n);return on;}
 // Two sets of players: the strip's and the Cameras view's. Each is torn down only by its own owner -- the strip's
 // refresh once destroyed the grid's players sixty milliseconds after they were mounted (the creator's screenshot).
-const PLAYERS={strip:{hls:[],rtc:[]},grid:{hls:[],rtc:[]}};
+const PLAYERS={strip:{hls:[],rtc:[]},grid:{hls:[],rtc:[]},zoom:{hls:[],rtc:[]}};
 async function pollStreams(){ // the strip's own poll: what is live now, every ten seconds
   try{const r=await (await fetch(q("/api/dash/streams"))).json();if(!DATA)return;DATA.streams=r.streams||[];DATA.cameras=r.cameras||[];DATA.ring_cameras=r.ring_cameras||[];refreshStrip();
     if(CUR==="cameras")render();}catch(e){}}
@@ -441,7 +461,7 @@ function syncLive(root,tiles,which){ // the same tiles, a moved window: swap onl
     if(isOn)mountTile(root,t,i,set);});}
 function imgSrc(t){return t.img?(t.img.startsWith("data:")?t.img:esc(t.img)+"?t="+Math.floor(t.at||0)):"";}
 function tileHTML(t,i,style){const playing=t.live||t.rtc;
-  return '<div class="ctile'+(playing?" on":"")+'"'+(style?' style="'+style+'"':'')+' data-i="'+i+'" data-name="'+esc(t.name)+'">'+(playing?'<video muted autoplay playsinline'+(t.img?' poster="'+imgSrc(t)+'"':'')+'></video>':(t.img?'<img src="'+imgSrc(t)+'" alt="">':''))
+  return '<div class="ctile'+(playing?" on":"")+'"'+(style?' style="'+style+'"':'')+' data-i="'+i+'" data-name="'+esc(t.name)+'" data-nav="cam:'+esc(t.name)+'">'+(playing?'<video muted autoplay playsinline'+(t.img?' poster="'+imgSrc(t)+'"':'')+'></video>':(t.img?'<img src="'+imgSrc(t)+'" alt="">':''))
     +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+(playing?' live':'')+'">'+(t.live?"● live":t.rtc?"● ring live":t.frame?(ago(t.at)==="now"?"just now":ago(t.at)+" ago"):t.can?"waiting for its turn":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>';}
 function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live);const stills=(DATA&&DATA.cameras)||[];const ring=(DATA&&DATA.ring_cameras)||[];
   const tiles=[];const named=new Set();
@@ -501,7 +521,7 @@ function majorCard(s){
   const pts=(s.history||{})[TF]||[];const first=pts.length?pts[0][1]:null,last=s.last!=null?s.last:(pts.length?pts[pts.length-1][1]:null);
   const ch=TF==="1D"?s.change_pct:(first&&last?(last-first)/first*100:null);const up=(ch==null?(s.change_pct||0):ch)>=0;const col=up?"#84e6a6":"#ff9a94";
   const d=priceDigits(s.last);const lo=s.year_low,hi=s.year_high;const pos=lo!=null&&hi!=null&&hi>lo&&s.last!=null?Math.max(0,Math.min(100,(s.last-lo)/(hi-lo)*100)):null;
-  return '<div class="glass card col" style="flex:1;min-width:0;">'
+  return '<div class="glass card col" data-nav="mk:'+esc(s.symbol)+'" style="flex:1;min-width:0;">'
    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;"><div style="min-width:0;"><div style="display:flex;align-items:baseline;gap:8px;"><span class="amber" style="font-size:24px;letter-spacing:.5px;">'+s.symbol+'</span><span class="dim" style="font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.short||s.name)+'</span></div>'
    +'<div class="faint clamp" style="font-size:13px;-webkit-line-clamp:1;">'+esc(s.description||"")+'</div></div>'
    +'<div style="text-align:right;flex:none;"><div style="font-size:25px;line-height:1.1;">'+N(s.last,d)+'</div><div class="'+cls(ch)+'" style="font-size:15px;">'+(s.change!=null&&TF==="1D"?(s.change>=0?"+":"")+N(s.change,d)+'  ':'')+P(ch,2)+' <span class="faint">'+TF+'</span></div></div></div>'
@@ -510,7 +530,7 @@ function majorCard(s){
    +'<span>Cap <span style="color:var(--fg);">'+esc(s.market_cap||"—")+'</span></span><span>P/E <span style="color:var(--fg);">'+N(s.pe,1)+'</span></span><span>EPS <span style="color:var(--fg);">'+N(s.eps,2)+'</span></span><span>β <span style="color:var(--fg);">'+N(s.beta,2)+'</span></span></div>'
    +(pos!=null?'<div class="range"><i style="left:'+pos.toFixed(1)+'%;"></i></div><div class="faint" style="display:flex;justify-content:space-between;font-size:12px;"><span>52w '+N(lo,d)+'</span><span>'+N(hi,d)+'</span></div>':'')+'</div>';}
 function smallTile(s,on){const pts=(s.history||{})[TF]||(s.history||{})["1D"]||[];const up=(s.change_pct||0)>=0;const d=priceDigits(s.last);
-  return '<div class="glass card tile'+(on?" on":"")+'" onclick="pinStock(\''+s.symbol+'\')" style="display:flex;flex-direction:column;justify-content:space-between;padding:9px 11px;">'
+  return '<div class="glass card tile'+(on?" on":"")+'" data-nav="mk:'+esc(s.symbol)+'" onclick="pinStock(\''+s.symbol+'\')" style="display:flex;flex-direction:column;justify-content:space-between;padding:9px 11px;">'
    +'<div style="display:flex;justify-content:space-between;align-items:baseline;"><span class="amber" style="font-size:17.5px;">'+s.symbol+'</span><span class="'+cls(s.change_pct)+'" style="font-size:14.5px;">'+P(s.change_pct,2)+'</span></div>'
    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;"><div style="min-width:0;"><div style="font-size:19px;">'+N(s.last,d)+'</div><div class="faint" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.short||s.name)+'</div></div><div style="width:44%;height:30px;">'+lineChart(pts,{col:up?"#84e6a6":"#ff9a94",ylabels:false,sw:1.5})+'</div></div>'
    +'<div class="faint" style="display:flex;justify-content:space-between;font-size:12px;"><span>H '+N(s.high,d)+'</span><span>L '+N(s.low,d)+'</span><span>'+esc(s.volume||"")+'</span></div></div>';}
@@ -523,12 +543,12 @@ function viewMarkets(){
   const top='<div class="glass" style="flex:none;height:38px;padding:0 14px;display:flex;align-items:center;gap:14px;overflow:hidden;"><span class="hd bb" style="flex:none;">Markets</span><span class="'+st[1]+'" style="font-size:14px;flex:none;">● '+st[0]+'</span><span class="faint" style="font-size:13px;flex:none;">'+(asof?'as of '+asof:'')+'</span>'+tickerHTML()+'<div style="display:flex;gap:6px;flex:none;">'+pills+'</div></div>';
   const bigRow='<div style="display:flex;gap:12px;flex:2.35;min-height:0;">'+majors.map(majorCard).join("")+'</div>';
   const tiles='<div class="grid" style="flex:1.1;grid-template-columns:repeat(5,1fr);grid-template-rows:1fr 1fr;gap:10px;">'+rest.slice(0,10).map(s=>smallTile(s,s.symbol===PIN)).join("")+'</div>';
-  const col=(t,rows,extra)=>'<div class="glass card col" style="flex:1;min-width:0;padding:10px 12px;">'+head(t,"",true)+'<div class="fill">'+(rows.length?rows.map(r=>quoteRow(r,true)).join(""):empty("waiting…"))+(extra||"")+'</div></div>';
+  const col=(t,rows,extra,nav)=>'<div class="glass card col" data-nav="'+nav+'" style="flex:1;min-width:0;padding:10px 12px;">'+head(t,"",true)+'<div class="fill">'+(rows.length?rows.map(r=>quoteRow(r,true)).join(""):empty("waiting…"))+(extra||"")+'</div></div>';
   const idxRows=m.indices;const half=Math.ceil(idxRows.length/2);
-  const idx='<div class="glass card col" style="flex:1.7;min-width:0;padding:10px 12px;">'+head("Indices","",true)+'<div style="display:flex;gap:16px;"><div style="flex:1;min-width:0;">'+idxRows.slice(0,half).map(r=>quoteRow(r,true)).join("")+'</div><div style="flex:1;min-width:0;">'+idxRows.slice(half).map(r=>quoteRow(r,true)).join("")+'</div></div></div>';
-  const rf=col("Rates & FX",[...m.rates,...m.fx]);
-  const cc=col("Commodities & crypto",[...m.commodities,...m.crypto]);
-  const news='<div class="glass card col" style="flex:1.9;min-width:0;padding:10px 12px;">'+head("Bloomberg","markets · economics",true)+'<div class="fill">'+newsRows(merged("bloomberg_markets","bloomberg_economics"),7,{color:"amber"})+'</div></div>';
+  const idx='<div class="glass card col" data-nav="mk:~idx" style="flex:1.7;min-width:0;padding:10px 12px;">'+head("Indices","",true)+'<div style="display:flex;gap:16px;"><div style="flex:1;min-width:0;">'+idxRows.slice(0,half).map(r=>quoteRow(r,true)).join("")+'</div><div style="flex:1;min-width:0;">'+idxRows.slice(half).map(r=>quoteRow(r,true)).join("")+'</div></div></div>';
+  const rf=col("Rates & FX",[...m.rates,...m.fx],"","mk:~rf");
+  const cc=col("Commodities & crypto",[...m.commodities,...m.crypto],"","mk:~cc");
+  const news='<div class="glass card col" data-nav="mk:~news" style="flex:1.9;min-width:0;padding:10px 12px;">'+head("Bloomberg","markets · economics",true)+'<div class="fill">'+newsRows(merged("bloomberg_markets","bloomberg_economics"),7,{color:"amber"})+'</div></div>';
   const bottom='<div style="display:flex;gap:12px;flex:1.05;min-height:0;">'+idx+rf+cc+news+'</div>';
   return '<div style="display:flex;flex-direction:column;gap:12px;height:100%;">'+top+bigRow+tiles+bottom+'</div>';
 }
@@ -611,7 +631,7 @@ function viewAmbient(){
   const w=DATA&&DATA.weather,qt=DATA&&DATA.quote,h=merged("bloomberg_markets","bbc_world")[0];
   const box=(inner,w)=>'<div class="glass" style="padding:14px 20px;text-align:center;'+(w?'min-width:'+w+'px;':'')+'">'+inner+'</div>';
   return '<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;">'
-    +'<div class="big" style="font-size:187.5px;text-shadow:0 4px 44px rgba(0,0,0,.5);">'+nowT()+'</div>'
+    +'<div class="big" data-nav="amb:clock" style="font-size:187.5px;text-shadow:0 4px 44px rgba(0,0,0,.5);">'+nowT()+'</div>'
     +'<div class="dim" style="font-size:27.5px;">'+nowD()+'</div>'
     +'<div style="display:flex;gap:12px;margin-top:22px;align-items:stretch;">'
     +box(w&&w.temp!=null?'<div style="font-size:42.5px;">'+w.glyph+' '+Math.round(w.temp)+'°</div><div class="faint" style="font-size:14px;">'+esc(w.text)+' · '+esc(w.place)+'</div>':'<div class="faint">weather…</div>')
@@ -625,16 +645,171 @@ function viewAmbient(){
 const RENDER={charts:viewCharts,deck:viewDeck,cameras:viewCameras,markets:viewMarkets,ambient:viewAmbient};   // RENDER.charts is only go()'s validity check; render() intercepts CUR==="charts" above and never reaches it
 const VIEW_ALIAS={news:"deck",discover:"deck",terminal:"deck",home:"deck",media:"deck"};
 
+// ---- remote control (the creator, 2026-09-14): on the top ribbon left/right change tabs and OK enters the tab; inside,
+// the arrows move between boxes, OK opens one full screen or takes control of its video, BACK steps out one level at a
+// time. Keys come from a keyboard or a remote that reaches the page and -- because a Cast receiver never hears the TV's
+// own remote -- from Sim, relayed through /api/dash/keys (the phone remote's D-pad, `tv nav`, the dash_key tool).
+const NAV={level:"ribbon",focus:{},zoom:"",tf:"",hudT:0,used:false};
+const NAV_KEYS={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down",Enter:"ok"," ":"ok",Escape:"back",Backspace:"back",GoBack:"back",BrowserBack:"back",MediaPlayPause:"playpause",MediaTrackNext:"next",MediaTrackPrevious:"prev"};
+let KEYSEQ=-1,KEYBUSY=false;
+async function pollKeys(){if(KEYBUSY||OFFLINE)return;KEYBUSY=true;
+  try{const r=await (await fetch(q("/api/dash/keys?after="+KEYSEQ))).json();
+    if(KEYSEQ<0||(r.seq!=null&&r.seq<KEYSEQ))KEYSEQ=r.seq||0;   // a page that just loaded, or a restarted Sim: start from now
+    else (r.keys||[]).forEach(x=>{if(x.seq>KEYSEQ){KEYSEQ=x.seq;navKey(x.key);}});}
+  catch(e){}finally{KEYBUSY=false;}}
+function navEls(){const st=$("#stage");return st?[...st.querySelectorAll("[data-nav]")].filter(e=>e.offsetParent!==null||e.classList.contains("navzoom")):[];}
+function navEl(id){return navEls().find(e=>e.dataset.nav===id)||null;}
+function navCurrent(){const id=NAV.focus[CUR];return id?navEl(id):null;}
+function navFirst(){const els=navEls().map(e=>[e,e.getBoundingClientRect()]);els.sort((a,b)=>(a[1].top-b[1].top)||(a[1].left-b[1].left));return els.length?els[0][0]:null;}
+function navMove(dir){const cur=navCurrent();if(!cur){const f=navFirst();if(f)NAV.focus[CUR]=f.dataset.nav;return !!f;}
+  const r=cur.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;let best=null,score=Infinity;
+  navEls().forEach(e=>{if(e===cur)return;const b=e.getBoundingClientRect(),dx=b.left+b.width/2-cx,dy=b.top+b.height/2-cy;
+    const along=dir==="left"?-dx:dir==="right"?dx:dir==="up"?-dy:dy,across=(dir==="left"||dir==="right")?Math.abs(dy):Math.abs(dx);
+    if(along<=2)return;const s=along+across*2;if(s<score){score=s;best=e;}});
+  if(!best)return false;NAV.focus[CUR]=best.dataset.nav;return true;}
+function navScrim(on){let s=$("#navscrim");if(on&&!s){s=document.createElement("div");s.id="navscrim";$("#app").appendChild(s);}else if(!on&&s&&!$("#navlayer"))s.remove();}
+function navLayer(html){navScrim(true);let l=$("#navlayer");if(!l){l=document.createElement("div");l.id="navlayer";l.className="glass navzoom";$("#app").appendChild(l);}if(html!=null)l.innerHTML=html;return l;}
+function navLayerClose(){closeLive("zoom");const l=$("#navlayer");if(l)l.remove();const s=$("#navscrim");if(s)s.remove();}
+function navRestore(){
+  document.querySelectorAll(".navf").forEach(e=>e.classList.remove("navf"));
+  document.querySelectorAll("#stage .navzoom").forEach(e=>{if(NAV.level!=="zoom"||e.dataset.nav!==NAV.zoom)e.classList.remove("navzoom","navtext");});
+  if(!NAV.used)return;   // no ring on the TV until someone actually uses a remote
+  if(NAV.level==="ribbon"){const d=$("#dock .dot.on");if(d)d.classList.add("navf");navScrim(false);return;}
+  if(CUR==="charts"){const p=$("#charts-player");if(p)p.classList.add("navf");return;}
+  let el=navCurrent();if(!el&&NAV.level==="content"){el=navFirst();if(el)NAV.focus[CUR]=el.dataset.nav;}
+  if(el)el.classList.add("navf");
+  if(NAV.level!=="zoom"){navScrim(false);return;}
+  const id=NAV.zoom;
+  if(id.startsWith("cam:"))return;
+  if(id.startsWith("mk:")&&!id.startsWith("mk:~")){navStockDraw(false);return;}
+  if(!el||el.dataset.nav!==id)el=navEl(id);
+  if(!el){NAV.zoom="";NAV.level="content";navScrim(false);return;}   // the box went away with a rebuilt view: back to the view
+  el.classList.add("navzoom");if(id!=="home:np")el.classList.add("navtext");navScrim(true);}
+function navZoom(){const el=navCurrent();if(!el)return;const id=el.dataset.nav;NAV.zoom=id;NAV.level="zoom";
+  if(id.startsWith("cam:")){closeLive("grid");CAMVIEWKEY="";navCamOpen(id.slice(4));navRestore();return;}
+  if(id.startsWith("mk:")&&!id.startsWith("mk:~")){NAV.tf=TF;navStockDraw(true);navRestore();return;}
+  if(id.startsWith("home:")&&id!=="home:np"){render();return;}   // refill the box at its full-screen size
+  navRestore();
+  if(id==="home:np"){const box=navEl(id);const m=mediaOf(box);if(m&&m.kind==="yt")ytListen(m.f);setTimeout(()=>navHud(box,""),300);}}
+function navBack(){
+  if(NAV.level==="zoom"){const id=NAV.zoom;NAV.zoom="";NAV.level="content";navLayerClose();if(id.startsWith("cam:"))CAMVIEWKEY="";render();return;}
+  if(NAV.level==="content"){NAV.level="ribbon";navRestore();return;}
+  if(CUR!=="deck")go("deck");}
+function navKey(k){
+  NAV.used=true;
+  if(k==="back"){navBack();return;}
+  if(NAV.level==="ribbon"){
+    if(k==="left"||k==="right"){const i=VIEWS.findIndex(v=>v[0]===CUR);go(VIEWS[(i+(k==="right"?1:-1)+VIEWS.length)%VIEWS.length][0]);navRestore();return;}
+    if(k==="ok"||k==="down"){NAV.level="content";navRestore();return;}
+    if(CUR==="charts"&&["playpause","next","prev"].includes(k))chartsCtl(k);
+    else if(CUR==="deck"&&["playpause","next","prev"].includes(k))npCtl({playpause:"playpause",next:"fwd10",prev:"back10"}[k]);
+    navRestore();return;}
+  if(NAV.level==="content"){
+    if(CUR==="charts"){
+      if(k==="left"||k==="prev")chartsCtl("prev");else if(k==="right"||k==="next")chartsCtl("next");
+      else if(k==="ok"||k==="playpause")chartsCtl("playpause");else if(k==="up"){NAV.level="ribbon";navRestore();}
+      return;}
+    if(["left","right","up","down"].includes(k)){if(!navMove(k)&&k==="up")NAV.level="ribbon";navRestore();return;}
+    if(k==="ok"){navZoom();return;}
+    if(CUR==="deck"&&["playpause","next","prev"].includes(k))npCtl({playpause:"playpause",next:"fwd10",prev:"back10"}[k]);
+    return;}
+  const id=NAV.zoom;   // zoom: what the keys mean depends on what is open
+  if(id==="home:np"){const act={ok:"playpause",playpause:"playpause",left:"back10",right:"fwd10",prev:"back10",next:"fwd10"}[k];if(act)npCtl(act);return;}
+  if(id.startsWith("cam:")){if(k==="left"||k==="prev")navCamStep(-1);else if(k==="right"||k==="next")navCamStep(1);return;}
+  if(id.startsWith("mk:")&&!id.startsWith("mk:~")){const tfs=["1D","1W","1M","1Y"];
+    if(k==="left"||k==="right"){NAV.tf=tfs[(tfs.indexOf(NAV.tf||TF)+(k==="right"?1:-1)+4)%4];navStockDraw(true);}
+    else if(k==="up"||k==="down"){const ids=navEls().map(e=>e.dataset.nav).filter(x=>x.startsWith("mk:")&&!x.startsWith("mk:~"));const j=ids.indexOf(id);
+      if(ids.length){NAV.zoom=ids[(j+(k==="down"?1:-1)+ids.length)%ids.length];NAV.focus.markets=NAV.zoom;navStockDraw(true);navRestore();}}
+    return;}}
+// -- a camera full screen and live, whatever the rotation says; BACK gives the grid its players back
+function navCamOpen(name){const tiles=stripTiles();const t0=tiles.find(t=>t.name===name);if(!t0){NAV.zoom="";NAV.level="content";return;}
+  const t=Object.assign({},t0,{live:t0.can==="hls",rtc:t0.can==="rtc"});
+  closeLive("zoom");
+  navLayer('<div id="navcam" style="position:absolute;inset:0;">'+tileHTML(t,0,"max-width:none;width:100%;height:100%;border-radius:0;")+'</div>'
+    +'<div class="navhint">◀ ▶ another camera · BACK the grid</div>');
+  mountTile($("#navcam"),t,0,PLAYERS.zoom);}
+function navCamStep(d){const tiles=stripTiles();const i=tiles.findIndex(t=>"cam:"+t.name===NAV.zoom);if(i<0||!tiles.length)return;
+  const n=tiles[(i+d+tiles.length)%tiles.length];NAV.zoom="cam:"+n.name;NAV.focus.cameras=NAV.zoom;navCamOpen(n.name);}
+// -- a stock full screen: the bigger chart, every timeframe, the details the quote carries, the headlines that name it
+function histPct(pts){return pts&&pts.length>1&&pts[0][1]?(pts[pts.length-1][1]-pts[0][1])/pts[0][1]*100:null;}
+function relatedNews(s){const words=[s.symbol,String(s.short||s.name||"").split(/[ ,.]/)[0]].filter(w=>w&&w.length>=3);
+  const seen=new Set(),all=[];Object.values((DATA&&DATA.news)||{}).forEach(list=>(list||[]).forEach(it=>all.push(it)));
+  return all.filter(it=>{const t=String(it.title||"");if(seen.has(t))return false;
+    const hit=words.some(w=>new RegExp("\\b"+w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i").test(t));if(hit)seen.add(t);return hit;})
+    .sort((a,b)=>(b.at||0)-(a.at||0)).slice(0,8);}
+function stockDetailHTML(s,tf){const d=priceDigits(s.last);const hist=s.history||{};const pts=hist[tf]||[];
+  const ch=tf==="1D"?s.change_pct:histPct(pts);const col=(ch==null?(s.change_pct||0):ch)>=0?"#84e6a6":"#ff9a94";
+  const lo=s.year_low,hi=s.year_high;const pos=lo!=null&&hi!=null&&hi>lo&&s.last!=null?Math.max(0,Math.min(100,(s.last-lo)/(hi-lo)*100)):null;
+  const tfs=["1D","1W","1M","1Y"].map(x=>{const p=hist[x]||[];const c=x==="1D"?s.change_pct:histPct(p);
+    return '<div class="glass" style="flex:1;min-width:0;padding:10px 14px;'+(x===tf?"border-color:rgba(255,179,71,.7);":"")+'"><div style="display:flex;justify-content:space-between;"><span class="hd'+(x===tf?" bb":"")+'">'+x+'</span><span class="'+cls(c)+'" style="font-size:17px;">'+P(c,2)+'</span></div><div style="height:64px;margin-top:4px;">'+lineChart(p,{col:(c==null||c>=0)?"#84e6a6":"#ff9a94",ylabels:false,sw:1.5,empty:"—"})+'</div></div>';}).join("");
+  const stat=(k,v)=>'<div class="tr" style="font-size:19px;padding:6px 0;"><span class="l">'+k+'</span><span>'+v+'</span></div>';
+  const news=relatedNews(s);
+  return '<div style="display:flex;flex-direction:column;height:100%;padding:22px 28px;gap:14px;">'
+   +'<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px;"><div style="min-width:0;"><div style="display:flex;align-items:baseline;gap:14px;"><span class="amber" style="font-size:52px;letter-spacing:1px;">'+esc(s.symbol)+'</span><span class="dim" style="font-size:26px;">'+esc(s.name||s.short||"")+'</span></div><div class="faint clamp" style="font-size:17px;-webkit-line-clamp:2;max-width:1150px;">'+esc(s.description||"")+'</div></div>'
+   +'<div style="text-align:right;flex:none;"><div style="font-size:58px;line-height:1;">'+N(s.last,d)+'</div><div class="'+cls(ch)+'" style="font-size:24px;">'+(s.change!=null&&tf==="1D"?(s.change>=0?"+":"")+N(s.change,d)+"  ":"")+P(ch,2)+' <span class="faint">'+tf+'</span></div></div></div>'
+   +'<div style="display:flex;gap:16px;flex:1;min-height:0;"><div class="glass" style="flex:2.6;min-width:0;padding:14px;">'+lineChart(pts,{col:col,xlabels:true,tf:tf,xn:7,ref:tf==="1D"?s.prev_close:null,empty:"waiting for the bars…"})+'</div>'
+   +'<div class="glass card col" style="flex:1;min-width:0;padding:14px 18px;"><div class="hd bb" style="margin-bottom:6px;">Details</div>'
+   +stat("Open",N(s.open,d))+stat("High",N(s.high,d))+stat("Low",N(s.low,d))+stat("Prev close",N(s.prev_close,d))+stat("Volume",esc(s.volume||"—"))+stat("Market cap",esc(s.market_cap||"—"))+stat("P/E",N(s.pe,1))+stat("EPS",N(s.eps,2))+stat("Beta",N(s.beta,2))
+   +(pos!=null?'<div style="margin-top:10px;"><div class="range"><i style="left:'+pos.toFixed(1)+'%;"></i></div><div class="faint" style="display:flex;justify-content:space-between;font-size:15px;"><span>52w low '+N(lo,d)+'</span><span>high '+N(hi,d)+'</span></div></div>':'')+'</div></div>'
+   +'<div style="display:flex;gap:12px;flex:none;">'+tfs+'</div>'
+   +'<div class="glass card" style="flex:none;padding:12px 16px;max-height:230px;overflow:hidden;">'+head("In the news",esc(s.symbol),true)+(news.length?newsRows(news,6,{color:"amber",src:true}):empty("no headline names "+s.symbol+" right now"))+'</div>'
+   +'<div class="faint" style="font-size:16px;text-align:center;">◀ ▶ timeframe · ▲ ▼ another stock · BACK the markets</div></div>';}
+function navStockDraw(force){const sym=NAV.zoom.slice(3);const s=stock(sym);if(!s)return;
+  const l=navLayer();const key=sym+"|"+(NAV.tf||TF)+"|"+DATA_AT;if(!force&&l.dataset.k===key)return;
+  l.dataset.k=key;l.innerHTML=stockDetailHTML(s,NAV.tf||TF);}
+// -- the videos: the Home player (a YouTube frame or the page's own <video>) and the Charts player (the iframe API)
+const YTI=new Map();   // a YouTube frame's window -> what it last said about itself (time, duration, state)
+addEventListener("message",e=>{if(!/youtube(-nocookie)?\.com$/.test(String(e.origin||"").replace(/^https?:\/\//,"")))return;
+  let d=e.data;try{if(typeof d==="string")d=JSON.parse(d);}catch(x){return;}
+  if(d&&d.event==="infoDelivery"&&d.info)YTI.set(e.source,Object.assign(YTI.get(e.source)||{},d.info));});
+function ytPost(f,func,args){try{f.contentWindow.postMessage(JSON.stringify({event:"command",func:func,args:args||[]}),"*");}catch(e){}}
+function ytListen(f){if(f._listening)return;f._listening=true;try{f.contentWindow.postMessage(JSON.stringify({event:"listening",id:"np",channel:"widget"}),"*");}catch(e){}}
+function mediaOf(el){if(!el)return null;const v=el.querySelector("video");if(v)return {kind:"video",v:v};
+  const f=el.querySelector('iframe[src*="youtube.com/embed"]');return f?{kind:"yt",f:f}:null;}
+function mmss(s){s=Math.max(0,Math.floor(s||0));return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");}
+function mediaState(box){
+  if(box&&box.id==="charts-player"&&CHARTS_PLAYER&&CHARTS_PLAYER.getPlayerState){try{return {playing:CHARTS_PLAYER.getPlayerState()===1,t:CHARTS_PLAYER.getCurrentTime(),d:CHARTS_PLAYER.getDuration()};}catch(e){}}
+  const m=mediaOf(box);if(!m)return {playing:false,t:null,d:null};
+  if(m.kind==="video")return {playing:!m.v.paused,t:m.v.currentTime,d:isFinite(m.v.duration)?m.v.duration:null};
+  const i=YTI.get(m.f.contentWindow)||{};return {playing:i.playerState==null?true:i.playerState===1,t:i.currentTime!=null?i.currentTime:null,d:i.duration||null};}
+function navHud(box,act,note){if(!box)return;let h=box.querySelector("#navhud");
+  if(!h){box.insertAdjacentHTML("beforeend",'<div id="navhud"></div>');h=box.querySelector("#navhud");}
+  const st=mediaState(box);const b=(k,label)=>'<span class="'+(act===k?"hot":"")+'">'+label+'</span>';
+  const charts=box.id==="charts-player";
+  h.innerHTML=note?'<span class="dim">'+esc(note)+'</span>'
+    :(charts?b("prev","⏮ previous")+b("playpause",st.playing?"❚❚ pause":"▶ play")+b("next","next ⏭"):b("back10","↺ 10 s")+b("playpause",st.playing?"❚❚":"▶")+b("fwd10","10 s ↻"))
+     +(st.t!=null?'<span class="dim">'+mmss(st.t)+(st.d?" / "+mmss(st.d):"")+'</span>':"");
+  h.classList.add("show");clearTimeout(NAV.hudT);NAV.hudT=setTimeout(()=>{const x=box.querySelector("#navhud");if(x)x.classList.remove("show");},3000);}
+function npCtl(act){const box=navEl("home:np")||$("#dk-np");const m=mediaOf(box);
+  if(!m){navHud(box,act,"nothing here to control — say “Sim, play…”");return;}
+  if(m.kind==="video"){if(act==="playpause"){if(m.v.paused)m.v.play().catch(()=>{});else m.v.pause();}
+    else if(act==="back10")m.v.currentTime=Math.max(0,m.v.currentTime-10);else if(act==="fwd10")m.v.currentTime=m.v.currentTime+10;}
+  else{ytListen(m.f);const i=YTI.get(m.f.contentWindow)||{};const playing=i.playerState==null?true:i.playerState===1;
+    if(act==="playpause"){ytPost(m.f,playing?"pauseVideo":"playVideo");YTI.set(m.f.contentWindow,Object.assign({},i,{playerState:playing?2:1}));}
+    else if((act==="back10"||act==="fwd10")&&i.currentTime!=null)ytPost(m.f,"seekTo",[Math.max(0,i.currentTime+(act==="fwd10"?10:-10)),true]);}
+  setTimeout(()=>navHud(box,act),250);}
+function chartsPrev(){const all=chartQueue();if(!all.length)return;const i=all.findIndex(e=>e.video===CHARTS_PLAYING);
+  for(let k=1;k<=all.length;k++){const c=all[((i-k)%all.length+all.length)%all.length];if(c&&!CHARTS_BAD.has(c.video)){CHARTS_PLAYING=c.video;
+    if(CHARTS_PLAYER&&CHARTS_PLAYER.loadVideoById){try{CHARTS_PLAYER.loadVideoById(c.video);CHARTS_KEY="yt:"+c.video+":"+(soundAllowed()?"s":"m");setChartsCaption(c);return;}catch(e){}}
+    render();return;}}}
+function chartsCtl(act){const box=$("#charts-player");
+  if(CAST_RECEIVER||!CHARTS_PLAYER||!CHARTS_PLAYER.getPlayerState){navHud(box,act,"the chart plays in the TV's own YouTube app — say “Sim, next”");return;}
+  try{if(act==="playpause"){if(CHARTS_PLAYER.getPlayerState()===1)CHARTS_PLAYER.pauseVideo();else CHARTS_PLAYER.playVideo();}
+    else if(act==="next")chartsAdvance("skip");else if(act==="prev")chartsPrev();}catch(e){}
+  setTimeout(()=>navHud($("#charts-player"),act),250);}
+
 // ---- app ----
 function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="29" height="29" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
   $("#dock").querySelectorAll(".dot").forEach(d=>d.onclick=()=>go(d.dataset.k));}
-function render(){try{if(CUR==="deck"){refreshDeck(true);return;}
+function render(){renderView();try{navRestore();}catch(e){}}
+function renderView(){try{if(CUR==="deck"){refreshDeck(true);return;}
   if(CUR==="charts"){refreshCharts(!$("#chartsroot"));return;}
+  if(CUR==="cameras"&&NAV.zoom.startsWith("cam:"))return;   // one camera is full screen: the grid waits with its decoders free
   if(CUR==="cameras"){const tiles=stripTiles();const key=tiles.map(t=>t.key).join("|");const grid=$("#camgrid");
     if(key===CAMVIEWKEY&&grid){syncLive(grid,tiles,"grid");return;}CAMVIEWKEY=key;captureFrames();closeLive("grid");}
   else if(CAMVIEWKEY){CAMVIEWKEY="";closeLive("grid");}
   $("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}catch(e){$("#stage").innerHTML='<div class="glass card red">render failed: '+esc(e.message)+'</div>';}}
-function go(k){k=VIEW_ALIAS[k]||k;if(!RENDER[k])return;CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
+function go(k){k=VIEW_ALIAS[k]||k;if(!RENDER[k])return;if(k!==CUR){navLayerClose();NAV.zoom="";NAV.level="ribbon";}CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
 // A Cast receiver lays the page out at 1280x720 logical pixels whatever the panel (the creator's 4K Sony showed a
 // few boxes, 2026-09-12); the page is designed at 1920x1080 and scaled to the viewport it actually gets.
 let SCALE=0;   // 0 = fit the viewport; a number = the creator's override (tv scale 0.5)
@@ -648,14 +823,10 @@ function fitApp(){const app=$("#app");const [w,h]=viewportSize();const sc=SCALE>
 addEventListener("resize",fitApp);
 function tickClock(){$("#clock").textContent=nowT();$("#date").textContent=new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
   if(CUR==="ambient"||CUR==="deck"){const c=$("#stage .big");}}
-// Keys: a TV browser, a keyboard, or a remote that does reach the page.
-document.addEventListener("keydown",e=>{const i=VIEWS.findIndex(v=>v[0]===CUR);
-  if(e.key==="ArrowRight"||e.key==="MediaTrackNext")go(VIEWS[(i+1)%VIEWS.length][0]);
-  else if(e.key==="ArrowLeft"||e.key==="MediaTrackPrevious")go(VIEWS[(i-1+VIEWS.length)%VIEWS.length][0]);
-  else if(/^[1-8]$/.test(e.key))go(VIEWS[parseInt(e.key)-1][0]);
-  else if(e.key==="Enter"||e.key===" "){if(CUR==="markets"){const t=["1D","1W","1M","1Y"];TF=t[(t.indexOf(TF)+1)%4];render();}else go("markets");}
-  else if(e.key==="Escape"||e.key==="Backspace"||e.key==="GoBack"||e.key==="BrowserBack")go("deck");
-  else return; e.preventDefault();});
+// Keys: a TV browser, a keyboard, or a remote that does reach the page -- all into navKey, like the relayed ones.
+document.addEventListener("keydown",e=>{const k=NAV_KEYS[e.key];
+  if(k){navKey(k);e.preventDefault();return;}
+  if(/^[1-5]$/.test(e.key)){go(VIEWS[parseInt(e.key)-1][0]);e.preventDefault();}});
 
 (async function(){fitApp();[300,1000,3000,8000].forEach(ms=>setTimeout(fitApp,ms));   // receivers settle their viewport late
   await loadWP();setBG(WP[0]);buildDock();render();tickClock();
@@ -664,6 +835,7 @@ document.addEventListener("keydown",e=>{const i=VIEWS.findIndex(v=>v[0]===CUR);
   setInterval(()=>{if(CUR==="ambient")render();},30000);
   setInterval(()=>{if(CUR==="deck")refreshDeck(false);},1000);   // the Home boxes rotate on their own clock
   poll();setInterval(poll,4000);
+  pollKeys();setInterval(pollKeys,300);   // remote keys relayed through Sim (the phone's D-pad, `tv nav`)
   loadBanner();refreshStrip();
   loadData();setInterval(loadData,60000);
   setInterval(pollStreams,10000);    // the strip follows the relays within ten seconds
