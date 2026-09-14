@@ -546,3 +546,30 @@ class TestRingWatchStartsByItself(_ExecutionServiceTestCase):
         self.service._config = dataclasses.replace(self.service._config, ring_watch_on_start=False)  # noqa: SLF001
         self.assertFalse(await self.service._autostart_ring_watch(delay_s=0))  # noqa: SLF001
         self.assertEqual(len(calls), 1, "switched off in config: left alone")
+
+    async def test_the_dashboard_goes_on_the_remembered_tv_at_boot(self):
+        """After a restart the TV stayed on its screensaver until someone
+        typed `tv show` (the creator, 2026-09-14)."""
+        import dataclasses
+
+        await self._start()
+        calls = []
+
+        class FakeShow:
+            name = "cast_show"
+
+            async def run(self, args, *, ctx):
+                calls.append(dict(args))
+                from simorgh.contracts.protocols import ToolResult
+                return ToolResult(ok=True, output="Sim's dashboard is on Family Room TV (woke the TV)")
+
+        self.service._registry["cast_show"] = FakeShow()  # noqa: SLF001
+        self.service._config = dataclasses.replace(self.service._config, cast_device="")  # noqa: SLF001
+        self.assertFalse(await self.service._autostart_tv_show(delay_s=0))  # noqa: SLF001
+        self.assertEqual(calls, [], "no TV remembered: nothing to show on")
+        self.service._config = dataclasses.replace(self.service._config, cast_device="Family Room TV")  # noqa: SLF001
+        self.assertTrue(await self.service._autostart_tv_show(delay_s=0))  # noqa: SLF001
+        self.assertEqual(calls, [{}])
+        self.service._config = dataclasses.replace(self.service._config, tv_show_on_start=False)  # noqa: SLF001
+        self.assertFalse(await self.service._autostart_tv_show(delay_s=0))  # noqa: SLF001
+        self.assertEqual(len(calls), 1, "switched off in config: left alone")

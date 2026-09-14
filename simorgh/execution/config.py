@@ -450,6 +450,10 @@ class Config:
     cast_page_url: str = ""
     cast_page_port: int = 8765
     cast_discovery_s: float = 5.0
+    # Put the dashboard on the remembered TV by itself at boot, waking the
+    # TV first: after a restart the TV stayed on its screensaver until
+    # someone typed `tv show` (the creator, 2026-09-14). Needs `cast_device`.
+    tv_show_on_start: bool = True
 
     # -- ring (execution/home/ring.py): the Ring cameras through Ring's
     # cloud. `ring_watch` polls every `ring_poll_s` for new rings and

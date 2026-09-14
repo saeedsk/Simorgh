@@ -124,6 +124,7 @@ class Service:
         self._capability_detail = ""
         self._probe_task: asyncio.Task | None = None
         self._ring_autostart: asyncio.Task | None = None
+        self._tv_autostart: asyncio.Task | None = None
         self._probe_results: list = []
         # One worktree per code task (worktree.py); None when the repo
         # is not a git checkout or `[execution] worktrees = false`.
@@ -218,6 +219,8 @@ class Service:
         self._probe_task = asyncio.create_task(self._probe_capabilities())
         # The Ring watch, by itself, when Ring is set up (`ring_watch_on_start`).
         self._ring_autostart = asyncio.create_task(self._autostart_ring_watch())
+        # The dashboard on the TV, by itself, when a TV is remembered (`tv_show_on_start`).
+        self._tv_autostart = asyncio.create_task(self._autostart_tv_show())
 
     def _build_worktrees(self, ctx) -> WorktreeManager | None:
         """Where a task's own worktree lives, and whether the feature is
@@ -372,6 +375,8 @@ class Service:
     async def stop(self) -> None:
         if self._ring_autostart is not None and not self._ring_autostart.done():
             self._ring_autostart.cancel()
+        if self._tv_autostart is not None and not self._tv_autostart.done():
+            self._tv_autostart.cancel()
         if self._probe_task is not None and not self._probe_task.done():
             self._probe_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -461,6 +466,31 @@ class Service:
             self._ctx.logger.warning("ring_watch_autostart_failed", error=repr(exc))
             return False
         self._ctx.logger.info("ring_watch_autostart", ok=result.ok, detail=(result.output or result.error or "")[:160])
+        return bool(result.ok)
+
+    async def _autostart_tv_show(self, *, delay_s: float = 25.0) -> bool:
+        """Run `tv show` at boot when a TV is remembered and `[execution]
+        tv_show_on_start` is true. The delay lets the interface's page
+        server come up first -- the TV fetches the dashboard from it.
+        Returns whether the dashboard went on."""
+        if not getattr(self._config, "tv_show_on_start", True):
+            return False
+        if not str(getattr(self._config, "cast_device", "") or "").strip():
+            return False
+        if delay_s:
+            await asyncio.sleep(delay_s)
+        tool = self._registry.get("cast_show")
+        if tool is None:
+            return False
+        ctx = ToolContext(action_id="tv-show-boot", task_id=None, scope={}, constraints={},
+                          data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
+                          ledger=self._ctx.ledger, bus=self._ctx.bus)
+        try:
+            result = await tool.run({}, ctx=ctx)
+        except Exception as exc:  # noqa: BLE001 -- a TV that is off is not the service's failure
+            self._ctx.logger.warning("tv_show_autostart_failed", error=repr(exc))
+            return False
+        self._ctx.logger.info("tv_show_autostart", ok=result.ok, detail=(result.output or result.error or "")[:160])
         return bool(result.ok)
 
     async def _on_dash_state(self, message: Message) -> None:

@@ -565,3 +565,75 @@ class ChartsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse([c for c in cast.calls if c[0] == "play"])
         state = [m.payload for m in bus.published if m.type == topics.TV_STATE][-1]
         self.assertEqual((state["native"], state["queue"]), ("YouTube", ["Ordinary — Alex Warren"]))
+
+
+class WakeBeforeShowTestCase(unittest.IsolatedAsyncioTestCase):
+    """`tv show` wakes a paired TV first: a cast to a TV on its screensaver
+    loaded behind it and the screen stayed dark (the creator, 2026-09-14)."""
+
+    async def asyncSetUp(self):
+        import tempfile
+
+        from tests.simorgh.execution.media.test_androidtv import FakeRemote
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.certs = Path(self._tmp.name)
+        self.order: list = []
+        order = self.order
+
+        class _Remote(FakeRemote):
+            def send_key_command(self, key):
+                order.append(("key", key))
+
+        class _Cast(_FakeCast):
+            def show_page(self, name, url):
+                order.append(("show_page", name))
+
+        self.remote_cls, self.cast = _Remote, _Cast()
+        FakeRemote.instances = []
+
+    def _show(self, **overrides):
+        from simorgh.contracts.protocols import ToolContext
+
+        class _Publish:
+            async def publish(self, message):
+                pass
+
+        tools = {t.name: t for t in cast_tools(
+            Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=self.cast, reachable=lambda url: True,
+            env={"SIM_API_TOKEN": "s3"}, remote_cls=overrides.get("remote_cls", self.remote_cls), certs_dir=self.certs)}
+        tool = tools["cast_show"]
+        tool._WAKE_SETTLE_S = 0  # noqa: SLF001
+        ctx = ToolContext(action_id="a1", task_id=None, scope={}, constraints={}, data_dir=self.certs,
+                          clock=None, logger=None, ledger=None, bus=_Publish())
+        return tool.run({}, ctx=ctx)
+
+    def _pair(self):
+        for name in ("androidtv-cert.pem", "androidtv-key.pem", "paired-10.0.0.9"):
+            (self.certs / name).write_text("x")
+
+    async def test_a_paired_tv_is_woken_before_the_page_is_cast(self):
+        self._pair()
+        result = await self._show()
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(self.order, [("key", "WAKEUP"), ("show_page", "Living Room TV")])
+        self.assertIn("woke the TV", result.output)
+
+    async def test_an_unpaired_tv_is_still_cast_to_without_a_wake(self):
+        result = await self._show()
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(self.order, [("show_page", "Living Room TV")])
+        self.assertNotIn("woke", result.output)
+
+    async def test_a_tv_that_does_not_answer_still_gets_the_page(self):
+        self._pair()
+
+        class _Silent(self.remote_cls):
+            async def async_connect(self):
+                raise OSError("no route to host")
+
+        result = await self._show(remote_cls=_Silent)
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(self.order, [("show_page", "Living Room TV")])
+

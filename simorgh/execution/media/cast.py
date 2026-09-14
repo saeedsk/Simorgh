@@ -303,6 +303,8 @@ def settings_paths(home: Path | None = None) -> tuple[Path, Path]:
 class _CastTool:
     read_only = False
     reversibility = "reversible"
+    #: seconds between waking the TV and casting to it
+    _WAKE_SETTLE_S = 1.0
 
     def __init__(self, config, *, cast=None, env=None, secrets=None, clock=time.time, reachable=None,
                  prefs: CastPreferences | None = None, settings_home: Path | None = None, fetch=None,
@@ -337,6 +339,27 @@ class _CastTool:
 
         certs = self._certs_dir or settings_paths(self._settings_home)[0].parent / "tv"
         return AndroidTv(host, certs_dir=certs, remote_cls=self._remote_cls)
+
+    async def _wake(self, backend, name: str, *, timeout_s: float = 6.0) -> bool:
+        """Wake the TV before casting to it. A cast to a TV sitting in its
+        screensaver loaded behind it and the screen stayed dark (the
+        creator, 2026-09-14). The Android TV remote's WAKEUP key dismisses
+        the screensaver without toggling power. Best effort: an unpaired or
+        silent TV never holds up the cast. Returns whether it woke."""
+        host = await asyncio.to_thread(self._host_of, backend, name)
+        if not host:
+            return False
+        try:
+            tv = self._androidtv(host)
+            if not tv.paired():
+                return False
+            problem = await asyncio.wait_for(tv.key("wake"), timeout=timeout_s)
+        except Exception:  # noqa: BLE001 -- asyncio.TimeoutError included: the cast goes ahead
+            return False
+        if problem:
+            return False
+        await asyncio.sleep(self._WAKE_SETTLE_S)  # let the screensaver close before the page loads over it
+        return True
 
     def _host_of(self, backend, name: str) -> str:
         try:
@@ -736,6 +759,7 @@ class CastShowTool(_CastTool):
                     f"refused: the TV could not fetch Sim's page at {url.split('?')[0]} ({why}). "
                     "Sim's API is probably bound to loopback: set [interface] http_host = \"0.0.0.0\" and a "
                     "SIM_API_TOKEN, then restart."))
+        woke = await self._wake(backend, name)
         self._bump()
         try:
             await asyncio.to_thread(backend.show_page, name, url)
@@ -747,8 +771,10 @@ class CastShowTool(_CastTool):
             await bus.publish(Message.new(topics.DASH_STATE, source="execution", payload={"view": view}))
         shown = url if args.get("url") else (f"Sim's dashboard ({view})" if view and page == "dash"
                                              else "Sim's dashboard" if page == "dash" else "Sim's page")
-        return ToolResult(ok=True, output=f"{shown} is on {name}", side_effects=(f"cast_show:{name}",),
-                          metadata={"device": name, "url": url.split("?")[0], "page": page, **({"view": view} if view else {})})
+        return ToolResult(ok=True, output=f"{shown} is on {name}" + (" (woke the TV)" if woke else ""),
+                          side_effects=(f"cast_show:{name}",),
+                          metadata={"device": name, "url": url.split("?")[0], "page": page, "woke": woke,
+                                    **({"view": view} if view else {})})
 
 
 class CastPlayTool(_CastTool):
