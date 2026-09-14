@@ -398,7 +398,27 @@ def splash(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
             else:
                 cells.append(f"\x1b[38;2;{bot[0]};{bot[1]};{bot[2]}m▄{_RESET}")
         rows.append(pad + "".join(cells).rstrip())
+    # The second splash. Sim's own task (36adc95) wrote this docstring
+    # and the import and never the lines below; the creator watched a
+    # startup for the cartoon that was not there (2026-09-13).
+    title, art = cartoon_splash.pick()
+    art_width = max((len(line) for line in art), default=0)
+    art_pad = " " * max(0, (width - art_width) // 2)
+    rows.append("")
+    rows.extend(art_pad + line.rstrip() for line in art)
+    caption = f"— {title} —"
+    rows.append(" " * max(0, (width - len(caption)) // 2) + caption)
     return rows
+
+
+def logo_rows(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
+    """The logo alone, no cartoon -- for a caller that wants the emblem."""
+    from . import cartoon_splash  # noqa: F401 -- keeps the import contract of splash()
+
+    rows = splash(enabled=enabled, width=width)
+    from . import splash_art
+
+    return rows[:len(splash_art.ROWS)]
 
 
 #: Derived from `parser.COMMANDS` -- see the note there. The splash

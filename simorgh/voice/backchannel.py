@@ -39,20 +39,18 @@ POOLS: dict[str, dict[str, tuple[str, ...]]] = {
     # ("Okay, okay."), and nothing a synthesiser cannot say -- Kokoro
     # read "Mm-hm." as four letters; "Uh-huh." it can say.
     HEARD: {
-        ENGLISH: ("Aha.", "Okay.", "Right.", "Got it.", "I see.", "Yes.", "Alright.", "Ah, okay.",
-                  "Okay, I see.", "Right, okay.", "Yep.", "Sure."),
+        # One word, the shortest Kokoro says cleanly: the creator, 2026-09-13,
+        # "for short sounds you should choose something that is short".
+        ENGLISH: ("Right.", "Got it.", "Yes.", "Yep.", "Okay.", "I see.", "Sure thing."),
         FARSI: ("اوهوم.", "آها.", "باشه.", "خب.", "درسته.", "آره.", "فهمیدم.", "بله.", "آها، خب."),
     },
     QUESTION: {
-        ENGLISH: ("Let me think.", "Hmm, let me see.", "Let me check.", "One sec.", "Just a sec.", "Hmm.",
-                  "Let me look.", "Hang on.", "Let me have a look.", "Give me a second.", "Okay, let me check.",
-                  "Ah, let me think."),
+        ENGLISH: ("Let me see.", "Let me check.", "One sec.", "Hmm.", "Hang on.", "Let me look."),
         FARSI: ("بذار ببینم.", "یه لحظه.", "یه ثانیه.", "الان می‌بینم.", "بذار فکر کنم.", "هوم.", "صبر کن ببینم.",
                 "الان چک می‌کنم.", "خب، بذار ببینم."),
     },
     REQUEST: {
-        ENGLISH: ("Okay.", "Sure.", "On it.", "Okay, let me do that.", "Alright, one sec.", "Sure, just a moment.",
-                  "Okay, hang on.", "Will do.", "Right, on it.", "Okay, one second.", "Alright."),
+        ENGLISH: ("Sure.", "On it.", "Will do.", "Right.", "One sec."),
         FARSI: ("چشم.", "حتماً.", "باشه.", "باشه، الان.", "الان انجام می‌دم.", "باشه، یه لحظه.", "باشه، ببینم.",
                 "خب، الان.", "حتماً، یه ثانیه."),
     },
@@ -68,7 +66,7 @@ POOLS: dict[str, dict[str, tuple[str, ...]]] = {
 # of it (2026-09-12); "Mm-hm" Kokoro cannot say, and "Yeah" it says as
 # "yaw ho".
 HUM: dict[str, tuple[str, ...]] = {
-    ENGLISH: ("Right.", "Okay.", "I see.", "Aha.", "Yep."),
+    ENGLISH: ("Right.", "Okay.", "I see.", "Yep."),
     FARSI: ("آره.", "خب.", "آها.", "درسته."),
 }
 

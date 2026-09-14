@@ -426,7 +426,8 @@ class TestDelivery(unittest.IsolatedAsyncioTestCase):
         heard = FakeRecogniser("my dog died yesterday and I am so tired", 0.95)
         session, bus, speaker, tts = _session(_config(), script, replies, recogniser=heard)
         await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
-        self.assertLess(tts.speeds[-1], 1.0, tts.speeds)
+        from simorgh.voice.config import Config as _Cfg
+        self.assertLess(tts.speeds[-1], _Cfg().tts_speed, tts.speeds)   # slower than the base pace
         spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("aside")]
         self.assertEqual(spoken[-1]["metrics"]["register"], "warm")
 
@@ -435,7 +436,8 @@ class TestDelivery(unittest.IsolatedAsyncioTestCase):
         replies = _Replies(["Twelve."])
         session, bus, speaker, tts = _session(_config(), script, replies)
         await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
-        self.assertEqual(tts.speeds[-1], 1.0)
+        from simorgh.voice.config import Config as _Cfg
+        self.assertEqual(tts.speeds[-1], _Cfg().tts_speed)
 
     async def test_a_listener_hums_under_a_long_story(self) -> None:
         # 7.5 s of talk, a breath, more talk: the breath gets a half-loud

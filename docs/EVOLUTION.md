@@ -5231,3 +5231,24 @@ Still ahead, roughly in order:
     recorded in the findings file: the eight cosmetics not worth a line
     here, the double encoder pass for timestamped whisper segments, and
     a self-test of the speaker model at load.
+
+167. **An hour of talking after the wave (2026-09-13, 16:40-17:00).**
+    The creator, by voice, in order: "for short sounds choose something
+    short -- that 'okay' takes two seconds"; "Aha -- you're not
+    pronouncing that correctly"; "I like the playful pace"; "you should
+    be able to just take my order and change the voice -- you have all
+    the API"; and the cartoon splash he had been told was "in the code"
+    was not on his screen. So: the acknowledgement waits 2.5 s (a quick
+    answer is its own), the pools are one or two words and no "Aha";
+    the base pace is 1.1; `voice_setting` is a tool -- Sim changes its
+    voice, speed, volume or lane when asked and lists the voices; the
+    tone splitter reads a misspelt tag ("[cialm]") as the tone, drops an
+    invented one ("[ciallo_3052e5_audio]") and keeps "[NVDA]" as text;
+    the stranger rule is kept silently instead of announced ("I don't
+    take this voice's word for family matters" was said to the creator);
+    and `render.splash()` really appends a cartoon and its caption --
+    Sim's own commit 36adc95 had changed the docstring and an import and
+    nothing else, and its verifier passed it. Not done here: the splash
+    the creator actually asked for -- five famous cartoon characters
+    fetched as images and rendered to half-block art like the logo -- is
+    a separate build.

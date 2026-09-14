@@ -34,7 +34,7 @@ class TestPick(unittest.TestCase):
 
     def test_the_pools_are_wide(self) -> None:
         for kind in (HEARD, QUESTION, REQUEST):
-            self.assertGreaterEqual(len(POOLS[kind]["en"]), 10, kind)
+            self.assertGreaterEqual(len(POOLS[kind]["en"]), 5, kind)   # short pools since 2026-09-13: one or two words each
             self.assertGreaterEqual(len(POOLS[kind]["fa"]), 8, kind)
         self.assertGreaterEqual(len(STILL["en"]), 4)
 

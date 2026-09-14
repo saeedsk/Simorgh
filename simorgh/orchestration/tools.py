@@ -65,6 +65,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # starting it again -- the work done so far stays in its branch.
     "list_tasks": ("read_only", False),
     "cancel_task": ("reversible", False),
+    # `voice set` over the bus: the service validates, the change is live
+    # and undone by setting it back.
+    "voice_setting": ("reversible", False),
     "apply_skill": ("reversible", False),
     "git_commit": ("reversible", False),
     "git_revert": ("reversible", False),

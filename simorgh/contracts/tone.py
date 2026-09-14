@@ -28,18 +28,40 @@ _ALIASES = {"happy": "bright", "excited": "bright", "cheerful": "bright", "gentl
             "soft": "warm", "sad": "sorry", "apologetic": "sorry", "grave": "serious", "stern": "serious",
             "urgent": "serious", "relaxed": "calm", "soothing": "calm", "fun": "playful", "teasing": "playful",
             "joking": "playful", "plain": "neutral", "flat": "neutral"}
-_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z]{3,12})\s*[\])>]\s*[:\-–—]?\s*", re.I)
+_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{2,24})\s*[\])>]\s*[:\-–—]?\s*", re.I)
 
 
 def split_tone(text: str) -> tuple[str, str]:
     """`("warm", "It's three o'clock.")` for `"[warm] It's three o'clock."`;
-    `("", text)` when there is no tag or the word is not a tone."""
+    `("", text)` when there is no tag or the word is not a tone. Two
+    stacked tags ("[ciallo_3052e5_audio][calm] No") give the real one."""
+    tone, rest = _split_one(text or "")
+    for _ in range(3):
+        again, rest2 = _split_one(rest)
+        if rest2 == rest:
+            break
+        tone, rest = (tone or again), rest2
+    return tone, rest
+
+
+def _split_one(text: str) -> tuple[str, str]:
     match = _TAG.match(text or "")
     if not match:
         return "", text or ""
     word = match.group(1).lower()
     tone = word if word in TONES else _ALIASES.get(word, "")
     if not tone:
+        import difflib
+
+        # "[cialm]" is calm; "[normal]", "[ciallo_05]" are invented tags the
+        # model opened with, not words for the person -- off they come, as
+        # neutral. "[NVDA]" and other upper-case brackets stay: a ticker
+        # is text (the creator's screen, 2026-09-13).
+        near = difflib.get_close_matches(word, sorted(TONES), n=1, cutoff=0.75)
+        if near and match.group(1) == match.group(1).lower():
+            return near[0], (text or "")[match.end():]
+        if match.group(1) == match.group(1).lower() and word.replace("_", "").replace("-", "").isalnum() and len(word) <= 24:
+            return "", (text or "")[match.end():].lstrip()
         return "", text or ""
     return tone, (text or "")[match.end():]
 

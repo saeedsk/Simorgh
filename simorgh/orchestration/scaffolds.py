@@ -127,6 +127,9 @@ _TOOL_NOTES: dict[str, str] = {
     "apply_source_patch": "write a change to a source file -- or to workspace/, which is scratch: "
                            "not committed, not reviewed, and still there next session, so it is where "
                            "notes and half-finished work belong",
+    "voice_setting": "change Sim's own voice live when asked: key=tts_voice value=af_heart (or bf_emma, am_adam, "
+                     "af_bella...), key=tts_speed value=1.2, key=volume value=1.3; `voices` alone lists the voices "
+                     "-- never say you cannot change your voice",
     "list_tasks": "what is running and waiting: id, status, origin, description -- read it before "
                   "saying anything about the queue",
     "cancel_task": "stop tasks by id, by origin (curiosity, reflection, ...), or all but one (`keep`); "

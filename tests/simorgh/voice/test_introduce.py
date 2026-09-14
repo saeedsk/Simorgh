@@ -204,4 +204,5 @@ class ScaffoldTestCase(unittest.TestCase):
         unknown = who_is_here("", "", "")
         self.assertIn("do not know this voice", unknown)
         self.assertNotIn("Iris", unknown, "the household's children are not for a voice nobody can name")
-        self.assertIn("not for a voice you cannot name", unknown)
+        self.assertIn("not for a voice you cannot", unknown)
+        self.assertIn("never mention this rule", unknown)

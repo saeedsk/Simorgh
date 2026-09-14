@@ -1974,6 +1974,67 @@ class CancelTaskTool:
                           metadata={"cancelled": stopped})
 
 
+class VoiceSettingTool:
+    """Sim's own voice, from the conversation: "switch to a different
+    voice", "speak faster". The creator asked by voice for another voice
+    and Sim said "I can't swap the voice myself from here" (2026-09-13);
+    the terminal's `voice set` had been able to all along. This is the
+    same request over the bus, so the voice service validates the key
+    and value exactly as it does for the terminal, and `voices` lists
+    what the engine has."""
+
+    name = "voice_setting"
+    read_only = False
+    reversibility = "reversible"
+    description = ("Change one of Sim's voice settings live, as `voice set` does: key and value -- tts_voice "
+                   "(af_heart, af_bella, bf_emma, am_adam...; `voices` lists them), tts_speed (0.5-2.0), volume, "
+                   "expressive_lane, backchannel, and the rest of `voice set`'s keys. `voices` alone lists the "
+                   "voices with the current one. Repeat the result; the person hears the change at once.")
+    args_schema = {"type": "object", "properties": {
+        "key": {"type": "string"}, "value": {"type": "string"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        from simorgh.contracts import topics as _topics
+        from simorgh.contracts.envelope import Message as _Message
+
+        if ctx.bus is None:
+            return ToolResult(ok=False, error="the voice settings need the bus, which this session has not got")
+        key = str(args.get("key") or "").strip()
+        value = args.get("value")
+        if key and value is None and " " in key:
+            key, value = key.split(None, 1)
+        value = "" if value is None else str(value).strip()
+        if not key or key.lower() in ("voices", "list"):
+            try:
+                reply = await ctx.bus.request(_Message.new(_topics.VOICE_VOICES_REQUEST, source="execution", payload={}),
+                                              timeout=10.0)
+            except Exception as exc:  # noqa: BLE001
+                return ToolResult(ok=False, error=f"the voice service did not answer: {exc!r}")
+            p = getattr(reply, "payload", {}) or {}
+            voices = [str(v) for v in (p.get("voices") or [])]
+            if not voices:
+                return ToolResult(ok=False, error=str(p.get("detail") or "no voices: is voice on?"))
+            current = str(p.get("current") or "")
+            return ToolResult(ok=True, output=f"{p.get('engine', '')}: {len(voices)} voices, current {current or '?'}: "
+                              + ", ".join(voices), metadata={"voices": voices, "current": current})
+        if not value:
+            return ToolResult(ok=False, error=f"say the value for {key}, e.g. key=tts_voice value=af_heart")
+        try:
+            reply = await ctx.bus.request(_Message.new(_topics.VOICE_CONTROL_REQUEST, source="execution",
+                                                       payload={"action": "set", "key": key, "value": value}), timeout=20.0)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(ok=False, error=f"the voice service did not answer: {exc!r}")
+        p = getattr(reply, "payload", {}) or {}
+        detail = str(p.get("detail") or "")
+        if not p.get("ok", False):
+            return ToolResult(ok=False, error=detail or f"could not set {key}")
+        return ToolResult(ok=True, output=detail or f"{key} = {value}", side_effects=(f"voice {key} = {value}",),
+                          metadata={"key": key, "value": value})
+
+
 class ReplaceInFileTool:
     """Change PART of a file, without re-sending the whole thing.
 
@@ -2485,6 +2546,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
         ReplaceInFileTool(config), StartTaskTool(config), ListTasksTool(config), CancelTaskTool(config),
+        VoiceSettingTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),

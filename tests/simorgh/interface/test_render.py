@@ -156,11 +156,19 @@ class RenderTestCase(unittest.TestCase):
 
         self.assertEqual(splash_art.SOURCE, "images/logo/Sim-Logo-transparent.png")
         rows = render.splash(enabled=False)
-        self.assertEqual(len(rows), len(splash_art.ROWS))
+        # the logo, a blank line, one cartoon and its caption (2026-09-13)
+        from simorgh.interface import cartoon_splash
+        self.assertGreater(len(rows), len(splash_art.ROWS) + 2)
+        self.assertEqual(rows[:len(splash_art.ROWS)], render.logo_rows(enabled=False))
+        self.assertEqual(rows[len(splash_art.ROWS)], "")
+        tail = "\n".join(rows[len(splash_art.ROWS) + 1:])
+        self.assertTrue(any(f"— {title} —" in tail for title, _art in cartoon_splash.CARTOON_SPLASHES), tail)
         self.assertTrue(10 <= len(rows) <= 40, len(rows))
-        for row in rows:
+        for row in rows[:len(splash_art.ROWS)]:   # the logo: plain block glyphs only; the cartoon draws with anything
             self.assertLessEqual(len(row), 68, repr(row))
-            self.assertTrue(set(row) <= set(" ▀▄█"), repr(row))  # plain block glyphs only
+            self.assertTrue(set(row) <= set(" ▀▄█"), repr(row))
+        for row in rows[len(splash_art.ROWS):]:
+            self.assertLessEqual(len(row), 68, repr(row))
 
     def test_splash_color_is_true_color_sgr_only(self):
         joined = "\n".join(render.splash(enabled=True))

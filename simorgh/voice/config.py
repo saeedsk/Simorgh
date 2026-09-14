@@ -35,7 +35,7 @@ class Config:
     stt_compute: str = "auto"          # faster_whisper: int8 | float16 | auto
     tts: str = "auto"                  # auto | kokoro | piper | say | chatterbox | miso | fake
     tts_voice: str = "af_jessica"      # Kokoro voice id (the creator's pick); a `say -v` name for `say`
-    tts_speed: float = 1.0
+    tts_speed: float = 1.1     # the creator, 2026-09-13: "you speak too slow, speak fast" -- playful's pace, always
     # A reply is spoken by the engine for ITS language (voice/lang.py):
     # Kokoro has no Persian and read Farsi as English gibberish
     # (2026-09-11). Off = the one engine above speaks everything.
@@ -131,7 +131,10 @@ class Config:
     # backchannel, and the screen shows what it was read as.
     tidy: bool = True
     backchannel: bool = True
-    backchannel_after_ms: int = 1500
+    # 2500, not 1500: the model's answer usually lands in 1-2.5 s, and an
+    # "Okay." that starts at 1.5 s holds the floor for the answer -- the
+    # creator heard the sound as the delay itself (2026-09-13).
+    backchannel_after_ms: int = 2500
     backchannel_gap_s: float = 12.0
     exchange_window_s: float = 20.0
     still_after_s: float = 20.0
