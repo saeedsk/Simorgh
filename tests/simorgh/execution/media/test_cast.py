@@ -309,3 +309,19 @@ class DashViewTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cast.calls[-1][2], "http://10.0.0.5:8765/tv?token=s3")
         result = await tools["cast_show"].run({"target": "terminal"}, ctx=_ctx(bus))
         self.assertEqual(cast.calls[-1][2], "http://10.0.0.5:8765/tv?token=s3", "the marker form names the page too")
+
+    async def test_a_view_name_opens_the_dashboard_on_that_view_not_a_tv_called_home(self):
+        # Live 2026-09-13: `CAST_SHOW: home` and `CAST_SHOW: page=home` were
+        # both refused as "no Cast device called 'home'".
+        from simorgh.contracts import topics
+        tools, cast, bus = self._tools()
+        for form in ({"target": "home"}, {"target": "page=home"}, {"page": "home"}, {"view": "home"}, {"target": "cams"}):
+            result = await tools["cast_show"].run(form, ctx=_ctx(bus))
+            self.assertTrue(result.ok, (form, result.error))
+            self.assertEqual(cast.calls[-1], ("show_page", "Living Room TV", "http://10.0.0.5:8765/dash?token=s3"), form)
+            views = [m.payload["view"] for m in bus.published if m.type == topics.DASH_STATE]
+            self.assertEqual(views[-1], "cameras" if form == {"target": "cams"} else "home", form)
+            self.assertIn(views[-1], result.output)
+        result = await tools["cast_show"].run({"target": "page=tv device=Living Room TV"}, ctx=_ctx(bus))
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(cast.calls[-1], ("show_page", "Living Room TV", "http://10.0.0.5:8765/tv?token=s3"))

@@ -352,6 +352,21 @@ class CastDevicesTool(_CastTool):
                           metadata={"devices": [d.name for d in devices], "default": default})
 
 
+#: The dashboard's views and the words people use for them (dash.html).
+DASH_VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "terminal", "ambient")
+DASH_ALIASES = {"deck": "home", "start": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
+                "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "video": "media",
+                "headlines": "news"}
+
+
+def _dash_view(word: str) -> str:
+    """The dashboard view `word` names, or ""; "terminal" is the bare
+    terminal page and not a view here."""
+    low = (word or "").strip().lower()
+    low = DASH_ALIASES.get(low, low)
+    return low if low in DASH_VIEWS and low != "terminal" else ""
+
+
 class CastShowTool(_CastTool):
     name = "cast_show"
     description = ("Put Sim's page on a Cast device (the TV). page dash (the default) is the glass dashboard -- home, "
@@ -359,14 +374,33 @@ class CastShowTool(_CastTool):
                    "replica with room for a video. `url` shows another page instead. `device` names the TV when "
                    "there are several.")
     args_schema = {"type": "object", "properties": {"device": {"type": "string"}, "url": {"type": "string"},
-                                                    "page": {"type": "string", "enum": ["tv", "dash"]}}}
+                                                    "page": {"type": "string", "enum": ["tv", "dash"]},
+                                                    "view": {"type": "string", "enum": list(DASH_VIEWS)}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         target = str(args.get("target") or "").strip()  # the marker form: a URL, a page name or a device name
-        if target and not args.get("url") and not args.get("device") and not args.get("page"):
-            key = "url" if target.lower().startswith(("http://", "https://")) else ("page" if target.lower() in ("tv", "terminal", "tui", "dash", "dashboard") else "device")
+        if target and "=" in target:
+            # `CAST_SHOW: page=home` -- live 2026-09-13, read as a TV called "page=home".
+            from simorgh.contracts.toolargs import key_values
+
+            pairs = {k: str(v) for k, v in key_values(target).items() if k in ("page", "device", "url", "view")}
+            if pairs:
+                args, target = {**args, **pairs}, ""
+        if target and not args.get("url") and not args.get("device") and not args.get("page") and not args.get("view"):
+            low = target.lower()
+            if low.startswith(("http://", "https://")):
+                key = "url"
+            elif low in ("tv", "terminal", "tui", "dash", "dashboard") or _dash_view(low):
+                key = "page"
+            else:
+                key = "device"
             args = {**args, key: target}
         page = str(args.get("page") or "dash").strip().lower()
+        view = _dash_view(str(args.get("view") or ""))
+        if page not in ("tv", "terminal", "tui", "dash", "dashboard") and _dash_view(page):
+            # `cast_show home`, `cast_show cameras`: the dashboard, opened
+            # on that view -- live 2026-09-13 "home" was taken for a TV.
+            view, page = _dash_view(page), "dash"
         page = "tv" if page in ("tv", "terminal", "tui") else "dash"
         url = str(args.get("url") or "").strip() or self._page_url(page)
         try:
@@ -388,9 +422,13 @@ class CastShowTool(_CastTool):
         except Exception as exc:  # noqa: BLE001
             return ToolResult(ok=False, error=f"refused: {name} would not show the page ({exc})")
         await self._publish_state(ctx, "none")
-        shown = url if args.get("url") else ("Sim's dashboard" if page == "dash" else "Sim's page")
+        bus = getattr(ctx, "bus", None)
+        if view and page == "dash" and bus is not None:
+            await bus.publish(Message.new(topics.DASH_STATE, source="execution", payload={"view": view}))
+        shown = url if args.get("url") else (f"Sim's dashboard ({view})" if view and page == "dash"
+                                             else "Sim's dashboard" if page == "dash" else "Sim's page")
         return ToolResult(ok=True, output=f"{shown} is on {name}", side_effects=(f"cast_show:{name}",),
-                          metadata={"device": name, "url": url.split("?")[0], "page": page})
+                          metadata={"device": name, "url": url.split("?")[0], "page": page, **({"view": view} if view else {})})
 
 
 class CastPlayTool(_CastTool):
@@ -525,10 +563,8 @@ class DashViewTool(_CastTool):
         "view": {"type": "string"}, "timeframe": {"type": "string"}, "symbol": {"type": "string"},
         "rotate_s": {"type": "number"}, "scale": {"type": "number"}, "live_max": {"type": "integer"},
         "video_quality": {"type": "string", "enum": ["light", "full"]}, "action": {"type": "string", "enum": ["view", "remote", "link"]}}}
-    VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "terminal", "ambient")
-    ALIASES = {"deck": "home", "start": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
-               "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "tv": "media", "video": "media",
-               "headlines": "news"}
+    VIEWS = DASH_VIEWS
+    ALIASES = {**DASH_ALIASES, "tv": "media"}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         action = str(args.get("action") or "").strip().lower()

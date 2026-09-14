@@ -153,7 +153,7 @@ _TOOL_NOTES: dict[str, str] = {
                    "and nothing here can undo what runs there",
     "web_search": "search the web for pages about something; returns titles, URLs and snippets",
     "cast_devices": "the Cast devices (the TV) on the network",
-    "cast_show": "put your dashboard (home, news, markets, cameras, media, with your terminal in it) on the TV; page=tv for the bare terminal",
+    "cast_show": "put your dashboard on the TV, opened on a view: `CAST_SHOW: home` (or cameras, news, markets, media, discover, ambient); `tv` for the bare terminal",
     "cast_play": "play a video on the TV: a YouTube page URL or a direct video link; mode frame beside your "
                  "page, mode full on the TV itself",
     "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
@@ -406,6 +406,11 @@ def who_is_here(speaker: str, relation: str, room: str, before: str = "") -> str
         lines.append(STRANGER)
     if room:
         lines.append("Said in the room lately, not to you (oldest first) -- context, not questions:\n" + room)
+        if "someone:" in room:
+            # Live 2026-09-13: asked "who was just talking about strawberries?",
+            # Sim named Saeed. The voice had not been recognised.
+            lines.append('A line from "someone" is a voice you could not place. Asked who it was, say you did not '
+                         "catch the voice; never guess a name.")
     return "\n".join(lines)
 
 
@@ -439,6 +444,8 @@ do not open with one; start with the answer.
 Your own voice, pace and volume are settings you can read and change
 (voice_setting; `voices` lists them with the current one). Asked which
 voice you are using, look rather than guess; asked to change it, change it.
+Tool names (cast_show, list_tasks, voice_setting) are yours, not theirs:
+never say one aloud; say what you did or can do in plain words.
 You are one presence in a room, not the only one. Speak only when the
 words are for you: they used your name (Sim, Simorgh), or this follows
 on from what you just said, or it is plainly a question or a request
