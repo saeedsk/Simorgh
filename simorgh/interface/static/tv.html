@@ -82,10 +82,21 @@
     grid(tv);
     if (tv.mode !== "frame" || !tv.url) { if (shown) { box.innerHTML = ""; shown = ""; } main.classList.remove("framed"); return; }
     main.classList.add("framed");
-    if (shown === tv.url) return;
-    shown = tv.url;
+    const key = tv.url + "|" + (tv.stream || "") + "|" + (tv.problem || "") + "|" + (tv.fetching ? 1 : 0);
+    if (shown === key) return;
+    shown = key;
     const yt = tv.url.match(/(?:youtu\.be\/|v=|\/embed\/)([\w-]{6,})/);
     const title = tv.title ? `<div class="title">${esc(tv.title)}</div>` : "";
+    if (yt && tv.stream) {
+      // The video as a file Sim fetched (media/tvmedia.py): YouTube's own player is blank inside a Cast receiver.
+      box.innerHTML = `${title}<video autoplay playsinline loop src="${esc(q(tv.stream))}"></video>`;
+      return;
+    }
+    if (yt && (tv.fetching || tv.problem || /CrKey|Chromecast|DashCast/i.test(navigator.userAgent))) {
+      const note = tv.problem ? `cannot play it here: ${esc(tv.problem)}` : (tv.fetching ? "fetching the video for the TV…" : "say “Sim, play it again”");
+      box.innerHTML = `${title}<img src="https://i.ytimg.com/vi/${yt[1]}/hqdefault.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:brightness(.55);"><div class="title" style="top:auto;bottom:8px;">${note}</div>`;
+      return;
+    }
     if (yt) {
       box.innerHTML = `${title}<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&mute=0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
       return;

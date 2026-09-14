@@ -240,8 +240,13 @@ class _CastTool:
     reversibility = "reversible"
 
     def __init__(self, config, *, cast=None, env=None, secrets=None, clock=time.time, reachable=None,
-                 prefs: CastPreferences | None = None, settings_home: Path | None = None) -> None:
+                 prefs: CastPreferences | None = None, settings_home: Path | None = None, fetch=None,
+                 media_dir: Path | None = None) -> None:
         self._config = config
+        # tvmedia.fetch, or a fake: a YouTube video as a file for the TV
+        self._fetch = fetch
+        self._media_dir = media_dir
+        self._fetches: set[asyncio.Task] = set()
         self._given = cast
         self._env = env
         self._secrets = secrets
@@ -316,7 +321,7 @@ class _CastTool:
         except Exception as exc:  # noqa: BLE001
             return f"{exc.__class__.__name__}: {exc}"
 
-    async def _publish_state(self, ctx: ToolContext, mode: str, *, url: str = "", title: str = "") -> None:
+    async def _publish_state(self, ctx: ToolContext, mode: str, *, url: str = "", title: str = "", **extra) -> None:
         bus = getattr(ctx, "bus", None)
         if bus is None:
             return
@@ -325,7 +330,42 @@ class _CastTool:
             payload["url"] = url
         if title:
             payload["title"] = title
+        payload.update({k: v for k, v in extra.items() if v not in ("", None, False)})
         await bus.publish(Message.new(topics.TV_STATE, source="execution", payload=payload))
+
+    def _media_url(self, name: str) -> str:
+        """Where the TV fetches a cached video from: Sim's API, the same
+        host the page comes from; the route is open on the LAN."""
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(self._page_url("tv"))
+        return f"{parts.scheme}://{parts.netloc}/tv/media/{name}"
+
+    async def _fetch_for_tv(self, ctx: ToolContext, video: str, url: str, title: str, *, mode: str = "frame",
+                            device: str = "", backend=None) -> None:
+        """Fetch the YouTube video as a file (tvmedia); then either tell
+        the page where it is (frame) or cast the file to the TV's plain
+        media player (full). Or say why not. Runs after `cast_play` has
+        answered, so the person is not kept waiting on the download."""
+        from . import tvmedia
+
+        fetch = self._fetch or tvmedia.fetch
+        try:
+            path, problem = await asyncio.to_thread(fetch, video, self._media_dir)
+        except Exception as exc:  # noqa: BLE001
+            path, problem = None, f"the fetch failed: {exc}"
+        if path is None:
+            await self._publish_state(ctx, mode, url=url, title=title, problem=problem)
+            return
+        stream = f"/tv/media/{path.name}"
+        if mode == "full" and backend is not None:
+            try:
+                await asyncio.to_thread(backend.play, device, self._media_url(path.name), content_type="video/mp4",
+                                        title=title)
+            except Exception as exc:  # noqa: BLE001
+                await self._publish_state(ctx, "full", url=url, title=title, problem=f"{device} would not play it ({exc})")
+                return
+        await self._publish_state(ctx, mode, url=url, title=title, stream=stream)
 
 
 class CastDevicesTool(_CastTool):
@@ -456,6 +496,18 @@ class CastPlayTool(_CastTool):
         mode = str(args.get("mode") or "frame").strip().lower()
         title = str(args.get("title") or "")
         if mode == "frame":
+            video = youtube_id(url)
+            if video:
+                # YouTube's embedded player is blank and silent inside a
+                # Cast receiver (the creator's TV, 2026-09-13): the page
+                # gets the video as a file instead, fetched now.
+                await self._publish_state(ctx, "frame", url=url, title=title, fetching=True)
+                task = asyncio.create_task(self._fetch_for_tv(ctx, video, url, title))
+                self._fetches.add(task)
+                task.add_done_callback(self._fetches.discard)
+                return ToolResult(ok=True, output=(f"framed inside Sim's page: {title or url} -- fetching the video for "
+                                                   "the TV's own player, with sound; it starts in a few seconds"),
+                                  side_effects=("cast_play:frame",), metadata={"mode": mode, "url": url, "video": video})
             await self._publish_state(ctx, "frame", url=url, title=title)
             return ToolResult(ok=True, output=f"framed inside Sim's page: {title or url}",
                               side_effects=("cast_play:frame",), metadata={"mode": mode, "url": url})
@@ -467,11 +519,22 @@ class CastPlayTool(_CastTool):
         if problem:
             return ToolResult(ok=False, error=problem)
         video = youtube_id(url)
+        if video:
+            # YouTube's Cast receiver stopped taking Sim's requests ("400
+            # screen_ids parameter error", the creator's TV, 2026-09-13):
+            # the video goes to the TV as a file through its plain media
+            # player instead -- the same fetch the framed page uses.
+            await self._publish_state(ctx, "full", url=url, title=title, fetching=True)
+            task = asyncio.create_task(self._fetch_for_tv(ctx, video, url, title, mode="full", device=name,
+                                                          backend=backend))
+            self._fetches.add(task)
+            task.add_done_callback(self._fetches.discard)
+            return ToolResult(ok=True, output=(f"playing full screen on {name}: {title or url} -- fetching the video "
+                                               "for the TV first; it starts in a few seconds"),
+                              side_effects=(f"cast_play:{name}",), metadata={"mode": mode, "url": url, "device": name,
+                                                                             "video": video})
         try:
-            if video:
-                await asyncio.to_thread(backend.play_youtube, name, video)
-            else:
-                await asyncio.to_thread(backend.play, name, url, content_type=_content_type(url), title=title)
+            await asyncio.to_thread(backend.play, name, url, content_type=_content_type(url), title=title)
         except Exception as exc:  # noqa: BLE001
             return ToolResult(ok=False, error=f"refused: {name} would not play it ({exc})")
         await self._publish_state(ctx, "full", url=url, title=title)
@@ -744,7 +807,8 @@ class CastSetupTool(_CastTool):
 
 
 def cast_tools(config, **kwargs) -> list:
-    kwargs = {k: v for k, v in kwargs.items() if k in ("cast", "env", "secrets", "clock", "reachable", "settings_home")}
+    kwargs = {k: v for k, v in kwargs.items()
+              if k in ("cast", "env", "secrets", "clock", "reachable", "settings_home", "fetch", "media_dir")}
     prefs = CastPreferences(device=str(getattr(config, "cast_device", "") or ""))
     return [CastDevicesTool(config, prefs=prefs, **kwargs), CastShowTool(config, prefs=prefs, **kwargs),
             CastPlayTool(config, prefs=prefs, **kwargs), CastStopTool(config, prefs=prefs, **kwargs),

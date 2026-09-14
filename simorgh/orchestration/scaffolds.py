@@ -155,7 +155,8 @@ _TOOL_NOTES: dict[str, str] = {
     "cast_devices": "the Cast devices (the TV) on the network",
     "cast_show": "put your dashboard on the TV, opened on a view: `CAST_SHOW: home` (or cameras, news, markets, media, discover, ambient); `tv` for the bare terminal",
     "cast_play": "play a video on the TV: a YouTube page URL or a direct video link; mode frame beside your "
-                 "page, mode full on the TV itself",
+                 "page, mode full on the TV itself. A YouTube video is fetched as a file first and starts a few "
+                 "seconds later, with sound -- say so",
     "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
     "cast_volume": "the TV's volume, 0-100",
     "dash_view": "turn the dashboard on the TV to a view (home, news, markets, cameras, media, ambient...), a chart "

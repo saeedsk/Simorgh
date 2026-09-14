@@ -4,6 +4,7 @@ played full screen, and every state change is announced on the bus."""
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from pathlib import Path
 
@@ -203,22 +204,56 @@ class SettingsPathsTestCase(unittest.TestCase):
 
 
 class YouTubeTestCase(unittest.IsolatedAsyncioTestCase):
-    async def test_a_youtube_page_plays_full_screen_through_the_youtube_receiver(self):
+    async def test_a_youtube_page_is_fetched_as_a_file_and_cast_to_the_plain_player(self):
+        # 2026-09-13, the creator's TV: YouTube's embedded player is blank
+        # inside the Cast receiver and its own receiver answered "400
+        # screen_ids parameter error". The video goes as a file instead.
+        import tempfile
         from simorgh.execution.media.cast import youtube_id
         self.assertEqual(youtube_id("https://www.youtube.com/watch?v=Ph-wjyyq1nA"), "Ph-wjyyq1nA")
         self.assertEqual(youtube_id("https://youtu.be/Ph-wjyyq1nA?t=3"), "Ph-wjyyq1nA")
         self.assertEqual(youtube_id("https://example.com/clip.mp4"), "")
-        cast = _FakeCast()
-        tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
-                                               reachable=lambda url: True)}
+        fetched = []
+
+        def fake_fetch(video, cache_dir):
+            fetched.append(video)
+            path = Path(cache_dir) / f"{video}.mp4"
+            path.write_bytes(b"\x00" * 16)
+            return path, ""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cast = _FakeCast()
+            tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
+                                                   reachable=lambda url: True, fetch=fake_fetch, media_dir=Path(tmp))}
+            bus = _Bus()
+            full = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=Ph-wjyyq1nA", "mode": "full",
+                                                 "title": "Sugar Man"}, ctx=_ctx(bus))
+            self.assertTrue(full.ok, full.error)
+            self.assertIn("fetching", full.output)
+            self.assertTrue(bus.published[-1].payload.get("fetching"), "the page is told the video is on its way")
+            await asyncio.gather(*tools["cast_play"]._fetches)  # noqa: SLF001
+            self.assertEqual(fetched, ["Ph-wjyyq1nA"])
+            self.assertEqual(cast.calls[-1], ("play", "Living Room TV", "http://10.0.0.5:8765/tv/media/Ph-wjyyq1nA.mp4",
+                                              "video/mp4", "Sugar Man"), "the file, through the plain media receiver")
+            self.assertEqual(bus.published[-1].payload["stream"], "/tv/media/Ph-wjyyq1nA.mp4")
+            framed = await tools["cast_play"].run({"url": "https://youtu.be/Ph-wjyyq1nA"}, ctx=_ctx(bus))
+            self.assertTrue(framed.ok)
+            self.assertEqual(bus.published[-1].payload["mode"], "frame")
+            await asyncio.gather(*tools["cast_play"]._fetches)  # noqa: SLF001
+            self.assertEqual(bus.published[-1].payload, {"mode": "frame", "url": "https://youtu.be/Ph-wjyyq1nA",
+                                                         "stream": "/tv/media/Ph-wjyyq1nA.mp4"})
+            self.assertEqual(len(cast.calls), 1, "a framed video is the page's to play")
+
+    async def test_when_the_video_cannot_be_fetched_the_page_is_told_why(self):
+        tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=_FakeCast(),
+                                               reachable=lambda url: True,
+                                               fetch=lambda v, d: (None, "yt-dlp is not installed"), media_dir=Path("."))}
         bus = _Bus()
-        full = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=Ph-wjyyq1nA", "mode": "full"},
-                                            ctx=_ctx(bus))
-        self.assertTrue(full.ok, full.error)
-        self.assertEqual(cast.calls[-1], ("play_youtube", "Living Room TV", "Ph-wjyyq1nA"))
-        framed = await tools["cast_play"].run({"url": "https://youtu.be/Ph-wjyyq1nA"}, ctx=_ctx(bus))
-        self.assertTrue(framed.ok)
-        self.assertEqual(bus.published[-1].payload["mode"], "frame")
+        r = await tools["cast_play"].run({"url": "https://youtu.be/Ph-wjyyq1nA"}, ctx=_ctx(bus))
+        self.assertTrue(r.ok)
+        await asyncio.gather(*tools["cast_play"]._fetches)  # noqa: SLF001
+        self.assertEqual(bus.published[-1].payload["problem"], "yt-dlp is not installed")
+        self.assertNotIn("stream", bus.published[-1].payload)
 
 
 class MarkerFormsTestCase(unittest.IsolatedAsyncioTestCase):
@@ -233,7 +268,10 @@ class MarkerFormsTestCase(unittest.IsolatedAsyncioTestCase):
         bus = _Bus()
         r = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=abc123 full Bedroom"}, ctx=_ctx(bus))
         self.assertTrue(r.ok, r.error)
-        self.assertEqual(cast.calls[-1], ("play_youtube", "Bedroom", "abc123"))
+        self.assertEqual(r.metadata["device"], "Bedroom")
+        self.assertEqual(r.metadata["video"], "abc123")
+        for t in list(tools["cast_play"]._fetches):  # noqa: SLF001 -- no fake fetch here: let the real one report
+            t.cancel()
         r = await tools["cast_play"].run({"url": "<https://x/clip.mp4>"}, ctx=_ctx(bus))
         self.assertTrue(r.ok, r.error)
         self.assertEqual(bus.published[-1].payload["mode"], "frame")

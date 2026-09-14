@@ -58,7 +58,8 @@ from simorgh.contracts.streamnames import is_valid_stream, stream_name_rule
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 _REASONS = {
-    200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+    200: "OK", 206: "Partial Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+    416: "Range Not Satisfiable",
     405: "Method Not Allowed", 409: "Conflict", 413: "Payload Too Large",
     429: "Too Many Requests", 500: "Internal Server Error",
 }
@@ -202,6 +203,7 @@ class HttpApi:
         # the LAN without the token: the Cast receiver fetches segments
         # with no header and no query of its own.
         self._hls_root = (Path.cwd() / "workspace" / "cameras" / "hls").resolve()
+        self._media_root = (Path.cwd() / "workspace" / "tv" / "media").resolve()
         # High-res wallpapers the dashboard rotates through the panels
         # (the creator dropped them in images/wallpapers, 2026-09-12).
         self._wallpaper_root = (Path.cwd() / "images" / "wallpapers").resolve()
@@ -423,8 +425,40 @@ class HttpApi:
             kind = "application/vnd.apple.mpegurl" if target.suffix == ".m3u8" else "video/mp2t"
             return 200, target.read_bytes(), kind
 
+        async def _media(_query, _body, headers, *, rest: str = ""):
+            # A framed YouTube video as a file (media/tvmedia.py). The
+            # TV's <video> asks in ranges; a whole 33 MB body in one go
+            # plays too, but seeking and resuming need 206.
+            name = rest.split("/", 1)[0].split("?", 1)[0]
+            target = (self._media_root / name).resolve()
+            if (not name or "/" in rest.rstrip("/") or not str(target).startswith(str(self._media_root) + os.sep)
+                    or target.suffix.lower() != ".mp4" or not target.is_file()):
+                return 404, b"no such video", "text/plain; charset=utf-8"
+            size = target.stat().st_size
+            start, end = 0, size - 1
+            wanted = str(headers.get("range") or "").strip()
+            partial = False
+            if wanted.startswith("bytes="):
+                first, _, last = wanted[6:].partition("-")
+                try:
+                    start = int(first) if first else max(0, size - int(last))
+                    end = min(size - 1, int(last)) if (first and last) else size - 1
+                    partial = True
+                except ValueError:
+                    start, end, partial = 0, size - 1, False
+                if start >= size or start > end:
+                    return 416, b"", "text/plain; charset=utf-8", (f"Content-Range: bytes */{size}",)
+            with target.open("rb") as handle:
+                handle.seek(start)
+                body = handle.read(end - start + 1)
+            extra = ("Accept-Ranges: bytes",)
+            if partial:
+                return 206, body, "video/mp4", extra + (f"Content-Range: bytes {start}-{end}/{size}",)
+            return 200, body, "video/mp4", extra
+
         self._prefixes.append(("POST", "/api/hooks/", _hook))
         self._prefixes.append(("GET", "/tv/hls/", _hls))
+        self._prefixes.append(("GET", "/tv/media/", _media))
 
         async def _wall(query, _body, _headers, *, rest: str = ""):
             import mimetypes
@@ -734,7 +768,7 @@ class HttpApi:
             for p_method, prefix, handler in self._prefixes:
                 if method == p_method and split.path.startswith(prefix):
                     rest = split.path[len(prefix):]
-                    open_ = prefix in ("/tv/hls/", "/wallpapers/", "/cameras/snap/")
+                    open_ = prefix in ("/tv/hls/", "/tv/media/", "/wallpapers/", "/cameras/snap/")
                     route = Route(method=method, path=split.path, handler=handler, auth=not open_,
                                   max_body=_MAX_BODY_BYTES if method == "POST" else None, rate=None)
                     prefix_extra = {"name": rest.split("/", 1)[0]} if prefix == "/api/hooks/" else {"rest": rest}
@@ -784,8 +818,12 @@ class HttpApi:
                 await self._try_respond(writer, 400, b'{"error":"truncated body"}', "application/json")
                 return
 
-        status, payload, content_type = await route.handler(query, body_bytes, headers, **prefix_extra)
-        await self._try_respond(writer, status, payload, content_type)
+        result = await route.handler(query, body_bytes, headers, **prefix_extra)
+        status, payload, content_type = result[0], result[1], result[2]
+        # A handler may add response headers as a fourth element (the
+        # video route's Content-Range).
+        await self._try_respond(writer, status, payload, content_type,
+                                extra_headers=tuple(result[3]) if len(result) > 3 else ())
 
     async def _benchmarks_json(self, query: dict) -> bytes:
         """Benchmark runs for the dashboard's accuracy-over-time chart --
@@ -952,7 +990,11 @@ class HttpApi:
         p = message.payload
         self._tv_state = {"mode": str(p.get("mode") or "none"), "url": str(p.get("url") or ""),
                           "title": str(p.get("title") or ""), "urls": list(p.get("urls") or []),
-                          "titles": list(p.get("titles") or []), "since": self._now()}
+                          "titles": list(p.get("titles") or []), "since": self._now(),
+                          # a framed YouTube video as a file for the TV's own player (media/tvmedia.py):
+                          # where it is, or why it is not coming, or that it is on its way
+                          "stream": str(p.get("stream") or ""), "problem": str(p.get("problem") or ""),
+                          "fetching": bool(p.get("fetching"))}
 
     @staticmethod
     def _q1(query: dict, key: str, default: str | None) -> str | None:

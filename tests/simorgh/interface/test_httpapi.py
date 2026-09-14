@@ -1015,6 +1015,48 @@ class HooksAndHlsTestCase(unittest.IsolatedAsyncioTestCase):
             status, _ = await asyncio.to_thread(_req, "GET", "/tv/hls/../secrets.toml")
             self.assertEqual(status, 404)
 
+    async def test_a_fetched_video_is_served_to_the_tv_in_ranges(self):
+        # media/tvmedia.py, 2026-09-13: a framed YouTube video comes to the
+        # TV as a file; its <video> asks in byte ranges.
+        import tempfile
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+        bus = _FakeBus()
+        api = HttpApi(bus, ledger=None, host="127.0.0.1", port=0, token="tv-secret")
+        with tempfile.TemporaryDirectory() as tmp:
+            api._media_root = Path(tmp).resolve()  # noqa: SLF001
+            (Path(tmp) / "abc.mp4").write_bytes(bytes(range(100)))
+            (Path(tmp) / "notes.txt").write_text("no")
+            await api.start()
+            self.addAsyncCleanup(api.stop)
+
+            def _req(path, range_=None):
+                conn = http.client.HTTPConnection("127.0.0.1", api.port, timeout=5)
+                conn.request("GET", path, headers={"Range": range_} if range_ else {})
+                resp = conn.getresponse()
+                data = resp.read()
+                hdrs = {k.lower(): v for k, v in resp.getheaders()}
+                conn.close()
+                return resp.status, data, hdrs
+            status, body, hdrs = await asyncio.to_thread(_req, "/tv/media/abc.mp4")
+            self.assertEqual((status, len(body), hdrs.get("content-type"), hdrs.get("accept-ranges")),
+                             (200, 100, "video/mp4", "bytes"), "open on the LAN, like the camera streams")
+            status, body, hdrs = await asyncio.to_thread(_req, "/tv/media/abc.mp4", "bytes=10-19")
+            self.assertEqual((status, body, hdrs.get("content-range")), (206, bytes(range(10, 20)), "bytes 10-19/100"))
+            status, body, hdrs = await asyncio.to_thread(_req, "/tv/media/abc.mp4", "bytes=90-")
+            self.assertEqual((status, body, hdrs.get("content-range")), (206, bytes(range(90, 100)), "bytes 90-99/100"))
+            status, _, _ = await asyncio.to_thread(_req, "/tv/media/abc.mp4", "bytes=500-")
+            self.assertEqual(status, 416)
+            status, _, _ = await asyncio.to_thread(_req, "/tv/media/notes.txt")
+            self.assertEqual(status, 404, "only video")
+            status, _, _ = await asyncio.to_thread(_req, "/tv/media/../secrets.toml")
+            self.assertEqual(status, 404)
+            # the state carries where the file is, or why it is not coming
+            await api._on_tv_state(Message.new(topics.TV_STATE, source="execution", payload={  # noqa: SLF001
+                "mode": "frame", "url": "https://youtu.be/abc", "stream": "/tv/media/abc.mp4"}))
+            self.assertEqual((api._tv_state["stream"], api._tv_state["problem"], api._tv_state["fetching"]),  # noqa: SLF001
+                             ("/tv/media/abc.mp4", "", False))
+
 
 class DashAndWallpapersTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_dash_is_open_wallpapers_list_and_serve_and_no_traversal(self):
