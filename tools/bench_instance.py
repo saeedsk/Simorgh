@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # `tools/` is not a package
 
-from observer_kit import DEFAULT_WORKSPACE_ROOT, fast_copy_repo  # noqa: E402
+from observer_kit import DEFAULT_WORKSPACE_ROOT  # noqa: E402
 from simorgh.contracts import topics  # noqa: E402
 from simorgh.kernel.config import LoadedConfig  # noqa: E402
 from simorgh.kernel.secrets import EnvSecretStore  # noqa: E402
@@ -47,14 +47,38 @@ def say(instance: int, line: str) -> None:
     print(f"[bench {instance} {time.strftime('%H:%M:%S')}] {line}", flush=True)
 
 
+#: Not copied into a benchmark copy. `workspace/` alone was 6 GB (voice
+#: recordings, old SWE-bench checkouts, TV media): the first wave's clones
+#: timed out under load, `observer_kit.fast_copy_repo` fell back to a real
+#: byte copy without saying so, and ten copies took the disk from 53 GB
+#: free to under 4 GB in minutes (2026-09-14).
+_NOT_COPIED = {".git", ".claude", "workspace", "papers", "images", "results", ".simorgh_loader",
+               "__pycache__", ".pytest_cache", "node_modules"}
+#: A copy that costs more than this is not copy-on-write any more; stop.
+_MAX_STAGE_GB = 1.0
+
+
 def stage(root: Path) -> Path:
-    """A throwaway copy of this repo with a fresh history, as tools/trial.py makes."""
+    """A throwaway copy of this repo's code with a fresh history. Each
+    top-level entry is cloned copy-on-write (`cp -c`, no timeout to fall
+    back on), big untracked folders are left out, and the copy is refused
+    if it cost real disk."""
     repo = root / "repo"
     if repo.exists():
         shutil.rmtree(repo)
-    fast_copy_repo(repo, source=REPO_ROOT)
-    shutil.rmtree(repo / ".git", ignore_errors=True)
-    shutil.rmtree(repo / ".claude", ignore_errors=True)
+    repo.mkdir(parents=True)
+    before = free_gb(root)
+    for entry in sorted(REPO_ROOT.iterdir()):
+        if entry.name in _NOT_COPIED:
+            continue
+        done = subprocess.run(["cp", "-Rc", str(entry), str(repo / entry.name)], capture_output=True, text=True)
+        if done.returncode != 0:
+            raise RuntimeError(f"copy-on-write clone of {entry.name} failed: {done.stderr.strip()[:200]}")
+    (repo / "workspace").mkdir(exist_ok=True)
+    spent = before - free_gb(root)
+    if spent > _MAX_STAGE_GB:
+        shutil.rmtree(repo, ignore_errors=True)
+        raise RuntimeError(f"staging used {spent:.1f} GB of real disk -- not a copy-on-write clone; refusing")
     subprocess.run(["git", "-C", str(repo), "init", "-q"], capture_output=True)
     subprocess.run(["git", "-C", str(repo), "add", "-A"], capture_output=True)
     subprocess.run(["git", "-C", str(repo), "-c", "user.email=bench@local", "-c", "user.name=Bench",
@@ -73,8 +97,13 @@ def append(out: Path, row: dict) -> None:
 
 
 async def run(args) -> int:
+    if args.start_delay:
+        await asyncio.sleep(args.start_delay)
     root = Path(args.root or DEFAULT_WORKSPACE_ROOT / f"bench-{args.wave}" / f"i{args.id}")
     root.mkdir(parents=True, exist_ok=True)
+    if free_gb(root) < args.min_free_gb:
+        say(args.id, f"not starting: {free_gb(root):.0f} GB free, under {args.min_free_gb}")
+        return 2
     repo = stage(root)
     os.chdir(repo)
     data = root / "data"
@@ -110,11 +139,9 @@ async def run(args) -> int:
         while time.time() < args.until:
             suite = suites[turn % len(suites)]
             turn += 1
-            if suite.startswith("swebench") and free_gb(Path.home()) < args.min_free_gb:
-                say(args.id, f"skipping {suite}: {free_gb(Path.home()):.0f} GB free, under {args.min_free_gb}")
-                if all(s.startswith("swebench") for s in suites):
-                    await asyncio.sleep(min(600, max(0, args.until - time.time())))
-                continue
+            if free_gb(root) < args.min_free_gb:
+                say(args.id, f"stopping: {free_gb(root):.0f} GB free, under {args.min_free_gb} -- no new runs")
+                break
             payload = {"suite": suite, "limit": args.limit, "offset": offsets[suite],
                        "note": f"bench wave {args.wave} instance {args.id} offset {offsets[suite]}"}
             if args.level:
@@ -179,7 +206,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True, help="shared JSONL of run summaries")
     parser.add_argument("--wave", default="w1")
     parser.add_argument("--root", default="")
-    parser.add_argument("--min-free-gb", type=float, default=15.0)
+    parser.add_argument("--min-free-gb", type=float, default=20.0)
+    parser.add_argument("--start-delay", type=float, default=0.0, help="seconds to wait before staging")
     return asyncio.run(run(parser.parse_args(argv)))
 
 
