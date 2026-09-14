@@ -28,7 +28,7 @@ _ALIASES = {"happy": "bright", "excited": "bright", "cheerful": "bright", "gentl
             "soft": "warm", "sad": "sorry", "apologetic": "sorry", "grave": "serious", "stern": "serious",
             "urgent": "serious", "relaxed": "calm", "soothing": "calm", "fun": "playful", "teasing": "playful",
             "joking": "playful", "plain": "neutral", "flat": "neutral"}
-_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{0,24})\s*[\])>]\s*[:\-–—]?\s*", re.I)
+_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{0,24}(?:[ ,/&+]+[A-Za-z][A-Za-z0-9_-]{0,24}){0,3})\s*[\])>]\s*[:\-–—]?\s*", re.I)
 
 
 def split_tone(text: str) -> tuple[str, str]:
@@ -50,6 +50,15 @@ def _split_one(text: str) -> tuple[str, str]:
         return "", text or ""
     word = match.group(1).lower()
     tone = word if word in TONES else _ALIASES.get(word, "")
+    if not tone and not word.replace("_", "").replace("-", "").isalnum():
+        # "[loud and warm]" (live 2026-09-13, spoken aloud): the feeling is
+        # whichever word in it is one, and the tag goes whole.
+        parts = [w for w in re.split(r"[ ,/&+]+", word) if w]
+        known = [w if w in TONES else _ALIASES.get(w, "") for w in parts]
+        known = [k for k in known if k]
+        if match.group(1) == match.group(1).lower():
+            return (known[0] if known else ""), (text or "")[match.end():].lstrip()
+        return "", text or ""
     if not tone:
         import difflib
 
