@@ -457,6 +457,12 @@ class Config:
     # `ring_snapshot_every_s` for the dashboard's tiles. Ring throttles
     # snapshot requests, and a battery camera wakes for each one.
     ring_poll_s: float = 120.0
+    # Start the Ring watch by itself at boot when a Ring token is saved:
+    # the dashboard's Ring tiles only get fresh stills while the watch
+    # runs, it lived in memory only, and after a restart the newest
+    # still was a day old ("ring cameras are not showing picture", the
+    # creator, 2026-09-13).
+    ring_watch_on_start: bool = True
     ring_snapshot_every_s: float = 300.0
 
     # -- render_page (render.py's own module docstring): a real headless-

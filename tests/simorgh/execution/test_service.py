@@ -516,3 +516,33 @@ class TestConnectorsAreProbedAndClosed(_ExecutionServiceTestCase):
         await self._start_with(fake)
         await self.service.stop()
         self.assertEqual(fake.closed, 1)
+
+
+class TestRingWatchStartsByItself(_ExecutionServiceTestCase):
+    """The creator, 2026-09-13: "ring cameras are not showing picture" --
+    the watch that refreshes the dashboard's stills had died with the
+    last restart. With a token saved, it starts at boot."""
+
+    async def test_with_a_token_the_watch_is_switched_on_and_without_one_nothing_runs(self):
+        await self._start()
+        calls = []
+
+        class FakeWatch:
+            name = "ring_watch"
+
+            async def run(self, args, *, ctx):
+                calls.append(dict(args))
+                from simorgh.contracts.protocols import ToolResult
+                return ToolResult(ok=True, output="watching 2 Ring camera(s)")
+
+        self.service._registry["ring_watch"] = FakeWatch()  # noqa: SLF001
+        self.service._ctx.secrets.pop("RING_TOKEN", None)  # noqa: SLF001
+        self.assertFalse(await self.service._autostart_ring_watch(delay_s=0))  # noqa: SLF001
+        self.assertEqual(calls, [], "no token: nothing to watch with")
+        self.service._ctx.secrets["RING_TOKEN"] = '{"access_token": "x"}'  # noqa: SLF001
+        self.assertTrue(await self.service._autostart_ring_watch(delay_s=0))  # noqa: SLF001
+        self.assertEqual(calls, [{"on": True}])
+        import dataclasses
+        self.service._config = dataclasses.replace(self.service._config, ring_watch_on_start=False)  # noqa: SLF001
+        self.assertFalse(await self.service._autostart_ring_watch(delay_s=0))  # noqa: SLF001
+        self.assertEqual(len(calls), 1, "switched off in config: left alone")

@@ -123,6 +123,7 @@ class Service:
         self._mcp_errors: list[str] = []
         self._capability_detail = ""
         self._probe_task: asyncio.Task | None = None
+        self._ring_autostart: asyncio.Task | None = None
         self._probe_results: list = []
         # One worktree per code task (worktree.py); None when the repo
         # is not a git checkout or `[execution] worktrees = false`.
@@ -215,6 +216,8 @@ class Service:
         # invisible until a task tried and failed. In the background:
         # boot must not wait on a `docker info` that hangs.
         self._probe_task = asyncio.create_task(self._probe_capabilities())
+        # The Ring watch, by itself, when Ring is set up (`ring_watch_on_start`).
+        self._ring_autostart = asyncio.create_task(self._autostart_ring_watch())
 
     def _build_worktrees(self, ctx) -> WorktreeManager | None:
         """Where a task's own worktree lives, and whether the feature is
@@ -367,6 +370,8 @@ class Service:
                     payload={"name": tool_name, "reason": reason}))
 
     async def stop(self) -> None:
+        if self._ring_autostart is not None and not self._ring_autostart.done():
+            self._ring_autostart.cancel()
         if self._probe_task is not None and not self._probe_task.done():
             self._probe_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -430,6 +435,34 @@ class Service:
         self._paused = message.payload["state"] in ("paused", "stopping")
 
     # -- skill acquisition as procedural memory (roadmap 4.7) --------------------
+    async def _autostart_ring_watch(self, *, delay_s: float = 20.0) -> bool:
+        """Run `ring_watch on` at boot when a Ring token is saved and
+        `[execution] ring_watch_on_start` is true. The watch keeps the
+        dashboard's Ring stills fresh and only lived as long as someone
+        had typed `ring watch on` this run ("ring cameras are not
+        showing picture", the creator, 2026-09-13). Returns whether it
+        started."""
+        if not getattr(self._config, "ring_watch_on_start", True):
+            return False
+        secrets = getattr(self._ctx, "secrets", None) or {}
+        if not str(secrets.get("RING_TOKEN") or "").strip():
+            return False
+        if delay_s:
+            await asyncio.sleep(delay_s)
+        tool = self._registry.get("ring_watch")
+        if tool is None:
+            return False
+        ctx = ToolContext(action_id="ring-watch-boot", task_id=None, scope={}, constraints={},
+                          data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
+                          ledger=self._ctx.ledger, bus=self._ctx.bus)
+        try:
+            result = await tool.run({"on": True}, ctx=ctx)
+        except Exception as exc:  # noqa: BLE001 -- Ring's cloud being down is not the service's failure
+            self._ctx.logger.warning("ring_watch_autostart_failed", error=repr(exc))
+            return False
+        self._ctx.logger.info("ring_watch_autostart", ok=result.ok, detail=(result.output or result.error or "")[:160])
+        return bool(result.ok)
+
     async def _on_dash_state(self, message: Message) -> None:
         payload = message.payload or {}
         if str(payload.get("view") or "") != "charts" or getattr(message, "source", "") == "execution":
