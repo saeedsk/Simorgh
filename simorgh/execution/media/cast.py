@@ -912,7 +912,7 @@ class DashViewTool(_CastTool):
     args_schema = {"type": "object", "properties": {
         "view": {"type": "string"}, "timeframe": {"type": "string"}, "symbol": {"type": "string"},
         "rotate_s": {"type": "number"}, "scale": {"type": "number"}, "live_max": {"type": "integer"},
-        "live_step_s": {"type": "number"},
+        "live_step_s": {"type": "number"}, "video_sound": {"type": "boolean"},
         "video_quality": {"type": "string", "enum": ["light", "full"]}, "action": {"type": "string", "enum": ["view", "remote", "link"]}}}
     VIEWS = DASH_VIEWS
     ALIASES = {**DASH_ALIASES, "tv": "media", "terminal": "home"}
@@ -971,10 +971,13 @@ class DashViewTool(_CastTool):
             if quality not in ("light", "full"):
                 return ToolResult(ok=False, error="refused: `video_quality` is light or full")
             payload["video_quality"] = quality
+        if "video_sound" in args and args["video_sound"] is not None:
+            raw = args["video_sound"]
+            payload["video_sound"] = raw if isinstance(raw, bool) else str(raw).strip().lower() in ("1", "true", "on", "yes")
         if not payload:
             return ToolResult(ok=False, error="refused: say a `view` (home, cameras, markets, media, charts, ambient), a "
-                                              "`timeframe`, a `symbol`, `rotate_s`, `scale`, `live_max`, `live_step_s` or "
-                                              "`video_quality`")
+                                              "`timeframe`, a `symbol`, `rotate_s`, `scale`, `live_max`, `live_step_s`, "
+                                              "`video_quality` or `video_sound`")
         bus = getattr(ctx, "bus", None)
         if bus is None:
             return ToolResult(ok=False, error="refused: no bus to reach the dashboard")
@@ -999,6 +1002,8 @@ class DashViewTool(_CastTool):
             said.append(f"up to {payload['live_max']} camera feeds play at once")
         if "live_step_s" in payload:
             said.append(f"the live window slides one camera every {payload['live_step_s']:g}s")
+        if "video_sound" in payload:
+            said.append("the videos play with sound" if payload["video_sound"] else "the videos play muted")
         if "video_quality" in payload:
             said.append(f"embedded video {payload['video_quality']}")
         return ToolResult(ok=True, output="; ".join(said), side_effects=("dash_view",), metadata=payload)

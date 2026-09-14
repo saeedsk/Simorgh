@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..fields import Enum, F, Float, Int, List, O, Str
+from ..fields import Bool, Enum, F, Float, Int, List, O, Str
 from ..registry import define
 from .. import topics as t
 
@@ -24,7 +24,8 @@ TvSpeech = define(t.TV_SPEECH, [F("ref", Str), F("seconds", Float), O("seq", Int
                                  O("text", Str)],
                   doc="One piece of Sim's reply, as a WAV blob in the ledger, for the TV page to play in order.")
 DashState = define(t.DASH_STATE, [O("view", Str), O("timeframe", Str), O("symbol", Str), O("rotate_s", Int), O("scale", Float),
-                                  O("live_max", Int), O("live_step_s", Float), O("video_quality", Enum("light", "full"))],
+                                  O("live_max", Int), O("live_step_s", Float), O("video_quality", Enum("light", "full")),
+                                  O("video_sound", Bool)],
                    doc="Where the glass dashboard on the TV should look: a view name, the markets chart's timeframe "
                        "or symbol, a rotation period in seconds (0 stops). Any subset; the HTTP API merges it.")
 UiHookReceived = define(t.UI_HOOK_RECEIVED, [F("name", Str), F("body", Str), O("content_type", Str),

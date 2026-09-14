@@ -54,6 +54,12 @@
         }
       ]
     },
+    "video_sound": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "view": {
       "type": [
         "string",

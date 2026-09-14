@@ -1149,6 +1149,9 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         st, b = await asyncio.to_thread(self._p, api, "/api/dash/state?token=secret", {"view": "stocks", "timeframe": "1w", "rotate_s": 30, "scale": 0.5, "live_max": 4, "video_quality": "FULL"})
         self.assertEqual(st, 200)
         state = json.loads(b)
+        self.assertTrue(state["video_sound"], "sound is on by default (2026-09-14)")
+        st2, b2 = await asyncio.to_thread(self._p, api, "/api/dash/state?token=secret", {"video_sound": "off"})
+        self.assertEqual((st2, json.loads(b2)["video_sound"]), (200, False))
         self.assertEqual((state["view"], state["timeframe"], state["rotate_s"], state["scale"], state["live_max"], state["video_quality"]),
                          ("markets", "1W", 30, 0.5, 4, "full"), "aliases and case are normalised")
         self.assertGreater(state["since"], 0)

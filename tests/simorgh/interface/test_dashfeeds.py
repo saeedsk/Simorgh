@@ -97,6 +97,20 @@ class ParsersTestCase(unittest.TestCase):
         self.assertTrue(videos[1]["live"]); self.assertEqual(videos[1]["length"], "LIVE")
         self.assertEqual(df.parse_youtube_results(b"<html>consent</html>"), [])
 
+    def test_the_picture_of_the_day_comes_from_nasas_own_page_when_the_api_says_too_many(self):
+        # 2026-09-14: DEMO_KEY answered 429 all evening and the Home panel said "waiting for NASA".
+        page = (b'<html><body><center><IMG SRC="image/2609/Elements_1080.jpg" alt="x"></center><a href="image/2609/Elements_6000.jpg">'
+                b'</a><center><b> Where Your Elements Came From </b><br></center><p><b> Explanation: </b> The hydrogen in your body '
+                b'came from the <a href="x">Big Bang</a>.<p>Tomorrow</p></body></html>')
+        pic = df.parse_apod_page(page)
+        self.assertEqual((pic["media_type"], pic["title"], pic["url"], pic["hdurl"]),
+                         ("image", "Where Your Elements Came From", "https://apod.nasa.gov/apod/image/2609/Elements_1080.jpg",
+                          "https://apod.nasa.gov/apod/image/2609/Elements_6000.jpg"))
+        self.assertTrue(pic["explanation"].startswith("The hydrogen in your body came from the Big Bang"))
+        feeds = df.DashFeeds(fetcher=_Fetcher({"api.nasa.gov": RuntimeError("HTTP Error 429: Too Many Requests"), "astropix": page}),
+                             clock=_Clock(), watchlist=("NVDA",), majors=("NVDA",))
+        self.assertEqual(feeds._run_apod(feeds._fetch)["title"], "Where Your Elements Came From")  # noqa: SLF001
+
     def test_the_songs_video_is_the_official_one_or_the_artists_of_a_songs_length(self):
         found = [{"id": "long", "title": "Golden 3 hour loop", "channel": "loops", "seconds": 10800},
                  {"id": "cover", "title": "Golden (cover)", "channel": "someone", "seconds": 190},

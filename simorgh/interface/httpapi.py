@@ -188,7 +188,7 @@ class HttpApi:
         # Where the dashboard should look (`ui.dash.state`): set by the
         # `dash_view` tool or the phone remote, polled by the page.
         self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "scale": 0,
-                                  "live_max": 3, "live_step_s": 1.0, "video_quality": "light", "since": 0.0}
+                                  "live_max": 3, "live_step_s": 1.0, "video_quality": "light", "video_sound": True, "since": 0.0}
         self._dash_sub = None
         self._remote_page = (_STATIC_DIR / "remote.html").read_text(encoding="utf-8")
         # Sim's logo (the creator's, 2026-09-12; keyed and shrunk from
@@ -313,7 +313,7 @@ class HttpApi:
                 return 400, b'{"error": "body must be JSON"}', "application/json"
             if not isinstance(asked, dict):
                 return 400, b'{"error": "body must be a JSON object"}', "application/json"
-            payload = {k: asked[k] for k in ("view", "timeframe", "symbol", "rotate_s", "scale", "live_max", "live_step_s", "video_quality") if k in asked}
+            payload = {k: asked[k] for k in ("view", "timeframe", "symbol", "rotate_s", "scale", "live_max", "live_step_s", "video_quality", "video_sound") if k in asked}
             bad = _dash_state_problems(payload)
             if bad:
                 return 400, json.dumps({"error": bad}).encode("utf-8"), "application/json"
@@ -321,7 +321,7 @@ class HttpApi:
             # What was APPLIED goes on the bus, in the schema's own types --
             # the raw body once failed validation after the state had
             # already changed, and the remote was told 500 (observer, 2026-09-13).
-            applied = {k: self._dash_state[k] for k in ("view", "timeframe", "symbol", "rotate_s", "scale", "live_max", "live_step_s", "video_quality")
+            applied = {k: self._dash_state[k] for k in ("view", "timeframe", "symbol", "rotate_s", "scale", "live_max", "live_step_s", "video_quality", "video_sound")
                        if k in payload and k in self._dash_state}
             await self._bus.publish(Message.new(topics.DASH_STATE, source="interface", payload=applied))
             return 200, json.dumps({"now": self._now(), **self._dash_state}).encode("utf-8"), "application/json"
@@ -683,6 +683,10 @@ class HttpApi:
         quality = str(payload.get("video_quality") or "").strip().lower()
         if quality in ("light", "full"):
             self._dash_state["video_quality"] = quality
+        if "video_sound" in payload:
+            # The embedded videos' sound, on by default (the creator, 2026-09-14).
+            raw = payload.get("video_sound")
+            self._dash_state["video_sound"] = raw if isinstance(raw, bool) else str(raw).strip().lower() in ("1", "true", "on", "yes")
         self._dash_state["since"] = self._now()
 
     async def _on_dash_state(self, message: Message) -> None:

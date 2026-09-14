@@ -164,7 +164,12 @@ MUSIC_VIDEO_MIN_S, MUSIC_VIDEO_MAX_S = 60, 12 * 60
 ITUNES_MOVIES = "https://itunes.apple.com/us/rss/topmovies/limit=10/json"
 BOX_OFFICE = "https://www.the-numbers.com/weekend-box-office-chart"
 WIKI_FEATURED = "https://en.wikipedia.org/api/rest_v1/feed/featured/{yyyy}/{mm}/{dd}"
-APOD = "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY&thumbs=true"
+APOD = "https://api.nasa.gov/planetary/apod?api_key={key}&thumbs=true"
+#: The API's DEMO_KEY is shared by everyone and answered 429 all evening
+#: (2026-09-14: "picture of the day is not showing up"). NASA's own page
+#: carries the same picture with no key; `NASA_API_KEY` in the
+#: environment is used when set.
+APOD_PAGE = "https://apod.nasa.gov/apod/astropix.html"
 HN_TOP = "https://hacker-news.firebaseio.com/v0/topstories.json"
 HN_ITEM = "https://hacker-news.firebaseio.com/v0/item/{id}.json"
 DAD_JOKES = "https://icanhazdadjoke.com/search?limit=12&page={page}"
@@ -536,6 +541,27 @@ def parse_apod(raw: bytes) -> dict:
             "explanation": str(data.get("explanation") or "")[:700], "copyright": str(data.get("copyright") or "").strip()}
 
 
+def parse_apod_page(raw: bytes) -> dict:
+    """The picture of the day from apod.nasa.gov/apod/astropix.html: the
+    image (1080 px, and the full one behind its link), the title in the
+    first <b>, the explanation paragraph."""
+    text = raw.decode("utf-8", errors="replace")
+    img = re.search(r'<IMG\s+SRC="(image/[^"]+)"', text, re.I)
+    full = re.search(r'<a href="(image/[^"]+)"', text, re.I)
+    title = re.search(r"<b>\s*([^<]+?)\s*</b>", text)
+    expl = re.search(r"<b>\s*Explanation:\s*</b>(.*?)<p>", text, re.S | re.I)
+    if not img and not full:
+        video = re.search(r'<iframe[^>]+src="([^"]+)"', text, re.I)
+        return {"title": title.group(1).strip() if title else "", "date": "", "media_type": "video",
+                "url": video.group(1) if video else "", "hdurl": "", "thumb": "",
+                "explanation": re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", expl.group(1))).strip()[:700] if expl else "", "copyright": ""}
+    base = "https://apod.nasa.gov/apod/"
+    url = base + (img.group(1) if img else full.group(1))
+    return {"title": title.group(1).strip() if title else "", "date": "", "media_type": "image", "url": url,
+            "hdurl": base + full.group(1) if full else url, "thumb": url,
+            "explanation": re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", expl.group(1))).strip()[:700] if expl else "", "copyright": ""}
+
+
 def parse_hn_item(raw: bytes) -> dict | None:
     data = json.loads(raw.decode("utf-8", errors="replace")) or {}
     if not data.get("title"):
@@ -691,7 +717,7 @@ class DashFeeds:
             Feed("movies", 6 * 3600.0, lambda f: parse_itunes_movies(f(ITUNES_MOVIES)), part="movies"),
             Feed("boxoffice", 6 * 3600.0, lambda f: parse_box_office(f(BOX_OFFICE)), part="boxoffice"),
             Feed("wiki", 3600.0, self._run_wiki, part="wiki"),
-            Feed("apod", 6 * 3600.0, lambda f: parse_apod(f(APOD)), part="apod"),
+            Feed("apod", 6 * 3600.0, self._run_apod, part="apod"),
             Feed("hn", 900.0, self._run_hn, part="hn"),
             Feed("jokes", 1800.0, self._run_jokes, part="jokes"),
             Feed("quote", 6 * 3600.0, lambda f: parse_zen(f(ZEN_TODAY)), part="quote"),
@@ -808,6 +834,18 @@ class DashFeeds:
         if not out and errors:
             raise RuntimeError("; ".join(errors))
         return out
+
+    def _run_apod(self, f: Fetcher) -> dict:
+        import os
+
+        key = os.environ.get("NASA_API_KEY", "").strip() or "DEMO_KEY"
+        try:
+            picture = parse_apod(f(APOD.format(key=key), accept="application/json"))
+            if picture.get("url"):
+                return picture
+        except Exception:  # noqa: BLE001 -- 429 on the shared key, most evenings; the page has the same picture
+            pass
+        return parse_apod_page(f(APOD_PAGE, accept="text/html"))
 
     def _run_jokes(self, f: Fetcher) -> list[str]:
         page = 1 + int(self._clock() // 1800) % 40

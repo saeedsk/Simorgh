@@ -792,7 +792,7 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     rest = words[1:]
     usage = ("usage: tv setup [device] | devices | use <device> | show [tv|dash] [device] | view <home|discover|cameras|news|"
              "markets|media|terminal|ambient> [1D|1W|1M|1Y] [symbol] | rotate <seconds|off> | scale <factor|auto> | live <n> | "
-             "quality light|full | remote | link | pair [code] | app <name|url> | key <key> | charts [kpop|us] | "
+             "quality light|full | sound on|off | remote | link | pair [code] | app <name|url> | key <key> | charts [kpop|us] | "
              "video <url> [full|frame] [device] | stop [frame] | volume <0-100> [device]")
 
     async def _run(tool: str, payload: dict) -> Outcome:
@@ -871,6 +871,10 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
             except ValueError:
                 return Outcome("usage: tv live <n> [seconds]")
         return await _run("dash_view", payload)
+    if verb in ("sound", "audio"):
+        if not rest or rest[0].lower() not in ("on", "off", "true", "false", "yes", "no"):
+            return Outcome("usage: tv sound on|off   (the embedded videos' sound, on by default -- in the browser too)")
+        return await _run("dash_view", {"video_sound": rest[0].lower() in ("on", "true", "yes")})
     if verb in ("quality", "video-quality"):
         if not rest or rest[0].lower() not in ("light", "full", "low", "high", "hd"):
             return Outcome("usage: tv quality light|full   (the embedded video's resolution; light is easier on the TV)")
