@@ -113,7 +113,9 @@ const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 const token=new URLSearchParams(location.search).get("token")||"";
 const q=p=>p+(token?(p.includes("?")?"&":"?")+"token="+encodeURIComponent(token):"");
 const ICONS={charts:'<path d="M8 15.5V5l8-2v10.5"/><circle cx="6" cy="15.5" r="2"/><circle cx="14" cy="13.5" r="2"/>',deck:'<path d="M3 9.5 10 3l7 6.5M5 8.2V16h4v-4h2v4h4V8.2"/>',discover:'<circle cx="10" cy="10" r="7.2"/><path d="M10 4.6l1.5 3.9 3.9 1.5-3.9 1.5L10 15.4 8.5 11.5 4.6 10l3.9-1.5z"/>',cameras:'<rect x="2.5" y="5.5" width="10" height="9" rx="1.6"/><path d="M12.5 8.5l5-2.5v8l-5-2.5z"/>',news:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M5.5 7h6M5.5 10h9M5.5 13h9"/>',markets:'<path d="M3 15.5V4.5M3 15.5h13.5"/><path d="M6 12l3-3 2.5 2L16 6"/>',media:'<circle cx="10" cy="10" r="7"/><path d="M8.5 7l4.5 3-4.5 3z"/>',terminal:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l3 2.5L6 13M11 13h3"/>',ambient:'<circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.5"/>'};
-const VIEWS=[["deck","Home"],["discover","Discover"],["cameras","Cameras"],["news","News"],["markets","Markets"],["media","Media"],["charts","Charts"],["terminal","Terminal"],["ambient","Ambient"]];
+// News, Discover and Terminal folded into Home (the creator, 2026-09-14): their panels rotate through Home's two news
+// boxes, the terminal is Home's left third, the picture of the day sits where the quote was.
+const VIEWS=[["deck","Home"],["cameras","Cameras"],["markets","Markets"],["media","Media"],["charts","Charts"],["ambient","Ambient"]];
 const VIEW_KEYS={home:"deck",deck:"deck",discover:"discover",cameras:"cameras",news:"news",markets:"markets",media:"media",terminal:"terminal",ambient:"ambient"};
 
 // ---- wallpapers ----
@@ -142,7 +144,7 @@ async function poll(){
   try{STATUS=await (await fetch(q("/api/status"))).json();}catch(e){}
   try{TV=await (await fetch(q("/api/tv/state"))).json();}catch(e){}
   try{const st=await (await fetch(q("/api/dash/state"))).json();applyState(st);}catch(e){}
-  if(CUR==="deck") refreshDeck(false); else if(CUR==="terminal"||CUR==="news"||CUR==="cameras") render();
+  if(CUR==="deck") refreshDeck(false); else if(CUR==="cameras") render();
 }
 let warmRetries=0;
 async function loadData(){
@@ -275,8 +277,8 @@ function kv(k,v,c){return '<div class="tr"><span class="l">'+k+'</span><span cla
 // ---- Home: Sim's terminal on the left third; two rotating news boxes, a quarter-page player,
 // the short watchlist and the quote+joke on the right. The skeleton is built once and its boxes
 // are refilled in place, so the video keeps playing and the scroll animations run their course.
-const DECK_A=[["Bloomberg",["bloomberg_markets","bloomberg_business"],"BBG"],["Technology",["bloomberg_technology","ars"],"TECH"],["World",["bbc_world","bloomberg_politics"],"WORLD"]];
-const DECK_B=[["Science",["sciencedaily","nasa"],"SCI"],["Entertainment",["variety","deadline"],"ENT"],["On this day",null,"OTD"],["Hacker News",null,"HN"],["Most read",null,"WIKI"]];
+const DECK_A=[["Bloomberg",["bloomberg_markets","bloomberg_business"],"BBG"],["Technology",["bloomberg_technology","ars"],"TECH"],["World",["bbc_world","bloomberg_politics"],"WORLD"],["Economics",["bloomberg_economics","bloomberg_business"],"ECON"]];
+const DECK_B=[["Science",["sciencedaily","nasa"],"SCI"],["Entertainment",["variety","deadline"],"ENT"],["Hacker News",null,"HN"],["On this day",null,"OTD"],["Featured article",null,"WIKI"],["Most read",null,"WIKI"],["Box office",null,"FILM"],["Top songs",null,"MUSIC"],["Jokes",null,"HA"]];
 const DECK_ROT_S=10,DECK_ITEMS=9;
 const DECK_WATCH=["NVDA","AAPL","GOOGL","AMZN"],DECK_IDX=[".SPX",".IXIC",".DJI"];
 let DK={a:-1,b:-1,m:-1,np:"",qj:""};
@@ -290,6 +292,10 @@ function deckItemsB(idx){const [name,feeds]=DECK_B[idx];const wk=DATA&&DATA.wiki
   if(feeds) return merged(...feeds).slice(0,DECK_ITEMS);
   if(name==="On this day") return (wk?wk.onthisday:[]).slice(0,DECK_ITEMS).map(e=>({title:e.text,meta:"Wikipedia · "+e.year,badge:String(e.year),badgeCol:"var(--gold)"}));
   if(name==="Hacker News") return ((DATA&&DATA.hn)||[]).slice(0,DECK_ITEMS).map(h=>({title:h.title,meta:"▲ "+(h.score||0)+" · "+(h.comments||0)+" comments · "+ago(h.at),source:"Hacker News"}));
+  if(name==="Featured article"){const f=wk&&wk.featured;return f?[{title:f.title,thumb:f.thumb,meta:"Wikipedia · today's featured article",source:"Wikipedia"},{title:f.extract||"",meta:"",badge:"…",badgeCol:"var(--faint)"}]:[];}
+  if(name==="Box office") return ((DATA&&DATA.boxoffice)||[]).slice(0,DECK_ITEMS).map(b=>({title:b.title,meta:"weekend "+(b.weekend||"")+(b.change?" · "+b.change:""),badge:String(b.rank),badgeCol:"var(--gold)"}));
+  if(name==="Top songs") return ((DATA&&DATA.songs)||[]).slice(0,DECK_ITEMS).map(x=>({title:x.name,thumb:x.art,meta:x.artist+" · Apple Music #"+x.rank}));
+  if(name==="Jokes") return ((DATA&&DATA.jokes)||[]).slice(0,4).map(j=>({title:j,meta:"for the house",badge:"HA",badgeCol:"var(--gold)"}));
   return (wk?wk.mostread:[]).slice(0,DECK_ITEMS).map(a=>({title:a.title,thumb:a.thumb,meta:"Wikipedia · "+(a.views?Math.round(a.views/1000)+"k reads today":""),source:"Wikipedia"}));}
 function fitBox(el){ // no scrolling in either direction: a headline wraps to three lines, and what does not fit is left out
   const list=el.querySelector(".nlist");if(!list)return;
@@ -329,16 +335,18 @@ function mktBoxHTML(idx){const m=mk();
     return '<div class="col fade" style="flex:1;min-width:0;">'+head("Markets · 5-day trend",mktStatus()[0],true)+'<div class="nlist"><div class="nscroll">'+rows.map(r=>{const w=r.week||[];const ch=w.length>1?(w[w.length-1][1]-w[0][1])/w[0][1]*100:null;const up=(ch==null?r.pct:ch)>=0;
       return '<div class="tr" style="align-items:center;gap:10px;padding:5px 0;"><span class="amber" style="width:64px;">'+esc(r.label)+'</span>'+spark(w,up?"#84e6a6":"#ff9a94",120,24,1.6)+'<span style="flex:1;text-align:right;">'+N(r.last,priceDigits(r.last))+'</span><span class="'+cls(ch==null?r.pct:ch)+'" style="width:64px;text-align:right;">'+P(ch==null?r.pct:ch,1)+'<span class="faint" style="font-size:9px;"> 5d</span></span></div>';}).join("")+'</div></div></div>';}
   return newsBoxHTML("Market & AI hot topics","Bloomberg",merged("bloomberg_markets","bloomberg_technology").slice(0,DECK_ITEMS),true);}
-function qjHTML(){const qt=DATA&&DATA.quote,jokes=(DATA&&DATA.jokes)||[];const jk=jokes.length?jokes[Math.floor(Date.now()/600000)%jokes.length]:"";
-  return '<div class="col fade" style="flex:1;min-width:0;">'+head("Quote of the day")+(qt&&qt.text?'<div style="font-size:13px;line-height:1.45;">“'+esc(qt.text)+'”</div><div class="faint" style="font-size:10.5px;margin-top:3px;">— '+esc(qt.author)+'</div>':empty("waiting…"))
-    +'<div style="border-top:1px solid var(--stroke2);margin:10px 0 8px;"></div>'+head("Joke","for the house")+(jk?'<div style="font-size:13px;line-height:1.45;">'+esc(jk)+'</div>':empty("waiting for a good one…"))+'</div>';}
+function qjHTML(){ // the picture of the day (NASA), where the quote of the day was (the creator, 2026-09-14)
+  const ap=DATA&&DATA.apod;
+  if(ap&&ap.media_type==="image"&&(ap.url||ap.hdurl))return '<div class="col fade" style="flex:1;min-width:0;">'+head("Picture of the day","NASA")+'<div class="fill" style="min-height:0;">'+thumb('<b>'+esc(ap.title)+'</b><br><span class="clamp faint" style="-webkit-line-clamp:2;font-size:10.5px;">'+esc(ap.explanation||"")+'</span>',ap.copyright?esc(ap.copyright):"",ap.url||ap.hdurl)+'</div></div>';
+  const qt=DATA&&DATA.quote;
+  return '<div class="col fade" style="flex:1;min-width:0;">'+head("Picture of the day","NASA")+(ap&&ap.title?'<div style="font-size:13px;line-height:1.45;">'+esc(ap.title)+'</div><div class="faint" style="font-size:10.5px;margin-top:3px;">today\'s picture is a video — NASA shows it on their site</div>':(qt&&qt.text?'<div style="font-size:13px;line-height:1.45;">“'+esc(qt.text)+'”</div><div class="faint" style="font-size:10.5px;margin-top:3px;">— '+esc(qt.author)+'</div>':empty("waiting for NASA…")))+'</div>';}
 function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-template-columns:1fr 2fr;gap:12px;height:100%;min-height:0;">'
   +'<div class="glass card col" id="dk-term">'+head("Sim","live")+'<div class="fill" id="dk-term-body"></div></div>'
-  +'<div style="display:grid;grid-template-columns:1.7fr 3.3fr;grid-template-rows:3.2fr 1.8fr;gap:12px;min-height:0;min-width:0;">'
+  +'<div style="display:grid;grid-template-columns:1.7fr 3.3fr;grid-template-rows:3fr 2fr;gap:12px;min-height:0;min-width:0;">'
   +'<div class="glass card" id="dk-newsA" style="display:flex;"></div>'
   +'<div class="glass" id="dk-np" style="padding:0;overflow:hidden;position:relative;min-height:0;"></div>'
   +'<div class="glass card" id="dk-newsB" style="display:flex;"></div>'
-  +'<div style="display:flex;gap:12px;min-height:0;min-width:0;"><div class="glass card" id="dk-mkt" style="flex:1.55;display:flex;min-width:0;"></div><div class="glass card" id="dk-qj" style="flex:1;display:flex;min-width:0;"></div></div>'
+  +'<div style="display:flex;gap:12px;min-height:0;min-width:0;"><div class="glass card" id="dk-mkt" style="flex:1.25;display:flex;min-width:0;"></div><div class="glass card" id="dk-qj" style="flex:1.3;display:flex;min-width:0;"></div></div>'
   +'</div></div>';}
 // ---- the camera strip: every relay that is live (cameras show all dash) plays through hls.js; a camera with
 // no relay shows its newest still. Rebuilt only when the set of feeds changes, so players are not restarted.
@@ -441,29 +449,10 @@ function refreshDeck(force){
   if(force||b!==DK.b){DK.b=b;const [name,,tag]=DECK_B[b];fillBox("#dk-newsB",newsBoxHTML(name,tag,deckItemsB(b)));}
   if(force||m!==DK.m){DK.m=m;fillBox("#dk-mkt",mktBoxHTML(m));}
   const npk=npKey();if(!OFFLINE&&npk!==DK.np){DK.np=npk;$("#dk-np").innerHTML=npHTML();}
-  const qjk=String(Math.floor(Date.now()/600000))+(DATA?"d":"");if(force||qjk!==DK.qj){DK.qj=qjk;fillBox("#dk-qj",qjHTML());}
+  const qjk=(DATA&&DATA.apod?String(DATA.apod.url||DATA.apod.title||""):"")+String(Math.floor(Date.now()/3600000));if(force||qjk!==DK.qj){DK.qj=qjk;fillBox("#dk-qj",qjHTML());}
   const body=$("#dk-term-body");if(body)body.innerHTML=termHTML(true);
 }
 function viewDeck(){return deckSkeleton();}
-function viewDiscover(){
-  const A="'world world holly holly photo photo' 'world world holly holly photo photo' 'sci sci wiki wiki photo photo' 'sci sci wiki wiki otd otd' 'movie movie music music jokes jokes' 'movie movie music music most most'";
-  const C=(a,inner)=>'<div class="glass card" style="grid-area:'+a+';">'+inner+'</div>';
-  const world=head("World","BBC · Bloomberg")+newsRows(merged("bbc_world","bloomberg_politics"),9,{src:true});
-  const holly=head("Hollywood & entertainment","Variety · Deadline")+newsRows(merged("variety","deadline"),9,{color:"violet",src:true});
-  const ap=DATA&&DATA.apod,wk=DATA&&DATA.wiki;
-  const photo='<div class="col">'+head("Astronomy picture of the day","NASA")+'<div class="fill">'+(ap&&ap.media_type==="image"?thumb('<b>'+esc(ap.title)+'</b><br><span class="clamp faint" style="-webkit-line-clamp:3;font-size:11px;">'+esc(ap.explanation)+'</span>',ap.copyright?esc(ap.copyright):"",ap.url):(wk&&wk.potd.thumb?thumb(esc(wk.potd.description),"Wikimedia",wk.potd.thumb):thumb("waiting for the picture…","")))+'</div></div>';
-  const sci=head("Science","ScienceDaily · NASA")+newsRows(merged("sciencedaily","nasa"),6,{color:"violet"});
-  const wiki='<div class="col">'+head("Featured article","Wikipedia")+(wk?'<div style="display:flex;gap:10px;height:100%;min-height:0;">'+(wk.featured.thumb?'<div style="width:38%;flex:none;">'+thumb("","",wk.featured.thumb)+'</div>':'')+'<div style="min-width:0;"><div style="font-size:13.5px;margin-bottom:4px;">'+esc(wk.featured.title)+'</div><div class="dim clamp" style="font-size:11.5px;line-height:1.4;-webkit-line-clamp:9;">'+esc(wk.featured.extract)+'</div></div></div>':empty("waiting…"))+'</div>';
-  const otd=head("On this day")+(wk?wk.onthisday.slice(0,4).map(e=>'<div class="rowitem"><span class="gold" style="flex:none;width:36px;">'+e.year+'</span><div class="t">'+esc(e.text)+'</div></div>').join(""):empty("waiting…"));
-  const movies=(DATA&&DATA.movies)||[],bo=(DATA&&DATA.boxoffice)||[];
-  const movie='<div class="col">'+head("Box office","The Numbers · weekend")+(bo.length?bo.slice(0,8).map(b=>'<div class="tr"><span class="gold" style="width:16px;">'+b.rank+'</span><span class="l" style="flex:1;">'+esc(b.title)+'</span><span>'+esc(b.weekend)+'</span><span class="'+(String(b.change).startsWith("-")?"red":"green")+'" style="width:44px;text-align:right;">'+esc(b.change)+'</span></div>').join(""):movies.slice(0,8).map(m=>'<div class="tr"><span class="gold" style="width:16px;">'+m.rank+'</span><span class="l" style="flex:1;">'+esc(m.name)+'</span><span class="faint">'+esc(m.genre)+'</span></div>').join("")||empty("waiting…"))+'</div>';
-  const songs=(DATA&&DATA.songs)||[];
-  const music='<div class="col">'+head("Top songs","Apple Music")+(songs.length?songs.slice(0,8).map(s=>'<div class="rowitem" style="align-items:center;padding:3px 0;"><span class="gold" style="width:14px;">'+s.rank+'</span><div class="art" style="background-image:url(\''+esc(s.art)+'\');width:26px;height:26px;"></div><div style="min-width:0;"><div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.name)+'</div><div class="faint" style="font-size:10px;">'+esc(s.artist)+'</div></div></div>').join(""):empty("waiting…"))+'</div>';
-  const jokes=(DATA&&DATA.jokes)||[];
-  const jk=head("Jokes","family")+(jokes.length?jokes.slice(0,3).map(j=>'<div style="font-size:12px;line-height:1.4;padding:4px 0;border-bottom:1px solid var(--stroke2);">'+esc(j)+'</div>').join(""):empty("waiting…"));
-  const most=head("Most read","Wikipedia")+(wk?wk.mostread.slice(0,4).map(a=>'<div class="rowitem"><span class="violet" style="flex:none;">•</span><div class="t">'+esc(a.title)+'</div><span class="m">'+(a.views?Math.round(a.views/1000)+'k':'')+'</span></div>').join(""):empty("waiting…"));
-  return '<div class="grid" style="grid-template-columns:repeat(6,1fr);grid-template-rows:repeat(6,1fr);grid-template-areas:'+A+';">'+C('world',world)+C('holly',holly)+C('photo',photo)+C('sci',sci)+C('wiki',wiki)+C('otd',otd)+C('movie',movie)+C('music',music)+C('jokes',jk)+C('most',most)+'</div>';
-}
 let CAMVIEWKEY="";
 function viewCameras(){
   const tiles=stripTiles();const n=Math.max(tiles.length,1);const cols=n<=1?1:n<=2?2:n<=4?3:4;
@@ -473,15 +462,6 @@ function viewCameras(){
     +'<div style="border-top:1px solid var(--stroke2);padding-top:8px;margin-top:6px;">'+weatherNow()+'</div></div>';
   setTimeout(()=>{const root=$("#camgrid");if(root){closeLive("grid");mountLive(root,tiles,"grid");}},30);
   return '<div style="display:flex;gap:12px;height:100%;"><div id="camgrid" class="grid" style="flex:3;grid-template-columns:repeat('+cols+',1fr);grid-auto-rows:1fr;grid-auto-flow:dense;">'+grid+'</div>'+feedCol+'</div>';
-}
-function viewNews(){
-  const cards=[["Bloomberg · Markets",["bloomberg_markets"],"amber"],["Bloomberg · Technology",["bloomberg_technology"],"amber"],["Bloomberg · Business",["bloomberg_business"],"amber"],
-    ["Bloomberg · Economics",["bloomberg_economics"],"amber"],["Bloomberg · Politics",["bloomberg_politics"],"amber"],["BBC · World",["bbc_world"],"gold"],
-    ["Ars Technica",["ars"],"cyan"],["Science · ScienceDaily · NASA",["sciencedaily","nasa"],"violet"],["Entertainment · Variety · Deadline",["variety","deadline"],"violet"]]
-    .map(([t,f,c])=>'<div class="glass card">'+head(t,"",c==="amber")+newsRows(merged(...f),6,{color:c})+'</div>').join("");
-  const all=merged("bloomberg_markets","bbc_world","bloomberg_technology","ars").slice(0,40);
-  const strip='<div class="glass" style="flex:none;height:36px;padding:0 14px;display:flex;align-items:center;gap:14px;overflow:hidden;"><span class="hd bb" style="flex:none;">Headlines</span><div class="marquee" style="font-size:12px;--mqs:'+(all.length*4)+'s;"><div class="track">'+all.map(it=>'<span><span class="faint">'+esc(it.source)+'</span> '+esc(it.title)+'</span>').join("")+'</div></div></div>';
-  return '<div style="display:flex;flex-direction:column;gap:12px;height:100%;">'+strip+'<div style="display:flex;gap:12px;flex:1;min-height:0;"><div class="glass card" style="flex:1;display:flex;">'+termHTML()+'</div><div class="grid" style="flex:3;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr;">'+cards+'</div></div></div>';
 }
 window.selTF=t=>{TF=t;render();};window.pinStock=s=>{PIN=PIN===s?"":s;render();};
 function majorCard(s){
@@ -549,13 +529,6 @@ function viewCharts(){const ch=(DATA&&DATA.charts)||{};const kp=ch.kpop,us=ch.us
   else player=top?chartsFrame(top.video,!CHARTS_SOUND):thumb("<b>Charts</b><br><span class=\"faint\">waiting for the chart…</span>","charts");
   return '<div style="display:flex;gap:10px;height:100%;"><div class="glass" style="flex:1;min-width:0;padding:0;overflow:hidden;position:relative;background:#000;">'+player+'</div>'
     +'<div class="glass card col" style="flex:none;width:218px;min-width:0;padding:10px 10px;gap:8px;">'+chartRail(kp,"kpop")+'<div style="height:1px;background:var(--stroke2);"></div>'+chartRail(us,"uspop")+'</div></div>';}
-function viewTerminal(){
-  const s=STATUS||{};const rows=[];
-  for(const k of ["state","mode","uptime_seconds","autonomous_paused","model","version"]){if(s[k]!=null&&typeof s[k]!=="object")rows.push(kv(k.replace(/_/g," "),esc(String(s[k]))));}
-  const tools=ACT.filter(e=>e.type==="action.result").slice(-8).reverse().map(e=>'<div class="tr"><span class="l">'+esc(e.tool||"tool")+'</span><span class="'+(e.ok===false?"red":"green")+'">'+(e.ok===false?"✗":"✓")+(e.duration_ms?' '+Math.round(e.duration_ms)+'ms':'')+'</span></div>').join("");
-  const side='<div class="glass card col" style="flex:1;min-width:0;">'+head("Sim","status")+(rows.join("")||empty("status needs the token"))+'<div class="hd" style="margin:10px 0 4px;">Recent tools</div>'+(tools||empty("nothing yet"))+'<div style="margin-top:auto;">'+weatherNow()+'</div></div>';
-  return '<div style="display:flex;gap:12px;height:100%;"><div class="glass card" style="flex:3.2;display:flex;">'+termHTML(true)+'</div>'+side+'</div>';
-}
 function viewAmbient(){
   const w=DATA&&DATA.weather,qt=DATA&&DATA.quote,h=merged("bloomberg_markets","bbc_world")[0];
   const box=(inner,w)=>'<div class="glass" style="padding:14px 20px;text-align:center;'+(w?'min-width:'+w+'px;':'')+'">'+inner+'</div>';
@@ -571,7 +544,8 @@ function viewAmbient(){
     +(qt&&qt.text?'<div class="dim" style="font-size:15px;margin-top:14px;max-width:80vw;text-align:center;">“'+esc(qt.text)+'” <span class="faint">— '+esc(qt.author)+'</span></div>':'')
     +(h?'<div class="faint" style="font-size:12.5px;margin-top:6px;max-width:80vw;text-align:center;"><span class="amber">'+esc(h.source)+'</span> '+esc(h.title)+'</div>':'')+'</div>';
 }
-const RENDER={charts:viewCharts,deck:viewDeck,discover:viewDiscover,cameras:viewCameras,news:viewNews,markets:viewMarkets,media:viewMedia,terminal:viewTerminal,ambient:viewAmbient};
+const RENDER={charts:viewCharts,deck:viewDeck,cameras:viewCameras,markets:viewMarkets,media:viewMedia,ambient:viewAmbient};
+const VIEW_ALIAS={news:"deck",discover:"deck",terminal:"deck",home:"deck"};
 
 // ---- app ----
 function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
@@ -581,7 +555,7 @@ function render(){try{if(CUR==="deck"){refreshDeck(true);return;}
     if(key===CAMVIEWKEY&&grid){syncLive(grid,tiles,"grid");return;}CAMVIEWKEY=key;captureFrames();closeLive("grid");}
   else if(CAMVIEWKEY){CAMVIEWKEY="";closeLive("grid");}
   $("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}catch(e){$("#stage").innerHTML='<div class="glass card red">render failed: '+esc(e.message)+'</div>';}}
-function go(k){if(!RENDER[k])return;CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
+function go(k){k=VIEW_ALIAS[k]||k;if(!RENDER[k])return;CUR=k;$("#viewname").textContent=(VIEWS.find(v=>v[0]===k)||[,"Home"])[1];buildDock();render();setBG(randWP());}
 // A Cast receiver lays the page out at 1280x720 logical pixels whatever the panel (the creator's 4K Sony showed a
 // few boxes, 2026-09-12); the page is designed at 1920x1080 and scaled to the viewport it actually gets.
 let SCALE=0;   // 0 = fit the viewport; a number = the creator's override (tv scale 0.5)

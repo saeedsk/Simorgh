@@ -639,13 +639,16 @@ class HttpApi:
                     self._logger.info("dash_cameras_live_failed", error=f"{exc.__class__.__name__}: {exc}")
             await asyncio.sleep(self._cameras_live_every_s)
 
-    _DASH_VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "charts", "terminal", "ambient")
+    _DASH_VIEWS = ("home", "cameras", "markets", "media", "charts", "ambient")
+    #: News, Discover and Terminal were folded into Home (2026-09-14); the old names still land somewhere
+    _VIEW_ALIASES = {"news": "home", "discover": "home", "terminal": "home", "deck": "home"}
 
     def _apply_dash_state(self, payload: dict) -> None:
         view = str(payload.get("view") or "").strip().lower()
         aliases = {"deck": "home", "start": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
                    "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "tv": "media", "video": "media"}
         view = aliases.get(view, view)
+        view = self._VIEW_ALIASES.get(view, view)
         if view and view in self._DASH_VIEWS:
             self._dash_state["view"] = view
         tf = str(payload.get("timeframe") or "").strip().upper()

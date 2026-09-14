@@ -659,10 +659,12 @@ class CastDevicesTool(_CastTool):
 
 
 #: The dashboard's views and the words people use for them (dash.html).
-DASH_VIEWS = ("home", "discover", "cameras", "news", "markets", "media", "charts", "terminal", "ambient")
-DASH_ALIASES = {"deck": "home", "start": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
+DASH_VIEWS = ("home", "cameras", "markets", "media", "charts", "ambient")
+# News, Discover and Terminal were folded into Home (the creator, 2026-09-14)
+DASH_ALIASES = {"deck": "home", "start": "home", "news": "home", "headlines": "home", "discover": "home",
+                "world": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
                 "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "video": "media",
-                "headlines": "news", "chart": "charts", "kpop": "charts", "k-pop": "charts", "music charts": "charts",
+                "chart": "charts", "kpop": "charts", "k-pop": "charts", "music charts": "charts",
                 "top songs": "charts", "hits": "charts"}
 #: the charts the dashboard carries (interface/dashfeeds.py CHARTS) and how people name them
 CHART_NAMES = {"kpop": "kpop", "k-pop": "kpop", "korea": "kpop", "korean": "kpop", "us": "uspop", "uspop": "uspop",
@@ -674,7 +676,7 @@ def _dash_view(word: str) -> str:
     terminal page and not a view here."""
     low = (word or "").strip().lower()
     low = DASH_ALIASES.get(low, low)
-    return low if low in DASH_VIEWS and low != "terminal" else ""
+    return low if low in DASH_VIEWS else ""
 
 
 class CastShowTool(_CastTool):
@@ -913,7 +915,7 @@ class DashViewTool(_CastTool):
         "live_step_s": {"type": "number"},
         "video_quality": {"type": "string", "enum": ["light", "full"]}, "action": {"type": "string", "enum": ["view", "remote", "link"]}}}
     VIEWS = DASH_VIEWS
-    ALIASES = {**DASH_ALIASES, "tv": "media"}
+    ALIASES = {**DASH_ALIASES, "tv": "media", "terminal": "home"}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         action = str(args.get("action") or "").strip().lower()
@@ -970,9 +972,9 @@ class DashViewTool(_CastTool):
                 return ToolResult(ok=False, error="refused: `video_quality` is light or full")
             payload["video_quality"] = quality
         if not payload:
-            return ToolResult(ok=False, error="refused: say a `view` (home, discover, cameras, news, markets, media, terminal, "
-                                              "ambient), a `timeframe`, a `symbol`, `rotate_s`, `scale`, `live_max`, `live_step_s` "
-                                              "or `video_quality`")
+            return ToolResult(ok=False, error="refused: say a `view` (home, cameras, markets, media, charts, ambient), a "
+                                              "`timeframe`, a `symbol`, `rotate_s`, `scale`, `live_max`, `live_step_s` or "
+                                              "`video_quality`")
         bus = getattr(ctx, "bus", None)
         if bus is None:
             return ToolResult(ok=False, error="refused: no bus to reach the dashboard")
