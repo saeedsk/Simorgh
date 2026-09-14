@@ -49,9 +49,16 @@ class ProviderUnavailable(Exception):
     that spend is real but invisible, silently undercounting the
     provider's own rolling-window budget."""
 
-    def __init__(self, message: str, *, billable: "ProviderResponse | None" = None) -> None:
+    def __init__(self, message: str, *, billable: "ProviderResponse | None" = None,
+                 truncated: bool = False) -> None:
         super().__init__(message)
         self.billable = billable
+        # The reply ran out of output tokens: a fact about THIS call's
+        # `max_tokens`, not about the provider being down. The Router
+        # retries once with more room and does not cool the provider down
+        # -- one truncated review used to put every call for the next 30s
+        # on the floor (benchmark wave, 2026-09-14).
+        self.truncated = truncated
 
 
 class NoRealProvider(Exception):

@@ -208,6 +208,7 @@ class TogetherProvider:
                     cost_usd=self.price(uncached, output_tokens, cached),
                     metadata={"model": data.get("model") or self._model},
                 ),
+                truncated=True,
             )
 
         return ProviderResponse(

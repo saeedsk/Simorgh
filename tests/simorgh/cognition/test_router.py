@@ -612,3 +612,47 @@ class TheCooldownIsStampedWhenTheFailureHappensTestCase(unittest.IsolatedAsyncio
         clock.advance(35.0)  # past it
         await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=600.0)
         self.assertEqual(primary.calls, 2, "the cooldown must still expire")
+
+
+class _TruncatingProvider:
+    """Cut off by `max_tokens` until given at least `needs` of them."""
+
+    def __init__(self, name: str, *, needs: int):
+        self.name = name
+        self._needs = needs
+        self.max_tokens_seen: list[int] = []
+
+    def available(self) -> bool:
+        return True
+
+    async def complete(self, messages, *, tools, max_tokens, timeout=None):
+        self.max_tokens_seen.append(max_tokens)
+        if max_tokens < self._needs:
+            raise ProviderUnavailable("reasoning only (finish_reason='length')", truncated=True,
+                                      billable=ProviderResponse(text="", provider=self.name, output_tokens=max_tokens))
+        return ProviderResponse(text=f"{self.name}-answer", provider=self.name)
+
+
+class ATruncatedReplyIsNotAnOutageTestCase(unittest.IsolatedAsyncioTestCase):
+    """2026-09-14: one Together review cut off by `max_tokens` cooled the
+    provider down for 30s, and every benchmark case in that window was
+    answered by the floor's canned template."""
+
+    async def test_it_is_retried_once_with_twice_the_room(self):
+        together = _TruncatingProvider("together", needs=150)
+        spend = _FakeProviderBudget()
+        router = Router([together], {"together": spend}, FloorProvider(), order=("together",), clock=FakeClock())
+        response, floor = await router.complete(Purpose.REVIEW, [], tools=None, budget=_budget(), timeout=30.0)
+        self.assertFalse(floor)
+        self.assertEqual(response.provider, "together")
+        self.assertEqual(together.max_tokens_seen, [100, 200])
+        self.assertEqual(len(spend.recorded), 2, "the truncated attempt was billed and must be recorded")
+
+    async def test_a_second_truncation_falls_through_without_a_cooldown(self):
+        together = _TruncatingProvider("together", needs=10_000)
+        router = Router([together], {}, FloorProvider(), order=("together",), clock=FakeClock())
+        _response, floor = await router.complete(Purpose.REVIEW, [], tools=None, budget=_budget(), timeout=30.0)
+        self.assertTrue(floor)
+        await router.complete(Purpose.REVIEW, [], tools=None, budget=_budget(), timeout=30.0)
+        self.assertEqual(together.max_tokens_seen, [100, 200, 100, 200],
+                         "the next call must dial the provider again, not sit out a cooldown")

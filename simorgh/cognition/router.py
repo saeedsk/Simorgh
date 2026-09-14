@@ -165,11 +165,8 @@ class Router:
                 # A `to_thread` provider's thread is not killed by the
                 # cancellation -- it is abandoned, which is why providers
                 # are still passed a timeout of their own.
-                response = await asyncio.wait_for(
-                    provider.complete(
-                        messages, tools=tools, max_tokens=budget.max_tokens_out, timeout=share,
-                    ),
-                    timeout=share + _OVERRUN_GRACE_SECONDS,
+                response = await self._dial(
+                    name, provider, messages, tools, budget.max_tokens_out, share, provider_budget, purpose,
                 )
             except Exception as exc:  # noqa: BLE001 -- ProviderUnavailable or anything else: try the next candidate
                 last_error = exc
@@ -183,7 +180,8 @@ class Router:
                 # Caught through a real Kernel boot, 2026-09-10: a cooldown
                 # stamped 64,836 seconds in the past, and the "cooling
                 # down" provider re-dialled on the very next call.
-                self._cooldown_until[name] = self._clock.now() + self._cooldown_s
+                if not getattr(exc, "truncated", False):
+                    self._cooldown_until[name] = self._clock.now() + self._cooldown_s
                 # Live-caught, 2026-09-08: a failover used to be
                 # completely silent -- nothing on the Ledger, nothing in
                 # any log, not even a debug line -- so the only trace of
@@ -225,6 +223,36 @@ class Router:
                 )
             raise NoRealProvider("no real provider available")
         return self._floor.respond_for_purpose(purpose), True
+
+    async def _dial(self, name, provider, messages, tools, max_tokens, share, provider_budget, purpose):
+        """One candidate's call, retried once with twice the output room
+        when the reply was cut off by `max_tokens`.
+
+        A reasoning model that spends the whole output budget thinking has
+        not failed as a provider; this call was simply too tight. Falling
+        through to the next candidate -- for Sim usually the floor -- turned
+        one tight review into a canned "no real reviewer" for every call
+        during the cooldown (benchmark wave, 2026-09-14)."""
+        started = self._clock.now()
+        try:
+            return await asyncio.wait_for(
+                provider.complete(messages, tools=tools, max_tokens=max_tokens, timeout=share),
+                timeout=share + _OVERRUN_GRACE_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001 -- only a truncation is retried; the caller handles the rest
+            left = share - (self._clock.now() - started)
+            if not getattr(exc, "truncated", False) or left < _MIN_CANDIDATE_SECONDS:
+                raise
+            billable = getattr(exc, "billable", None)
+            if billable is not None and provider_budget is not None:
+                await provider_budget.record(billable)
+            if self._logger is not None:
+                self._logger.warning("cognition.truncated_retry", provider=name, purpose=purpose.value,
+                                     max_tokens=max_tokens * 2)
+        return await asyncio.wait_for(
+            provider.complete(messages, tools=tools, max_tokens=max_tokens * 2, timeout=left),
+            timeout=left + _OVERRUN_GRACE_SECONDS,
+        )
 
     def _share_of(self, name: str, remaining: float) -> float:
         """This candidate's fair slice of the time that is left, so a slow
