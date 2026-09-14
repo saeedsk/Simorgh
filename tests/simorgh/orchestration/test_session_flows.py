@@ -449,5 +449,4 @@ class ClaimedTvActTestCase(unittest.TestCase):
         session.record(Step(1, "act", "played", tool="tv_charts", ok=True))
         self.assertEqual(claimed_tv_act("The K-pop chart's running on the TV now.", session), "", "a tool ran: the claim stands")
         plain = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT, worker_id="w", user_text="x", channel="cli")
-        self.assertEqual(claimed_tv_act("It's playing on the TV now.", plain), "" if not any(
-            t in profiles.CHAT.tools for t in ("cast_play", "tv_charts")) else "'s playing on the TV")
+        self.assertTrue(claimed_tv_act("It's playing on the TV now.", plain), "the typed chat has the TV tools too")
