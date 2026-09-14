@@ -41,6 +41,19 @@ _PREFIX = "SIMORGH_"
 #: and which a caller may legitimately set for a whole run.
 _KEEP = frozenset({"SIMORGH_OBSERVER_RUN_ID"})
 
+#: The operator's model keys. With them in the environment, every test
+#: that booted a real Kernel made a paid, networked Together call (a second
+#: or more each, 2026-09-14). A test of a provider passes its own key.
+_MODEL_CREDENTIALS = frozenset({
+    "TOGETHER_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "VOYAGE_API_KEY",
+    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+})
+
+#: Without a key Cognition would fall through to the `claude` CLI, when
+#: it is installed -- slower and still billed. Booted services answer from
+#: the offline floor instead (cognition/service.py reads this).
+_FLOOR_ONLY = "SIMORGH_COGNITION_PROVIDER_ORDER"
+
 
 def pytest_configure(config):
     # The loader's gate runs with `-m "not live"`: a boot must not fail
@@ -51,10 +64,13 @@ def pytest_configure(config):
 
 @pytest.fixture(autouse=True, scope="session")
 def _no_ambient_simorgh_env():
-    stashed = {k: v for k, v in os.environ.items() if k.startswith(_PREFIX) and k not in _KEEP}
+    stashed = {k: v for k, v in os.environ.items()
+               if (k.startswith(_PREFIX) and k not in _KEEP) or k in _MODEL_CREDENTIALS}
     for key in stashed:
         del os.environ[key]
+    os.environ[_FLOOR_ONLY] = "floor"
     try:
         yield
     finally:
+        os.environ.pop(_FLOOR_ONLY, None)
         os.environ.update(stashed)

@@ -8,6 +8,8 @@ the availability loop."""
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import os
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
@@ -118,6 +120,15 @@ class Service:
         # constructs the service with one is unaffected.
         if self._config_from_caller is None and ctx.config:
             self._config = Config.from_mapping(dict(ctx.config))
+        # `SIMORGH_COGNITION_PROVIDER_ORDER=floor` (comma-separated names)
+        # chooses who answers without a config file. The test session sets
+        # it: every test that booted a real Kernel was making a paid
+        # Together call with the operator's own key (2026-09-14). A config
+        # or providers handed in by the caller still win.
+        order_env = os.environ.get("SIMORGH_COGNITION_PROVIDER_ORDER", "").strip()
+        if order_env and self._config_from_caller is None and self._injected_providers is None:
+            self._config = dataclasses.replace(
+                self._config, provider_order=tuple(p.strip() for p in order_env.split(",") if p.strip()))
         self._floor = FloorProvider()
         if self._injected_providers is not None:
             # test seam: a fake Provider list, so an integration test can
