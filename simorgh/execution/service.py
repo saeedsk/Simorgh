@@ -204,6 +204,11 @@ class Service:
         ))
         self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
         self._subs.append(await ctx.bus.subscribe(topics.LEARN_SKILL_ACQUIRED, self._on_skill_acquired))
+        # The dashboard's Charts view auto-plays (the creator, 2026-09-13):
+        # chosen from the phone remote or the page, the chart starts on the
+        # TV. The tools' own `ui.dash.state` messages come from
+        # "execution" and are not re-played.
+        self._subs.append(await ctx.bus.subscribe(topics.DASH_STATE, self._on_dash_state))
         # Half the toolset stands on something outside this repo (Node,
         # a bundled Chromium, an optional pip package). Each is allowed
         # to be absent -- every tool refuses cleanly -- but "absent" was
@@ -425,6 +430,23 @@ class Service:
         self._paused = message.payload["state"] in ("paused", "stopping")
 
     # -- skill acquisition as procedural memory (roadmap 4.7) --------------------
+    async def _on_dash_state(self, message: Message) -> None:
+        payload = message.payload or {}
+        if str(payload.get("view") or "") != "charts" or getattr(message, "source", "") == "execution":
+            return
+        tool = self._registry.get("tv_charts")
+        if tool is None:
+            return
+        ctx = ToolContext(action_id=f"charts-{message.id}", task_id=None, scope={}, constraints={},
+                          data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
+                          ledger=self._ctx.ledger, bus=self._ctx.bus)
+        try:
+            result = await tool.run({"chart": str(payload.get("chart") or "kpop")}, ctx=ctx)
+        except Exception as exc:  # noqa: BLE001 -- a TV that is off is not the service's failure
+            self._ctx.logger.warning("charts_autoplay_failed", error=repr(exc))
+            return
+        self._ctx.logger.info("charts_autoplay", ok=result.ok, detail=(result.output or result.error or "")[:160])
+
     async def _on_skill_acquired(self, message: Message) -> None:
         name, path = message.payload.get("name", ""), message.payload.get("path", "")
         if name and path:
