@@ -132,7 +132,11 @@ def strip_lead(reply: str) -> str:
     match = _LEAD.match(reply or "")
     if match is None or match.end() >= len(reply.rstrip()):
         return reply
-    rest = reply[match.end():]
+    # "Got it -- KATSEYE..." left "-- KATSEYE" for the voice (live 2026-09-13):
+    # the dash or comma that joined the lead to the rest goes with it.
+    rest = reply[match.end():].lstrip(" \t,;:-\u2013\u2014")
+    if not rest:
+        return reply
     return rest[0].upper() + rest[1:] if rest[:1].islower() else rest
 
 
