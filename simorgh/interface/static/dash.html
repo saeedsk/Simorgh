@@ -348,6 +348,11 @@ let CAM_LIVE_MAX=3,LIVE_STEP_S=1,VIDEO_QUALITY="light";let CAMKEY="",LIVE_ASKED=
 // not live shows the last frame captured from its own playback -- never grey while a relay exists.
 const LIVE_ROTATE_S=8,LIVE_SEED_S=5;const FRAMES={};   // name -> {url, at}; 8 s: a segment must buffer before a frame shows
 function rotateS(){return LIVE_STEP_S;}
+function captureFrames(){document.querySelectorAll(".ctile video").forEach(v=>{if(v.readyState<2||!v.videoWidth)return;const name=v.closest(".ctile")&&v.closest(".ctile").dataset.name;if(!name)return;
+  try{const c=captureFrames.c||(captureFrames.c=document.createElement("canvas"));c.width=320;c.height=Math.round(320*v.videoHeight/v.videoWidth);c.getContext("2d").drawImage(v,0,0,c.width,c.height);FRAMES[name]={url:c.toDataURL("image/jpeg",.7),at:Date.now()/1000};}catch(e){}});}
+function liveBudget(){ // decoders left for cameras: the Home view's video frame takes one while it plays
+  const video=CUR==="deck"&&DK.np&&!DK.np.startsWith("ambient|")?1:(CUR==="deck"&&DK.np&&DK.np.startsWith("ambient|")&&(DATA&&DATA.ambient||[]).length?1:0);
+  return Math.max(0,CAM_LIVE_MAX-video);}
 function liveWindow(n,budget){ // which of n live-capable tiles play now: a window of `budget`, sliding one camera per step
   if(n<=budget||budget<=0)return new Set([...Array(n).keys()].slice(0,budget>0?n:0));
   const start=Math.floor(Date.now()/1000/rotateS())%n;const on=new Set();for(let k=0;k<budget;k++)on.add((start+k)%n);return on;}
