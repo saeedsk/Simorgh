@@ -804,9 +804,12 @@ class VoiceSession:
         self._answered.add(turn_id)
         from simorgh.contracts.tone import strip_tone as _strip_tone
 
-        if is_quiet(_strip_tone(reply)):
+        if not _strip_tone(reply).strip() or is_quiet(_strip_tone(reply)):
             # "[warm] QUIET" is QUIET: the tag came first and the word was
-            # spoken aloud, in a warm voice (2026-09-13, 17:46).
+            # spoken aloud, in a warm voice (2026-09-13, 17:46). And an empty
+            # reply is silence too: a cancelled ask comes back "", and the
+            # planner turned that into "I have nothing to say to that.",
+            # said aloud to Iris eight minutes after she spoke (2026-09-14).
             if not speaker:
                 self._quiet_unknown.append(self._now())
             await self._stay_quiet(turn_id)

@@ -340,6 +340,28 @@ class TestTheBackchannel(unittest.IsolatedAsyncioTestCase):
             stop.set()
             await asyncio.wait_for(task, timeout=3.0)
 
+    async def test_an_empty_reply_is_silence_not_a_spoken_non_answer(self) -> None:
+        # A cancelled ask comes back "". The planner turned that into "I have
+        # nothing to say to that.", said aloud to Iris eight minutes after
+        # she had spoken (2026-09-14).
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies([""], delay=0.1)
+        session, bus, speaker, tts = _session(_config(backchannel=True), script, replies)
+        stop = asyncio.Event()
+        task = asyncio.create_task(session.run(stop))
+        try:
+            for _ in range(800):
+                if any(p.get("quiet") for p in bus.of(topics.VOICE_SPOKEN)):
+                    break
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)
+            self.assertEqual(session.state, LISTENING)
+            self.assertNotIn("I have nothing to say to that.", tts.spoken)
+            self.assertEqual(len(replies.asked), 1)
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=3.0)
+
     async def test_a_sound_is_made_before_the_answer_and_the_answer_does_not_repeat_it(self) -> None:
         script = _Script((True, 20), (False, 15), (False, 10_000))
         replies = _Replies(["Okay, the pool has twelve connections."], delay=1.0)
