@@ -229,6 +229,8 @@ class Service:
         if result.task is not None:
             await self._announce_created(result.task)
             await self._preempt_for(result.task)
+            if result.task.origin == "human":
+                await self._supersede_own_copies(result.task)
             payload = {"task_id": result.task.id, "backlog": result.backlog}
             # A task `auto off` holds is created, not running; the caller
             # must be able to say so (the creator, 2026-09-13, was told
@@ -984,6 +986,26 @@ class Service:
                 )
                 continue
             await self._store.transition(task.id, AVAILABLE, note=f"retrying after being blocked: {task.note}")
+
+    async def _supersede_own_copies(self, task) -> None:
+        """A person asked for this by name; Sim's own waiting copy of the
+        same request (a `start_task` held under auto off, re-issued with
+        the go-ahead) is theirs now. Two copies ran the splash build
+        twice on 2026-09-13."""
+        wanted = " ".join(str(task.description or "").lower().split())
+        if not wanted:
+            return
+        for other in list(self._store.index.tasks.values()):
+            if other.id == task.id or other.origin == "human" or other.status in TERMINAL_STATUSES:
+                continue
+            if other.status not in (AVAILABLE, PENDING, BLOCKED):
+                continue
+            if " ".join(str(other.description or "").lower().split()) != wanted:
+                continue
+            note = f"superseded by {task.id}: the same request from a person"
+            if other.status != BLOCKED:
+                await self._store.transition(other.id, BLOCKED, note=note)
+            await self._store.transition(other.id, FAILED, note=note)
 
     async def _end_cancelled_after_expiry(self) -> None:
         """A task cancelled while a worker held it, whose worker never

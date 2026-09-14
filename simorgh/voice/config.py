@@ -64,7 +64,7 @@ class Config:
     # echo tracking (`vad.BargeInEndpointer`) these are the belt to its
     # braces -- a person cutting in clears them easily; Sim's own voice
     # and a stray clip do not.
-    barge_in_speech_ms: int = 650
+    barge_in_speech_ms: int = 450     # "stop" is short: 650 let the creator say it twenty times unheard (2026-09-13)
     # The first stretch of each reply is spent learning how loud Sim's own
     # voice is at the microphone; nothing can interrupt during it. Kokoro
     # replies open near-silent, so a short window learnt silence and Sim

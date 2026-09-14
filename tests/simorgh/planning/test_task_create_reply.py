@@ -216,3 +216,20 @@ class CancelAndPauseLifecycleTestCase(TaskCreateTestCase):
                                              payload={"task_id": task_id, "reason": "cancelled by cli:s1"}))
         await asyncio.sleep(0.05)
         self.assertEqual((await store.get(task_id)).status, "failed")
+
+
+class SupersedeTestCase(TaskCreateTestCase):
+    async def test_a_persons_request_supersedes_sims_waiting_copy_of_it(self):
+        store = self.service._store  # noqa: SLF001
+        self.service._scheduler.autonomous_paused = True  # noqa: SLF001
+        held = (await self.other.request(Message.new(topics.TASK_CREATE, source="execution", payload={
+            "kind": "patch", "description": "Five cartoon splash screens after the logo", "origin": "assistant",
+            "mode": "execute"}), timeout=5.0)).payload["task_id"]
+        theirs = (await self.other.request(Message.new(topics.TASK_CREATE, source="execution", payload={
+            "kind": "patch", "description": "five cartoon splash screens after the logo", "origin": "human",
+            "mode": "execute"}), timeout=5.0)).payload["task_id"]
+        self.assertNotEqual(held, theirs)
+        self.assertEqual((await store.get(held)).status, "failed")
+        self.assertIn("superseded", (await store.get(held)).note)
+        self.assertEqual((await store.get(theirs)).status, "available")
+        self.service._scheduler.autonomous_paused = False  # noqa: SLF001
