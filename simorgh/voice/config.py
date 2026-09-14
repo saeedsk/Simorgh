@@ -100,7 +100,11 @@ class Config:
     output: str = "laptop"             # laptop | tv | both
     tv_audio_lag_s: float = 2.5
     auto_listen: bool = True           # after a reply, listen again without being asked
-    vad_sensitivity: str = "balanced"  # low | balanced | high (vad.threshold_for); overrides vad_threshold
+    # "high" since 2026-09-13: Ira, nine, spoke to Sim twice and neither
+    # became a turn -- a child's voice from across the room sits under
+    # the balanced bar. The model's QUIET handles what the looser bar
+    # lets through; `voice set vad_sensitivity balanced` restores it.
+    vad_sensitivity: str = "high"      # low | balanced | high (vad.threshold_for); overrides vad_threshold
     min_speech_ms: int = 250           # shorter than this is a breath or a chair, not a turn
     max_turn_ms: int = 30000           # a turn is finalised at this length regardless
     semantic_silence_factor: float = 0.75  # a finished sentence needs this much of the silence
