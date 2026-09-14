@@ -793,7 +793,7 @@ class TvAudioTestCase(unittest.IsolatedAsyncioTestCase):
         script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
         replies = _Replies(["yes?"])
         session, bus, speaker, tts = _session(_config(), script, replies)
-        replies.tv_state = {"mode": "full", "title": "KATSEYE - Gnarly", "native": "YouTube"}
+        session._pipeline.tv_state = {"mode": "full", "title": "KATSEYE - Gnarly", "native": "YouTube"}  # noqa: SLF001
         _distinct_questions(session, ["my wife Michelle will judge the drawings", "Sim, what time is it"])
         await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
         self.assertEqual(replies.asked, ["Sim, what time is it"], "the TV's line is not asked; a line naming Sim is")
