@@ -491,21 +491,19 @@ function justifyRows(items,width,rowH){ // one group's own rows: each row's item
     const laidRow=r.items.map((it,idx)=>{let w=Math.round(it.ar*h);if(idx===r.items.length-1)w=width-x;const item={i:it.i,x,w,h};x+=w;return item;});
     return laidRow;});
   return {rows:laid,totalH};}
-function packCameras(tiles,W,H){ // Ring cameras first as their own block, then everything else; zero gap, exact fill
-  const withAr=arr=>arr.map(t=>({i:t.i,ar:tileAspect(t.name)}));
-  const order=tiles.map((t,i)=>({...t,i}));
-  const ring=withAr(order.filter(t=>t.kind==="ring"));
-  const other=withAr(order.filter(t=>t.kind!=="ring"));
-  if(!ring.length&&!other.length)return [];
-  const heightAt=rh=>{let h=0;if(ring.length)h+=justifyRows(ring,W,rh).totalH;if(other.length)h+=justifyRows(other,W,rh).totalH;return h;};
+function packCameras(tiles,W,H){ // Ring cameras sorted first, then everything else -- ONE wall, not two blocks, so
+  // a handful of Ring cameras never balloon into a few giant tiles beside many small Reolink ones (the creator,
+  // 2026-09-14: "ring cameras have 3x larger video feed box... I expect a more or less even tile view"). Ring simply
+  // sorts earlier in the same row-filling order; row boundaries fall wherever width runs out, group or no group.
+  const order=tiles.map((t,i)=>({i,ar:tileAspect(t.name),kind:t.kind}));
+  order.sort((a,b)=>(a.kind==="ring"?0:1)-(b.kind==="ring"?0:1));   // stable: original order kept within each kind
+  if(!order.length)return [];
   let lo=Math.min(60,H),hi=Math.max(H,60);
-  for(let k=0;k<24;k++){const mid=(lo+hi)/2;if(heightAt(mid)>H)hi=mid;else lo=mid;}
-  const rowsAll=[];
-  if(ring.length)rowsAll.push(...justifyRows(ring,W,lo).rows);
-  if(other.length)rowsAll.push(...justifyRows(other,W,lo).rows);
-  const rawTotal=rowsAll.reduce((a,r)=>a+r[0].h,0)||1;const scale=H/rawTotal;
+  for(let k=0;k<24;k++){const mid=(lo+hi)/2;if(justifyRows(order,W,mid).totalH>H)hi=mid;else lo=mid;}
+  const {rows}=justifyRows(order,W,lo);
+  const rawTotal=rows.reduce((a,r)=>a+r[0].h,0)||1;const scale=H/rawTotal;
   const boxes=[];let y=0;
-  rowsAll.forEach((r,ri)=>{let rh=Math.round(r[0].h*scale);if(ri===rowsAll.length-1)rh=Math.max(1,H-y);
+  rows.forEach((r,ri)=>{let rh=Math.round(r[0].h*scale);if(ri===rows.length-1)rh=Math.max(1,H-y);
     r.forEach(it=>{boxes[it.i]={x:it.x,y,w:it.w,h:rh};});y+=rh;});
   return boxes;}
 function boxStyle(b){return b?('position:absolute;max-width:none;left:'+b.x+'px;top:'+b.y+'px;width:'+b.w+'px;height:'+b.h+'px;'):'';}
