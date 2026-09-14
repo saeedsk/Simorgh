@@ -659,11 +659,11 @@ class CastDevicesTool(_CastTool):
 
 
 #: The dashboard's views and the words people use for them (dash.html).
-DASH_VIEWS = ("home", "cameras", "markets", "media", "charts", "ambient")
-# News, Discover and Terminal were folded into Home (the creator, 2026-09-14)
+DASH_VIEWS = ("home", "cameras", "markets", "charts", "ambient")
+# News, Discover, Terminal and Media were folded into Home (the creator, 2026-09-14)
 DASH_ALIASES = {"deck": "home", "start": "home", "news": "home", "headlines": "home", "discover": "home",
-                "world": "home", "stocks": "markets", "market": "markets", "camera": "cameras",
-                "cams": "cameras", "clock": "ambient", "screensaver": "ambient", "video": "media",
+                "world": "home", "media": "home", "video": "home", "stocks": "markets", "market": "markets",
+                "camera": "cameras", "cams": "cameras", "clock": "ambient", "screensaver": "ambient",
                 "chart": "charts", "kpop": "charts", "k-pop": "charts", "music charts": "charts",
                 "top songs": "charts", "hits": "charts"}
 #: the charts the dashboard carries (interface/dashfeeds.py CHARTS) and how people name them
@@ -681,10 +681,10 @@ def _dash_view(word: str) -> str:
 
 class CastShowTool(_CastTool):
     name = "cast_show"
-    description = ("Put Sim's page on a Cast device (the TV). page dash (the default) is the glass dashboard -- home, "
-                   "news, markets, cameras, media, ambient, with Sim's terminal in it; page tv is the bare terminal "
-                   "replica with room for a video. `url` shows another page instead. `device` names the TV when "
-                   "there are several.")
+    description = ("Put Sim's page on a Cast device (the TV). page dash (the default) is the glass dashboard -- home "
+                   "(news, discover and media all rotate through it), cameras, markets, charts, ambient, with Sim's "
+                   "terminal in it; page tv is the bare terminal replica with room for a video. `url` shows another "
+                   "page instead. `device` names the TV when there are several.")
     args_schema = {"type": "object", "properties": {"device": {"type": "string"}, "url": {"type": "string"},
                                                     "page": {"type": "string", "enum": ["tv", "dash"]},
                                                     "view": {"type": "string", "enum": list(DASH_VIEWS)}}}
@@ -903,19 +903,20 @@ class DashViewTool(_CastTool):
     name = "dash_view"
     read_only = False
     reversibility = "reversible"
-    description = ("Change what Sim's dashboard on the TV shows: `view` is one of home, discover, cameras, news, markets, "
-                   "media, terminal, ambient; `timeframe` 1D/1W/1M/1Y and `symbol` pick the markets chart; `rotate_s` "
-                   "cycles the views every N seconds (0 stops); `scale` fixes the page's zoom on a TV that misreports "
-                   "its size (0 = fit); `live_max` caps how many camera feeds play at once; `video_quality` light|full "
-                   "for the embedded video. `action` remote answers the phone remote's link; link, the dashboard's own link "
-                   "for a browser (with the token).")
+    description = ("Change what Sim's dashboard on the TV shows: `view` is one of home, cameras, markets, charts, "
+                   "ambient (news, discover, media and terminal all live inside home now); `timeframe` 1D/1W/1M/1Y and "
+                   "`symbol` pick the markets chart; `rotate_s` cycles the views every N seconds (0 stops); `scale` "
+                   "fixes the page's zoom on a TV that misreports its size (0 = fit); `live_max` caps how many camera "
+                   "feeds play at once, `live_step_s` how often the live window slides one camera on; `video_quality` "
+                   "light|full and `video_sound` on/off for the embedded video. `action` remote answers the phone "
+                   "remote's link; link, the dashboard's own link for a browser (with the token).")
     args_schema = {"type": "object", "properties": {
         "view": {"type": "string"}, "timeframe": {"type": "string"}, "symbol": {"type": "string"},
         "rotate_s": {"type": "number"}, "scale": {"type": "number"}, "live_max": {"type": "integer"},
         "live_step_s": {"type": "number"}, "video_sound": {"type": "boolean"},
         "video_quality": {"type": "string", "enum": ["light", "full"]}, "action": {"type": "string", "enum": ["view", "remote", "link"]}}}
     VIEWS = DASH_VIEWS
-    ALIASES = {**DASH_ALIASES, "tv": "media", "terminal": "home"}
+    ALIASES = {**DASH_ALIASES, "tv": "home", "terminal": "home"}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         action = str(args.get("action") or "").strip().lower()
@@ -975,7 +976,7 @@ class DashViewTool(_CastTool):
             raw = args["video_sound"]
             payload["video_sound"] = raw if isinstance(raw, bool) else str(raw).strip().lower() in ("1", "true", "on", "yes")
         if not payload:
-            return ToolResult(ok=False, error="refused: say a `view` (home, cameras, markets, media, charts, ambient), a "
+            return ToolResult(ok=False, error="refused: say a `view` (home, cameras, markets, charts, ambient), a "
                                               "`timeframe`, a `symbol`, `rotate_s`, `scale`, `live_max`, `live_step_s`, "
                                               "`video_quality` or `video_sound`")
         bus = getattr(ctx, "bus", None)

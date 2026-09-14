@@ -76,10 +76,14 @@ body.offline #offline{display:flex;} body.offline #stage,body.offline #camstrip{
 #camstrip{height:171px;flex:none;display:flex;gap:8px;padding:7px;border-radius:16px;}
 /* A tile is the same size live or still (the creator, 2026-09-13: "keep the layout and grid with fixed size"); live
    shows only as a glow. */
-.ctile{flex:1;min-width:0;max-width:330px;position:relative;border-radius:11px;overflow:hidden;background:rgba(0,0,0,.35);border:1px solid var(--stroke2);}
+.ctile{flex:1;min-width:0;max-width:330px;position:relative;border-radius:11px;overflow:hidden;background:#0b0c11;border:1px solid var(--stroke2);}
 .ctile.on{box-shadow:0 0 0 1px rgba(255,154,148,.55),0 8px 24px rgba(0,0,0,.45);}
 
 .ctile video,.ctile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+/* The Cameras view (the creator, 2026-09-14): "camera video aspect is usually rectangle... change the feeds to
+   rectangle so we see all the camera feed" -- whole picture, not cropped (the tile's own solid background,
+   above, shows behind any letterbox bar). */
+#camgrid .ctile video,#camgrid .ctile img{object-fit:contain;}
 .ctile .cap{position:absolute;left:8px;right:8px;bottom:6px;font-size:11.5px;text-shadow:0 1px 5px #000;display:flex;justify-content:space-between;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;}
 .ctile .cap .tag{background:rgba(0,0,0,.4);}
 .ctile .live{color:var(--red);}
@@ -115,8 +119,7 @@ const q=p=>p+(token?(p.includes("?")?"&":"?")+"token="+encodeURIComponent(token)
 const ICONS={charts:'<path d="M8 15.5V5l8-2v10.5"/><circle cx="6" cy="15.5" r="2"/><circle cx="14" cy="13.5" r="2"/>',deck:'<path d="M3 9.5 10 3l7 6.5M5 8.2V16h4v-4h2v4h4V8.2"/>',discover:'<circle cx="10" cy="10" r="7.2"/><path d="M10 4.6l1.5 3.9 3.9 1.5-3.9 1.5L10 15.4 8.5 11.5 4.6 10l3.9-1.5z"/>',cameras:'<rect x="2.5" y="5.5" width="10" height="9" rx="1.6"/><path d="M12.5 8.5l5-2.5v8l-5-2.5z"/>',news:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M5.5 7h6M5.5 10h9M5.5 13h9"/>',markets:'<path d="M3 15.5V4.5M3 15.5h13.5"/><path d="M6 12l3-3 2.5 2L16 6"/>',media:'<circle cx="10" cy="10" r="7"/><path d="M8.5 7l4.5 3-4.5 3z"/>',terminal:'<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l3 2.5L6 13M11 13h3"/>',ambient:'<circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.5"/>'};
 // News, Discover and Terminal folded into Home (the creator, 2026-09-14): their panels rotate through Home's two news
 // boxes, the terminal is Home's left third, the picture of the day sits where the quote was.
-const VIEWS=[["deck","Home"],["cameras","Cameras"],["markets","Markets"],["media","Media"],["charts","Charts"],["ambient","Ambient"]];
-const VIEW_KEYS={home:"deck",deck:"deck",discover:"discover",cameras:"cameras",news:"news",markets:"markets",media:"media",terminal:"terminal",ambient:"ambient"};
+const VIEWS=[["deck","Home"],["cameras","Cameras"],["markets","Markets"],["charts","Charts"],["ambient","Ambient"]];
 
 // ---- wallpapers ----
 let WP=[],wpi=0,bgFlip=false;
@@ -165,11 +168,11 @@ function applyState(st){
   if(st.rotate_s!=null) setRotate(st.rotate_s|0);
   if(st.scale!=null){SCALE=Number(st.scale)||0;fitApp();}
   if(st.live_max!=null&&Number(st.live_max)!==CAM_LIVE_MAX){CAM_LIVE_MAX=Number(st.live_max);CAMKEY="";CAMVIEWKEY="";refreshStrip();if(CUR==="cameras")render();}
-  if(st.live_step_s!=null&&Number(st.live_step_s)!==LIVE_STEP_S){LIVE_STEP_S=Math.max(0.5,Number(st.live_step_s)||1);}
+  if(st.live_step_s!=null&&Number(st.live_step_s)!==LIVE_STEP_S){LIVE_STEP_S=Math.max(0.5,Number(st.live_step_s)||6);}
   if(st.video_sound!=null&&Boolean(st.video_sound)!==SOUND){SOUND=Boolean(st.video_sound);DK.np="";if(CUR==="deck")refreshDeck(false);else if(CUR==="charts")render();if(SOUND)unmuteAll();}
   if(st.video_quality&&st.video_quality!==VIDEO_QUALITY){VIDEO_QUALITY=st.video_quality;DK.np="";}
-  const k=VIEW_KEYS[st.view||""];
-  if(k&&k!==CUR) go(k); else render();
+  const k=VIEW_ALIAS[st.view||""]||st.view||"";
+  if(k&&RENDER[k]&&k!==CUR) go(st.view); else render();
 }
 function setRotate(s){ROT=s;if(rotTimer){clearInterval(rotTimer);rotTimer=null;}
   const t=$("#rot");if(s>0){rotTimer=setInterval(()=>{const i=VIEWS.findIndex(v=>v[0]===CUR);go(VIEWS[(i+1)%VIEWS.length][0]);},s*1000);t.style.display="";t.textContent="rotating "+s+"s";}else t.style.display="none";}
@@ -279,7 +282,7 @@ function kv(k,v,c){return '<div class="tr"><span class="l">'+k+'</span><span cla
 // the short watchlist and the quote+joke on the right. The skeleton is built once and its boxes
 // are refilled in place, so the video keeps playing and the scroll animations run their course.
 const DECK_A=[["Bloomberg",["bloomberg_markets","bloomberg_business"],"BBG"],["Technology",["bloomberg_technology","ars"],"TECH"],["World",["bbc_world","bloomberg_politics"],"WORLD"],["Economics",["bloomberg_economics","bloomberg_business"],"ECON"]];
-const DECK_B=[["Science",["sciencedaily","nasa"],"SCI"],["Entertainment",["variety","deadline"],"ENT"],["Hacker News",null,"HN"],["On this day",null,"OTD"],["Featured article",null,"WIKI"],["Most read",null,"WIKI"],["Box office",null,"FILM"],["Top songs",null,"MUSIC"],["Jokes",null,"HA"]];
+const DECK_B=[["Science",["sciencedaily","nasa"],"SCI"],["Entertainment",["variety","deadline"],"ENT"],["Hacker News",null,"HN"],["On this day",null,"OTD"],["Featured article",null,"WIKI"],["Most read",null,"WIKI"],["Box office",null,"FILM"],["Top movies",null,"FILM"],["Top songs",null,"MUSIC"],["Jokes",null,"HA"]];
 const DECK_ROT_S=10,DECK_ITEMS=9;
 const DECK_WATCH=["NVDA","AAPL","GOOGL","AMZN"],DECK_IDX=[".SPX",".IXIC",".DJI"];
 let DK={a:-1,b:-1,m:-1,np:"",qj:""};
@@ -295,6 +298,7 @@ function deckItemsB(idx){const [name,feeds]=DECK_B[idx];const wk=DATA&&DATA.wiki
   if(name==="Hacker News") return ((DATA&&DATA.hn)||[]).slice(0,DECK_ITEMS).map(h=>({title:h.title,meta:"▲ "+(h.score||0)+" · "+(h.comments||0)+" comments · "+ago(h.at),source:"Hacker News"}));
   if(name==="Featured article"){const f=wk&&wk.featured;return f?[{title:f.title,thumb:f.thumb,meta:"Wikipedia · today's featured article",source:"Wikipedia"},{title:f.extract||"",meta:"",badge:"…",badgeCol:"var(--faint)"}]:[];}
   if(name==="Box office") return ((DATA&&DATA.boxoffice)||[]).slice(0,DECK_ITEMS).map(b=>({title:b.title,meta:"weekend "+(b.weekend||"")+(b.change?" · "+b.change:""),badge:String(b.rank),badgeCol:"var(--gold)"}));
+  if(name==="Top movies") return ((DATA&&DATA.movies)||[]).slice(0,DECK_ITEMS).map(m=>({title:m.name,thumb:m.art,meta:(m.genre||"")+(m.released?" · "+m.released:"")}));
   if(name==="Top songs") return ((DATA&&DATA.songs)||[]).slice(0,DECK_ITEMS).map(x=>({title:x.name,thumb:x.art,meta:x.artist+" · Apple Music #"+x.rank}));
   if(name==="Jokes") return ((DATA&&DATA.jokes)||[]).slice(0,4).map(j=>({title:j,meta:"for the house",badge:"HA",badgeCol:"var(--gold)"}));
   return (wk?wk.mostread:[]).slice(0,DECK_ITEMS).map(a=>({title:a.title,thumb:a.thumb,meta:"Wikipedia · "+(a.views?Math.round(a.views/1000)+"k reads today":""),source:"Wikipedia"}));}
@@ -352,7 +356,7 @@ function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-temp
   +'</div></div>';}
 // ---- the camera strip: every relay that is live (cameras show all dash) plays through hls.js; a camera with
 // no relay shows its newest still. Rebuilt only when the set of feeds changes, so players are not restarted.
-let CAM_LIVE_MAX=3,LIVE_STEP_S=1,VIDEO_QUALITY="light",SOUND=true;let CAMKEY="",LIVE_ASKED=0;
+let CAM_LIVE_MAX=3,LIVE_STEP_S=6,VIDEO_QUALITY="light",SOUND=true;let CAMKEY="",LIVE_ASKED=0;
 // Sound (the creator, 2026-09-14: on by default, in the browser and on the TV). A Cast receiver may autoplay with sound;
 // a browser may not until the person has touched the page -- so there the players start muted and the first tap or key
 // turns them up (YouTube's frames through enablejsapi, the page's own <video> directly).
@@ -362,9 +366,9 @@ function unmuteAll(){if(!SOUND)return;document.querySelectorAll('iframe[src*="yo
   document.querySelectorAll("video[data-sound]").forEach(v=>{try{v.muted=false;}catch(e){}});const b=document.getElementById("unmute");if(b)b.remove();}
 ["pointerdown","keydown","touchstart"].forEach(ev=>addEventListener(ev,()=>{if(!ACTIVATED){ACTIVATED=true;unmuteAll();}},{capture:true,passive:true}));
 // The TV decodes only a couple of videos at once (the creator: two feeds play, three do not). So every camera keeps
-// its tile, `live_max` of them play at a time, the live slots rotate every LIVE_ROTATE_S seconds, and a tile that is
-// not live shows the last frame captured from its own playback -- never grey while a relay exists.
-const LIVE_ROTATE_S=8,LIVE_SEED_S=5;const FRAMES={};   // name -> {url, at}; 8 s: a segment must buffer before a frame shows
+// its tile, `live_max` of them play at a time (3), the live slots slide one camera every LIVE_STEP_S seconds, and a
+// tile that is not live shows the last frame captured from its own playback -- never blank while a relay exists.
+const FRAMES={};   // name -> {url, at}
 function rotateS(){return LIVE_STEP_S;}
 function captureFrames(){document.querySelectorAll(".ctile video").forEach(v=>{if(v.readyState<2||!v.videoWidth)return;const name=v.closest(".ctile")&&v.closest(".ctile").dataset.name;if(!name)return;
   try{const c=captureFrames.c||(captureFrames.c=document.createElement("canvas"));c.width=320;c.height=Math.round(320*v.videoHeight/v.videoWidth);c.getContext("2d").drawImage(v,0,0,c.width,c.height);FRAMES[name]={url:c.toDataURL("image/jpeg",.7),at:Date.now()/1000};}catch(e){}});}
@@ -429,14 +433,11 @@ function syncLive(root,tiles,which){ // the same tiles, a moved window: swap onl
     if(wasOn===isOn){if(!isOn){const img=tile.querySelector("img");if(img&&t.img&&!img.getAttribute("src").startsWith(imgSrc(t)))img.setAttribute("src",imgSrc(t));const tag=tile.querySelector(".tag");if(tag)tag.textContent=t.frame?(ago(t.at)==="now"?"just now":ago(t.at)+" ago"):t.can?"waiting for its turn":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at));}return;}
     if(wasOn)unmountTile(root,i,set);
     if(!isOn){const f=FRAMES[t.name];if(f){t.img=f.url;t.at=f.at;t.frame=true;}}
-    tile.outerHTML=tileHTML(t,i,which==="grid"?boxStyle(CAM_BOXES[i]):undefined);
+    tile.outerHTML=tileHTML(t,i,which==="grid"?GRID_TILE_STYLE:undefined);
     if(isOn)mountTile(root,t,i,set);});}
 function imgSrc(t){return t.img?(t.img.startsWith("data:")?t.img:esc(t.img)+"?t="+Math.floor(t.at||0)):"";}
-function jsesc(s){return String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");}
-function tileHTML(t,i,style){const playing=t.live||t.rtc;const nm=jsesc(t.name);
-  const media=playing?'<video muted autoplay playsinline'+(t.img?' poster="'+imgSrc(t)+'"':'')+' onloadedmetadata="noteAspect(\''+nm+'\',this.videoWidth,this.videoHeight)"></video>'
-    :(t.img?'<img src="'+imgSrc(t)+'" alt="" onload="noteAspect(\''+nm+'\',this.naturalWidth,this.naturalHeight)">':'');
-  return '<div class="ctile'+(playing?" on":"")+'"'+(style?' style="'+style+'"':'')+' data-i="'+i+'" data-name="'+esc(t.name)+'">'+media
+function tileHTML(t,i,style){const playing=t.live||t.rtc;
+  return '<div class="ctile'+(playing?" on":"")+'"'+(style?' style="'+style+'"':'')+' data-i="'+i+'" data-name="'+esc(t.name)+'">'+(playing?'<video muted autoplay playsinline'+(t.img?' poster="'+imgSrc(t)+'"':'')+'></video>':(t.img?'<img src="'+imgSrc(t)+'" alt="">':''))
     +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+(playing?' live':'')+'">'+(t.live?"● live":t.rtc?"● ring live":t.frame?(ago(t.at)==="now"?"just now":ago(t.at)+" ago"):t.can?"waiting for its turn":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>';}
 function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live);const stills=(DATA&&DATA.cameras)||[];const ring=(DATA&&DATA.ring_cameras)||[];
   const tiles=[];const named=new Set();
@@ -447,6 +448,8 @@ function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live)
   const capable=tiles.filter(t=>t.can);const on=liveWindow(capable.length,liveBudget());
   capable.forEach((t,i)=>{const play=on.has(i);t.live=play&&t.can==="hls";t.rtc=play&&t.can==="rtc";
     if(!play){const f=FRAMES[t.name];if(f){t.img=f.url;t.at=f.at;t.frame=true;}}});
+  // Ring cameras first (the creator, 2026-09-14: "prefer ring to be shown first"), stable otherwise
+  tiles.sort((a,b)=>(a.kind==="ring"?0:1)-(b.kind==="ring"?0:1));
   return tiles;}
 function refreshStrip(){const el=$("#camstrip");if(!el||OFFLINE)return;
   if(CUR==="cameras"){if(el.style.display!=="none"){el.style.display="none";closeLive("strip");CAMKEY="";el.innerHTML="";}return;}
@@ -472,48 +475,22 @@ function refreshDeck(force){
   const body=$("#dk-term-body");if(body)body.innerHTML=termHTML(true);
 }
 function viewDeck(){return deckSkeleton();}
-let CAMVIEWKEY="";let CAM_BOXES=[];
-// The Cameras view (the creator, 2026-09-14): no strip above, no events panel beside, no space between tiles --
-// a justified wall, each camera at its own real aspect ratio (measured off its own video/still, 16:9 only a
-// starting guess), Ring cameras packed together as one block, everything else after, the whole thing stretched
-// to fill the stage exactly with zero gap.
-const ASPECT={};
-function tileAspect(name){return ASPECT[name]||16/9;}
-function noteAspect(name,w,h){if(!(w>0&&h>0))return;const ar=w/h;const prev=ASPECT[name];
-  if(prev&&Math.abs(prev-ar)/prev<0.02)return;   // already close enough: do not thrash the layout
-  ASPECT[name]=ar;if(CUR==="cameras")render();}
-function justifyRows(items,width,rowH){ // one group's own rows: each row's items share a height that fills `width` exactly
-  const rows=[];let row=[],sumAr=0;
-  items.forEach(it=>{row.push(it);sumAr+=it.ar;if(sumAr*rowH>=width){rows.push({items:row,sumAr});row=[];sumAr=0;}});
-  if(row.length)rows.push({items:row,sumAr});
-  let totalH=0;
-  const laid=rows.map(r=>{const h=width/r.sumAr;totalH+=h;let x=0;
-    const laidRow=r.items.map((it,idx)=>{let w=Math.round(it.ar*h);if(idx===r.items.length-1)w=width-x;const item={i:it.i,x,w,h};x+=w;return item;});
-    return laidRow;});
-  return {rows:laid,totalH};}
-function packCameras(tiles,W,H){ // Ring cameras sorted first, then everything else -- ONE wall, not two blocks, so
-  // a handful of Ring cameras never balloon into a few giant tiles beside many small Reolink ones (the creator,
-  // 2026-09-14: "ring cameras have 3x larger video feed box... I expect a more or less even tile view"). Ring simply
-  // sorts earlier in the same row-filling order; row boundaries fall wherever width runs out, group or no group.
-  const order=tiles.map((t,i)=>({i,ar:tileAspect(t.name),kind:t.kind}));
-  order.sort((a,b)=>(a.kind==="ring"?0:1)-(b.kind==="ring"?0:1));   // stable: original order kept within each kind
-  if(!order.length)return [];
-  let lo=Math.min(60,H),hi=Math.max(H,60);
-  for(let k=0;k<24;k++){const mid=(lo+hi)/2;if(justifyRows(order,W,mid).totalH>H)hi=mid;else lo=mid;}
-  const {rows}=justifyRows(order,W,lo);
-  const rawTotal=rows.reduce((a,r)=>a+r[0].h,0)||1;const scale=H/rawTotal;
-  const boxes=[];let y=0;
-  rows.forEach((r,ri)=>{let rh=Math.round(r[0].h*scale);if(ri===rows.length-1)rh=Math.max(1,H-y);
-    r.forEach(it=>{boxes[it.i]={x:it.x,y,w:it.w,h:rh};});y+=rh;});
-  return boxes;}
-function boxStyle(b){return b?('position:absolute;max-width:none;left:'+b.x+'px;top:'+b.y+'px;width:'+b.w+'px;height:'+b.h+'px;'):'';}
+let CAMVIEWKEY="";
+// The Cameras view (the creator, 2026-09-14): the whole stage, tiled edge to edge with zero gap -- a plain CSS
+// grid of 1fr tracks always exactly fills its container, whatever the count, no math needed for that part -- and
+// every camera's own picture shown whole (object-fit:contain, above), never cropped to fit a forced shape. An
+// earlier "even tiles, no gap" version packed cameras into a fixed-height wall and came out nearly square,
+// cropping most of every 16:9 feed; this trades that for a rare thin letterbox bar on a camera whose own shape
+// is not 16:9, which is the right side to give.
+function bestGrid(n,W,H){let best=[1,n,0];for(let c=1;c<=n;c++){const r=Math.ceil(n/c);const w=W/c,h=H/r;const fit=Math.min(w,h*16/9);if(fit>best[2])best=[c,r,fit];}return best;}
+const GRID_TILE_STYLE="max-width:none;width:100%;height:100%;";
 function viewCameras(){
-  const tiles=stripTiles();const st=$("#stage");const W=Math.max(1,st?st.clientWidth||1600:1600),H=Math.max(1,st?st.clientHeight||880:880);
-  CAM_BOXES=tiles.length?packCameras(tiles,W,H):[];
-  const html=tiles.length?tiles.map((t,i)=>tileHTML(t,i,boxStyle(CAM_BOXES[i]))).join("")
-    :'<div class="glass card faint" style="display:flex;align-items:center;justify-content:center;height:100%;">no cameras have sent a still yet — `cameras show all dash` (Reolink) or `ring list` (Ring)</div>';
+  const tiles=stripTiles();   // Ring cameras already sorted first, inside stripTiles()
+  const n=Math.max(tiles.length,1);const st=$("#stage");const W=st?st.clientWidth||1600:1600,H=st?st.clientHeight||880:880;
+  const [cols,rows]=bestGrid(n,W,H);
+  const grid=tiles.length?tiles.map((t,i)=>tileHTML(t,i,GRID_TILE_STYLE)).join(""):'<div class="glass card faint" style="display:flex;align-items:center;justify-content:center;grid-column:1/-1;">no cameras have sent a still yet — `cameras show all dash` (Reolink) or `ring list` (Ring)</div>';
   setTimeout(()=>{const root=$("#camgrid");if(root){closeLive("grid");mountLive(root,tiles,"grid");}},30);
-  return '<div id="camgrid" style="position:relative;width:100%;height:100%;overflow:hidden;">'+html+'</div>';
+  return '<div id="camgrid" class="grid" style="height:100%;grid-template-columns:repeat('+cols+',1fr);grid-template-rows:repeat('+rows+',1fr);gap:0;">'+grid+'</div>';
 }
 window.selTF=t=>{TF=t;render();};window.pinStock=s=>{PIN=PIN===s?"":s;render();};
 function majorCard(s){
@@ -551,15 +528,6 @@ function viewMarkets(){
   const bottom='<div style="display:flex;gap:12px;flex:1.05;min-height:0;">'+idx+rf+cc+news+'</div>';
   return '<div style="display:flex;flex-direction:column;gap:12px;height:100%;">'+top+bigRow+tiles+bottom+'</div>';
 }
-function viewMedia(){
-  const np=nowPlaying();const songs=(DATA&&DATA.songs)||[],movies=(DATA&&DATA.movies)||[],bo=(DATA&&DATA.boxoffice)||[];
-  const now='<div class="glass" style="flex:2;padding:0;overflow:hidden;display:flex;flex-direction:column;"><div style="flex:1;min-height:0;">'+thumb('<b>'+esc(np.title)+'</b><br><span class="faint">'+esc(np.sub)+'</span>',np.tag)+'</div>'
-    +'<div style="padding:12px 16px;">'+head("Hollywood","Variety · Deadline")+newsRows(merged("variety","deadline"),5,{color:"violet"})+'</div></div>';
-  const music='<div class="glass card col" style="flex:1;">'+head("Top songs","Apple Music")+(songs.length?songs.slice(0,10).map(s=>'<div class="rowitem" style="align-items:center;padding:3.5px 0;"><span class="gold" style="width:16px;">'+s.rank+'</span><div class="art" style="background-image:url(\''+esc(s.art)+'\');"></div><div style="min-width:0;"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.name)+'</div><div class="faint" style="font-size:10.5px;">'+esc(s.artist)+'</div></div></div>').join(""):empty("waiting…"))+'</div>';
-  const films='<div class="glass card col" style="flex:1;">'+head("Top movies","iTunes")+(movies.length?movies.slice(0,7).map(mv=>'<div class="rowitem" style="align-items:center;padding:3.5px 0;"><span class="gold" style="width:16px;">'+mv.rank+'</span><div class="art" style="background-image:url(\''+esc(mv.art)+'\');width:30px;height:42px;"></div><div style="min-width:0;"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(mv.name)+'</div><div class="faint" style="font-size:10.5px;">'+esc(mv.genre)+' · '+esc(mv.released)+'</div></div></div>').join(""):empty("waiting…"))
-    +(bo.length?'<div class="hd" style="margin:8px 0 4px;">Box office · weekend</div>'+bo.slice(0,5).map(b=>'<div class="tr"><span class="gold" style="width:16px;">'+b.rank+'</span><span class="l" style="flex:1;">'+esc(b.title)+'</span><span>'+esc(b.weekend)+'</span></div>').join(""):'')+'</div>';
-  return '<div style="display:flex;gap:12px;height:100%;">'+now+music+films+'</div>';
-}
 // Charts (the creator, 2026-09-13): K-pop and US pop, separate columns, the chart's videos auto-playing. On the
 // TV the playing is Sim's (tv_charts: the TV's own YouTube app when paired, else the files one after another, full
 // screen); the page marks what is on. In a browser the top video plays here, muted, as browsers allow.
@@ -595,14 +563,15 @@ function viewAmbient(){
     +(qt&&qt.text?'<div class="dim" style="font-size:15px;margin-top:14px;max-width:80vw;text-align:center;">“'+esc(qt.text)+'” <span class="faint">— '+esc(qt.author)+'</span></div>':'')
     +(h?'<div class="faint" style="font-size:12.5px;margin-top:6px;max-width:80vw;text-align:center;"><span class="amber">'+esc(h.source)+'</span> '+esc(h.title)+'</div>':'')+'</div>';
 }
-const RENDER={charts:viewCharts,deck:viewDeck,cameras:viewCameras,markets:viewMarkets,media:viewMedia,ambient:viewAmbient};
-const VIEW_ALIAS={news:"deck",discover:"deck",terminal:"deck",home:"deck"};
+const RENDER={charts:viewCharts,deck:viewDeck,cameras:viewCameras,markets:viewMarkets,ambient:viewAmbient};
+const VIEW_ALIAS={news:"deck",discover:"deck",terminal:"deck",home:"deck",media:"deck"};
 
 // ---- app ----
 function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
   $("#dock").querySelectorAll(".dot").forEach(d=>d.onclick=()=>go(d.dataset.k));}
 function render(){try{if(CUR==="deck"){refreshDeck(true);return;}
-  if(CUR==="cameras"){const tiles=stripTiles();const key=tiles.map(t=>t.key).join("|")+"|"+tiles.map(t=>Math.round(tileAspect(t.name)*20)).join(",");const grid=$("#camgrid");
+  if(CUR==="charts"){refreshCharts(!$("#chartsroot"));return;}
+  if(CUR==="cameras"){const tiles=stripTiles();const key=tiles.map(t=>t.key).join("|");const grid=$("#camgrid");
     if(key===CAMVIEWKEY&&grid){syncLive(grid,tiles,"grid");return;}CAMVIEWKEY=key;captureFrames();closeLive("grid");}
   else if(CAMVIEWKEY){CAMVIEWKEY="";closeLive("grid");}
   $("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}catch(e){$("#stage").innerHTML='<div class="glass card red">render failed: '+esc(e.message)+'</div>';}}

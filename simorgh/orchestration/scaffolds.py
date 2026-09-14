@@ -155,7 +155,8 @@ _TOOL_NOTES: dict[str, str] = {
                    "and nothing here can undo what runs there",
     "web_search": "search the web for pages about something; returns titles, URLs and snippets",
     "cast_devices": "the Cast devices (the TV) on the network",
-    "cast_show": "put your dashboard on the TV, opened on a view: `CAST_SHOW: home` (or cameras, news, markets, media, discover, ambient); `tv` for the bare terminal",
+    "cast_show": "put your dashboard on the TV, opened on a view: `CAST_SHOW: home` (news/discover/media rotate through it; "
+                 "or cameras, markets, charts, ambient); `tv` for the bare terminal",
     "cast_play": "play a video on the TV: a YouTube page URL or a direct video link. Paired with the TV (it is, "
                  "since 2026-09-13), a YouTube video opens in the TV's own YouTube app at its best quality -- the "
                  "result says which route it took; repeat that. The TV cannot draw a video inside your page",

@@ -834,7 +834,8 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         return await _run("cast_show", payload)
     if verb == "view":
         if not rest:
-            return Outcome("usage: tv view <home|discover|cameras|news|markets|media|terminal|ambient> [1D|1W|1M|1Y] [symbol]")
+            return Outcome("usage: tv view <home|cameras|markets|charts|ambient> [1D|1W|1M|1Y] [symbol]   "
+                           "(news, discover, media and terminal all live inside home now)")
         payload = {"view": rest[0]}
         for word in rest[1:]:
             if word.upper() in ("1D", "1W", "1M", "1Y"):

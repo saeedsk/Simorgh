@@ -188,7 +188,7 @@ class HttpApi:
         # Where the dashboard should look (`ui.dash.state`): set by the
         # `dash_view` tool or the phone remote, polled by the page.
         self._dash_state: dict = {"view": "", "timeframe": "", "symbol": "", "rotate_s": 0, "scale": 0,
-                                  "live_max": 3, "live_step_s": 1.0, "video_quality": "light", "video_sound": True, "since": 0.0}
+                                  "live_max": 3, "live_step_s": 6.0, "video_quality": "light", "video_sound": True, "since": 0.0}
         self._dash_sub = None
         self._remote_page = (_STATIC_DIR / "remote.html").read_text(encoding="utf-8")
         # Sim's logo (the creator's, 2026-09-12; keyed and shrunk from
@@ -639,9 +639,9 @@ class HttpApi:
                     self._logger.info("dash_cameras_live_failed", error=f"{exc.__class__.__name__}: {exc}")
             await asyncio.sleep(self._cameras_live_every_s)
 
-    _DASH_VIEWS = ("home", "cameras", "markets", "media", "charts", "ambient")
-    #: News, Discover and Terminal were folded into Home (2026-09-14); the old names still land somewhere
-    _VIEW_ALIASES = {"news": "home", "discover": "home", "terminal": "home", "deck": "home"}
+    _DASH_VIEWS = ("home", "cameras", "markets", "charts", "ambient")
+    #: News, Discover, Terminal and Media were folded into Home (2026-09-14); the old names still land somewhere
+    _VIEW_ALIASES = {"news": "home", "discover": "home", "terminal": "home", "deck": "home", "media": "home"}
 
     def _apply_dash_state(self, payload: dict) -> None:
         view = str(payload.get("view") or "").strip().lower()
@@ -674,10 +674,12 @@ class HttpApi:
             except (TypeError, ValueError, OverflowError):
                 pass
         if "live_step_s" in payload:
-            # The live window slides one camera every this many seconds (the
-            # creator, 2026-09-13: three live, one second each).
+            # The live window slides one camera every this many seconds. Started at 1 s (the creator, 2026-09-13);
+            # that is shorter than an HLS segment takes to fetch and decode, so no camera ever produced a frame to
+            # show or to keep as its still when it rotated out -- every tile just went blank (2026-09-14). 6 s
+            # gives a real stream time to catch up; `tv live 3 <seconds>` overrides it.
             try:
-                self._dash_state["live_step_s"] = max(0.5, min(600.0, float(payload.get("live_step_s") or 1.0)))
+                self._dash_state["live_step_s"] = max(0.5, min(600.0, float(payload.get("live_step_s") or 6.0)))
             except (TypeError, ValueError, OverflowError):
                 pass
         quality = str(payload.get("video_quality") or "").strip().lower()
