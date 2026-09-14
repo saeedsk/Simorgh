@@ -195,6 +195,30 @@ class RingTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kept[0]["id"], "e3")
         self.assertEqual(await watch.tick(bus, cloud, folder), 0, "announced once")
 
+    async def test_on_demand_events_are_seen_but_never_announced(self):
+        """Ring logs its own live-view sessions -- including Sim's own
+        dashboard opening one every camera rotation -- as `on_demand`
+        history events. Nothing happened at the camera; announcing these
+        was pure noise on every poll (the creator's terminal, 2026-09-14:
+        "ring camera ondemand infos are useless, no need to notify
+        user")."""
+        tools, cloud, bus = self._tools()
+        watch = tools["ring_watch"]
+        folder = self.root / "workspace" / "cameras" / "ring"
+        folder.mkdir(parents=True)
+        await watch.tick(bus, cloud, folder, first=True)
+        cloud.events["11"].insert(0, {"id": "od1", "kind": "on_demand", "at": 1_789_200_400.0,
+                                       "answered": False, "camera_id": "11"})
+        announced = await watch.tick(bus, cloud, folder)
+        self.assertEqual(announced, 0, "on_demand is not news")
+        self.assertEqual(bus.published, [])
+        # Marked seen regardless, so it is not re-evaluated forever.
+        self.assertEqual(await watch.tick(bus, cloud, folder), 0)
+        # Not written into events.json either -- same noise, different surface
+        # (the dashboard's Cameras view reads that file directly).
+        kept = json.loads((folder / "events.json").read_text())
+        self.assertNotIn("od1", [e["id"] for e in kept])
+
     async def test_live_view_carries_the_offer_and_answer_and_the_session_through(self):
         tools, cloud, bus = self._tools()
         offer = "v=0\r\no=- 4242 2 IN IP4 127.0.0.1\r\ns=-\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=candidate:1 1 udp 1 10.0.0.2 5 typ host\r\n"

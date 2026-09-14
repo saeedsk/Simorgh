@@ -49,6 +49,10 @@ RING_DIR = Path("workspace/cameras/ring")
 EVENTS_FILE = "events.json"
 USER_AGENT = "Simorgh/1.0"
 EVENTS_KEPT = 200
+# Ring history event kinds that are not something a person did at the
+# camera -- a live view being opened, including by Sim's own dashboard --
+# so `RingWatchTool.tick` marks them seen but never announces them.
+_SILENT_KINDS = frozenset({"on_demand"})
 
 
 def available() -> tuple[bool, str]:
@@ -754,7 +758,14 @@ class RingWatchTool(_RingTool):
             if e["id"] in self._prefs.seen:
                 continue
             self._prefs.seen.add(e["id"])
-            if first:
+            if first or e["kind"] in _SILENT_KINDS:
+                # `on_demand` is Ring's own history record of a live view
+                # being opened -- including Sim's own dashboard opening
+                # one every camera rotation -- not something that
+                # happened at the camera worth telling a person about
+                # (the creator's terminal, 2026-09-14: "ring camera
+                # ondemand infos are useless, no need to notify user").
+                # Still marked `seen` above so it is never re-announced.
                 continue
             index = next((i for i, c in enumerate(cams) if c.id == e.get("camera_id")), 0)
             await bus.publish(Message.new(topics.CAMERA_EVENT, source="execution",
@@ -765,8 +776,9 @@ class RingWatchTool(_RingTool):
             announced += 1
         if len(self._prefs.seen) > 5000:
             self._prefs.seen = set(list(self._prefs.seen)[-2000:])
-        if fresh:
-            self._write_events(folder, fresh, names)
+        kept_fresh = [e for e in fresh if e.get("kind") not in _SILENT_KINDS]
+        if kept_fresh:
+            self._write_events(folder, kept_fresh, names)
         snap_every = float(getattr(self._config, "ring_snapshot_every_s", 300.0))
         now = self._clock()
         last = getattr(self._prefs, "_last_snap", 0.0)
