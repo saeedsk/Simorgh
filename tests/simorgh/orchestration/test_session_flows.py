@@ -450,3 +450,15 @@ class ClaimedTvActTestCase(unittest.TestCase):
         self.assertEqual(claimed_tv_act("The K-pop chart's running on the TV now.", session), "", "a tool ran: the claim stands")
         plain = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT, worker_id="w", user_text="x", channel="cli")
         self.assertTrue(claimed_tv_act("It's playing on the TV now.", plain), "the typed chat has the TV tools too")
+
+
+class InventedMarkerTestCase(unittest.TestCase):
+    def test_a_marker_for_a_tool_sim_does_not_have_is_named_and_dropped(self):
+        from simorgh.orchestration.session import invented_markers, without_markers
+        text = "PLAY_ANIMATION: wave\n\n[warm] Waving at you, Saeed -- right side of the screen."
+        self.assertEqual(invented_markers(text, ("cast_play", "tv_key")), ["PLAY_ANIMATION"])
+        self.assertEqual(without_markers(text, ["PLAY_ANIMATION"]), "[warm] Waving at you, Saeed -- right side of the screen.")
+        self.assertEqual(invented_markers("TV_KEY: next", ("tv_key",)), [], "an offered tool is a call, not an invention")
+        self.assertEqual(invented_markers("QUIET", ()), [])
+        self.assertEqual(invented_markers("Sure -- NVDA: down five percent this week.", ("web_search",)), [],
+                         "a marker owns its line; a colon mid-sentence is prose")

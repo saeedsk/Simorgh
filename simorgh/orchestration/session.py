@@ -187,6 +187,29 @@ _TV_CLAIM = re.compile(
 _TV_TOOLS = ("cast_play", "cast_show", "tv_charts", "tv_app", "tv_key", "dash_view", "cast_stop")
 
 
+def invented_markers(text: str, offered: tuple[str, ...]) -> list[str]:
+    """Marker-shaped lines naming tools that are not on offer -- the
+    model inventing a capability. Live 2026-09-13: "Play animation" got
+    "PLAY_ANIMATION: wave" and "Waving at you, Saeed -- right side of
+    the screen", spoken; there is no such tool and no such wave."""
+    have = {t.upper() for t in offered}
+    out = []
+    for line in (text or "").splitlines():
+        match = _MARKER_LINE.match(line + " ")
+        if match:
+            name = line.strip().split(":", 1)[0].strip()
+            if name.upper() not in have and name.upper() not in ("QUIET", "FINAL ANSWER", "NOTE", "TODO"):
+                out.append(name)
+    return out
+
+
+def without_markers(text: str, names: list[str]) -> str:
+    drop = {n.upper() for n in names}
+    kept = [line for line in (text or "").splitlines()
+            if not (_MARKER_LINE.match(line + " ") and line.strip().split(":", 1)[0].strip().upper() in drop)]
+    return "\n".join(kept).strip()
+
+
 def claimed_tv_act(text: str, session) -> str:
     """The words in `text` that say the TV is doing something, when no
     tool ran this turn and the TV tools were offered -- or "".
@@ -841,6 +864,21 @@ class SessionRunner:
                 )})
                 continue
 
+            invented = invented_markers(text, offered_tools(session.profile.tools))
+            if invented and not is_last and not session.invented_corrected:
+                session.invented_corrected = True
+                step = Step(step_no, "act", f"rejected a marker for a tool that does not exist: {invented[0]}", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                session.messages.append({"role": "assistant", "content": text})
+                session.messages.append({"role": "user", "content": (
+                    f"There is no tool called {invented[0]}. Your tools are the ones listed above and no others; "
+                    "do not write a marker for anything else, and do not describe doing what no tool did. Answer "
+                    "with what you can actually do, or say plainly that you cannot."
+                )})
+                continue
+            if invented:
+                text = without_markers(text, invented)
             claimed = claimed_tv_act(text, session)
             if claimed and not is_last and not session.claim_corrected:
                 session.claim_corrected = True

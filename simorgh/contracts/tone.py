@@ -28,7 +28,7 @@ _ALIASES = {"happy": "bright", "excited": "bright", "cheerful": "bright", "gentl
             "soft": "warm", "sad": "sorry", "apologetic": "sorry", "grave": "serious", "stern": "serious",
             "urgent": "serious", "relaxed": "calm", "soothing": "calm", "fun": "playful", "teasing": "playful",
             "joking": "playful", "plain": "neutral", "flat": "neutral"}
-_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{2,24})\s*[\])>]\s*[:\-–—]?\s*", re.I)
+_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{0,24})\s*[\])>]\s*[:\-–—]?\s*", re.I)
 
 
 def split_tone(text: str) -> tuple[str, str]:

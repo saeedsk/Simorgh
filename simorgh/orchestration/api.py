@@ -116,6 +116,9 @@ class Session:
     # Once per session: a reply that said the TV was playing something
     # when no tool had run was sent back (live 2026-09-13).
     claim_corrected: bool = False
+    # Once per session: a marker for a tool Sim does not have was sent
+    # back ("PLAY_ANIMATION: wave", live 2026-09-13).
+    invented_corrected: bool = False
     # Files this session wrote and has not committed. A session that
     # ends with anything left here put a change in the tree and
     # walked away from it; `SessionRunner` cleans up before it
