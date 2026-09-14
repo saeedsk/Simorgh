@@ -113,6 +113,9 @@ class Session:
     # second time would mean the reply really is prose about a tool, and
     # correcting it again would loop.
     marker_corrected: bool = False
+    # Once per session: a reply that said the TV was playing something
+    # when no tool had run was sent back (live 2026-09-13).
+    claim_corrected: bool = False
     # Files this session wrote and has not committed. A session that
     # ends with anything left here put a change in the tree and
     # walked away from it; `SessionRunner` cleans up before it

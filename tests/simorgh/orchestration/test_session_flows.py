@@ -430,3 +430,24 @@ class TestAChatThatRunsOutOfStepsStillAnswers(unittest.IsolatedAsyncioTestCase):
             self.assertIn("step budget exhausted", outcome.reason)
             await cognition.stop()
             await gx.stop()
+
+
+class ClaimedTvActTestCase(unittest.TestCase):
+    def test_a_claim_that_the_tv_is_playing_needs_a_tool_behind_it(self):
+        # Live 2026-09-13: "The K-pop chart's running on the TV now" with no tool call; the TV sat idle.
+        from simorgh.orchestration import profiles
+        from simorgh.orchestration.api import Session, Step
+        from simorgh.orchestration.session import claimed_tv_act
+        session = Session(task_id="t", kind="chat", mode="execute", profile=profiles.VOICE_CHAT, worker_id="w",
+                          user_text="Sim played the K-pop chart.", channel="voice")
+        self.assertTrue(claimed_tv_act("The K-pop chart's running on the TV now, Saeed.", session).startswith("'s running"))
+        self.assertTrue(claimed_tv_act("Sent it again, the video should come up full screen.", session))
+        self.assertTrue(claimed_tv_act("It's playing in the TV's YouTube app now.", session))
+        self.assertEqual(claimed_tv_act("I can play it on the TV if you like -- say the word.", session), "",
+                         "an offer is not a claim")
+        self.assertEqual(claimed_tv_act("Yes, I hear you.", session), "")
+        session.record(Step(1, "act", "played", tool="tv_charts", ok=True))
+        self.assertEqual(claimed_tv_act("The K-pop chart's running on the TV now.", session), "", "a tool ran: the claim stands")
+        plain = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT, worker_id="w", user_text="x", channel="cli")
+        self.assertEqual(claimed_tv_act("It's playing on the TV now.", plain), "" if not any(
+            t in profiles.CHAT.tools for t in ("cast_play", "tv_charts")) else "'s playing on the TV")

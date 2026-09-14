@@ -179,6 +179,30 @@ def _marker_shaped(text: str) -> bool:
     return bool(_MARKER_LINE.search(text or ""))
 
 
+_TV_CLAIM = re.compile(
+    r"(?:\b(?:is|are|'s|it's|that's)\s+(?:now\s+|already\s+)?(?:playing|running|up|showing|on\s+(?:the\s+)?(?:tv|screen))\b"
+    r"|\b(?:i(?:'ve|\s+have)?\s+)?(?:put|turned|switched|started|queued|cast|sent|opened|pulled|pushed)\b[^.!?]{0,60}"
+    r"\b(?:tv|dashboard|chart|screen|video|song|youtube)\b"
+    r"|\bplaying\s+(?:on|in)\s+(?:the\s+)?(?:tv|family room|youtube))", re.I)
+_TV_TOOLS = ("cast_play", "cast_show", "tv_charts", "tv_app", "tv_key", "dash_view", "cast_stop")
+
+
+def claimed_tv_act(text: str, session) -> str:
+    """The words in `text` that say the TV is doing something, when no
+    tool ran this turn and the TV tools were offered -- or "".
+
+    Live 2026-09-13: "Sim played the K-pop chart" (whisper's past tense
+    for "play") got "The K-pop chart's running on the TV now" and no
+    tool call; the TV sat idle. A claim of an act is checked against
+    the acts."""
+    if not text or any(step.tool for step in session.steps):
+        return ""
+    if not any(tool in session.profile.tools for tool in _TV_TOOLS):
+        return ""
+    match = _TV_CLAIM.search(text)
+    return match.group(0).strip() if match else ""
+
+
 def unhonoured_marker(text: str, offered: tuple[str, ...]) -> str:
     """A tool the model asked for in the middle of a sentence, or "".
 
@@ -814,6 +838,21 @@ class SessionRunner:
                     f"That reply {echo}. Nothing in it actually ran. Do not describe tool calls or "
                     "their results in prose: write one real marker line, or give your final answer "
                     "using only what the results above actually said."
+                )})
+                continue
+
+            claimed = claimed_tv_act(text, session)
+            if claimed and not is_last and not session.claim_corrected:
+                session.claim_corrected = True
+                step = Step(step_no, "act", f"rejected a claim no tool backs: \"{claimed}\"", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                session.messages.append({"role": "assistant", "content": text})
+                session.messages.append({"role": "user", "content": (
+                    f"You said \"{claimed}\", but you called no tool this turn, so nothing happened on the TV. "
+                    "If they asked you to play or show something, write the marker on a line of its own now "
+                    "(TV_CHARTS: kpop, CAST_PLAY: <url>, CAST_SHOW: home, TV_KEY: next). If they did not, or you "
+                    "cannot, answer plainly without saying it is done."
                 )})
                 continue
 
