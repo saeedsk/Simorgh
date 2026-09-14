@@ -133,6 +133,10 @@ class VoiceSession:
         # lines not asked of Sim go to the model as context, and two
         # people talking to each other is a reason to stay quiet.
         self._room: deque = deque(maxlen=16)
+        #: when the model stayed quiet on a voice it could not place (voice/session.py::_background)
+        self._quiet_unknown: deque = deque(maxlen=8)
+        #: whether the last words Sim answered were properly for it: named, or from a voice it knows
+        self._last_ask_addressed = False
         self._last_asked_speaker = ""
         self.last_speaker = ""
         self.last_identification = None
@@ -767,6 +771,8 @@ class VoiceSession:
             # was written (2026-09-13). Only for a name the book knows.
             await self._take_correction(turn_id, text, claimed, vector, clock)
             return
+        if await self._background(turn_id, speaker, text):
+            return
         text = await self._tidy(text, turn_id)
         if clock.confidence < self._config.min_confidence:
             reply = NOT_SURE.format(text=text)
@@ -784,6 +790,7 @@ class VoiceSession:
         room = self._room_lines(exclude_text=text, speaker=speaker)
         self._room.append((speaker or "someone", text, self._now(), "asked"))
         before, self._last_asked_speaker = self._last_asked_speaker, speaker or ""
+        self._last_ask_addressed = bool(speaker) or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)
         try:
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
                                              speaker_name=speaker, speaker_relation=relation, room=room,
@@ -800,6 +807,8 @@ class VoiceSession:
         if is_quiet(_strip_tone(reply)):
             # "[warm] QUIET" is QUIET: the tag came first and the word was
             # spoken aloud, in a warm voice (2026-09-13, 17:46).
+            if not speaker:
+                self._quiet_unknown.append(self._now())
             await self._stay_quiet(turn_id)
             return
         self._room.append(("Sim", _strip_tone(reply), self._now(), "reply"))
@@ -863,6 +872,38 @@ class VoiceSession:
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
             "reason": f"{me} and {partner} are talking to each other"})
+        self.stats.turns += 1
+        self.turns.state = LISTENING
+        await self._announce(self.turns.state)
+        return True
+
+    async def _background(self, turn_id: int, speaker: str, text: str) -> bool:
+        """True when these words are more of the background: a voice Sim
+        cannot place, not naming Sim and not answering it, after the model
+        has already stayed quiet on such a voice at least
+        `background_after_quiet` times in `background_window_s`. The TV
+        interview it had rightly ignored twice got an answer on its third
+        fragment (2026-09-14). Off with `[voice] background_quiet = false`."""
+        if not self._config.background_quiet or speaker:
+            return False
+        now = self._now()
+        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0):
+            return False
+        # A follow-up counts only when the exchange began properly: Sim
+        # answering a stray fragment of the TV must not make the next
+        # fragment "an exchange under way" -- that is how one mistaken
+        # answer turned into answering every fragment after it.
+        in_exchange = 0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s
+        if in_exchange and self._last_ask_addressed:
+            return False
+        recent = [at for at in self._quiet_unknown if now - at <= self._config.background_window_s]
+        if len(recent) < int(self._config.background_after_quiet):
+            return False
+        self._quiet_unknown.append(now)
+        self._room.append(("someone", text, now, "aside"))
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
+            "reason": "an unknown voice keeps talking without naming Sim: the TV, a podcast or the radio"})
         self.stats.turns += 1
         self.turns.state = LISTENING
         await self._announce(self.turns.state)

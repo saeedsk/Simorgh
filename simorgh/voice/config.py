@@ -213,6 +213,16 @@ class Config:
     # Two known people talking to each other: Sim keeps the thread and
     # stays quiet unless named or mid-exchange (voice/session.py).
     bystander: bool = True
+    # An unknown voice that keeps talking without naming Sim -- the TV, a
+    # podcast, the radio. Once the model has stayed quiet on it
+    # `background_after_quiet` times within `background_window_s`, later
+    # fragments are not asked about until Sim is named or Sim spoke a
+    # moment ago (live 2026-09-14: an interview playing in the room, and
+    # one fragment of it, "provide the creation of that money", got a
+    # spoken answer).
+    background_quiet: bool = True
+    background_after_quiet: int = 2
+    background_window_s: float = 120.0
     # How much of a feeling shows in the voice: Kokoro blends that share
     # of a differently coloured voice into yours (1.0 = as tabled in
     # tts/kokoro.py, 0 = always the plain voice; 2.0 is a lot).

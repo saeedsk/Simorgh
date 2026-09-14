@@ -209,6 +209,37 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         # ...and each ask says who Sim answered before it: nobody, then Ira again
         self.assertEqual([c["before"] for c in replies.calls], ["", "Ira"])
 
+    async def test_an_unknown_voice_that_keeps_talking_is_background_until_it_names_sim(self):
+        """An interview on the TV (2026-09-14): the model rightly stayed
+        quiet on two fragments, then answered the third aloud. After two
+        quiet turns on a voice Sim cannot place, the rest is background --
+        not even asked -- until Sim is named; a guest who names Sim is
+        answered, and their follow-up still is."""
+        self.book.enroll("Saeed", _vec(2.0))
+        self.embedder.vector = _vec(0.0)          # nowhere near Saeed: a voice Sim cannot place
+        heard = iter(["the economy crumbles", "and taxes go up", "provide the creation of that money",
+                      "the transition is the hard part", "Sim, what time is it", "and tomorrow"])
+        script = _Script(*[(True, 60), (False, 110)] * 6, (False, 10_000))
+
+        class _TvAware(_Replies):
+            async def ask(self, text, **kw) -> str:
+                await super().ask(text, **kw)
+                return "It is nine." if "Sim" in text or text == "and tomorrow" else "QUIET"
+
+        replies = _TvAware()
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.2, engine="fake")
+        session._stt._inner.transcribe = _transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: len(replies.asked) >= 4, timeout=15.0)
+        self.assertEqual([a[0] for a in replies.asked],
+                         ["the economy crumbles", "and taxes go up", "Sim, what time is it", "and tomorrow"])
+        quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet") and "unknown voice" in p.get("reason", "")]
+        self.assertEqual(len(quiet), 2, "the third and fourth fragments were background, never asked")
+        self.assertIn("It is nine", " ".join(tts.spoken))
+
     async def test_a_feeling_named_by_the_model_shapes_the_voice_and_is_not_spoken(self):
         self.book.enroll("Ira", _vec(0.0))
         self.embedder.vector = _vec(0.02)
