@@ -231,3 +231,21 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("off", session.enroll("Ira"))
         session, bus, tts = _session(_config(speaker_id="auto", model_dir=self.tmp.name, speakers_dir=self.tmp.name), script, replies, None, None)
         self.assertIn("needs", session.enroll("Ira"), "with the book but no model: says what is missing")
+
+
+class WhoSaidTestCase(unittest.TestCase):
+    def test_who_said_is_answered_from_the_room_not_guessed(self):
+        # Live 2026-09-13: "Sim, who said I don't care?" -- nobody had -- got "That was Ira".
+        from collections import deque
+        from simorgh.voice.session import VoiceSession, _WHO_SAID
+        fake = VoiceSession.__new__(VoiceSession)
+        fake._room = deque(); fake._now = lambda: 1000.0  # noqa: SLF001
+        self.assertTrue(_WHO_SAID.search("Sim, who said I don't care?"))
+        self.assertEqual(_WHO_SAID.search("who said \"the pool is cold\"?").group(1), "the pool is cold")
+        self.assertIn("didn't catch anyone", fake._who_said("I don't care"))  # noqa: SLF001
+        fake._room.append(("Ira", "I honestly don't care about that", 990.0, "aside"))  # noqa: SLF001
+        self.assertEqual(fake._who_said("I don't care"), "That was Ira.")  # noqa: SLF001
+        fake._room.append(("someone", "the pool is cold today", 995.0, "asked"))  # noqa: SLF001
+        self.assertIn("couldn't place the voice", fake._who_said("the pool is cold"))  # noqa: SLF001
+        fake._room.append(("Sim", "I don't care for that either", 999.0, "reply"))  # noqa: SLF001
+        self.assertEqual(fake._who_said("I don't care"), "That was Ira.", "Sim's own words are not the answer")  # noqa: SLF001

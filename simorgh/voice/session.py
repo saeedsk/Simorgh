@@ -115,6 +115,8 @@ GUESS_FLOOR = 0.22
 #: "no, this is Ira" / "I'm Iris" / "it's Saeed" -- a claim of identity, taken as a take when the name is known
 _I_AM = re.compile(r"\b(?:this is|it'?s|i'?m|i am|my name is)\s+([A-Z][a-z]+)\b(?!\s+(?:voice|question|game))", re.I)
 #: "who is talking / speaking / am I / is this" -- answered from the identification, not the model
+#: "Sim, who said I don't care?" -- answered from what was actually heard
+_WHO_SAID = re.compile(r"\bwho\s+(?:just\s+)?(?:said|asked|told\s+you|was\s+saying)\s+(?:that\s+)?[\"“']?(.+?)[\"”']?\s*\??\s*$", re.I)
 _WHO_IS_SPEAKING = re.compile(r"\bwho(?:'s| is| am)\s+(?:i\b|(?:this|that|it)\b|(?:talking|speaking)\b|(?:one\s+of\s+us\s+is\s+)?(?:talking|speaking))|which\s+(?:one\s+)?of\s+us\s+is\s+(?:talking|speaking)", re.I)
 
 
@@ -750,6 +752,13 @@ class VoiceSession:
             # model guessed "Iris" at the creator (2026-09-13).
             await self._answer_who(turn_id, text, identification, clock)
             return
+        said_by = _WHO_SAID.search(text)
+        if said_by and self._speakers is not None:
+            # "Who said I don't care?" -- nobody had, in hours; the model
+            # answered "That was Ira, a moment ago" (live 2026-09-13).
+            clock.reply_at = self._now()
+            await self._speak_reply(turn_id, self._who_said(said_by.group(1)), clock, Context(user_text=text))
+            return
         claimed = self._identity_claim(text)
         if claimed and vector is not None and self._speakers is not None and claimed.lower() != speaker.lower():
             # "No, this is Ira. Remember the voice." A person of the house
@@ -987,6 +996,36 @@ class VoiceSession:
         said = f"Got it, {name}. I'll know your voice better now." if not note else f"Got it, {name}."
         clock.reply_at = self._now()
         await self._speak_reply(turn_id, said, clock, Context(user_text=text))
+
+    def _who_said(self, words: str, *, within_s: float = 600.0) -> str:
+        """Who said `words` lately, from the room's own record: a name, a
+        voice nobody could place, or nobody."""
+        import difflib
+
+        wanted = re.sub(r"[^\w\s']", " ", (words or "").lower()).split()
+        wanted_text = " ".join(wanted)
+        if not wanted_text:
+            return "Who said what? Say the words."
+        now = self._now()
+        best: tuple[float, str] | None = None
+        for who, said, at, kind in reversed(self._room):
+            if kind == "reply" or now - at > within_s or who == "Sim":
+                continue
+            heard = re.sub(r"[^\w\s']", " ", said.lower())
+            if wanted_text in heard:
+                score = 1.0
+            elif set(wanted) <= set(heard.split()):
+                score = 0.95      # "I don't care" in "I honestly don't care about that"
+            else:
+                score = difflib.SequenceMatcher(None, wanted_text, heard).ratio()
+            if score >= 0.6 and (best is None or score > best[0]):
+                best = (score, who)
+        if best is None:
+            return f"I didn't catch anyone saying \"{words.strip()}\" lately."
+        who = best[1]
+        if who == "someone":
+            return f"I heard \"{words.strip()}\" but couldn't place the voice."
+        return f"That was {who}."
 
     async def _answer_who(self, turn_id: int, text: str, identification, clock: TurnClock) -> None:
         """The identification, said plainly, without a model call."""
