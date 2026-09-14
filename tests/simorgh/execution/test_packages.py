@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import unittest
+
+import pytest
 import unittest.mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -289,6 +291,7 @@ class InstallPackageTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("already today", blocked.error)
 
 
+@pytest.mark.live
 class RealPyPiSmokeTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_real_lookup_of_a_package_we_actually_depend_on(self):
         import socket

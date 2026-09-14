@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 import unittest
+
+import pytest
 from pathlib import Path
 
 from simorgh.execution.config import Config
@@ -95,6 +97,7 @@ class GeocodeToolTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Simorgh", seen[0].headers.get("User-agent", ""))
 
 
+@pytest.mark.live
 class RealNominatimSmokeTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_real_lookup_against_nominatim(self):
         import socket

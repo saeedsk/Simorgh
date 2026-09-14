@@ -42,6 +42,13 @@ _PREFIX = "SIMORGH_"
 _KEEP = frozenset({"SIMORGH_OBSERVER_RUN_ID"})
 
 
+def pytest_configure(config):
+    # The loader's gate runs with `-m "not live"`: a boot must not fail
+    # because the network, Docker or a browser is not there.
+    config.addinivalue_line(
+        "markers", "live: needs a real network service, Docker, a browser or this machine's tools")
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _no_ambient_simorgh_env():
     stashed = {k: v for k, v in os.environ.items() if k.startswith(_PREFIX) and k not in _KEEP}

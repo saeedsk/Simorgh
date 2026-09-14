@@ -6,6 +6,8 @@ is installed and the network is reachable."""
 from __future__ import annotations
 
 import unittest
+
+import pytest
 from pathlib import Path
 
 from simorgh.execution.config import Config
@@ -203,6 +205,7 @@ class ToolTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await tool.run({"location": "x"}, ctx=_ctx(clock))).ok)
 
 
+@pytest.mark.live
 class RealHomeharvestSmokeTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_real_query_returns_real_95120_listings(self):
         import importlib.util

@@ -12,6 +12,8 @@ import shutil
 import socket
 import tempfile
 import unittest
+
+import pytest
 import unittest.mock
 from pathlib import Path
 
@@ -165,6 +167,7 @@ class RenderSummaryTestCase(unittest.TestCase):
         self.assertIn("timeout", text)
 
 
+@pytest.mark.live
 class RealBrowserSmokeTestCase(unittest.IsolatedAsyncioTestCase):
     """Real end-to-end: actually launches headless Chromium via the
     globally-installed Puppeteer. Skips itself if either isn't present

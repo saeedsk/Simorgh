@@ -18,6 +18,8 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+
+import pytest
 from pathlib import Path
 
 from simorgh.execution.config import Config
@@ -206,6 +208,7 @@ class FindDockerTestCase(unittest.TestCase):
         self.assertTrue(found == "" or Path(found).exists() or shutil.which("docker"))
 
 
+@pytest.mark.live
 class RealDockerSmokeTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_real_container_runs_and_leaves_nothing_behind(self):
         docker = find_docker()

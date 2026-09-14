@@ -77,8 +77,6 @@ def pytest_parallel_args() -> list[str]:
     return ["-n", "auto"] if importlib.util.find_spec("xdist") else []
 
 
-# Only for the "this will take a while" line; nothing depends on it.
-EXPECTED_UNIT_S = 90 if pytest_parallel_args() else 720
 _TAG = re.compile(rf"^{re.escape(TAG_PREFIX)}(\d+)$")
 # Notes default to a directory *inside the repo being gated*, not the
 # invoking process's real `$HOME`. This used to be
@@ -443,21 +441,60 @@ def next_tag(repo: Path) -> str:
 
 
 # ------------------------------------------------------------------ gate
+# The gate's tests: what Sim needs to boot, think, act safely and change
+# its own code. The feature suites (cameras, the TV, home automation,
+# energy, mail, voice, benchmarks, the v1 code) are not here, and neither
+# is any test marked `live` -- a real network service, Docker or a
+# browser. A boot must not fail, or take eight minutes, because the house
+# is offline or one integration changed (the creator, 2026-09-14: "limit
+# the testing to most fundamental tests"). `--all-tests` runs everything.
+CORE_TESTS = (
+    "tests/simorgh/contracts", "tests/simorgh/bus", "tests/simorgh/ledger", "tests/simorgh/kernel",
+    "tests/simorgh/guardian", "tests/simorgh/cognition", "tests/simorgh/memory", "tests/simorgh/orchestration",
+    "tests/simorgh/planning", "tests/simorgh/verification", "tests/simorgh/execution",
+    "tests/simorgh/interface/test_parser.py", "tests/simorgh/interface/test_dispatch.py",
+    "tests/simorgh/interface/test_command_table.py", "tests/simorgh/interface/test_service.py",
+    "tests/simorgh/interface/test_tui.py",
+    "tests/simorgh/integration/test_kernel_boots_all_sixteen_subsystems.py",
+    "tests/simorgh/integration/test_guardian_execution_action_path.py",
+    "tests/simorgh/integration/test_cli_end_to_end.py",
+    "tests/simorgh/integration/test_flow_5_pause_resume_stop.py",
+    "tests/simorgh/integration/test_a_patch_lands_through_a_worktree.py",
+    "tests/simorgh/test_module_boundaries.py", "tests/simorgh/test_simloader.py",
+)
+CORE_IGNORE = tuple(f"tests/simorgh/execution/{domain}"
+                    for domain in ("home", "media", "energy", "pim", "knowledge", "security"))
+
+
+def gate_selection(repo: Path, *, all_tests: bool) -> list[str]:
+    """pytest's arguments for what the gate runs. Paths this checkout does
+    not have are dropped -- a rollback lands on older trees -- and with
+    none left the gate falls back to every test rather than to none."""
+    paths = [p for p in CORE_TESTS if (repo / p).exists()]
+    if all_tests or not paths:
+        return ["tests"]
+    return ["-m", "not live", *paths, *(f"--ignore={p}" for p in CORE_IGNORE if (repo / p).exists())]
+
+
 def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = None,
-             allow_skip: bool = False) -> tuple[bool, str]:
+             allow_skip: bool = False, all_tests: bool = False) -> tuple[bool, str]:
     """Is this checkout fit to run? Returns (ok, why).
 
     With `allow_skip`, pressing `s` at the terminal abandons the gate and
     boots anyway -- a `run` convenience, never offered to `bless`."""
     started = time.monotonic()
-    rule("gate: unit suite")
-    say(f"running the whole test suite -- takes about {EXPECTED_UNIT_S // 60} minutes on this machine")
+    scope = "all" if all_tests else "core"
+    rule("gate: unit suite" if all_tests else "gate: core tests")
+    last = _baseline_record(notes, scope)
+    took = f" -- {last['seconds']:.0f}s last time" if isinstance(last.get("seconds"), (int, float)) else ""
+    say(("running every test" if all_tests else "running the core tests (--all-tests runs every one)") + took)
     with SkipWatch(allow_skip) as skip:
         if skip.enabled:
             say("press s to skip the gate and boot anyway (nothing will be tagged known-good)")
         try:
             code, unit_out = stream(
-                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *pytest_parallel_args(), "tests"],
+                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *pytest_parallel_args(),
+                 *gate_selection(repo, all_tests=all_tests)],
                 cwd=repo, timeout_s=timeout_s, progress=PytestProgress(started), skip=skip,
             )
         except GateSkipped:
@@ -471,7 +508,7 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
         if notes is not None:
             notes.mkdir(parents=True, exist_ok=True)
             (notes / "last_unit.txt").write_text(tests.stdout)
-        unit_ok, unit_why, ran = unit_verdict(tests.returncode, tests.stdout, baseline=read_baseline(notes))
+        unit_ok, unit_why, ran = unit_verdict(tests.returncode, tests.stdout, baseline=read_baseline(notes, scope))
         if not unit_ok:
             # Name them. "9 failed" alone sent the human off to re-run
             # the whole suite to learn which nine (2026-09-07). `ERROR `
@@ -485,7 +522,7 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
             if len(failed) > 12:
                 say(f"... and {len(failed) - 12} more (full output: {notes / 'last_unit.txt' if notes else 'not kept'})")
             return False, f"unit suite failed: {unit_why} ({tail})"
-        write_baseline(notes, ran)
+        write_baseline(notes, ran, scope, seconds=time.monotonic() - started)
         if not full:
             return True, f"unit suite green ({unit_why})"
 
@@ -582,21 +619,36 @@ def unit_verdict(code: int, text: str, *, baseline: int | None) -> tuple[bool, s
     return True, f"{ran} tests ran, none failed", ran
 
 
-def read_baseline(notes: Path | None) -> int | None:
+# One count per selection: the core gate runs about half the suite, so
+# measured against a whole-suite count it would read as "the suite shrank
+# by more than a tenth" and fail every time. The old unit_baseline.json
+# counted the whole suite and is left alone.
+BASELINE_FILES = {"core": "unit_baseline-core.json", "all": "unit_baseline-all.json"}
+
+
+def _baseline_record(notes: Path | None, scope: str) -> dict:
     if notes is None:
-        return None
+        return {}
     try:
-        return int(json.loads((notes / "unit_baseline.json").read_text())["tests"])
-    except (OSError, ValueError, KeyError, TypeError):
+        data = json.loads((notes / BASELINE_FILES[scope]).read_text())
+    except (OSError, ValueError, KeyError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def read_baseline(notes: Path | None, scope: str = "core") -> int | None:
+    try:
+        return int(_baseline_record(notes, scope)["tests"])
+    except (KeyError, ValueError, TypeError):
         return None
 
 
-def write_baseline(notes: Path | None, tests: int) -> None:
+def write_baseline(notes: Path | None, tests: int, scope: str = "core", *, seconds: float | None = None) -> None:
     if notes is None or tests <= 0:
         return
     try:
         notes.mkdir(parents=True, exist_ok=True)
-        (notes / "unit_baseline.json").write_text(json.dumps({"tests": tests, "ts": time.time()}))
+        (notes / BASELINE_FILES[scope]).write_text(json.dumps({"tests": tests, "seconds": seconds, "ts": time.time()}))
     except OSError as exc:  # noqa: BLE001 -- never lose a boot to bookkeeping
         say(f"could not record the unit baseline ({exc!r}); continuing")
 
@@ -790,18 +842,18 @@ def source_fingerprint(repo: Path) -> str:
     return git("rev-parse", "HEAD", cwd=repo).stdout.strip()
 
 
-def record_green(repo: Path, notes: Path, *, full: bool) -> None:
+def record_green(repo: Path, notes: Path, *, full: bool, all_tests: bool = False) -> None:
     commit = source_fingerprint(repo)
     if not commit:
         return
     try:
         notes.mkdir(parents=True, exist_ok=True)
-        (notes / GREEN_FILE).write_text(json.dumps({"commit": commit, "full": full, "ts": time.time()}))
+        (notes / GREEN_FILE).write_text(json.dumps({"commit": commit, "full": full, "all_tests": all_tests, "ts": time.time()}))
     except OSError as exc:
         say(f"could not remember this green gate ({exc!r}); the next boot runs it again")
 
 
-def already_verified(repo: Path, notes: Path, *, full: bool) -> str:
+def already_verified(repo: Path, notes: Path, *, full: bool, all_tests: bool = False) -> str:
     """Why this checkout needs no gate, or "" when it does: the tree is
     clean, HEAD is the commit the gate last passed, and that pass covered
     at least what is asked for now (a unit-only pass does not stand in
@@ -813,14 +865,17 @@ def already_verified(repo: Path, notes: Path, *, full: bool) -> str:
         last = json.loads((notes / GREEN_FILE).read_text())
     except (OSError, ValueError):
         return ""
-    if not isinstance(last, dict) or last.get("commit") != commit or (full and not last.get("full")):
+    if not isinstance(last, dict) or last.get("commit") != commit or (full and not last.get("full")) \
+            or (all_tests and not last.get("all_tests")):
         return ""
-    covered = "the unit and trial suites" if last.get("full") else "the unit suite"
+    covered = "every test" if last.get("all_tests") else "the core tests"
+    if last.get("full"):
+        covered += " and the trial suite"
     return f"{commit[:7]} already passed {covered} and nothing has changed since"
 
 
 def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollbacks: int,
-            watchdog_s: float, sim_args: list[str], force_gate: bool = False) -> int:
+            watchdog_s: float, sim_args: list[str], force_gate: bool = False, all_tests: bool = False) -> int:
     rule("run")
     say(f"repo {repo}, HEAD {head(repo)}")
     tags = good_tags(repo)
@@ -830,19 +885,19 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
     restarts = 0
     while True:
         while True:
-            verified = "" if force_gate else already_verified(repo, notes, full=full)
+            verified = "" if force_gate else already_verified(repo, notes, full=full, all_tests=all_tests)
             if verified:
                 say(f"gate not needed: {verified} (--force-gate runs it anyway)")
                 write_note(notes, {"kind": "gate_reused", "commit": head(repo), "why": verified})
                 break
-            ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes, allow_skip=True)
+            ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes, allow_skip=True, all_tests=all_tests)
             if ok and SKIP_SENTINEL in why:
                 say(f"gate {why}; booting unverified, and nothing is being tagged")
                 write_note(notes, {"kind": "gate_skipped", "commit": head(repo), "why": why})
                 break
             if ok:
                 say(f"gate passed: {why}")
-                record_green(repo, notes, full=full)
+                record_green(repo, notes, full=full, all_tests=all_tests)
                 commit = head(repo)
                 stray_code = untracked_code(repo)
                 if stray_code:
@@ -916,6 +971,8 @@ def main(argv: list[str] | None = None) -> int:
                          help=f"where decisions are written for Sim to read "
                               f"(default: <repo>/{NOTES_DIRNAME})")
     parser.add_argument("--full", action="store_true", help="gate with the trial suite too, not just unit tests")
+    parser.add_argument("--all-tests", action="store_true",
+                        help="gate with every test, not only the core ones")
     parser.add_argument("--force-gate", action="store_true",
                         help="run the gate even when this exact source already passed it")
     parser.add_argument("--timeout", type=float, default=5400.0, help="seconds the whole gate may take")
@@ -935,7 +992,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_rollback(repo, notes, reason=args.reason)
     return cmd_run(
         repo, notes, full=args.full, timeout_s=args.timeout, max_rollbacks=args.max_rollbacks,
-        watchdog_s=args.watchdog, sim_args=args.sim_args, force_gate=args.force_gate)
+        watchdog_s=args.watchdog, sim_args=args.sim_args, force_gate=args.force_gate, all_tests=args.all_tests)
 
 
 if __name__ == "__main__":

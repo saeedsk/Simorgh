@@ -11,6 +11,8 @@ tool still answers, so nothing looks broken.
 from __future__ import annotations
 
 import unittest
+
+import pytest
 from pathlib import Path
 import tempfile
 import types
@@ -103,6 +105,7 @@ class PromptWarningTestCase(unittest.TestCase):
         self.assertNotIn("Do not spend steps", with_note)
 
 
+@pytest.mark.live
 class RealProbesTestCase(unittest.IsolatedAsyncioTestCase):
     """The real table against this machine. Asserts shape, not outcome:
     whether node or docker happens to be installed is not this test's

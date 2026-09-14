@@ -356,6 +356,52 @@ class LoaderTestCase(unittest.TestCase):
             self._run()
         self.assertFalse((self.notes / simloader.GREEN_FILE).exists())
 
+    # -- the gate runs the core tests, not every feature's --------------------
+    def _gate_argv(self, **kw) -> list[str]:
+        seen = {}
+
+        def _stream(argv, **_):
+            seen["argv"] = argv
+            return 0, "12 passed in 1.0s"
+
+        with mock.patch.object(simloader, "stream", side_effect=_stream):
+            simloader.run_gate(self.repo.path, full=False, timeout_s=10, notes=self.notes, **kw)
+        return seen["argv"]
+
+    def test_the_gate_runs_the_core_tests_without_live_ones(self):
+        """The creator, 2026-09-14: the gate ran all 5,969 tests in eight
+        minutes, cameras and TV included, and would fail a boot with the
+        network down."""
+        (self.repo.path / "tests" / "simorgh" / "kernel").mkdir(parents=True)
+        (self.repo.path / "tests" / "simorgh" / "execution" / "home").mkdir(parents=True)
+        argv = self._gate_argv()
+        self.assertIn("tests/simorgh/kernel", argv)
+        self.assertNotIn("tests", argv)
+        self.assertEqual(argv[argv.index("not live") - 1], "-m", "the marker filter, not python's -m")
+        self.assertIn("--ignore=tests/simorgh/execution/home", argv)
+        self.assertNotIn("tests/simorgh/voice", argv, "a path the checkout lacks is not passed")
+
+    def test_all_tests_runs_every_test(self):
+        (self.repo.path / "tests" / "simorgh" / "kernel").mkdir(parents=True)
+        self.assertEqual(self._gate_argv(all_tests=True)[-1], "tests")
+
+    def test_a_checkout_without_the_core_paths_still_runs_something(self):
+        self.assertEqual(self._gate_argv()[-1], "tests")
+
+    def test_a_whole_suite_count_is_not_the_core_gates_baseline(self):
+        simloader.write_baseline(self.notes, 5969, "all")
+        self.assertIsNone(simloader.read_baseline(self.notes, "core"))
+        simloader.write_baseline(self.notes, 2958, "core", seconds=41.0)
+        self.assertEqual(simloader.read_baseline(self.notes, "core"), 2958)
+        self.assertEqual(simloader.read_baseline(self.notes, "all"), 5969)
+
+    def test_a_core_pass_does_not_stand_in_for_all_tests(self):
+        self._green_once()
+        with mock.patch.object(simloader, "run_gate", return_value=(True, "green")) as gate, \
+             mock.patch.object(simloader, "launch_sim", return_value=0):
+            self._run(all_tests=True)
+        gate.assert_called_once()
+
 class LoaderIsIndependentTestCase(unittest.TestCase):
     def test_it_never_imports_the_package_it_boots(self):
         """The one property a bootloader must have."""
@@ -615,7 +661,7 @@ class TheGateCannotBeTalkedIntoPassingTestCase(unittest.TestCase):
             self.assertIsNone(simloader.read_baseline(notes))
             simloader.write_baseline(notes, 2865)
             self.assertEqual(simloader.read_baseline(notes), 2865)
-            (notes / "unit_baseline.json").write_text("{not json")
+            (notes / simloader.BASELINE_FILES["core"]).write_text("{not json")
             self.assertIsNone(simloader.read_baseline(notes))
 
 
