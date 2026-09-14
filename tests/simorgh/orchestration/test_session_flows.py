@@ -360,6 +360,8 @@ class AMarkerBuriedMidSentenceIsCorrectedNotAcceptedTestCase(unittest.TestCase):
     def test_a_marker_after_prose_on_the_same_line_is_spotted(self):
         text = "I'll read all five docs. Starting with the first two. READ_FILE: docs/x.md"
         self.assertEqual(unhonoured_marker(text, self.OFFERED), "read_file")
+        self.assertEqual(unhonoured_marker("[bright] READ_FILE: docs/x.md", self.OFFERED), "",
+                         "a feeling tag before the marker is not text before it (2026-09-13)")
 
     def test_a_marker_that_owns_its_line_is_left_alone(self):
         """Those already run -- correcting them would be nonsense."""

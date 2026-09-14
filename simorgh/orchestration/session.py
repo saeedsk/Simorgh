@@ -192,7 +192,9 @@ def unhonoured_marker(text: str, offered: tuple[str, ...]) -> str:
     times in seven seconds, in a run an observer watched on 2026-09-10.
     One corrective step costs a step; the silent version costs an
     attempt."""
-    body = text or ""
+    from simorgh.contracts.tone import strip_tone
+
+    body = strip_tone(text or "")     # "[bright] CAST_SHOW: home" starts its line (2026-09-13)
     for tool in offered:
         prefix = f"{tool.upper()}:"
         position = body.upper().find(prefix)

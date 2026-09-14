@@ -42,6 +42,12 @@ class TestFirstLineArgument(unittest.TestCase):
 
 
 class TestParseMarker(unittest.TestCase):
+    def test_a_feeling_tag_before_the_marker_does_not_hide_it(self):
+        # Live 2026-09-13: "[bright] CAST_SHOW: home" was spoken aloud.
+        from simorgh.cognition.parser import parse_marker
+        self.assertEqual(parse_marker("[bright] CAST_SHOW: home", ("cast_show",)), ("cast_show", "home"))
+        self.assertEqual(parse_marker("[warm] LIST_TASKS: all", ("list_tasks",)), ("list_tasks", "all"))
+
     def test_recognized_marker_is_case_insensitive(self):
         marker, payload = parse_marker("draft: def f(): pass", ("DRAFT", "RUN"))
         self.assertEqual(marker, "draft")

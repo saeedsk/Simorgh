@@ -226,7 +226,13 @@ def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
 
     A marker must own its line: a mention inside a sentence stays prose.
     """
-    stripped = _unwrap_native_tool_tags(text).strip()
+    # "[bright] CAST_SHOW: home": the feeling the voice prompt asks for
+    # came first, the marker was not at the line's start, nothing ran,
+    # and the marker was spoken aloud (the creator's room, 2026-09-13).
+    # A marker line never begins with a bracket, so a leading tag goes.
+    from simorgh.contracts.tone import strip_tone
+
+    stripped = strip_tone(_unwrap_native_tool_tags(text).strip())
     for marker in markers:
         prefix = f"{marker}:"
         if stripped[: len(prefix)].upper() == prefix.upper():
