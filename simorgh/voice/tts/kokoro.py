@@ -96,7 +96,9 @@ class KokoroSynthesiser:
             return None
         try:
             import numpy as np
-
+        except ImportError:  # kokoro-onnx brings numpy; without it there is no blend, just the plain voice
+            return None
+        try:
             key = f"{voice}+{other}@{weight:.2f}"
             style = self._styles.get(key)
             if style is None:

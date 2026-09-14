@@ -95,8 +95,11 @@ class PyChromecast:
     def _start(self) -> None:
         if self._browser is not None:
             return
-        import zeroconf
-        from pychromecast.discovery import CastBrowser, SimpleCastListener
+        try:
+            import zeroconf
+            from pychromecast.discovery import CastBrowser, SimpleCastListener
+        except ImportError as exc:
+            raise RuntimeError("needs pychromecast (pip install pychromecast)") from exc
 
         import logging
 
@@ -121,7 +124,10 @@ class PyChromecast:
         return sorted(out, key=lambda d: d.name.lower())
 
     def _cast(self, name: str):
-        import pychromecast
+        try:
+            import pychromecast
+        except ImportError as exc:
+            raise RuntimeError("needs pychromecast (pip install pychromecast)") from exc
 
         self._start()
         cast = self._casts.get(name)
@@ -167,7 +173,10 @@ class PyChromecast:
 
     def show_page(self, name: str, url: str) -> None:
         with self._lock:
-            from pychromecast.controllers.dashcast import DashCastController
+            try:
+                from pychromecast.controllers.dashcast import DashCastController
+            except ImportError as exc:
+                raise RuntimeError("needs pychromecast (pip install pychromecast)") from exc
 
             cast = self._cast(name)
             controller = DashCastController()
@@ -220,7 +229,10 @@ class PyChromecast:
         receiver -- which answers "400 screen_ids parameter error" since
         2026-09; kept for the day it works again."""
         with self._lock:
-            from pychromecast.controllers.youtube import YouTubeController
+            try:
+                from pychromecast.controllers.youtube import YouTubeController
+            except ImportError as exc:
+                raise RuntimeError("needs pychromecast (pip install pychromecast)") from exc
 
             cast = self._cast(name)
             controller = YouTubeController()
@@ -282,14 +294,9 @@ def settings_paths(home: Path | None = None) -> tuple[Path, Path]:
     (the creator's screen, 2026-09-12)."""
     if home is not None:
         return home / "simorgh.toml", home / "secrets.toml"
-    default_home = Path("~/.simorgh").expanduser()
-    try:
-        from simorgh.kernel.config import find_config_path
+    from simorgh.contracts.settings import config_path as kernel_config_path
 
-        found = find_config_path(data_dir=default_home)
-    except Exception:  # noqa: BLE001 -- the default is the right answer when the loader cannot say
-        found = None
-    config_path = found or default_home / "simorgh.toml"
+    config_path = kernel_config_path()
     return config_path, config_path.parent / "secrets.toml"
 
 
@@ -1028,7 +1035,7 @@ class CastUseTool(_CastTool):
         if problem:
             return ToolResult(ok=False, error=problem)
         self._prefs.device = name
-        from simorgh.voice.settings import persist
+        from simorgh.contracts.settings import persist
 
         path, _secrets_path = settings_paths(self._settings_home)
         try:
@@ -1048,7 +1055,7 @@ class CastSetupTool(_CastTool):
     args_schema = {"type": "object", "properties": {"device": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        from simorgh.voice.settings import persist
+        from simorgh.contracts.settings import persist
 
         config_path, secrets_path = settings_paths(self._settings_home)
         changed: list[str] = []

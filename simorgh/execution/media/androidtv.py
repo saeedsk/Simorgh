@@ -60,7 +60,10 @@ def available() -> tuple[bool, str]:
     except ImportError:
         return False, "the Android TV remote library is not installed: `pip install androidtvremote2`"
     try:
-        from google.protobuf.internal import api_implementation
+        try:
+            from google.protobuf.internal import api_implementation
+        except ImportError:  # no protobuf internals to ask: not the cpp build
+            return True, ""
 
         if api_implementation.Type() == "cpp":
             # Live 2026-09-13: pairing died with "'FieldDescriptor' object
@@ -119,7 +122,10 @@ class AndroidTv:
     def _remote(self):
         cls = self._remote_cls
         if cls is None:
-            from androidtvremote2 import AndroidTVRemote
+            try:
+                from androidtvremote2 import AndroidTVRemote
+            except ImportError as exc:
+                raise RuntimeError("needs androidtvremote2 (pip install androidtvremote2)") from exc
             cls = AndroidTVRemote
         self._certs.mkdir(parents=True, exist_ok=True)
         return cls(self._client_name, str(self.certfile), str(self.keyfile), self.host)

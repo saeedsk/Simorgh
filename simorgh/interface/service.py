@@ -741,7 +741,7 @@ class Service:
         changed, so the person sees what was understood."""
         if not self.config.tidy_input or self._ctx is None:
             return text
-        from simorgh.cognition.tidy import tidy
+        from simorgh.contracts.tidy import tidy
 
         tidied = await tidy(self._ctx.bus, text, recent=list(self._recent_text))
         self._recent_text.append(tidied.text)

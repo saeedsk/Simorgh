@@ -964,7 +964,7 @@ class VoiceSession:
         tidy.py); a change is announced as a corrected transcript."""
         if not self._config.tidy:
             return text
-        from simorgh.cognition.tidy import tidy
+        from simorgh.contracts.tidy import tidy
 
         tidied = await tidy(self._pipeline._bus, text,  # noqa: SLF001 -- the same bus the ask goes on
                             recent=[self._last_user_text, self._pipeline.last_said])

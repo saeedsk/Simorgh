@@ -172,7 +172,7 @@ def _next_words(before: str) -> list[tuple[str, str]]:
     if len(words) == 1:
         return [(w, f"{command} {w}") for w in subcommands(command)]
     if command == "voice" and words[1] == "set" and len(words) == 2:
-        from ..voice.settings import SAFE_KEYS
+        from ..contracts.settings import VOICE_SAFE_KEYS as SAFE_KEYS
 
         return [(key, spec[2]) for key, spec in sorted(SAFE_KEYS.items())]
     return []

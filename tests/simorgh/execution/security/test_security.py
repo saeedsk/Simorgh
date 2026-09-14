@@ -360,12 +360,19 @@ class _ToolCase(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def _isolated_toml(self, toml: str = "") -> str:
+        # With no config file, the checker falls back to the machine's
+        # own ~/.simorgh/simorgh.toml and ~/.simorgh as the data dir --
+        # so on a machine that really runs Sim, "a clean system" read a
+        # 151,000-file ledger and an API open to the network, and scored
+        # 72 (the loader's gate, 2026-09-14). Every case names its own.
+        return f'[runtime]\ndata_dir = "{self.root / "data"}"\n\n' + toml
+
     def _tools(self, *, toml: str = "", env=None, lsof=None, **overrides) -> dict:
-        if toml:
-            (self.root / "simorgh.toml").write_text(toml, encoding="utf-8")
+        (self.root / "simorgh.toml").write_text(self._isolated_toml(toml), encoding="utf-8")
         config = Config(repo_root=self.root,
                         security_findings_path=str(self.root / "findings.db"),
-                        security_config_path=str(self.root / "simorgh.toml") if toml else "",
+                        security_config_path=str(self.root / "simorgh.toml"),
                         **overrides)
         return {tool.name: tool for tool in security_tools(
             config, env=env if env is not None else {}, clock=lambda: self.now,
@@ -394,7 +401,7 @@ class SecSelfTestCase(_ToolCase):
         config = Config(repo_root=self.root,
                         security_findings_path=str(self.root / "findings.db"),
                         security_config_path=str(self.root / "simorgh.toml"))
-        (self.root / "simorgh.toml").write_text(self.EXPOSED, encoding="utf-8")
+        (self.root / "simorgh.toml").write_text(self._isolated_toml(self.EXPOSED), encoding="utf-8")
         tools = {t.name: t for t in security_tools(config, secrets=_Secrets(), env={},
                                                     clock=lambda: self.now,
                                                     lsof_runner=lambda: None)}

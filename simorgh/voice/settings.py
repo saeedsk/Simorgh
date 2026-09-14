@@ -12,57 +12,11 @@ running service applies it at once.
 
 from __future__ import annotations
 
-import tomllib
 from dataclasses import fields, replace
-from pathlib import Path
+
+from simorgh.contracts.settings import VOICE_SAFE_KEYS as SAFE_KEYS, persist
 
 from .config import Config
-
-#: key -> (type, allowed values or (low, high) range, help)
-SAFE_KEYS: dict[str, tuple[type, object, str]] = {
-    "enabled": (bool, None, "listen on boot"),
-    "tts_voice": (str, None, "the voice id (Kokoro: af_heart, af_jessica, ...; `voice voices` lists them)"),
-    "tts_farsi_voice": (str, None, "the Piper voice for Farsi"),
-    "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),
-    "stt_languages": (str, None, "the languages the house speaks, e.g. en,fa -- a turn heard in another is not answered; \"\" for any"),
-    "tts_speed": (float, (0.5, 2.0), "speaking rate, 1.0 = normal"),
-    "speaker_id": (str, ("auto", "on", "off"), "auto | on | off -- recognise who is speaking (needs `voice enroll`)"),
-    "speaker_threshold": (float, (0.2, 0.95), "how alike a voice must be to count as an enrolled person (cosine)"),
-    "speaker_margin": (float, (0.0, 0.5), "how far the best match must beat the second before it counts"),
-    "speaker_lean": (float, (0.0, 0.95), "under the threshold but at least this close, a voice is 'probably' that person; 0 = never lean"),
-    "speaker_refine": (bool, None, "a turn Sim is sure about quietly becomes another take for that person"),
-    "diarize": (bool, None, "a long turn's words are attributed to who said them, voice by voice"),
-    "diarize_words": (bool, None, "time every word for finer attribution (about half a second slower a turn)"),
-    "introduce_after_turns": (int, (0, 10), "turns from an unknown voice before Sim asks who it is (0 = never ask; enrol with `voice enroll` or 'Sim, learn my voice')"),
-    "bystander": (bool, None, "stay quiet while two known people talk to each other, unless named"),
-    "tone_blend": (float, (0.0, 2.0), "how much a feeling colours the voice (Kokoro blends voices); 0 = plain, 1 = normal"),
-    "volume": (float, (0.2, 2.0), "playback gain"),
-    "output": (str, ("laptop", "tv", "both"), "where the voice comes out: this machine, the TV page, or both"),
-    "auto_listen": (bool, None, "listen again after each reply"),
-    "barge_in": (bool, None, "interrupt Sim by talking"),
-    "endpoint_silence_ms": (int, (200, 3000), "silence that ends your turn"),
-    "min_speech_ms": (int, (50, 2000), "shorter than this is not a turn"),
-    "vad_sensitivity": (str, ("low", "balanced", "high"), "how sure the detector must be"),
-    "tts": (str, ("auto", "kokoro", "piper", "say", "chatterbox", "miso", "fake"),
-            "the voice engine: kokoro (fast), chatterbox / miso (expressive, in their own venvs; `voice models <name>` first)"),
-    "chatterbox_exaggeration": (float, (0.0, 1.0), "Chatterbox's feeling dial; 0 lets the tone table choose"),
-    "chatterbox_reference": (str, None, "a WAV (6 s or more) whose voice Chatterbox clones; \"\" for its own"),
-    "miso_reference": (str, None, "a WAV whose voice MisoTTS follows; \"\" for its default speaker"),
-    "miso_device": (str, ("", "mps", "cpu", "cuda"), "where MisoTTS runs; \"\" picks the best available"),
-    "stt": (str, ("auto", "faster_whisper", "whisper_server", "whisper_cli", "fake"),
-            "the recogniser: whisper_server keeps the model loaded (fast), whisper_cli reloads it every turn"),
-    "expressive_lane": (str, ("auto", "always", "off"),
-                        "when Chatterbox/Miso speaks: auto = typed replies, tests and long answers only (spoken turns stay quick); always; off"),
-    "expressive_min_chars": (int, (0, 5000), "0 = never (default); else a spoken reply at least this long goes to the slow engine -- it can hold the floor a minute"),
-    "stt_partials": (bool, None, "show what is heard while you are still talking"),
-    "connectors": (bool, None, "the rare Okay / Yeah lead-ins"),
-    "backchannel": (bool, None, "say Aha / Let me check the moment your turn ends, before thinking"),
-    "max_spoken_sentences": (int, (1, 30), "longer answers are cut and say there is more on screen"),
-    "diagnostics": (bool, None, "per-turn latencies in voice status"),
-    "keep_audio": (bool, None, "keep raw recordings under workspace/voice/audio (off by default)"),
-    "keep_transcripts": (bool, None, "ledger the transcripts"),
-    "speak_replies": (bool, None, "speak replies to typed turns too"),
-}
 
 
 def parse(key: str, raw: str) -> tuple[object | None, str]:
@@ -102,59 +56,6 @@ def apply(config: Config, key: str, value: object) -> Config:
     if key not in {f.name for f in fields(Config)}:
         raise KeyError(key)
     return replace(config, **{key: value})
-
-
-def _toml_value(value: object) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return repr(value)
-    if isinstance(value, (list, tuple)):
-        return "[" + ", ".join(_toml_value(v) for v in value) + "]"
-    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{text}"'
-
-
-def _dump(data: dict) -> str:
-    """A small TOML writer for what `simorgh.toml` holds: scalar keys at
-    the top, then one `[section]` per table of scalars (and one level
-    of `[section.sub]`). Enough for a settings file; not a general one."""
-    lines: list[str] = []
-    for key, value in data.items():
-        if not isinstance(value, dict):
-            lines.append(f"{key} = {_toml_value(value)}")
-    for key, value in data.items():
-        if isinstance(value, dict):
-            lines.append("")
-            lines.append(f"[{key}]")
-            for k, v in value.items():
-                if isinstance(v, dict):
-                    continue
-                lines.append(f"{k} = {_toml_value(v)}")
-            for k, v in value.items():
-                if isinstance(v, dict):
-                    lines.append("")
-                    lines.append(f"[{key}.{k}]")
-                    for k2, v2 in v.items():
-                        lines.append(f"{k2} = {_toml_value(v2)}")
-    return "\n".join(lines).strip() + "\n"
-
-
-def persist(path: Path, key: str, value: object, *, section: str = "voice") -> None:
-    """Write `[section] key = value` into the TOML at `path`, keeping
-    every other setting the file already has. `[voice]` by default; the
-    cast tools write `[execution] cast_device` the same way."""
-    data: dict = {}
-    if path.is_file():
-        with path.open("rb") as handle:
-            data = tomllib.load(handle)
-    table = dict(data.get(section) or {})
-    table[key] = value
-    data[section] = table
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".toml.part")
-    tmp.write_text(_dump(data))
-    tmp.replace(path)
 
 
 def describe() -> list[tuple[str, str, str]]:

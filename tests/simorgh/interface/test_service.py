@@ -82,7 +82,7 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         do something funny today, there is an event online called
         agentcon". A fake cognition answers the tidy call; the percept
         Sim answers carries the corrected text."""
-        from simorgh.cognition.tidy import dictionary
+        from simorgh.contracts.tidy import dictionary
         if not dictionary():
             self.skipTest("no system word list on this machine")
         garbled = "Sim let sdo somethin gfunnty tday, ther isan even onlne called agencon"

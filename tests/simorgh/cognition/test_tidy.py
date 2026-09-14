@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from simorgh.cognition.tidy import Tidied, accept, dictionary, fix_name, garbled, tidy, unknown_words
+from simorgh.contracts.tidy import Tidied, accept, dictionary, fix_name, garbled, tidy, unknown_words
 from simorgh.contracts import topics
 
 GARBLED = "Sim let sdo somethin gfunnty tday, ther isan even onlne called agencon"

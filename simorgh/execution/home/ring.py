@@ -255,7 +255,10 @@ def harden_webrtc_stream(stream) -> None:
         exc = task.exception()  # retrieves it either way -- the whole point
         if exc is None:
             return
-        from websockets.exceptions import ConnectionClosed
+        try:
+            from websockets.exceptions import ConnectionClosed
+        except ImportError:  # ring_doorbell brings websockets; without it there is no such close to expect
+            ConnectionClosed = ()
 
         if isinstance(exc, ConnectionClosed):
             return
@@ -414,7 +417,7 @@ def _save_secrets(settings_home: Path | None, values: dict[str, str]) -> Path:
     import tomllib
 
     from ..media.cast import settings_paths
-    from simorgh.voice.settings import persist
+    from simorgh.contracts.settings import persist
 
     config_path, secrets_path = settings_paths(settings_home)
     existing: dict = {}

@@ -63,7 +63,7 @@ VoiceTranscript = define(t.VOICE_TRANSCRIPT, [
 ], doc="speaker: who the voice book says spoke (\"\" = unknown), with the cosine score and, when unknown, why. "
        "enrolling: this utterance was a take for that person, not a turn. "
        "echo=true: the words were Sim's own reply coming back through the microphone; not a turn. "
-       "corrected=true: the same turn, read through the recogniser's mistakes (cognition/tidy.py). "
+       "corrected=true: the same turn, read through the recogniser's mistakes (contracts/tidy.py). "
        "partial=true: provisional, replaced by the next transcript for the same turn.")
 VoiceSpoken = define(t.VOICE_SPOKEN, [F("text", Str), F("seconds", Float), F("engine", Str), F("device", Str),
                                        O("session_id", Str), O("interrupted", Bool), O("turn", Int), O("register", Str),

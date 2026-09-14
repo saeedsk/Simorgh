@@ -79,7 +79,10 @@ class ReolinkNvr:
 
     async def _api(self):
         if self._host is None:
-            from reolink_aio.api import Host
+            try:
+                from reolink_aio.api import Host
+            except ImportError as exc:
+                raise RuntimeError("needs reolink_aio (pip install reolink-aio)") from exc
 
             host, user, password, port = self._args
             self._host = Host(host, user, password, port=port, stream="sub")
@@ -300,7 +303,7 @@ class CamSetupTool(_CameraTool):
             return ToolResult(ok=False, error="refused: no password was handed over; at the terminal, `cameras setup <host> "
                                               "<username>` asks for it hidden (never put it on the command line)")
         from ..media.cast import settings_paths
-        from simorgh.voice.settings import persist
+        from simorgh.contracts.settings import persist
 
         config_path, secrets_path = settings_paths(self._settings_home)
         import tomllib

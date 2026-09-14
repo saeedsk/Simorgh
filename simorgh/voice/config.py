@@ -141,7 +141,7 @@ class Config:
     # exchange under way. Overheard talk gets no sound; whether it gets
     # an answer at all is the model's call (backchannel.is_quiet).
     # Read through what the recogniser mangled before answering
-    # (cognition/tidy.py): "Seem do something" is "Sim, do something"
+    # (contracts/tidy.py): "Seem do something" is "Sim, do something"
     # at once; a garbled sentence gets one short model call, under the
     # backchannel, and the screen shows what it was read as.
     tidy: bool = True
