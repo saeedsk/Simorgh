@@ -359,6 +359,7 @@ class ClassifyActionsTestCase(unittest.TestCase):
         self.assertFalse(mutates([{"wait": "#x"}, {"screenshot": "s"}]))
 
 
+@pytest.mark.live
 class BrowsePageRealTestCase(unittest.IsolatedAsyncioTestCase):
     """A real browser against a real local page with a form."""
 

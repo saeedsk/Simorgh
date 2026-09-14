@@ -484,14 +484,22 @@ class TheDeadlineIsSharedNotSpentByTheFirstCandidateTestCase(unittest.IsolatedAs
                 await asyncio.sleep(300)  # the timeout argument, ignored
                 raise AssertionError("unreachable")
 
+        from unittest import mock
+
+        from simorgh.cognition import router as router_module
+
         rude = _Ignores()
         router = Router([rude], {}, self.floor, order=("together",), clock=self.clock)
         started = time.monotonic()
-        with self.assertRaises(NoRealProvider):
+        # A short deadline and grace prove the same cut-off as the real
+        # ones; at 5 s plus the real grace this test alone took 6 s.
+        with mock.patch.object(router_module, "_OVERRUN_GRACE_SECONDS", 0.05), \
+             mock.patch.object(router_module, "_MIN_CANDIDATE_SECONDS", 0.1), \
+             self.assertRaises(NoRealProvider):
             await router.complete(Purpose.CHAT, [], tools=None,
-                                  budget=_budget(require_real=True), timeout=5.0)
+                                  budget=_budget(require_real=True), timeout=0.2)
         self.assertEqual(rude.calls, 1)
-        self.assertLess(time.monotonic() - started, 30.0, "the Router waited on a provider that never stops")
+        self.assertLess(time.monotonic() - started, 5.0, "the Router waited on a provider that never stops")
 
     async def test_running_out_of_time_is_not_reported_as_no_provider_available(self):
         """Honesty: providers were available and willing; the deadline had

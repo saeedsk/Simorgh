@@ -73,10 +73,13 @@ class TestPromptAssemblerWithResponders(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.clock = FakeClock()
-        backend = make_backend(BusConfig(backend="memory", request_default_timeout=1.0), clock=self.clock)
+        # The in-memory bus answers at once; the timeout only bounds the
+        # blocks nobody answers here, and each of those waited it out (a
+        # second apiece, 2-3 s a test).
+        backend = make_backend(BusConfig(backend="memory", request_default_timeout=0.05), clock=self.clock)
         self.bus = make_client(backend, source="cognition", clock=self.clock)
         await self.bus.start()
-        self.assembler = PromptAssembler(self.bus, "cognition", request_timeout=1.0, logger=_Logger())
+        self.assembler = PromptAssembler(self.bus, "cognition", request_timeout=0.05, logger=_Logger())
 
         async def _answer_voice(message: Message) -> None:
             await self.bus.reply(message, type=topics.PERSONA_VOICE_REPLY,
@@ -119,10 +122,13 @@ class TestUserProfileBlock(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.clock = FakeClock()
-        backend = make_backend(BusConfig(backend="memory", request_default_timeout=1.0), clock=self.clock)
+        # The in-memory bus answers at once; the timeout only bounds the
+        # blocks nobody answers here, and each of those waited it out (a
+        # second apiece, 2-3 s a test).
+        backend = make_backend(BusConfig(backend="memory", request_default_timeout=0.05), clock=self.clock)
         self.bus = make_client(backend, source="cognition", clock=self.clock)
         await self.bus.start()
-        self.assembler = PromptAssembler(self.bus, "cognition", request_timeout=1.0, logger=_Logger())
+        self.assembler = PromptAssembler(self.bus, "cognition", request_timeout=0.05, logger=_Logger())
 
     async def asyncTearDown(self):
         await self.bus.stop()
