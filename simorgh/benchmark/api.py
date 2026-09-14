@@ -176,8 +176,11 @@ class Suite:
         matches = [level for level in levels if folded in level.casefold()]
         return matches[0] if len(matches) == 1 else None
 
-    def sample(self, limit: int, *, level: str = "") -> "Suite":
-        """The first `limit` cases, optionally of one level.
+    def sample(self, limit: int, *, level: str = "", offset: int = 0) -> "Suite":
+        """The first `limit` cases, optionally of one level, starting at
+        `offset` -- still a fixed slice, so a run stays repeatable, but
+        parallel runs of one suite can take different slices instead of
+        all scoring its first cases (the 2026-09-14 benchmark wave).
 
         First rather than random: a run you can repeat is worth more
         here than an unbiased one, because the point is to see movement
@@ -188,7 +191,7 @@ class Suite:
         from a human resolve it through `match_level` first, so that
         "no cases" and "no such level" stay different answers.
         """
-        cases = tuple(c for c in self.cases if not level or c.level == level)
+        cases = tuple(c for c in self.cases if not level or c.level == level)[max(0, offset):]
         return replace(self, cases=cases[:limit] if limit > 0 else cases)
 
 

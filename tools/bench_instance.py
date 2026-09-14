@@ -104,6 +104,7 @@ async def run(args) -> int:
     await kernel.bus.subscribe(topics.BENCHMARK_PROGRESS, _on_progress)
 
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
+    offsets = {suite: max(0, args.offset) for suite in suites}
     turn = 0
     try:
         while time.time() < args.until:
@@ -114,12 +115,17 @@ async def run(args) -> int:
                 if all(s.startswith("swebench") for s in suites):
                     await asyncio.sleep(min(600, max(0, args.until - time.time())))
                 continue
-            payload = {"suite": suite, "limit": args.limit, "note": f"bench wave {args.wave} instance {args.id}"}
+            payload = {"suite": suite, "limit": args.limit, "offset": offsets[suite],
+                       "note": f"bench wave {args.wave} instance {args.id} offset {offsets[suite]}"}
             if args.level:
                 payload["level"] = args.level
             reply = await kernel.bus.request(kernel.bus.new(topics.BENCHMARK_RUN_REQUEST, payload), timeout=120)
             if not reply.payload.get("ok", True) or not reply.payload.get("run_id"):
                 error = reply.payload.get("error") or {}
+                if error.get("code") == "no_cases" and offsets[suite] > 0:
+                    say(args.id, f"{suite}: past the last case at offset {offsets[suite]}, back to the start")
+                    offsets[suite] = 0
+                    continue
                 say(args.id, f"{suite} refused: {error.get('code')} -- {str(error.get('detail'))[:160]}")
                 append(Path(args.out), {"wave": args.wave, "instance": args.id, "suite": suite, "refused": error,
                                         "at": time.time()})
@@ -137,7 +143,7 @@ async def run(args) -> int:
                     try:
                         summary = await asyncio.wait_for(completed.get(), timeout=300)
                     except asyncio.TimeoutError:
-                        summary = {"run_id": run_id, "suite": suite, "partial": True, "note": "no completion after stop"}
+                        summary = None
                     break
                 try:
                     candidate = await asyncio.wait_for(completed.get(), timeout=min(remaining, 300))
@@ -145,9 +151,14 @@ async def run(args) -> int:
                     continue
                 if candidate.get("run_id") == run_id:
                     summary = candidate
+            if summary is None:
+                say(args.id, f"{suite} run {run_id}: no completion after the stop; nothing recorded")
+                break
             row = {k: summary.get(k) for k in ("run_id", "suite", "suite_version", "model", "attempted", "correct",
-                                                "skipped", "accuracy", "seconds", "partial", "by_level")}
-            row.update({"wave": args.wave, "instance": args.id, "at": time.time()})
+                                                "skipped", "accuracy", "seconds", "partial", "by_level", "note")}
+            row.update({"wave": args.wave, "instance": args.id, "offset": offsets[suite], "at": time.time()})
+            offsets[suite] += max(1, int(summary.get("attempted") or 0) + int(summary.get("skipped") or 0)) \
+                if not summary.get("partial") else 0
             append(Path(args.out), row)
             say(args.id, f"finished {suite}: {row.get('correct')}/{row.get('attempted')} correct, "
                          f"{row.get('skipped')} skipped, partial={row.get('partial')}")
@@ -163,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--suites", required=True, help="comma-separated, run in rotation")
     parser.add_argument("--limit", type=int, default=10, help="cases per run")
     parser.add_argument("--level", default="")
+    parser.add_argument("--offset", type=int, default=0, help="where each suite's first slice starts")
     parser.add_argument("--until", type=float, required=True, help="epoch seconds to stop by")
     parser.add_argument("--out", required=True, help="shared JSONL of run summaries")
     parser.add_argument("--wave", default="w1")

@@ -22,6 +22,12 @@
         "null"
       ]
     },
+    "offset": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "refresh": {
       "type": [
         "boolean",

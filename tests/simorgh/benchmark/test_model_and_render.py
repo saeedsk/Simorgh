@@ -26,6 +26,13 @@ class SuiteTestCase(unittest.TestCase):
     def test_levels_are_reported_sorted(self):
         self.assertEqual(self.suite.levels(), ("1", "2", "3"))
 
+    def test_an_offset_takes_a_later_slice_and_slices_do_not_overlap(self):
+        total = len(self.suite)
+        first, second = self.suite.sample(2), self.suite.sample(2, offset=2)
+        self.assertEqual([c.id for c in second.cases], [c.id for c in self.suite.cases[2:4]])
+        self.assertFalse({c.id for c in first.cases} & {c.id for c in second.cases})
+        self.assertEqual(len(self.suite.sample(2, offset=total)), 0, "past the end: no cases")
+
     def test_a_sample_takes_the_first_n_so_a_run_repeats(self):
         first = self.suite.sample(3)
         second = self.suite.sample(3)

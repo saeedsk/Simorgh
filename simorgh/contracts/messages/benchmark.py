@@ -44,6 +44,9 @@ BenchmarkRunRequest = define(t.BENCHMARK_RUN_REQUEST, [
     O("level", Str),
     O("refresh", Bool),
     O("note", Str),
+    # Where in the suite the run's cases start (Suite.sample): parallel
+    # runs of one suite take different slices.
+    O("offset", Int),
 ], doc="Start a benchmark run. One at a time: two runs would measure each other's contention.")
 # `ok`/`error` are added to every `*.reply` by the registry itself.
 BenchmarkRunReply = define(t.BENCHMARK_RUN_REPLY, [

@@ -333,7 +333,7 @@ class Service:
                                               + " -- the number or the name works.")))
                 return
             level = resolved
-        chosen = suite.sample(limit, level=level)
+        chosen = suite.sample(limit, level=level, offset=max(0, int(payload.get("offset") or 0)))
         if not len(chosen):
             await self._ctx.bus.reply(message, type=topics.BENCHMARK_RUN_REPLY,
                                       payload=error_reply_payload("no_cases", (
