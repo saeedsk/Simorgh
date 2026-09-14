@@ -669,7 +669,7 @@ function navMove(dir){const cur=navCurrent();if(!cur){const f=navFirst();if(f)NA
   if(!best)return false;NAV.focus[CUR]=best.dataset.nav;return true;}
 function navScrim(on){let s=$("#navscrim");if(on&&!s){s=document.createElement("div");s.id="navscrim";$("#app").appendChild(s);}else if(!on&&s&&!$("#navlayer"))s.remove();}
 function navLayer(html){navScrim(true);let l=$("#navlayer");if(!l){l=document.createElement("div");l.id="navlayer";l.className="glass navzoom";$("#app").appendChild(l);}if(html!=null)l.innerHTML=html;return l;}
-function navLayerClose(){closeLive("zoom");const l=$("#navlayer");if(l)l.remove();const s=$("#navscrim");if(s)s.remove();}
+function navLayerClose(){navCamMainStop();closeLive("zoom");const l=$("#navlayer");if(l)l.remove();const s=$("#navscrim");if(s)s.remove();}
 function navRestore(){
   document.querySelectorAll(".navf").forEach(e=>e.classList.remove("navf"));
   document.querySelectorAll("#stage .navzoom").forEach(e=>{if(NAV.level!=="zoom"||e.dataset.nav!==NAV.zoom)e.classList.remove("navzoom","navtext");});
@@ -690,7 +690,7 @@ function navZoom(){const el=navCurrent();if(!el)return;const id=el.dataset.nav;N
   if(id.startsWith("mk:")&&!id.startsWith("mk:~")){NAV.tf=TF;navStockDraw(true);navRestore();return;}
   if(id.startsWith("home:")&&id!=="home:np"){render();return;}   // refill the box at its full-screen size
   navRestore();
-  if(id==="home:np"){const box=navEl(id);const m=mediaOf(box);if(m&&m.kind==="yt")ytListen(m.f);setTimeout(()=>navHud(box,""),300);}}
+  if(id==="home:np"){const box=navEl(id);const m=mediaOf(box);if(m&&m.kind==="yt")ytListen(m.f);ytToTv(homeVideo(),box,null);}}
 function navBack(){
   if(NAV.level==="zoom"){const id=NAV.zoom;NAV.zoom="";NAV.level="content";navLayerClose();if(id.startsWith("cam:"))CAMVIEWKEY="";render();return;}
   if(NAV.level==="content"){NAV.level="ribbon";navRestore();return;}
@@ -707,14 +707,16 @@ function navKey(k){
   if(NAV.level==="content"){
     if(CUR==="charts"){
       if(k==="left"||k==="prev")chartsCtl("prev");else if(k==="right"||k==="next")chartsCtl("next");
-      else if(k==="ok"||k==="playpause")chartsCtl("playpause");else if(k==="up"){NAV.level="ribbon";navRestore();}
+      else if(k==="ok")ytToTv(chartsVideo(),$("#charts-player"),()=>chartsCtl("playpause"));
+      else if(k==="playpause")chartsCtl("playpause");else if(k==="up"){NAV.level="ribbon";navRestore();}
       return;}
     if(["left","right","up","down"].includes(k)){if(!navMove(k)&&k==="up")NAV.level="ribbon";navRestore();return;}
     if(k==="ok"){navZoom();return;}
     if(CUR==="deck"&&["playpause","next","prev"].includes(k))npCtl({playpause:"playpause",next:"fwd10",prev:"back10"}[k]);
     return;}
   const id=NAV.zoom;   // zoom: what the keys mean depends on what is open
-  if(id==="home:np"){const act={ok:"playpause",playpause:"playpause",left:"back10",right:"fwd10",prev:"back10",next:"fwd10"}[k];if(act)npCtl(act);return;}
+  if(id==="home:np"){if(k==="ok"){ytToTv(homeVideo(),navEl(id),()=>npCtl("playpause"));return;}
+    const act={playpause:"playpause",left:"back10",right:"fwd10",prev:"back10",next:"fwd10"}[k];if(act)npCtl(act);return;}
   if(id.startsWith("cam:")){if(k==="left"||k==="prev")navCamStep(-1);else if(k==="right"||k==="next")navCamStep(1);return;}
   if(id.startsWith("mk:")&&!id.startsWith("mk:~")){const tfs=["1D","1W","1M","1Y"];
     if(k==="left"||k==="right"){NAV.tf=tfs[(tfs.indexOf(NAV.tf||TF)+(k==="right"?1:-1)+4)%4];navStockDraw(true);}
@@ -724,10 +726,29 @@ function navKey(k){
 // -- a camera full screen and live, whatever the rotation says; BACK gives the grid its players back
 function navCamOpen(name){const tiles=stripTiles();const t0=tiles.find(t=>t.name===name);if(!t0){NAV.zoom="";NAV.level="content";return;}
   const t=Object.assign({},t0,{live:t0.can==="hls",rtc:t0.can==="rtc"});
-  closeLive("zoom");
+  closeLive("zoom");navCamMainStop();
   navLayer('<div id="navcam" style="position:absolute;inset:0;">'+tileHTML(t,0,"max-width:none;width:100%;height:100%;border-radius:0;")+'</div>'
     +'<div class="navhint">◀ ▶ another camera · BACK the grid</div>');
-  mountTile($("#navcam"),t,0,PLAYERS.zoom);}
+  mountTile($("#navcam"),t,0,PLAYERS.zoom);
+  if(t.can==="hls"&&/^cam:\d+$/.test(t.key||""))navCamMain(t);}
+// The full-resolution stream for the camera that is full screen (the creator, 2026-09-14: "prefer high resolution").
+// The sub stream shows at once; Sim starts the main relay, and the player swaps to it when its playlist appears.
+// BACK, or another camera, stops it, so the grid's light streams have the TV's decoders back.
+let NAVMAIN=null;
+function navCamMainStop(){const m=NAVMAIN;NAVMAIN=null;if(!m)return;m.dead=true;
+  fetch(q("/api/dash/cameras/main"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:m.name,action:"stop"})}).catch(()=>{});}
+async function navCamMain(t){const m={name:t.name,dead:false};NAVMAIN=m;const url="/tv/hls/"+t.key.slice(4)+"-main/index.m3u8";
+  const tag=()=>{const x=document.querySelector("#navcam .tag");return x;};
+  try{const r=await fetch(q("/api/dash/cameras/main"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:t.name,action:"start"})});
+    const b=await r.json().catch(()=>({}));if(!r.ok||b.ok===false){const x=tag();if(x)x.textContent="● live · full resolution not available";return;}}catch(e){return;}
+  for(let i=0;i<30&&!m.dead;i++){try{const h=await fetch(q(url),{cache:"no-store"});if(h.ok&&/#EXTM3U/.test(await h.text()))break;}catch(e){}await new Promise(r=>setTimeout(r,500));}
+  if(m.dead||NAVMAIN!==m)return;
+  const v=document.querySelector("#navcam video");if(!v)return;const set=PLAYERS.zoom;
+  set.hls.forEach(h=>{try{h.destroy();}catch(e){}});set.hls=[];
+  if(window.Hls&&Hls.isSupported()){const h=new Hls({lowLatencyMode:true,liveSyncDurationCount:2,maxBufferLength:8,enableWorker:true});
+    h.loadSource(q(url));h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play().catch(()=>{}));set.hls.push(h);}
+  else if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=q(url);v.play().catch(()=>{});}
+  const x=tag();if(x)x.textContent="● live · full resolution";}
 function navCamStep(d){const tiles=stripTiles();const i=tiles.findIndex(t=>"cam:"+t.name===NAV.zoom);if(i<0||!tiles.length)return;
   const n=tiles[(i+d+tiles.length)%tiles.length];NAV.zoom="cam:"+n.name;NAV.focus.cameras=NAV.zoom;navCamOpen(n.name);}
 // -- a stock full screen: the bigger chart, every timeframe, the details the quote carries, the headlines that name it
@@ -780,6 +801,23 @@ function navHud(box,act,note){if(!box)return;let h=box.querySelector("#navhud");
     :(charts?b("prev","⏮ previous")+b("playpause",st.playing?"❚❚ pause":"▶ play")+b("next","next ⏭"):b("back10","↺ 10 s")+b("playpause",st.playing?"❚❚":"▶")+b("fwd10","10 s ↻"))
      +(st.t!=null?'<span class="dim">'+mmss(st.t)+(st.d?" / "+mmss(st.d):"")+'</span>':"");
   h.classList.add("show");clearTimeout(NAV.hudT);NAV.hudT=setTimeout(()=>{const x=box.querySelector("#navhud");if(x)x.classList.remove("show");},3000);}
+// OK on a video the page cannot play well (the TV draws no embedded YouTube): hand it to the TV's own YouTube app,
+// full screen, through Sim (cast_play). If Sim cannot, the page keeps the video it has.
+let YT_HANDOFF_AT=0;
+function homeVideo(){const id=ytId(TV.url||"");if(id)return {id:id,title:TV.title||""};
+  const v=ambientPick();return v&&!(TV.mode&&TV.mode!=="none")?{id:v.id,title:v.title||""}:null;}
+function chartsVideo(){const tvId=ytId(TV.url||"");if(tvId&&(TV.mode==="full"||TV.mode==="frame"))return {id:tvId,title:TV.title||""};
+  // not skipping CHARTS_BAD: that marks what the page's embedded player could not play, which the TV's own app may
+  const q0=chartQueue();const e=q0.find(x=>x.video===CHARTS_PLAYING)||q0.find(x=>!CHARTS_BAD.has(x.video))||q0[0];return e?{id:e.video,title:e.name+" — "+e.artist}:null;}
+async function ytToTv(v,box,fallback){if(!v){if(fallback)fallback();return;}
+  if(Date.now()-YT_HANDOFF_AT<3000)return;YT_HANDOFF_AT=Date.now();
+  navHud(box,"playpause","sending it to the TV's YouTube app…");
+  try{const r=await fetch(q("/api/dash/youtube"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({video:v.id,title:v.title})});
+    const b=await r.json().catch(()=>({}));
+    if(r.ok&&b.ok!==false){navHud(box,"playpause","playing on the TV's YouTube app");return;}
+    navHud(box,"playpause","the TV's YouTube app did not take it"+(b.text?": "+String(b.text).slice(0,80):""));}
+  catch(e){navHud(box,"playpause","Sim is not answering");}
+  if(fallback)fallback();}
 function npCtl(act){const box=navEl("home:np")||$("#dk-np");const m=mediaOf(box);
   if(!m){navHud(box,act,"nothing here to control — say “Sim, play…”");return;}
   if(m.kind==="video"){if(act==="playpause"){if(m.v.paused)m.v.play().catch(()=>{});else m.v.pause();}
