@@ -151,6 +151,7 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
                            "then YouTube plays in the TV's own app at 4K"),
            ("app <name|url>", "open one of the TV's apps (youtube, netflix, disney, prime, spotify, plex) or a link in one"),
            ("key <key>", "press a key on the TV: home, back, ok, play, pause, next, mute, volume up, power"),
+           ("next|pause|play|back|home|mute", "the same keys, shorter: `tv next` skips a track"),
            ("charts [kpop|us]", "play a music chart on the TV top to bottom -- K-pop (Korea's most played) or US pop; "
                                 "the dashboard turns to its Charts view; `tv view charts` does the same")),
     "schedule": (("<15m> <label>", "a reminder later"), ("every <15m> <label>", "a reminder on a repeat"),

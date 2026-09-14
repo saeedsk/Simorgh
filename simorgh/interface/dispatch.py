@@ -803,6 +803,9 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         return await _run("tv_key", {"key": " ".join(rest)})
     if verb in ("charts", "chart"):
         return await _run("tv_charts", {"chart": " ".join(rest) or "kpop"})
+    if verb in ("next", "previous", "pause", "play", "resume", "back", "home", "mute", "ok", "up", "down", "left", "right"):
+        # `tv next` -- the creator typed `next` when Sim said "say next" (2026-09-13)
+        return await _run("tv_key", {"key": "play" if verb == "resume" else verb})
     if verb == "setup":
         return await _run("cast_setup", {"device": " ".join(rest)} if rest else {})
     if verb == "use":
