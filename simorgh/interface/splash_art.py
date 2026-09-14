@@ -32,3 +32,56 @@ ROWS = (
     ((None, None), (None, None), (None, None), (None, None), ((61, 57, 117), None), ((64, 67, 92), None), ((85, 99, 120), (1, 65, 178)), ((72, 98, 129), (14, 60, 125)), ((44, 85, 134), (22, 61, 111)), ((49, 83, 129), (66, 74, 96)), ((111, 108, 108), (68, 83, 105)), ((145, 126, 100), (24, 73, 132)), ((110, 121, 119), (20, 68, 129)), ((112, 127, 126), (18, 60, 115)), ((108, 126, 127), (13, 60, 129)), ((88, 114, 128), (1, 53, 154)), ((50, 80, 110), None), ((7, 34, 94), (23, 84, 136)), ((19, 86, 112), (91, 155, 138)), ((143, 143, 119), (196, 97, 84)), ((74, 122, 155), (91, 90, 121)), ((139, 110, 113), (110, 117, 112)), ((77, 121, 119), (55, 114, 130)), ((69, 100, 111), (53, 55, 92)), ((7, 46, 114), None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None),),
     ((None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, (34, 55, 124)), ((30, 96, 125), (27, 72, 115)), ((48, 122, 128), (21, 71, 111)), ((111, 118, 106), (8, 66, 114)), ((104, 116, 112), (2, 66, 126)), ((32, 88, 118), None), ((22, 56, 119), None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None), (None, None),),
 )
+# --- five Unicode cartoon splash screens (the creator, 2026) ---
+# Plain data plus one random pick; no new runtime dependency. Remove this
+# section (and the cartoon block in render.splash()) to uninstall the
+# feature, or set SIMORGH_CARTOON_SPLASH=0 to just switch it off.
+
+import random
+
+CARTOON_SPLASHES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("the phoenix and the coffee", (
+        r"      ╭───────╮      ",
+        r"      │ ☕ 🔥 │      ",
+        r"   ╭──┴─────┴──╮   ",
+        r"   │  ◉     ◉  │~  ",
+        r"   ╰──┬───┬───┬╯~~~",
+        r"      │ ﹏﹏﹏ │ ~  ",
+        r"      ╰───────╯    ",
+    )),
+    ("thirty birds, one queue", (
+        r"  🐦 🐦 🐦 🐦 🐦 🐦   ",
+        r"  ▶ 🐦 🐦 🐦 🐦 🐦   ",
+        r"  🐦 🐦 🐦 🐦 🐦 ⏳  ",
+        r"  (the queue for wisdom)",
+    )),
+    ("the dramatic reader", (
+        r"   ╭─────────────╮   ",
+        r"   │ 📖 ╭ o o ╮  │   ",
+        r"   │   ╰─ ▽ ─╯  │   ",
+        r"   ╰──────┬──────╯   ",
+        r"      ╶───┴───╮      ",
+        r"      │ →  🐌 │      ",
+        r"      ╰───────╯      ",
+    )),
+    ("the monday mood", (
+        r"  ╔═══════════════╗  ",
+        r"  ║  ◉  z Z z  ◉ ║  ",
+        r"  ║  ~\______/~  ║  ",
+        r"  ╚═══╦═══════╦═══╝  ",
+        r"    ══╩═══════╩══    ",
+    )),
+    ("the grumpy printer", (
+        r"  ┌─────────────┐    ",
+        r"  │ ▤ ⚠  ▒▒▒▒▒ │    ",
+        r"  │ (╯°□°)╯ ⚡  │    ",
+        r"  └───┬─────┬───┘    ",
+        r"   ═══╧═════╧═══    ",
+        r"   paper jam. again. ",
+    )),
+)
+
+
+def pick() -> tuple[str, tuple[str, ...]]:
+    """Return one of the cartoons, chosen at random."""
+    return random.choice(CARTOON_SPLASHES)

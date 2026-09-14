@@ -380,7 +380,9 @@ def splash(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
     drawn in plain block glyphs, so the silhouette still reads. A second
     splash -- one of five Unicode cartoons, picked at random -- follows
     the logo rows, so every startup shows the logo then a cartoon."""
-    from . import cartoon_splash, splash_art
+    import os
+
+    from . import splash_art
 
     rows: list[str] = []
     pad = " " * max(0, (width - splash_art.WIDTH) // 2)
@@ -398,23 +400,24 @@ def splash(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
             else:
                 cells.append(f"\x1b[38;2;{bot[0]};{bot[1]};{bot[2]}m▄{_RESET}")
         rows.append(pad + "".join(cells).rstrip())
-    # The second splash. Sim's own task (36adc95) wrote this docstring
-    # and the import and never the lines below; the creator watched a
-    # startup for the cartoon that was not there (2026-09-13).
-    title, art = cartoon_splash.pick()
-    art_width = max((len(line) for line in art), default=0)
-    art_pad = " " * max(0, (width - art_width) // 2)
-    rows.append("")
-    rows.extend(art_pad + line.rstrip() for line in art)
-    caption = f"— {title} —"
-    rows.append(" " * max(0, (width - len(caption)) // 2) + caption)
+    # One of five Unicode cartoons, picked at random, follows the logo
+    # rows. Cleanly removable: set SIMORGH_CARTOON_SPLASH=0 (or delete
+    # appended cartoon section of splash_art.py) to uninstall it.
+    if (
+        enabled
+        and os.environ.get("SIMORGH_CARTOON_SPLASH", "1") not in ("0", "false", "off")
+    ):
+        name, art = splash_art.pick()
+        cwidth = max(len(line) for line in art)
+        cpad = " " * max(0, (width - cwidth) // 2)
+        rows.append("")
+        rows.extend(cpad + line for line in art)
+        rows.append(cpad + f"~ {name} ~")
     return rows
 
 
 def logo_rows(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
     """The logo alone, no cartoon -- for a caller that wants the emblem."""
-    from . import cartoon_splash  # noqa: F401 -- keeps the import contract of splash()
-
     rows = splash(enabled=enabled, width=width)
     from . import splash_art
 
