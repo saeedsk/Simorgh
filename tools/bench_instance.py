@@ -113,6 +113,13 @@ async def run(args) -> int:
         "runtime": {"data_dir": str(data)},
         "execution": {"repo_root": str(repo)},
         "curiosity": {"autonomy_on_boot": False},
+        # Reflection's own self-improvement work, off. Its hourly pass turns
+        # mined patterns into patch tasks and distillation turns solved cases
+        # into skill tasks; in a benchmark copy those queued beside the cases,
+        # held the worker for minutes, and each landing ran the test suite at
+        # ~5.5 GB -- ten copies of that took the machine out of memory
+        # (2026-09-14).
+        "reflection": {"reflect_after_start_s": 0, "distillation_enabled": False},
     }, None), secrets=EnvSecretStore(dict(os.environ)))
     await kernel.boot()
     say(args.id, f"booted in {repo}")
