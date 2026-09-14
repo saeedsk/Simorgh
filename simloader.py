@@ -875,7 +875,8 @@ def already_verified(repo: Path, notes: Path, *, full: bool, all_tests: bool = F
 
 
 def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollbacks: int,
-            watchdog_s: float, sim_args: list[str], force_gate: bool = False, all_tests: bool = False) -> int:
+            watchdog_s: float, sim_args: list[str], force_gate: bool = False, all_tests: bool = False,
+            reload_loader=None) -> int:
     rule("run")
     say(f"repo {repo}, HEAD {head(repo)}")
     tags = good_tags(repo)
@@ -944,6 +945,13 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
             restarts += 1
             say(f"Sim asked to restart (after {ran_for:.0f}s) -- re-gating the current checkout")
             write_note(notes, {"kind": "restart", "commit": head(repo), "restarts": restarts})
+            if reload_loader is not None:
+                # This process holds the loader as it was when it started;
+                # re-entering through sim.sh brings in the loader's own new
+                # code and sim.sh's checks (live, 2026-09-14: a `restart`
+                # would have gated with the old whole-suite loader). Only
+                # returns if the exec failed -- then loop as before.
+                reload_loader()
             continue
         if returncode != 0 and ran_for < watchdog_s:
             why = f"Sim exited {returncode} after {ran_for:.0f}s, inside the {watchdog_s:.0f}s watchdog"
@@ -990,9 +998,28 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_bless(repo, notes, full=args.full, timeout_s=args.timeout)
     if args.command == "rollback":
         return cmd_rollback(repo, notes, reason=args.reason)
+    invoked = list(sys.argv[1:] if argv is None else argv)
+    if "run" in invoked:
+        invoked.remove("run")
+
+    def reload_loader() -> None:
+        script = repo / "sim.sh"
+        if script.is_file():
+            command = ["bash", str(script), *invoked]
+            executable = shutil.which("bash") or "/bin/bash"
+        else:
+            command = [sys.executable, str(Path(__file__).resolve()), "run", *invoked]
+            executable = sys.executable
+        say("reloading the loader itself, so a change to it applies too")
+        try:
+            os.execv(executable, command)
+        except OSError as exc:
+            say(f"could not reload the loader ({exc!r}); re-gating with this one")
+
     return cmd_run(
         repo, notes, full=args.full, timeout_s=args.timeout, max_rollbacks=args.max_rollbacks,
-        watchdog_s=args.watchdog, sim_args=args.sim_args, force_gate=args.force_gate, all_tests=args.all_tests)
+        watchdog_s=args.watchdog, sim_args=args.sim_args, force_gate=args.force_gate, all_tests=args.all_tests,
+        reload_loader=reload_loader)
 
 
 if __name__ == "__main__":

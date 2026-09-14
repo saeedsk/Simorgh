@@ -402,6 +402,48 @@ class LoaderTestCase(unittest.TestCase):
             self._run(all_tests=True)
         gate.assert_called_once()
 
+    # -- a restart reloads the loader itself ----------------------------------
+    def test_a_restart_reloads_the_loader_before_gating_again(self):
+        """The loader in memory is the one that started; without this a
+        `restart` gated with old loader code."""
+        class _Execd(Exception):
+            pass
+
+        def _reload():
+            raise _Execd()
+
+        with self._gate([(True, "green")]), \
+             mock.patch.object(simloader, "launch_sim", return_value=simloader.RESTART_EXIT_CODE) as sim:
+            with self.assertRaises(_Execd):
+                self._run(reload_loader=_reload)
+        sim.assert_called_once()
+
+    def test_a_failed_reload_falls_back_to_gating_in_this_process(self):
+        with self._gate([(True, "green")]), \
+             mock.patch.object(simloader, "launch_sim", side_effect=[simloader.RESTART_EXIT_CODE, 0]) as sim:
+            self.assertEqual(self._run(reload_loader=lambda: None), 0)
+        self.assertEqual(sim.call_count, 2)
+
+    def test_main_reloads_with_the_same_arguments(self):
+        calls = []
+
+        class _Execd(Exception):
+            pass
+
+        def _execv(executable, command):
+            calls.append((executable, command))
+            raise _Execd()
+
+        argv = ["run", "--repo", str(self.repo.path), "--notes", str(self.notes)]
+        with self._gate([(True, "green")]), \
+             mock.patch.object(simloader, "launch_sim", return_value=simloader.RESTART_EXIT_CODE), \
+             mock.patch.object(simloader.os, "execv", side_effect=_execv):
+            with self.assertRaises(_Execd):
+                simloader.main(argv)
+        executable, command = calls[0]
+        self.assertEqual(executable, sys.executable, "no sim.sh in this repo: the loader itself")
+        self.assertEqual(command[2:], argv)
+
 class LoaderIsIndependentTestCase(unittest.TestCase):
     def test_it_never_imports_the_package_it_boots(self):
         """The one property a bootloader must have."""
