@@ -78,9 +78,10 @@ class _Replies:
 
     async def ask(self, text, *, session_id=None, speaker_name: str = "", confidence: float = 1.0, **kw) -> str:
         self.asked.append(text)
+        index = min(len(self.asked) - 1, len(self.replies) - 1)   # this ask's reply, whatever is asked meanwhile
         if self.delay:
             await asyncio.sleep(self.delay)
-        return self.replies[min(len(self.asked) - 1, len(self.replies) - 1)]
+        return self.replies[index]
 
 
 def _config(**kw) -> Config:
@@ -228,23 +229,50 @@ class TestBargeIn(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(speaker.stopped, 0)
 
 
+def _distinct_questions(session, texts: list[str]) -> None:
+    """The fake recogniser says the same words every turn; these tests
+    need turns that differ (a repeat is its own rule, voice/repeat.py)."""
+    from simorgh.voice.api import Utterance
+    heard = iter(texts)
+
+    async def transcribe(audio, *, language=""):
+        return Utterance(text=next(heard, texts[-1]), confidence=0.95, seconds=audio.seconds, engine="fake")
+    session._stt._inner.transcribe = transcribe  # type: ignore[method-assign]  # noqa: SLF001
+
+
 class TestStaleAndEcho(unittest.IsolatedAsyncioTestCase):
-    async def test_a_reply_to_a_turn_that_is_over_is_never_spoken(self) -> None:
-        # Sim is slow; the person speaks again meanwhile. The first reply
-        # must be dropped, the second spoken.
+    async def test_a_reply_that_arrives_just_after_the_next_question_is_said_late_then_the_next(self) -> None:
+        # Sim is slow; the person asks something else meanwhile. Live
+        # 2026-09-13 the first answer was dropped and the person was left
+        # with nothing: now it is said, late, and the second follows.
         script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
         replies = _Replies(["first answer", "second answer"], delay=0.5)
         session, bus, speaker, tts = _session(_config(), script, replies)
-        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        _distinct_questions(session, ["why did the stock drop", "what is the weather like"])
+        await _run_until(session, lambda: session.stats.turns >= 2, timeout=8.0)
         await asyncio.sleep(0.05)
-        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("dropped")]
-        self.assertEqual(len(spoken), 1)
-        self.assertEqual(spoken[0]["turn"], 2)
-        self.assertEqual(spoken[0]["response"], 1)
-        self.assertNotIn("first answer", " ".join(tts.spoken))
-        dropped = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("dropped")]
-        self.assertIn(1, [p["turn"] for p in dropped], "the screen is told the first answer was not spoken")
-        self.assertIn("later turn", next(p for p in dropped if p["turn"] == 1)["reason"])
+        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("dropped") and not p.get("quiet")]
+        self.assertEqual([p["turn"] for p in spoken], [1, 2])
+        self.assertEqual([p["response"] for p in spoken], [1, 2])
+        self.assertIn("first answer", " ".join(tts.spoken))
+        self.assertIn("second answer", " ".join(tts.spoken))
+        self.assertFalse([p for p in bus.of(topics.VOICE_SPOKEN) if p.get("dropped")])
+
+    async def test_the_same_question_again_is_not_asked_twice(self) -> None:
+        # The person repeats because nothing has come yet: one ask, one
+        # answer, and the screen says why the second turn was not asked.
+        script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["the answer"], delay=0.5)
+        session, bus, speaker, tts = _session(_config(), script, replies)
+        _distinct_questions(session, ["why did nvidia drop five percent", "sim why did nvidia drop five percent this week"])
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        await asyncio.sleep(0.1)
+        self.assertEqual(len(replies.asked), 1, "the repeat is not a second ask")
+        self.assertFalse(bus.of(topics.TASK_CANCEL), "and it does not cancel the first")
+        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("dropped") and not p.get("quiet")]
+        self.assertEqual([p["turn"] for p in spoken], [1])
+        quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet")]
+        self.assertIn("same question again", quiet[-1]["reason"])
 
     async def test_sims_own_words_coming_back_are_not_a_turn(self) -> None:
         script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
@@ -728,9 +756,11 @@ class TestASupersededAskIsCancelled(unittest.IsolatedAsyncioTestCase):
         script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
         replies = _Replies(["first answer", "second answer"], delay=0.6)
         session, bus, speaker, tts = _session(_config(), script, replies)
-        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        _distinct_questions(session, ["what time is it", "how far is the moon"])
+        await _run_until(session, lambda: session.stats.turns >= 2, timeout=8.0)
         cancels = bus.of(topics.TASK_CANCEL)
         self.assertEqual(len(cancels), 1)
         self.assertIn("new turn", cancels[0]["reason"])
-        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("dropped")]
-        self.assertEqual([p["turn"] for p in spoken], [2])
+        # the fake ignores the cancel and answers anyway: said late, then the second
+        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("dropped") and not p.get("quiet")]
+        self.assertEqual([p["turn"] for p in spoken], [1, 2])

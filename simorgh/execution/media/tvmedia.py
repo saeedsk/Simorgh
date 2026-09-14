@@ -10,10 +10,12 @@ own receiver app) works and a framed video does not.
 So the video is fetched on the laptop with yt-dlp -- an open-source
 downloader; YouTube's terms frown on it, and the person is told the
 file is for the TV in this house -- as 720p H.264 with AAC sound, and
-served from `workspace/tv/media/` by Sim's HTTP API. The page plays
-that file in a `<video>` element, with sound. A song takes about five
-seconds to arrive (33 MB, measured); the page shows the thumbnail and
-"fetching" until it does. The cache keeps the newest few gigabytes.
+served from `workspace/tv/media/` by Sim's HTTP API, and the TV's
+plain media player plays it full screen (a `<video>` inside the page
+came out white on the Bravia's Cast browser -- sound, no picture -- so
+"framed" on the TV means full screen, and the dashboard comes back
+when the video ends). A song takes about five seconds to arrive (33 MB
+at 720p, measured). The cache keeps the newest few gigabytes.
 """
 
 from __future__ import annotations
@@ -24,7 +26,8 @@ from pathlib import Path
 
 DEFAULT_DIR = Path("workspace") / "tv" / "media"
 CACHE_CAP_BYTES = 3 * 1024 ** 3
-#: what the Bravia's Cast browser decodes without thinking: H.264 in mp4
+#: what the TV's media player decodes without thinking: H.264 in mp4, up
+#: to 1080p (YouTube's 4K is VP9/AV1 only, and a 4K file is 300 MB+)
 FORMAT = "bv*[height<={h}][ext=mp4][vcodec^=avc1]+ba[ext=m4a]/b[height<={h}][ext=mp4]/b[ext=mp4]/b"
 
 
@@ -32,7 +35,7 @@ def default_dir() -> Path:
     return (Path.cwd() / DEFAULT_DIR).resolve()
 
 
-def fetch(video_id: str, cache_dir: Path | str | None = None, *, max_height: int = 720, timeout_s: float = 180.0,
+def fetch(video_id: str, cache_dir: Path | str | None = None, *, max_height: int = 1080, timeout_s: float = 180.0,
           runner=subprocess.run, which=shutil.which) -> tuple[Path | None, str]:
     """`<cache_dir>/<video_id>.mp4`, fetched if not already there.
     Returns (path, "") or (None, why): yt-dlp missing, the download

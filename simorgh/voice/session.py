@@ -202,7 +202,7 @@ class VoiceSession:
         # turn is asked. On the creator's screen (2026-09-11) five such
         # chats ran at once, each exploring the codebase, and the
         # replies came back late, out of order, and stale.
-        self._outstanding: dict[int, str] = {}
+        self._outstanding: dict[int, tuple[str, str]] = {}
 
     # ------------------------------------------------------------- helpers
     @property
@@ -370,8 +370,12 @@ class VoiceSession:
             await self._tts.cancel(str(action.response_id))
         elif kind == Actions.ASK:
             self._settled.set()
-            await self._cancel_outstanding(before=action.turn_id)
-            self._ask_task = asyncio.create_task(self._guarded(self._ask_and_speak(action.turn_id, action.text)))
+            earlier = self._repeat_of(action.text)
+            if earlier is not None:
+                await self._repeat_waits(action.turn_id, earlier, action.text)
+            else:
+                await self._cancel_outstanding(before=action.turn_id)
+                self._ask_task = asyncio.create_task(self._guarded(self._ask_and_speak(action.turn_id, action.text)))
         elif kind == Actions.SPEAK:
             pass  # handled by `_ask_and_speak`, which minted the response
         elif kind == Actions.DROP_REPLY:
@@ -398,12 +402,42 @@ class VoiceSession:
                 self.turns.state = LISTENING
                 await self._announce(self.turns.state)
 
+    def _repeat_of(self, text: str) -> int | None:
+        """The outstanding turn these words ask again, if any: the same
+        question, or a nudge ("are you there?") while one is owed
+        (voice/repeat.py)."""
+        from .repeat import is_nudge, is_repeat
+
+        if not self._outstanding:
+            return None
+        newest = max(self._outstanding)
+        if is_nudge(text):
+            return newest
+        for turn, (_sid, asked) in sorted(self._outstanding.items(), reverse=True):
+            if is_repeat(text, asked):
+                return turn
+        return None
+
+    async def _repeat_waits(self, turn_id: int, earlier: int, text: str) -> None:
+        """The question is already being answered: this turn is not
+        asked and does not cancel the earlier one. A short "still on
+        it" aloud, when backchannels are on, so the wait is not silence."""
+        self.turns.withdraw_ask(turn_id)
+        self._clocks.pop(turn_id, None)
+        self._log("info", "voice.repeat_waiting", turn=turn_id, of=earlier)
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
+            "reason": f"the same question again; the answer to turn {earlier} is on its way"})
+        if self._config.backchannel and self._backchannel is not None:
+            if await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language_of(text))):
+                self._last_aside_at = self._now()
+
     async def _cancel_outstanding(self, *, before: int) -> None:
         """Ask the Worker to stop the chats for turns older than
-        `before`: their replies would be dropped as stale anyway, and a
-        chat mid-investigation was holding the model for the turn the
-        person actually wants answered."""
-        for turn, session_id in list(self._outstanding.items()):
+        `before`: a chat mid-investigation was holding the model for the
+        turn the person actually wants answered. One whose answer is
+        already in flight still gets spoken (turns.py, `_superseded`)."""
+        for turn, (session_id, _asked) in list(self._outstanding.items()):
             if turn < before:
                 self._outstanding.pop(turn, None)
                 await self._pipeline._publish(topics.TASK_CANCEL, {  # noqa: SLF001
@@ -687,13 +721,13 @@ class VoiceSession:
         language = language_of(text)
         still = asyncio.create_task(self._still_thinking(turn_id, language))
         self._still_task = still
-        self._outstanding[turn_id] = session_id
+        self._outstanding[turn_id] = (session_id, text)
         relation = ""
         if speaker and self._speakers is not None:
             person = self._speakers.get(speaker)
             relation = person.relation if person is not None else ""
-        room = self._room_lines(exclude_text=text)
-        self._room.append((speaker or "someone", text, self._now(), True))
+        room = self._room_lines(exclude_text=text, speaker=speaker)
+        self._room.append((speaker or "someone", text, self._now(), "asked"))
         before, self._last_asked_speaker = self._last_asked_speaker, speaker or ""
         try:
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
@@ -713,6 +747,7 @@ class VoiceSession:
             # spoken aloud, in a warm voice (2026-09-13, 17:46).
             await self._stay_quiet(turn_id)
             return
+        self._room.append(("Sim", _strip_tone(reply), self._now(), "reply"))
         took = clock.reply_at - clock.final_at if clock.final_at else 0.0
         context = Context(user_text=text, language=language, turns=self.stats.turns,
                           turns_since_connector=self._turns_since_connector,
@@ -722,11 +757,27 @@ class VoiceSession:
         await self._speak_reply(turn_id, reply, clock, context)
 
     # ------------------------------------------------------------- the room
-    def _room_lines(self, *, exclude_text: str = "", within_s: float = 180.0) -> str:
+    def _room_lines(self, *, exclude_text: str = "", within_s: float = 180.0, speaker: str = "") -> str:
+        """What the model is told of the room: asides that were not for
+        Sim, and -- for a voice other than the one Sim just answered, or
+        one it could not place -- the last exchange, so "fix for what?"
+        from a new voice has something to refer to (live 2026-09-13: Sim
+        invented an answer)."""
         now = self._now()
-        lines = [f"{who}: {said}" for who, said, at, asked in self._room
-                 if not asked and now - at <= within_s and said != exclude_text]
-        return "\n".join(lines[-8:])
+        lines = [f"{who}: {said}" for who, said, at, kind in self._room
+                 if kind == "aside" and now - at <= within_s and said != exclude_text][-8:]
+        if not speaker or speaker != (self._last_asked_speaker or ""):
+            exchange = []
+            for who, said, at, kind in reversed(self._room):
+                if now - at > 120.0 or said == exclude_text:
+                    continue
+                if kind == "reply" and not exchange:
+                    exchange.append(f"you: {said}")
+                elif kind == "asked" and exchange:
+                    exchange.append(f"{who} (to you): {said}")
+                    break
+            lines = list(reversed(exchange)) + lines
+        return "\n".join(lines)
 
     async def _bystander(self, turn_id: int, speaker: str, text: str) -> bool:
         """True when these words were two people talking to each other and
@@ -749,7 +800,7 @@ class VoiceSession:
                   if now - at <= self._config.exchange_window_s * 2 and who != me and who != "someone"}
         if not others:
             return False
-        self._room.append((me, text, now, False))
+        self._room.append((me, text, now, "aside"))
         partner = sorted(others)[0]
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
@@ -1051,7 +1102,15 @@ class VoiceSession:
             # The person may be starting to talk: wait for that to settle
             # -- a blip is discarded and the reply goes ahead; real
             # speech becomes the next turn and this reply is dropped.
+            hold = next(a for a in actions if a.kind == Actions.HOLD_REPLY)
             self._settled.clear()
+            if "late reply" in hold.reason:
+                # An older answer is being said first; this one follows
+                # when it ends (playback finished sets `_settled`).
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self._settled.wait(), timeout=120.0)
+                actions = self.turns.reply_ready(turn_id)
+                continue
             try:
                 await asyncio.wait_for(self._settled.wait(), timeout=self._config.max_turn_ms / 1000 + 2.0)
             except asyncio.TimeoutError:
@@ -1220,6 +1279,8 @@ class VoiceSession:
         before = self.turns.state
         for action in self.turns.handle_playback_state(state):
             await self._dispatch(action, frame_time=self._now())
+        if state.state in ("finished", "stopped"):
+            self._settled.set()      # a reply held behind a late one may go ahead
         if before != self.turns.state:
             await self._announce(self.turns.state)
 

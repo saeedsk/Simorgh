@@ -32,7 +32,7 @@ class TvMediaTestCase(unittest.TestCase):
         self.assertEqual(cmd[0], "/usr/bin/yt-dlp")
         self.assertIn("https://www.youtube.com/watch?v=RqfZ3UTC14c", cmd)
         self.assertIn("--no-playlist", cmd)
-        self.assertIn("height<=720", cmd[cmd.index("-f") + 1], "720p H.264 is what the TV's browser decodes with ease")
+        self.assertIn("height<=1080", cmd[cmd.index("-f") + 1], "1080p H.264: what the TV plays with ease; 4K on YouTube is VP9 only")
         self.assertIn("+faststart", " ".join(cmd), "the index at the front, so it plays while it loads")
         again, _ = tvmedia.fetch("RqfZ3UTC14c", self.root, runner=runner, which=lambda n: "/usr/bin/yt-dlp")
         self.assertEqual(again, path)

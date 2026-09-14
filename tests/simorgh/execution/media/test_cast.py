@@ -39,6 +39,14 @@ class _FakeCast:
     def play_youtube(self, name, video_id):
         self.calls.append(("play_youtube", name, video_id))
 
+    #: what media_state answers, in order; the last repeats
+    states: list = ["PLAYING", "IDLE"]
+
+    def media_state(self, name):
+        state = self.states[0] if len(self.states) == 1 else self.states.pop(0)
+        self.calls.append(("media_state", name, state))
+        return state
+
     def stop(self, name):
         self.calls.append(("stop", name))
 
@@ -225,6 +233,7 @@ class YouTubeTestCase(unittest.IsolatedAsyncioTestCase):
             cast = _FakeCast()
             tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=cast,
                                                    reachable=lambda url: True, fetch=fake_fetch, media_dir=Path(tmp))}
+            tools["cast_play"].IDLE_POLL_S = 0.01
             bus = _Bus()
             full = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=Ph-wjyyq1nA", "mode": "full",
                                                  "title": "Sugar Man"}, ctx=_ctx(bus))
@@ -233,16 +242,25 @@ class YouTubeTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(bus.published[-1].payload.get("fetching"), "the page is told the video is on its way")
             await asyncio.gather(*tools["cast_play"]._fetches)  # noqa: SLF001
             self.assertEqual(fetched, ["Ph-wjyyq1nA"])
-            self.assertEqual(cast.calls[-1], ("play", "Living Room TV", "http://10.0.0.5:8765/tv/media/Ph-wjyyq1nA.mp4",
-                                              "video/mp4", "Sugar Man"), "the file, through the plain media receiver")
-            self.assertEqual(bus.published[-1].payload["stream"], "/tv/media/Ph-wjyyq1nA.mp4")
+            plays = [c for c in cast.calls if c[0] == "play"]
+            self.assertEqual(plays[-1], ("play", "Living Room TV", "http://10.0.0.5:8765/tv/media/Ph-wjyyq1nA.mp4",
+                                         "video/mp4", "Sugar Man"), "the file, through the plain media receiver")
+            states = [m.payload for m in bus.published if m.type == topics.TV_STATE]
+            self.assertEqual(states[-2]["stream"], "/tv/media/Ph-wjyyq1nA.mp4")
+            # the video ended (PLAYING, then IDLE): the dashboard is put back
+            self.assertEqual(cast.calls[-1], ("show_page", "Living Room TV", "http://10.0.0.5:8765/dash"))
+            self.assertEqual(states[-1], {"mode": "none"})
+            # "framed" on the TV is full screen too: the TV's browser draws a framed video white
+            cast.states = ["PLAYING", "IDLE"]
             framed = await tools["cast_play"].run({"url": "https://youtu.be/Ph-wjyyq1nA"}, ctx=_ctx(bus))
             self.assertTrue(framed.ok)
+            self.assertIn("cannot draw a video inside the page", framed.output)
             self.assertEqual(bus.published[-1].payload["mode"], "frame")
             await asyncio.gather(*tools["cast_play"]._fetches)  # noqa: SLF001
-            self.assertEqual(bus.published[-1].payload, {"mode": "frame", "url": "https://youtu.be/Ph-wjyyq1nA",
-                                                         "stream": "/tv/media/Ph-wjyyq1nA.mp4"})
-            self.assertEqual(len(cast.calls), 1, "a framed video is the page's to play")
+            states = [m.payload for m in bus.published if m.type == topics.TV_STATE]
+            self.assertEqual(states[-2], {"mode": "full", "url": "https://youtu.be/Ph-wjyyq1nA",
+                                          "stream": "/tv/media/Ph-wjyyq1nA.mp4"})
+            self.assertEqual([c for c in cast.calls if c[0] == "play"][-1][2], "http://10.0.0.5:8765/tv/media/Ph-wjyyq1nA.mp4")
 
     async def test_when_the_video_cannot_be_fetched_the_page_is_told_why(self):
         tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=_FakeCast(),
@@ -254,6 +272,24 @@ class YouTubeTestCase(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(*tools["cast_play"]._fetches)  # noqa: SLF001
         self.assertEqual(bus.published[-1].payload["problem"], "yt-dlp is not installed")
         self.assertNotIn("stream", bus.published[-1].payload)
+
+    async def test_without_a_tv_the_page_plays_the_file_itself(self):
+        import tempfile
+
+        class NoTv(_FakeCast):
+            def devices(self):
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tools = {t.name: t for t in cast_tools(Config(cast_page_url="http://10.0.0.5:8765/tv"), cast=NoTv(),
+                                                   reachable=lambda url: True, media_dir=Path(tmp),
+                                                   fetch=lambda v, d: ((Path(d) / f"{v}.mp4").write_bytes(b"x") and None) or (Path(d) / f"{v}.mp4", ""))}
+            bus = _Bus()
+            r = await tools["cast_play"].run({"url": "https://youtu.be/Ph-wjyyq1nA"}, ctx=_ctx(bus))
+            self.assertTrue(r.ok, r.error)
+            await asyncio.gather(*tools["cast_play"]._fetches)  # noqa: SLF001
+            self.assertEqual(bus.published[-1].payload, {"mode": "frame", "url": "https://youtu.be/Ph-wjyyq1nA",
+                                                         "stream": "/tv/media/Ph-wjyyq1nA.mp4"})
 
 
 class MarkerFormsTestCase(unittest.IsolatedAsyncioTestCase):

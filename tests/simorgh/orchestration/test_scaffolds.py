@@ -164,7 +164,8 @@ class TestTheVoiceChannel(unittest.TestCase):
         with_who = scaffolds.render(profiles.VOICE_CHAT, channel="voice", speaker="Ira", speaker_relation="daughter, 9",
                                     room="Saeed: dinner is at six\nIra: I am not hungry")
         self.assertIn("You are speaking with Ira (daughter, 9)", with_who)
-        self.assertIn("Said in the room lately, not to you", with_who); self.assertIn("Saeed: dinner is at six", with_who)
+        self.assertIn("Said in the room lately", with_who); self.assertIn("Saeed: dinner is at six", with_who)
+        self.assertIn("(to you) was asked of you", with_who)
         unplaced = scaffolds.render(profiles.VOICE_CHAT, channel="voice", speaker="Ira", room="someone: I am eating strawberries")
         self.assertIn("never guess a name", unplaced)
         self.assertNotIn("never guess a name", with_who, "only when the room has a voice nobody placed")

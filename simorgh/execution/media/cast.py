@@ -164,6 +164,16 @@ class PyChromecast:
         cast.media_controller.play_media(url, content_type, title=title or None)
         cast.media_controller.block_until_active(timeout=10)
 
+    def media_state(self, name: str) -> str:
+        """The device's player state: PLAYING, PAUSED, BUFFERING, IDLE,
+        UNKNOWN -- for knowing when a video has ended."""
+        cast = self._cast(name)
+        try:
+            cast.media_controller.update_status()
+        except Exception:  # noqa: BLE001 -- the last known status is the answer then
+            pass
+        return str(getattr(cast.media_controller.status, "player_state", "") or "UNKNOWN").upper()
+
     def play_youtube(self, name: str, video_id: str) -> None:
         """YouTube full screen: the Cast protocol has its own YouTube
         receiver, driven by video id -- a YouTube page URL is not a media
@@ -358,14 +368,58 @@ class _CastTool:
             await self._publish_state(ctx, mode, url=url, title=title, problem=problem)
             return
         stream = f"/tv/media/{path.name}"
-        if mode == "full" and backend is not None:
+        if mode == "frame" and backend is None:
+            # No TV to speak of: the page is in a browser and plays the file itself.
             try:
-                await asyncio.to_thread(backend.play, device, self._media_url(path.name), content_type="video/mp4",
-                                        title=title)
-            except Exception as exc:  # noqa: BLE001
-                await self._publish_state(ctx, "full", url=url, title=title, problem=f"{device} would not play it ({exc})")
+                backend = self._backend()
+                device, problem = await asyncio.to_thread(self._device, backend, "")
+            except Exception:  # noqa: BLE001
+                backend, device, problem = None, "", "no TV"
+            if problem or backend is None:
+                await self._publish_state(ctx, "frame", url=url, title=title, stream=stream)
                 return
-        await self._publish_state(ctx, mode, url=url, title=title, stream=stream)
+            # The TV's browser draws a framed video white (the creator,
+            # 2026-09-13: "it plays but it shows as a white screen"), so
+            # on the TV a framed video is full screen, and the dashboard
+            # comes back when it ends.
+            mode = "full"
+        try:
+            await asyncio.to_thread(backend.play, device, self._media_url(path.name), content_type="video/mp4",
+                                    title=title)
+        except Exception as exc:  # noqa: BLE001
+            await self._publish_state(ctx, "full", url=url, title=title, problem=f"{device} would not play it ({exc})")
+            return
+        await self._publish_state(ctx, "full", url=url, title=title, stream=stream)
+        await self._dashboard_back_after(ctx, backend, device)
+
+    #: how often the TV is asked whether the video has ended
+    IDLE_POLL_S = 5.0
+    #: give up watching after this long (a film, and then some)
+    WATCH_MAX_S = 4 * 3600.0
+
+    async def _dashboard_back_after(self, ctx: ToolContext, backend, device: str) -> None:
+        """When the video ends the plain player sits on its idle card;
+        the dashboard is put back. Polls the device's player state."""
+        if not hasattr(backend, "media_state"):
+            return
+        started = time.monotonic()
+        seen_playing = False
+        while time.monotonic() - started < self.WATCH_MAX_S:
+            await asyncio.sleep(self.IDLE_POLL_S)
+            try:
+                state = await asyncio.to_thread(backend.media_state, device)
+            except Exception:  # noqa: BLE001 -- the TV went away; nothing to put back
+                return
+            if state in ("PLAYING", "PAUSED", "BUFFERING"):
+                seen_playing = True
+                continue
+            if state in ("IDLE", "UNKNOWN") and (seen_playing or time.monotonic() - started > 30.0):
+                try:
+                    await asyncio.to_thread(backend.show_page, device, self._page_url("dash"))
+                except Exception:  # noqa: BLE001
+                    return
+                await self._publish_state(ctx, "none")
+                return
 
 
 class CastDevicesTool(_CastTool):
@@ -505,8 +559,9 @@ class CastPlayTool(_CastTool):
                 task = asyncio.create_task(self._fetch_for_tv(ctx, video, url, title))
                 self._fetches.add(task)
                 task.add_done_callback(self._fetches.discard)
-                return ToolResult(ok=True, output=(f"framed inside Sim's page: {title or url} -- fetching the video for "
-                                                   "the TV's own player, with sound; it starts in a few seconds"),
+                return ToolResult(ok=True, output=(f"playing on the TV: {title or url} -- fetching the video first; it "
+                                                   "starts full screen in a few seconds, with sound, and the dashboard "
+                                                   "comes back when it ends (the TV cannot draw a video inside the page)"),
                                   side_effects=("cast_play:frame",), metadata={"mode": mode, "url": url, "video": video})
             await self._publish_state(ctx, "frame", url=url, title=title)
             return ToolResult(ok=True, output=f"framed inside Sim's page: {title or url}",

@@ -92,6 +92,14 @@ class TurnManager:
     # advanced the turn id, the reply was judged stale, and Sim said
     # nothing to "you're not responding".
     _asked_turn: int = 0
+    # The turn whose ask was still owed when a newer one was asked. Its
+    # reply, arriving before the newer turn's, is spoken late rather
+    # than dropped: the person asked it and is waiting. Live 2026-09-13:
+    # a 15 s answer was dropped because the creator spoke meanwhile, the
+    # next answer was dropped the same way, and Sim was blamed for
+    # silence. Once the newer turn is answered the older one is stale.
+    _superseded: int = 0
+    _late_playing: bool = False
     transitions: list[tuple[str, str, str]] = field(default_factory=list)
 
     # -- helpers --------------------------------------------------------------------------------
@@ -200,9 +208,17 @@ class TurnManager:
             self._awaiting_final = False
             self._go(THINKING if self._asked_turn else LISTENING, "heard nothing")
             return []
+        if self._asked_turn and self._asked_turn != self.turn_id:
+            self._superseded = self._asked_turn
         self._asked_turn = self.turn_id
         self._go(THINKING, "final transcript")
         return [Action(Actions.ASK, turn_id=self.turn_id, text=text)]
+
+    def withdraw_ask(self, turn_id: int) -> None:
+        """The turn just asked was the same question again (voice/repeat.py):
+        it is not asked, and the earlier turn's answer is owed as before."""
+        if turn_id == self._asked_turn and self._superseded:
+            self._asked_turn, self._superseded = self._superseded, 0
 
     def reply_ready(self, turn_id: int) -> list[Action]:
         """The model answered `turn_id`. Spoken if that is still the turn
@@ -210,12 +226,24 @@ class TurnManager:
         turn right now (the caller asks again once that settles);
         dropped if a later turn has really been asked."""
         if turn_id != self._asked_turn:
+            if turn_id and turn_id == self._superseded and self.state == THINKING:
+                # Asked, then superseded, answered first: said now, late;
+                # the newer turn's answer follows.
+                self._superseded = 0
+                self._late_playing = True
+                self.response_id += 1
+                self.speaking_response = self.response_id
+                return [Action(Actions.SPEAK, turn_id=turn_id, response_id=self.response_id,
+                               reason="late; the newer turn is still owed")]
             return [Action(Actions.DROP_REPLY, turn_id=turn_id, reason="a later turn was asked")]
         if self.state == USER_SPEAKING:
             return [Action(Actions.HOLD_REPLY, turn_id=turn_id, reason="the person may be speaking")]
+        if self.state == AGENT_SPEAKING and self._late_playing:
+            return [Action(Actions.HOLD_REPLY, turn_id=turn_id, reason="a late reply is being spoken")]
         if self.state != THINKING:
             return [Action(Actions.DROP_REPLY, turn_id=turn_id, reason=f"the session is {self.state}")]
         self._asked_turn = 0
+        self._superseded = 0
         self.response_id += 1
         self.speaking_response = self.response_id
         return [Action(Actions.SPEAK, turn_id=turn_id, response_id=self.response_id)]
@@ -226,8 +254,13 @@ class TurnManager:
                 self._go(AGENT_SPEAKING, "playback started")
             return []
         if state.state in ("finished", "stopped"):
+            owed = self._late_playing and bool(self._asked_turn)
+            self._late_playing = False
             if self.state == AGENT_SPEAKING:
-                self._go(LISTENING if self.auto_listen else IDLE, f"playback {state.state}")
+                if owed:
+                    self._go(THINKING, f"playback {state.state}; the newer turn's answer is still owed")
+                else:
+                    self._go(LISTENING if self.auto_listen else IDLE, f"playback {state.state}")
             elif self.state == INTERRUPTED:
                 # The person who cut in is talking; their turn is under way.
                 self._go(USER_SPEAKING, "playback stopped after barge-in")

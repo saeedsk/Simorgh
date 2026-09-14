@@ -156,8 +156,39 @@ class TestTurnManager(unittest.TestCase):
         tm.handle_vad(_speech(700))
         tm.handle_vad(_silence(600))
         tm.handle_transcript(TranscriptEvent("final", "second question", 2))
-        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.DROP_REPLY])
-        self.assertEqual(tm.response_id, 0)
+        # Live 2026-09-13: the first answer, 15 s in the making, arrived
+        # just after the second question and was thrown away. It is the
+        # answer the person waited for: said now, late; the second follows.
+        late = tm.reply_ready(1)
+        self.assertEqual(_kinds(late), [Actions.SPEAK])
+        self.assertIn("late", late[0].reason)
+        self.assertEqual(tm.response_id, 1)
+        tm.handle_playback_state(PlaybackState("started", "1"))
+        self.assertEqual(_kinds(tm.reply_ready(2)), [Actions.HOLD_REPLY], "the second waits for the first to end")
+        tm.handle_playback_state(PlaybackState("finished", "1"))
+        self.assertEqual(tm.state, THINKING, "the second answer is still owed")
+        self.assertEqual(_kinds(tm.reply_ready(2)), [Actions.SPEAK])
+        tm.handle_playback_state(PlaybackState("started", "2"))
+        tm.handle_playback_state(PlaybackState("finished", "2"))
+        self.assertEqual(tm.state, LISTENING)
+        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.DROP_REPLY], "once the newer is answered the older is stale")
+
+    def test_the_same_question_again_is_withdrawn_and_the_first_answer_is_owed(self) -> None:
+        tm = TurnManager(Policy(min_speech_ms=200, end_of_turn_silence_ms=600))
+        tm.start()
+        tm.handle_vad(VadEvent("speech_start", speech_ms=30))
+        tm.handle_vad(_speech(600))
+        tm.handle_vad(_silence(600))
+        tm.handle_transcript(TranscriptEvent("final", "why did nvidia drop", 1))
+        tm.handle_vad(VadEvent("speech_start", speech_ms=30))
+        tm.handle_vad(_speech(700))
+        tm.handle_vad(_silence(600))
+        tm.handle_transcript(TranscriptEvent("final", "why did nvidia drop this week", 2))
+        tm.withdraw_ask(2)     # the session saw a repeat (voice/repeat.py)
+        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.SPEAK], "not late: the first is the one owed again")
+        self.assertEqual(tm.state, THINKING)
+        tm.handle_playback_state(PlaybackState("started", "1")); tm.handle_playback_state(PlaybackState("finished", "1"))
+        self.assertEqual(tm.state, LISTENING)
 
     def test_ids_only_go_up(self) -> None:
         tm = self._speaking_manager()
@@ -311,15 +342,16 @@ class TestABlipWhileThinkingDoesNotLoseTheReply(unittest.TestCase):
         tm.handle_vad(_silence(600))                              # the blip ends: too short
         self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.SPEAK])
 
-    def test_real_speech_while_thinking_makes_the_reply_stale(self) -> None:
+    def test_real_speech_while_thinking_supersedes_the_reply(self) -> None:
         tm = self._thinking()
         tm.handle_vad(VadEvent("speech_start", speech_ms=30))
         tm.handle_vad(_speech(700))
         tm.handle_vad(_silence(600))
         actions = tm.handle_transcript(TranscriptEvent("final", "never mind, something else", tm.turn_id))
         self.assertEqual(_kinds(actions), [Actions.ASK])
-        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.DROP_REPLY])
+        # The newer answer first: the older is then stale.
         self.assertEqual(_kinds(tm.reply_ready(tm.turn_id)), [Actions.SPEAK])
+        self.assertEqual(_kinds(tm.reply_ready(1)), [Actions.DROP_REPLY])
 
     def test_an_empty_final_during_thinking_keeps_thinking(self) -> None:
         tm = self._thinking()

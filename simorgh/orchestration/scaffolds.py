@@ -154,9 +154,9 @@ _TOOL_NOTES: dict[str, str] = {
     "web_search": "search the web for pages about something; returns titles, URLs and snippets",
     "cast_devices": "the Cast devices (the TV) on the network",
     "cast_show": "put your dashboard on the TV, opened on a view: `CAST_SHOW: home` (or cameras, news, markets, media, discover, ambient); `tv` for the bare terminal",
-    "cast_play": "play a video on the TV: a YouTube page URL or a direct video link; mode frame beside your "
-                 "page, mode full on the TV itself. A YouTube video is fetched as a file first and starts a few "
-                 "seconds later, with sound -- say so",
+    "cast_play": "play a video on the TV: a YouTube page URL or a direct video link. A YouTube video is "
+                 "fetched as a file first and starts full screen a few seconds later, with sound; the dashboard "
+                 "comes back when it ends -- say so. The TV cannot draw a video inside your page",
     "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
     "cast_volume": "the TV's volume, 0-100",
     "dash_view": "turn the dashboard on the TV to a view (home, news, markets, cameras, media, ambient...), a chart "
@@ -406,7 +406,8 @@ def who_is_here(speaker: str, relation: str, room: str, before: str = "") -> str
     else:
         lines.append(STRANGER)
     if room:
-        lines.append("Said in the room lately, not to you (oldest first) -- context, not questions:\n" + room)
+        lines.append("Said in the room lately (oldest first). A line marked (to you) was asked of you and \"you:\" "
+                     "is what you answered; the rest was not for you. Context, not questions:\n" + room)
         if "someone:" in room:
             # Live 2026-09-13: asked "who was just talking about strawberries?",
             # Sim named Saeed. The voice had not been recognised.
@@ -447,6 +448,10 @@ Your own voice, pace and volume are settings you can read and change
 voice you are using, look rather than guess; asked to change it, change it.
 Tool names (cast_show, list_tasks, voice_setting) are yours, not theirs:
 never say one aloud; say what you did or can do in plain words.
+When someone says something went wrong with you -- they did not hear
+you, you did not answer, you got it wrong -- that is not a request to
+fix your code. Say sorry in a few words and what you will do now; do
+not start a task unless they ask for one in so many words.
 You are one presence in a room, not the only one. Speak only when the
 words are for you: they used your name (Sim, Simorgh), or this follows
 on from what you just said, or it is plainly a question or a request
