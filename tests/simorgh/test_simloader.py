@@ -293,6 +293,69 @@ class LoaderTestCase(unittest.TestCase):
         self.assertNotIn("watchdog", (self.notes / "decisions.jsonl").read_text())
 
 
+    # -- the gate is not re-run for source it already passed -----------------
+    def _run(self, **kw):
+        return simloader.cmd_run(self.repo.path, self.notes, full=kw.pop("full", False), timeout_s=10,
+                                 max_rollbacks=3, watchdog_s=60, sim_args=[], **kw)
+
+    def _green_once(self, **kw):
+        with self._gate([(True, "green")]), mock.patch.object(simloader, "launch_sim", return_value=0):
+            self.assertEqual(self._run(**kw), 0)
+
+    def test_an_unchanged_clean_checkout_boots_without_rerunning_the_gate(self):
+        """The creator, 2026-09-14: the gate took seven minutes on a boot
+        of source it had already judged."""
+        self._green_once()
+        with mock.patch.object(simloader, "run_gate") as gate, \
+             mock.patch.object(simloader, "launch_sim", return_value=0) as sim:
+            self.assertEqual(self._run(), 0)
+        gate.assert_not_called()
+        sim.assert_called_once()
+        self.assertIn("gate_reused", (self.notes / "decisions.jsonl").read_text())
+
+    def test_a_new_commit_runs_the_gate_again(self):
+        self._green_once()
+        self.repo.commit("two")
+        with mock.patch.object(simloader, "run_gate", return_value=(True, "green")) as gate, \
+             mock.patch.object(simloader, "launch_sim", return_value=0):
+            self._run()
+        gate.assert_called_once()
+
+    def test_an_uncommitted_change_runs_the_gate_again(self):
+        self._green_once()
+        (self.repo.path / "one.txt").write_text("edited, not committed")
+        with mock.patch.object(simloader, "run_gate", return_value=(True, "green")) as gate, \
+             mock.patch.object(simloader, "launch_sim", return_value=0):
+            self._run()
+        gate.assert_called_once()
+
+    def test_untracked_code_runs_the_gate_again(self):
+        self._green_once()
+        (self.repo.path / "helper.py").write_text("x = 1\n")
+        with mock.patch.object(simloader, "run_gate", return_value=(True, "green")) as gate, \
+             mock.patch.object(simloader, "launch_sim", return_value=0):
+            self._run()
+        gate.assert_called_once()
+
+    def test_a_unit_only_pass_does_not_stand_in_for_full(self):
+        self._green_once()
+        with mock.patch.object(simloader, "run_gate", return_value=(True, "green")) as gate, \
+             mock.patch.object(simloader, "launch_sim", return_value=0):
+            self._run(full=True)
+        gate.assert_called_once()
+
+    def test_force_gate_runs_it_anyway(self):
+        self._green_once()
+        with mock.patch.object(simloader, "run_gate", return_value=(True, "green")) as gate, \
+             mock.patch.object(simloader, "launch_sim", return_value=0):
+            self._run(force_gate=True)
+        gate.assert_called_once()
+
+    def test_a_failed_gate_is_never_remembered_as_green(self):
+        with self._gate([(False, "red")] * 5), mock.patch.object(simloader, "launch_sim", return_value=0):
+            self._run()
+        self.assertFalse((self.notes / simloader.GREEN_FILE).exists())
+
 class LoaderIsIndependentTestCase(unittest.TestCase):
     def test_it_never_imports_the_package_it_boots(self):
         """The one property a bootloader must have."""

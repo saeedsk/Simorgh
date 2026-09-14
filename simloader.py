@@ -773,9 +773,54 @@ def cmd_rollback(repo: Path, notes: Path, *, reason: str) -> int:
 # imports `simorgh` -- see the module docstring).
 RESTART_EXIT_CODE = 75
 
+# The last checkout the gate passed. The suite takes minutes, and a boot
+# (or a `restart`) of source the gate has already judged learns nothing
+# from judging it again (the creator, 2026-09-14: "do it once for any git
+# head and skip it if git head has not changed and there is no
+# uncommitted file").
+GREEN_FILE = "last_green.json"
+
+
+def source_fingerprint(repo: Path) -> str:
+    """The commit the gate would be judging, or "" when the working tree
+    is not exactly that commit -- a tracked change, or untracked code the
+    suite would import -- so no earlier verdict can stand for it."""
+    if is_dirty(repo) or untracked_code(repo):
+        return ""
+    return git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+
+
+def record_green(repo: Path, notes: Path, *, full: bool) -> None:
+    commit = source_fingerprint(repo)
+    if not commit:
+        return
+    try:
+        notes.mkdir(parents=True, exist_ok=True)
+        (notes / GREEN_FILE).write_text(json.dumps({"commit": commit, "full": full, "ts": time.time()}))
+    except OSError as exc:
+        say(f"could not remember this green gate ({exc!r}); the next boot runs it again")
+
+
+def already_verified(repo: Path, notes: Path, *, full: bool) -> str:
+    """Why this checkout needs no gate, or "" when it does: the tree is
+    clean, HEAD is the commit the gate last passed, and that pass covered
+    at least what is asked for now (a unit-only pass does not stand in
+    for `--full`)."""
+    commit = source_fingerprint(repo)
+    if not commit:
+        return ""
+    try:
+        last = json.loads((notes / GREEN_FILE).read_text())
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(last, dict) or last.get("commit") != commit or (full and not last.get("full")):
+        return ""
+    covered = "the unit and trial suites" if last.get("full") else "the unit suite"
+    return f"{commit[:7]} already passed {covered} and nothing has changed since"
+
 
 def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollbacks: int,
-            watchdog_s: float, sim_args: list[str]) -> int:
+            watchdog_s: float, sim_args: list[str], force_gate: bool = False) -> int:
     rule("run")
     say(f"repo {repo}, HEAD {head(repo)}")
     tags = good_tags(repo)
@@ -785,6 +830,11 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
     restarts = 0
     while True:
         while True:
+            verified = "" if force_gate else already_verified(repo, notes, full=full)
+            if verified:
+                say(f"gate not needed: {verified} (--force-gate runs it anyway)")
+                write_note(notes, {"kind": "gate_reused", "commit": head(repo), "why": verified})
+                break
             ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes, allow_skip=True)
             if ok and SKIP_SENTINEL in why:
                 say(f"gate {why}; booting unverified, and nothing is being tagged")
@@ -792,6 +842,7 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
                 break
             if ok:
                 say(f"gate passed: {why}")
+                record_green(repo, notes, full=full)
                 commit = head(repo)
                 stray_code = untracked_code(repo)
                 if stray_code:
@@ -865,6 +916,8 @@ def main(argv: list[str] | None = None) -> int:
                          help=f"where decisions are written for Sim to read "
                               f"(default: <repo>/{NOTES_DIRNAME})")
     parser.add_argument("--full", action="store_true", help="gate with the trial suite too, not just unit tests")
+    parser.add_argument("--force-gate", action="store_true",
+                        help="run the gate even when this exact source already passed it")
     parser.add_argument("--timeout", type=float, default=5400.0, help="seconds the whole gate may take")
     parser.add_argument("--max-rollbacks", type=int, default=3)
     parser.add_argument("--watchdog", type=float, default=60.0, help="a non-zero exit inside this is a bad boot")
@@ -882,8 +935,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_rollback(repo, notes, reason=args.reason)
     return cmd_run(
         repo, notes, full=args.full, timeout_s=args.timeout, max_rollbacks=args.max_rollbacks,
-        watchdog_s=args.watchdog, sim_args=args.sim_args,
-    )
+        watchdog_s=args.watchdog, sim_args=args.sim_args, force_gate=args.force_gate)
 
 
 if __name__ == "__main__":
