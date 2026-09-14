@@ -455,6 +455,28 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("the reply", out)
         self.assertLess(out.index("thinking..."), out.index("the reply"))
 
+    async def test_a_completion_that_lands_before_the_watch_still_prints(self):
+        """The race the loader's gate caught under parallel load
+        (2026-09-14), forced on purpose: the task finishes and publishes
+        its ending before `dispatch()` has returned its id to be watched."""
+        async def _responder(message: Message) -> None:
+            await self.other.publish(self.other.new(topics.TASK_COMPLETED, {
+                "task_id": "wt2", "result_summary": "the answer that came first", "artifacts": [],
+                "verification_ref": "v1",
+            }))
+            for _ in range(20):
+                await asyncio.sleep(0)
+            await self.other.reply(message, type=topics.TASK_CREATE_REPLY, payload={"ok": True, "task_id": "wt2"})
+
+        sub = await self.other.subscribe(topics.TASK_CREATE, _responder)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            await self.service._handle_line("improve web access")
+        await sub.unsubscribe()
+        self.assertIn("task created: wt2", buf.getvalue())
+        self.assertIn("the answer that came first", buf.getvalue())
+        self.assertNotIn("wt2", self.service._watched_tasks)
+
     async def test_a_dispatch_created_task_prints_its_real_completion(self):
         """Live-caught (the creator, real use): `improve web access`
         printed "task created: <id>" and then nothing -- the task really

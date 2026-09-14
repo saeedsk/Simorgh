@@ -170,6 +170,12 @@ class Service:
         # their `task.completed` prints the real `result_summary` instead
         # of resolving an awaited future (nothing's awaiting these).
         self._watched_tasks: set[str] = set()
+        # A task's ending that arrived before anyone watched it. `dispatch()`
+        # returns the new task's id only after the reply, and a fast task
+        # can publish its `task.completed` in between -- which then found
+        # no watch and was dropped (the loader's gate caught it failing
+        # under parallel load, 2026-09-14). `_handle_line` replays it.
+        self._unclaimed_endings: dict[str, Message] = {}
         # What the Kernel last said its state was. A chat typed while
         # paused has nothing to wait for (`_handle_chat`).
         self._system_state = "running"
@@ -647,6 +653,9 @@ class Service:
             if outcome.task_id:
                 self._watched_tasks.add(outcome.task_id)
                 self._turn_started[outcome.task_id] = time.monotonic()
+                ended = self._unclaimed_endings.pop(outcome.task_id, None)
+                if ended is not None:
+                    await self._on_task_event(ended)
             if outcome.exit_repl:
                 self._stop_repl.set()
         except Exception as exc:  # noqa: BLE001 -- the REPL must survive a handler crash (spec section 8)
@@ -1150,6 +1159,10 @@ class Service:
                 topics.TASK_FAILED: "failed",
                 topics.TASK_BLOCKED: "blocked",
             }[message.type])
+            if task_id not in self._pending_turns and task_id not in self._watched_tasks:
+                self._unclaimed_endings[task_id] = message
+                while len(self._unclaimed_endings) > 64:
+                    self._unclaimed_endings.pop(next(iter(self._unclaimed_endings)))
             if task_id in self._pending_turns or task_id in self._watched_tasks:
                 elapsed = now - finished.started_at if finished.started_at is not None else 0.0
                 self._last_done = (panel_mod.breath_word(task_id, elapsed).replace("ing", "ed"), elapsed,
