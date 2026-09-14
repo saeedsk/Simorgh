@@ -52,7 +52,8 @@ class SpeakerBookTestCase(unittest.TestCase):
         # two voices that are legitimately distinct, and a test sample between them
         self.book.enroll("Iris", _vec(1.1))   # cos 1.1 = 0.45 from Ira: under threshold+margin, accepted
         between = self.book.identify(_vec(0.55))   # cos 0.55 = 0.85 to both
-        self.assertFalse(between.known); self.assertIn("too close to call", between.reason)
+        # two voices this alike, both over the bar: the nearer one, as a probable (2026-09-13)
+        self.assertTrue(between.known); self.assertTrue(between.probable); self.assertIn("probably", between.reason)
 
     def test_a_take_that_sounds_like_someone_else_is_refused_with_the_name(self):
         self.book.enroll("Ira", _vec(0.0))

@@ -366,8 +366,13 @@ class SpeakerBook:
             return Identification(name="", score=best_score, runner_up=best.name, runner_up_score=best_score,
                                   reason=f"closest is {best.name} at {best_score:.2f}, under the threshold {self.threshold:.2f}")
         if second is not None and best_score - second_score < self.margin:
-            return Identification(name="", score=best_score, runner_up=runner, runner_up_score=second_score,
-                                  reason=f"{best.name} {best_score:.2f} and {runner} {second_score:.2f} are too close to call")
+            # Two voices this alike -- nine-year-old twins -- used to be
+            # "unknown", and a child who had just enrolled heard "I can't
+            # place you" (2026-09-13). Above the threshold, the nearer one
+            # is the answer, said with the doubt: "probably Ira".
+            return Identification(name=best.name, score=best_score, runner_up=runner, runner_up_score=second_score,
+                                  probable=True,
+                                  reason=f"probably {best.name} at {best_score:.2f}; {runner} is close at {second_score:.2f}")
         return Identification(name=best.name, score=best_score, runner_up=runner, runner_up_score=second_score)
 
     def refine(self, name: str, embedding: Sequence[float]) -> bool:
