@@ -46,7 +46,13 @@ _NOT_NAMES = {"me", "them", "us", "you", "her", "him", "it", "someone", "anyone"
               "afraid", "tired", "busy", "hungry", "his", "her", "their", "my", "your", "this", "that", "it"}
 _SKIP = re.compile(r"^\s*(?:skip|no|none|nothing|never ?mind|pass|not now|later|rather not)\b", re.I)
 _RELATION_LEAD = re.compile(r"^\s*(?:i am|i'm|im|it's|its|this is|his|her|their|the)\s+", re.I)
-_LEARN = re.compile(r"\b(?:learn|remember|meet|enrol+|register|save)\s+(?:the\s+voice\s+of\s+)?([A-Za-z][A-Za-z\-]{1,30})(?:'s|s'|s)?\s*(?:voice)?\b", re.I)
+# "learn Aran's voice", "enrol Megan" -- and no longer "meet Megan" or
+# "remember Megan": a guest introduced to the room was enrolled from the
+# introduction (live 2026-09-13, dropped by the creator a minute later).
+# learn/remember/meet/save need the word "voice"; enrol/register stand alone.
+_LEARN = re.compile(r"\b(?:(?:learn|remember|save)\s+the\s+voice\s+of\s+([A-Za-z][A-Za-z\-]{1,30})\b"
+                    r"|(?:learn|remember|meet|save)\s+([A-Za-z][A-Za-z\-]{1,30})(?:'s|s')?\s+voice\b"
+                    r"|(?:enrol+|register)\s+([A-Za-z][A-Za-z\-]{1,30})(?:'s|s')?\s*(?:voice)?\b)", re.I)
 _LEARN_TAIL = re.compile(r"\b(?:learn|remember|enrol+|register|save)\s+(?:my|this)\s+voice\b", re.I)
 
 
@@ -79,8 +85,10 @@ def learn_request(text: str, *, speaker: str = "") -> str:
     if _LEARN_TAIL.search(text):
         return speaker or "?"
     match = _LEARN.search(text)
-    if match and match.group(1).lower() not in _NOT_NAMES and match.group(1).lower() not in ("my", "this", "your", "the"):
-        return match.group(1)[:1].upper() + match.group(1)[1:]
+    if match:
+        name = next((g for g in match.groups() if g), "")
+        if name and name.lower() not in _NOT_NAMES and name.lower() not in ("my", "this", "your", "the"):
+            return name[:1].upper() + name[1:]
     return ""
 
 

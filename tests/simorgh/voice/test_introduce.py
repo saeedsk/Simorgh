@@ -36,7 +36,9 @@ class ParsersTestCase(unittest.TestCase):
     def test_learn_requests(self):
         self.assertEqual(learn_request("Sim, learn Aran's voice"), "Aran")
         self.assertEqual(learn_request("please remember Iris's voice"), "Iris")
-        self.assertEqual(learn_request("meet Soodeh"), "Soodeh")
+        self.assertEqual(learn_request("meet Soodeh"), "", "an introduction to the room is not a request to enrol (2026-09-13)")
+        self.assertEqual(learn_request("enrol Soodeh"), "Soodeh")
+        self.assertEqual(learn_request("remember Soodeh's voice"), "Soodeh")
         self.assertEqual(learn_request("learn my voice", speaker="Ira"), "Ira")
         self.assertEqual(learn_request("learn my voice"), "?")
         self.assertEqual(learn_request("what time is it"), ""); self.assertEqual(learn_request("learn the piano"), "The" if False else learn_request("learn the piano"))
