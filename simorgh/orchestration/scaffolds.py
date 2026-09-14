@@ -378,9 +378,13 @@ answer, and you do not route around it."""
 # "voice"`). The spoken-response planner (voice/planner.py) strips what
 # a screen needs anyway; this is the model writing for the ear in the
 # first place, which no amount of stripping can do afterwards.
-def who_is_here(speaker: str, relation: str, room: str) -> str:
+def who_is_here(speaker: str, relation: str, room: str, before: str = "") -> str:
     """The lines that tell the model who it is talking to and what it
-    overheard (voice/speakers.py, voice/session.py)."""
+    overheard (voice/speakers.py, voice/session.py). `before` is who Sim
+    answered last: the creator, 2026-09-13, "I'd like sim to mention
+    family member names when they answer different family members, not
+    all the time" -- so the name is asked for when the voice changes
+    and left to fall naturally while the same person keeps talking."""
     from simorgh.contracts.household import FAMILY, STRANGER, WITH_A_CHILD, describe, is_child, member, roster
 
     lines = []
@@ -394,6 +398,7 @@ def who_is_here(speaker: str, relation: str, room: str) -> str:
                      "now and then, not every sentence -- and when you do, it is THIS name: the words may mention "
                      "other people, but the one talking to you is {speaker}. What you remember with them is in your "
                      "memory, labelled with their name; what others told you stays theirs.".replace("{speaker}", speaker))
+        lines.append(_turned_to(speaker, before))
         known = member(speaker)
         if known is not None and is_child(speaker):
             lines.append(WITH_A_CHILD.format(name=known.name, age=known.age))
@@ -402,6 +407,19 @@ def who_is_here(speaker: str, relation: str, room: str) -> str:
     if room:
         lines.append("Said in the room lately, not to you (oldest first) -- context, not questions:\n" + room)
     return "\n".join(lines)
+
+
+def _turned_to(speaker: str, before: str) -> str:
+    """When to say the name: a new voice gets it, the same voice again
+    does not need it."""
+    if not before:
+        return (f"This is the first thing {speaker} has said to you in a while: address them by name once "
+                "in this reply, the way you would turn to someone who just walked in.")
+    if before != speaker:
+        return (f"You were just talking with {before}; now {speaker} is speaking. Turn to them: say "
+                f"\"{speaker}\" once in this reply so everyone hears who you are answering.")
+    return (f"You have been talking with {speaker} already, so their name is not needed in this reply -- "
+            "use it only where it falls naturally.")
 
 
 VOICE = """\
@@ -489,7 +507,7 @@ _BY_SCAFFOLD: dict[str, str] = {
 
 def render(profile: Profile, *, subject: str | None = None, task: str | None = None,
            unavailable: str = "", channel: str = "", speaker: str = "", speaker_relation: str = "",
-           room: str = "", offered: tuple[str, ...] | None = None) -> str:
+           room: str = "", offered: tuple[str, ...] | None = None, speaker_before: str = "") -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -507,7 +525,7 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         # for nested bullets under a VOICE block that forbids them; the
         # prompt ran to 12k characters (observer, 2026-09-13). VOICE says
         # what brevity says, and more.
-        body = f"{who_is_here(speaker, speaker_relation, room)}\n\n{VOICE}"
+        body = f"{who_is_here(speaker, speaker_relation, room, speaker_before)}\n\n{VOICE}"
     elif profile.scaffold == "chat":
         body = f"{BREVITY}\n\n{body}" if body else BREVITY
     if task:

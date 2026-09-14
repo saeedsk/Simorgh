@@ -869,6 +869,7 @@ class SessionRunner:
                     session.profile, subject=session.subject, task=session.user_text,
                     unavailable=scaffolds.unavailable_note(offered), channel=session.channel,
                     speaker=session.speaker, speaker_relation=session.speaker_relation, room=session.room,
+                    speaker_before=getattr(session, "speaker_before", ""),
                     offered=() if no_tools else None,
                 ) + (f"\n\n{session.extra_rules}" if getattr(session, "extra_rules", "") else ""),
                 # Live-caught: this request never actually asked Cognition

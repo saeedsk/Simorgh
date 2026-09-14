@@ -694,10 +694,11 @@ class VoiceSession:
             relation = person.relation if person is not None else ""
         room = self._room_lines(exclude_text=text)
         self._room.append((speaker or "someone", text, self._now(), True))
-        self._last_asked_speaker = speaker or ""
+        before, self._last_asked_speaker = self._last_asked_speaker, speaker or ""
         try:
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
-                                             speaker_name=speaker, speaker_relation=relation, room=room)
+                                             speaker_name=speaker, speaker_relation=relation, room=room,
+                                             speaker_before=before)
         finally:
             self._outstanding.pop(turn_id, None)
             still.cancel()

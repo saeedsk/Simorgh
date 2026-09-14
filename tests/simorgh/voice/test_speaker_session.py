@@ -47,9 +47,10 @@ class _Replies:
         self.calls: list[dict] = []
 
     async def ask(self, text, *, session_id=None, speaker_name: str = "", confidence: float = 1.0,
-                  speaker_relation: str = "", room: str = "") -> str:
+                  speaker_relation: str = "", room: str = "", speaker_before: str = "") -> str:
         self.asked.append((text, speaker_name))
-        self.calls.append({"text": text, "speaker": speaker_name, "relation": speaker_relation, "room": room})
+        self.calls.append({"text": text, "speaker": speaker_name, "relation": speaker_relation, "room": room,
+                           "before": speaker_before})
         return self.reply
 
 
@@ -205,6 +206,8 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         # ...and when Ira names Sim, what was said in the room comes along as context
         self.assertIn("Saeed: I think it is late", replies.calls[1]["room"]); self.assertIn("Saeed: we should go to bed", replies.calls[1]["room"])
         self.assertNotIn("what did we decide", replies.calls[1]["room"])
+        # ...and each ask says who Sim answered before it: nobody, then Ira again
+        self.assertEqual([c["before"] for c in replies.calls], ["", "Ira"])
 
     async def test_a_feeling_named_by_the_model_shapes_the_voice_and_is_not_spoken(self):
         self.book.enroll("Ira", _vec(0.0))

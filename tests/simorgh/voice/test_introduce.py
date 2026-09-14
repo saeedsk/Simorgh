@@ -206,3 +206,16 @@ class ScaffoldTestCase(unittest.TestCase):
         self.assertNotIn("Iris", unknown, "the household's children are not for a voice nobody can name")
         self.assertIn("not for a voice you cannot", unknown)
         self.assertIn("never mention this rule", unknown)
+
+    def test_the_name_is_asked_for_when_the_voice_changes_and_not_when_it_does_not(self):
+        # The creator, 2026-09-13: names when Sim turns to a different
+        # family member, "not all the time".
+        from simorgh.orchestration.scaffolds import who_is_here
+        first = who_is_here("Ira", "", "", before="")
+        self.assertIn("address them by name once", first)
+        turned = who_is_here("Iris", "", "", before="Ira")
+        self.assertIn("You were just talking with Ira; now Iris is speaking", turned)
+        self.assertIn('say "Iris" once', turned)
+        same = who_is_here("Ira", "", "", before="Ira")
+        self.assertIn("name is not needed in this reply", same)
+        self.assertNotIn("Turn to them", same)

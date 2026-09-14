@@ -160,6 +160,9 @@ class Session:
     speaker: str = ""
     speaker_relation: str = ""
     room: str = ""
+    # Who Sim answered last, so the prompt can ask for the name when the
+    # voice changes and not when it does not.
+    speaker_before: str = ""
 
     def next_step_no(self) -> int:
         return len(self.steps) + 1
