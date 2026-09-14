@@ -206,6 +206,12 @@ class WhisperAnnotationsTestCase(unittest.TestCase):
         self.assertEqual(clean_transcript(" (silence) "), "")
         self.assertEqual(clean_transcript("[MUSIC] hello there [inaudible]"), "hello there")
         self.assertEqual(clean_transcript("*laughs* okay"), "okay")
+        # Live 2026-09-13: "*crying*" reached Sim, who asked what was wrong.
+        self.assertEqual(clean_transcript("*crying*"), "")
+        self.assertEqual(clean_transcript("*door closes* hi Sim *speaks in Farsi*"), "hi Sim")
+        self.assertEqual(clean_transcript("(sobbing) (speaking in Farsi) (clears throat)"), "")
+        self.assertEqual(clean_transcript("two times three *is* six"), "two times three six",
+                         "an emphasised word is lost too -- the price of never answering a stage direction")
 
     def test_real_words_with_brackets_survive(self):
         from simorgh.voice.stt.whisper_cli import clean_transcript

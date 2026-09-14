@@ -98,13 +98,20 @@ def download_model(name: str, model_dir: Path, *, timeout: float = 600.0) -> tup
 #: non-speech word in parentheses or asterisks. A real parenthetical a
 #: person spoke -- "call foo (the old one)" -- is left alone.
 _SHOUTED = re.compile(r"\[[A-Z0-9_ ]{2,40}\]")
-_KNOWN = re.compile(r"[\[(*](?:silence|inaudible|laughs|laughter|laughing|applause|music|noise|blank(?:_audio)?|"
-                    r"unintelligible|crosstalk|sighs|coughs|coughing|breathing)[\])*]", re.I)
+#: Nobody speaks asterisks: `*crying*`, `*door closes*`, `*speaks in
+#: Farsi*` are the model narrating the room. Live 2026-09-13: a turn
+#: came back as `*crying*` and Sim asked what was wrong.
+_STAGED = re.compile(r"\*[^*\n]{1,40}\*")
+_KNOWN = re.compile(r"[\[(](?:silence|inaudible|laughs|laughter|laughing|chuckles|giggles|applause|music|noise|"
+                    r"blank(?:_audio)?|unintelligible|crosstalk|sighs|sighing|coughs|coughing|breathing|crying|cries|"
+                    r"sobbing|sobs|screaming|screams|yelling|gasps|humming|singing|whistling|clears throat|"
+                    r"footsteps|door (?:opens|closes|slams)|static|beep(?:ing)?|speaking (?:in )?[a-z]+|"
+                    r"speaks (?:in )?[a-z]+|foreign(?: language)?)[\])]", re.I)
 
 
 def clean_transcript(text: str) -> str:
     """The words, with whisper's non-speech annotations removed."""
-    cleaned = _KNOWN.sub(" ", _SHOUTED.sub(" ", text or ""))
+    cleaned = _KNOWN.sub(" ", _STAGED.sub(" ", _SHOUTED.sub(" ", text or "")))
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
