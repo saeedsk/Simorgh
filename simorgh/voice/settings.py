@@ -24,6 +24,7 @@ SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "tts_voice": (str, None, "the voice id (Kokoro: af_heart, af_jessica, ...; `voice voices` lists them)"),
     "tts_farsi_voice": (str, None, "the Piper voice for Farsi"),
     "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),
+    "stt_languages": (str, None, "the languages the house speaks, e.g. en,fa -- a turn heard in another is not answered; \"\" for any"),
     "tts_speed": (float, (0.5, 2.0), "speaking rate, 1.0 = normal"),
     "speaker_id": (str, ("auto", "on", "off"), "auto | on | off -- recognise who is speaking (needs `voice enroll`)"),
     "speaker_threshold": (float, (0.2, 0.95), "how alike a voice must be to count as an enrolled person (cosine)"),

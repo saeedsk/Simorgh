@@ -32,6 +32,11 @@ class Config:
     # Persian sample: exact transcript, 1.3-2.0 s with Metal); `base.en`
     # cannot hear Farsi at all -- `voice models large-v3-turbo`.
     stt_language: str = ""
+    # The languages this house speaks. Whisper, left to detect, called a
+    # line Turkish and Sim answered in Turkish (live 2026-09-13); a turn
+    # heard in a language outside this list is most likely noise and is
+    # not answered. "" allows any.
+    stt_languages: str = "en,fa"
     stt_compute: str = "auto"          # faster_whisper: int8 | float16 | auto
     tts: str = "auto"                  # auto | kokoro | piper | say | chatterbox | miso | fake
     tts_voice: str = "af_jessica"      # Kokoro voice id (the creator's pick); a `say -v` name for `say`

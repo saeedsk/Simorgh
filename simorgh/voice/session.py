@@ -24,7 +24,7 @@ import contextlib
 import time
 import uuid
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from simorgh.contracts.household import HOUSEHOLD
 from simorgh.contracts import topics
@@ -432,6 +432,15 @@ class VoiceSession:
             if await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language_of(text))):
                 self._last_aside_at = self._now()
 
+    def _other_language(self, heard: str) -> str:
+        """The language code whisper heard, when it is not one of the
+        house's (`[voice] stt_languages`); "" otherwise."""
+        allowed = {c.strip().lower()[:2] for c in (self._config.stt_languages or "").split(",") if c.strip()}
+        code = (heard or "").strip().lower()[:2]
+        if not allowed or not code or code in ("au", "un"):     # auto / unknown
+            return ""
+        return "" if code in allowed else code
+
     async def _cancel_outstanding(self, *, before: int) -> None:
         """Ask the Worker to stop the chats for turns older than
         `before`: a chat mid-investigation was holding the model for the
@@ -462,6 +471,16 @@ class VoiceSession:
                         "text": event.text, "partial": True, "turn": turn_id, "confidence": event.confidence,
                         "seconds": event.audio_seconds, "engine": event.engine, "device": self._config.device})
                 else:
+                    other = self._other_language(event.language)
+                    if other and event.text.strip():
+                        # Not a language of this house: whisper's guess for
+                        # noise, a TV, a song. Heard as nothing.
+                        self._log("info", "voice.other_language", turn=turn_id, language=other, text=event.text[:60])
+                        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+                            "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id,
+                            "quiet": True, "reason": f"heard {other}, not a language of this house "
+                                                     f"({self._config.stt_languages}); probably not speech for me"})
+                        event = replace(event, text="")
                     clock = self._clocks.get(turn_id)
                     if clock is not None:
                         clock.final_at = self._now()

@@ -764,3 +764,24 @@ class TestASupersededAskIsCancelled(unittest.IsolatedAsyncioTestCase):
         # the fake ignores the cancel and answers anyway: said late, then the second
         spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("dropped") and not p.get("quiet")]
         self.assertEqual([p["turn"] for p in spoken], [1, 2])
+
+
+class OtherLanguageTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_a_turn_heard_in_a_language_the_house_does_not_speak_is_not_answered(self) -> None:
+        # Live 2026-09-13: whisper called a line Turkish and Sim answered in Turkish.
+        from simorgh.voice.api import Utterance
+        script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["salaam"])
+        session, bus, speaker, tts = _session(_config(), script, replies)
+        heard = iter([("Hayra Bey, sen bir bak", "tr"), ("saeed kojast", "fa")])
+
+        async def transcribe(audio, *, language=""):
+            text, lang = next(heard, ("hello", "en"))
+            return Utterance(text=text, confidence=0.95, seconds=audio.seconds, engine="fake", language=lang)
+        session._stt._inner.transcribe = transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=8.0)
+        self.assertEqual(replies.asked, ["saeed kojast"], "Farsi is asked; Turkish is not")
+        quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet")]
+        self.assertIn("heard tr, not a language of this house", quiet[0]["reason"])
+        self.assertEqual(session._other_language("auto"), "")  # noqa: SLF001
+        self.assertEqual(session._other_language(""), "")  # noqa: SLF001
