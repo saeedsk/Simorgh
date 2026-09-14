@@ -1900,6 +1900,52 @@ class ListTasksTool:
                           metadata={"count": len(rows), "task_ids": [str(t.get("task_id") or "") for t in rows[:40]]})
 
 
+class MemoryForgetTool:
+    """"Forget the last minute, that was the TV" (the creator,
+    2026-09-13). Sim had said "I'll wipe it from the record" with nothing
+    behind the words. Tombstones what was remembered in a window; the
+    result says how many things went, and that is what is repeated."""
+
+    name = "memory_forget"
+    description = ("Forget what was remembered in the last `minutes` (default 2) -- when told the words were the TV's, "
+                   "or not for you, or to be forgotten. `containing` keeps it to records with those words in them. "
+                   "The result says how many records went; repeat that, never more.")
+    args_schema = {"type": "object", "properties": {"minutes": {"type": "number"}, "containing": {"type": "string"}}}
+    read_only = False
+    reversibility = "irreversible"
+
+    def __init__(self, config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        try:
+            minutes = float(args.get("minutes") or 2.0)
+        except (TypeError, ValueError):
+            return ToolResult(ok=False, error="refused: `minutes` is a number")
+        minutes = max(0.1, min(minutes, 24 * 60.0))
+        containing = str(args.get("containing") or "").strip()
+        bus = getattr(ctx, "bus", None)
+        if bus is None:
+            return ToolResult(ok=False, error="refused: no bus to reach memory")
+        from simorgh.contracts import topics as _topics
+        from simorgh.contracts.envelope import Message as _Message
+
+        try:
+            reply = await bus.request(_Message.new(_topics.MEMORY_FORGET, source="execution", payload={
+                "minutes": minutes, "containing": containing, "kinds": ["episodic"],
+                "reason": f"asked to forget the last {minutes:g} min" + (f" about {containing!r}" if containing else "")}),
+                timeout=10.0)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(ok=False, error=f"refused: memory did not answer ({exc.__class__.__name__}: {exc})")
+        count = int((reply.payload or {}).get("forgotten") or 0)
+        what = f"the last {minutes:g} minute{'s' if minutes != 1 else ''}" + (f" about \"{containing}\"" if containing else "")
+        if not count:
+            return ToolResult(ok=True, output=f"nothing remembered from {what} -- there was nothing to forget",
+                              metadata={"forgotten": 0})
+        return ToolResult(ok=True, output=f"forgot {count} thing{'s' if count != 1 else ''} remembered from {what}",
+                          side_effects=("memory_forget",), metadata={"forgotten": count})
+
+
 class CancelTaskTool:
     """Stop tasks: one by id, every waiting task of an origin, or all but one.
 
@@ -2551,7 +2597,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
         ReplaceInFileTool(config), StartTaskTool(config), ListTasksTool(config), CancelTaskTool(config),
-        VoiceSettingTool(config),
+        VoiceSettingTool(config), MemoryForgetTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),

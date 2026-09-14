@@ -261,6 +261,13 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "benchmark":
         return await _benchmark(bus, args)
 
+    if name == "forget":
+        words = (args or "").split()
+        minutes = 2.0
+        if words and re.fullmatch(r"\d+(?:\.\d+)?", words[0]):
+            minutes, words = float(words[0]), words[1:]
+        return await _run_tool(bus=bus, ledger=ledger, tool="memory_forget", session_id=session_id, timeout=30.0,
+                               raw=json.dumps({"minutes": minutes, "containing": " ".join(words)}))
     if name == "cancel":
         # Until 2026-09-08 there was no way to stop anything. A task that
         # had stopped being useful ran to its step budget while holding

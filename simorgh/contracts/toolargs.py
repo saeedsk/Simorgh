@@ -247,7 +247,8 @@ def key_values(text: str) -> dict:
 MARKER_KEY_VALUES: dict[str, str] = {
     "cancel_task": "task_id",
     "list_tasks": "all",
-    "voice_setting": "key",     # `VOICE_SETTING: tts_voice af_heart` or `key=tts_voice value=af_heart` or `voices`
+    "voice_setting": "key",
+    "memory_forget": "minutes",     # `MEMORY_FORGET: 2` or `minutes=5 containing=TV`     # `VOICE_SETTING: tts_voice af_heart` or `key=tts_voice value=af_heart` or `voices`
 }
 
 

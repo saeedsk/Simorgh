@@ -42,3 +42,11 @@ MemoryConsolidated = define(t.MEMORY_CONSOLIDATED, [
     F("pruned", Int),
 ])
 MemoryForgotten = define(t.MEMORY_FORGOTTEN, [F("refs", List(Str)), F("reason", Str)])
+# "forget the last minute, that was all from TV" (the creator, 2026-09-13):
+# the last `minutes`, or `since`..`until`; `kinds` default episodic;
+# `containing` keeps it to records with those words. Request/reply.
+MemoryForget = define(t.MEMORY_FORGET, [
+    O("minutes", Float), O("since", Float), O("until", Float), O("kinds", List(MEMORY_KIND)),
+    O("containing", Str), O("reason", Str),
+])
+MemoryForgetReply = define(t.MEMORY_FORGET_REPLY, [F("forgotten", Int), F("refs", List(Str)), O("since", Float)])

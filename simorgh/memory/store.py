@@ -427,6 +427,30 @@ class MemoryEngine:
             flagged.append((ref_a, ref_b, evidence))
         return flagged
 
+    async def forget_window(self, *, since: float, until: float | None = None, kinds: tuple[str, ...] = ("episodic",),
+                            containing: str = "", reason: str) -> list[str]:
+        """Tombstone every live record of `kinds` remembered between
+        `since` and `until` (now), optionally only those whose content
+        has `containing` in it. Returns the refs that went. The creator,
+        2026-09-13: "forget all the one minute conversation, that was
+        all from TV" -- and Sim had promised to, with nothing behind it."""
+        end = until if until is not None else self._clock.now()
+        needle = (containing or "").strip().lower()
+        tombstoned = await self._tombstoned_refs()
+        gone: list[str] = []
+        for kind in kinds:
+            stream = stream_for(kind)
+            for event in await self._ledger.read(stream):
+                ref = f"{stream}:{event.seq}"
+                if ref in tombstoned or not (since <= float(event.ts) <= end):
+                    continue
+                if needle and needle not in str(event.payload.get("content", "")).lower():
+                    continue
+                gone.append(ref)
+        if gone:
+            await self.forget(gone, reason=reason)
+        return gone
+
     async def forget(self, refs: list[str], *, reason: str) -> None:
         await self._ledger.append(TOMBSTONE_STREAM, Event(
             stream=TOMBSTONE_STREAM, type="forgotten", ts=self._clock.now(), trace_id="", causation_id=None,

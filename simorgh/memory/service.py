@@ -57,6 +57,7 @@ class Service:
         self.engine = MemoryEngine(ctx.ledger, self._config, clock=ctx.clock)
         self._sub_retrieve = await ctx.bus.subscribe(topics.MEMORY_RETRIEVE, self._on_retrieve)
         self._sub_store = await ctx.bus.subscribe(topics.MEMORY_STORE, self._on_store)
+        self._sub_forget = await ctx.bus.subscribe(topics.MEMORY_FORGET, self._on_forget)
         self._sub_sleep = await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep)
         self._sub_turn = await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
         self._sub_tick = await ctx.bus.subscribe(topics.SYSTEM_TICK_SECOND, self._on_tick)
@@ -93,7 +94,7 @@ class Service:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise from a background pass
                 pass
             self._first_consolidation = None
-        for sub in (self._sub_retrieve, self._sub_store, self._sub_sleep, self._sub_turn, self._sub_tick):
+        for sub in (self._sub_retrieve, self._sub_store, self._sub_forget, self._sub_sleep, self._sub_turn, self._sub_tick):
             await sub.unsubscribe()
 
     async def _consolidate_after_start(self) -> None:
@@ -127,6 +128,28 @@ class Service:
 
     async def health(self) -> Health:
         return Health.ok()
+
+    async def _on_forget(self, message: Message) -> None:
+        """`memory.forget{minutes | since, until, kinds, containing, reason}`
+        -> `memory.forget.reply{forgotten, refs}`; a `memory.forgotten`
+        event when anything went."""
+        payload = message.payload or {}
+        now = self._ctx.clock.now()
+        if payload.get("since") is not None:
+            since = float(payload["since"])
+        else:
+            minutes = max(0.0, float(payload.get("minutes") or 0.0))
+            since = now - minutes * 60.0
+        until = float(payload["until"]) if payload.get("until") is not None else None
+        kinds = tuple(str(k) for k in (payload.get("kinds") or ["episodic"]))
+        reason = str(payload.get("reason") or "forgotten on request")
+        refs = await self.engine.forget_window(since=since, until=until, kinds=kinds,
+                                               containing=str(payload.get("containing") or ""), reason=reason)
+        if refs:
+            await self._ctx.bus.publish(Message.new(topics.MEMORY_FORGOTTEN, source=self._ctx.source,
+                                                    payload={"refs": refs, "reason": reason}))
+        await self._ctx.bus.reply(message, type=topics.MEMORY_FORGET_REPLY,
+                                  payload={"forgotten": len(refs), "refs": refs, "since": since})
 
     async def _on_retrieve(self, message: Message) -> None:
         payload = message.payload

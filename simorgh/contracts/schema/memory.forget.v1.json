@@ -1,0 +1,56 @@
+{
+  "$id": "https://simorgh.local/schema/memory.forget.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `memory.forget` (catalog v1).",
+  "properties": {
+    "containing": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kinds": {
+      "items": {
+        "enum": [
+          "working",
+          "episodic",
+          "semantic",
+          "procedural"
+        ],
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "minutes": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "since": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "until": {
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "memory.forget",
+  "type": "object"
+}

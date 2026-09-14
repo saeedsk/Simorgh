@@ -298,3 +298,23 @@ class TheReportedScoreIsAboutTheQueryTestCase(MemoryServiceTestCase):
         self.assertIn("confidence_now", item)
         self.assertGreater(item["confidence_now"], 0.0)
         self.assertLessEqual(item["confidence_now"], 1.0 + 1e-9)
+
+
+class ForgetTestCase(MemoryServiceTestCase):
+    async def test_forget_the_last_minutes_over_the_bus(self):
+        # The creator, 2026-09-13: "forget all the one minute conversation, that was all from TV".
+        await self._store_and_wait({"kind": "episodic", "content": "Saeed: the TV said my wife Michelle / Sim: fun test",
+                                    "tags": ["person:Saeed"], "source_ref": ""})
+        await self._store_and_wait({"kind": "semantic", "content": "the creator likes the pool at 30 degrees",
+                                    "tags": [], "source_ref": ""})
+        reply = await self.bus.request(Message.new(topics.MEMORY_FORGET, source="test", payload={"minutes": 5}), timeout=5.0)
+        self.assertEqual(reply.type, topics.MEMORY_FORGET_REPLY)
+        self.assertEqual(reply.payload["forgotten"], 1, "episodic only, by default")
+        recall = await self.bus.request(Message.new(topics.MEMORY_RETRIEVE, source="test", payload={
+            "query": "Michelle", "kinds": ["episodic"], "k": 5}), timeout=5.0)
+        self.assertEqual(recall.payload["items"], [], "the forgotten turn is not recalled")
+        recall = await self.bus.request(Message.new(topics.MEMORY_RETRIEVE, source="test", payload={
+            "query": "pool", "kinds": ["semantic"], "k": 5}), timeout=5.0)
+        self.assertEqual(len(recall.payload["items"]), 1, "other kinds untouched")
+        again = await self.bus.request(Message.new(topics.MEMORY_FORGET, source="test", payload={"minutes": 5}), timeout=5.0)
+        self.assertEqual(again.payload["forgotten"], 0, "nothing forgotten twice")

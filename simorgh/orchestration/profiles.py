@@ -52,7 +52,7 @@ CHAT = Profile(
            # The escape hatch from a one-shot reply into work that
            # resumes. Chat only: a task that starts tasks is a fork
            # bomb, and the tool refuses from inside one anyway.
-           "start_task", "list_tasks", "cancel_task", "voice_setting",
+           "start_task", "list_tasks", "cancel_task", "memory_forget", "voice_setting",
            "propose_mcp_server",
            # The TV (execution/media/cast.py): "put yourself on the TV",
            # "play this on the TV" are chat requests too.
@@ -181,7 +181,7 @@ SKILL = Profile(
 # dig.
 VOICE_CHAT = replace(
     CHAT,
-    tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task", "list_tasks", "cancel_task",
+    tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task", "list_tasks", "cancel_task", "memory_forget",
            "voice_setting", "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "tv_app", "tv_key", "tv_charts",
            "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
            "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch"),

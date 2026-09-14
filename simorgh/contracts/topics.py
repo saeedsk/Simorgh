@@ -131,6 +131,11 @@ MEMORY_STORED = "memory.stored"
 MEMORY_CONTRADICTION_FLAGGED = "memory.contradiction.flagged"
 MEMORY_CONSOLIDATED = "memory.consolidated"
 MEMORY_FORGOTTEN = "memory.forgotten"
+#: "forget the last minute, that was the TV" (the creator, 2026-09-13):
+#: a request to tombstone what was remembered in a window; the reply
+#: says how much went
+MEMORY_FORGET = "memory.forget"
+MEMORY_FORGET_REPLY = "memory.forget.reply"
 # --- 4.10 world / self ----------------------------------------------------
 WORLD_ENV_QUERY = "world.env.query"
 # A camera saw something: motion, a person, a vehicle, an animal

@@ -28,6 +28,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("capabilities", "", "what Sim can actually reach: Node, Docker, optional packages"),
     ("tasks", "[all|work|clear]", "see the backlog (all of it), advance the next item, or wipe it"),
     ("cancel", "<task_id>", "stop a running task"),
+    ("forget", "[minutes] [words]", "forget what Sim remembered in the last minutes (default 2), optionally only records with those words"),
     ("improve", "[path] <description>", "change something, tested before it lands"),
     ("skill", "<topic>", "draft a new reusable skill, audited before it lands"),
     ("plan", "<goal>", "break a goal into tracked steps"),
@@ -79,7 +80,7 @@ SPLASH_COMMANDS = 8
 #: hint) but has no line of its own.
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Look around", ("status", "domains", "capabilities", "config", "alerts", "tool")),
-    ("Work", ("tasks", "cancel", "improve", "skill", "plan", "research", "interests", "benchmark")),
+    ("Work", ("tasks", "cancel", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("Voice, screen and cameras", ("voice", "tv", "next", "cameras", "ring")),
     ("Control", ("auto", "schedule", "mcp", "pause", "resume")),
     ("Session", ("help", "exit")),

@@ -190,6 +190,7 @@ subsystem spec expands the entries it owns. Payload fields are shown as
 - `memory.contradiction.flagged` {ref_a, ref_b, evidence, confidence_after} — emitted when a store or consolidation pass detects two records that cannot both hold (v1's halving-on-contradiction rule)
 - `memory.consolidated` {window, distilled: n, pruned: n}
 - `memory.forgotten` {refs, reason}
+- `memory.forget` / `memory.forget.reply` {minutes? | since?, until?, kinds?: [...] (default episodic), containing?, reason?} → {forgotten: n, refs, since} — tombstones what was remembered in the window ("forget the last minute, that was the TV", 2026-09-13); the `memory_forget` tool and the `forget` command call it
 
 ### 4.10 `world.*` / `self.*`
 - `world.env.query` / `.reply` {what: capability_map|file_index|tools|user_profile|git_state, args?} → {facet, as_of, …} — `file_index` accepts `args: {path, max_chars}` and returns a bounded read-only content preview (World Model reads the repository tree and git state directly as observation; it never writes)
