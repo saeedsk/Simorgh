@@ -298,7 +298,9 @@ person asked for detail. Give the answer, not the path to it; summarise
 rather than enumerate; no preamble, no restating the question, no closing
 offer of more. Every sentence should tell the person something they did
 not have. (The creator, 2026-09-13: Sim's replies are spoken, and a long
-one arrives late; "messages should be short in nature.")"""
+one arrives late; "messages should be short in nature.") Address a person
+by name only when this turn tells you who they are; a typed line carries
+no name, and guessing one ("your turn, Ira") names the wrong child."""
 
 _CHAT = """\
 Answer the person. Use a tool when it would make the answer true rather
