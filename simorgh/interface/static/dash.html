@@ -429,11 +429,14 @@ function syncLive(root,tiles,which){ // the same tiles, a moved window: swap onl
     if(wasOn===isOn){if(!isOn){const img=tile.querySelector("img");if(img&&t.img&&!img.getAttribute("src").startsWith(imgSrc(t)))img.setAttribute("src",imgSrc(t));const tag=tile.querySelector(".tag");if(tag)tag.textContent=t.frame?(ago(t.at)==="now"?"just now":ago(t.at)+" ago"):t.can?"waiting for its turn":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at));}return;}
     if(wasOn)unmountTile(root,i,set);
     if(!isOn){const f=FRAMES[t.name];if(f){t.img=f.url;t.at=f.at;t.frame=true;}}
-    tile.outerHTML=tileHTML(t,i);
+    tile.outerHTML=tileHTML(t,i,which==="grid"?boxStyle(CAM_BOXES[i]):undefined);
     if(isOn)mountTile(root,t,i,set);});}
 function imgSrc(t){return t.img?(t.img.startsWith("data:")?t.img:esc(t.img)+"?t="+Math.floor(t.at||0)):"";}
-function tileHTML(t,i){const playing=t.live||t.rtc;
-  return '<div class="ctile'+(playing?" on":"")+'" data-i="'+i+'" data-name="'+esc(t.name)+'">'+(playing?'<video muted autoplay playsinline'+(t.img?' poster="'+imgSrc(t)+'"':'')+'></video>':(t.img?'<img src="'+imgSrc(t)+'" alt="">':''))
+function jsesc(s){return String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");}
+function tileHTML(t,i,style){const playing=t.live||t.rtc;const nm=jsesc(t.name);
+  const media=playing?'<video muted autoplay playsinline'+(t.img?' poster="'+imgSrc(t)+'"':'')+' onloadedmetadata="noteAspect(\''+nm+'\',this.videoWidth,this.videoHeight)"></video>'
+    :(t.img?'<img src="'+imgSrc(t)+'" alt="" onload="noteAspect(\''+nm+'\',this.naturalWidth,this.naturalHeight)">':'');
+  return '<div class="ctile'+(playing?" on":"")+'"'+(style?' style="'+style+'"':'')+' data-i="'+i+'" data-name="'+esc(t.name)+'">'+media
     +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+(playing?' live':'')+'">'+(t.live?"● live":t.rtc?"● ring live":t.frame?(ago(t.at)==="now"?"just now":ago(t.at)+" ago"):t.can?"waiting for its turn":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>';}
 function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live);const stills=(DATA&&DATA.cameras)||[];const ring=(DATA&&DATA.ring_cameras)||[];
   const tiles=[];const named=new Set();
@@ -469,16 +472,50 @@ function refreshDeck(force){
   const body=$("#dk-term-body");if(body)body.innerHTML=termHTML(true);
 }
 function viewDeck(){return deckSkeleton();}
-let CAMVIEWKEY="";
-// The Cameras view (the creator, 2026-09-14): no strip above, no events panel beside -- the whole stage, tiled so
-// every camera gets the largest equal 16:9 tile that fits.
-function bestGrid(n,W,H){let best=[1,n,0];for(let c=1;c<=n;c++){const r=Math.ceil(n/c);const w=W/c,h=H/r;const fit=Math.min(w,h*16/9);if(fit>best[2])best=[c,r,fit];}return best;}
+let CAMVIEWKEY="";let CAM_BOXES=[];
+// The Cameras view (the creator, 2026-09-14): no strip above, no events panel beside, no space between tiles --
+// a justified wall, each camera at its own real aspect ratio (measured off its own video/still, 16:9 only a
+// starting guess), Ring cameras packed together as one block, everything else after, the whole thing stretched
+// to fill the stage exactly with zero gap.
+const ASPECT={};
+function tileAspect(name){return ASPECT[name]||16/9;}
+function noteAspect(name,w,h){if(!(w>0&&h>0))return;const ar=w/h;const prev=ASPECT[name];
+  if(prev&&Math.abs(prev-ar)/prev<0.02)return;   // already close enough: do not thrash the layout
+  ASPECT[name]=ar;if(CUR==="cameras")render();}
+function justifyRows(items,width,rowH){ // one group's own rows: each row's items share a height that fills `width` exactly
+  const rows=[];let row=[],sumAr=0;
+  items.forEach(it=>{row.push(it);sumAr+=it.ar;if(sumAr*rowH>=width){rows.push({items:row,sumAr});row=[];sumAr=0;}});
+  if(row.length)rows.push({items:row,sumAr});
+  let totalH=0;
+  const laid=rows.map(r=>{const h=width/r.sumAr;totalH+=h;let x=0;
+    const laidRow=r.items.map((it,idx)=>{let w=Math.round(it.ar*h);if(idx===r.items.length-1)w=width-x;const item={i:it.i,x,w,h};x+=w;return item;});
+    return laidRow;});
+  return {rows:laid,totalH};}
+function packCameras(tiles,W,H){ // Ring cameras first as their own block, then everything else; zero gap, exact fill
+  const withAr=arr=>arr.map(t=>({i:t.i,ar:tileAspect(t.name)}));
+  const order=tiles.map((t,i)=>({...t,i}));
+  const ring=withAr(order.filter(t=>t.kind==="ring"));
+  const other=withAr(order.filter(t=>t.kind!=="ring"));
+  if(!ring.length&&!other.length)return [];
+  const heightAt=rh=>{let h=0;if(ring.length)h+=justifyRows(ring,W,rh).totalH;if(other.length)h+=justifyRows(other,W,rh).totalH;return h;};
+  let lo=Math.min(60,H),hi=Math.max(H,60);
+  for(let k=0;k<24;k++){const mid=(lo+hi)/2;if(heightAt(mid)>H)hi=mid;else lo=mid;}
+  const rowsAll=[];
+  if(ring.length)rowsAll.push(...justifyRows(ring,W,lo).rows);
+  if(other.length)rowsAll.push(...justifyRows(other,W,lo).rows);
+  const rawTotal=rowsAll.reduce((a,r)=>a+r[0].h,0)||1;const scale=H/rawTotal;
+  const boxes=[];let y=0;
+  rowsAll.forEach((r,ri)=>{let rh=Math.round(r[0].h*scale);if(ri===rowsAll.length-1)rh=Math.max(1,H-y);
+    r.forEach(it=>{boxes[it.i]={x:it.x,y,w:it.w,h:rh};});y+=rh;});
+  return boxes;}
+function boxStyle(b){return b?('position:absolute;max-width:none;left:'+b.x+'px;top:'+b.y+'px;width:'+b.w+'px;height:'+b.h+'px;'):'';}
 function viewCameras(){
-  const tiles=stripTiles();const n=Math.max(tiles.length,1);const st=$("#stage");const W=st?st.clientWidth||1600:1600,H=st?st.clientHeight||880:880;
-  const [cols,rows]=bestGrid(n,W-12,H-12);
-  const grid=tiles.length?tiles.map((t,i)=>tileHTML(t,i).replace('class="ctile"','class="ctile" style="max-width:none;"')).join(""):'<div class="glass card faint" style="display:flex;align-items:center;justify-content:center;grid-column:1/-1;">no cameras have sent a still yet — `cameras show all dash` (Reolink) or `ring list` (Ring)</div>';
+  const tiles=stripTiles();const st=$("#stage");const W=Math.max(1,st?st.clientWidth||1600:1600),H=Math.max(1,st?st.clientHeight||880:880);
+  CAM_BOXES=tiles.length?packCameras(tiles,W,H):[];
+  const html=tiles.length?tiles.map((t,i)=>tileHTML(t,i,boxStyle(CAM_BOXES[i]))).join("")
+    :'<div class="glass card faint" style="display:flex;align-items:center;justify-content:center;height:100%;">no cameras have sent a still yet — `cameras show all dash` (Reolink) or `ring list` (Ring)</div>';
   setTimeout(()=>{const root=$("#camgrid");if(root){closeLive("grid");mountLive(root,tiles,"grid");}},30);
-  return '<div id="camgrid" class="grid" style="height:100%;grid-template-columns:repeat('+cols+',1fr);grid-template-rows:repeat('+rows+',1fr);gap:8px;">'+grid+'</div>';
+  return '<div id="camgrid" style="position:relative;width:100%;height:100%;overflow:hidden;">'+html+'</div>';
 }
 window.selTF=t=>{TF=t;render();};window.pinStock=s=>{PIN=PIN===s?"":s;render();};
 function majorCard(s){
@@ -567,7 +604,7 @@ const VIEW_ALIAS={news:"deck",discover:"deck",terminal:"deck",home:"deck"};
 function buildDock(){$("#dock").innerHTML=VIEWS.map(([k,n])=>'<div class="dot'+(k===CUR?" on":"")+'" data-k="'+k+'" title="'+n+'"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+ICONS[k]+'</svg></div>').join("");
   $("#dock").querySelectorAll(".dot").forEach(d=>d.onclick=()=>go(d.dataset.k));}
 function render(){try{if(CUR==="deck"){refreshDeck(true);return;}
-  if(CUR==="cameras"){const tiles=stripTiles();const key=tiles.map(t=>t.key).join("|");const grid=$("#camgrid");
+  if(CUR==="cameras"){const tiles=stripTiles();const key=tiles.map(t=>t.key).join("|")+"|"+tiles.map(t=>Math.round(tileAspect(t.name)*20)).join(",");const grid=$("#camgrid");
     if(key===CAMVIEWKEY&&grid){syncLive(grid,tiles,"grid");return;}CAMVIEWKEY=key;captureFrames();closeLive("grid");}
   else if(CAMVIEWKEY){CAMVIEWKEY="";closeLive("grid");}
   $("#stage").innerHTML=(RENDER[CUR]||viewDeck)();}catch(e){$("#stage").innerHTML='<div class="glass card red">render failed: '+esc(e.message)+'</div>';}}
