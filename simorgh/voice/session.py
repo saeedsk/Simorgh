@@ -101,6 +101,8 @@ def _looks_like_question(text: str) -> bool:
 #: an unknown voice this close to an enrolled person is asked "is that you?"
 #: rather than "what is your name?" (the threshold itself is 0.5)
 GUESS_FLOOR = 0.22
+#: "who is talking / speaking / am I / is this" -- answered from the identification, not the model
+_WHO_IS_SPEAKING = re.compile(r"\bwho(?:'s| is| am)\s+(?:i\b|(?:this|that|it)\b|(?:talking|speaking)\b|(?:one\s+of\s+us\s+is\s+)?(?:talking|speaking))|which\s+(?:one\s+)?of\s+us\s+is\s+(?:talking|speaking)", re.I)
 
 
 class VoiceSession:
@@ -661,6 +663,11 @@ class VoiceSession:
         if command is not None:
             await self._obey(turn_id, command)
             return
+        if _WHO_IS_SPEAKING.search(text) and self._speakers is not None and self._speakers.has_voices():
+            # "Who is talking now?" is a fact the voice layer holds; the
+            # model guessed "Iris" at the creator (2026-09-13).
+            await self._answer_who(turn_id, text, identification, clock)
+            return
         text = await self._tidy(text, turn_id)
         if clock.confidence < self._config.min_confidence:
             reply = NOT_SURE.format(text=text)
@@ -843,6 +850,18 @@ class VoiceSession:
                 "device": self._config.device, "corrected": True, "turn": turn_id})
             self._last_user_text = tidied.text
         return tidied.text
+
+    async def _answer_who(self, turn_id: int, text: str, identification, clock: TurnClock) -> None:
+        """The identification, said plainly, without a model call."""
+        if identification is not None and identification.name:
+            who = identification.name
+            said = (f"That sounds like {who}, though I'm not certain." if identification.probable
+                    else f"That's {who}.")
+        else:
+            reason = getattr(identification, "reason", "") if identification is not None else ""
+            said = "I don't recognise this voice." + (" Nobody is enrolled yet." if "nobody" in reason else "")
+        clock.reply_at = self._now()
+        await self._speak_reply(turn_id, said, clock, Context(user_text=text))
 
     async def _obey(self, turn_id: int, command: str) -> None:
         """"Stop", "be quiet", "voice off": done here and now, the model
