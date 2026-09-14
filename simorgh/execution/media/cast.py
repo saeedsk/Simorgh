@@ -1157,7 +1157,8 @@ class TvPairTool(_CastTool):
     description = ("Pair with the TV's own remote protocol (Android TV), once: without a `pin` the TV shows a code; "
                    "with the `pin` the pairing finishes. Unlocks the TV's own apps -- YouTube at 4K, Netflix -- and its "
                    "keys. `device` names the TV when there are several.")
-    args_schema = {"type": "object", "properties": {"pin": {"type": "string"}, "device": {"type": "string"}}}
+    args_schema = {"type": "object", "properties": {"pin": {"type": "string"}, "device": {"type": "string"},
+                                                   "again": {"type": "boolean"}}}
     reversibility = "reversible"
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
@@ -1174,8 +1175,12 @@ class TvPairTool(_CastTool):
         tv = self._androidtv(host)
         pin = str(args.get("pin") or "").strip()
         if not pin:
-            if tv.paired():
-                return ToolResult(ok=True, output=f"already paired with {name} ({host}); `tv pair <code>` again only if the TV forgot Sim",
+            # `paired()` is Sim's own files, not the TV's memory. A TV that
+            # forgot Sim still read "already paired", and with no way to get a
+            # code on screen the hint (`tv pair <code>`) was a dead end: the
+            # creator ran `tv pair` twice and got nowhere (2026-09-14).
+            if tv.paired() and not args.get("again"):
+                return ToolResult(ok=True, output=f"already paired with {name} ({host}); `tv pair again` if the TV forgot Sim",
                                   metadata={"device": name, "host": host, "paired": True})
             problem = await tv.pair_start()
             if problem:

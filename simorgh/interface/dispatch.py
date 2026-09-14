@@ -828,7 +828,7 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     rest = words[1:]
     usage = ("usage: tv setup [device] | devices | use <device> | show [tv|dash] [device] | view <home|discover|cameras|news|"
              "markets|media|terminal|ambient> [1D|1W|1M|1Y] [symbol] | rotate <seconds|off> | scale <factor|auto> | live <n> | "
-             "quality light|full | sound on|off | remote | link | pair [code] | app <name|url> | key <key> | charts [kpop|us] | "
+             "quality light|full | sound on|off | remote | link | pair [again|code] | app <name|url> | key <key> | charts [kpop|us] | "
              "video <url> [full|frame] [device] | stop [frame] | volume <0-100> [device]")
 
     async def _run(tool: str, payload: dict) -> Outcome:
@@ -838,6 +838,8 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     if verb == "devices":
         return await _run("cast_devices", {})
     if verb == "pair":
+        if rest and rest[0].lower() in ("again", "new", "reset", "force"):
+            return await _run("tv_pair", {"again": True})
         return await _run("tv_pair", {"pin": rest[0]} if rest else {})
     if verb == "app":
         if not rest:

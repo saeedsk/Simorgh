@@ -437,6 +437,10 @@ class AndroidTvToolsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(done.ok, done.error); self.assertIn("paired with Living Room TV", done.output)
         again = await tools["tv_pair"].run({}, ctx=_ctx(bus))
         self.assertIn("already paired", again.output)
+        # A TV that forgot Sim still looks paired from here; `again` asks it for a code anyway.
+        fresh = await tools["tv_pair"].run({"again": True}, ctx=_ctx(bus))
+        self.assertTrue(fresh.ok, fresh.error)
+        self.assertIn("showing a code", fresh.output)
         # now a YouTube video goes to the TV's own app, at its best quality
         r = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=RqfZ3UTC14c", "mode": "full",
                                           "title": "Sugar Man"}, ctx=_ctx(bus))
