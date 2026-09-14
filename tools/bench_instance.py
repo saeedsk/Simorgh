@@ -135,6 +135,7 @@ async def run(args) -> int:
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
     offsets = {suite: max(0, args.offset) for suite in suites}
     turn = 0
+    floor_runs = 0
     try:
         while time.time() < args.until:
             suite = suites[turn % len(suites)]
@@ -184,11 +185,28 @@ async def run(args) -> int:
             row = {k: summary.get(k) for k in ("run_id", "suite", "suite_version", "model", "attempted", "correct",
                                                 "skipped", "accuracy", "seconds", "partial", "by_level", "note")}
             row.update({"wave": args.wave, "instance": args.id, "offset": offsets[suite], "at": time.time()})
+            # A run that answered every case in a couple of seconds and got none
+            # right was answered by Cognition's offline floor, not the model: one
+            # truncated Together reply moved copy 6 to the floor and it looped,
+            # recording 0/10 runs a second apart (2026-09-14). Mark it, back off
+            # so the provider's cooldown can pass, and give up after three.
+            attempted = int(summary.get("attempted") or 0)
+            if attempted >= 3 and not summary.get("correct") and float(summary.get("seconds") or 0) < 3.0 * attempted:
+                row["suspect_floor"] = True
+                floor_runs += 1
             offsets[suite] += max(1, int(summary.get("attempted") or 0) + int(summary.get("skipped") or 0)) \
                 if not summary.get("partial") else 0
             append(Path(args.out), row)
             say(args.id, f"finished {suite}: {row.get('correct')}/{row.get('attempted')} correct, "
                          f"{row.get('skipped')} skipped, partial={row.get('partial')}")
+            if row.get("suspect_floor"):
+                if floor_runs >= 3:
+                    say(args.id, "stopping: three runs answered by the offline floor, not the model")
+                    break
+                say(args.id, f"run looks answered by the offline floor ({floor_runs}/3); waiting 10 minutes")
+                await asyncio.sleep(min(600, max(0, args.until - time.time())))
+            else:
+                floor_runs = 0
     finally:
         await kernel.shutdown()
         say(args.id, "shut down")
