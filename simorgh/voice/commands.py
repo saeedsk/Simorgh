@@ -21,7 +21,9 @@ _TRAIL = re.compile(r"\s*(?:please|now|sim|simorgh|شین|سیم|لطفا)?\s*[.
 _PHRASES: dict[str, tuple[str, ...]] = {
     OFF: ("voice off", "turn off the voice", "turn the voice off", "turn off your voice", "switch off the voice",
           "go to sleep", "sleep", "صدا قطع", "صدا رو قطع کن", "صدات رو قطع کن", "بخواب"),
-    MUTE: ("mute", "mute yourself", "stop listening", "گوش نده", "بی‌صدا"),
+    MUTE: ("mute", "mute yourself", "stop listening", "mute your mic", "mute the mic", "mute your microphone",
+           "mute the microphone", "mute your ears", "stop listening to us", "don't listen", "ears off",
+           "گوش نده", "بی‌صدا"),
     STOP: ("stop", "stop talking", "stop it", "be quiet", "quiet", "shut up", "enough", "hush", "shush",
            "that's enough", "okay stop", "ok stop", "stop please", "بس کن", "بسه", "ساکت", "ساکت شو", "خفه شو",
            "دیگه بسه", "کافیه"),
