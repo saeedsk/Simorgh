@@ -43,6 +43,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),
     ("pause", "", "hold everything"),
     ("resume", "", "let it continue"),
+    ("next", "", "skip the track playing on the TV (also: skip; `tv pause` / `tv play` for the rest)"),
     ("help", "[command]", "list everything, or one command's words: help voice"),
     ("exit", "", "leave (Ctrl-D also detaches)"),
 )
@@ -79,7 +80,7 @@ SPLASH_COMMANDS = 8
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Look around", ("status", "domains", "capabilities", "config", "alerts", "tool")),
     ("Work", ("tasks", "cancel", "improve", "skill", "plan", "research", "interests", "benchmark")),
-    ("Voice, screen and cameras", ("voice", "tv", "cameras", "ring")),
+    ("Voice, screen and cameras", ("voice", "tv", "next", "cameras", "ring")),
     ("Control", ("auto", "schedule", "mcp", "pause", "resume")),
     ("Session", ("help", "exit")),
 )

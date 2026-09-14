@@ -796,6 +796,9 @@ class VoiceSession:
                     exchange.append(f"{who} (to you): {said}")
                     break
             lines = list(reversed(exchange)) + lines
+        tv = getattr(self._pipeline, "tv_line", lambda: "")()
+        if tv:
+            lines = [tv] + lines
         return "\n".join(lines)
 
     async def _bystander(self, turn_id: int, speaker: str, text: str) -> bool:

@@ -341,6 +341,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 
     if name == "tv":
         return await _tv(args, bus=bus, ledger=ledger, session_id=session_id)
+    if name in ("next", "skip"):
+        # Sim says "say next"; the person types it (2026-09-13). The TV key, without the model.
+        return await _tv("next", bus=bus, ledger=ledger, session_id=session_id)
 
     if name == "cameras":
         return await _cameras(args, bus=bus, ledger=ledger, session_id=session_id)

@@ -142,6 +142,24 @@ class Pipeline:
         self._subs.append(await self._bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed))
         for topic in (topics.TASK_FAILED, topics.TASK_BLOCKED):
             self._subs.append(await self._bus.subscribe(topic, self._on_task_event))
+        # What is on the TV, so the model knows what "next" and "pause"
+        # are about (live 2026-09-13: a bare "next" got QUIET).
+        self._subs.append(await self._bus.subscribe(topics.TV_STATE, self._on_tv_state))
+
+    #: the last `ui.tv.state`: mode, url, title, native (execution/media/cast.py)
+    tv_state: dict = {}
+
+    async def _on_tv_state(self, message) -> None:
+        self.tv_state = dict(message.payload or {})
+
+    def tv_line(self) -> str:
+        """One line for the prompt: what the TV is playing, or ""."""
+        state = self.tv_state or {}
+        if str(state.get("mode") or "none") not in ("full", "frame"):
+            return ""
+        what = str(state.get("title") or state.get("url") or "something")
+        where = f"in its {state['native']} app" if state.get("native") else "full screen"
+        return f"TV: playing {what} {where}"
 
     async def _on_turn_completed(self, message) -> None:
         payload = message.payload

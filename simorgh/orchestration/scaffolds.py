@@ -154,9 +154,9 @@ _TOOL_NOTES: dict[str, str] = {
     "web_search": "search the web for pages about something; returns titles, URLs and snippets",
     "cast_devices": "the Cast devices (the TV) on the network",
     "cast_show": "put your dashboard on the TV, opened on a view: `CAST_SHOW: home` (or cameras, news, markets, media, discover, ambient); `tv` for the bare terminal",
-    "cast_play": "play a video on the TV: a YouTube page URL or a direct video link. A YouTube video is "
-                 "fetched as a file first and starts full screen a few seconds later, with sound; the dashboard "
-                 "comes back when it ends -- say so. The TV cannot draw a video inside your page",
+    "cast_play": "play a video on the TV: a YouTube page URL or a direct video link. Paired with the TV (it is, "
+                 "since 2026-09-13), a YouTube video opens in the TV's own YouTube app at its best quality -- the "
+                 "result says which route it took; repeat that. The TV cannot draw a video inside your page",
     "cast_stop": "stop the TV's playback (what=frame clears only the framed video)",
     "tv_app": "open one of the TV's own apps (youtube, netflix, disney, prime, spotify, plex) or a link in one; "
               "needs the person to have run `tv pair` once -- if it is refused for that, say so",
@@ -414,7 +414,9 @@ def who_is_here(speaker: str, relation: str, room: str, before: str = "") -> str
         lines.append(STRANGER)
     if room:
         lines.append("Said in the room lately (oldest first). A line marked (to you) was asked of you and \"you:\" "
-                     "is what you answered; the rest was not for you. Context, not questions:\n" + room)
+                     "is what you answered; a line starting \"TV:\" is what the TV is playing right now -- then a bare "
+                     "\"next\", \"skip\", \"pause\", \"louder\" is a request for you (TV_KEY); the rest was not for you. "
+                     "Context, not questions:\n" + room)
         if "someone:" in room:
             # Live 2026-09-13: asked "who was just talking about strawberries?",
             # Sim named Saeed. The voice had not been recognised.
