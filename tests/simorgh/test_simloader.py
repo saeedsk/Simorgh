@@ -444,6 +444,39 @@ class LoaderTestCase(unittest.TestCase):
         self.assertEqual(executable, sys.executable, "no sim.sh in this repo: the loader itself")
         self.assertEqual(command[2:], argv)
 
+class TheLookTestCase(unittest.TestCase):
+    """A terminal gets the card, icons and a moving bar; a log or a pipe
+    gets the plain `[simloader]` lines it always had (2026-09-14)."""
+
+    def test_plain_output_is_unchanged(self):
+        self.assertEqual(simloader.format_say("gate passed", "ok", fancy=False), "[simloader] gate passed")
+        self.assertIn("[simloader] ── gate: core tests ", simloader.format_rule("gate: core tests", fancy=False))
+        self.assertEqual(simloader.format_card([("repo", "/r")], fancy=False), "[simloader] repo /r")
+
+    def test_a_terminal_gets_an_icon_per_outcome(self):
+        self.assertIn("✓", simloader.format_say("gate passed", "ok", fancy=True))
+        self.assertIn("✗", simloader.format_say("gate FAILED", "fail", fancy=True))
+        self.assertIn("↺", simloader.format_say("rolled back", "warn", fancy=True))
+        self.assertIn("⏺", simloader.format_rule("gate: core tests", fancy=True))
+
+    def test_the_card_is_a_closed_box(self):
+        import re
+
+        card = simloader.format_card([("repo", "~/ws/Simorgh"), ("HEAD", "d5703da  main"), ("gate", "core tests")],
+                                     fancy=True)
+        lines = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in card.splitlines()]
+        self.assertTrue(lines[0].startswith("╭") and lines[0].endswith("╮"))
+        self.assertTrue(lines[-1].startswith("╰") and lines[-1].endswith("╯"))
+        self.assertEqual(len({len(line) for line in lines}), 1, f"a ragged edge: {[len(l) for l in lines]}")
+
+    def test_the_bar_says_how_long_is_left_when_it_knows(self):
+        line = simloader.format_progress(label="tests", fraction=0.5, elapsed=20, expected_s=50, fancy=True)
+        self.assertIn("50%", line)
+        self.assertIn("~0:30 left", line)
+        plain = simloader.format_progress(label="tests", fraction=0.5, elapsed=20, expected_s=50, fancy=False)
+        self.assertTrue(plain.startswith("[simloader] "))
+        self.assertNotIn("\\x1b", plain)
+
 class LoaderIsIndependentTestCase(unittest.TestCase):
     def test_it_never_imports_the_package_it_boots(self):
         """The one property a bootloader must have."""

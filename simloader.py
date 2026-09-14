@@ -96,14 +96,68 @@ NOTES_DIRNAME = ".simorgh_loader"
 
 
 # ---------------------------------------------------------------- output
-def say(line: str) -> None:
+# On a terminal the loader draws like the rest of Sim: a card, `⏺` section
+# titles, one icon per outcome, a moving bar (the creator, 2026-09-14:
+# "make the sim loader more modern and visually appealing"). Anywhere else
+# -- a log, a pipe, NO_COLOR -- it prints the plain `[simloader]` lines it
+# always has, so nothing that reads its output has to change.
+_KINDS = {
+    "info": ("⎿", "2"), "note": ("·", "2"), "ok": ("✓", "32"), "fail": ("✗", "31"),
+    "warn": ("↺", "33"), "step": ("▸", "36"),
+}
+_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+def _fancy() -> bool:
+    return _LIVE and "NO_COLOR" not in os.environ
+
+
+def paint(code: str, text: str, *, fancy: bool) -> str:
+    return f"\x1b[{code}m{text}\x1b[0m" if fancy else text
+
+
+def format_say(line: str, kind: str = "info", *, fancy: bool) -> str:
+    if not fancy:
+        return f"[simloader] {line}"
+    icon, code = _KINDS.get(kind, _KINDS["info"])
+    body = line if kind not in ("info", "note") else paint("2", line, fancy=True)
+    return f"  {paint(code, icon, fancy=True)} {body}"
+
+
+def format_rule(title: str, *, fancy: bool, width: int = 64) -> str:
+    if not fancy:
+        return f"\n[simloader] ── {title} " + "─" * max(0, 60 - len(title))
+    label = title[:1].upper() + title[1:]
+    tail = "─" * max(2, width - len(label) - 4)
+    return f"\n{paint('1;36', '⏺', fancy=True)} {paint('1', label, fancy=True)} {paint('2', tail, fancy=True)}"
+
+
+def say(line: str, kind: str = "info") -> None:
     _live_clear()
-    print(f"[simloader] {line}", flush=True)
+    print(format_say(line, kind, fancy=_fancy()), flush=True)
 
 
 def rule(title: str) -> None:
     _live_clear()
-    print(f"\n[simloader] ── {title} " + "─" * max(0, 60 - len(title)), flush=True)
+    print(format_rule(title, fancy=_fancy()), flush=True)
+
+
+def format_card(rows: list[tuple[str, str]], *, fancy: bool, title: str = "Simorgh loader") -> str:
+    """The run's opening card: what is being booted, from where."""
+    if not fancy:
+        return "\n".join(f"[simloader] {key} {value}" for key, value in rows)
+    body = max([len(title) + 2] + [6 + len(value) for _key, value in rows])
+    top = "╭─ " + paint("1;35", title, fancy=True) + " " + "─" * (body - len(title) - 1) + "╮"
+    lines = [top]
+    for key, value in rows:
+        lines.append("│ " + paint("2", key.ljust(6), fancy=True) + value.ljust(body - 6) + " │")
+    lines.append("╰" + "─" * (body + 2) + "╯")
+    return "\n".join(lines)
+
+
+def card(rows: list[tuple[str, str]]) -> None:
+    _live_clear()
+    print(("\n" if _fancy() else "") + format_card(rows, fancy=_fancy()), flush=True)
 
 
 # A gate is minutes of silence otherwise. The creator, 2026-09-07:
@@ -143,6 +197,30 @@ def bar(fraction: float, width: int = 24) -> str:
 
 def _mmss(seconds: float) -> str:
     return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
+def fancy_bar(fraction: float, width: int = 28) -> str:
+    fraction = min(1.0, max(0.0, fraction))
+    filled = int(fraction * width)
+    head = "╸" if filled < width else ""
+    rest = width - filled - len(head)
+    return paint("32", "━" * filled + head, fancy=True) + paint("2", "━" * rest, fancy=True)
+
+
+def format_progress(*, label: str, fraction: float, elapsed: float, detail: str = "",
+                    expected_s: float | None = None, fancy: bool) -> str:
+    if not fancy:
+        line = f"[simloader] {bar(fraction)} {fraction * 100:3.0f}%  {label}  {_mmss(elapsed)}"
+        return line + (f"  {detail}" if detail else "")
+    spin = paint("36", _SPINNER[int(elapsed * 10) % len(_SPINNER)], fancy=True)
+    parts = [f"{spin} {paint('1', label, fancy=True)}", fancy_bar(fraction), paint("1", f"{fraction * 100:3.0f}%", fancy=True)]
+    if detail:
+        parts.append(detail)
+    timing = _mmss(elapsed)
+    if expected_s and expected_s > elapsed:
+        timing += f" · ~{_mmss(expected_s - elapsed)} left"
+    parts.append(paint("2", timing, fancy=True))
+    return "  " + "  ".join(parts)
 
 
 SKIP_KEYS = ("s", "S")
@@ -209,8 +287,9 @@ class Progress:
 
     label = "working"
 
-    def __init__(self, started: float) -> None:
+    def __init__(self, started: float, expected_s: float | None = None) -> None:
         self.started = started
+        self.expected_s = expected_s
         self.detail = ""
         self.fraction = 0.0
         self._last_plain = 0.0
@@ -220,9 +299,8 @@ class Progress:
 
     def render(self) -> None:
         elapsed = time.monotonic() - self.started
-        line = f"[simloader] {bar(self.fraction)} {self.fraction * 100:3.0f}%  {self.label}  {_mmss(elapsed)}"
-        if self.detail:
-            line += f"  {self.detail}"
+        line = format_progress(label=self.label, fraction=self.fraction, elapsed=elapsed, detail=self.detail,
+                               expected_s=self.expected_s, fancy=_fancy())
         if _LIVE:
             _live(line)
         elif elapsed - self._last_plain >= _HEARTBEAT_S:
@@ -233,7 +311,7 @@ class Progress:
 class PytestProgress(Progress):
     """pytest -q writes dots and a `[ 42%]` at each line's end."""
 
-    label = "unit suite"
+    label = "tests"
     _PCT = re.compile(r"\[\s*(\d{1,3})%\]")
     # Only a run of progress characters at the start of a line is a
     # result row. Matching bare `[.FEsxX]` anywhere counted ordinary
@@ -244,8 +322,8 @@ class PytestProgress(Progress):
     # worse than no progress line.
     _ROW = re.compile(r"^[.FEsxX]{2,}", re.M)
 
-    def __init__(self, started: float) -> None:
-        super().__init__(started)
+    def __init__(self, started: float, expected_s: float | None = None) -> None:
+        super().__init__(started, expected_s)
         self.tests = 0
         self.failed = 0
         self._buffer = ""
@@ -288,7 +366,7 @@ class TrialProgress(Progress):
             if plain.startswith(("PASS", "FAIL")):
                 self.done += 1
                 self.fraction = self.done / self.total
-                say(f"  {plain}")
+                say(plain, "ok" if plain.startswith("PASS") else "fail")
             elif plain.startswith("→"):
                 self.detail = f"trial {self.done + 1}/{self.total}: {plain[1:].strip()[:60]}"
             elif plain.startswith(("🔧", "🔍", "🎓", "💬", "🗂")):
@@ -487,24 +565,26 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
     rule("gate: unit suite" if all_tests else "gate: core tests")
     last = _baseline_record(notes, scope)
     took = f" -- {last['seconds']:.0f}s last time" if isinstance(last.get("seconds"), (int, float)) else ""
-    say(("running every test" if all_tests else "running the core tests (--all-tests runs every one)") + took)
+    say(("running every test" if all_tests else "running the core tests (--all-tests runs every one)") + took, "note")
     with SkipWatch(allow_skip) as skip:
         if skip.enabled:
-            say("press s to skip the gate and boot anyway (nothing will be tagged known-good)")
+            say("press s to skip the gate and boot anyway (nothing will be tagged known-good)", "note")
         try:
             code, unit_out = stream(
                 [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *pytest_parallel_args(),
                  *gate_selection(repo, all_tests=all_tests)],
-                cwd=repo, timeout_s=timeout_s, progress=PytestProgress(started), skip=skip,
+                cwd=repo, timeout_s=timeout_s, progress=PytestProgress(started, last.get("seconds") if isinstance(last.get("seconds"), (int, float)) else None),
+                skip=skip,
             )
         except GateSkipped:
-            say("skipped the unit suite at your request -- this checkout is UNVERIFIED")
+            say("skipped the unit suite at your request -- this checkout is UNVERIFIED", "warn")
             return True, f"{SKIP_SENTINEL} during the unit suite"
         except subprocess.TimeoutExpired:
             return False, f"unit suite exceeded {timeout_s:.0f}s"
         tests = subprocess.CompletedProcess(args=[], returncode=code, stdout=unit_out, stderr="")
         tail = (tests.stdout.strip().splitlines() or [""])[-1]
-        say(f"unit suite: {tail}  ({time.monotonic() - started:.0f}s)")
+        say(f"tests: {tail}  ({time.monotonic() - started:.0f}s)",
+            "fail" if re.search(r"\\b\\d+ (failed|errors?)\\b", tail) else "ok")
         if notes is not None:
             notes.mkdir(parents=True, exist_ok=True)
             (notes / "last_unit.txt").write_text(tests.stdout)
@@ -518,9 +598,9 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
             failed = [line.strip() for line in tests.stdout.splitlines()
                       if line.startswith(("FAILED ", "ERROR "))]
             for line in failed[:12]:
-                say(line)
+                say(line, "fail")
             if len(failed) > 12:
-                say(f"... and {len(failed) - 12} more (full output: {notes / 'last_unit.txt' if notes else 'not kept'})")
+                say(f"... and {len(failed) - 12} more (full output: {notes / 'last_unit.txt' if notes else 'not kept'})", "fail")
             return False, f"unit suite failed: {unit_why} ({tail})"
         write_baseline(notes, ran, scope, seconds=time.monotonic() - started)
         if not full:
@@ -537,7 +617,7 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
                 cwd=repo, timeout_s=remaining, progress=TrialProgress(trial_started, total), skip=skip,
             )
         except GateSkipped:
-            say("skipped the trial suite at your request -- the unit suite passed, the trials did not run")
+            say("skipped the trial suite at your request -- the unit suite passed, the trials did not run", "warn")
             return True, f"{SKIP_SENTINEL} during the trial suite"
         except subprocess.TimeoutExpired:
             return False, f"trial suite exceeded {remaining:.0f}s"
@@ -551,7 +631,7 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
         # three "blocked" trials and this summary alone could not say why.
         notes.mkdir(parents=True, exist_ok=True)
         (notes / "last_trials.txt").write_text(trials.stdout)
-        say(f"full trial output: {notes / 'last_trials.txt'}")
+        say(f"full trial output: {notes / 'last_trials.txt'}", "note")
     if trials.returncode != 0:
         return False, "trial suite had failures"
     return True, "unit suite and trial suite green"
@@ -650,7 +730,7 @@ def write_baseline(notes: Path | None, tests: int, scope: str = "core", *, secon
         notes.mkdir(parents=True, exist_ok=True)
         (notes / BASELINE_FILES[scope]).write_text(json.dumps({"tests": tests, "seconds": seconds, "ts": time.time()}))
     except OSError as exc:  # noqa: BLE001 -- never lose a boot to bookkeeping
-        say(f"could not record the unit baseline ({exc!r}); continuing")
+        say(f"could not record the unit baseline ({exc!r}); continuing", "warn")
 
 
 def trial_count(repo: Path) -> int:
@@ -676,7 +756,7 @@ def write_note(notes: Path, note: dict) -> None:
     try:
         _write_note(notes, note)
     except OSError as exc:
-        say(f"could not write the note ({exc!r}); continuing")
+        say(f"could not write the note ({exc!r}); continuing", "warn")
 
 
 def _write_note(notes: Path, note: dict) -> None:
@@ -723,11 +803,11 @@ def cmd_status(repo: Path, notes: Path) -> int:
 def cmd_bless(repo: Path, notes: Path, *, full: bool, timeout_s: float) -> int:
     rule("bless")
     if is_dirty(repo):
-        say("refusing: the working tree has uncommitted changes -- commit or stash them first")
+        say("refusing: the working tree has uncommitted changes -- commit or stash them first", "fail")
         return 2
     stray_code = untracked_code(repo)
     if stray_code:
-        say("refusing: the gate would run against code this commit does not contain --")
+        say("refusing: the gate would run against code this commit does not contain --", "fail")
         for path in stray_code[:8]:
             say(f"  {path}  (untracked)")
         say("commit them or move them aside; a tag has to mean the commit was verified")
@@ -749,20 +829,20 @@ def cmd_bless(repo: Path, notes: Path, *, full: bool, timeout_s: float) -> int:
     ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes)
     if existing is not None:
         if ok:
-            say(f"trial suite green for {existing}  ({why})")
+            say(f"trial suite green for {existing}  ({why})", "ok")
             write_note(notes, {"kind": "full_gate_passed", "commit": commit, "tag": existing, "why": why})
             return 0
-        say(f"the full gate FAILED for {existing}: {why}")
+        say(f"the full gate FAILED for {existing}: {why}", "fail")
         say(f"{existing} still stands -- it was earned by the unit suite, which still passes")
         write_note(notes, {"kind": "full_gate_failed", "commit": commit, "tag": existing, "why": why})
         return 1
     if not ok:
-        say(f"NOT blessed: {why}")
+        say(f"NOT blessed: {why}", "fail")
         write_note(notes, {"kind": "bless_refused", "commit": commit, "why": why})
         return 1
     tag = next_tag(repo)
     git("tag", "-a", tag, "-m", f"simloader: {why}", cwd=repo, check=True)
-    say(f"blessed {commit} as {tag}  ({why})")
+    say(f"blessed {commit} as {tag}  ({why})", "ok")
     write_note(notes, {"kind": "blessed", "commit": commit, "tag": tag, "why": why})
     return 0
 
@@ -798,7 +878,7 @@ def cmd_rollback(repo: Path, notes: Path, *, reason: str) -> int:
     rule("rollback")
     tags = good_tags(repo)
     if is_dirty(repo):
-        say("refusing: the working tree has uncommitted changes; a rollback would discard them")
+        say("refusing: the working tree has uncommitted changes; a rollback would discard them", "fail")
         return 2
     current = head(repo)
     target = previous_tag(repo, tags, current)
@@ -809,10 +889,10 @@ def cmd_rollback(repo: Path, notes: Path, *, reason: str) -> int:
     if done.returncode != 0:
         # A rollback that cannot happen is a thing to report, not a
         # traceback out of the boot path.
-        say(f"could not check out {target}: {(done.stderr or done.stdout).strip()}")
+        say(f"could not check out {target}: {(done.stderr or done.stdout).strip()}", "fail")
         write_note(notes, {"kind": "rollback_failed", "from": current, "to": target, "reason": reason})
         return 2
-    say(f"rolled back {current} -> {target} ({tag_of(repo, target)}): {reason}")
+    say(f"rolled back {current} -> {target} ({tag_of(repo, target)}): {reason}", "warn")
     write_note(notes, {"kind": "rollback", "from": current, "to": target, "reason": reason})
     return 0
 
@@ -850,7 +930,7 @@ def record_green(repo: Path, notes: Path, *, full: bool, all_tests: bool = False
         notes.mkdir(parents=True, exist_ok=True)
         (notes / GREEN_FILE).write_text(json.dumps({"commit": commit, "full": full, "all_tests": all_tests, "ts": time.time()}))
     except OSError as exc:
-        say(f"could not remember this green gate ({exc!r}); the next boot runs it again")
+        say(f"could not remember this green gate ({exc!r}); the next boot runs it again", "warn")
 
 
 def already_verified(repo: Path, notes: Path, *, full: bool, all_tests: bool = False) -> str:
@@ -877,27 +957,33 @@ def already_verified(repo: Path, notes: Path, *, full: bool, all_tests: bool = F
 def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollbacks: int,
             watchdog_s: float, sim_args: list[str], force_gate: bool = False, all_tests: bool = False,
             reload_loader=None) -> int:
-    rule("run")
-    say(f"repo {repo}, HEAD {head(repo)}")
+    branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo).stdout.strip()
+    where = str(repo).replace(str(Path.home()), "~", 1)
+    if _fancy():
+        card([("repo", where), ("HEAD", f"{head(repo)}  {branch if branch != 'HEAD' else '(detached)'}"),
+              ("gate", "every test" if all_tests else "core tests" + (" + trial suite" if full else ""))])
+    else:
+        rule("run")
+        say(f"repo {repo}, HEAD {head(repo)}")
     tags = good_tags(repo)
     if not tags:
-        say("no known-good tag exists yet; gating HEAD as-is")
+        say("no known-good tag exists yet; gating HEAD as-is", "note")
     rollbacks = 0
     restarts = 0
     while True:
         while True:
             verified = "" if force_gate else already_verified(repo, notes, full=full, all_tests=all_tests)
             if verified:
-                say(f"gate not needed: {verified} (--force-gate runs it anyway)")
+                say(f"gate not needed: {verified} (--force-gate runs it anyway)", "ok")
                 write_note(notes, {"kind": "gate_reused", "commit": head(repo), "why": verified})
                 break
             ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes, allow_skip=True, all_tests=all_tests)
             if ok and SKIP_SENTINEL in why:
-                say(f"gate {why}; booting unverified, and nothing is being tagged")
+                say(f"gate {why}; booting unverified, and nothing is being tagged", "warn")
                 write_note(notes, {"kind": "gate_skipped", "commit": head(repo), "why": why})
                 break
             if ok:
-                say(f"gate passed: {why}")
+                say(f"gate passed: {why}", "ok")
                 record_green(repo, notes, full=full, all_tests=all_tests)
                 commit = head(repo)
                 stray_code = untracked_code(repo)
@@ -905,20 +991,20 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
                     # Booting is fine -- this tree just passed. Tagging is
                     # not: the tag would name a commit that lacks these.
                     say(f"not tagging: the gate ran with untracked code ({', '.join(stray_code[:3])}"
-                        f"{' ...' if len(stray_code) > 3 else ''}) that {commit} does not contain")
+                        f"{' ...' if len(stray_code) > 3 else ''}) that {commit} does not contain", "warn")
                     write_note(notes, {"kind": "tag_withheld", "commit": commit, "untracked": stray_code[:20]})
                 elif not any(tag_of(repo, t) == commit for _n, t in good_tags(repo)) and not is_dirty(repo):
                     tag = next_tag(repo)
                     git("tag", "-a", tag, "-m", f"simloader: {why}", cwd=repo, check=True)
-                    say(f"tagged {commit} as {tag}")
+                    say(f"tagged {commit} as {tag}", "ok")
                     write_note(notes, {"kind": "blessed", "commit": commit, "tag": tag, "why": why})
                 break
-            say(f"gate FAILED: {why}")
+            say(f"gate FAILED: {why}", "fail")
             write_note(notes, {"kind": "gate_failed", "commit": head(repo), "why": why})
             if rollbacks >= max_rollbacks:
                 rule("giving up")
-                say(f"the gate failed after {rollbacks} rollback(s), and I am not going to keep trying.")
-                say(f"HEAD is {head(repo)}, which did NOT pass. Nothing here is blessed.")
+                say(f"the gate failed after {rollbacks} rollback(s), and I am not going to keep trying.", "fail")
+                say(f"HEAD is {head(repo)}, which did NOT pass. Nothing here is blessed.", "fail")
                 tags = good_tags(repo)
                 if tags:
                     say(f"last known-good tag: {tags[-1][1]} ({tag_of(repo, tags[-1][1])})")
@@ -928,11 +1014,11 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
                 write_note(notes, {"kind": "gave_up", "commit": head(repo), "rollbacks": rollbacks, "why": why})
                 return 3
             if cmd_rollback(repo, notes, reason=why) != 0:
-                say("could not roll back; stopping")
+                say("could not roll back; stopping", "fail")
                 return 3
             rollbacks += 1
 
-        rule("handing off to Sim" if not restarts else f"handing off to Sim (restart #{restarts})")
+        rule("starting Sim" if not restarts else f"starting Sim (restart #{restarts})")
         started = time.monotonic()
         returncode = launch_sim(repo, notes, sim_args)
         ran_for = time.monotonic() - started
@@ -943,7 +1029,7 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
             # than returning to sim.sh, which the creator would have to
             # notice and re-run by hand.
             restarts += 1
-            say(f"Sim asked to restart (after {ran_for:.0f}s) -- re-gating the current checkout")
+            say(f"Sim asked to restart (after {ran_for:.0f}s) -- re-gating the current checkout", "step")
             write_note(notes, {"kind": "restart", "commit": head(repo), "restarts": restarts})
             if reload_loader is not None:
                 # This process holds the loader as it was when it started;
@@ -955,12 +1041,12 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
             continue
         if returncode != 0 and ran_for < watchdog_s:
             why = f"Sim exited {returncode} after {ran_for:.0f}s, inside the {watchdog_s:.0f}s watchdog"
-            say(f"bad boot: {why}")
+            say(f"bad boot: {why}", "fail")
             write_note(notes, {"kind": "watchdog", "commit": head(repo), "why": why})
             if rollbacks < max_rollbacks and cmd_rollback(repo, notes, reason=why) == 0:
-                say("rolled back; run `simloader.py run` again to boot the previous image")
+                say("rolled back; run `simloader.py run` again to boot the previous image", "warn")
             return 4
-        say(f"Sim exited {returncode} after {ran_for:.0f}s")
+        say(f"Sim exited {returncode} after {ran_for:.0f}s", "note")
         return returncode
 
 
@@ -1010,11 +1096,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             command = [sys.executable, str(Path(__file__).resolve()), "run", *invoked]
             executable = sys.executable
-        say("reloading the loader itself, so a change to it applies too")
+        say("reloading the loader itself, so a change to it applies too", "step")
         try:
             os.execv(executable, command)
         except OSError as exc:
-            say(f"could not reload the loader ({exc!r}); re-gating with this one")
+            say(f"could not reload the loader ({exc!r}); re-gating with this one", "warn")
 
     return cmd_run(
         repo, notes, full=args.full, timeout_s=args.timeout, max_rollbacks=args.max_rollbacks,
