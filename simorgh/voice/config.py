@@ -112,6 +112,12 @@ class Config:
     vad_sensitivity: str = "high"      # low | balanced | high (vad.threshold_for); overrides vad_threshold
     min_speech_ms: int = 250           # shorter than this is a breath or a chair, not a turn
     max_turn_ms: int = 30000           # a turn is finalised at this length regardless
+    # How long a ready reply waits while the microphone hears speech that
+    # may be a new turn. With children and a TV in the room the microphone
+    # hears speech all the time, and replies sat 2-6 s before the first
+    # sound (measured 2026-09-13, `before_lock`). If it really is a new
+    # turn, that turn supersedes this reply anyway (turns.py).
+    hold_reply_max_s: float = 1.5
     semantic_silence_factor: float = 0.75  # a finished sentence needs this much of the silence
     stt_partials: bool = True          # provisional transcripts while the person is still talking
     stt_partial_every_ms: int = 1500

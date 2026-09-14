@@ -1200,7 +1200,8 @@ class VoiceSession:
                 actions = self.turns.reply_ready(turn_id)
                 continue
             try:
-                await asyncio.wait_for(self._settled.wait(), timeout=self._config.max_turn_ms / 1000 + 2.0)
+                await asyncio.wait_for(self._settled.wait(),
+                                       timeout=float(getattr(self._config, "hold_reply_max_s", 1.5) or 1.5))
             except asyncio.TimeoutError:
                 # Nothing settled the hold: the candidate turn is neither a
                 # turn nor a blip yet. Ask once more; if it still holds,
