@@ -775,6 +775,19 @@ class VoiceSession:
             return
         text = await self._tidy(text, turn_id)
         if clock.confidence < self._config.min_confidence:
+            # Asking "did you say ...?" is for someone talking to Sim. A
+            # half-heard aside -- the creator and a guest talking Farsi across
+            # the room -- got the question read back to it, English and Farsi
+            # in one breath, turn after turn (2026-09-14, live). Unless Sim was
+            # named or an exchange is under way, a turn Sim could not hear
+            # clearly is not a turn at all.
+            now = self._now()
+            in_exchange = (0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s
+                           and self._last_ask_addressed)
+            if not in_exchange and not addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0):
+                self._room.append((speaker or "someone", text, now, "aside"))
+                await self._stay_quiet(turn_id)
+                return
             reply = NOT_SURE.format(text=text)
             clock.reply_at = self._now()
             await self._speak_reply(turn_id, reply, clock, Context(is_error=True))

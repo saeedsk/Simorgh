@@ -240,6 +240,28 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(quiet), 2, "the third and fourth fragments were background, never asked")
         self.assertIn("It is nine", " ".join(tts.spoken))
 
+    async def test_a_half_heard_aside_is_not_asked_back_but_a_half_heard_ask_is(self):
+        """2026-09-14, live: the creator talking Farsi across the room, heard
+        at low confidence, got "I'm not sure I heard that right. Did you say:
+        ...?" read back after every sentence. Only a turn that names Sim (or
+        continues an exchange) is worth asking about."""
+        self.book.enroll("Saeed", _vec(0.0))
+        self.embedder.vector = _vec(0.02)
+        heard = iter(["and the accessories need image processing", "Sim, what time is it"])
+        script = _Script(*[(True, 60), (False, 110)] * 2, (False, 10_000))
+        replies = _Replies("It is nine.")
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            return Utterance(text=next(heard, "hello"), confidence=0.3, seconds=1.2, engine="fake")
+        session._stt._inner.transcribe = _transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: any("Sim, what time" in t for t in tts.spoken), timeout=15.0)
+        said = " ".join(tts.spoken)
+        self.assertNotIn("accessories", said, "the aside was not asked back")
+        self.assertIn("Did you say: Sim, what time is it", said)
+        self.assertEqual(replies.asked, [], "neither half-heard turn reached the model")
+
     async def test_a_feeling_named_by_the_model_shapes_the_voice_and_is_not_spoken(self):
         self.book.enroll("Ira", _vec(0.0))
         self.embedder.vector = _vec(0.02)
