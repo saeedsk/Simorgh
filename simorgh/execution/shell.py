@@ -106,6 +106,13 @@ DEFAULT_SHELL_REFUSALS: dict[str, str] = {
     r"\bgit\s+push\b.*(--force|-f)\b": "force-pushes, which can destroy someone else's history",
     r"\bgit\s+push\b": "pushes to a remote; publishing is the creator's call",
     r"\bshutdown\b|\breboot\b|\bhalt\b": "shuts the machine down",
+    # Landing is `worktree_land`'s job, behind the test gate. A task once
+    # resolved its own merge conflict and committed onto main through
+    # the shell (2026-09-13); nothing checked it.
+    r"\bgit\b[^|;&]*\b(merge|rebase|cherry-pick)\b": "merges or rebases by hand; land work with worktree_land",
+    r"\bgit\b[^|;&]*\b(checkout|switch)\s+(main|master)\b": "moves the main checkout; work stays in the task's worktree",
+    r"\bgit\b[^|;&]*\breset\s+--hard\b": "throws away commits or edits; use git_discard for one file",
+    r"\bgit\s+-C\s+\S*Simorgh\b(?!/\S)": "acts on the main checkout from a worktree; land work with worktree_land",
     r":\(\)\s*\{.*\|.*&\s*\}\s*;": "is a fork bomb",
 }
 

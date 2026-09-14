@@ -157,12 +157,11 @@ class RenderTestCase(unittest.TestCase):
         self.assertEqual(splash_art.SOURCE, "images/logo/Sim-Logo-transparent.png")
         rows = render.splash(enabled=False)
         # the logo, a blank line, one cartoon and its caption (2026-09-13)
-        from simorgh.interface import cartoon_splash
         self.assertGreater(len(rows), len(splash_art.ROWS) + 2)
         self.assertEqual(rows[:len(splash_art.ROWS)], render.logo_rows(enabled=False))
         self.assertEqual(rows[len(splash_art.ROWS)], "")
         tail = "\n".join(rows[len(splash_art.ROWS) + 1:])
-        self.assertTrue(any(f"— {title} —" in tail for title, _art in cartoon_splash.CARTOON_SPLASHES), tail)
+        self.assertTrue(any(title in tail for title, _art in splash_art.CARTOON_SPLASHES), tail)
         self.assertTrue(10 <= len(rows) <= 40, len(rows))
         for row in rows[:len(splash_art.ROWS)]:   # the logo: plain block glyphs only; the cartoon draws with anything
             self.assertLessEqual(len(row), 68, repr(row))

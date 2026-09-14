@@ -403,10 +403,7 @@ def splash(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
     # One of five Unicode cartoons, picked at random, follows the logo
     # rows. Cleanly removable: set SIMORGH_CARTOON_SPLASH=0 (or delete
     # appended cartoon section of splash_art.py) to uninstall it.
-    if (
-        enabled
-        and os.environ.get("SIMORGH_CARTOON_SPLASH", "1") not in ("0", "false", "off")
-    ):
+    if os.environ.get("SIMORGH_CARTOON_SPLASH", "1") not in ("0", "false", "off"):   # colour or not
         name, art = splash_art.pick()
         cwidth = max(len(line) for line in art)
         cpad = " " * max(0, (width - cwidth) // 2)
