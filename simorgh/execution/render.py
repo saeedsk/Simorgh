@@ -27,6 +27,7 @@ didn't already ask to load.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import shutil
@@ -156,6 +157,20 @@ main().catch(e => {
 """
 
 
+@functools.lru_cache(maxsize=4)
+def _npm_global_root(npm: str) -> str:
+    """`npm root -g`, once per process. Every Execution start built this
+    tool and spawned npm again -- a third of a second per boot, paid by
+    every test that boots the system."""
+    try:
+        completed = subprocess.run(
+            [npm, "root", "-g"], capture_output=True, text=True, timeout=10.0, stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return completed.stdout.strip() if completed.returncode == 0 else ""
+
+
 class RenderPageTool:
     name = "render_page"
     description = (
@@ -181,15 +196,7 @@ class RenderPageTool:
         if self._config.render_page_node_path:
             return self._config.render_page_node_path
         npm = shutil.which("npm")
-        if not npm:
-            return ""
-        try:
-            completed = subprocess.run(
-                [npm, "root", "-g"], capture_output=True, text=True, timeout=10.0, stdin=subprocess.DEVNULL,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return ""
-        return completed.stdout.strip() if completed.returncode == 0 else ""
+        return _npm_global_root(npm) if npm else ""
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         if not self._node:

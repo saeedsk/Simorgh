@@ -640,10 +640,16 @@ async def _status_panel(bus: BusClient, vitals: VitalsCache) -> str:
     honestly on its own if that subsystem does not answer in time."""
     from . import render as render_mod
 
-    health = await _payload_of(bus, topics.SYSTEM_STATUS_REQUEST, {})
-    posture = await _payload_of(bus, topics.GUARDIAN_POSTURE_REQUEST, {})
-    tools_payload = await _payload_of(bus, topics.WORLD_ENV_QUERY, {"what": "tools", "args": {}})
-    git = await _payload_of(bus, topics.WORLD_ENV_QUERY, {"what": "git_state", "args": {}})
+    import asyncio
+
+    # Asked together: one piece that does not answer costs one timeout,
+    # not one per piece (with nothing answering, four in a row took 12s).
+    health, posture, tools_payload, git = await asyncio.gather(
+        _payload_of(bus, topics.SYSTEM_STATUS_REQUEST, {}),
+        _payload_of(bus, topics.GUARDIAN_POSTURE_REQUEST, {}),
+        _payload_of(bus, topics.WORLD_ENV_QUERY, {"what": "tools", "args": {}}),
+        _payload_of(bus, topics.WORLD_ENV_QUERY, {"what": "git_state", "args": {}}),
+    )
     return render_mod.status_panel(
         health=health, snapshot=vitals.snapshot(), posture=posture,
         tools=(tools_payload or {}).get("tools") if tools_payload is not None else None,
