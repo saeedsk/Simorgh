@@ -222,6 +222,13 @@ def claimed_tv_act(text: str, session) -> str:
         return ""
     if not any(tool in session.profile.tools for tool in _TV_TOOLS):
         return ""
+    asked = (getattr(session, "user_text", "") or "").strip()
+    if asked.endswith("?") and re.search(r"\b(?:tv|television|screen|casting|playing|dashboard)\b", asked, re.I) \
+            and not re.search(r"\b(?:can|could|would|will) you\b|\bplay\b.*\bon\b", asked, re.I):
+        # "Are you casting that on the TV?" asks about the state; "yes, it is
+        # on" is an answer, not an act (live 2026-09-13: the guard forced a
+        # needless re-cast). "Can you play X on the TV?" is still a request.
+        return ""
     match = _TV_CLAIM.search(text)
     return match.group(0).strip() if match else ""
 

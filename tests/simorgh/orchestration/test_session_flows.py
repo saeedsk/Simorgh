@@ -446,6 +446,13 @@ class ClaimedTvActTestCase(unittest.TestCase):
         self.assertEqual(claimed_tv_act("I can play it on the TV if you like -- say the word.", session), "",
                          "an offer is not a claim")
         self.assertEqual(claimed_tv_act("Yes, I hear you.", session), "")
+        asking = Session(task_id="t", kind="chat", mode="execute", profile=profiles.VOICE_CHAT, worker_id="w",
+                         user_text="Are you casting that on the TV?", channel="voice")
+        self.assertEqual(claimed_tv_act("Yes -- it's on the TV now, home view.", asking), "",
+                         "a question about the state is answered, not acted on")
+        wanting = Session(task_id="t", kind="chat", mode="execute", profile=profiles.VOICE_CHAT, worker_id="w",
+                          user_text="Can you play Golden on the TV?", channel="voice")
+        self.assertTrue(claimed_tv_act("It's playing on the TV now.", wanting), "a request with a question mark is a request")
         session.record(Step(1, "act", "played", tool="tv_charts", ok=True))
         self.assertEqual(claimed_tv_act("The K-pop chart's running on the TV now.", session), "", "a tool ran: the claim stands")
         plain = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT, worker_id="w", user_text="x", channel="cli")
