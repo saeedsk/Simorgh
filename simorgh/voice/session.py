@@ -705,7 +705,11 @@ class VoiceSession:
                 await still
         clock.reply_at = self._now()
         self._answered.add(turn_id)
-        if is_quiet(reply):
+        from simorgh.contracts.tone import strip_tone as _strip_tone
+
+        if is_quiet(_strip_tone(reply)):
+            # "[warm] QUIET" is QUIET: the tag came first and the word was
+            # spoken aloud, in a warm voice (2026-09-13, 17:46).
             await self._stay_quiet(turn_id)
             return
         took = clock.reply_at - clock.final_at if clock.final_at else 0.0
