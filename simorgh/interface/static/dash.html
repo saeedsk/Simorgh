@@ -5,7 +5,7 @@
 --stroke:rgba(255,255,255,.20);--stroke2:rgba(255,255,255,.10);--radius:22px;}
 *{box-sizing:border-box;}
 html,body{margin:0;height:100%;background:#06060b;color:var(--fg);overflow:hidden;
-font-family:"SF Mono","SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;font-size:14px;line-height:1.45;font-variant-numeric:tabular-nums;}
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:17.5px;line-height:1.45;font-variant-numeric:tabular-nums;}
 #bg,#bg2{position:fixed;inset:0;background-size:cover;background-position:center;transition:opacity 1.4s ease;}
 #bg2{opacity:0;}
 #scrim{position:fixed;inset:0;pointer-events:none;
@@ -20,9 +20,9 @@ background:linear-gradient(160deg,rgba(255,255,255,.22),transparent 75%);opacity
 .dark{background:linear-gradient(160deg,rgba(8,8,14,.72),rgba(8,8,14,.55));}
 .dim{color:var(--dim);}.faint{color:var(--faint);}.warm{color:var(--warm);}.gold{color:var(--gold);}.amber{color:var(--amber);}
 .green{color:var(--green);}.cyan{color:var(--cyan);}.red{color:var(--red);}.violet{color:var(--violet);}
-.hd{font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--faint);}
+.hd{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--faint);}
 .hd.bb{color:var(--amber);}
-.tag{font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);border:1px solid var(--stroke2);border-radius:6px;padding:1px 6px;white-space:nowrap;}
+.tag{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);border:1px solid var(--stroke2);border-radius:6px;padding:1px 6px;white-space:nowrap;}
 #bar{height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-radius:16px;}
 #dock{display:flex;gap:7px;}
 .dot{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;
@@ -33,30 +33,30 @@ background:rgba(255,255,255,.09);border:1px solid var(--stroke2);box-shadow:inse
 #offline{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;
 background:rgba(6,6,11,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:9;text-align:center;}
 #offline img{height:120px;opacity:.9;filter:drop-shadow(0 4px 18px rgba(0,0,0,.6));}
-#offline .t{font-size:26px;letter-spacing:.5px;}
-#offline .s{font-size:13px;color:var(--dim);max-width:640px;line-height:1.5;}
+#offline .t{font-size:32.5px;letter-spacing:.5px;}
+#offline .s{font-size:16px;color:var(--dim);max-width:640px;line-height:1.5;}
 body.offline #offline{display:flex;} body.offline #stage,body.offline #camstrip{filter:grayscale(.6) brightness(.55);}
 .grid{display:grid;gap:12px;height:100%;min-height:0;}
 .card{padding:13px;min-width:0;min-height:0;overflow:hidden;}
 .col{display:flex;flex-direction:column;height:100%;min-height:0;}
 .fill{flex:1;min-height:0;overflow:hidden;}
-.rowitem{display:flex;gap:9px;padding:4px 0;border-bottom:1px solid var(--stroke2);font-size:11.5px;line-height:1.35;}
+.rowitem{display:flex;gap:9px;padding:4px 0;border-bottom:1px solid var(--stroke2);font-size:14.5px;line-height:1.35;}
 .rowitem:last-child{border-bottom:none;}
 .rowitem .t{min-width:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
-.rowitem .m{flex:none;color:var(--faint);font-size:10.5px;}
-.tr{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px solid var(--stroke2);font-size:11px;white-space:nowrap;}
+.rowitem .m{flex:none;color:var(--faint);font-size:13px;}
+.tr{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px solid var(--stroke2);font-size:14px;white-space:nowrap;}
 .tr:last-child{border-bottom:none;}
 .tr .l{color:var(--dim);overflow:hidden;text-overflow:ellipsis;min-width:0;}
 .thumb{border-radius:14px;overflow:hidden;background-size:cover;background-position:center;position:relative;border:1px solid var(--stroke2);height:100%;}
-.thumb .cap{position:absolute;left:12px;right:12px;bottom:10px;font-size:12.5px;text-shadow:0 1px 6px #000;line-height:1.3;}
+.thumb .cap{position:absolute;left:12px;right:12px;bottom:10px;font-size:15.5px;text-shadow:0 1px 6px #000;line-height:1.3;}
 .thumb .scr{position:absolute;inset:0;background:linear-gradient(180deg,transparent 45%,rgba(0,0,0,.72));}
 .thumb .tag{position:absolute;right:9px;top:8px;background:rgba(0,0,0,.35);}
 .clamp{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-box-orient:vertical;}
 .ch{position:relative;width:100%;height:100%;min-height:0;}
 .ch svg{position:absolute;inset:0;width:100%;height:100%;}
-.ch .yl{position:absolute;right:4px;font-size:9.5px;color:var(--faint);transform:translateY(-50%);text-shadow:0 1px 3px #000;}
-.ch .xl{position:absolute;bottom:0;font-size:9.5px;color:var(--faint);transform:translateX(-50%);}
-.pill{cursor:pointer;padding:3px 10px;border-radius:8px;border:1px solid var(--stroke2);color:var(--dim);font-size:11px;}
+.ch .yl{position:absolute;right:4px;font-size:12px;color:var(--faint);transform:translateY(-50%);text-shadow:0 1px 3px #000;}
+.ch .xl{position:absolute;bottom:0;font-size:12px;color:var(--faint);transform:translateX(-50%);}
+.pill{cursor:pointer;padding:3px 10px;border-radius:8px;border:1px solid var(--stroke2);color:var(--dim);font-size:14px;}
 .pill.on{background:rgba(255,179,71,.22);color:var(--amber);border-color:rgba(255,179,71,.5);}
 .tile{cursor:pointer;transition:border-color .2s;}
 .tile.on{border-color:rgba(255,179,71,.6);}
@@ -70,9 +70,9 @@ body.offline #offline{display:flex;} body.offline #stage,body.offline #camstrip{
 .nlist{flex:1;min-height:0;overflow:hidden;position:relative;}
 .nit{display:flex;gap:9px;align-items:center;padding:4px 0;border-bottom:1px solid var(--stroke2);}
 .nit:last-child{border-bottom:none;}
-.nit .th{width:48px;height:34px;border-radius:9px;flex:none;background-size:cover;background-position:center;background-color:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;font-size:10px;letter-spacing:.6px;}
+.nit .th{width:48px;height:34px;border-radius:9px;flex:none;background-size:cover;background-position:center;background-color:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;font-size:12.5px;letter-spacing:.6px;}
 .nit .tx{min-width:0;flex:1;}
-.nit .ttl{font-size:11.5px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;}
+.nit .ttl{font-size:14.5px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;}
 #camstrip{height:171px;flex:none;display:flex;gap:8px;padding:7px;border-radius:16px;}
 /* A tile is the same size live or still (the creator, 2026-09-13: "keep the layout and grid with fixed size"); live
    shows only as a glow. */
@@ -84,10 +84,10 @@ body.offline #offline{display:flex;} body.offline #stage,body.offline #camstrip{
    rectangle so we see all the camera feed" -- whole picture, not cropped (the tile's own solid background,
    above, shows behind any letterbox bar). */
 #camgrid .ctile video,#camgrid .ctile img{object-fit:contain;}
-.ctile .cap{position:absolute;left:8px;right:8px;bottom:6px;font-size:11.5px;text-shadow:0 1px 5px #000;display:flex;justify-content:space-between;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;}
+.ctile .cap{position:absolute;left:8px;right:8px;bottom:6px;font-size:14.5px;text-shadow:0 1px 5px #000;display:flex;justify-content:space-between;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;}
 .ctile .cap .tag{background:rgba(0,0,0,.4);}
 .ctile .live{color:var(--red);}
-.ban{margin:0;font:inherit;font-size:10px;line-height:1.2;white-space:pre;color:var(--dim);}
+.ban{margin:0;font-family:"SF Mono","SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.2;white-space:pre;color:var(--dim);}
 .ban b{font-weight:600;}
 .fade{animation:fadein .45s ease;}
 @keyframes fadein{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
@@ -98,17 +98,17 @@ a{color:var(--warm);}
 <div id="app">
   <div id="bar" class="glass">
     <div style="display:flex;align-items:center;gap:10px;"><img src="/logo.png" alt="" style="height:36px;width:auto;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5));">
-      <span style="font-size:15px;letter-spacing:.5px;">Simorgh</span><span class="faint">·</span><span class="dim" id="viewname">Home</span>
+      <span style="font-size:19px;letter-spacing:.5px;">Simorgh</span><span class="faint">·</span><span class="dim" id="viewname">Home</span>
       <span class="tag" id="rot" style="display:none;"></span></div>
     <div id="dock"></div>
-    <div style="display:flex;align-items:center;gap:14px;font-size:12px;">
+    <div style="display:flex;align-items:center;gap:14px;font-size:15px;">
       <span class="dim" id="wx"></span>
-      <span class="green" id="net">● online</span><span class="gold" id="clock" style="font-size:15px;">--:--</span>
-      <span class="dim" id="date"></span><span class="faint" id="vp" style="font-size:9px;"></span></div>
+      <span class="green" id="net">● online</span><span class="gold" id="clock" style="font-size:19px;">--:--</span>
+      <span class="dim" id="date"></span><span class="faint" id="vp" style="font-size:11px;"></span></div>
   </div>
   <div id="camstrip" class="glass"></div>
   <div id="stage"></div>
-  <div id="offline"><img src="/logo.png" alt=""><div class="t">Sim is offline</div><div class="s">This page runs on the TV; Sim stopped answering it. The video and the camera feeds are paused until it is back. Start Sim again — the page reconnects on its own — or stop the cast from the TV.</div><div class="faint" id="offline-since" style="font-size:11px;"></div></div>
+  <div id="offline"><img src="/logo.png" alt=""><div class="t">Sim is offline</div><div class="s">This page runs on the TV; Sim stopped answering it. The video and the camera feeds are paused until it is back. Start Sim again — the page reconnects on its own — or stop the cast from the TV.</div><div class="faint" id="offline-since" style="font-size:14px;"></div></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.6.15/hls.min.js"></script>
 <script>
@@ -188,7 +188,7 @@ function nowD(){return new Date().toLocaleDateString(undefined,{weekday:"long",m
 function greet(){const h=new Date().getHours();return h<5?"Good night":h<12?"Good morning":h<17?"Good afternoon":"Good evening";}
 function hhmm(iso){if(!iso)return "";const d=new Date(iso);let h=d.getHours(),m=d.getMinutes();const ap=h>=12?"p":"a";h=h%12||12;return h+":"+String(m).padStart(2,"0")+ap;}
 function head(t,tag,bb){return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;gap:8px;"><span class="hd'+(bb?" bb":"")+'">'+t+'</span>'+(tag?'<span class="tag">'+tag+'</span>':'')+'</div>';}
-function empty(msg){return '<div class="faint" style="font-size:11.5px;padding:6px 0;">'+esc(msg)+'</div>';}
+function empty(msg){return '<div class="faint" style="font-size:14.5px;padding:6px 0;">'+esc(msg)+'</div>';}
 function newsRows(items,n,opts={}){items=(items||[]).slice(0,n);if(!items.length)return empty(opts.empty||"waiting for the feed…");
   return items.map(it=>'<div class="rowitem"><span class="'+(opts.color||"gold")+'" style="flex:none;">•</span><div class="t">'+esc(it.title)+'</div><span class="m">'+(opts.src?esc(it.source)+' · ':'')+ago(it.at)+'</span></div>').join("");}
 function feed(name){return (DATA&&DATA.news&&DATA.news[name])||[];}
@@ -199,7 +199,7 @@ function spark(pts,col,w=84,h=26,sw=1.5){pts=(pts||[]).map(p=>Array.isArray(p)?p
   return '<svg width="'+w+'" height="'+h+'" style="flex:none;"><polyline points="'+ln+'" fill="none" stroke="'+col+'" stroke-width="'+sw+'"/></svg>';}
 let gid=0;
 function lineChart(pts,opts={}){ // pts: [[epoch_s, value]]
-  pts=pts||[];if(pts.length<2)return '<div class="ch"><div class="faint" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;">'+esc(opts.empty||"no series yet")+'</div></div>';
+  pts=pts||[];if(pts.length<2)return '<div class="ch"><div class="faint" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;">'+esc(opts.empty||"no series yet")+'</div></div>';
   const vals=pts.map(p=>p[1]);let mx=Math.max(...vals),mn=Math.min(...vals);
   if(opts.ref!=null&&opts.ref>0){mx=Math.max(mx,opts.ref);mn=Math.min(mn,opts.ref);}
   const pad=(mx-mn)*0.08||mx*0.005||1;mx+=pad;mn-=pad;const rg=mx-mn;
@@ -259,22 +259,22 @@ function stock(sym){return mk().stocks.find(s=>s.symbol===sym);}
 function mktStatus(){const s=mk().status||"";return {REG_MKT:["market open","green"],PRE_MKT:["pre-market","gold"],POST_MKT:["after hours","gold"],CLOSED:["closed","dim"]}[s]||[s.toLowerCase().replace("_"," ")||"—","dim"];}
 function quoteRow(r,sparkOn){const d=priceDigits(r.last);return '<div class="tr"><span class="l">'+esc(r.label||r.name)+'</span>'+(sparkOn&&r.spark?spark(r.spark,r.change_pct>=0?"#84e6a6":"#ff9a94",44,14,1.2):'')+'<span>'+N(r.last,d)+'</span><span class="'+cls(r.change_pct)+'" style="width:58px;text-align:right;">'+P(r.change_pct,2)+'</span></div>';}
 function tickerHTML(){const m=mk();const rows=[...m.indices,...m.crypto,...m.commodities,...m.fx,...m.rates];
-  if(!rows.length) return '<div class="faint" style="font-size:11.5px;padding:0 6px;">markets: waiting for the collector…</div>';
+  if(!rows.length) return '<div class="faint" style="font-size:14.5px;padding:0 6px;">markets: waiting for the collector…</div>';
   const items=rows.map(r=>'<span>'+esc(r.label)+' <span style="color:var(--fg);">'+N(r.last,priceDigits(r.last))+'</span> <span class="'+cls(r.change_pct)+'">'+P(r.change_pct,2)+'</span></span>').join("");
-  return '<div class="marquee" style="font-size:11.5px;--mqs:'+(rows.length*3.2)+'s;"><div class="track">'+items+'</div></div>';}
+  return '<div class="marquee" style="font-size:14.5px;--mqs:'+(rows.length*3.2)+'s;"><div class="track">'+items+'</div></div>';}
 function weatherNow(){const w=DATA&&DATA.weather;if(!w||w.temp==null)return '<div class="hd">Weather</div>'+empty("waiting for Open-Meteo…");
   const d0=(w.daily||[])[0]||{};
-  return '<div class="hd">'+esc(w.place)+'</div><div style="display:flex;align-items:center;gap:10px;"><div class="big" style="font-size:38px;">'+Math.round(w.temp)+'°</div><div style="font-size:26px;">'+w.glyph+'</div><div style="font-size:11px;line-height:1.35;"><div>'+esc(w.text)+'</div><div class="faint">feels '+Math.round(w.feels)+'° · H '+Math.round(d0.high)+' L '+Math.round(d0.low)+'</div></div></div>'
-   +'<div class="faint" style="font-size:10.5px;display:flex;gap:10px;flex-wrap:wrap;margin-top:2px;"><span>wind '+Math.round(w.wind)+' mph</span><span>hum '+w.humidity+'%</span><span>UV '+(w.uv!=null?Math.round(w.uv):"—")+'</span>'+(w.aqi!=null?'<span class="'+(w.aqi<=50?"green":w.aqi<=100?"gold":"red")+'">AQI '+w.aqi+'</span>':'')+'<span>☀ '+hhmm(w.sunrise)+' · ☾ '+hhmm(w.sunset)+'</span></div>';}
+  return '<div class="hd">'+esc(w.place)+'</div><div style="display:flex;align-items:center;gap:10px;"><div class="big" style="font-size:47.5px;">'+Math.round(w.temp)+'°</div><div style="font-size:32.5px;">'+w.glyph+'</div><div style="font-size:14px;line-height:1.35;"><div>'+esc(w.text)+'</div><div class="faint">feels '+Math.round(w.feels)+'° · H '+Math.round(d0.high)+' L '+Math.round(d0.low)+'</div></div></div>'
+   +'<div class="faint" style="font-size:13px;display:flex;gap:10px;flex-wrap:wrap;margin-top:2px;"><span>wind '+Math.round(w.wind)+' mph</span><span>hum '+w.humidity+'%</span><span>UV '+(w.uv!=null?Math.round(w.uv):"—")+'</span>'+(w.aqi!=null?'<span class="'+(w.aqi<=50?"green":w.aqi<=100?"gold":"red")+'">AQI '+w.aqi+'</span>':'')+'<span>☀ '+hhmm(w.sunrise)+' · ☾ '+hhmm(w.sunset)+'</span></div>';}
 function forecastStrip(n){const w=DATA&&DATA.weather;if(!w)return "";
-  return '<div style="display:flex;gap:6px;margin-top:6px;">'+(w.daily||[]).slice(1,1+n).map(d=>'<div style="flex:1;text-align:center;font-size:10.5px;line-height:1.3;background:rgba(255,255,255,.05);border-radius:9px;padding:4px 2px;"><div class="faint">'+new Date(d.date+"T12:00").toLocaleDateString(undefined,{weekday:"short"})+'</div><div style="font-size:14px;">'+d.glyph+'</div><div>'+Math.round(d.high)+'° <span class="faint">'+Math.round(d.low)+'°</span></div>'+(d.rain?'<div class="cyan">'+d.rain+'%</div>':'')+'</div>').join("")+'</div>';}
+  return '<div style="display:flex;gap:6px;margin-top:6px;">'+(w.daily||[]).slice(1,1+n).map(d=>'<div style="flex:1;text-align:center;font-size:13px;line-height:1.3;background:rgba(255,255,255,.05);border-radius:9px;padding:4px 2px;"><div class="faint">'+new Date(d.date+"T12:00").toLocaleDateString(undefined,{weekday:"short"})+'</div><div style="font-size:17.5px;">'+d.glyph+'</div><div>'+Math.round(d.high)+'° <span class="faint">'+Math.round(d.low)+'°</span></div>'+(d.rain?'<div class="cyan">'+d.rain+'%</div>':'')+'</div>').join("")+'</div>';}
 function hourlyStrip(n){const w=DATA&&DATA.weather;if(!w)return "";
-  return '<div style="display:flex;gap:8px;">'+(w.hourly||[]).filter((h,i)=>i%2===0).slice(0,n).map(h=>'<div style="flex:1;text-align:center;font-size:11px;line-height:1.35;"><div class="faint">'+hhmm(h.time)+'</div><div style="font-size:18px;">'+h.glyph+'</div><div>'+Math.round(h.temp)+'°</div></div>').join("")+'</div>';}
+  return '<div style="display:flex;gap:8px;">'+(w.hourly||[]).filter((h,i)=>i%2===0).slice(0,n).map(h=>'<div style="flex:1;text-align:center;font-size:14px;line-height:1.35;"><div class="faint">'+hhmm(h.time)+'</div><div style="font-size:22.5px;">'+h.glyph+'</div><div>'+Math.round(h.temp)+'°</div></div>').join("")+'</div>';}
 function nowPlaying(){const m=TV.mode||"none";if(m==="none"||!m)return {title:"Nothing on the TV",sub:"say “cast something” — a video, YouTube, the cameras",tag:"idle"};
   if(m==="grid")return {title:"Cameras",sub:(TV.titles||[]).join(" · "),tag:"live grid"};
   return {title:TV.title||TV.url||"",sub:m==="frame"?"framed inside Sim's page":"full screen on the TV",tag:m};}
 function camList(){return (DATA&&DATA.cameras)||[];}
-function camTile(c,tag){return c?thumb(esc(c.name)+' <span class="faint" style="font-size:10px;">· '+ago(c.at)+'</span>',tag||(c.kind==="ring"?"ring":"still"),c.url):thumb("no camera still yet <span class='faint' style='font-size:10px;'>· cameras snapshot &lt;name&gt;</span>","");}
+function camTile(c,tag){return c?thumb(esc(c.name)+' <span class="faint" style="font-size:12.5px;">· '+ago(c.at)+'</span>',tag||(c.kind==="ring"?"ring":"still"),c.url):thumb("no camera still yet <span class='faint' style='font-size:12.5px;'>· cameras snapshot &lt;name&gt;</span>","");}
 function kv(k,v,c){return '<div class="tr"><span class="l">'+k+'</span><span class="'+(c||"")+'">'+v+'</span></div>';}
 
 // ---- views ----
@@ -290,7 +290,7 @@ const SRC_BADGE={"Bloomberg":["BBG","#ffb347"],"BBC":["BBC","#ff9a94"],"Ars Tech
 function badge(label,col){return '<div class="th" style="color:'+(col||"var(--dim)")+';border:1px solid var(--stroke2);">'+esc(label)+'</div>';}
 function newsItem(it){const b=SRC_BADGE[it.source]||[String(it.source||"").slice(0,3).toUpperCase(),"var(--dim)"];
   const th=it.thumb?'<div class="th" style="background-image:url(\''+esc(it.thumb)+'\');"></div>':badge(it.badge||b[0],it.badgeCol||b[1]);
-  return '<div class="nit">'+th+'<div class="tx"><div class="ttl">'+esc(it.title)+'</div><div class="faint" style="font-size:9.5px;">'+esc(it.meta!=null?it.meta:(it.source||"")+(it.at?' · '+ago(it.at):''))+'</div></div></div>';}
+  return '<div class="nit">'+th+'<div class="tx"><div class="ttl">'+esc(it.title)+'</div><div class="faint" style="font-size:12px;">'+esc(it.meta!=null?it.meta:(it.source||"")+(it.at?' · '+ago(it.at):''))+'</div></div></div>';}
 function newsBoxHTML(title,tag,items,accent){return '<div class="col fade" style="flex:1;min-width:0;">'+head(title,tag,accent)+'<div class="nlist"><div class="nscroll">'+(items.length?items.map(newsItem).join(""):empty("waiting for the feed…"))+'</div></div></div>';}
 function deckItemsB(idx){const [name,feeds]=DECK_B[idx];const wk=DATA&&DATA.wiki;
   if(feeds) return merged(...feeds).slice(0,DECK_ITEMS);
@@ -313,7 +313,7 @@ function ytFrame(id,mute){ // light: the iframe is laid out at half size and sca
   const light=VIDEO_QUALITY==="light";const box=light?'position:absolute;left:0;top:0;width:50%;height:50%;transform:scale(2);transform-origin:0 0;':'position:absolute;inset:0;width:100%;height:100%;';
   const muted=mute||!soundAllowed();
   return '<iframe src="https://www.youtube.com/embed/'+id+'?autoplay=1&mute='+(muted?1:0)+'&controls=0&rel=0&iv_load_policy=3&modestbranding=1&playsinline=1&loop=1&playlist='+id+'&enablejsapi=1" style="'+box+'border:0;" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>';}
-function npOverlay(title,sub,tag){return '<div style="position:absolute;left:0;right:0;bottom:0;padding:26px 16px 12px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.72));pointer-events:none;"><div style="font-size:14px;text-shadow:0 1px 6px #000;" class="clamp" style="-webkit-line-clamp:1;">'+title+'</div><div class="dim" style="font-size:11px;text-shadow:0 1px 6px #000;">'+sub+'</div></div>'+(tag?'<div class="tag" style="position:absolute;right:10px;top:9px;background:rgba(0,0,0,.4);">'+esc(tag)+'</div>':'');}
+function npOverlay(title,sub,tag){return '<div style="position:absolute;left:0;right:0;bottom:0;padding:26px 16px 12px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.72));pointer-events:none;"><div style="font-size:17.5px;text-shadow:0 1px 6px #000;" class="clamp" style="-webkit-line-clamp:1;">'+title+'</div><div class="dim" style="font-size:14px;text-shadow:0 1px 6px #000;">'+sub+'</div></div>'+(tag?'<div class="tag" style="position:absolute;right:10px;top:9px;background:rgba(0,0,0,.4);">'+esc(tag)+'</div>':'');}
 // Inside a Cast receiver YouTube's embedded player is blank and silent (the creator's TV, 2026-09-13), so a framed
 // YouTube video comes as a file Sim fetched (TV.stream, media/tvmedia.py) and plays in the page's own player, with sound.
 const CAST_RECEIVER=/CrKey|Chromecast|DashCast/i.test(navigator.userAgent);
@@ -339,13 +339,13 @@ function mktBoxHTML(idx){const m=mk();
       .concat(m.indices.filter(r=>DECK_IDX.includes(r.symbol)).map(r=>({label:r.label,name:"",last:r.last,week:r.week,pct:r.change_pct})));
     if(!rows.length)return '<div class="col fade" style="flex:1;min-width:0;">'+head("Markets","5-day trend",true)+empty("waiting for quotes…")+'</div>';
     return '<div class="col fade" style="flex:1;min-width:0;">'+head("Markets · 5-day trend",mktStatus()[0],true)+'<div class="nlist"><div class="nscroll">'+rows.map(r=>{const w=r.week||[];const ch=w.length>1?(w[w.length-1][1]-w[0][1])/w[0][1]*100:null;const up=(ch==null?r.pct:ch)>=0;
-      return '<div class="tr" style="align-items:center;gap:10px;padding:5px 0;"><span class="amber" style="width:64px;">'+esc(r.label)+'</span>'+spark(w,up?"#84e6a6":"#ff9a94",120,24,1.6)+'<span style="flex:1;text-align:right;">'+N(r.last,priceDigits(r.last))+'</span><span class="'+cls(ch==null?r.pct:ch)+'" style="width:64px;text-align:right;">'+P(ch==null?r.pct:ch,1)+'<span class="faint" style="font-size:9px;"> 5d</span></span></div>';}).join("")+'</div></div></div>';}
+      return '<div class="tr" style="align-items:center;gap:10px;padding:5px 0;"><span class="amber" style="width:64px;">'+esc(r.label)+'</span>'+spark(w,up?"#84e6a6":"#ff9a94",120,24,1.6)+'<span style="flex:1;text-align:right;">'+N(r.last,priceDigits(r.last))+'</span><span class="'+cls(ch==null?r.pct:ch)+'" style="width:64px;text-align:right;">'+P(ch==null?r.pct:ch,1)+'<span class="faint" style="font-size:11px;"> 5d</span></span></div>';}).join("")+'</div></div></div>';}
   return newsBoxHTML("Market & AI hot topics","Bloomberg",merged("bloomberg_markets","bloomberg_technology").slice(0,DECK_ITEMS),true);}
 function qjHTML(){ // the picture of the day (NASA), where the quote of the day was (the creator, 2026-09-14)
   const ap=DATA&&DATA.apod;
-  if(ap&&ap.media_type==="image"&&(ap.url||ap.hdurl))return '<div class="col fade" style="flex:1;min-width:0;">'+head("Picture of the day","NASA")+'<div class="fill" style="min-height:0;">'+thumb('<b>'+esc(ap.title)+'</b><br><span class="clamp faint" style="-webkit-line-clamp:2;font-size:10.5px;">'+esc(ap.explanation||"")+'</span>',ap.copyright?esc(ap.copyright):"",ap.url||ap.hdurl)+'</div></div>';
+  if(ap&&ap.media_type==="image"&&(ap.url||ap.hdurl))return '<div class="col fade" style="flex:1;min-width:0;">'+head("Picture of the day","NASA")+'<div class="fill" style="min-height:0;">'+thumb('<b>'+esc(ap.title)+'</b><br><span class="clamp faint" style="-webkit-line-clamp:2;font-size:13px;">'+esc(ap.explanation||"")+'</span>',ap.copyright?esc(ap.copyright):"",ap.url||ap.hdurl)+'</div></div>';
   const qt=DATA&&DATA.quote;
-  return '<div class="col fade" style="flex:1;min-width:0;">'+head("Picture of the day","NASA")+(ap&&ap.title?'<div style="font-size:13px;line-height:1.45;">'+esc(ap.title)+'</div><div class="faint" style="font-size:10.5px;margin-top:3px;">today\'s picture is a video — NASA shows it on their site</div>':(qt&&qt.text?'<div style="font-size:13px;line-height:1.45;">“'+esc(qt.text)+'”</div><div class="faint" style="font-size:10.5px;margin-top:3px;">— '+esc(qt.author)+'</div>':empty("waiting for NASA…")))+'</div>';}
+  return '<div class="col fade" style="flex:1;min-width:0;">'+head("Picture of the day","NASA")+(ap&&ap.title?'<div style="font-size:16px;line-height:1.45;">'+esc(ap.title)+'</div><div class="faint" style="font-size:13px;margin-top:3px;">today\'s picture is a video — NASA shows it on their site</div>':(qt&&qt.text?'<div style="font-size:16px;line-height:1.45;">“'+esc(qt.text)+'”</div><div class="faint" style="font-size:13px;margin-top:3px;">— '+esc(qt.author)+'</div>':empty("waiting for NASA…")))+'</div>';}
 function deckSkeleton(){return '<div id="deckroot" style="display:grid;grid-template-columns:1fr 2fr;gap:12px;height:100%;min-height:0;">'
   +'<div class="glass card col" id="dk-term">'+head("Sim","live")+'<div class="fill" id="dk-term-body"></div></div>'
   +'<div style="display:grid;grid-template-columns:1.7fr 3.3fr;grid-template-rows:3fr 2fr;gap:12px;min-height:0;min-width:0;">'
@@ -459,7 +459,7 @@ function refreshStrip(){const el=$("#camstrip");if(!el||OFFLINE)return;
   const key=tiles.map(t=>t.key).join("|");   // the layout: which tiles, in what order -- never which are live
   if(key===CAMKEY&&el.querySelector(".ctile")){syncLive(el,tiles,"strip");return;}
   CAMKEY=key;captureFrames();closeLive("strip");
-  if(!tiles.length){el.innerHTML='<div class="faint" style="display:flex;align-items:center;justify-content:center;flex:1;font-size:12px;gap:14px;"><span class="hd">Cameras</span>no feeds yet — the Reolink relays are being asked for; <code style="color:var(--dim);">ring list</code> adds the Ring cameras</div>';return;}
+  if(!tiles.length){el.innerHTML='<div class="faint" style="display:flex;align-items:center;justify-content:center;flex:1;font-size:15px;gap:14px;"><span class="hd">Cameras</span>no feeds yet — the Reolink relays are being asked for; <code style="color:var(--dim);">ring list</code> adds the Ring cameras</div>';return;}
   el.innerHTML=tiles.map(tileHTML).join("");
   mountLive(el,tiles,"strip");}
 function fillBox(id,html){const el=$(id);if(!el)return;el.innerHTML=html;setTimeout(()=>fitBox(el),40);}   // a timeout, not rAF: rAF never fires in a hidden tab
@@ -498,25 +498,25 @@ function majorCard(s){
   const ch=TF==="1D"?s.change_pct:(first&&last?(last-first)/first*100:null);const up=(ch==null?(s.change_pct||0):ch)>=0;const col=up?"#84e6a6":"#ff9a94";
   const d=priceDigits(s.last);const lo=s.year_low,hi=s.year_high;const pos=lo!=null&&hi!=null&&hi>lo&&s.last!=null?Math.max(0,Math.min(100,(s.last-lo)/(hi-lo)*100)):null;
   return '<div class="glass card col" style="flex:1;min-width:0;">'
-   +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;"><div style="min-width:0;"><div style="display:flex;align-items:baseline;gap:8px;"><span class="amber" style="font-size:19px;letter-spacing:.5px;">'+s.symbol+'</span><span class="dim" style="font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.short||s.name)+'</span></div>'
-   +'<div class="faint clamp" style="font-size:10.5px;-webkit-line-clamp:1;">'+esc(s.description||"")+'</div></div>'
-   +'<div style="text-align:right;flex:none;"><div style="font-size:20px;line-height:1.1;">'+N(s.last,d)+'</div><div class="'+cls(ch)+'" style="font-size:12px;">'+(s.change!=null&&TF==="1D"?(s.change>=0?"+":"")+N(s.change,d)+'  ':'')+P(ch,2)+' <span class="faint">'+TF+'</span></div></div></div>'
+   +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;"><div style="min-width:0;"><div style="display:flex;align-items:baseline;gap:8px;"><span class="amber" style="font-size:24px;letter-spacing:.5px;">'+s.symbol+'</span><span class="dim" style="font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.short||s.name)+'</span></div>'
+   +'<div class="faint clamp" style="font-size:13px;-webkit-line-clamp:1;">'+esc(s.description||"")+'</div></div>'
+   +'<div style="text-align:right;flex:none;"><div style="font-size:25px;line-height:1.1;">'+N(s.last,d)+'</div><div class="'+cls(ch)+'" style="font-size:15px;">'+(s.change!=null&&TF==="1D"?(s.change>=0?"+":"")+N(s.change,d)+'  ':'')+P(ch,2)+' <span class="faint">'+TF+'</span></div></div></div>'
    +'<div class="fill" style="margin:6px 0 4px;">'+lineChart(pts,{col:col,xlabels:true,tf:TF,ref:TF==="1D"?s.prev_close:null,empty:"waiting for the bars…"})+'</div>'
-   +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:2px 10px;font-size:10.5px;" class="dim"><span>O <span style="color:var(--fg);">'+N(s.open,d)+'</span></span><span>H <span style="color:var(--fg);">'+N(s.high,d)+'</span></span><span>L <span style="color:var(--fg);">'+N(s.low,d)+'</span></span><span>Vol <span style="color:var(--fg);">'+esc(s.volume||"—")+'</span></span>'
+   +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:2px 10px;font-size:13px;" class="dim"><span>O <span style="color:var(--fg);">'+N(s.open,d)+'</span></span><span>H <span style="color:var(--fg);">'+N(s.high,d)+'</span></span><span>L <span style="color:var(--fg);">'+N(s.low,d)+'</span></span><span>Vol <span style="color:var(--fg);">'+esc(s.volume||"—")+'</span></span>'
    +'<span>Cap <span style="color:var(--fg);">'+esc(s.market_cap||"—")+'</span></span><span>P/E <span style="color:var(--fg);">'+N(s.pe,1)+'</span></span><span>EPS <span style="color:var(--fg);">'+N(s.eps,2)+'</span></span><span>β <span style="color:var(--fg);">'+N(s.beta,2)+'</span></span></div>'
-   +(pos!=null?'<div class="range"><i style="left:'+pos.toFixed(1)+'%;"></i></div><div class="faint" style="display:flex;justify-content:space-between;font-size:9.5px;"><span>52w '+N(lo,d)+'</span><span>'+N(hi,d)+'</span></div>':'')+'</div>';}
+   +(pos!=null?'<div class="range"><i style="left:'+pos.toFixed(1)+'%;"></i></div><div class="faint" style="display:flex;justify-content:space-between;font-size:12px;"><span>52w '+N(lo,d)+'</span><span>'+N(hi,d)+'</span></div>':'')+'</div>';}
 function smallTile(s,on){const pts=(s.history||{})[TF]||(s.history||{})["1D"]||[];const up=(s.change_pct||0)>=0;const d=priceDigits(s.last);
   return '<div class="glass card tile'+(on?" on":"")+'" onclick="pinStock(\''+s.symbol+'\')" style="display:flex;flex-direction:column;justify-content:space-between;padding:9px 11px;">'
-   +'<div style="display:flex;justify-content:space-between;align-items:baseline;"><span class="amber" style="font-size:14px;">'+s.symbol+'</span><span class="'+cls(s.change_pct)+'" style="font-size:11.5px;">'+P(s.change_pct,2)+'</span></div>'
-   +'<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;"><div style="min-width:0;"><div style="font-size:15px;">'+N(s.last,d)+'</div><div class="faint" style="font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.short||s.name)+'</div></div><div style="width:44%;height:30px;">'+lineChart(pts,{col:up?"#84e6a6":"#ff9a94",ylabels:false,sw:1.5})+'</div></div>'
-   +'<div class="faint" style="display:flex;justify-content:space-between;font-size:9.5px;"><span>H '+N(s.high,d)+'</span><span>L '+N(s.low,d)+'</span><span>'+esc(s.volume||"")+'</span></div></div>';}
+   +'<div style="display:flex;justify-content:space-between;align-items:baseline;"><span class="amber" style="font-size:17.5px;">'+s.symbol+'</span><span class="'+cls(s.change_pct)+'" style="font-size:14.5px;">'+P(s.change_pct,2)+'</span></div>'
+   +'<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;"><div style="min-width:0;"><div style="font-size:19px;">'+N(s.last,d)+'</div><div class="faint" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.short||s.name)+'</div></div><div style="width:44%;height:30px;">'+lineChart(pts,{col:up?"#84e6a6":"#ff9a94",ylabels:false,sw:1.5})+'</div></div>'
+   +'<div class="faint" style="display:flex;justify-content:space-between;font-size:12px;"><span>H '+N(s.high,d)+'</span><span>L '+N(s.low,d)+'</span><span>'+esc(s.volume||"")+'</span></div></div>';}
 function viewMarkets(){
   const m=mk();let stocks=m.stocks.slice();if(!stocks.length)return '<div class="glass card" style="height:100%;display:flex;align-items:center;justify-content:center;" class="faint">markets: waiting for the collector (CNBC quotes)…</div>';
   let majors=stocks.filter(s=>s.major);let rest=stocks.filter(s=>!s.major);
   if(PIN&&rest.some(s=>s.symbol===PIN)){const p=rest.find(s=>s.symbol===PIN);const last=majors[majors.length-1];majors=majors.slice(0,-1).concat([p]);rest=rest.filter(s=>s.symbol!==PIN);if(last)rest=[last].concat(rest);}
   const st=mktStatus();const asof=m.as_of?new Date(m.as_of*1000).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}):"";
   const pills=["1D","1W","1M","1Y"].map(t=>'<span class="pill'+(t===TF?" on":"")+'" onclick="selTF(\''+t+'\')">'+t+'</span>').join("");
-  const top='<div class="glass" style="flex:none;height:38px;padding:0 14px;display:flex;align-items:center;gap:14px;overflow:hidden;"><span class="hd bb" style="flex:none;">Markets</span><span class="'+st[1]+'" style="font-size:11px;flex:none;">● '+st[0]+'</span><span class="faint" style="font-size:10.5px;flex:none;">'+(asof?'as of '+asof:'')+'</span>'+tickerHTML()+'<div style="display:flex;gap:6px;flex:none;">'+pills+'</div></div>';
+  const top='<div class="glass" style="flex:none;height:38px;padding:0 14px;display:flex;align-items:center;gap:14px;overflow:hidden;"><span class="hd bb" style="flex:none;">Markets</span><span class="'+st[1]+'" style="font-size:14px;flex:none;">● '+st[0]+'</span><span class="faint" style="font-size:13px;flex:none;">'+(asof?'as of '+asof:'')+'</span>'+tickerHTML()+'<div style="display:flex;gap:6px;flex:none;">'+pills+'</div></div>';
   const bigRow='<div style="display:flex;gap:12px;flex:2.35;min-height:0;">'+majors.map(majorCard).join("")+'</div>';
   const tiles='<div class="grid" style="flex:1.1;grid-template-columns:repeat(5,1fr);grid-template-rows:1fr 1fr;gap:10px;">'+rest.slice(0,10).map(s=>smallTile(s,s.symbol===PIN)).join("")+'</div>';
   const col=(t,rows,extra)=>'<div class="glass card col" style="flex:1;min-width:0;padding:10px 12px;">'+head(t,"",true)+'<div class="fill">'+(rows.length?rows.map(r=>quoteRow(r,true)).join(""):empty("waiting…"))+(extra||"")+'</div></div>';
@@ -532,7 +532,7 @@ function viewMarkets(){
 // TV the playing is Sim's (tv_charts: the TV's own YouTube app when paired, else the files one after another, full
 // screen); the page marks what is on. In a browser the top video plays here, muted, as browsers allow.
 function chartRail(ch,key){const on=ytId(TV.url||"")||CHARTS_PLAYING;const label=ch?esc(ch.label):(key==="kpop"?"K-pop":"US pop");
-  return '<div style="flex:1;min-height:0;display:flex;flex-direction:column;"><div class="hd" style="margin:0 0 4px;">'+label+'</div>'+((ch&&ch.songs||[]).length?'<div style="flex:1;min-height:0;overflow:hidden;">'+ch.songs.slice(0,10).map(s=>'<div class="rowitem" style="align-items:center;padding:3px 2px;gap:6px;border-bottom:none;'+(on&&s.video===on?"background:rgba(240,189,131,.18);border-radius:6px;":"")+'"><span class="gold" style="width:14px;font-size:10.5px;">'+(on&&s.video===on?"▶":s.rank)+'</span><div class="art" style="background-image:url(\''+esc(s.thumb||s.art)+'\');width:40px;height:23px;border-radius:4px;"></div><div style="min-width:0;flex:1;"><div style="font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.name)+'</div><div class="faint" style="font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.artist)+'</div></div></div>').join("")+'</div>':empty("waiting…"))+'</div>';}
+  return '<div style="flex:1;min-height:0;display:flex;flex-direction:column;"><div class="hd" style="margin:0 0 4px;">'+label+'</div>'+((ch&&ch.songs||[]).length?'<div style="flex:1;min-height:0;overflow:hidden;">'+ch.songs.slice(0,10).map(s=>'<div class="rowitem" style="align-items:center;padding:3px 2px;gap:6px;border-bottom:none;'+(on&&s.video===on?"background:rgba(240,189,131,.18);border-radius:6px;":"")+'"><span class="gold" style="width:14px;font-size:13px;">'+(on&&s.video===on?"▶":s.rank)+'</span><div class="art" style="background-image:url(\''+esc(s.thumb||s.art)+'\');width:40px;height:23px;border-radius:4px;"></div><div style="min-width:0;flex:1;"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.name)+'</div><div class="faint" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(s.artist)+'</div></div></div>').join("")+'</div>':empty("waiting…"))+'</div>';}
 // The big frame, in a browser: a real YouTube player (the iframe API, not a bare <iframe>), so a video that
 // fails -- removed, private, region-blocked, the "video is not available" placard the creator saw, 2026-09-14 --
 // or simply ends is caught and the chart moves on to the next song by itself, the way it already promised to.
@@ -607,16 +607,16 @@ function viewAmbient(){
   const w=DATA&&DATA.weather,qt=DATA&&DATA.quote,h=merged("bloomberg_markets","bbc_world")[0];
   const box=(inner,w)=>'<div class="glass" style="padding:14px 20px;text-align:center;'+(w?'min-width:'+w+'px;':'')+'">'+inner+'</div>';
   return '<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;">'
-    +'<div class="big" style="font-size:150px;text-shadow:0 4px 44px rgba(0,0,0,.5);">'+nowT()+'</div>'
-    +'<div class="dim" style="font-size:22px;">'+nowD()+'</div>'
+    +'<div class="big" style="font-size:187.5px;text-shadow:0 4px 44px rgba(0,0,0,.5);">'+nowT()+'</div>'
+    +'<div class="dim" style="font-size:27.5px;">'+nowD()+'</div>'
     +'<div style="display:flex;gap:12px;margin-top:22px;align-items:stretch;">'
-    +box(w&&w.temp!=null?'<div style="font-size:34px;">'+w.glyph+' '+Math.round(w.temp)+'°</div><div class="faint" style="font-size:11px;">'+esc(w.text)+' · '+esc(w.place)+'</div>':'<div class="faint">weather…</div>')
-    +box('<div class="hd">Sun</div><div style="font-size:15px;margin-top:5px;">☀ '+(w?hhmm(w.sunrise):"—")+'</div><div class="faint" style="font-size:11px;">☾ '+(w?hhmm(w.sunset):"—")+'</div>')
-    +box('<div class="hd">Air</div><div class="'+(w&&w.aqi!=null?(w.aqi<=50?"green":w.aqi<=100?"gold":"red"):"dim")+'" style="font-size:15px;margin-top:5px;">AQI '+(w&&w.aqi!=null?w.aqi:"—")+'</div><div class="faint" style="font-size:11px;">'+(w&&w.aqi!=null?(w.aqi<=50?"good":w.aqi<=100?"moderate":"unhealthy"):"")+'</div>')
-    +box('<div class="hd">Sim</div><div class="green" style="font-size:15px;margin-top:5px;">'+(STATUS.state||"online")+'</div><div class="faint" style="font-size:11px;">'+esc(STATUS.model||"")+'</div>')+'</div>'
+    +box(w&&w.temp!=null?'<div style="font-size:42.5px;">'+w.glyph+' '+Math.round(w.temp)+'°</div><div class="faint" style="font-size:14px;">'+esc(w.text)+' · '+esc(w.place)+'</div>':'<div class="faint">weather…</div>')
+    +box('<div class="hd">Sun</div><div style="font-size:19px;margin-top:5px;">☀ '+(w?hhmm(w.sunrise):"—")+'</div><div class="faint" style="font-size:14px;">☾ '+(w?hhmm(w.sunset):"—")+'</div>')
+    +box('<div class="hd">Air</div><div class="'+(w&&w.aqi!=null?(w.aqi<=50?"green":w.aqi<=100?"gold":"red"):"dim")+'" style="font-size:19px;margin-top:5px;">AQI '+(w&&w.aqi!=null?w.aqi:"—")+'</div><div class="faint" style="font-size:14px;">'+(w&&w.aqi!=null?(w.aqi<=50?"good":w.aqi<=100?"moderate":"unhealthy"):"")+'</div>')
+    +box('<div class="hd">Sim</div><div class="green" style="font-size:19px;margin-top:5px;">'+(STATUS.state||"online")+'</div><div class="faint" style="font-size:14px;">'+esc(STATUS.model||"")+'</div>')+'</div>'
     +'<div class="glass" style="padding:12px 20px;margin-top:10px;width:min(920px,86vw);">'+hourlyStrip(10)+'</div>'
-    +(qt&&qt.text?'<div class="dim" style="font-size:15px;margin-top:14px;max-width:80vw;text-align:center;">“'+esc(qt.text)+'” <span class="faint">— '+esc(qt.author)+'</span></div>':'')
-    +(h?'<div class="faint" style="font-size:12.5px;margin-top:6px;max-width:80vw;text-align:center;"><span class="amber">'+esc(h.source)+'</span> '+esc(h.title)+'</div>':'')+'</div>';
+    +(qt&&qt.text?'<div class="dim" style="font-size:19px;margin-top:14px;max-width:80vw;text-align:center;">“'+esc(qt.text)+'” <span class="faint">— '+esc(qt.author)+'</span></div>':'')
+    +(h?'<div class="faint" style="font-size:15.5px;margin-top:6px;max-width:80vw;text-align:center;"><span class="amber">'+esc(h.source)+'</span> '+esc(h.title)+'</div>':'')+'</div>';
 }
 const RENDER={charts:viewCharts,deck:viewDeck,cameras:viewCameras,markets:viewMarkets,ambient:viewAmbient};   // RENDER.charts is only go()'s validity check; render() intercepts CUR==="charts" above and never reaches it
 const VIEW_ALIAS={news:"deck",discover:"deck",terminal:"deck",home:"deck",media:"deck"};
