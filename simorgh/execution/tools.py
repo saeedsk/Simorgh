@@ -2281,6 +2281,11 @@ class GitCommitTool:
             )
 
         add = await asyncio.to_thread(run, ["git", "add", "--", path])
+        if add.returncode != 0 and "did not match any files" in (add.stderr or ""):
+            # A file the task deleted: `git add` of a path that is gone
+            # refuses, `git add -A` on it stages the removal. Sim's splash
+            # task hit this and fell back to a shell commit (2026-09-13).
+            add = await asyncio.to_thread(run, ["git", "add", "-A", "--", path])
         if add.returncode != 0:
             return ToolResult(ok=False, error=f"git add failed: {add.stderr.strip()}")
         commit = await asyncio.to_thread(run, [
