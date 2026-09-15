@@ -131,3 +131,20 @@ Not wholesale yet. The evidence points first at cheaper, measurable changes. Orc
 6. **Then A/B the orchestrator.** Same model, same budget, a fixed slice (for example 20 SWE-bench Verified and all GAIA level 2 and 3 cases): single-task vs a planner that delegates test runs and file edits to child tasks. Keep it only if it wins.
 
 The follow-up's diagnosis, context overload in one loop, is right in spirit for SWE-bench, where the verify-and-revise loop does fill the context. For GAIA and BFCL the rejected answers were scored anyway, so the gains there have to come from reasoning effort, prompts and infrastructure, not from the reviewer.
+
+## Comparison arms (wave w20260915-arms, 2026-09-15)
+
+Each arm is one isolated copy of Sim on GLM-5.3-Flash with the answer review off, run on the same slices: GAIA level 3 (26 cases), GAIA level 2 (first 24) and SWE-bench Verified (first 15). Skipped cases are those Cognition answered from the floor (a provider outage), which are not scored.
+
+| Arm | Settings | GAIA L3 | GAIA L2 | SWE-bench |
+|---|---|---|---|---|
+| 21/24 baseline | review off | 7/26 (arm 24; arm 21's run was cut at 12 cases) | 11/24 | 2/15 |
+| 22 reground | + `reground_every_steps=6` | 7/26 | 13/23 (1 skipped) | 2/12 (3 skipped) |
+| 23 reground + clean | + `clean_revisions=true` | 8/26 | 9/20 (4 skipped) | 4/13 (2 skipped) |
+| 25 parallel reads | + `parallel_read_tools=4` | running | pending | pending |
+
+**Reading.**
+- No arm separates from the baseline by more than two cases on any slice. At these sizes that is inside run-to-run noise, so none of the switches has earned a default yet; all stay off.
+- Re-grounding fired on schedule (94 notes in arm 22, 79 in arm 23; no `context_too_large`), so the mechanism works. It did not turn into answers.
+- "Step budget exhausted" is the leading failure in every arm, and roughly twice as frequent in the plain re-grounding arm: writing a note every six steps spends steps. If re-grounding is tried again it should be gentler (every 10, keep 4).
+- The budget problem is what change H (read-only lookups in one reply, arm 25) targets: it lets several lookups share one step. Arm 25 shows GLM-5.3-Flash does write several lookups in one reply when told it may; its first launch was stopped and discarded because concurrent keyless searches were refused by DuckDuckGo, fixed in 2aeb871 before the relaunch.
