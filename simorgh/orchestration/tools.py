@@ -569,6 +569,11 @@ def is_read_only(tool: str) -> bool:
     return _TOOL_POLICY.get(tool, ("irreversible", False))[0] == "read_only"
 
 
+def is_irreversible(tool: str) -> bool:
+    """Whether `tool` is tagged `irreversible` (or unknown, which counts)."""
+    return _TOOL_POLICY.get(tool, ("irreversible", False))[0] == "irreversible"
+
+
 def known_tools() -> frozenset[str]:
     """Every tool Execution has announced this process. Empty until the
     first `tool.registered` -- a harness with no Execution -- and then a
