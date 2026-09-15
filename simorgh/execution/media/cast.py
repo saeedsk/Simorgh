@@ -180,6 +180,25 @@ class PyChromecast:
                 raise RuntimeError("needs pychromecast (pip install pychromecast)") from exc
 
             cast = self._cast(name)
+            # The dashboard's receiver may still be "running" in the
+            # background after the TV went to its home screen or another app
+            # took over (the K-pop chart in the YouTube app): loading a URL
+            # into that session changes nothing on screen, and `tv show`
+            # reported the dashboard up on a TV showing its launcher, three
+            # times (the creator, 2026-09-14). Close it first, so the load
+            # launches the receiver again -- in front.
+            try:
+                from pychromecast.config import APP_DASHCAST
+            except ImportError:  # an older pychromecast: the id it has always had
+                APP_DASHCAST = "84912283"
+            if getattr(cast, "app_id", None) == APP_DASHCAST:
+                try:
+                    cast.quit_app()
+                    deadline = time.monotonic() + 3.0
+                    while getattr(cast, "app_id", None) == APP_DASHCAST and time.monotonic() < deadline:
+                        time.sleep(0.2)
+                except Exception:  # noqa: BLE001 -- a failed quit still leaves the load to try
+                    pass
             controller = DashCastController()
             cast.register_handler(controller)
             done = {}
