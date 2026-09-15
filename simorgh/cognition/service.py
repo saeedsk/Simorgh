@@ -171,6 +171,20 @@ class Service:
             gemini_cfg = self._config.providers.get("gemini")
             if gemini_cfg is not None:
                 real_providers.append(GeminiProvider(model=gemini_cfg.model or "gemini-3.8-flash"))
+            ollama_cfg = self._config.providers.get("ollama")
+            if ollama_cfg is not None and ollama_cfg.model:
+                # The local last resort: after every cloud provider, before the floor.
+                from .providers.ollama import OllamaProvider
+
+                real_providers.append(OllamaProvider(
+                    model=ollama_cfg.model, base_url=ollama_cfg.base_url, keep_alive=ollama_cfg.keep_alive,
+                    num_ctx=ollama_cfg.num_ctx, timeout_seconds=ollama_cfg.timeout_seconds,
+                ))
+                if "ollama" not in self._config.provider_order:
+                    order = [n for n in self._config.provider_order if n != "floor"] + ["ollama"]
+                    if "floor" in self._config.provider_order:
+                        order.append("floor")
+                    self._config = dataclasses.replace(self._config, provider_order=tuple(order))
         self._budgets = {
             p.name: RollingWindowBudget(p.name, self._config.providers[p.name], ctx.ledger, clock=ctx.clock)
             for p in real_providers if p.name in self._config.providers
@@ -178,6 +192,8 @@ class Service:
         self._router = Router(
             real_providers, self._budgets, self._floor, order=self._config.provider_order, clock=ctx.clock,
             logger=ctx.logger,
+            purpose_filter={name: set(cfg.only_purposes) for name, cfg in self._config.providers.items()
+                            if getattr(cfg, "only_purposes", ())},
         )
         self._assembler = PromptAssembler(
             ctx.bus, ctx.source, request_timeout=self._config.assembly_request_timeout, logger=ctx.logger,

@@ -51,7 +51,10 @@ class Router:
         self, providers: list[Provider], budgets: dict[str, RollingWindowBudget],
         floor: FloorProvider, *, order: tuple[str, ...], clock: Clock, logger: Logger | None = None,
         cooldown_s: float = 30.0, transient_backoff_s: float = 2.0,
+        purpose_filter: dict[str, set[str]] | None = None,
     ) -> None:
+        # name -> the purposes that provider may answer (absent: all).
+        self._purpose_filter = {k: set(v) for k, v in (purpose_filter or {}).items() if v}
         # One retry after this wait for a transient failure (HTTP 429/5xx, a
         # timeout, a dropped connection) before the provider is cooled down:
         # a single Together 503 skipped 14 of 26 benchmark cases (2026-09-15).
@@ -130,6 +133,8 @@ class Router:
         names = tuple(order) if order else self._order
         for name in names:
             provider = self._by_name.get(name)
+            if name in self._purpose_filter and purpose.value not in self._purpose_filter[name]:
+                continue
             if provider is None or not provider.available():
                 continue
             if self._cooldown_until.get(name, 0.0) > self._clock.now():

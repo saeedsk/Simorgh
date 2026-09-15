@@ -42,6 +42,15 @@ class ProviderConfig:
     # "together_strong" tier). Empty for the built-in providers.
     backend: str = ""
     reasoning_effort: str = ""
+    # Purposes this provider may answer; empty means all. The local Ollama
+    # fallback is normally `["chat"]`: a benchmark case or a patch should
+    # say "no model available" rather than spend this machine on a weak try.
+    only_purposes: tuple = ()
+    # Local-model knobs (Ollama): server URL, how long the model stays loaded
+    # after a call, and the context window.
+    base_url: str = ""
+    keep_alive: str = ""
+    num_ctx: int = 0
 
 
 @dataclass(frozen=True)
