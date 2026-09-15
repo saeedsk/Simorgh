@@ -24,11 +24,15 @@ Related documents:
 | One Together HTTP 503 (twice, so the quick retry failed too) put a copy on the floor, and the runner fed it the rest of the run: 21 of 26 GAIA cases skipped in 2 s (arm 25, 04:08, 2026-09-15). The driver then counted that run toward `--max-runs`, so the slice would never have re-run | A whole slice lost to a 30-second outage | Runner re-runs a floored case up to `floor_retries` (3) times after a doubling wait from `floor_retry_wait_s` (60 s); a floor-answered run no longer counts toward `--max-runs` (5123f74) |
 | `observer_kit.fast_copy_repo` fell back to `shutil.copytree` under load and copied `workspace/` (~6 GB per copy) | Disk fell from 53 GB to 3.6 GB | Driver clones code only, refuses a copy over 1 GB, stops under 20 GB free (ad2563b) |
 
+**Memory: Docker keeps what SWE-bench used.** After arms 21-23's SWE-bench slices, Docker Desktop's Linux VM held ~29 GB of the Mac's memory (11 GB resident, 18 GB compressed) while its only running container used 110 MB; the VM never returns page cache to macOS. With that held, one benchmark copy was enough for Claude Code to kill arm 25 for low memory (2026-09-15, ~05:00). A Docker Desktop restart released it (free memory 50% -> 79%, compressor 26 GB -> 2 GB). `osascript quit` left Docker stuck in "stopping"; `docker desktop stop --force` then `docker desktop start` worked. `moda-db-1` (the creator's, restart policy `no`) must be started again by hand. **Before a wave with SWE-bench, and after it, check `top -o mem -stats pid,command,mem,cmprs` for the Virtualization process.**
+
 **Measurement lessons.**
 - Use `footprint -p` or the compressor total from `vm_stat` for memory; `ps` RSS hid about 10 GB of compressed memory.
 - zsh does not word-split an unquoted `$VAR`; option strings passed that way arrive as one argument. Launch arm chains with `bash -c`.
 - SWE-bench images are about 2.9 GB each; watch free disk during any wave.
 - A driver that waits on a log line can match a stale line from an earlier run; mark relaunches in the log and wait on the new marker.
+
+**Planning dropped completions with long answers.** A completion passes the answer as the status note; a 14,359-character GAIA answer exceeded the Ledger's 4,096-character inline limit, the append raised inside the Bus handler, and the task was never marked `completed` in Planning (the benchmark still scored it from the bus event). The note now goes through `_inline_or_blob`, like a long description: a preview naming the cut plus `note_ref` (e71d996).
 
 **Still open.** Copies hung once after a floor backoff (16:55, 2026-09-14), root cause not confirmed. The SWE-bench scorer skips cases whose named tests are missing from the log.
 
@@ -157,6 +161,7 @@ So install freely, but list only enabled, relevant skills, or look skills up wit
 - An empty spoken reply is silence (58f48fc); a half-heard aside is not asked back (4b35681); courtesy words not addressed to Sim are not a turn (cd96667); in doubt, Sim stays quiet (509247a); a voice Sim cannot place may not start work without saying Sim's name (d521b21); "Sima" counts as Sim's name (da8e011).
 - `tv pair again` (c7ad9fc); `tv show` brings the dashboard back in front of another app (111ba2b); saying the dashboard is on the TV requires `cast_show` to have run (15e2858).
 - Siren takes `on` and answers `off` (7390468); a lone `?` opens help (31ea0c6); a Ring camera asked for by name on the NVR says where to find it (e822cbc).
+- "Hey Sim" came back from whisper as "A-seam." and Sim replied QUIET, then heard "Why are you not responding?" (2026-09-15). "seam" now names Sim, and the voice rules list the usual mishearings and say a turn that is only the name is a call: answer in a word or two (4d9d148). "AC" was left out on purpose (air conditioner).
 - **Still open:** barge-in "stop" does not interrupt speech; the `voice barge aec off` test is waiting on the creator.
 
 ---
@@ -175,5 +180,5 @@ So install freely, but list only enabled, relevant skills, or look skills up wit
 3. A gentler re-grounding arm (every 10, keep 4) and a higher reasoning-effort arm.
 4. Skills step 2: catalog in `task_rules`, `use_skill`, trust tiers, `[skills] enabled`.
 5. Long-run changes D, E remainder, F, G.
-6. The post-backoff hang in the benchmark driver; SWE-bench scorer skips.
+6. The post-backoff hang in the benchmark driver; SWE-bench scorer skips; Docker VM memory after SWE-bench slices (check and restart between waves).
 7. Barge-in "stop"; `restart` the live Sim to load the fixes and the Ollama fallback.
