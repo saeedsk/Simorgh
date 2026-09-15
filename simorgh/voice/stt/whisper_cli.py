@@ -121,6 +121,9 @@ def clean_transcript(text: str) -> str:
     return _collapse_repeats(cleaned)
 
 
+_PHRASE_LOOP = re.compile(r"\b(\w[\w' ]{6,80}?\w)(?:[\s,]+\1\b){2,}", re.IGNORECASE)
+
+
 def _collapse_repeats(text: str) -> str:
     """One copy of a sentence whisper wrote several times in a row.
 
@@ -129,6 +132,10 @@ def _collapse_repeats(text: str) -> str:
     identical sentences back to back go; a sentence said again after
     something else is kept.
     """
+    # The same loop with no full stops: "I'm going to say that I'm going to
+    # say that I'm going to say that" -- a phrase of a few words three or
+    # more times running. Twice is left alone ("no, no" is speech).
+    text = _PHRASE_LOOP.sub(r"\1", text)
     parts = [p for p in re.split(r"(?<=[.!?])\s+", text) if p]
     kept: list[str] = []
     for part in parts:

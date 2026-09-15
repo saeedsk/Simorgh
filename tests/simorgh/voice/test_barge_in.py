@@ -215,6 +215,10 @@ class WhisperAnnotationsTestCase(unittest.TestCase):
                                           "There's a lot of stuff in there."), "There's a lot of stuff in there.")
         self.assertEqual(clean_transcript("- I'm going to go. - I'm going to go. - I'm going to go."), "- I'm going to go.")
         self.assertEqual(clean_transcript("Stop. Wait. Stop."), "Stop. Wait. Stop.", "a repeat with words between is kept")
+        self.assertEqual(clean_transcript("I'm going to say that I'm going to say that I'm going to say that "
+                                          "I'm going to say that"), "I'm going to say that")
+        self.assertEqual(clean_transcript("no, no, I said no"), "no, no, I said no", "a word said twice is speech")
+        self.assertEqual(clean_transcript("turn it up turn it up"), "turn it up turn it up", "twice is kept")
         # Live 2026-09-13: "*crying*" reached Sim, who asked what was wrong.
         self.assertEqual(clean_transcript("*crying*"), "")
         self.assertEqual(clean_transcript("*door closes* hi Sim *speaks in Farsi*"), "hi Sim")
