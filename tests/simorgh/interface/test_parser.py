@@ -127,6 +127,11 @@ class ASentenceStartingWithACommandWordTestCase(unittest.TestCase):
     def test_asking_for_help_with_something_is_a_question(self):
         self.assertIsNone(parse("help me understand why the build fails").name)
 
+    def test_a_lone_question_mark_is_help(self):
+        self.assertEqual(parse("?").name, "help")
+        self.assertEqual(parse(" /? ").name, "help")
+        self.assertIsNone(parse("what time is it?").name)
+
     def test_the_bare_command_still_works(self):
         for word in ("exit", "pause", "resume", "status", "help", "capabilities"):
             self.assertEqual(parse(word).name, word)

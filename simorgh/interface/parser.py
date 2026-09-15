@@ -237,6 +237,11 @@ def parse(line: str) -> Command | None:
         return None
     if stripped.startswith("!"):
         return Command(name="!", args=stripped[1:].strip(), raw=raw)
+    if stripped in ("?", "/?"):
+        # A lone question mark is asking for the commands, not asking the
+        # model something: `?` went to chat and got "I'm here -- what would
+        # you like?" (the creator, 2026-09-14).
+        return Command(name="help", args="", raw=raw)
 
     explicit = stripped.startswith("/")
     body = stripped[1:] if explicit else stripped
