@@ -112,7 +112,11 @@ _KNOWN = re.compile(r"[\[(](?:silence|inaudible|laughs|laughter|laughing|chuckle
 def clean_transcript(text: str) -> str:
     """The words, with whisper's non-speech annotations removed."""
     cleaned = _KNOWN.sub(" ", _STAGED.sub(" ", _SHOUTED.sub(" ", text or "")))
-    return re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    # A transcript with no letter or digit in it -- "-", "...", "?" -- is
+    # whisper hearing a breath, not a word. Live 2026-09-14: "-" went to the
+    # model as a turn and cost a call to be told QUIET.
+    return cleaned if re.search(r"\w", cleaned) else ""
 
 
 class WhisperCliRecogniser:

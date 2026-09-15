@@ -206,6 +206,10 @@ class WhisperAnnotationsTestCase(unittest.TestCase):
         self.assertEqual(clean_transcript(" (silence) "), "")
         self.assertEqual(clean_transcript("[MUSIC] hello there [inaudible]"), "hello there")
         self.assertEqual(clean_transcript("*laughs* okay"), "okay")
+        # Live 2026-09-14: "-" reached the model as a turn. No letter, no word.
+        self.assertEqual(clean_transcript("-"), "")
+        self.assertEqual(clean_transcript(" ... ? "), "")
+        self.assertEqual(clean_transcript("موسیقی"), "موسیقی", "a word in any script is still a word")
         # Live 2026-09-13: "*crying*" reached Sim, who asked what was wrong.
         self.assertEqual(clean_transcript("*crying*"), "")
         self.assertEqual(clean_transcript("*door closes* hi Sim *speaks in Farsi*"), "hi Sim")
