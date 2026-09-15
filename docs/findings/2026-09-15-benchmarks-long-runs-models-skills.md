@@ -60,7 +60,7 @@ Design: `docs/plans/long-run-context-design.md`. Every change ships behind a swi
 | E. Model tiers and escalation | `escalate_from_attempt`, `[cognition] routes` | 0cf575b | partial |
 | F. Plan-first | - | - | not built |
 | G. Model scout for Together | - | - | designed, not built |
-| H. Read-only lookups in one reply run together | `parallel_read_tools` | faf953f | built; arm 25 running |
+| H. Read-only lookups in one reply run together | `parallel_read_tools` | faf953f | built; arm 25 within noise, off |
 
 **Arms, wave w20260915-arms** (GLM-5.3-Flash, review off; skipped = floor-answered, not scored):
 
@@ -69,12 +69,13 @@ Design: `docs/plans/long-run-context-design.md`. Every change ships behind a swi
 | 21/24 baseline | 7/26 | 11/24 | 2/15 |
 | 22 reground every 6 | 7/26 | 13/23 (1 skipped) | 2/12 (3 skipped) |
 | 23 reground + clean | 8/26 | 9/20 (4 skipped) | 4/13 (2 skipped) |
-| 25 parallel reads (4) | running | pending | pending |
+| 25 parallel reads (4) | 9/25 (1 skipped); outage run 3/21 | 13/24 | 3/13 (2 skipped) |
 
 **Conclusions.**
 - No arm beats the baseline by more than two cases on any slice: within run-to-run noise. Keep A and B off.
 - Re-grounding fires as designed (94 notes in arm 22, 79 in arm 23, no `context_too_large`), but writing a note every six steps spends steps: "step budget exhausted" was roughly twice as frequent in arm 22. If retried, use every 10 steps and keep 4.
-- Next candidates: change H (arm 25), a gentler re-grounding, and a higher reasoning effort.
+- Arm 25 (change H) halved "step budget exhausted" on L3 (4 -> 2) and scored within noise of the others. Its two L3 runs with identical settings gave 3/21 and 9/25, a swing larger than any gap between arms: **slices of 13-26 cases cannot rank these switches.** The next measurement should repeat each arm 3 times or use the full GAIA validation set, before any switch becomes a default.
+- Next candidates: a gentler re-grounding, a higher reasoning effort, and repeated runs of the baseline to size the noise.
 
 ---
 
@@ -175,7 +176,7 @@ So install freely, but list only enabled, relevant skills, or look skills up wit
 
 ## 9. Open list
 
-1. Arm 25 (parallel reads) results: GAIA L3, L2, SWE-bench; append to the analysis doc. Exclude run 7f5d624a109a.
+1. Size the benchmark's run-to-run noise (repeat the baseline 3 times on the same slices) before judging any switch. Arm 25 is done; run 7f5d624a109a stays excluded.
 2. Re-run the floor-skipped GAIA L2 cases (1 in arm 22, 4 in arm 23).
 3. A gentler re-grounding arm (every 10, keep 4) and a higher reasoning-effort arm.
 4. Skills step 2: catalog in `task_rules`, `use_skill`, trust tiers, `[skills] enabled`.

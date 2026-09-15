@@ -141,10 +141,11 @@ Each arm is one isolated copy of Sim on GLM-5.3-Flash with the answer review off
 | 21/24 baseline | review off | 7/26 (arm 24; arm 21's run was cut at 12 cases) | 11/24 | 2/15 |
 | 22 reground | + `reground_every_steps=6` | 7/26 | 13/23 (1 skipped) | 2/12 (3 skipped) |
 | 23 reground + clean | + `clean_revisions=true` | 8/26 | 9/20 (4 skipped) | 4/13 (2 skipped) |
-| 25 parallel reads | + `parallel_read_tools=4` | running | pending | pending |
+| 25 parallel reads | + `parallel_read_tools=4` | 9/25 (1 skipped); an earlier run hit a Together outage: 3/21 (5 skipped) | 13/24 | 3/13 (2 skipped) |
 
 **Reading.**
 - No arm separates from the baseline by more than two cases on any slice. At these sizes that is inside run-to-run noise, so none of the switches has earned a default yet; all stay off.
 - Re-grounding fired on schedule (94 notes in arm 22, 79 in arm 23; no `context_too_large`), so the mechanism works. It did not turn into answers.
 - "Step budget exhausted" is the leading failure in every arm, and roughly twice as frequent in the plain re-grounding arm: writing a note every six steps spends steps. If re-grounding is tried again it should be gentler (every 10, keep 4).
+- **Arm 25 (parallel reads).** GLM-5.3-Flash batched heavily (292 batches in the first L3 run, 108 of four lookups), and "step budget exhausted" fell from 4 to 2 on L3. Accuracy is within noise of the other arms: 9/25 on L3, 13/24 on L2 (best with arm 22), 3/13 on SWE-bench. Its own two L3 runs, same settings and cases, scored 3/21 and 9/25: a six-case swing larger than any difference between arms. At 13-26 cases per slice the benchmark cannot separate these switches; a decision needs repeated runs or larger slices. `parallel_read_tools` stays off by default.
 - The budget problem is what change H (read-only lookups in one reply, arm 25) targets: it lets several lookups share one step. Arm 25 shows GLM-5.3-Flash does write several lookups in one reply when told it may; its first launch was stopped and discarded because concurrent keyless searches were refused by DuckDuckGo, fixed in 2aeb871 before the relaunch.
