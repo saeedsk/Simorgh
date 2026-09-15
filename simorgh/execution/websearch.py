@@ -39,6 +39,8 @@ import html
 import json
 import os
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -233,6 +235,7 @@ class WebSearchTool:
         self._env = env if env is not None else os.environ
         self._recent_calls: list[float] = []
         self._last_call = 0.0
+        self._space_lock = threading.Lock()
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         query = str(args.get("query") or "").strip()
@@ -273,7 +276,11 @@ class WebSearchTool:
                 problem = duckduckgo_problem(body)
                 if not problem:
                     return parse_duckduckgo(body, limit)
-                self._last_call = 0.0  # force the next attempt to wait out the throttle
+                # A refusal: the next attempt waits two gaps. This used to set
+                # `_last_call = 0.0`, which `_space_out` reads as "never
+                # searched" -- so the retry went out at once, into the same throttle.
+                with self._space_lock:
+                    self._last_call = time.monotonic() + self._config.web_search_min_interval_s
             raise SearchUnavailable(
                 f"{problem}. Set BRAVE_API_KEY, TAVILY_API_KEY or SERPER_API_KEY for a search API "
                 "with a real quota, or try again in a moment"
@@ -300,16 +307,22 @@ class WebSearchTool:
     def _space_out(self) -> None:
         """Leave a gap between keyless searches. Wall-clock, not the
         injected clock: this is about the remote service's patience, not
-        about anything this system measures."""
-        import time
+        about anything this system measures.
 
+        Searches run together (`[orchestration] parallel_read_tools`) arrive
+        on several threads at once. Unlocked, each read the same `_last_call`,
+        none waited, and all went out in the same instant -- DuckDuckGo
+        refused about half of them (arm 25, 2026-09-15). Each caller now
+        reserves the next free slot under the lock and sleeps outside it."""
         gap = self._config.web_search_min_interval_s
         if gap <= 0:
             return
-        waited = time.monotonic() - self._last_call
-        if self._last_call and waited < gap:
-            time.sleep(gap - waited)
-        self._last_call = time.monotonic()
+        with self._space_lock:
+            now = time.monotonic()
+            slot = max(now, self._last_call + gap) if self._last_call else now
+            self._last_call = slot
+        if slot > now:
+            time.sleep(slot - now)
 
     def _require(self, key: str, provider: str) -> str:
         value = (self._env.get(key) or "").strip()
