@@ -13,6 +13,7 @@ work is additive, not a redesign.
 from __future__ import annotations
 
 import asyncio
+import re
 
 from simorgh.contracts.protocols import Clock, Logger, Provider, ProviderResponse
 
@@ -32,12 +33,29 @@ _MIN_CANDIDATE_SECONDS = 5.0
 _OVERRUN_GRACE_SECONDS = 1.0
 
 
+_TRANSIENT = re.compile(
+    r"HTTP (?:429|5\d\d)\b|timed out|TimeoutError|RemoteDisconnected|Connection (?:reset|aborted|refused)"
+    r"|temporarily unavailable|Service unavailable|overloaded", re.IGNORECASE)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """A failure worth one quick retry: the provider is up, this call was
+    unlucky. An exhausted key or a bad request is not."""
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return True
+    return bool(_TRANSIENT.search(str(exc)))
+
+
 class Router:
     def __init__(
         self, providers: list[Provider], budgets: dict[str, RollingWindowBudget],
         floor: FloorProvider, *, order: tuple[str, ...], clock: Clock, logger: Logger | None = None,
-        cooldown_s: float = 30.0,
+        cooldown_s: float = 30.0, transient_backoff_s: float = 2.0,
     ) -> None:
+        # One retry after this wait for a transient failure (HTTP 429/5xx, a
+        # timeout, a dropped connection) before the provider is cooled down:
+        # a single Together 503 skipped 14 of 26 benchmark cases (2026-09-15).
+        self._transient_backoff_s = max(0.0, float(transient_backoff_s))
         self._by_name = {p.name: p for p in providers}
         self._budgets = budgets
         self._floor = floor
@@ -240,18 +258,33 @@ class Router:
                 provider.complete(messages, tools=tools, max_tokens=max_tokens, timeout=share),
                 timeout=share + _OVERRUN_GRACE_SECONDS,
             )
-        except Exception as exc:  # noqa: BLE001 -- only a truncation is retried; the caller handles the rest
+        except Exception as exc:  # noqa: BLE001 -- truncations and transient failures retry once; the caller handles the rest
             left = share - (self._clock.now() - started)
-            if not getattr(exc, "truncated", False) or left < _MIN_CANDIDATE_SECONDS:
+            truncated = bool(getattr(exc, "truncated", False))
+            # Quick failures only: a provider that hung for most of its slice
+            # before failing gets no second slice -- that is what the cooldown
+            # is for (TheCooldownIsStampedWhenTheFailureHappens).
+            elapsed = self._clock.now() - started
+            transient = not truncated and _is_transient(exc) and elapsed <= min(10.0, share / 3)
+            wait = self._transient_backoff_s if transient else 0.0
+            if not (truncated or transient) or left - wait < _MIN_CANDIDATE_SECONDS:
                 raise
             billable = getattr(exc, "billable", None)
             if billable is not None and provider_budget is not None:
                 await provider_budget.record(billable)
             if self._logger is not None:
-                self._logger.warning("cognition.truncated_retry", provider=name, purpose=purpose.value,
-                                     max_tokens=max_tokens * 2)
+                if truncated:
+                    self._logger.warning("cognition.truncated_retry", provider=name, purpose=purpose.value,
+                                         max_tokens=max_tokens * 2)
+                else:
+                    self._logger.warning("cognition.transient_retry", provider=name, purpose=purpose.value,
+                                         error=str(exc)[:200], wait_s=wait)
+            if wait:
+                await asyncio.sleep(wait)
+                left -= wait
+        next_tokens = max_tokens * 2 if truncated else max_tokens
         return await asyncio.wait_for(
-            provider.complete(messages, tools=tools, max_tokens=max_tokens * 2, timeout=left),
+            provider.complete(messages, tools=tools, max_tokens=next_tokens, timeout=left),
             timeout=left + _OVERRUN_GRACE_SECONDS,
         )
 

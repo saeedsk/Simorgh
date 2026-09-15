@@ -656,3 +656,51 @@ class ATruncatedReplyIsNotAnOutageTestCase(unittest.IsolatedAsyncioTestCase):
         await router.complete(Purpose.REVIEW, [], tools=None, budget=_budget(), timeout=30.0)
         self.assertEqual(together.max_tokens_seen, [100, 200, 100, 200],
                          "the next call must dial the provider again, not sit out a cooldown")
+
+
+class _FlakyProvider:
+    """Fails `failures` times with `error`, then answers."""
+
+    def __init__(self, name: str, error: Exception, failures: int):
+        self.name = name
+        self._error = error
+        self._failures = failures
+        self.calls = 0
+
+    def available(self) -> bool:
+        return True
+
+    async def complete(self, messages, *, tools, max_tokens, timeout=None):
+        self.calls += 1
+        if self.calls <= self._failures:
+            raise self._error
+        return ProviderResponse(text=f"{self.name}-answer", provider=self.name)
+
+
+class ATransientFailureIsRetriedOnceTestCase(unittest.IsolatedAsyncioTestCase):
+    """2026-09-15: one Together HTTP 503 cooled the provider for 30 s and the
+    floor answered 14 of 26 benchmark cases."""
+
+    async def test_one_503_is_retried_and_the_provider_answers(self):
+        together = _FlakyProvider("together", ProviderUnavailable('Together HTTP 503: {"message": "Service unavailable"}'), 1)
+        router = Router([together], {}, FloorProvider(), order=("together",), clock=FakeClock(), transient_backoff_s=0.0)
+        response, floor = await router.complete(Purpose.DRAFT, [], tools=None, budget=_budget(), timeout=30.0)
+        self.assertFalse(floor)
+        self.assertEqual((response.provider, together.calls), ("together", 2))
+        await router.complete(Purpose.DRAFT, [], tools=None, budget=_budget(), timeout=30.0)
+        self.assertEqual(together.calls, 3, "no cooldown was started")
+
+    async def test_a_second_transient_failure_falls_through_and_cools_down(self):
+        together = _FlakyProvider("together", ProviderUnavailable("Together request failed: TimeoutError('timed out')"), 99)
+        router = Router([together], {}, FloorProvider(), order=("together",), clock=FakeClock(), transient_backoff_s=0.0)
+        _response, floor = await router.complete(Purpose.DRAFT, [], tools=None, budget=_budget(), timeout=30.0)
+        self.assertTrue(floor)
+        self.assertEqual(together.calls, 2)
+        await router.complete(Purpose.DRAFT, [], tools=None, budget=_budget(), timeout=30.0)
+        self.assertEqual(together.calls, 2, "cooling down now")
+
+    async def test_a_non_transient_failure_is_not_retried(self):
+        together = _FlakyProvider("together", ProviderUnavailable("credit limit exceeded"), 1)
+        router = Router([together], {}, FloorProvider(), order=("together",), clock=FakeClock(), transient_backoff_s=0.0)
+        await router.complete(Purpose.DRAFT, [], tools=None, budget=_budget(), timeout=30.0)
+        self.assertEqual(together.calls, 1)
