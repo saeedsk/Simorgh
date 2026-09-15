@@ -38,8 +38,9 @@ _FLOORED = "not the model --"
 
 class Runner:
     def __init__(self, bus, *, config: Config | None = None, clock=None,
-                 on_progress=None, on_start=None, repo_root: Path | None = None) -> None:
+                 on_progress=None, on_start=None, repo_root: Path | None = None, sleep=None) -> None:
         self._bus = bus
+        self._sleep = sleep or asyncio.sleep
         self._config = config or Config()
         self._clock = clock
         self._on_progress = on_progress or (lambda **_: None)
@@ -133,6 +134,22 @@ class Runner:
             expected=case.answer, seconds=seconds, steps=steps, cost_usd=cost_usd,
             blocked_by=error, error=error,
         )
+
+    async def _run_past_the_floor(self, case: Case) -> CaseResult:
+        """`run_case`, run again while the offline floor is what answered.
+
+        A provider outage lasts seconds to minutes; the cases behind it do
+        not deserve to be skipped for it. The last result stands, still
+        marked skipped, if the model never comes back."""
+        result = await self.run_case(case)
+        wait = self._config.floor_retry_wait_s
+        for _ in range(max(0, self._config.floor_retries)):
+            if not (result.skipped and (result.error or "").startswith(_FLOORED)):
+                break
+            await self._sleep(wait)
+            wait *= 2
+            result = await self.run_case(case)
+        return result
 
     async def _fetch_attachment(self, case: Case) -> tuple[str, str]:
         """`(path Sim can open, problem)`.
@@ -344,7 +361,7 @@ class Runner:
         try:
             for index, case in enumerate(suite.cases, start=1):
                 self._on_start(index=index, total=len(suite), case=case)
-                result = await self.run_case(case)
+                result = await self._run_past_the_floor(case)
                 record.results.append(result)
                 # Fire progress only after the case is scored and
                 # appended, so a cancellation mid-case (or `benchmark

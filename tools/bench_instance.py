@@ -236,7 +236,12 @@ async def run(args) -> int:
                 if floor_runs >= 3:
                     say(args.id, "stopping: three runs answered by the offline floor, not the model")
                     break
-                say(args.id, f"run looks answered by the offline floor ({floor_runs}/3); waiting 10 minutes")
+                # Not a measurement, so it does not use up --max-runs: the offset
+                # was not advanced, and after the wait the same slice runs again.
+                # Arm 25's GAIA L3 was lost this way on 2026-09-15.
+                runs_done -= 1
+                say(args.id, f"run looks answered by the offline floor ({floor_runs}/3); waiting 10 minutes, "
+                             "then the same slice again")
                 await asyncio.sleep(min(600, max(0, args.until - time.time())))
             else:
                 floor_runs = 0
