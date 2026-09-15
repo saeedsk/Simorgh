@@ -207,6 +207,7 @@ class VoiceSession:
         self._last_hum_at = -1e9
         self._hum_task: asyncio.Task | None = None
         self._sim_spoke_at = -1e9        # when Sim's voice last finished: an exchange under way, or not
+        self._quiet_on: dict[str, float] = {}   # speaker -> when the model last stayed quiet on them
         self._ack_task: asyncio.Task | None = None
         self._still_task: asyncio.Task | None = None
         self._last_user_text = ""
@@ -801,6 +802,8 @@ class VoiceSession:
             return
         if await self._background(turn_id, speaker, text):
             return
+        if await self._continuation(turn_id, speaker, text):
+            return
         text = await self._tidy(text, turn_id)
         if clock.confidence < self._config.min_confidence:
             # Asking "did you say ...?" is for someone talking to Sim. A
@@ -853,6 +856,7 @@ class VoiceSession:
             # said aloud to Iris eight minutes after she spoke (2026-09-14).
             if not speaker:
                 self._quiet_unknown.append(self._now())
+            self._quiet_on[speaker or "someone"] = self._now()
             await self._stay_quiet(turn_id)
             return
         self._room.append(("Sim", _strip_tone(reply), self._now(), "reply"))
@@ -916,6 +920,32 @@ class VoiceSession:
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
             "reason": f"{me} and {partner} are talking to each other"})
+        self.stats.turns += 1
+        self.turns.state = LISTENING
+        await self._announce(self.turns.state)
+        return True
+
+    async def _continuation(self, turn_id: int, speaker: str, text: str) -> bool:
+        """True when these words carry on an aside the model just stayed
+        quiet on: the same voice, within `continuation_quiet_s`, not naming
+        Sim, and Sim has not spoken since. Whisper cuts one sentence into two
+        turns; the second half was answered after the first was rightly
+        ignored (Ira to Bobby about pizza, 2026-09-15). A voice Sim knows
+        only: an unknown voice has `_background`, which waits for two quiet
+        turns before it stops asking."""
+        window = float(self._config.continuation_quiet_s or 0.0)
+        me = speaker
+        at = self._quiet_on.get(me) if me else None
+        now = self._now()
+        if window <= 0 or at is None or now - at > window or self._sim_spoke_at >= at:
+            return False
+        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0):
+            return False
+        self._quiet_on[me] = now
+        self._room.append((me, text, now, "aside"))
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
+            "reason": f"more of what {me} was saying to someone else"})
         self.stats.turns += 1
         self.turns.state = LISTENING
         await self._announce(self.turns.state)

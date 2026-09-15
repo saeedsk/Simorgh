@@ -152,6 +152,12 @@ class Config:
     backchannel_after_ms: int = 2500
     backchannel_gap_s: float = 12.0
     exchange_window_s: float = 20.0
+    # After the model stayed quiet on a voice, the same voice within this many
+    # seconds -- not naming Sim, with Sim silent since -- is the rest of that
+    # aside and is not asked (2026-09-15: Ira to Bobby, "it isn't fair that you
+    # get pizza for lunch," QUIET, then "that I didn't even eat a bite out of
+    # today" was answered). 0 turns it off.
+    continuation_quiet_s: float = 12.0
     still_after_s: float = 20.0
     # A listener's "uh-huh" under the person, at half volume, when
     # they pause mid-story (voice/delivery.py "hum"): only once they have
