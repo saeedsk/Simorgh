@@ -504,6 +504,12 @@ class UnplacedVoiceRefusalTestCase(unittest.TestCase):
         self.assertIn("refused", unplaced_voice_refusal(tv, "start_task"))
         self.assertIn("refused", unplaced_voice_refusal(tv, "cam_siren"), "an irreversible tool too")
         self.assertEqual(unplaced_voice_refusal(tv, "web_search"), "", "looking something up is harmless")
+        # Live 2026-09-15: "We are on the queue." from a voice Sim could not
+        # place became dash_view on the TV. A reversible change is still a change.
+        self.assertIn("refused", unplaced_voice_refusal(voice("We are on the queue."), "dash_view"))
+        self.assertEqual(unplaced_voice_refusal(voice("Sim, show the cameras."), "dash_view"), "")
+        self.assertEqual(unplaced_voice_refusal(voice("A-seam, show the cameras."), "dash_view"), "",
+                         "whisper's 'A-seam' is Sim's name")
         self.assertEqual(unplaced_voice_refusal(voice("Sim, delete the spam emails."), "start_task"), "",
                          "a guest who names Sim is heard")
         self.assertEqual(unplaced_voice_refusal(voice("Sima, are you there? Delete the spam."), "start_task"), "",
