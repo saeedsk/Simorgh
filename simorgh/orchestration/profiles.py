@@ -212,3 +212,16 @@ def for_task(kind: str, mode: str) -> Profile:
     if mode == "plan":
         return PLAN
     return BY_KIND.get(kind, CHAT)
+
+
+def for_claimed(kind: str, mode: str, *, origin: str = "", review_benchmark: bool = True) -> Profile:
+    """The profile for a claimed task: `for_task`, with Verification
+    switched off for a benchmark case when `[orchestration]
+    review_benchmark` is false -- the one knob a wave needs to measure
+    what the reviewer costs and gains."""
+    profile = for_task(kind, mode)
+    if origin == "benchmark" and not review_benchmark and profile.verify:
+        from dataclasses import replace
+
+        return replace(profile, verify=False)
+    return profile

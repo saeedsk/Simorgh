@@ -92,8 +92,9 @@ class Worker:
     def __init__(
         self, bus, ledger, *, clock=None, worker_id: str | None = None,
         assemble_timeout_s: float = DEFAULT_TIMEOUT_S, think_timeout_s: float | None = None,
-        heartbeat_s: float = 30.0, worktrees: bool = False,
+        heartbeat_s: float = 30.0, worktrees: bool = False, review_benchmark: bool = True,
     ) -> None:
+        self._review_benchmark = review_benchmark
         self._bus = bus
         self._ledger = ledger
         self._clock = clock
@@ -236,7 +237,8 @@ class Worker:
         kind = str(task.get("kind") or kind)
         mode = task.get("mode", "execute")
         description = await self._full_description(task)
-        profile = profiles.for_task(kind, mode)
+        profile = profiles.for_claimed(kind, mode, origin=str(task.get("origin") or ""),
+                                       review_benchmark=self._review_benchmark)
         session = Session(
             task_id=task_id, kind=kind, mode=mode, profile=profile,
             worker_id=self.worker_id, user_text=description, subject=task.get("subject"),

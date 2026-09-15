@@ -476,6 +476,20 @@ class DashboardOnTvClaimTestCase(unittest.TestCase):
         self.assertEqual(claimed_tv_act("The dashboard's back on the TV now.", session), "", "cast_show ran: the claim stands")
 
 
+class BenchmarkReviewSwitchTestCase(unittest.TestCase):
+    def test_review_benchmark_false_skips_verification_only_for_benchmark_cases(self):
+        from simorgh.orchestration import profiles
+        from simorgh.orchestration.config import Config
+        self.assertTrue(Config().review_benchmark, "reviewed by default")
+        self.assertTrue(Config.from_mapping({"review_benchmark": False}).review_benchmark is False)
+        patch = profiles.for_claimed("patch", "execute", origin="benchmark", review_benchmark=False)
+        self.assertFalse(patch.verify)
+        self.assertEqual(patch.max_steps, profiles.for_task("patch", "execute").max_steps, "only review changes")
+        self.assertTrue(profiles.for_claimed("patch", "execute", origin="benchmark", review_benchmark=True).verify)
+        self.assertTrue(profiles.for_claimed("patch", "execute", origin="human", review_benchmark=False).verify,
+                        "a person's task is still reviewed")
+
+
 class UnplacedVoiceRefusalTestCase(unittest.TestCase):
     def test_an_unknown_voice_that_does_not_name_sim_cannot_start_work(self):
         # Live 2026-09-14: a TV advert queued a task to delete promotion and spam emails.

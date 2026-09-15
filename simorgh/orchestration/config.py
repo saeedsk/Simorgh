@@ -48,6 +48,11 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Config:
     workers: int = 1
+    # Whether Verification reviews a benchmark case's answer. On by default.
+    # A benchmark wave turns it off to measure the reviewer: on 2026-09-14
+    # it rejected 111 correct and 111 wrong answers alike, and on patch
+    # tasks each rejection spends a revision in the same context.
+    review_benchmark: bool = True
     lease_seconds: int = 600
     heartbeat_s: int = 30
     max_depth: int = 3
