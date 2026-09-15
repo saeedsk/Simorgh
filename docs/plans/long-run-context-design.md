@@ -343,7 +343,7 @@ Only real calls find this out, and the list changes weekly.
 | 2 | **A**: `ProgressNote`, `task.progress`, re-ground hook, `context_too_large` handling, config `reground_every_steps`/`keep_recent_steps` | **done 2026-09-15**: `orchestration/progress.py`, `tests/simorgh/orchestration/test_reground.py`; off by default |
 | 3 | **B**: note-based retries and crash resume; `clean_revisions` flag | **done 2026-09-15**: `resume.py` carries the latest `task.progress` note plus later steps; crash resume opens with the note; `[orchestration] clean_revisions` (off); `tests/simorgh/orchestration/test_clean_retries.py` |
 | 4 | Benchmark arms 1-3 on the slice | results appended to `docs/benchmark-analysis-2026-09-14.md` |
-| 5 | **C**: `delegate` tool, in-process child sessions, Worker task stack, `delegate` origin | Flow 6 test green; pushed |
+| 5 | **C**: `delegate` tool, in-process child sessions, Worker task stack, `delegate` origin | **v1 done 2026-09-15**: read-only `research` helpers run in-process by `SessionRunner._delegate`, off by default (`[orchestration] delegation`, `delegate_max_steps`, `max_depth`); only the report returns (`tests/simorgh/orchestration/test_delegate.py`). The Worker stack and `delegate` origin were not needed: the child never goes through `Worker.run` or Planning. **Still to do:** patch helpers sharing the parent's worktree, and parallel helpers. |
 | 6 | **D**: test-first patch check | tests green; pushed |
 | 7 | **E**: per-purpose routes, strong instance, escalation signals, cost cap, `cognition.escalated` | tests green; pushed |
 | 8 | Benchmark arms 4-6 | results appended; defaults set from the winners |

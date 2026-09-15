@@ -62,6 +62,10 @@ class Config:
     # A patch revision after a rejected answer starts from the progress note
     # and the last `keep_recent_steps` steps instead of the whole transcript.
     clean_revisions: bool = False
+    # Helper tasks: the `delegate` tool, offered to patch and research sessions
+    # below `max_depth`. Off until its benchmark arm wins.
+    delegation: bool = False
+    delegate_max_steps: int = 12
     lease_seconds: int = 600
     heartbeat_s: int = 30
     max_depth: int = 3

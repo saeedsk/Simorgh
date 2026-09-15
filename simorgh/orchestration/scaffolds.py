@@ -136,6 +136,10 @@ _TOOL_NOTES: dict[str, str] = {
                   "saying anything about the queue",
     "cancel_task": "stop tasks by id, by origin (curiosity, reflection, ...), or all but one (`keep`); "
                    "the result says what stopped -- repeat exactly that, never claim a clearing it does not list",
+    "delegate": "hand ONE bounded investigation to a helper with a fresh context and its own few steps "
+                "(find where X is defined, run these tests and report failures, look up a fact). You get "
+                "back only its short report, not its steps -- use it to keep your own context focused. "
+                "Line one: the job; optional JSON line after it: {\"steps\": 8}",
     "start_task": "hand a BUILD off to a background task with its own step budget, which "
                    "resumes where it left off instead of starting over -- for an app, a game, a "
                    "long document, anything too big for one reply. authorised=true only when the "

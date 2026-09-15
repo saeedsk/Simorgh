@@ -471,8 +471,14 @@ class SessionRunner:
         think_timeout_s: float = 5.0, action_timeout_s: float = ACTION_TIMEOUT_S,
         verify_timeout_s: float = VERIFY_TIMEOUT_S, assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
         worktrees: bool = False, reground_every_steps: int = 0, keep_recent_steps: int = 2,
-        clean_revisions: bool = False,
+        clean_revisions: bool = False, delegation: bool = False, max_depth: int = 3,
+        delegate_max_steps: int = 12,
     ) -> None:
+        # Helper tasks (design section 5): `delegate` runs a read-only research
+        # session in-process with a fresh context and returns only its report.
+        self._delegation = bool(delegation)
+        self._max_depth = max(0, int(max_depth))
+        self._delegate_max_steps = max(3, int(delegate_max_steps))
         # A revision after a rejected answer starts from the note and the
         # last few steps, not the whole transcript (design section 4).
         self._clean_revisions = bool(clean_revisions)
@@ -724,7 +730,7 @@ class SessionRunner:
             # one: a cancel must not tear down a provider call or leave a
             # half-applied edit behind. The cleanup in `run` runs either
             # way, so an uncommitted change is still discarded.
-            if self._is_cancelled(session.task_id):
+            if self._is_cancelled(session.task_id) or (session.parent_id and self._is_cancelled(session.parent_id)):
                 return Outcome("failed", reason=CANCELLED_REASON)
 
             if (session.profile.scaffold != "chat" and session.messages and not session.budget.is_last_step
@@ -817,7 +823,10 @@ class SessionRunner:
 
             if tool_calls and not is_last:
                 call = tool_calls[0]  # one action per step (section 7)
-                ok, summary, detail = await self._propose_and_await(session, call, step_no)
+                if call.get("tool") == "delegate":
+                    ok, summary, detail = await self._delegate(session, call)
+                else:
+                    ok, summary, detail = await self._propose_and_await(session, call, step_no)
                 # `detail` (narration/Ledger, generously bounded) vs `summary`
                 # (the model's own next-turn context, tightly bounded) are
                 # deliberately different lengths -- see `_propose_and_await`.
@@ -1001,6 +1010,9 @@ class SessionRunner:
         # `offered_tools(())` means "every registered tool" (skills arrive
         # that way); the wrap-up call wants none at all.
         offered = () if no_tools else offered_tools(session.profile.tools)
+        if (offered and self._delegation and session.depth < self._max_depth
+                and session.profile.scaffold in ("patch", "research") and "delegate" not in offered):
+            offered = tuple(offered) + ("delegate",)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
         is_chat = session.profile.name == "chat"
         req = Message.new(
@@ -1097,6 +1109,68 @@ class SessionRunner:
             return None
         session.last_think_error = ""
         return reply
+
+    async def _delegate(self, session: Session, call: dict) -> tuple[bool, str, str]:
+        """Run a helper: a read-only research session with a fresh context and
+        its own small budget, in this process (so a single Worker cannot
+        deadlock waiting on its own child). Only its report comes back; its
+        steps live on its own `task:<id>` stream. (Design section 5.)"""
+        from dataclasses import replace as _replace
+
+        from . import profiles as _profiles
+        from .api import Budget as _Budget
+
+        args = call.get("args") or {}
+        if isinstance(args, dict) and set(args) == {"argument"}:
+            # A marker from a real model arrives as one raw string. Guardian's
+            # `to_action_payload` is where other tools get it split, and a
+            # delegate is never proposed -- so split it here the same way:
+            # the job on line one, optional JSON after.
+            from .tools import _json_rest
+
+            head, _, rest = str(args["argument"]).partition("\n")
+            args = {"job": head.strip(), **_json_rest(rest, "spec")}
+        job = " ".join(str(args.get("job") or args.get("goal") or "").split())
+        if not job:
+            text = "delegate: refused -- say on the first line what the helper should do"
+            return False, text, text
+        if session.depth >= self._max_depth:
+            text = f"delegate: refused -- helpers may not go deeper than {self._max_depth}"
+            return False, text, text
+        try:
+            steps = int(args.get("steps") or 0)
+        except (TypeError, ValueError):
+            steps = 0
+        steps = max(3, min(self._delegate_max_steps, steps or self._delegate_max_steps))
+        n = sum(1 for s in session.steps if s.tool == "delegate") + 1
+        child_id = f"{session.task_id}-h{n}"
+        goal = (session.progress.split("\n", 1)[0] if session.progress
+                else " ".join(session.user_text.split())[:500]) or "(not stated; the job below is the whole brief)"
+        brief = (
+            f"You are a helper on a larger task. Its goal: {goal}\n\n"
+            f"Your one job: {job}\n\n"
+            # No `WORD:` lines: a capitalised word and a colon reads as a tool
+            # marker, and a report of "ANSWER: 2009" was bounced as an invented
+            # tool (test_delegate, 2026-09-15).
+            "Do only this job, in as few steps as you can. Then reply with a short plain-text report: "
+            "first the answer in one or two sentences, then the facts behind it as '- ' bullets with "
+            "exact paths, names and numbers, including any tests you ran and whether they passed."
+        )
+        child = Session(
+            task_id=child_id, kind="research", mode="execute",
+            profile=_replace(_profiles.RESEARCH, verify=False, max_steps=steps),
+            budget=_Budget(max_steps=steps), worker_id=session.worker_id, user_text=brief,
+            depth=session.depth + 1, parent_id=session.task_id,
+        )
+        outcome = await self.run(child, user_text=brief)
+        session.spent_usd += child.spent_usd
+        session.spent_tokens += child.spent_tokens
+        body = (outcome.result_summary or outcome.reason or "(no report)").strip()
+        if len(body) > 1500:
+            body = body[:1499] + "\u2026"
+        ok = outcome.kind == "completed" and bool((outcome.result_summary or "").strip())
+        text = f"Helper {child_id} ({outcome.kind}, {child.budget.steps_used} steps): {body}"
+        return ok, text, text[:self._DETAIL_CHARS]
 
     async def _reground(self, session: Session, *, forced: bool = False) -> bool:
         """Write the progress note and replace the transcript with it.

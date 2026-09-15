@@ -83,7 +83,9 @@ class Service:
                             heartbeat_s=self.config.heartbeat_s, review_benchmark=self.config.review_benchmark,
                             reground_every_steps=self.config.reground_every_steps,
                             keep_recent_steps=self.config.keep_recent_steps,
-                            clean_revisions=self.config.clean_revisions, worktrees=self.config.worktrees)
+                            clean_revisions=self.config.clean_revisions,
+                            delegation=self.config.delegation, max_depth=self.config.max_depth,
+                            delegate_max_steps=self.config.delegate_max_steps, worktrees=self.config.worktrees)
             await worker.start()
             self._workers.append(worker)
         self._percept_sub = await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept)
