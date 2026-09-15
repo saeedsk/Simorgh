@@ -240,6 +240,26 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(quiet), 2, "the third and fourth fragments were background, never asked")
         self.assertIn("It is nine", " ".join(tts.spoken))
 
+    async def test_a_thank_you_to_someone_else_is_not_answered(self):
+        """2026-09-14, live: "Thank you." from across the room got "You're
+        welcome." again and again. Courtesy words that name nobody are not
+        asked; "Sim, thank you" still is."""
+        self.book.enroll("Saeed", _vec(0.0))
+        self.embedder.vector = _vec(0.02)
+        heard = iter(["- Thank you. - Thank you.", "Sim, thank you"])
+        script = _Script(*[(True, 60), (False, 110)] * 2, (False, 10_000))
+        replies = _Replies("You're welcome.")
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.0, engine="fake")
+        session._stt._inner.transcribe = _transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: len(replies.asked) >= 1, timeout=15.0)
+        self.assertEqual([a[0] for a in replies.asked], ["Sim, thank you"])
+        quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet") and "courtesy" in p.get("reason", "")]
+        self.assertEqual(len(quiet), 1)
+
     async def test_a_half_heard_aside_is_not_asked_back_but_a_half_heard_ask_is(self):
         """2026-09-14, live: the creator talking Farsi across the room, heard
         at low confidence, got "I'm not sure I heard that right. Did you say:

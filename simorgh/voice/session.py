@@ -453,6 +453,23 @@ class VoiceSession:
         state = getattr(self._pipeline, "tv_state", None) or {}
         return str(state.get("mode") or "none") in ("full", "frame")
 
+    _COURTESY = frozenset((
+        "thank", "thanks", "you", "so", "much", "very", "okay", "ok", "yeah", "yes", "yep", "no", "nope", "bye",
+        "goodbye", "good", "luck", "night", "go", "wait", "sorry", "please", "oh", "wow", "cool", "nice", "right",
+        "alright", "sure", "fine", "it's", "its", "that's", "great", "awesome", "hmm", "uh", "um", "huh", "hey",
+    ))
+
+    def _courtesy_aside(self, text: str) -> bool:
+        """A few words of courtesy or filler, not naming Sim and not an
+        answer to what Sim just said."""
+        words = re.findall(r"[a-z']+", (text or "").lower())
+        if not words or len(words) > 6 or any(w not in self._COURTESY for w in words):
+            return False
+        if self._names_sim(text):
+            return False
+        in_exchange = 0.0 <= self._now() - self._sim_spoke_at <= self._config.exchange_window_s
+        return not in_exchange
+
     @staticmethod
     def _names_sim(text: str) -> bool:
         return bool(re.search(r"\b(?:sim|simorgh|sam|seem)\b", text or "", re.I))
@@ -770,6 +787,15 @@ class VoiceSession:
             # word -- the model had said "I'm writing it down" and nothing
             # was written (2026-09-13). Only for a name the book knows.
             await self._take_correction(turn_id, text, claimed, vector, clock)
+            return
+        if self._courtesy_aside(text):
+            # "Thank you", "okay", "bye", "go, go" said to someone else got
+            # "You're welcome" again and again, with the voice rules already
+            # asking for QUIET (2026-09-14). Small words that name nobody
+            # and follow nothing Sim said are not a turn; the model is not
+            # asked.
+            self._room.append((speaker or "someone", text, self._now(), "aside"))
+            await self._stay_quiet(turn_id, reason="a courtesy word not said to Sim")
             return
         if await self._background(turn_id, speaker, text):
             return
