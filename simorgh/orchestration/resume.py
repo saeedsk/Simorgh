@@ -28,6 +28,7 @@ from __future__ import annotations
 from simorgh.contracts import topics
 
 from .api import Session, Step
+from .progress import NOTE_HEADER
 from .session import EDITS_KEPT
 
 # How much of the earlier attempts the new one is told about. A patch
@@ -48,12 +49,17 @@ def _attempts(events) -> list[dict]:
     current: dict | None = None
     for e in events:
         if e.type == topics.TASK_STARTED:
-            current = {"steps": [], "ended": None, "reason": "", "kept": [], "created": []}
+            current = {"steps": [], "ended": None, "reason": "", "kept": [], "created": [], "note": "", "note_at": 0}
             attempts.append(current)
         elif current is None:
             continue
         elif e.type == topics.TASK_STEP:
             current["steps"].append(e.payload)
+        elif e.type == topics.TASK_PROGRESS:
+            # The session's own note (orchestration/progress.py). Steps
+            # before it are summarised in it; only later ones need listing.
+            current["note"] = str(e.payload.get("note") or "")
+            current["note_at"] = len(current["steps"])
         elif e.type == EDITS_KEPT:
             current["kept"] = list(e.payload.get("paths") or [])
             current["created"] = list(e.payload.get("created") or [])
@@ -75,7 +81,15 @@ def carried_note(attempts: list[dict]) -> str:
     blocks: list[str] = []
     for n, attempt in enumerate(attempts, start=1):
         lines = [f"Attempt {n} ended {attempt['ended'] or 'unknown'}" + (f": {attempt['reason'][:200]}" if attempt["reason"] else "")]
-        for step in attempt["steps"]:
+        steps = attempt["steps"]
+        if attempt.get("note"):
+            # A clean retry (docs/plans/long-run-context-design.md section 4):
+            # the attempt's own progress note, then only the steps after it.
+            lines.append("Its progress note:\n" + attempt["note"])
+            steps = steps[attempt.get("note_at", 0):]
+            if steps:
+                lines.append("Steps after that note:")
+        for step in steps:
             tool = step.get("tool") or step.get("phase") or "step"
             cap = _PATCH_STEP_CHARS if tool in ("apply_source_patch", "apply_skill") else _STEP_CHARS
             summary = str(step.get("summary") or "")
@@ -109,6 +123,12 @@ async def restore_session(session: Session, ledger) -> int:
             ))
         session.budget.steps_used = len(last["steps"])
         session.resumed_from_step = len(last["steps"])
+        if last.get("note"):
+            # The dead worker had re-grounded: continue from its note rather
+            # than from an empty transcript.
+            session.progress = last["note"]
+            session.reground_at = last.get("note_at", 0)
+            session.messages = [{"role": "user", "content": f"{NOTE_HEADER}\n\n{last['note']}"}]
         if len(attempts) > 1:
             session.carried = carried_note(attempts[:-1])
             # The edits the DEAD attempt inherited are still in the tree.

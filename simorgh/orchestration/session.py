@@ -471,7 +471,11 @@ class SessionRunner:
         think_timeout_s: float = 5.0, action_timeout_s: float = ACTION_TIMEOUT_S,
         verify_timeout_s: float = VERIFY_TIMEOUT_S, assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
         worktrees: bool = False, reground_every_steps: int = 0, keep_recent_steps: int = 2,
+        clean_revisions: bool = False,
     ) -> None:
+        # A revision after a rejected answer starts from the note and the
+        # last few steps, not the whole transcript (design section 4).
+        self._clean_revisions = bool(clean_revisions)
         self._bus = bus
         # Re-grounding (orchestration/progress.py): every N steps the model
         # writes a progress note and the transcript is replaced by it. 0 is
@@ -1361,6 +1365,15 @@ class SessionRunner:
                                result_summary=text, verification_ref=verification_id)
 
             session.budget.revisions_used += 1
+            if self._clean_revisions:
+                # The objection, the note and the last few steps -- not every
+                # failed attempt and tool dump that led to the rejected answer.
+                kept = session.messages[-(2 * self._keep_recent_steps):] if self._keep_recent_steps else []
+                while kept and kept[0].get("role") != "assistant":
+                    kept = kept[1:]
+                head = [{"role": "user", "content": f"{progress_note.NOTE_HEADER}\n\n{session.progress}"}] \
+                    if session.progress else []
+                session.messages = head + list(kept)
             session.messages.append({"role": "user", "content": f"Verification feedback: {note}"})
             think_reply = await self._think(session, "", last_step=session.budget.is_last_step)
             if think_reply is None:

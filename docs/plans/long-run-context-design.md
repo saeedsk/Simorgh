@@ -341,7 +341,7 @@ Only real calls find this out, and the list changes weekly.
 | 0 | `review_benchmark` switch | shipped, `b7aa40e` |
 | 1 | This document | committed |
 | 2 | **A**: `ProgressNote`, `task.progress`, re-ground hook, `context_too_large` handling, config `reground_every_steps`/`keep_recent_steps` | **done 2026-09-15**: `orchestration/progress.py`, `tests/simorgh/orchestration/test_reground.py`; off by default |
-| 3 | **B**: note-based retries and crash resume; `clean_revisions` flag | tests green; pushed |
+| 3 | **B**: note-based retries and crash resume; `clean_revisions` flag | **done 2026-09-15**: `resume.py` carries the latest `task.progress` note plus later steps; crash resume opens with the note; `[orchestration] clean_revisions` (off); `tests/simorgh/orchestration/test_clean_retries.py` |
 | 4 | Benchmark arms 1-3 on the slice | results appended to `docs/benchmark-analysis-2026-09-14.md` |
 | 5 | **C**: `delegate` tool, in-process child sessions, Worker task stack, `delegate` origin | Flow 6 test green; pushed |
 | 6 | **D**: test-first patch check | tests green; pushed |

@@ -93,7 +93,7 @@ class Worker:
         self, bus, ledger, *, clock=None, worker_id: str | None = None,
         assemble_timeout_s: float = DEFAULT_TIMEOUT_S, think_timeout_s: float | None = None,
         heartbeat_s: float = 30.0, worktrees: bool = False, review_benchmark: bool = True,
-        reground_every_steps: int = 0, keep_recent_steps: int = 2,
+        reground_every_steps: int = 0, keep_recent_steps: int = 2, clean_revisions: bool = False,
     ) -> None:
         self._review_benchmark = review_benchmark
         self._bus = bus
@@ -128,7 +128,8 @@ class Worker:
             bus, ledger, clock=clock, worker_id=self.worker_id, is_paused=lambda: self._paused,
             is_cancelled=self._is_cancelled,
             assemble_timeout_s=assemble_timeout_s, worktrees=worktrees,
-            reground_every_steps=reground_every_steps, keep_recent_steps=keep_recent_steps, **runner_kwargs,
+            reground_every_steps=reground_every_steps, keep_recent_steps=keep_recent_steps,
+            clean_revisions=clean_revisions, **runner_kwargs,
         )
         self._subs: list = []
         # Task ids somebody has asked to stop -> whether that cancel was
