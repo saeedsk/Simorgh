@@ -291,9 +291,18 @@ class TaskStore:
         # caller wanting the optimistic check still passes `expected_seq`.
         exp = expected_seq
         now = self._clock.now()
+        # A completion's note is the task's answer, and an answer can be long.
+        # Live 2026-09-15 (arm 25): a 14,359-character GAIA answer made this
+        # append raise `$.note: ... inline exceeds 4096`, the Bus handler
+        # swallowed it, and the task was never marked completed. Same rule
+        # as a long description: the rest goes to a blob, the note says so.
+        note, note_ref = await self._inline_or_blob(note or "")
+        payload = {"status": status, "note": note, "attempt": attempt}
+        if note_ref:
+            payload["note_ref"] = note_ref
         event = Event(
             stream=stream, type="status_changed", ts=now, trace_id=task_id, causation_id=None,
-            payload={"status": status, "note": note, "attempt": attempt},
+            payload=payload,
         )
         seq = await self._ledger.append(stream, event, expected_seq=exp)
         self.index.apply(stream, replace(event, seq=seq))
