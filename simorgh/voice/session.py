@@ -478,8 +478,9 @@ class VoiceSession:
     @staticmethod
     def _names_sim(text: str) -> bool:
         # "Hey Sim" came back from whisper as "A-seam." and Sim stayed quiet,
-        # then was asked "why are you not responding?" (live 2026-09-15).
-        return bool(re.search(r"\b(?:sim|sima|simorgh|sam|seem|seam)\b", text or "", re.I))
+        # then was asked "why are you not responding?"; "Hey Seym are you
+        # there?" the same afternoon (live 2026-09-15).
+        return bool(re.search(r"\b(?:sim|sima|simorgh|sam|seem|seam|seym|syme)\b", text or "", re.I))
 
     def _other_language(self, heard: str) -> str:
         """The language code whisper heard, when it is not one of the

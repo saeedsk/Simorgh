@@ -440,7 +440,7 @@ def _git_head() -> str:
 
 
 # "Sima, are you there?" -- whisper hearing the name (live 2026-09-15).
-_NAMES_SIM = re.compile(r"\b(?:sim|sima|simorgh|sam|seem|seam)\b", re.IGNORECASE)
+_NAMES_SIM = re.compile(r"\b(?:sim|sima|simorgh|sam|seem|seam|seym|syme)\b", re.IGNORECASE)
 
 
 def unplaced_voice_refusal(session: Session, tool: str) -> str:

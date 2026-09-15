@@ -8,7 +8,8 @@ from simorgh.voice.session import VoiceSession
 
 class MisheardName(unittest.TestCase):
     def test_seam_forms_name_sim(self):
-        for heard in ("A-seam.", "Hey seam", "Seam, are you there?", "Seem?", "Sima"):
+        for heard in ("A-seam.", "Hey seam", "Seam, are you there?", "Seem?", "Sima",
+                      "Hey Seym are you there?", "Syme, what time is it"):
             self.assertTrue(VoiceSession._names_sim(heard), heard)
 
     def test_ordinary_words_do_not(self):
