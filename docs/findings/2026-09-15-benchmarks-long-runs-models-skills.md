@@ -1,0 +1,178 @@
+# Findings, 2026-09-14 and 2026-09-15
+
+Benchmarks, long-run architecture, model tiers, local fallback, Agent Skills and parallel lookups. Every claim below was measured or observed in these two days; open questions are marked as such.
+
+Related documents:
+- `docs/benchmark-analysis-2026-09-14.md` (analysis, Gemini reviews, comparison arm table)
+- `docs/plans/long-run-context-design.md` (changes A-H and the project plan)
+- `docs/plans/agent-skills-design.md` (skills design, trust tiers, build plan)
+
+---
+
+## 1. Benchmark harness
+
+**Setup.** `tools/bench_instance.py` runs one isolated copy of Sim (repo clone, own data dir, autonomy off, provider order `together,floor`) and asks it for benchmark runs over the bus. Results append to `~/.simorgh/benchmark-waves/<wave>/results.jsonl`. Comparison arms use `--arm`, `--orch key=value` (repeatable) and `--max-runs` (29079e4).
+
+**Bugs found running 10 copies for 6 hours, and their fixes.**
+
+| Finding | Effect | Fix |
+|---|---|---|
+| A case answered by the offline floor (Together connection dropped, 30 s cooldown) was scored as the model's wrong answer | Scores understated; 53 floor cases in wave w20260914b | `task.completed` carries `floor`; runner skips the case (3b6dc01); driver backs off (8a4858f) |
+| A reply cut at `max_tokens` (reasoning-only) was treated as an outage and cooled the provider down | Healthy provider benched, more floor answers | Retry once with twice the tokens, no cooldown (517fa26) |
+| Copies ran reflection's self-improvement tasks, each landing running `pytest -n auto` at 2-5 GB | Claude Code killed all copies twice for low memory | Reflection and distillation off in copies (474a98c) |
+| A restarted copy resumed tasks from its old data dir | Stale work competing with the benchmark | Data dir wiped at start (bb4e036) |
+| `observer_kit.fast_copy_repo` fell back to `shutil.copytree` under load and copied `workspace/` (~6 GB per copy) | Disk fell from 53 GB to 3.6 GB | Driver clones code only, refuses a copy over 1 GB, stops under 20 GB free (ad2563b) |
+
+**Measurement lessons.**
+- Use `footprint -p` or the compressor total from `vm_stat` for memory; `ps` RSS hid about 10 GB of compressed memory.
+- zsh does not word-split an unquoted `$VAR`; option strings passed that way arrive as one argument. Launch arm chains with `bash -c`.
+- SWE-bench images are about 2.9 GB each; watch free disk during any wave.
+- A driver that waits on a log line can match a stale line from an earlier run; mark relaunches in the log and wait on the new marker.
+
+**Still open.** Copies hung once after a floor backoff (16:55, 2026-09-14), root cause not confirmed. The SWE-bench scorer skips cases whose named tests are missing from the log.
+
+---
+
+## 2. What the 2026-09-14 wave showed
+
+- **The answer reviewer was not a net gain on benchmarks.** It rejected 111 correct and 111 wrong answers, and for research profiles it cannot revise (`max_revisions=0`), so a rejection only discards. GAIA and BFCL rejected answers are still scored. Fixed by `[orchestration] review_benchmark` (b7aa40e); arms run with it off.
+- **The reviewer only revises patch tasks** (87a5655); the analysis doc was corrected where it said otherwise.
+- **Leading failure: "step budget exhausted"**, not wrong reasoning. That shaped the long-run work below.
+- Sim calls GLM-5.3-Flash with `reasoning_effort: "low"` on every call (34f1791); a higher effort is untested.
+
+---
+
+## 3. Long-run changes and the comparison arms
+
+Design: `docs/plans/long-run-context-design.md`. Every change ships behind a switch, off until its arm wins.
+
+| Change | Switch | Commit | Status |
+|---|---|---|---|
+| A. Progress note, re-grounding every N steps | `reground_every_steps`, `keep_recent_steps` | 64033a2 | built; no gain measured |
+| B. Clean retries/revisions from the note | `clean_revisions` | d4d29d4 | built; no gain measured |
+| C. `delegate`: helper task with fresh context, report-only return | `delegation`, `delegate_max_steps` | 6864b18 | built; not yet in an arm |
+| D. Test-first patch loop | - | - | not built |
+| E. Model tiers and escalation | `escalate_from_attempt`, `[cognition] routes` | 0cf575b | partial |
+| F. Plan-first | - | - | not built |
+| G. Model scout for Together | - | - | designed, not built |
+| H. Read-only lookups in one reply run together | `parallel_read_tools` | faf953f | built; arm 25 running |
+
+**Arms, wave w20260915-arms** (GLM-5.3-Flash, review off; skipped = floor-answered, not scored):
+
+| Arm | GAIA L3 | GAIA L2 | SWE-bench Verified |
+|---|---|---|---|
+| 21/24 baseline | 7/26 | 11/24 | 2/15 |
+| 22 reground every 6 | 7/26 | 13/23 (1 skipped) | 2/12 (3 skipped) |
+| 23 reground + clean | 8/26 | 9/20 (4 skipped) | 4/13 (2 skipped) |
+| 25 parallel reads (4) | running | pending | pending |
+
+**Conclusions.**
+- No arm beats the baseline by more than two cases on any slice: within run-to-run noise. Keep A and B off.
+- Re-grounding fires as designed (94 notes in arm 22, 79 in arm 23, no `context_too_large`), but writing a note every six steps spends steps: "step budget exhausted" was roughly twice as frequent in arm 22. If retried, use every 10 steps and keep 4.
+- Next candidates: change H (arm 25), a gentler re-grounding, and a higher reasoning effort.
+
+---
+
+## 4. Parallel read-only lookups (change H)
+
+**Why.** One tool per model call made three independent searches cost three calls and three steps of budget.
+
+**How it works** (faf953f):
+- The parser keeps every marker in a reply (`cognition/parser.py::further_calls`); `tool_calls[0]` is unchanged.
+- With `parallel_read_tools = N > 1`, the think request carries `parallel_tools` and `max_parallel_tools`, and Cognition tells the model independent lookups may share one reply.
+- The session runs the first call plus the read-only calls straight after it, up to N, concurrently. Each is proposed to Guardian and recorded as its own step; the model gets one numbered result block; the batch costs one step.
+- Anything that can change something, and `delegate`, still runs alone, and the model is told what did not run.
+
+**Finding: GLM-5.3-Flash does batch when told it may.** Within the first GAIA cases of arm 25, the copy's ledger showed batches of 3 and 4 lookups.
+
+**Finding: concurrent keyless searches were refused.** In arm 25's first launch DuckDuckGo refused 12 of 26 searches, against 5-21% in the other arms. Two bugs in `execution/websearch.py` (fixed in 2aeb871):
+1. `_space_out` read `_last_call` without a lock, so concurrent searches all saw the same time, none waited, and all went out at once. Each caller now reserves the next slot under a lock.
+2. After a refusal, `_last_call = 0.0` was meant to force a wait but reads as "never searched", so the retry went out immediately. It now waits two gaps.
+
+That launch was stopped and discarded (no result row written) and the arm relaunched with the fix.
+
+**Consequence.** With the keyless engine, batched searches still go out 2 s apart: the saving is model calls and step budget, not wall time. Batched file reads and fetches do run concurrently. A search API key (Brave, Tavily, Serper) would remove the spacing.
+
+---
+
+## 5. Models: Together tiers and local fallback
+
+**Together serverless probe (2026-09-15).** Callable per token:
+
+| Model | Input $/M | Output $/M |
+|---|---|---|
+| GLM-5.3-Flash | 0.15 | 0.50 |
+| GLM-5.3 | 1.40 | 4.40 |
+| DeepSeek-V4-Flash | 0.14 | 0.28 |
+| DeepSeek-V4-Pro | 1.32 | 3.96 |
+| gpt-oss-20b | callable | |
+| Ternary-Bonsai-27B | free | |
+
+- Qwen3.8-Flash and Qwen3.7-Max are streaming-only (Sim's provider does not stream).
+- Most "free" catalogue entries need a dedicated endpoint, not serverless.
+- `/v1/models` returned 403 through urllib; use `api.together.ai` with a User-Agent header.
+
+**Built.** Per-purpose routes, named extra Together instances and strong-tier escalation (0cf575b); a quick transient failure (429/5xx, timeout, connection reset) retried once before cooldown (fb1ec4b).
+
+**Ollama as last resort** (4dc8405), before the floor, `chat` purpose only:
+- `qwen3:4b` leaks its reasoning even with `think:false`; do not use it.
+- `qwen3:4b-instruct` answers directly in 0.6-1.8 s, about 3.9 GB of GPU memory at `num_ctx 8192`, `keep_alive 2m`.
+- Enabled in `~/.simorgh/simorgh.toml`; takes effect on `restart`.
+- Its 8,192-token context is a hard ceiling: anything that grows every prompt (a large skills catalog) breaks this fallback first.
+
+---
+
+## 6. Agent Skills
+
+Design: `docs/plans/agent-skills-design.md` (6b7da66, a058536). Step 1 built: `simorgh/contracts/skills.py` parses and discovers `SKILL.md` folders, reports invalid ones with a reason, renders a capped per-profile catalog (ee89c39). Nothing reads it yet.
+
+**Decisions (agreed with the creator, 2026-09-15).**
+- **Trust belongs to the GitHub organisation that maintains a repo**, never to a marketplace that lists it.
+- **Trusted orgs:** `anthropics`, `google`, `microsoft`, `huggingface`, `trailofbits`. Their skills install pinned to a commit with no approval step; the deterministic review still runs and holds back anything flagged. A new commit is taken only by an explicit `skills update`.
+- **Any other repo:** reviewed, hash-pinned, enabled only after approval.
+- **Marketplaces and lists** (SkillsMP ~1.9M scraped skills, ClawHub, "awesome" lists): discovery only.
+- **Every source:** licence checked at install; fit with Sim's tools checked; enabled only if Sim will use it.
+- **Default:** skills on once the catalog lands, confirmed by a benchmark arm; flip back if the catalog costs score.
+
+**Source notes.**
+- `anthropics/skills`: example skills Apache-2.0 (may be bundled); `docx`/`pdf`/`pptx`/`xlsx` source-available (install locally, never commit). Written for Claude's tools.
+- `google/skills`: Gmail, Drive, Docs, Sheets, Calendar, YouTube, Gemini API; Apache-2.0. Most relevant to a home assistant.
+- `trailofbits/skills` (security review), `microsoft/playwright-cli`, `huggingface/skills`: relevant.
+- Vercel, Cloudflare, Stripe, Supabase, Neon, PlanetScale, Redis, HashiCorp: trusted but product-specific.
+- `openai/skills` is deprecated in favour of OpenAI's plugins repository.
+
+**Cost of preinstalling everything.** Disk is negligible. The cost is the catalog in every prompt:
+- ~50 skills ≈ 3,000 tokens per call ≈ 60,000 tokens for a 20-step task.
+- 150+ skills ≈ 9,000 tokens per call, larger than the Ollama fallback's whole context.
+- A long, overlapping menu makes a weaker model pick the wrong skill.
+
+So install freely, but list only enabled, relevant skills, or look skills up with a search tool instead of a full list.
+
+---
+
+## 7. Voice, TV and home fixes (2026-09-14)
+
+- Speech-to-text auto order picks the whisper.cpp server first (af51564). Whisper transcripts with no letters are dropped (9e2bb12); looped sentences and phrases are heard once (535d8e6, 29034c7).
+- An empty spoken reply is silence (58f48fc); a half-heard aside is not asked back (4b35681); courtesy words not addressed to Sim are not a turn (cd96667); in doubt, Sim stays quiet (509247a); a voice Sim cannot place may not start work without saying Sim's name (d521b21); "Sima" counts as Sim's name (da8e011).
+- `tv pair again` (c7ad9fc); `tv show` brings the dashboard back in front of another app (111ba2b); saying the dashboard is on the TV requires `cast_show` to have run (15e2858).
+- Siren takes `on` and answers `off` (7390468); a lone `?` opens help (31ea0c6); a Ring camera asked for by name on the NVR says where to find it (e822cbc).
+- **Still open:** barge-in "stop" does not interrupt speech; the `voice barge aec off` test is waiting on the creator.
+
+---
+
+## 8. Environment notes
+
+- The listings tool's import prints NumPy tracebacks: `pyarrow` 14.0.2, `numexpr` 2.8.7 and `bottleneck` 1.3.7 in the Anaconda base were built for NumPy 1.x, and NumPy is 2.5.3. The import succeeds; it is noise. Upgrading those three packages would silence it (not done).
+- Ten `voiceday` observer copies (5.9 GB each) were found on disk during the wave; not created by the benchmark work and not deleted.
+
+---
+
+## 9. Open list
+
+1. Arm 25 (parallel reads) results: GAIA L3, L2, SWE-bench; append to the analysis doc.
+2. Re-run the floor-skipped GAIA L2 cases (1 in arm 22, 4 in arm 23).
+3. A gentler re-grounding arm (every 10, keep 4) and a higher reasoning-effort arm.
+4. Skills step 2: catalog in `task_rules`, `use_skill`, trust tiers, `[skills] enabled`.
+5. Long-run changes D, E remainder, F, G.
+6. The post-backoff hang in the benchmark driver; SWE-bench scorer skips.
+7. Barge-in "stop"; `restart` the live Sim to load the fixes and the Ollama fallback.
