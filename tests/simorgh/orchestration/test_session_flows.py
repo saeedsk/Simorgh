@@ -459,6 +459,23 @@ class ClaimedTvActTestCase(unittest.TestCase):
         self.assertTrue(claimed_tv_act("It's playing on the TV now.", plain), "the typed chat has the TV tools too")
 
 
+class DashboardOnTvClaimTestCase(unittest.TestCase):
+    def test_saying_the_dashboard_is_on_the_tv_needs_cast_show(self):
+        # Live 2026-09-14: "The dashboard's back on the TV now -- home view." after only dash_view.
+        from simorgh.orchestration import profiles
+        from simorgh.orchestration.api import Session, Step
+        from simorgh.orchestration.session import claimed_tv_act
+        session = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT, worker_id="w",
+                          user_text="the TV switched to home screen, but it didn't switch to your dashboard", channel="cli")
+        session.record(Step(1, "act", "the dashboard shows home", tool="dash_view", ok=True))
+        self.assertTrue(claimed_tv_act("The dashboard's back on the TV now -- home view.", session))
+        self.assertTrue(claimed_tv_act("Dashboard's up on the Family Room TV -- home view.", session))
+        self.assertEqual(claimed_tv_act("Switched the dashboard to the home view.", session), "",
+                         "turning the page is what dash_view did")
+        session.record(Step(2, "act", "Sim's dashboard is on Family Room TV", tool="cast_show", ok=True))
+        self.assertEqual(claimed_tv_act("The dashboard's back on the TV now.", session), "", "cast_show ran: the claim stands")
+
+
 class UnplacedVoiceRefusalTestCase(unittest.TestCase):
     def test_an_unknown_voice_that_does_not_name_sim_cannot_start_work(self):
         # Live 2026-09-14: a TV advert queued a task to delete promotion and spam emails.

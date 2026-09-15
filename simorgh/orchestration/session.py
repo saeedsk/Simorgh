@@ -210,6 +210,11 @@ def without_markers(text: str, names: list[str]) -> str:
     return "\n".join(kept).strip()
 
 
+_DASH_ON_TV = re.compile(
+    r"dashboard(?:'s| is)?\s+(?:\w+\s+){0,2}(?:on|up on|back on|showing on)\s+(?:the\s+)?(?:[\w ]{0,20})?(?:tv|screen)\b",
+    re.IGNORECASE)
+
+
 def claimed_tv_act(text: str, session) -> str:
     """The words in `text` that say the TV is doing something, when no
     tool ran this turn and the TV tools were offered -- or "".
@@ -218,9 +223,7 @@ def claimed_tv_act(text: str, session) -> str:
     for "play") got "The K-pop chart's running on the TV now" and no
     tool call; the TV sat idle. A claim of an act is checked against
     the acts."""
-    if not text or any(step.tool for step in session.steps):
-        return ""
-    if not any(tool in session.profile.tools for tool in _TV_TOOLS):
+    if not text or not any(tool in session.profile.tools for tool in _TV_TOOLS):
         return ""
     asked = (getattr(session, "user_text", "") or "").strip()
     if asked.endswith("?") and re.search(r"\b(?:tv|television|screen|casting|playing|dashboard)\b", asked, re.I) \
@@ -228,6 +231,16 @@ def claimed_tv_act(text: str, session) -> str:
         # "Are you casting that on the TV?" asks about the state; "yes, it is
         # on" is an answer, not an act (live 2026-09-13: the guard forced a
         # needless re-cast). "Can you play X on the TV?" is still a request.
+        return ""
+    if "cast_show" in session.profile.tools and not any(step.tool == "cast_show" for step in session.steps):
+        # Putting the dashboard ON the TV is cast_show's act alone; dash_view
+        # only turns the page of a dashboard that may not be on screen at all.
+        # Live 2026-09-14: "The dashboard's back on the TV now -- home view",
+        # twice, with only dash_view run, and the TV on its home screen.
+        on_tv = _DASH_ON_TV.search(text)
+        if on_tv:
+            return on_tv.group(0).strip()
+    if any(step.tool for step in session.steps):
         return ""
     match = _TV_CLAIM.search(text)
     return match.group(0).strip() if match else ""
