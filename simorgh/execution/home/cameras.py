@@ -61,6 +61,26 @@ def available() -> tuple[bool, str]:
     return True, ""
 
 
+#: The Ring cameras the Ring tools last listed (execution/home/ring.py
+#: writes it), relative to the repository Sim runs in.
+_RING_LIST = Path("workspace/cameras/ring/cameras.json")
+
+
+def _ring_camera_named(wanted: str) -> str:
+    """The Ring camera's own name when `wanted` names one, else ""."""
+    try:
+        import json
+
+        names = [str(c.get("name") or "") for c in json.loads(_RING_LIST.read_text(encoding="utf-8")) or []]
+    except (OSError, ValueError, AttributeError):
+        return ""
+    low = (wanted or "").strip().lower()
+    for name in names:
+        if name and (name.lower() == low or (low and low in name.lower())):
+            return name
+    return ""
+
+
 @dataclass
 class Camera:
     channel: int
@@ -260,6 +280,12 @@ class _CameraTool:
         loose = [c for c in cameras if low in c.name.lower()] or [c for c in cameras if all(w in c.name.lower() for w in low.split())]
         match = exact or loose
         if not match:
+            ring = _ring_camera_named(wanted)
+            if ring:
+                # "cameras show Garden", three times, 2026-09-14: Garden is a
+                # Ring camera, and the NVR's list alone did not say where to look.
+                return None, (f"refused: {ring} is a Ring camera, not one on the NVR -- `ring live {ring}` or "
+                              f"`ring snapshot {ring}`")
             return None, f"refused: no camera called {wanted!r}; cameras: {', '.join(c.name for c in cameras)}"
         if len(match) > 1:
             return None, f"refused: {wanted!r} could be {', '.join(c.name for c in match)}"

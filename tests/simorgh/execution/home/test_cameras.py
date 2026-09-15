@@ -140,6 +140,16 @@ class CamerasTestCase(unittest.IsolatedAsyncioTestCase):
         bad = await self.tools["cam_snapshot"].run({"camera": "garage"}, ctx=self.ctx)
         self.assertIn("no camera called 'garage'", bad.error)
         self.assertIn("Front Window, Office, Pool", bad.error)
+        # "cameras show Garden" (2026-09-14): a Ring camera is named as one.
+        import json
+        from unittest import mock
+        from simorgh.execution.home import cameras as cameras_mod
+        ring_list = Path(self.root) / "ring-cameras.json"
+        ring_list.write_text(json.dumps([{"id": 1, "name": "Garden"}]), encoding="utf-8")
+        with mock.patch.object(cameras_mod, "_RING_LIST", ring_list):
+            garden = await self.tools["cam_snapshot"].run({"camera": "garden"}, ctx=self.ctx)
+        self.assertIn("Garden is a Ring camera", garden.error)
+        self.assertIn("ring live Garden", garden.error)
 
     async def test_lights_siren_ptz_and_recordings(self):
         self.assertTrue((await self.tools["cam_light"].run({"camera": "office on"}, ctx=self.ctx)).ok)
