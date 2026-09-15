@@ -84,10 +84,10 @@ A bundled script never runs because a skill loaded. The model asks for it like a
    - instructions aimed at the agent's rules ("ignore previous", "you are now", "do not tell the user").
 
    Then an optional model summary, purpose `review`.
-4. Shows the creator a summary. Nothing is enabled until approved (`skills approve <name>`).
+4. Applies the source's trust tier (§3.9). A skill from a trusted org is enabled with no approval step, but the review still runs and anything it flags is held back. A skill from any other source is shown to the creator as a summary, and nothing is enabled until approved (`skills approve <name>`).
 5. Copies the approved skill to `~/.simorgh/skills/<source>/<name>/` and writes `~/.simorgh/skills/lock.json` with source, commit, sha256 per file, licence and approval time.
 
-**Update.** `skills update <name>` re-fetches, diffs against the lock, and needs approval again if any script or instruction changed.
+**Update.** `skills update <name>` re-fetches, diffs against the lock, and needs approval again if any script or instruction changed. A trusted-org skill moves its pinned commit only by an explicit `skills update`; it is never auto-pulled.
 
 **Other commands.** `skills remove <name>`, `skills list` (enabled, pending, invalid), `skills show <name>`.
 
@@ -97,10 +97,25 @@ This review exists because published work documents real attacks and specificati
 
 Distillation (`reflection/distillation.py`) gains a second output: a `SKILL.md` procedure drafted from a solved task's steps. It is written to `~/.simorgh/skills/sim/<name>/` as *pending*, and approved the same way. It is safer to generate than new Python, because it is advice the model follows through tools Guardian already gates.
 
+### 3.9 Trust tiers (agreed 2026-09-15)
+
+Trust belongs to the **GitHub organisation that maintains a repository**, never to a directory or marketplace that lists it.
+
+| Tier | Sources | On install | Default |
+|---|---|---|---|
+| Trusted org | `anthropics`, `google`, `microsoft`, `huggingface`, `trailofbits` (`[skills] trusted_orgs`) | pinned commit, licence check, deterministic review; enabled unless the review flags something | enabled when relevant to Sim |
+| Reviewed | any other repository | pinned commit, sha256 per file, review, creator approval | pending until approved |
+| Discovery only | marketplaces and aggregators (SkillsMP, ClawHub, "awesome" lists) | never installed from directly; a skill found there counts as trusted only if it lives in a trusted org's repo | n/a |
+
+For every tier:
+- **Licence at install.** Apache/MIT-style skills may be bundled; source-available ones (Anthropic's `docx`/`pdf`/`pptx`/`xlsx`) are installed locally on first use and never committed.
+- **Environment fit.** Vendor skills assume their own CLI, MCP server or Claude's tool names. Each is checked against Sim's tools (§3.4) before it is enabled.
+- **Relevance.** Trust does not put a skill in the catalog. Only skills Sim will use are enabled (§5.5). Relevant trusted repos today: `anthropics/skills`; `google/skills` (Gmail, Drive, Docs, Sheets, Calendar, YouTube; Apache-2.0); `trailofbits/skills` (security review for self-patches); `microsoft/playwright-cli`; `huggingface/skills` (model scouting). Product-specific vendor repos (Vercel, Cloudflare, Stripe, Supabase, Neon, PlanetScale, Redis, HashiCorp) are trusted but off-mission. `openai/skills` is deprecated.
+
 ### 3.8 Finding skills
 
 `skills search <topic>` queries a short, configured list of sources:
-- the `anthropics/skills` index;
+- the trusted orgs' skill repositories (§3.9);
 - the `agentskills` examples;
 - any repository the creator adds under `[skills] sources`.
 
@@ -143,7 +158,7 @@ Brand guidelines, internal communications and algorithmic art are not what a hom
 
 ### 5.6 Recommendation
 
-1. **Bundle a small default set (5-8 skills), chosen for Sim's actual work.** Candidates, each checked for licence and dependencies before bundling:
+1. **Bundle a small default set (5-8 skills) from trusted orgs, chosen for Sim's actual work, enabled by default.** Candidates, each checked for licence and dependencies before bundling:
    - `skill-creator`, so Sim can draft good skills;
    - `webapp-testing`, for the dashboard;
    - `mcp-builder`, for Sim's MCP proposals;
@@ -158,13 +173,13 @@ Brand guidelines, internal communications and algorithmic art are not what a hom
 
 | # | Deliverable | Done when |
 |---|---|---|
-| 1 | `contracts/skills.py` parser plus loader for the three roots | parses the spec's examples; invalid skills listed with a reason |
+| 1 ✅ (ee89c39) | `contracts/skills.py` parser plus loader for the three roots | parses the spec's examples; invalid skills listed with a reason |
 | 2 | Catalog block in `task_rules` (capped, per-profile) and the `use_skill` tool with the tool-name mapping note | a scripted session loads a skill and its instructions reach the model; the catalog is absent when `[skills] enabled = false` |
 | 3 | Guardian read-only path rule for skill roots; scripts only through `run_script` | a skill script is not run without a gated call |
-| 4 | `skills list/show/remove`; `install` from git at a commit, with the deterministic review, `approve`, and `lock.json` | a hostile fixture skill is flagged and not enabled; an approved skill appears in the catalog |
+| 4 | `skills list/show/remove`; `install` from git at a commit, with the deterministic review, trust tiers (§3.9), `approve`, and `lock.json` | a hostile fixture skill is flagged and not enabled; an approved skill appears in the catalog |
 | 5 | `skills update` with diff and re-approval; `skills search` over configured sources | a changed script needs re-approval |
 | 6 | Default bundled set (licence-checked) | `skills/` committed with `LICENSE`/`NOTICE` |
 | 7 | Distillation writes pending `SKILL.md` | a solved task yields a pending skill for approval |
 | 8 | Benchmark arms: none / default / default+document | results appended to `docs/benchmark-analysis-2026-09-14.md` |
 
-**Deploy.** Everything ships behind `[skills] enabled` (default false) until step 8's numbers justify turning it on. Each step is pushed when its tests pass, and the live Sim picks it up on `restart`.
+**Deploy.** `[skills] enabled` defaults to true once step 2 lands; the catalog then holds only the bundled trusted-org set, and installed skills follow their tier (§3.9). Step 8 confirms the catalog does not cost benchmark score; if it does, the default flips back to false. Each step is pushed when its tests pass, and the live Sim picks it up on `restart`.
