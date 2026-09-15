@@ -86,7 +86,8 @@ class Service:
                             clean_revisions=self.config.clean_revisions,
                             delegation=self.config.delegation, max_depth=self.config.max_depth,
                             delegate_max_steps=self.config.delegate_max_steps,
-                            escalate_from_attempt=self.config.escalate_from_attempt, worktrees=self.config.worktrees)
+                            escalate_from_attempt=self.config.escalate_from_attempt, worktrees=self.config.worktrees,
+                            parallel_read_tools=self.config.parallel_read_tools)
             await worker.start()
             self._workers.append(worker)
         self._percept_sub = await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept)

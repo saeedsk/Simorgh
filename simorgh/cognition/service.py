@@ -78,6 +78,15 @@ def _tool_instruction_block(payload: dict) -> str | None:
         "Only do this when you genuinely need that tool right now; otherwise "
         "just answer in plain text as normal, with no marker line.",
     ]
+    parallel = [tool for tool in (payload.get("parallel_tools") or ()) if tool in tools]
+    most = int(payload.get("max_parallel_tools") or 1)
+    if len(parallel) > 1 and most > 1:
+        lines.append(
+            f"Lookups that do not depend on each other can go in one reply, up to {most} at once: "
+            + ", ".join(sorted(tool.upper() for tool in parallel))
+            + ". Put each marker on its own line; they run together and every result comes back "
+            "in the next turn. Any other tool is one per reply, on its own."
+        )
     for tool, hint in (payload.get("tool_hints") or {}).items():
         if tool in tools and hint:
             lines.append(f"{tool.upper()}'s own argument format:\n{hint}")

@@ -176,6 +176,32 @@ def count_markers(text: str, markers: tuple[str, ...]) -> int:
     return sum(1 for line in stripped.splitlines() if line.strip().upper().startswith(prefixes))
 
 
+def further_calls(text: str, markers: tuple[str, ...]) -> tuple[dict, ...]:
+    """Every tool call after the first, in order, as `{"tool", "args"}`.
+
+    A call's payload runs to the next marker line. A code-bearing marker
+    keeps the whole payload; any other takes its first line, as the first
+    call does."""
+    from simorgh.contracts.tone import strip_tone
+
+    lines = strip_tone(_unwrap_native_tool_tags(text).strip()).splitlines()
+    found: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        head = line.strip().upper()
+        for marker in markers:
+            if head.startswith(f"{marker.upper()}:"):
+                found.append((index, marker))
+                break
+    calls = []
+    for n, (index, marker) in enumerate(found[1:], start=1):
+        end = found[n + 1][0] if n + 1 < len(found) else len(lines)
+        first = lines[index].strip()[len(marker) + 1:].strip()
+        body = "\n".join([first, *lines[index + 1:end]]).strip()
+        arg = body if marker.upper() in _CODE_BEARING_MARKERS else first_line_argument(body)
+        calls.append({"tool": marker.lower(), "args": {"argument": arg}})
+    return tuple(calls)
+
+
 def cut_at_next_marker(payload: str, markers: tuple[str, ...]) -> tuple[str, bool]:
     """`(payload, was cut)` -- a code-bearing payload ends where the next
     marker begins.
@@ -349,7 +375,12 @@ class OutputParser:
             # Only when it means something, so an ordinary call keeps its
             # minimal shape on the wire.
             call["dropped_markers"] = extra
-        return ParsedOutput(kind="tool_calls", text=text.strip(), tool_calls=(call,))
+        # The further calls are parsed as well as counted: a session that
+        # runs independent read-only lookups together (`[orchestration]
+        # parallel_read_tools`) needs their arguments. Which of them run is
+        # the session's decision; `tool_calls[0]` is still the first call.
+        further = further_calls(text, markers) if extra > 0 else ()
+        return ParsedOutput(kind="tool_calls", text=text.strip(), tool_calls=(call, *further))
 
     def _parse_edit_blocks(self, text: str) -> ParsedOutput:
         blocks = parse_search_replace_blocks(text)

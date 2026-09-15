@@ -24,6 +24,11 @@ CognitionThink = define(t.COGNITION_THINK, [
     # only learns its budget on the final step discovers the limit at
     # the moment it can no longer act on it.
     O("steps_left", Int),
+    # Read-only tools the session runs together when one reply asks for
+    # several, up to `max_parallel_tools` ([orchestration]
+    # parallel_read_tools). Absent: one tool call per reply.
+    O("parallel_tools", List(Str)),
+    O("max_parallel_tools", Int),
 ])
 CognitionThinkReply = define(t.COGNITION_THINK_REPLY, [
     F("text", Str),

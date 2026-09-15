@@ -310,6 +310,20 @@ Only real calls find this out, and the list changes weekly.
 
 **Depends on** change E's per-purpose routes, since a recommendation has to have somewhere to go. Adding streaming to `TogetherProvider` also opens the streaming-only models.
 
+## 8b. Change H: read-only lookups run together
+
+**Problem.** A session runs one tool per model call. Three independent web searches cost three THINKs, three round trips and three steps of the budget; the arms show "step budget exhausted" as a leading failure on GAIA.
+
+**Change.**
+- The parser keeps every marker in a reply (`cognition/parser.py::further_calls`), not only the first; `tool_calls[0]` is unchanged.
+- With `[orchestration] parallel_read_tools = N` (N > 1), the THINK request carries `parallel_tools` (the offered read-only tools) and `max_parallel_tools`, and Cognition tells the model that independent lookups may share one reply.
+- The session runs the first call plus the read-only calls straight after it, up to N, with `asyncio.gather`. Each is still proposed to Guardian on its own and recorded as its own step; the model gets one numbered result block. The batch costs one step of the budget.
+- A tool that can change something (or `delegate`) always runs alone, and nothing after it runs in that step; the model is told what was not run.
+
+**Default.** 1 (off) until its arm wins. **Open question:** whether GLM-5.3-Flash writes several markers when told it may; the arm's step records answer it.
+
+**Measure.** Arm 25 (`parallel_read_tools=4`, review off) on the same GAIA L3 ×26, L2 ×24 and SWE-bench ×15 slices as arms 21-23.
+
 ## 9. Measurement
 
 **Long-run slice**, fixed and repeatable, all run with `tools/bench_instance.py`:

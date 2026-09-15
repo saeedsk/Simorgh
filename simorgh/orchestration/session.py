@@ -472,8 +472,11 @@ class SessionRunner:
         verify_timeout_s: float = VERIFY_TIMEOUT_S, assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
         worktrees: bool = False, reground_every_steps: int = 0, keep_recent_steps: int = 2,
         clean_revisions: bool = False, delegation: bool = False, max_depth: int = 3,
-        delegate_max_steps: int = 12, escalate_from_attempt: int = 0,
+        delegate_max_steps: int = 12, escalate_from_attempt: int = 0, parallel_read_tools: int = 1,
     ) -> None:
+        # Independent read-only calls in one reply run together, up to this
+        # many per step (change H). 1 is off: one tool call per reply.
+        self._parallel_reads = max(1, int(parallel_read_tools))
         # Escalation (design section 7): from this attempt on, or after a
         # helper came back without an answer, a THINK asks Cognition for the
         # strong tier. 0 is off.
@@ -827,16 +830,22 @@ class SessionRunner:
 
             if tool_calls and not is_last:
                 call = tool_calls[0]  # one action per step (section 7)
-                if call.get("tool") == "delegate":
-                    ok, summary, detail = await self._delegate(session, call)
+                # ...unless it and the calls straight after it are all
+                # read-only: those run together as one step (change H).
+                batch = self._read_batch(tool_calls)
+                if len(batch) > 1:
+                    summary = await self._run_batch(session, batch, step_no)
                 else:
-                    ok, summary, detail = await self._propose_and_await(session, call, step_no)
-                # `detail` (narration/Ledger, generously bounded) vs `summary`
-                # (the model's own next-turn context, tightly bounded) are
-                # deliberately different lengths -- see `_propose_and_await`.
-                step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
-                session.record(step)
-                await self._record_step(session, step)
+                    if call.get("tool") == "delegate":
+                        ok, summary, detail = await self._delegate(session, call)
+                    else:
+                        ok, summary, detail = await self._propose_and_await(session, call, step_no)
+                    # `detail` (narration/Ledger, generously bounded) vs `summary`
+                    # (the model's own next-turn context, tightly bounded) are
+                    # deliberately different lengths -- see `_propose_and_await`.
+                    step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
+                    session.record(step)
+                    await self._record_step(session, step)
                 # Two turns, not one. This used to append a single
                 # *assistant* message reading "[tool_call read_file] ->
                 # <the file>", so the model was asked to continue a
@@ -874,16 +883,17 @@ class SessionRunner:
                 # tests again, re-applied the same content, and burned the
                 # whole step budget without ever answering (watched trial,
                 # 2026-09-07). Say what finishing looks like every time.
-                dropped = int(call.get("dropped_markers") or 0)
+                dropped = max(len(tool_calls) - 1, int(call.get("dropped_markers") or 0)) - (len(batch) - 1)
                 dropped_note = (
                     f"\n\nYour reply also contained {dropped} further tool marker"
-                    f"{'s' if dropped != 1 else ''}, which were NOT run: one tool call per message. "
+                    f"{'s' if dropped != 1 else ''}, which were NOT run: {self._dropped_rule()} "
                     "Ask for the next one now if you still need it."
                 ) if dropped else ""
+                head = f"Results of {len(batch)} lookups, run together" if len(batch) > 1 else f"Result of {tool_name}"
                 session.messages.append({
                     "role": "user",
                     "content": (
-                        f"Result of {tool_name}:\n{summary}{dropped_note}\n\n"
+                        f"{head}:\n{summary}{dropped_note}\n\n"
                         "If the task is now finished, reply with your final answer in plain text, "
                         "with no tool marker. Otherwise take the next step."
                     ),
@@ -1063,6 +1073,7 @@ class SessionRunner:
                 "require_real_provider": False, "last_step": last_step,
                 # So the model can wind down rather than hit a wall.
                 "steps_left": steps_left,
+                **self._parallel_offer(offered),
                 # Live-caught (v2 live trial, 2026-09-06): a chat turn
                 # whose assembled memory-retrieval block happens to be
                 # large (large migrated records, a broad query) could
@@ -1114,6 +1125,54 @@ class SessionRunner:
             return None
         session.last_think_error = ""
         return reply
+
+    def _parallel_offer(self, offered) -> dict:
+        """Which offered tools may run together, when that is switched on."""
+        reads = [tool for tool in offered if tool != "delegate" and is_read_only(tool)]
+        if self._parallel_reads < 2 or len(reads) < 2:
+            return {}
+        return {"parallel_tools": reads, "max_parallel_tools": self._parallel_reads}
+
+    def _read_batch(self, tool_calls: list) -> list:
+        """The calls this step runs: the first, plus the read-only calls
+        straight after it when the first is read-only too, up to
+        `parallel_read_tools`. Anything that can change something still
+        runs alone, and nothing after it runs in the same step."""
+        batch = [tool_calls[0]]
+        if self._parallel_reads < 2 or not self._batchable(batch[0]):
+            return batch
+        for extra in tool_calls[1:]:
+            if len(batch) >= self._parallel_reads or not self._batchable(extra):
+                break
+            batch.append(extra)
+        return batch
+
+    @staticmethod
+    def _batchable(call: dict) -> bool:
+        tool = str(call.get("tool") or "")
+        return tool != "delegate" and is_read_only(tool)
+
+    def _dropped_rule(self) -> str:
+        if self._parallel_reads > 1:
+            return (f"only read-only lookups run together, up to {self._parallel_reads}, "
+                    "and nothing after a tool that changes something.")
+        return "one tool call per message."
+
+    async def _run_batch(self, session: Session, batch: list, step_no: int) -> str:
+        """Run independent read-only calls at once. Each is proposed to
+        Guardian on its own and recorded as its own step; the model gets
+        one numbered block with every result."""
+        results = await asyncio.gather(*(
+            self._propose_and_await(session, call, step_no + i) for i, call in enumerate(batch)
+        ))
+        blocks = []
+        for i, (call, (ok, summary, detail)) in enumerate(zip(batch, results)):
+            step = Step(step_no + i, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
+            session.record(step)
+            await self._record_step(session, step)
+            argument = " ".join(str((call.get("args") or {}).get("argument") or "").split())[:120]
+            blocks.append(f"[{i + 1}] {str(call.get('tool') or '').upper()}: {argument}\n{summary}")
+        return "\n\n".join(blocks)
 
     async def _delegate(self, session: Session, call: dict) -> tuple[bool, str, str]:
         """Run a helper: a read-only research session with a fresh context and

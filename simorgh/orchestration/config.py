@@ -69,6 +69,9 @@ class Config:
     # From this attempt on, a task's THINKs ask Cognition for the strong tier
     # ([cognition] routes.strong). 0 is off.
     escalate_from_attempt: int = 0
+    # Read-only tools one reply asks for together run together, up to this
+    # many per step (docs/plans/long-run-context-design.md, change H). 1 is off.
+    parallel_read_tools: int = 1
     lease_seconds: int = 600
     heartbeat_s: int = 30
     max_depth: int = 3
