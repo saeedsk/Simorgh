@@ -163,6 +163,18 @@ So install freely, but list only enabled, relevant skills, or look skills up wit
 - `tv pair again` (c7ad9fc); `tv show` brings the dashboard back in front of another app (111ba2b); saying the dashboard is on the TV requires `cast_show` to have run (15e2858).
 - Siren takes `on` and answers `off` (7390468); a lone `?` opens help (31ea0c6); a Ring camera asked for by name on the NVR says where to find it (e822cbc).
 - "Hey Sim" came back from whisper as "A-seam." and Sim replied QUIET, then heard "Why are you not responding?" (2026-09-15). "seam" now names Sim, and the voice rules list the usual mishearings and say a turn that is only the name is a call: answer in a word or two (4d9d148). "AC" was left out on purpose (air conditioner).
+**Voice, afternoon of 2026-09-15 (live, the creator's house).** Watching a real evening produced eight cases where Sim answered words that were not for it, and five fixes:
+
+| What happened | Fix |
+|---|---|
+| "Hey Sim" heard as "A-seam.", Sim stayed QUIET, then "Why are you not responding?" | `seam` (later `seym`, `syme`) names Sim; the voice rules list the mishearings and say a bare name is a call (4d9d148, 2f8d645) |
+| Mid-conversation "But, I mean..." got QUIET, then "Sim, I was talking to you." | A trailing fragment from the person Sim is already talking with is a pause: "Go on", never QUIET (565cc32) |
+| Ira to Bobby, "it isn't fair that you get pizza for lunch," QUIET; whisper sent the rest as its own turn and Sim answered it | A known voice within `[voice] continuation_quiet_s` (12 s) of a quiet turn, not naming Sim, is the rest of that aside and is not asked (3cca60f) |
+| "We are on the queue." from an unplaced voice became `dash_view` on the TV, refused only because the invented view did not exist | `unplaced_voice_refusal` now refuses every non-read-only tool, not just `start_task` and irreversible ones (0926c8b) |
+| "- I'm sorry." said to someone on a call got "No need to apologize" spoken into it | `i'm`, `im`, `my`, `bad` added to the courtesy list; a turn is an aside only when every word is filler (098f5a8) |
+
+**Open: the model ignores its own quiet rules.** Six of the eight misfires were fresh remarks or questions from a voice Sim could not place -- "Who did that?", a parent's "try harder, honey", "What is this game?", "You're in my heart.", and two fragments of the creator's call with a colleague, answered aloud into the call. The scaffold already forbids each one. Rewording it has been tried repeatedly (509247a, 4b35681, cd96667). The candidate fix is deterministic and awaits the creator's call: **an unplaced voice gets no reply at all unless it names Sim or answers something Sim just asked** -- it would have prevented all six, at the cost of guests having to say "Sim". A cheap second model call to judge "is this for me?" is the alternative.
+
 - **Still open:** barge-in "stop" does not interrupt speech; the `voice barge aec off` test is waiting on the creator.
 
 ---
