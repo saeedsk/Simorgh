@@ -37,6 +37,11 @@ class ProviderConfig:
     price_in: float = 0.0
     price_out: float = 0.0
     price_cached_in: float = 0.0
+    # An extra instance of a known backend under its own name: `backend =
+    # "together"` with a different `model` or `reasoning_effort` (a
+    # "together_strong" tier). Empty for the built-in providers.
+    backend: str = ""
+    reasoning_effort: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,11 @@ class Config:
         ),
     })
     purposes: Mapping[str, Budget] = field(default_factory=lambda: dict(DEFAULT_PURPOSE_BUDGETS))
+    # Per-purpose provider order, tried before `provider_order`:
+    # `{"draft": ("together_strong",), "strong": ("together_strong",)}`. The
+    # key "strong" is used when a request asks for `tier: "strong"`
+    # (escalation). Empty = every purpose uses `provider_order`, as before.
+    routes: Mapping[str, tuple] = field(default_factory=dict)
     # Compaction thresholds (04-cognition.md section 3.5's `compaction.thresholds`
     # table): L1 at 100% of the per-tool-result cap, L2 at 90%, L3 at 95%,
     # L4 always, L5 at 100% (and only when the caller sets allow_summarize).
@@ -117,6 +127,8 @@ class Config:
             }}
         if "provider_order" in raw:
             kwargs["provider_order"] = tuple(raw["provider_order"])
+        if "routes" in raw and isinstance(raw["routes"], Mapping):
+            kwargs["routes"] = {k: tuple(v) for k, v in raw["routes"].items() if isinstance(v, (list, tuple))}
         if "purposes" in raw:
             kwargs["purposes"] = {**cls().purposes, **{
                 k: Budget(**v) for k, v in raw["purposes"].items() if isinstance(v, Mapping)

@@ -105,6 +105,29 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("from first to second", notices[0]["text"])
         self.assertIn("cap of 1 calls per 1 h", notices[0]["text"])
 
+    async def test_a_purpose_route_and_the_strong_tier_pick_their_provider(self):
+        # Long-run design section 7: routes per purpose, and tier "strong"
+        # for escalation, tried before the default order.
+        cheap, strong = _FakeProvider("cheap", text="cheap answer"), _FakeProvider("strong", text="strong answer")
+        config = CognitionConfig(
+            provider_order=("cheap", "strong", "floor"), assembly_request_timeout=0.05,
+            providers={"cheap": ProviderConfig(max_calls=100, window_seconds=3600.0),
+                       "strong": ProviderConfig(max_calls=100, window_seconds=3600.0)},
+            routes={"draft": ("strong",), "strong": ("strong",)},
+        )
+        await self._make(providers=[cheap, strong], config=config)
+
+        async def ask(purpose, **extra):
+            reply = await self.bus.request(Message.new(topics.COGNITION_THINK, source="test", payload={
+                "purpose": purpose, "messages": [{"role": "user", "content": "q"}],
+                "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False, **extra,
+            }), timeout=5.0)
+            return reply.payload["provider"]
+
+        self.assertEqual(await ask("chat"), "cheap", "no route: the default order")
+        self.assertEqual(await ask("draft"), "strong", "the draft route")
+        self.assertEqual(await ask("chat", tier="strong", tier_reason="attempt 2"), "strong", "escalated")
+
     async def test_think_with_a_fake_provider_returns_its_answer_not_the_floor(self):
         await self._make(providers=[_FakeProvider(text="42")])
         request = Message.new(topics.COGNITION_THINK, source="test", payload={

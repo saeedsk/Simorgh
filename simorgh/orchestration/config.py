@@ -66,6 +66,9 @@ class Config:
     # below `max_depth`. Off until its benchmark arm wins.
     delegation: bool = False
     delegate_max_steps: int = 12
+    # From this attempt on, a task's THINKs ask Cognition for the strong tier
+    # ([cognition] routes.strong). 0 is off.
+    escalate_from_attempt: int = 0
     lease_seconds: int = 600
     heartbeat_s: int = 30
     max_depth: int = 3

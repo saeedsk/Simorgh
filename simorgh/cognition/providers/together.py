@@ -83,7 +83,14 @@ class TogetherProvider:
         self, api_key: str | None = None, model: str = DEFAULT_MODEL, *,
         base_url: str = DEFAULT_BASE_URL, timeout_seconds: float = 180.0,
         reasoning_effort: str = DEFAULT_REASONING_EFFORT, transport: Any | None = None,
+        name: str = "together", price_in: float = PRICE_IN, price_out: float = PRICE_OUT,
+        price_cached_in: float = PRICE_CACHED_IN,
     ) -> None:
+        # A second instance -- a stronger model or more effort for escalated
+        # work -- is a separate provider to the Router, with its own name,
+        # budget and prices (docs/plans/long-run-context-design.md section 7).
+        self.name = name
+        self._prices = (price_in, price_out, price_cached_in)
         # `None` means "look in the environment"; an explicit "" means
         # "there is no key" and must not silently pick one up from the
         # shell -- that difference is what lets the Kernel pass
@@ -205,7 +212,7 @@ class TogetherProvider:
                 billable=ProviderResponse(
                     text="", provider=self.name,
                     input_tokens=uncached, output_tokens=output_tokens, cached_input_tokens=cached,
-                    cost_usd=self.price(uncached, output_tokens, cached),
+                    cost_usd=self._bill(uncached, output_tokens, cached),
                     metadata={"model": data.get("model") or self._model},
                 ),
                 truncated=True,
@@ -214,7 +221,7 @@ class TogetherProvider:
         return ProviderResponse(
             text=text, provider=self.name,
             input_tokens=uncached, output_tokens=output_tokens, cached_input_tokens=cached,
-            cost_usd=self.price(uncached, output_tokens, cached),
+            cost_usd=self._bill(uncached, output_tokens, cached),
             metadata={"model": data.get("model") or self._model},
         )
 
@@ -235,6 +242,13 @@ class TogetherProvider:
         the bill, never quietly under-report spend."""
         details = usage.get("prompt_tokens_details") or {}
         return int(details.get("cached_tokens") or usage.get("cached_tokens") or 0)
+
+    def _bill(self, input_tokens: int, output_tokens: int, cached_input_tokens: int = 0) -> float:
+        """What this instance's call cost, at this instance's own prices."""
+        price_in, price_out, price_cached = self._prices
+        return round(
+            (input_tokens / 1_000_000) * price_in + (output_tokens / 1_000_000) * price_out
+            + (cached_input_tokens / 1_000_000) * price_cached, 8)
 
     @staticmethod
     def price(input_tokens: int, output_tokens: int, cached_input_tokens: int = 0) -> float:

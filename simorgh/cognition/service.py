@@ -149,6 +149,21 @@ class Service:
                     api_key=ctx.secrets.get("TOGETHER_API_KEY"),
                     model=together_cfg.model or together_default_model,
                     timeout_seconds=together_cfg.timeout_seconds,
+                    **({"reasoning_effort": together_cfg.reasoning_effort} if together_cfg.reasoning_effort else {}),
+                ))
+            # Extra Together instances by name (a stronger model or more
+            # effort), for per-purpose routes and escalation.
+            from .providers import together as _together
+
+            for extra_name, extra in self._config.providers.items():
+                if extra_name == "together" or extra.backend != "together":
+                    continue
+                real_providers.append(TogetherProvider(
+                    api_key=ctx.secrets.get("TOGETHER_API_KEY"), name=extra_name,
+                    model=extra.model or together_default_model, timeout_seconds=extra.timeout_seconds,
+                    reasoning_effort=extra.reasoning_effort or _together.DEFAULT_REASONING_EFFORT,
+                    price_in=extra.price_in or _together.PRICE_IN, price_out=extra.price_out or _together.PRICE_OUT,
+                    price_cached_in=extra.price_cached_in or extra.price_in or _together.PRICE_CACHED_IN,
                 ))
             real_providers.append(
                 ClaudeCodeProvider(timeout_seconds=self._config.providers["claude_code_cli"].timeout_seconds),
@@ -296,9 +311,17 @@ class Service:
             if not think_messages:
                 think_messages.append({"role": "user", "content": ""})  # never call complete() with zero messages
 
+            # A per-purpose route, or the strong route when the caller escalates,
+            # tried before the default order (design section 7).
+            strong = payload.get("tier") == "strong"
+            route = (self._config.routes.get("strong") if strong else None) or self._config.routes.get(purpose.value)
+            order = tuple(dict.fromkeys(tuple(route) + tuple(self._config.provider_order))) if route else None
+            if strong and route and self._ctx is not None:
+                self._ctx.logger.info("cognition.escalated", purpose=purpose.value, route=list(route),
+                                      reason=str(payload.get("tier_reason") or ""))
             response, floor = await self._router.complete(
                 purpose, think_messages, tools=None,
-                budget=budget, timeout=budget.max_seconds,
+                budget=budget, timeout=budget.max_seconds, order=order,
             )
         except NoRealProvider as exc:
             await self._error_reply(message, "no_real_provider", str(exc), retryable=True)

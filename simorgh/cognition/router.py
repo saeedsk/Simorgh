@@ -86,7 +86,7 @@ class Router:
 
     async def complete(
         self, purpose: Purpose, messages: list[dict], *, tools: list[dict] | None,
-        budget: Budget, timeout: float,
+        budget: Budget, timeout: float, order: tuple[str, ...] | None = None,
     ) -> tuple[ProviderResponse, bool]:
         """Returns (response, floor). Raises `NoRealProvider` if every
         real candidate failed/was exhausted and `budget.require_real`;
@@ -109,7 +109,8 @@ class Router:
         # could never be reached, because nobody was still listening by
         # the time the second candidate was dialled (2026-09-10).
         deadline = now + timeout
-        for name in self._order:
+        names = tuple(order) if order else self._order
+        for name in names:
             provider = self._by_name.get(name)
             if provider is None or not provider.available():
                 continue
@@ -155,7 +156,7 @@ class Router:
             # deadline is now *shared*: each candidate gets its fair slice
             # of what is left, so the last one still gets a real shot, and a
             # candidate that fails fast hands its unused time to the next.
-            share = self._share_of(name, remaining)
+            share = self._share_of(name, remaining, names)
             try:
                 # A provider is asked to honour `timeout`, and then held to
                 # it: `GeminiProvider` accepted the argument and dropped it
@@ -254,7 +255,7 @@ class Router:
             timeout=left + _OVERRUN_GRACE_SECONDS,
         )
 
-    def _share_of(self, name: str, remaining: float) -> float:
+    def _share_of(self, name: str, remaining: float, order: tuple[str, ...] | None = None) -> float:
         """This candidate's fair slice of the time that is left, so a slow
         primary cannot starve every candidate behind it. Never less than
         `_MIN_CANDIDATE_SECONDS` (a slice too small to answer in is not a
@@ -262,7 +263,7 @@ class Router:
         now = self._clock.now()
         still_to_try = 0
         seen_self = False
-        for other in self._order:
+        for other in (order or self._order):
             if other == name:
                 seen_self = True
                 continue

@@ -472,8 +472,12 @@ class SessionRunner:
         verify_timeout_s: float = VERIFY_TIMEOUT_S, assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
         worktrees: bool = False, reground_every_steps: int = 0, keep_recent_steps: int = 2,
         clean_revisions: bool = False, delegation: bool = False, max_depth: int = 3,
-        delegate_max_steps: int = 12,
+        delegate_max_steps: int = 12, escalate_from_attempt: int = 0,
     ) -> None:
+        # Escalation (design section 7): from this attempt on, or after a
+        # helper came back without an answer, a THINK asks Cognition for the
+        # strong tier. 0 is off.
+        self._escalate_from_attempt = max(0, int(escalate_from_attempt))
         # Helper tasks (design section 5): `delegate` runs a read-only research
         # session in-process with a fresh context and returns only its report.
         self._delegation = bool(delegation)
@@ -1069,6 +1073,7 @@ class SessionRunner:
                 # a patch/skill draft's own code context could silently
                 # lose the exact content a real code change needs.
                 "allow_summarize": is_chat,
+                **self._tier(session),
             },
             trace_id=session.task_id, clock=self._clock,
         )
@@ -1171,6 +1176,19 @@ class SessionRunner:
         ok = outcome.kind == "completed" and bool((outcome.result_summary or "").strip())
         text = f"Helper {child_id} ({outcome.kind}, {child.budget.steps_used} steps): {body}"
         return ok, text, text[:self._DETAIL_CHARS]
+
+    def _tier(self, session: Session) -> dict:
+        """`{"tier": "strong", "tier_reason": ...}` when this THINK should use
+        the strong tier, else {}. Cognition falls back to the default order
+        when no strong route is configured, so asking costs nothing."""
+        if not self._escalate_from_attempt or session.profile.scaffold == "chat":
+            return {}
+        if session.attempt >= self._escalate_from_attempt:
+            return {"tier": "strong", "tier_reason": f"attempt {session.attempt}"}
+        last = session.steps[-1] if session.steps else None
+        if last is not None and last.tool == "delegate" and last.ok is False:
+            return {"tier": "strong", "tier_reason": "a helper came back without an answer"}
+        return {}
 
     async def _reground(self, session: Session, *, forced: bool = False) -> bool:
         """Write the progress note and replace the transcript with it.
