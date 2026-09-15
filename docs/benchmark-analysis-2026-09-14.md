@@ -110,7 +110,10 @@ No published SWE-bench Verified score for GLM-5.3-Flash was found. Its published
 | SWE-bench: patch broke tests that passed before | 5 | no test-before-commit discipline |
 | Step budget exhausted | 8 | long horizon |
 
-The single most important number: **the reviewer rejected 111 answers that were correct and 111 that were wrong.** Its verdict carries no information about correctness, yet every rejection spends a revision, and each revision appends the feedback to the same conversation (`orchestration/session.py::_verify_then_finish`, `max_revisions = 2`) and asks the same model again. That is exactly the "cluttered scratchpad" the follow-up describes, but produced by the verify loop, not by planning.
+The single most important number: **the reviewer rejected 111 answers that were correct and 111 that were wrong.** Its verdict carries no information about correctness. What that costs depends on the profile (`orchestration/profiles.py`):
+
+- **GAIA and BFCL run as `research` tasks: `verify=True`, `max_revisions=0`.** A rejection blocks the task at once, with no revision. The benchmark runner scores the answer anyway (`benchmark/runner.py`: "our verifier is not part of GAIA"), so the 111 correct-but-rejected answers are already counted correct. Here the reviewer costs one extra model call per case and changes almost nothing about accuracy.
+- **SWE-bench runs as `patch` tasks: `max_revisions=2`.** A rejection appends the objection to the same conversation and asks again (`orchestration/session.py::_verify_then_finish`), up to twice. This is where the "cluttered scratchpad" is real. It also coincides with 11 of 18 wrong SWE-bench cases producing no patch at all.
 
 ### 3. The orchestrator-worker path was never in play
 
@@ -120,11 +123,11 @@ Benchmark cases are created as single `execute`-mode tasks with a 30-step cap (`
 
 Not wholesale yet. The evidence points first at cheaper, measurable changes. Orchestration earns its place only if it beats them on the same cases.
 
-1. **Fix the verifier before adding more agents.** For benchmark-style research and chat answers, make the reviewer advisory (record the objection, keep the answer), or run each revision in a fresh context seeded only with the task, the answer and the objection. Track `blocked_but_correct` per run. This alone could recover a large share of the 111 correct-but-rejected cases.
+1. **Fix the verifier where it acts: patch tasks.** For GAIA and BFCL the reviewer is nearly free and nearly irrelevant, so accuracy there is a model, prompt and effort question. For SWE-bench, run the same fixed slice two ways. First, a quick baseline with review off for patch tasks. Second, if review is worth keeping, a revision in a fresh context seeded only with the task, the current diff, the failing test output and the objection. Compare patches produced, cases resolved, steps and cost against today's 3 of 12.
 2. **Infrastructure.** The floor skips are provider noise. The truncation retry is in (517fa26). Next is retrying timeouts before cooling the provider down, and making the runner wait out a cooldown instead of burning cases.
 3. **SWE-bench patch loop.** Run the named failing tests before editing and the whole relevant test file after, and refuse to finish while a previously passing test fails. That addresses the "5 tests that passed before the patch" failures directly.
 4. **Context checkpoints.** Every N steps, replace the raw transcript with a short progress summary against the original instruction. This is a cheap form of the context isolation the follow-up wants, and it targets GAIA level 3 and step-budget failures.
 5. **Reasoning effort per purpose.** Keep `low` for chat and the short housekeeping purposes. Try `medium` or `high` for `draft`, `research` and `review` on the same GAIA and SWE-bench slice, watching cost and truncation. This is a one-line configuration experiment with no architecture change.
 6. **Then A/B the orchestrator.** Same model, same budget, a fixed slice (for example 20 SWE-bench Verified and all GAIA level 2 and 3 cases): single-task vs a planner that delegates test runs and file edits to child tasks. Keep it only if it wins.
 
-The follow-up's diagnosis, context overload in one loop, is right in spirit. Sim's data locates the overload in the verify-and-revise loop, and that is the first thing to change.
+The follow-up's diagnosis, context overload in one loop, is right in spirit for SWE-bench, where the verify-and-revise loop does fill the context. For GAIA and BFCL the rejected answers were scored anyway, so the gains there have to come from reasoning effort, prompts and infrastructure, not from the reviewer.
