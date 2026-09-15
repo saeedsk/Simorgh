@@ -19,6 +19,8 @@ import subprocess
 import uuid
 
 from simorgh.contracts import topics
+
+from . import progress as progress_note
 from simorgh.contracts.pytestfailures import hoist_marker
 from simorgh.contracts.scratch import SCRATCH_PREFIX, is_scratch  # noqa: F401 -- re-export
 from simorgh.contracts.envelope import Event, Message
@@ -468,9 +470,14 @@ class SessionRunner:
         self, bus, ledger, *, clock=None, worker_id: str = "w1", is_paused=None, is_cancelled=None,
         think_timeout_s: float = 5.0, action_timeout_s: float = ACTION_TIMEOUT_S,
         verify_timeout_s: float = VERIFY_TIMEOUT_S, assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
-        worktrees: bool = False,
+        worktrees: bool = False, reground_every_steps: int = 0, keep_recent_steps: int = 2,
     ) -> None:
         self._bus = bus
+        # Re-grounding (orchestration/progress.py): every N steps the model
+        # writes a progress note and the transcript is replaced by it. 0 is
+        # off -- the default until its benchmark arm wins.
+        self._reground_every = max(0, int(reground_every_steps or 0))
+        self._keep_recent_steps = max(0, int(keep_recent_steps))
         # Off here, on in production (`[orchestration] worktrees`, the
         # default): a harness that stands in for Execution would
         # otherwise be asked to fake three more tools in every flow.
@@ -716,6 +723,10 @@ class SessionRunner:
             if self._is_cancelled(session.task_id):
                 return Outcome("failed", reason=CANCELLED_REASON)
 
+            if (session.profile.scaffold != "chat" and session.messages and not session.budget.is_last_step
+                    and progress_note.due(session.budget.steps_used, session.reground_at, self._reground_every)):
+                await self._reground(session)
+
             step_no = session.next_step_no()
             is_last = session.budget.is_last_step
             # Live-caught (the creator: "not informative ... what do you
@@ -734,9 +745,18 @@ class SessionRunner:
             think_reply = await self._think(session, pending_user_text, last_step=is_last)
             pending_user_text = ""
 
+            if think_reply is None and session.last_think_error == "context_too_large" \
+                    and session.profile.scaffold != "chat" and session.messages:
+                # A long transcript the model cannot take: write the note,
+                # replace the transcript with it, and ask again -- once.
+                session.last_think_error = ""
+                if await self._reground(session, forced=True):
+                    think_reply = await self._think(session, "", last_step=is_last)
             if think_reply is None:  # provider unavailable / timeout -- honest floor
                 if session.profile.name == "chat":
                     return Outcome("completed", result_summary="", floor=True)
+                if session.last_think_error == "context_too_large":
+                    return Outcome("blocked", reason="context too large for the model, even after re-grounding")
                 return Outcome("blocked", reason="no real provider")
 
             session.budget.steps_used += 1
@@ -1069,8 +1089,57 @@ class SessionRunner:
             # REPL's narration, the dashboard feed -- sees the failure as
             # it happens, not only in the Ledger afterwards.
             await self._publish(session, topics.TASK_STEP, step_payload)
+            session.last_think_error = str(error.get("code") or "")
             return None
+        session.last_think_error = ""
         return reply
+
+    async def _reground(self, session: Session, *, forced: bool = False) -> bool:
+        """Write the progress note and replace the transcript with it.
+
+        True when the transcript was replaced. A failed or unusable note
+        leaves the transcript exactly as it was -- a re-ground may lose
+        nothing -- and is tried again at the next interval.
+        (docs/plans/long-run-context-design.md section 3.)"""
+        since = session.messages
+        prompt = progress_note.reground_prompt(session.user_text, session.progress, since,
+                                               steps_left=session.budget.steps_left)
+        req = Message.new(
+            topics.COGNITION_THINK, source=self._bus.source,
+            payload={
+                "purpose": "reground", "messages": [{"role": "user", "content": prompt}], "tools": [],
+                "expected": "text", "budget": {"max_tokens": 1500, "max_cost_usd": 0.1},
+                "require_real_provider": True, "last_step": False, "steps_left": session.budget.steps_left,
+            },
+            trace_id=session.task_id, clock=self._clock,
+        )
+        reply = await self._bus.request_or_error(req, timeout=self._think_timeout_s)
+        session.spent_usd += float(reply.payload.get("cost_usd") or 0.0)
+        session.spent_tokens += int(reply.payload.get("tokens") or 0)
+        note = None
+        if reply.payload.get("ok") is not False and not reply.payload.get("floor"):
+            note = progress_note.parse_note(str(reply.payload.get("text") or ""))
+        # Counted from now either way, so a failing note-writer is not asked every step.
+        session.reground_at = session.budget.steps_used
+        if note is None:
+            error = (reply.payload.get("error") or {}).get("code") or "no usable note"
+            step = Step(session.next_step_no(), "gather", f"reground skipped ({error}); the transcript is kept", ok=False)
+            session.record(step)
+            await self._record_step(session, step)
+            return False
+        before = len(session.messages)
+        session.progress = note.render()
+        session.messages = progress_note.compacted(session.messages, note, keep_recent_steps=self._keep_recent_steps)
+        await self._append(session, topics.TASK_PROGRESS, {
+            "task_id": session.task_id, "note": session.progress, "step_no": session.budget.steps_used,
+            "attempt": session.attempt,
+        })
+        step = Step(session.next_step_no(), "gather",
+                    f"reground{' (context too large)' if forced else ''}: {before} messages -> {len(session.messages)}; "
+                    f"next: {note.next}", ok=True)
+        session.record(step)
+        await self._record_step(session, step)
+        return True
 
     # Live-caught (the creator: "I'd like ... code diffs ... similar UI
     # experience as claude code cli" -- 07-post-cutover-review.md §3.11):

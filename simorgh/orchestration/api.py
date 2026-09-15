@@ -145,6 +145,14 @@ class Session:
     # first attempt.
     carried: str = ""
     attempt: int = 1
+    # The progress note (orchestration/progress.py) and the step count at
+    # which it was last written; `session.messages` is replaced by the note
+    # plus the last few steps at each re-ground.
+    progress: str = ""
+    reground_at: int = 0
+    # The last Cognition error code a THINK got, so a `context_too_large`
+    # is re-grounded and retried instead of reported as "no real provider".
+    last_think_error: str = ""
     # The git commit this session started from, captured once by
     # `SessionRunner.run`. Travels to Verification in the verify
     # subject so `full_suite_ran` can stage the tree as it was BEFORE

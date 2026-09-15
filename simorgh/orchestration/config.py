@@ -53,6 +53,12 @@ class Config:
     # it rejected 111 correct and 111 wrong answers alike, and on patch
     # tasks each rejection spends a revision in the same context.
     review_benchmark: bool = True
+    # Re-grounding (orchestration/progress.py): every N steps a task session
+    # writes a progress note and its transcript is replaced by the note and
+    # the last `keep_recent_steps` steps. 0 is off, the default until its
+    # benchmark arm wins (docs/plans/long-run-context-design.md).
+    reground_every_steps: int = 0
+    keep_recent_steps: int = 2
     lease_seconds: int = 600
     heartbeat_s: int = 30
     max_depth: int = 3

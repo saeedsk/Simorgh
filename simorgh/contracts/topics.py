@@ -95,6 +95,7 @@ TASK_CLEARED = "task.cleared"
 # Planning's `refresh_lease`.
 TASK_LEASE_HEARTBEAT = "task.lease_heartbeat"
 TASK_EDITS_KEPT = "task.edits_kept"
+TASK_PROGRESS = "task.progress"
 TASK_DEPENDENCY_SATISFIED = "task.dependency.satisfied"
 # --- 4.5 plan / project ---------------------------------------------------
 PLAN_PROPOSED = "plan.proposed"

@@ -1,0 +1,32 @@
+{
+  "$id": "https://simorgh.local/schema/task.progress.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Ledger-only: the session's progress note -- goal, done, learned, next -- written at a re-ground. The transcript is replaced by it; retries and helpers start from it.",
+  "properties": {
+    "attempt": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "note": {
+      "type": "string"
+    },
+    "step_no": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "note"
+  ],
+  "title": "task.progress",
+  "type": "object"
+}

@@ -263,6 +263,53 @@ checkpoint runs as a delegated helper, and the parent checks each result before
 the next. Parallel helpers for independent sub-jobs come only after A-E prove
 out.
 
+## 8a. Change G: the model scout
+
+The creator, 2026-09-15: "I feel we need a daemon or code to handle Together's available AI models, research which one suits our need better, since the list dynamically changes and new models get added; test them, consider cheaper options, and for more advanced usage suggest better options."
+
+**Why code, not a one-off check.** The 2026-09-15 probe showed that Together's own list misleads:
+- Most "$0" models are dedicated-endpoint only ("non-serverless").
+- Two strong, cheap models only answer with streaming.
+- Several reasoning models return nothing under a small token cap.
+
+Only real calls find this out, and the list changes weekly.
+
+**Pieces.**
+1. **Catalog** (`cognition/scout/catalog.py`), daily, free:
+   - fetches `/v1/models` from `api.together.ai`, with a User-Agent;
+   - stores `~/.simorgh/models/catalog.json`: id, organisation, type, context length, input and output price, first and last seen;
+   - diffs against yesterday: new, removed, price changed.
+2. **Probe** (`cognition/scout/probe.py`), for each new or changed chat model, a few tokens each. It records:
+   - serverless or not;
+   - streaming-only or not;
+   - whether it reasons: a 16-token cap empties the content, or `reasoning_content` is present;
+   - latency and whether `reasoning_effort` is accepted.
+
+   Results are cached per model, so nothing is probed twice without cause.
+3. **Eval pack** (`cognition/scout/evals.py`), weekly, cost-capped, only on serverless candidates in a tier's price band. It reuses the benchmark unit's datasets and scorers:
+
+   | Check | What it tests | Tier it serves |
+   |---|---|---|
+   | 10 BFCL parallel cases | tool calls | T0 and T1 |
+   | 10 GAIA level 1 cases | research answers | T1 |
+   | Sim's own progress-note prompt on a canned transcript | valid JSON and the facts kept | re-grounding |
+   | the QUIET/answer judgement on 20 labelled room lines from `voice:turns` | staying quiet correctly | T0 voice |
+
+   Each check records accuracy, cost per case, latency and truncations.
+4. **Recommendations**: for each tier (T0 cheap, T1 default, T2 strong), the best model by accuracy per dollar within a latency limit. It is written to `~/.simorgh/models/recommendations.json`, and the creator is told through `notify` or the dashboard:
+   - "DeepSeek-V4-Flash matches GLM-5.3-Flash on the T0 pack at 45% of the cost";
+   - "new: X, strongest T2 candidate".
+5. **Apply**: never automatic for T1 or T2. A proposal is a one-line command (`models use t0 deepseek-ai/DeepSeek-V4-Flash-0731`) that writes `[cognition] routes` through `contracts/settings.persist`. A later option: T0 may switch on its own when the candidate is at least as accurate on the pack and cheaper, with the change announced and one command to undo it.
+
+**Where it runs.** A kernel periodic job, like reflection's timed pass, gated by `[cognition.scout] enabled` and `daily_budget_usd` (default $0.50 for evals; the catalog diff is free). It is also available on demand: `models scan`, `models test <id>`, `models recommend`.
+
+**Guardrails.**
+- A hard dollar cap per run, and cases stop the moment it is reached.
+- Probes and evals send no personal data: fixed public prompts and benchmark cases only.
+- Every result is kept on the ledger stream `models:scout`, so a recommendation can be traced to its numbers.
+
+**Depends on** change E's per-purpose routes, since a recommendation has to have somewhere to go. Adding streaming to `TogetherProvider` also opens the streaming-only models.
+
 ## 9. Measurement
 
 **Long-run slice**, fixed and repeatable, all run with `tools/bench_instance.py`:
@@ -293,7 +340,7 @@ out.
 |---|---|---|
 | 0 | `review_benchmark` switch | shipped, `b7aa40e` |
 | 1 | This document | committed |
-| 2 | **A**: `ProgressNote`, `task.progress`, re-ground hook, `context_too_large` handling, config `reground_every_steps`/`keep_recent_steps` | unit tests green; a 30-step scripted session stays bounded; pushed |
+| 2 | **A**: `ProgressNote`, `task.progress`, re-ground hook, `context_too_large` handling, config `reground_every_steps`/`keep_recent_steps` | **done 2026-09-15**: `orchestration/progress.py`, `tests/simorgh/orchestration/test_reground.py`; off by default |
 | 3 | **B**: note-based retries and crash resume; `clean_revisions` flag | tests green; pushed |
 | 4 | Benchmark arms 1-3 on the slice | results appended to `docs/benchmark-analysis-2026-09-14.md` |
 | 5 | **C**: `delegate` tool, in-process child sessions, Worker task stack, `delegate` origin | Flow 6 test green; pushed |
@@ -301,6 +348,7 @@ out.
 | 7 | **E**: per-purpose routes, strong instance, escalation signals, cost cap, `cognition.escalated` | tests green; pushed |
 | 8 | Benchmark arms 4-6 | results appended; defaults set from the winners |
 | 9 | **F**: plan-first, parallel helpers | only if 8 shows long tasks still stall |
+| 10 | **G**: the model scout (section 8a) | catalog, probe and eval run on a schedule; proposals reach the creator; nothing applied without approval |
 
 **Deploy.** Each deliverable is pushed to `main` when its tests pass. The live
 Sim picks it up on `restart`, through the loader gate. Behaviour changes that

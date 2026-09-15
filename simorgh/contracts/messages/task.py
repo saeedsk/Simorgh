@@ -153,6 +153,13 @@ TaskEditsKept = define(t.TASK_EDITS_KEPT, [
     F("paths", List(Str)),
     O("created", List(Str)),
 ], doc="Ledger-only: uncommitted edits an attempt that ran out of steps left for the next attempt.")
+TaskProgress = define(t.TASK_PROGRESS, [
+    F("task_id", Str),
+    F("note", Str),
+    O("step_no", Int),
+    O("attempt", Int),
+], doc="Ledger-only: the session's progress note -- goal, done, learned, next -- written at a re-ground. "
+       "The transcript is replaced by it; retries and helpers start from it.")
 TaskDependencySatisfied = define(t.TASK_DEPENDENCY_SATISFIED, [
     F("task_id", Str),
     F("satisfied_by", Str),
