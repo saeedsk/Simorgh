@@ -126,7 +126,12 @@ async def run(args) -> int:
         # ~5.5 GB -- ten copies of that took the machine out of memory
         # (2026-09-14).
         "reflection": {"reflect_after_start_s": 0, "distillation_enabled": False},
+        # A comparison arm's switches (`--orch reground_every_steps=6`), for
+        # measuring one change against the baseline on the same cases
+        # (docs/plans/long-run-context-design.md section 9).
+        "orchestration": orchestration_overrides(args.orch),
     }, None), secrets=EnvSecretStore(dict(os.environ)))
+    say(args.id, f"arm {args.arm or '-'}: orchestration {orchestration_overrides(args.orch)}")
     await kernel.boot()
     say(args.id, f"booted in {repo}")
 
@@ -152,8 +157,12 @@ async def run(args) -> int:
     offsets = {suite: max(0, args.offset) for suite in suites}
     turn = 0
     floor_runs = 0
+    runs_done = 0
     try:
         while time.time() < args.until:
+            if args.max_runs and runs_done >= args.max_runs:
+                say(args.id, f"done: {runs_done} run(s), the --max-runs limit")
+                break
             suite = suites[turn % len(suites)]
             turn += 1
             if free_gb(root) < args.min_free_gb:
@@ -202,6 +211,11 @@ async def run(args) -> int:
             row = {k: summary.get(k) for k in ("run_id", "suite", "suite_version", "model", "attempted", "correct",
                                                 "skipped", "accuracy", "seconds", "partial", "by_level", "note")}
             row.update({"wave": args.wave, "instance": args.id, "offset": offsets[suite], "at": time.time()})
+            runs_done += 1
+            if args.arm:
+                row["arm"] = args.arm
+                row["orchestration"] = orchestration_overrides(args.orch)
+                row["level"] = args.level
             # A run that answered every case in a couple of seconds and got none
             # right was answered by Cognition's offline floor, not the model: one
             # truncated Together reply moved copy 6 to the floor and it looped,
@@ -232,6 +246,20 @@ async def run(args) -> int:
     return 0
 
 
+def orchestration_overrides(pairs: list[str] | None) -> dict:
+    """`["reground_every_steps=6", "clean_revisions=true"]` -> typed settings."""
+    out: dict = {}
+    for pair in pairs or []:
+        key, _, raw = pair.partition("=")
+        value: object = raw.strip()
+        if raw.strip().lower() in ("true", "false"):
+            value = raw.strip().lower() == "true"
+        elif raw.strip().lstrip("-").isdigit():
+            value = int(raw.strip())
+        out[key.strip()] = value
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Benchmark rounds against one isolated copy of Sim until a deadline.")
     parser.add_argument("--id", type=int, required=True)
@@ -245,6 +273,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default="")
     parser.add_argument("--min-free-gb", type=float, default=20.0)
     parser.add_argument("--start-delay", type=float, default=0.0, help="seconds to wait before staging")
+    parser.add_argument("--orch", action="append", default=[], help="orchestration setting key=value, repeatable")
+    parser.add_argument("--arm", default="", help="comparison arm label recorded on every row")
+    parser.add_argument("--max-runs", type=int, default=0, help="stop after this many runs (0: until --until)")
     return asyncio.run(run(parser.parse_args(argv)))
 
 
