@@ -21,6 +21,7 @@ Related documents:
 | A reply cut at `max_tokens` (reasoning-only) was treated as an outage and cooled the provider down | Healthy provider benched, more floor answers | Retry once with twice the tokens, no cooldown (517fa26) |
 | Copies ran reflection's self-improvement tasks, each landing running `pytest -n auto` at 2-5 GB | Claude Code killed all copies twice for low memory | Reflection and distillation off in copies (474a98c) |
 | A restarted copy resumed tasks from its old data dir | Stale work competing with the benchmark | Data dir wiped at start (bb4e036) |
+| One Together HTTP 503 (twice, so the quick retry failed too) put a copy on the floor, and the runner fed it the rest of the run: 21 of 26 GAIA cases skipped in 2 s (arm 25, 04:08, 2026-09-15). The driver then counted that run toward `--max-runs`, so the slice would never have re-run | A whole slice lost to a 30-second outage | Runner re-runs a floored case up to `floor_retries` (3) times after a doubling wait from `floor_retry_wait_s` (60 s); a floor-answered run no longer counts toward `--max-runs` (5123f74) |
 | `observer_kit.fast_copy_repo` fell back to `shutil.copytree` under load and copied `workspace/` (~6 GB per copy) | Disk fell from 53 GB to 3.6 GB | Driver clones code only, refuses a copy over 1 GB, stops under 20 GB free (ad2563b) |
 
 **Measurement lessons.**
@@ -89,7 +90,7 @@ Design: `docs/plans/long-run-context-design.md`. Every change ships behind a swi
 1. `_space_out` read `_last_call` without a lock, so concurrent searches all saw the same time, none waited, and all went out at once. Each caller now reserves the next slot under a lock.
 2. After a refusal, `_last_call = 0.0` was meant to force a wait but reads as "never searched", so the retry went out immediately. It now waits two gaps.
 
-That launch was stopped and discarded (no result row written) and the arm relaunched with the fix.
+That launch was stopped and discarded (no result row written) and the arm relaunched with the fix. The relaunch lost its GAIA L3 run to a Together 503 (run 7f5d624a109a, marked invalid in the wave's `NOTES`); arm 25 was relaunched again after the floor-retry fix (5123f74).
 
 **Consequence.** With the keyless engine, batched searches still go out 2 s apart: the saving is model calls and step budget, not wall time. Batched file reads and fetches do run concurrently. A search API key (Brave, Tavily, Serper) would remove the spacing.
 
@@ -169,7 +170,7 @@ So install freely, but list only enabled, relevant skills, or look skills up wit
 
 ## 9. Open list
 
-1. Arm 25 (parallel reads) results: GAIA L3, L2, SWE-bench; append to the analysis doc.
+1. Arm 25 (parallel reads) results: GAIA L3, L2, SWE-bench; append to the analysis doc. Exclude run 7f5d624a109a.
 2. Re-run the floor-skipped GAIA L2 cases (1 in arm 22, 4 in arm 23).
 3. A gentler re-grounding arm (every 10, keep 4) and a higher reasoning-effort arm.
 4. Skills step 2: catalog in `task_rules`, `use_skill`, trust tiers, `[skills] enabled`.
