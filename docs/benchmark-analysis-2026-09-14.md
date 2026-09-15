@@ -94,6 +94,11 @@ The follow-up argues that a single monolithic loop is the bottleneck, and that t
 
 No published SWE-bench Verified score for GLM-5.3-Flash was found. Its published agentic-coding number is DeepSWE v1.1, 63.4 Pass@1 ([Qubrid](https://www.qubrid.com/blog/glm-53-flash-benchmarks-official-and-independent-results), [Together](https://www.together.ai/blog/glm-5-3-vs-glm-5-3-flash-on-deepswe-cost-coding-and-routing), [Hugging Face](https://huggingface.co/zai-org/GLM-5.3-Flash)). A strong scaffold plausibly reaches well above 25%, but "25% → 78% with the same model" is not a measured target, and Sim's 25% rests on only 12 scored cases.
 
+[MindStudio's GLM-5.3-Flash write-up](https://www.mindstudio.ai/blog/glm-5-3-flash-local-benchmarks) gives no benchmark numbers at all. It reports Z.ai's claim that the model "approaches Claude Opus 4.8" on coding and agentic tasks, its OpenRouter and OpenCode usage lead, and one anecdotal bug fix. Two points from it matter for Sim:
+
+- **Hybrid sparse and linear attention**, built to serve up to a 1M-token window without cost exploding. Long context is cheap for this model to *serve*, which is not the same as the model *using* a long, cluttered transcript well.
+- **`reasoning_effort` defaults to `max`** on the model, and "directly affects both response quality and token spend". Sim does not use that default. `cognition/providers/together.py` sends `reasoning_effort: "low"` on *every* call, for every purpose: chat, draft, plan, research and review alike. That was chosen on 2026-09-07 so short calls stop spending their whole output budget thinking. The provider's own note says to "raise it per instance for a provider dedicated to hard drafting work", and that was never done. Every benchmark case therefore ran at low effort, including the GAIA level 3 questions, the SWE-bench patches, and the reviewer judging them (on a 1,000-token `review` budget). Low effort on hard work and on judging is a plausible contributor both to the hard-case failures and to a reviewer whose verdict does not track correctness.
+
 ### 2. Where cases actually failed
 
 | Failure (all runs in the wave) | Cases | What it is |
@@ -119,6 +124,7 @@ Not wholesale yet. The evidence points first at cheaper, measurable changes. Orc
 2. **Infrastructure.** The floor skips are provider noise. The truncation retry is in (517fa26). Next is retrying timeouts before cooling the provider down, and making the runner wait out a cooldown instead of burning cases.
 3. **SWE-bench patch loop.** Run the named failing tests before editing and the whole relevant test file after, and refuse to finish while a previously passing test fails. That addresses the "5 tests that passed before the patch" failures directly.
 4. **Context checkpoints.** Every N steps, replace the raw transcript with a short progress summary against the original instruction. This is a cheap form of the context isolation the follow-up wants, and it targets GAIA level 3 and step-budget failures.
-5. **Then A/B the orchestrator.** Same model, same budget, a fixed slice (for example 20 SWE-bench Verified and all GAIA level 2 and 3 cases): single-task vs a planner that delegates test runs and file edits to child tasks. Keep it only if it wins.
+5. **Reasoning effort per purpose.** Keep `low` for chat and the short housekeeping purposes. Try `medium` or `high` for `draft`, `research` and `review` on the same GAIA and SWE-bench slice, watching cost and truncation. This is a one-line configuration experiment with no architecture change.
+6. **Then A/B the orchestrator.** Same model, same budget, a fixed slice (for example 20 SWE-bench Verified and all GAIA level 2 and 3 cases): single-task vs a planner that delegates test runs and file edits to child tasks. Keep it only if it wins.
 
 The follow-up's diagnosis, context overload in one loop, is right in spirit. Sim's data locates the overload in the verify-and-revise loop, and that is the first thing to change.
