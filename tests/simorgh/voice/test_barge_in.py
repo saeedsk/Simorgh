@@ -210,6 +210,11 @@ class WhisperAnnotationsTestCase(unittest.TestCase):
         self.assertEqual(clean_transcript("-"), "")
         self.assertEqual(clean_transcript(" ... ? "), "")
         self.assertEqual(clean_transcript("موسیقی"), "موسیقی", "a word in any script is still a word")
+        # Whisper looping on room noise (live 2026-09-14).
+        self.assertEqual(clean_transcript("There's a lot of stuff in there. There's a lot of stuff in there. "
+                                          "There's a lot of stuff in there."), "There's a lot of stuff in there.")
+        self.assertEqual(clean_transcript("- I'm going to go. - I'm going to go. - I'm going to go."), "- I'm going to go.")
+        self.assertEqual(clean_transcript("Stop. Wait. Stop."), "Stop. Wait. Stop.", "a repeat with words between is kept")
         # Live 2026-09-13: "*crying*" reached Sim, who asked what was wrong.
         self.assertEqual(clean_transcript("*crying*"), "")
         self.assertEqual(clean_transcript("*door closes* hi Sim *speaks in Farsi*"), "hi Sim")

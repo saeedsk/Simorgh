@@ -116,7 +116,27 @@ def clean_transcript(text: str) -> str:
     # A transcript with no letter or digit in it -- "-", "...", "?" -- is
     # whisper hearing a breath, not a word. Live 2026-09-14: "-" went to the
     # model as a turn and cost a call to be told QUIET.
-    return cleaned if re.search(r"\w", cleaned) else ""
+    if not re.search(r"\w", cleaned):
+        return ""
+    return _collapse_repeats(cleaned)
+
+
+def _collapse_repeats(text: str) -> str:
+    """One copy of a sentence whisper wrote several times in a row.
+
+    On a stretch of room noise whisper loops: "There's a lot of stuff in
+    there." three times, "I'm going to go." four (live, 2026-09-14). Only
+    identical sentences back to back go; a sentence said again after
+    something else is kept.
+    """
+    parts = [p for p in re.split(r"(?<=[.!?])\s+", text) if p]
+    kept: list[str] = []
+    for part in parts:
+        key = re.sub(r"[^\w]+", " ", part).strip().lower()
+        if kept and key and key == re.sub(r"[^\w]+", " ", kept[-1]).strip().lower():
+            continue
+        kept.append(part)
+    return " ".join(kept)
 
 
 class WhisperCliRecogniser:
