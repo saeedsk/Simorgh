@@ -21,5 +21,25 @@ class MisheardName(unittest.TestCase):
         self.assertIn("never QUIET", text)
 
 
+class CourtesyAside(unittest.TestCase):
+    """"- I'm sorry." said to someone on a call was answered aloud (2026-09-15)."""
+
+    @staticmethod
+    def _aside(text: str) -> bool:
+        session = VoiceSession.__new__(VoiceSession)
+        session._now = lambda: 1000.0                      # noqa: SLF001
+        session._sim_spoke_at = -1e9                       # noqa: SLF001
+        session._config = type("C", (), {"exchange_window_s": 20.0})()   # noqa: SLF001
+        return VoiceSession._courtesy_aside(session, text)
+
+    def test_apologies_and_thanks_are_asides(self):
+        for text in ("- I'm sorry.", "I'm so sorry", "my bad", "thank you so much", "okay, sure"):
+            self.assertTrue(self._aside(text), text)
+
+    def test_real_turns_are_not(self):
+        for text in ("I'm hungry", "sorry, what did you say about the lights", "Sim, thank you"):
+            self.assertFalse(self._aside(text), text)
+
+
 if __name__ == "__main__":
     unittest.main()

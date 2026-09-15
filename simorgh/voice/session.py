@@ -458,6 +458,10 @@ class VoiceSession:
         "thank", "thanks", "you", "so", "much", "very", "okay", "ok", "yeah", "yes", "yep", "no", "nope", "bye",
         "goodbye", "good", "luck", "night", "go", "wait", "sorry", "please", "oh", "wow", "cool", "nice", "right",
         "alright", "sure", "fine", "it's", "its", "that's", "great", "awesome", "hmm", "uh", "um", "huh", "hey",
+        # "- I'm sorry." said to someone on a call got "No need to apologize"
+        # spoken into it (live 2026-09-15). Every word must be courtesy for a
+        # turn to count as an aside, so "I'm hungry" is still a turn.
+        "i'm", "im", "i", "am", "my", "bad",
     ))
 
     def _courtesy_aside(self, text: str) -> bool:
