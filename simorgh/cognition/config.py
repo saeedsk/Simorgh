@@ -123,14 +123,24 @@ class Config:
     collapse_trigger_fraction: float = 0.45
     availability_poll_seconds: float = 30.0
     assembly_request_timeout: float = 2.0  # persona.voice / self.summary -- omitted on timeout, not fatal
+    #: What `from_mapping` had to ignore, logged by the service at start.
+    problems: tuple[str, ...] = ()
 
     @classmethod
     def from_mapping(cls, raw: Mapping) -> "Config":
         if not raw:
             return cls()
         kwargs = {}
+        problems: list[str] = []
         if "providers" in raw:
             order = list(cls().provider_order)
+            # A provider written as anything but a table is skipped. It used to
+            # be skipped in silence: `ollama = "{'model': 'qwen3:4b-instruct'}"`
+            # (a stringified dict, hand-written) left the Ollama fallback off
+            # for a day, with nothing said (live 2026-09-15). The service logs
+            # `problems` at start.
+            problems += [f"providers.{k} is {type(v).__name__}, not a table -- write [cognition.providers.{k}]"
+                         for k, v in raw["providers"].items() if not isinstance(v, Mapping)]
             kwargs["providers"] = {**cls().providers, **{
                 k: ProviderConfig(**v) for k, v in raw["providers"].items() if isinstance(v, Mapping)
             }}
@@ -150,7 +160,7 @@ class Config:
         ):
             if key in raw:
                 kwargs[key] = raw[key]
-        return cls(**kwargs)
+        return cls(**kwargs, problems=tuple(problems))
 
 
 __all__ = ["Config", "ProviderConfig", "DEFAULT_PURPOSE_BUDGETS"]

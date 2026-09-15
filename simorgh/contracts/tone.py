@@ -31,10 +31,27 @@ _ALIASES = {"happy": "bright", "excited": "bright", "cheerful": "bright", "gentl
 _TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{0,24}(?:[ ,/&+]+[A-Za-z][A-Za-z0-9_-]{0,24}){0,3})\s*[\])>]\s*[:\-–—]?\s*", re.I)
 
 
+#: A tone tag opening a LATER line, with only a short note before it.
+_AFTER_NOTE = re.compile(r"\A(?P<pre>[^\n]{0,160}(?:\n[^\n]{0,160})?)\n\s*(?=[\[(<]\s*(?:tone\s*[:=]\s*)?[A-Za-z])", re.S)
+
+
 def split_tone(text: str) -> tuple[str, str]:
     """`("warm", "It's three o'clock.")` for `"[warm] It's three o'clock."`;
     `("", text)` when there is no tag or the word is not a tone. Two
-    stacked tags ("[ciallo_3052e5_audio][calm] No") give the real one."""
+    stacked tags ("[ciallo_3052e5_audio][calm] No") give the real one.
+
+    A short note before the tag is the model talking to itself and is
+    dropped: "Calm answer, then compress offer.\n\n[calm] Mostly our
+    conversations..." was spoken aloud, plan and all, and the tag that
+    followed it was ignored (live 2026-09-15). Only when a real tone tag
+    follows -- ordinary prose with brackets in it is untouched."""
+    first, _ = _split_one(text or "")
+    if not first:
+        match = _AFTER_NOTE.match(text or "")
+        if match:
+            tail = (text or "")[match.end():]
+            if _split_one(tail)[0]:
+                text = tail
     tone, rest = _split_one(text or "")
     for _ in range(3):
         again, rest2 = _split_one(rest)

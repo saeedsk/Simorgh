@@ -129,6 +129,10 @@ class Service:
         # constructs the service with one is unaffected.
         if self._config_from_caller is None and ctx.config:
             self._config = Config.from_mapping(dict(ctx.config))
+        for problem in self._config.problems:
+            # A malformed entry used to be skipped in silence, and the Ollama
+            # fallback was off for a day with nothing said (2026-09-15).
+            ctx.logger.warning("cognition.config_ignored", detail=problem)
         # `SIMORGH_COGNITION_PROVIDER_ORDER=floor` (comma-separated names)
         # chooses who answers without a config file. The test session sets
         # it: every test that booted a real Kernel was making a paid
