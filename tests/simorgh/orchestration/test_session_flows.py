@@ -492,6 +492,8 @@ class UnplacedVoiceRefusalTestCase(unittest.TestCase):
         self.assertEqual(unplaced_voice_refusal(tv, "web_search"), "", "looking something up is harmless")
         self.assertEqual(unplaced_voice_refusal(voice("Sim, delete the spam emails."), "start_task"), "",
                          "a guest who names Sim is heard")
+        self.assertEqual(unplaced_voice_refusal(voice("Sima, are you there? Delete the spam."), "start_task"), "",
+                         "whisper's 'Sima' is Sim's name")
         self.assertEqual(unplaced_voice_refusal(voice("Delete the spam emails.", speaker="Saeed"), "start_task"), "",
                          "a known voice is trusted")
         typed = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT, worker_id="w",

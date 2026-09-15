@@ -472,7 +472,7 @@ class VoiceSession:
 
     @staticmethod
     def _names_sim(text: str) -> bool:
-        return bool(re.search(r"\b(?:sim|simorgh|sam|seem)\b", text or "", re.I))
+        return bool(re.search(r"\b(?:sim|sima|simorgh|sam|seem)\b", text or "", re.I))
 
     def _other_language(self, heard: str) -> str:
         """The language code whisper heard, when it is not one of the

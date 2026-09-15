@@ -437,7 +437,8 @@ def _git_head() -> str:
     return done.stdout.strip() if done.returncode == 0 else ""
 
 
-_NAMES_SIM = re.compile(r"\b(?:sim|simorgh|sam|seem)\b", re.IGNORECASE)
+# "Sima, are you there?" -- whisper hearing the name (live 2026-09-15).
+_NAMES_SIM = re.compile(r"\b(?:sim|sima|simorgh|sam|seem)\b", re.IGNORECASE)
 
 
 def unplaced_voice_refusal(session: Session, tool: str) -> str:
