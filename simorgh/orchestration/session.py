@@ -1196,7 +1196,9 @@ class SessionRunner:
         except OSError as exc:
             text = f"{card.name}: its SKILL.md could not be read ({exc})"
             return False, text, text
-        header = f"Skill {card.name} ({card.source}, files under {card.path}). Follow it for this task:"
+        header = (f"Skill {card.name} ({card.source}, files under {card.path}). Follow it for this task. "
+                  f"Read the files it mentions with read_file; run any script it ships with run_script, "
+                  f"never by pasting its contents somewhere else:")
         return True, f"{header}\n\n{body}", f"loaded the skill {card.name}"
 
     def _parallel_offer(self, offered) -> dict:

@@ -76,6 +76,11 @@ class Config:
     # (observer, 2026-09-08).
     readable_roots: tuple[str, ...] = (
         "src", "docs", "tests", "simorgh", "simorgh_skills", "papers", "tools",
+        # Agent Skills bundled in the repo: a skill's SKILL.md is read by
+        # `use_skill`, and the files beside it (references, scripts) with
+        # `read_file`. Read-only -- a skill is never edited by a task, and
+        # its scripts run only through `run_script`, which Guardian gates.
+        "skills",
         # Where a large tool result is written (`results_dir` below).
         # Readable, never writable by a patch: `write_scopes_source` does
         # not list it, so Sim can read the data it fetched and cannot
