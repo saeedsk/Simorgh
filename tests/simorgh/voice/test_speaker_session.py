@@ -95,11 +95,13 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.last_speaker, "Ira")
 
     async def test_an_unknown_voice_stays_you_with_the_reason(self):
+        """Who the voice is, not whether Sim answers it -- so the rule that an
+        unplaced voice must name Sim (2026-09-15) is off here."""
         self.book.enroll("Ira", _vec(0.0))
         self.embedder.vector = _vec(1.5)
         script = _Script((True, 60), (False, 110), (False, 10_000))
         replies = _Replies()
-        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        session, bus, tts = _session(_config(unplaced_needs_name=False), script, replies, self.embedder, self.book)
         await _run_until(session, lambda: session.stats.turns >= 1, timeout=6.0)
         self.assertEqual(replies.asked[0][1], "")
         final = [p for p in bus.of(topics.VOICE_TRANSCRIPT) if p.get("session_id")][0]
@@ -109,7 +111,7 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.book.enroll("Ira", _vec(0.0))
         script = _Script((True, 12), (False, 15), (False, 10_000))   # 360 ms
         replies = _Replies()
-        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        session, bus, tts = _session(_config(unplaced_needs_name=False), script, replies, self.embedder, self.book)
         await _run_until(session, lambda: session.stats.turns >= 1, timeout=6.0)
         self.assertEqual(self.embedder.seconds, [], "too little voice: no embedding, no guess")
         self.assertEqual(replies.asked[0][1], "")
@@ -227,7 +229,8 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
                 return "It is nine." if "Sim" in text or text == "and tomorrow" else "QUIET"
 
         replies = _TvAware()
-        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+        # `_background`'s own rule, so the blanket one is off here.
+        session, bus, tts = _session(_config(unplaced_needs_name=False), script, replies, self.embedder, self.book)
 
         async def _transcribe(audio, *, language=""):
             from simorgh.voice.api import Utterance
@@ -270,6 +273,29 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet") and "more of what Ira" in p.get("reason", "")]
         self.assertEqual(len(quiet), 1)
         self.assertIn("Pasta", " ".join(tts.spoken))
+
+    async def test_a_voice_sim_cannot_place_must_name_sim(self):
+        """2026-09-15: six of eight misfires in one evening were unplaced
+        voices -- a parent's "try harder, honey", a child's "What is this
+        game?", and two fragments of a work call answered aloud into it.
+        The creator: no reply unless it names Sim. Answering what Sim just
+        asked still counts as being in the conversation."""
+        self.book.enroll("Ira", _vec(0.0))
+        self.embedder.vector = _vec(2.0)                       # nobody the house knows
+        heard = iter(["can you try a bit harder next time honey", "Sim, what time is it", "about nine"])
+        script = _Script(*[(True, 60), (False, 110)] * 3, (False, 10_000))
+        replies = _Replies("It is nine.")
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.2, engine="fake")
+        session._stt._inner.transcribe = _transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: len(replies.asked) >= 2, timeout=15.0)
+        self.assertEqual([a[0] for a in replies.asked], ["Sim, what time is it", "about nine"],
+                         "the aside was never asked; naming Sim was, and the answer to Sim's own reply was")
+        quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet") and "cannot place" in p.get("reason", "")]
+        self.assertEqual(len(quiet), 1)
 
     async def test_a_thank_you_to_someone_else_is_not_answered(self):
         """2026-09-14, live: "Thank you." from across the room got "You're

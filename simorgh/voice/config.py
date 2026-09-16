@@ -158,6 +158,13 @@ class Config:
     # get pizza for lunch," QUIET, then "that I didn't even eat a bite out of
     # today" was answered). 0 turns it off.
     continuation_quiet_s: float = 12.0
+    # A voice Sim cannot place is not answered at all unless it says Sim's name
+    # or is answering what Sim just asked. Six of eight misfires on 2026-09-15
+    # were unplaced voices the scaffold already told the model to ignore --
+    # including two answered aloud into the creator's call. Only where speaker
+    # recognition is on; without it every voice is "unplaced" and Sim would
+    # answer nobody.
+    unplaced_needs_name: bool = True
     still_after_s: float = 20.0
     # A listener's "uh-huh" under the person, at half volume, when
     # they pause mid-story (voice/delivery.py "hum"): only once they have

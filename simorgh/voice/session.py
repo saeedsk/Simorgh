@@ -809,6 +809,8 @@ class VoiceSession:
             return
         if await self._continuation(turn_id, speaker, text):
             return
+        if await self._unplaced(turn_id, speaker, text):
+            return
         text = await self._tidy(text, turn_id)
         if clock.confidence < self._config.min_confidence:
             # Asking "did you say ...?" is for someone talking to Sim. A
@@ -951,6 +953,46 @@ class VoiceSession:
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
             "reason": f"more of what {me} was saying to someone else"})
+        self.stats.turns += 1
+        self.turns.state = LISTENING
+        await self._announce(self.turns.state)
+        return True
+
+    async def _unplaced(self, turn_id: int, speaker: str, text: str) -> bool:
+        """True when a voice Sim cannot place said something that does not
+        name Sim and does not answer what Sim just asked.
+
+        The scaffold has forbidden this for weeks and the model keeps
+        answering anyway: on 2026-09-15 a parent's "try harder, honey", a
+        child's "What is this game?", "Who did that?", "You're in my heart"
+        and two fragments of the creator's call with a colleague were all
+        answered aloud. The creator: an unplaced voice gets no reply unless
+        it names Sim. A question missed this way costs one repeat with the
+        name in it; an answer into someone's meeting costs more.
+
+        Only with speaker recognition on -- without it every voice is
+        unplaced and Sim would answer nobody. Off with
+        `[voice] unplaced_needs_name = false`."""
+        if not self._config.unplaced_needs_name or speaker:
+            return False
+        if self._speakers is None or self._embedder is None:
+            return False
+        if int(self._config.introduce_after_turns) > 0:
+            # Asking a new voice its name counts its turns on the reply path
+            # (`_maybe_ask_who`), so a house that has switched that on must
+            # still hear those turns. Off by default since 2026-09-13.
+            return False
+        now = self._now()
+        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0):
+            return False
+        # Sim asked something a moment ago and this may be the answer to it.
+        if 0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s and self._last_ask_addressed:
+            return False
+        self._quiet_on["someone"] = now
+        self._room.append(("someone", text, now, "aside"))
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
+            "reason": "a voice Sim cannot place, not naming Sim: say \"Sim\" and it will answer"})
         self.stats.turns += 1
         self.turns.state = LISTENING
         await self._announce(self.turns.state)
