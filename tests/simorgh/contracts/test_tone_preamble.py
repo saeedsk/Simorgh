@@ -27,3 +27,22 @@ class TonePreamble(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MetaTag(unittest.TestCase):
+    """GLM wrote "[sd:0.55, sv:0.45] Sah-EED." and the scores were spoken
+    aloud, "zero point five five" and all (live 2026-09-15)."""
+
+    def test_a_numeric_head_tag_is_dropped(self):
+        self.assertEqual(split_tone("[sd:0.55, sv:0.45] Sah-EED."), ("", "Sah-EED."))
+        self.assertEqual(split_tone("[turn 4] hello"), ("", "hello"))
+
+    def test_a_feeling_is_still_a_feeling(self):
+        self.assertEqual(split_tone("[warm] hello"), ("warm", "hello"))
+        self.assertEqual(split_tone("[calm] 12 o'clock"), ("calm", "12 o'clock"))
+
+    def test_any_head_tag_is_dropped_not_spoken(self):
+        """The long-standing contract: a bracket at the head is never said
+        aloud, feeling or not. The numeric case above is the one the old
+        pattern could not match."""
+        self.assertEqual(split_tone("[the kitchen] is warm"), ("", "is warm"))

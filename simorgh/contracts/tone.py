@@ -31,6 +31,13 @@ _ALIASES = {"happy": "bright", "excited": "bright", "cheerful": "bright", "gentl
 _TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{0,24}(?:[ ,/&+]+[A-Za-z][A-Za-z0-9_-]{0,24}){0,3})\s*[\])>]\s*[:\-–—]?\s*", re.I)
 
 
+#: A bracketed block at the head that is plainly not a feeling: it carries
+#: digits or colons. GLM, asked to open with "[warm]", wrote
+#: "[sd:0.55, sv:0.45] Sah-EED." and the scores were read aloud, decimal
+#: point and all (live 2026-09-15).
+_META_TAG = re.compile(r"^\s*[\[(<][^\]\)>\n]{0,60}[\])>]\s*")
+
+
 #: A tone tag opening a LATER line, with only a short note before it.
 _AFTER_NOTE = re.compile(r"\A(?P<pre>[^\n]{0,160}(?:\n[^\n]{0,160})?)\n\s*(?=[\[(<]\s*(?:tone\s*[:=]\s*)?[A-Za-z])", re.S)
 
@@ -45,7 +52,8 @@ def split_tone(text: str) -> tuple[str, str]:
     conversations..." was spoken aloud, plan and all, and the tag that
     followed it was ignored (live 2026-09-15). Only when a real tone tag
     follows -- ordinary prose with brackets in it is untouched."""
-    first, _ = _split_one(text or "")
+    text = _drop_meta_tag(text or "")
+    first, _ = _split_one(text)
     if not first:
         match = _AFTER_NOTE.match(text or "")
         if match:
@@ -59,6 +67,19 @@ def split_tone(text: str) -> tuple[str, str]:
             break
         tone, rest = (tone or again), rest2
     return tone, rest
+
+
+def _drop_meta_tag(text: str) -> str:
+    """A head tag with numbers in it is the model talking to itself."""
+    match = _META_TAG.match(text)
+    if not match:
+        return text
+    inside = match.group(0).strip()[1:-1]
+    if _split_one(text)[0]:
+        return text                      # a real feeling: leave it to `_split_one`
+    if any(ch.isdigit() for ch in inside) or ":" in inside:
+        return text[match.end():]
+    return text
 
 
 def _split_one(text: str) -> tuple[str, str]:
