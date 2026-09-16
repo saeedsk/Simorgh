@@ -8,6 +8,7 @@ and the answer on screen with the date and time and out loud.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import tempfile
 import types
@@ -93,6 +94,18 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
         self.bus = _Bus()
         self.snapshot = _Snapshot()
 
+    def _knows(self, camera: str = "Front Door",
+               scene: str = "a front door, a porch light and a path") -> None:
+        """A camera whose usual view Sim has already learnt.
+
+        The first event on an UNKNOWN camera learns the scene and says
+        nothing -- deliberately (the creator, 2026-09-16: stop describing
+        the house). These tests are about the event that comes after.
+        """
+        path = self.root / "workspace/cameras/baselines.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({camera: scene}), encoding="utf-8")
+
     def _vision(self, *, tools=None, **settings) -> CameraVision:
         config = Config(repo_root=self.root, camera_vision_gap_s=0.0, **settings)
         ctx = types.SimpleNamespace(clock=self.clock, logger=self.logger, ledger=None, bus=self.bus)
@@ -108,6 +121,7 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
 
     # -- the whole chain ---------------------------------------------------
     async def test_an_event_becomes_a_described_scene_on_screen_and_out_loud(self):
+        self._knows()
         vision = self._vision()
         await self._event(vision)
 
@@ -163,6 +177,7 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
 
     # -- when it cannot ----------------------------------------------------
     async def test_no_eyes_is_said_once_not_once_per_event(self):
+        self._knows()
         self.bus = _Bus(answer={"ok": False, "error": {"code": "no_real_provider",
                                                        "detail": "nothing here can look at a picture"}})
         vision = self._vision(camera_vision_cooldown_s=0.0)
@@ -193,6 +208,7 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bus.published, [])
 
     async def test_the_screen_can_have_it_without_the_voice(self):
+        self._knows()
         vision = self._vision(camera_vision_speak=False)
         await self._event(vision)
         self.assertEqual(len(self.bus.of_type(topics.UI_NOTICE)), 1)
@@ -203,6 +219,89 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
         vision = self._vision()
         await self._event(vision)
         self.assertEqual(self.bus.published, [], "an empty description is not news")
+
+
+
+class ReportingTheEventNotTheHouse(unittest.IsolatedAsyncioTestCase):
+    """The creator, live 2026-09-16, after Sim announced "a residential
+    street with a driveway ... the street is quiet, with no visible
+    movement or people": "you are descbing my home, isntead i expect you
+    to describe the event ... avoide telling me imag estatis componenets
+    an djust tell me what happened".
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.clock = FakeClock()
+        self.logger = _Logger()
+        self.snapshot = _Snapshot()
+        self.asked: list = []
+
+    def _vision(self, answers):
+        """`answers` is consumed one per model call, in order."""
+        replies = list(answers)
+        outer = self
+
+        class _AskingBus(_Bus):
+            async def request_or_error(self, message, *, timeout=None):
+                outer.asked.append(message.payload["messages"][0]["content"])
+                return types.SimpleNamespace(payload={"ok": True, "text": replies.pop(0)})
+
+        self.bus = _AskingBus()
+        config = Config(repo_root=self.root, camera_vision_gap_s=0.0)
+        ctx = types.SimpleNamespace(clock=self.clock, logger=self.logger, ledger=None, bus=self.bus)
+        return CameraVision(config=config, registry=_Registry(cam_snapshot=self.snapshot), ctx=ctx)
+
+    async def _event(self, vision, **payload):
+        body = {"channel": 1, "camera": "Front", "kinds": ["motion"]}
+        body.update(payload)
+        await vision.on_camera_event(types.SimpleNamespace(payload=body))
+        for task in list(vision._tasks):  # noqa: SLF001
+            await task
+
+    async def test_the_first_event_learns_the_scene_and_says_nothing(self):
+        vision = self._vision(["a driveway, a wooden trellis and a garden bed"])
+        await self._event(vision)
+        self.assertEqual(self.bus.published, [], "learning is not news")
+        saved = json.loads((self.root / "workspace/cameras/baselines.json").read_text())
+        self.assertIn("driveway", saved["Front"])
+        self.assertIn("PERMANENT things", self.asked[0], "it asked for the scene, not the event")
+
+    async def test_a_later_event_is_judged_against_that_scene(self):
+        vision = self._vision(["a driveway and a garden bed",
+                               "a delivery driver is leaving a parcel by the door"])
+        await self._event(vision)
+        self.clock.advance(1_000)
+        await self._event(vision)
+        said = self.bus.of_type(topics.UI_NOTICE)[-1].payload["text"]
+        self.assertIn("delivery driver", said)
+        self.assertIn("a driveway and a garden bed", self.asked[1], "the scene is given to the model by name")
+        self.assertIn("ONLY what is happening", self.asked[1])
+
+    async def test_nothing_but_the_usual_view_is_not_announced(self):
+        vision = self._vision(["a driveway and a garden bed", "NOTHING"])
+        await self._event(vision)
+        self.clock.advance(1_000)
+        await self._event(vision)
+        self.assertEqual(self.bus.of_type(topics.UI_NOTICE), [], "a quiet street is not an event")
+        self.assertEqual(self.bus.of_type(topics.VOICE_SPEAK_REQUEST), [])
+
+    async def test_a_full_stop_does_not_turn_nothing_into_news(self):
+        vision = self._vision(["a driveway", "Nothing."])
+        await self._event(vision)
+        self.clock.advance(1_000)
+        await self._event(vision)
+        self.assertEqual(self.bus.of_type(topics.UI_NOTICE), [])
+
+    async def test_the_scene_is_learnt_once_and_reused(self):
+        vision = self._vision(["a driveway", "NOTHING", "a fox crossing the drive"])
+        for _ in range(3):
+            await self._event(vision)
+            self.clock.advance(1_000)
+        self.assertEqual(len(self.asked), 3, "the scene was not re-learnt")
+        self.assertIn("fox", self.bus.of_type(topics.UI_NOTICE)[-1].payload["text"])
 
 
 if __name__ == "__main__":

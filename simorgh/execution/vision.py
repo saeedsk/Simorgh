@@ -25,6 +25,7 @@ driveway" into "a car pulling out of the driveway".
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from pathlib import Path
 
@@ -41,8 +42,75 @@ PROMPT = (
     "If the frames are too dark or too blurred to tell, say exactly that instead of guessing."
 )
 
+#: What the model answers when a camera event turned out to be nothing.
+NOTHING = "NOTHING"
 
-async def describe_stills(paths: list[str], *, camera: str, bus, kinds=(), timeout: float = 60.0) -> tuple[str, str]:
+#: The creator, live 2026-09-16, after Sim announced "a residential street
+#: with a driveway ... the street is quiet, with no visible movement or
+#: people": "you are descbing my home, isntead i expect you to describe
+#: the event ... you should laearn the camera statis elemenets and next
+#: time you process the camer, avoide telling me imag estatis componenets
+#: an djust tell me what happened".
+#:
+#: So the camera's own scene is given to the model as words and excluded
+#: by name. Words rather than a reference frame on purpose: a baseline
+#: image has to be matched against darkness, headlights, rain and a
+#: moved bush, and "a driveway, a wooden trellis, a garden" survives all
+#: of those unchanged.
+EVENT_PROMPT = (
+    "These are {count} still frames from the {camera} camera, taken a moment apart"
+    "{kinds}.\n\n"
+    "This camera normally shows: {baseline}\n\n"
+    "Say ONLY what is happening that is NOT part of that normal scene -- a person, an "
+    "animal, a vehicle arriving or leaving, a package left or taken, a child playing, a "
+    "door or gate that has opened. One or two short sentences, plain words, no preamble.\n"
+    "If the frames show only the normal scene -- however the light, weather or time of day "
+    "differs -- answer with the single word {nothing}. Answer {nothing} rather than "
+    "describing the house, the garden, the sky or the parked cars that are always there.\n"
+    "If the frames are too dark or blurred to tell, say exactly that."
+)
+
+#: Learning the scene: asked of the frames Sim sees when nothing is
+#: happening, once per camera, and reused until the camera is renamed or
+#: the file is deleted.
+BASELINE_PROMPT = (
+    "These are {count} still frames from the {camera} camera at a quiet moment"
+    "{kinds}. List, in one sentence, only the PERMANENT things in view -- buildings, "
+    "paths, fences, trees, garden beds, permanently parked vehicles, furniture. "
+    "Do not mention people, animals, weather, the time of day, shadows or light levels. "
+    "Plain words, no preamble."
+)
+
+
+BASELINE_FILE = Path("workspace/cameras/baselines.json")
+
+
+def _baselines(root: Path) -> dict:
+    try:
+        return json.loads((root / BASELINE_FILE).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _remember_baseline(root: Path, camera: str, scene: str) -> None:
+    """What this camera always shows, kept between restarts.
+
+    A file rather than memory: learning the scene costs a model call, and
+    paying it again every boot -- while announcing whatever the first
+    event happened to be -- is the behaviour this replaces.
+    """
+    path = root / BASELINE_FILE
+    known = _baselines(root)
+    known[camera] = scene
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(known, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
+
+
+async def describe_stills(paths: list[str], *, camera: str, bus, kinds=(), timeout: float = 60.0,
+                          template: str = "", baseline: str = "") -> tuple[str, str]:
     """`(description, problem)` for a few stills, through Cognition.
 
     A function, not a method, because two callers need it: the watcher
@@ -54,7 +122,8 @@ async def describe_stills(paths: list[str], *, camera: str, bus, kinds=(), timeo
     """
     kinds = [str(k) for k in (kinds or []) if str(k).strip()]
     kinds_text = f" after the camera reported {', '.join(kinds)}" if kinds else ""
-    prompt = PROMPT.format(count=len(paths), camera=camera, kinds=kinds_text)
+    prompt = (template or PROMPT).format(count=len(paths), camera=camera, kinds=kinds_text,
+                                         baseline=baseline or "", nothing=NOTHING)
     request = Message.new(
         topics.COGNITION_THINK, source="execution",
         payload={
@@ -192,9 +261,32 @@ class CameraVision:
             stills = await self._stills(payload, camera)
             if not stills:
                 return
-            said = await self._describe(stills, camera, payload)
-            if said:
-                await self._announce(said, camera)
+            root = Path(self._config.repo_root)
+            baseline = _baselines(root).get(camera, "")
+            if not baseline:
+                # Nothing known about this camera yet: learn what is always
+                # there from these frames, and say nothing about this event.
+                # One quiet event's worth of silence buys every later event
+                # its meaning.
+                scene, problem = await self._ask(stills, camera, payload, BASELINE_PROMPT)
+                if scene and not problem:
+                    _remember_baseline(root, camera, scene)
+                    self._ctx.logger.info("camera_vision_baseline_learnt", camera=camera, scene=scene[:160])
+                return
+            said, problem = await self._ask(stills, camera, payload, EVENT_PROMPT, baseline=baseline)
+            if problem:
+                if not self._said_blind:
+                    self._said_blind = True
+                    await self._notice(f"📷 {camera}: something happened, but Sim could not look ({problem[:120]}).")
+                self._ctx.logger.warning("camera_vision_no_answer", camera=camera, detail=problem[:200])
+                return
+            if not said or said.strip().strip(".").upper() == NOTHING:
+                # The camera fired and there was nothing in it but the
+                # camera's own view. Saying so out loud is the noise this
+                # exists to remove.
+                self._ctx.logger.info("camera_vision_nothing", camera=camera)
+                return
+            await self._announce(said, camera)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 -- a camera is not worth crashing Execution over
@@ -238,20 +330,15 @@ class CameraVision:
         return paths
 
     # -- the looking ------------------------------------------------------
-    async def _describe(self, stills: list[str], camera: str, payload: dict) -> str:
-        said, problem = await describe_stills(
+    async def _ask(self, stills: list[str], camera: str, payload: dict, template: str,
+                   *, baseline: str = "") -> tuple[str, str]:
+        # No floor answer anywhere on this path: a canned sentence about a
+        # camera nobody looked at is exactly the "succeeded while saying
+        # nothing true" shape Sim is not allowed to have.
+        return await describe_stills(
             stills, camera=camera, bus=self._ctx.bus, kinds=payload.get("kinds") or (),
-            timeout=float(getattr(self._config, "camera_vision_timeout_s", 60.0)))
-        if problem:
-            # No floor answer: a canned sentence about a camera nobody
-            # looked at is exactly the "succeeded while saying nothing
-            # true" shape Sim is not allowed to have.
-            if not self._said_blind:
-                self._said_blind = True
-                await self._notice(f"📷 {camera}: something happened, but Sim could not look ({problem[:120]}).")
-            self._ctx.logger.warning("camera_vision_no_answer", camera=camera, detail=problem[:200])
-            return ""
-        return said
+            timeout=float(getattr(self._config, "camera_vision_timeout_s", 60.0)),
+            template=template, baseline=baseline)
 
     # -- the telling ------------------------------------------------------
     async def _announce(self, said: str, camera: str) -> None:
@@ -272,4 +359,5 @@ class CameraVision:
         ))
 
 
-__all__ = ["CameraDescribeTool", "CameraVision", "PROMPT", "describe_stills", "vision_tools"]
+__all__ = ["BASELINE_PROMPT", "CameraDescribeTool", "CameraVision", "EVENT_PROMPT", "NOTHING",
+           "PROMPT", "describe_stills", "vision_tools"]
