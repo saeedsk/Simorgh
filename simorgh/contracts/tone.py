@@ -28,7 +28,10 @@ _ALIASES = {"happy": "bright", "excited": "bright", "cheerful": "bright", "gentl
             "soft": "warm", "sad": "sorry", "apologetic": "sorry", "grave": "serious", "stern": "serious",
             "urgent": "serious", "relaxed": "calm", "soothing": "calm", "fun": "playful", "teasing": "playful",
             "joking": "playful", "plain": "neutral", "flat": "neutral"}
-_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{0,24}(?:[ ,/&+]+[A-Za-z][A-Za-z0-9_-]{0,24}){0,3})\s*[\])>]\s*[:\-–—]?\s*", re.I)
+#: The separators a model puts between words inside one tag. The em dash was
+#: missing, so "[loud and clear -- calm, warm] [calm] Loud and clear." had its
+#: first tag read out (live 2026-09-15).
+_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{0,24}(?:[ ,/&+\-–—;]+[A-Za-z][A-Za-z0-9_-]{0,24}){0,5})\s*[\])>]\s*[:\-–—]?\s*", re.I)
 
 
 #: A bracketed block at the head that is plainly not a feeling: it carries

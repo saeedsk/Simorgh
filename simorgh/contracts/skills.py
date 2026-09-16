@@ -149,6 +149,47 @@ _FLAGS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
         r"no need to (?:ask|confirm)|skip (?:the )?(?:approval|confirmation))\b", re.I)),
     ("hidden text", re.compile(r"[\u200b-\u200f\u2028-\u202e\ufeff]")),
 )
+#: Orgs whose skills install without a person approving each one (the
+#: creator, 2026-09-15: "agree with skill trust strategy"). Trust belongs to
+#: the organisation that maintains a repository, never to a directory that
+#: lists it -- a marketplace entry counts only if it lives in one of these.
+#: The deterministic review still runs; a flagged skill still waits.
+TRUSTED_ORGS: tuple[str, ...] = ("anthropics", "google", "microsoft", "huggingface", "trailofbits")
+
+
+@dataclass(frozen=True)
+class Source:
+    """Where a skill came from: `github.com/google/skills#skills/bigquery`."""
+
+    host: str
+    org: str
+    repo: str
+    path: str = ""
+    ref: str = ""
+
+    @property
+    def trusted(self) -> bool:
+        return self.host == "github.com" and self.org.lower() in TRUSTED_ORGS
+
+    @property
+    def name(self) -> str:
+        return f"{self.org}/{self.repo}"
+
+
+_GIT_URL = re.compile(
+    r"^(?:https?://|git@)?(?P<host>[a-z0-9.\-]+)[/:](?P<org>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+?)"
+    r"(?:\.git)?(?:#(?P<path>[^@\s]*))?(?:@(?P<ref>[^\s]+))?$", re.I)
+
+
+def parse_source(url: str) -> Source | None:
+    """`github.com/google/skills#skills/gmail@abc123` -> a `Source`."""
+    match = _GIT_URL.match((url or "").strip())
+    if not match:
+        return None
+    return Source(host=match.group("host").lower(), org=match.group("org"), repo=match.group("repo"),
+                  path=(match.group("path") or "").strip("/"), ref=(match.group("ref") or ""))
+
+
 #: A licence file next to the skill, or in the repository it came from.
 _LICENCE_FILES = ("LICENSE", "LICENSE.txt", "LICENSE.md", "LICENCE", "COPYING", "NOTICE")
 _OPEN_LICENCES = ("apache license", "mit license", "bsd ", "mozilla public license", "isc license",
@@ -271,5 +312,6 @@ def load_body(card: SkillCard, *, max_chars: int = MAX_BODY_CHARS) -> str:
     return body if len(body) <= max_chars else body[:max_chars] + "\n\n[... cut; read the rest of SKILL.md with read_file]"
 
 
-__all__ = ["Finding", "InvalidSkill", "Review", "SkillCard", "catalog_text", "discover_skills", "load_body",
-           "parse_skill", "review_skill", "review_text", "split_frontmatter"]
+__all__ = ["Finding", "InvalidSkill", "Review", "SkillCard", "Source", "TRUSTED_ORGS", "catalog_text",
+           "discover_skills", "load_body", "parse_skill", "parse_source", "review_skill", "review_text",
+           "split_frontmatter"]

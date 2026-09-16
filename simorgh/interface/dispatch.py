@@ -24,6 +24,7 @@ import re
 import uuid
 import subprocess
 from dataclasses import dataclass
+import shutil
 from pathlib import Path
 
 from simorgh.bus.client import BusClient
@@ -50,6 +51,9 @@ _NOT_YET = "not yet available in this build"
 # bus topics are, so this is the same kind of agreement `execution/
 # service.py`'s own `INFLIGHT_STREAM`/`TOOLS_STREAM` constants are.
 MCP_PROPOSALS_STREAM = "mcp:proposals"
+# Agent Skills installed on this machine, and what the review said of each
+# (docs/plans/agent-skills-design.md section 3.6).
+SKILLS_STREAM = "skills:installs"
 # Same agreement, for `execution/capabilities.py::CAPABILITIES_STREAM`.
 # Kept in step by a test rather than an import, for the reason above.
 CAPABILITIES_STREAM = "capabilities"
@@ -355,6 +359,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
             return await _request(bus, topics.CURIOSITY_INTEREST_LIST_REQUEST, {}, timeout=3.0,
                                   render=_render_interests)
         return await _publish(bus, topics.CURIOSITY_INTEREST_ADD, {"topic": args}, render_ok=f"interest added: {args}")
+
+    if name == "skills":
+        return await _skills_command(args, ledger=ledger, clock=clock)
 
     if name == "mcp":
         return await _mcp_command(args, bus=bus, ledger=ledger, clock=clock)
@@ -1708,6 +1715,151 @@ def _named_list(names: list[str]) -> str:
     if hidden > 0:
         shown.append(f"...and {hidden} more NOT SHOWN -- approving grants all {len(names)}")
     return ", ".join(shown)
+
+
+#: Where installed skills live, beside the ones bundled in the repo.
+SKILLS_HOME = Path("~/.simorgh/skills")
+
+
+def _skill_roots() -> list[tuple[str, Path]]:
+    """Bundled first, then installed: the first root with a name wins."""
+    roots = [("bundled", Path("skills"))]
+    home = SKILLS_HOME.expanduser()
+    if home.is_dir():
+        roots += [(child.name, child) for child in sorted(home.iterdir()) if child.is_dir()]
+    return roots
+
+
+async def _clone_at(source, into: Path) -> tuple[Path, str, str]:
+    """`(folder, commit, problem)` -- a shallow clone, pinned to a commit."""
+    url = f"https://{source.host}/{source.org}/{source.repo}.git"
+    clone = await run_shell(f"git clone --depth 1 --quiet {url} {into}", timeout=180.0)
+    if not into.is_dir():
+        return into, "", f"could not clone {url}: {' '.join(clone.split())[:200]}"
+    if source.ref:
+        await run_shell(f"git -C {into} fetch --depth 1 --quiet origin {source.ref}", timeout=180.0)
+        checkout = await run_shell(f"git -C {into} checkout --quiet {source.ref}", timeout=60.0)
+        if "error" in checkout.lower() or "fatal" in checkout.lower():
+            return into, "", f"no such commit {source.ref!r}: {' '.join(checkout.split())[:160]}"
+    commit = (await run_shell(f"git -C {into} rev-parse HEAD", timeout=30.0)).strip().split("\n")[-1]
+    return (into / source.path if source.path else into), commit, ""
+
+
+async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clone_at) -> Outcome:
+    """Agent Skills: what is here, what a skill contains, and installing one.
+
+    Trust belongs to the organisation that maintains a repository (the
+    creator, 2026-09-15): a skill from one of `TRUSTED_ORGS` is enabled once
+    the deterministic review is clean, anything else waits for `skills
+    approve`. The review always runs, and nothing is ever executed by it."""
+    from simorgh.contracts.skills import discover_skills, parse_source, review_skill, review_text
+
+    parts = args.split(None, 1)
+    sub = parts[0].lower() if parts else "list"
+    rest = parts[1].strip() if len(parts) > 1 else ""
+
+    if sub in ("", "list"):
+        cards, invalid = discover_skills(_skill_roots())
+        if not cards and not invalid:
+            lines = ["no skills yet -- `skills install <git-url>`, e.g. skills install github.com/anthropics/skills"]
+        else:
+            lines = [f"{len(cards)} skill(s):"]
+            lines += [f"  {card.name:24s} {card.source:12s} {card.description[:70]}" for card in cards]
+        if invalid:
+            lines.append(f"{len(invalid)} ignored:")
+            lines += [f"  {bad.path}: {bad.reason}" for bad in invalid[:8]]
+        return Outcome("\n".join(lines))
+
+    if sub == "show":
+        if not rest:
+            return Outcome("usage: skills show <name>")
+        cards, _ = discover_skills(_skill_roots())
+        card = next((c for c in cards if c.name == rest.lower()), None)
+        if card is None:
+            return Outcome(f"no skill called {rest!r} -- `skills` lists them")
+        return Outcome(f"{card.name} ({card.source})\n{card.description}\nfiles: {card.path}\n"
+                       f"sha256: {card.sha256[:16]}…" + (f"\nprofiles: {', '.join(card.allowed_profiles)}"
+                                                         if card.allowed_profiles else ""))
+
+    if sub == "review":
+        if not rest:
+            return Outcome("usage: skills review <folder>")
+        folder = Path(rest).expanduser()
+        if not (folder / "SKILL.md").is_file():
+            return Outcome(f"no SKILL.md in {folder}")
+        return Outcome(review_text(review_skill(folder)))
+
+    if sub == "install":
+        if not rest:
+            return Outcome("usage: skills install <git-url>[#path][@commit]   (github.com/anthropics/skills#document-skills)")
+        source = parse_source(rest.split()[0])
+        if source is None:
+            return Outcome(f"{rest.split()[0]!r} is not a git URL I can read")
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder, commit, problem = await clone(source, Path(tmp) / "repo")
+            if problem:
+                return Outcome(f"refused: {problem}")
+            if not (folder / "SKILL.md").is_file():
+                return Outcome(f"no SKILL.md at {source.path or '/'} in {source.name} -- name the skill's own folder with #path")
+            review = review_skill(folder)
+            home = SKILLS_HOME.expanduser() / (source.org.lower() if source.trusted else "review") / review.name
+            home.parent.mkdir(parents=True, exist_ok=True)
+            if home.exists():
+                shutil.rmtree(home)
+            shutil.copytree(folder, home)
+            record = {"name": review.name, "source": source.name, "commit": commit, "licence": review.licence,
+                      "open_licence": review.open_licence, "scripts": list(review.scripts),
+                      "findings": [f"{f.label} {f.path}:{f.line}" for f in review.findings],
+                      "trusted": source.trusted, "path": str(home),
+                      "status": "enabled" if (source.trusted and review.clean) else "waiting"}
+            await ledger.append(SKILLS_STREAM, Event(
+                stream=SKILLS_STREAM, type="installed", ts=clock.now(), trace_id=review.name,
+                causation_id=None, payload=record))
+            head = f"{review.name} from {source.name} at {commit[:12]}"
+            if record["status"] == "enabled":
+                return Outcome(f"{head}: trusted org, review clean -- installed to {home}\n{review_text(review)}")
+            why = "review flagged something" if not review.clean else "not a trusted org"
+            return Outcome(f"{head}: {why}, so it is NOT enabled.\n{review_text(review)}\n"
+                           f"`skills approve {review.name}` to enable it, `skills remove {review.name}` to drop it.")
+
+    if sub == "approve":
+        if not rest:
+            return Outcome("usage: skills approve <name>")
+        waiting = SKILLS_HOME.expanduser() / "review" / rest.lower()
+        if not waiting.is_dir():
+            return Outcome(f"nothing waiting called {rest!r}")
+        enabled = SKILLS_HOME.expanduser() / "approved" / rest.lower()
+        enabled.parent.mkdir(parents=True, exist_ok=True)
+        if enabled.exists():
+            shutil.rmtree(enabled)
+        shutil.move(str(waiting), str(enabled))
+        await ledger.append(SKILLS_STREAM, Event(
+            stream=SKILLS_STREAM, type="approved", ts=clock.now(), trace_id=rest.lower(), causation_id=None,
+            payload={"name": rest.lower(), "path": str(enabled), "status": "enabled"}))
+        return Outcome(f"approved: {rest.lower()} is enabled at {enabled}")
+
+    if sub == "remove":
+        if not rest:
+            return Outcome("usage: skills remove <name>")
+        gone = []
+        for source, root in _skill_roots():
+            if source == "bundled":
+                continue
+            folder = root / rest.lower()
+            if folder.is_dir():
+                shutil.rmtree(folder)
+                gone.append(str(folder))
+        if not gone:
+            return Outcome(f"no installed skill called {rest!r} (bundled skills are part of the repo)")
+        await ledger.append(SKILLS_STREAM, Event(
+            stream=SKILLS_STREAM, type="removed", ts=clock.now(), trace_id=rest.lower(), causation_id=None,
+            payload={"name": rest.lower(), "paths": gone}))
+        return Outcome("removed: " + ", ".join(gone))
+
+    return Outcome(f"skills: no sub-command {sub!r} -- list | show <name> | review <folder> | "
+                   f"install <git-url> | approve <name> | remove <name>")
 
 
 async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock) -> Outcome:

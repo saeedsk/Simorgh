@@ -41,6 +41,8 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("tv", "[setup|devices|use <device>|show [tv|dash] [device]|view <name>|rotate <s>|scale <f>|live <n>|quality <q>|sound on|off|remote|link|pair [code]|app <name>|key <key>|nav <key>|charts [kpop|us]|video <url> [full|frame]|stop [frame]|volume <0-100>]", "Sim on the TV over Chromecast: its terminal or its glass dashboard on screen, a video framed in it or full screen"),
     ("schedule", "[every] <15m> <label> | cancel <id>", "fire a reminder later, or on a repeat"),
     ("mcp", "[list|approve|deny]", "review external tools Sim has proposed"),
+    ("skills", "[list|show <name>|review <folder>|install <git-url>|approve <name>|remove <name>]",
+     "Agent Skills: folders of instructions Sim can load; a trusted org installs clean, anything else waits"),
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),
     ("pause", "", "hold everything"),
     ("resume", "", "let it continue"),
@@ -83,7 +85,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Look around", ("status", "domains", "capabilities", "config", "alerts", "tool")),
     ("Work", ("tasks", "cancel", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("Voice, screen and cameras", ("voice", "tv", "next", "cameras", "ring")),
-    ("Control", ("auto", "schedule", "mcp", "pause", "resume")),
+    ("Control", ("auto", "schedule", "mcp", "skills", "pause", "resume")),
     ("Session", ("help", "exit", "restart")),
 )
 SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
@@ -165,6 +167,10 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
     "schedule": (("<15m> <label>", "a reminder later"), ("every <15m> <label>", "a reminder on a repeat"),
                  ("cancel <id>", "drop one")),
     "mcp": (("list", "external tools Sim has proposed"), ("approve <id>", "let one in"), ("deny <id>", "keep one out")),
+    "skills": (("list", "the skills Sim has, bundled and installed"), ("show <name>", "one skill's card and where it lives"),
+               ("review <folder>", "what a skill contains: licence, scripts, anything it does quietly"),
+               ("install <git-url>", "clone at a commit, review it, enable it if the org is trusted"),
+               ("approve <name>", "enable one that was waiting"), ("remove <name>", "delete an installed one")),
     "auto": (("", "is the idle loop on?"), ("on", "let Sim improve itself when idle"), ("off", "stop that"),
              ("now", "one round now")),
     "interests": (("", "topics Sim is following"), ("<topic>", "follow one more")),

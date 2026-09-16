@@ -46,3 +46,19 @@ class MetaTag(unittest.TestCase):
         aloud, feeling or not. The numeric case above is the one the old
         pattern could not match."""
         self.assertEqual(split_tone("[the kitchen] is warm"), ("", "is warm"))
+
+
+class TwoTagsAndDashes(unittest.TestCase):
+    """"[loud and clear — calm, warm] [calm] Loud and clear." -- the first
+    tag was spoken aloud, em dash and all (live 2026-09-15)."""
+
+    def test_the_live_case(self):
+        tone, rest = split_tone("[loud and clear — calm, warm] [calm] Loud and clear.")
+        self.assertEqual(tone, "calm")
+        self.assertEqual(rest, "Loud and clear.")
+
+    def test_a_dashed_tag_alone(self):
+        self.assertEqual(split_tone("[warm — gentle] hello"), ("warm", "hello"))
+
+    def test_prose_is_untouched(self):
+        self.assertEqual(split_tone("Loud and clear."), ("", "Loud and clear."))
