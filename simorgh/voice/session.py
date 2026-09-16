@@ -120,6 +120,20 @@ _WHO_SAID = re.compile(r"\bwho\s+(?:just\s+)?(?:said|asked|told\s+you|was\s+sayi
 _WHO_IS_SPEAKING = re.compile(r"\bwho(?:'s| is| am)\s+(?:i\b|(?:this|that|it)\b|(?:talking|speaking)\b|(?:one\s+of\s+us\s+is\s+)?(?:talking|speaking))|which\s+(?:one\s+)?of\s+us\s+is\s+(?:talking|speaking)", re.I)
 
 
+_TO_SIM = re.compile(r"\b(?:you|your|you're|youre|you've)\b", re.I)
+
+
+def _speaks_to_sim(text: str) -> bool:
+    """Words aimed at Sim: second person, or a question.
+
+    Live 2026-09-15, minutes after the continuation rule landed: the creator
+    was told his own turn was "more of what he was saying to someone else" and
+    answered "I have a conversation with you while you're just bailing out
+    mid-conversation". A fragment of somebody else's talk does not say "you"."""
+    stripped = (text or "").strip()
+    return bool(stripped) and (stripped.endswith("?") or bool(_TO_SIM.search(stripped)))
+
+
 class VoiceSession:
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
                  detector_factory, clock=None, logger=None, embedder=None, speakers=None) -> None:
@@ -209,6 +223,7 @@ class VoiceSession:
         self._hum_task: asyncio.Task | None = None
         self._sim_spoke_at = -1e9        # when Sim's voice last finished: an exchange under way, or not
         self._quiet_on: dict[str, float] = {}   # speaker -> when the model last stayed quiet on them
+        self._talking_with: dict[str, float] = {}   # speaker -> when Sim last answered them
         self._ack_task: asyncio.Task | None = None
         self._still_task: asyncio.Task | None = None
         self._last_user_text = ""
@@ -868,6 +883,7 @@ class VoiceSession:
             await self._stay_quiet(turn_id)
             return
         self._room.append(("Sim", _strip_tone(reply), self._now(), "reply"))
+        self._talking_with[speaker or "someone"] = self._now()
         took = clock.reply_at - clock.final_at if clock.final_at else 0.0
         context = Context(user_text=text, language=language, turns=self.stats.turns,
                           turns_since_connector=self._turns_since_connector,
@@ -897,6 +913,10 @@ class VoiceSession:
                     exchange.append(f"{who} (to you): {said}")
                     break
             lines = list(reversed(exchange)) + lines
+        if speaker and self._in_conversation(speaker):
+            since = int(self._now() - self._talking_with.get(speaker, self._now()))
+            lines = [f"You are mid-conversation with {speaker}; you answered them {since}s ago. "
+                     f"Their next words are for you unless they are plainly for someone else."] + lines
         tv = getattr(self._pipeline, "tv_line", lambda: "")()
         if tv:
             lines = [tv] + lines
@@ -908,6 +928,8 @@ class VoiceSession:
         moment ago, and another known person spoke within the last little
         while. Off with `[voice] bystander = false`."""
         if not self._config.bystander or self._speakers is None or self._embedder is None:
+            return False
+        if self._in_conversation(speaker):
             return False
         now = self._now()
         me = speaker or "someone"
@@ -933,6 +955,19 @@ class VoiceSession:
         await self._announce(self.turns.state)
         return True
 
+    def _in_conversation(self, speaker: str) -> bool:
+        """Sim answered this person within `conversation_window_s`.
+
+        A conversation under way is the answer to "why did you bail out in the
+        middle of it" (the creator, 2026-09-15): while it is live, none of the
+        quiet rules apply to that person -- they are talking to Sim, and the
+        pace of the exchange says so more reliably than any wording test."""
+        window = float(getattr(self._config, "conversation_window_s", 0.0) or 0.0)
+        if window <= 0:
+            return False
+        last = self._talking_with.get(speaker or "someone")
+        return last is not None and 0.0 <= self._now() - last <= window
+
     async def _continuation(self, turn_id: int, speaker: str, text: str) -> bool:
         """True when these words carry on an aside the model just stayed
         quiet on: the same voice, within `continuation_quiet_s`, not naming
@@ -941,13 +976,15 @@ class VoiceSession:
         ignored (Ira to Bobby about pizza, 2026-09-15). A voice Sim knows
         only: an unknown voice has `_background`, which waits for two quiet
         turns before it stops asking."""
+        if self._in_conversation(speaker):
+            return False
         window = float(self._config.continuation_quiet_s or 0.0)
         me = speaker
         at = self._quiet_on.get(me) if me else None
         now = self._now()
         if window <= 0 or at is None or now - at > window or self._sim_spoke_at >= at:
             return False
-        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0):
+        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0) or _speaks_to_sim(text):
             return False
         self._quiet_on[me] = now
         self._room.append((me, text, now, "aside"))
@@ -975,6 +1012,8 @@ class VoiceSession:
         unplaced and Sim would answer nobody. Off with
         `[voice] unplaced_needs_name = false`."""
         if not self._config.unplaced_needs_name or speaker:
+            return False
+        if self._in_conversation(speaker):
             return False
         if self._speakers is None or self._embedder is None:
             return False

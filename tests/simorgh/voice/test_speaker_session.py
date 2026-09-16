@@ -314,6 +314,33 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         await _run_until(session, lambda: len(replies.asked) >= 1, timeout=12.0)
         self.assertEqual(replies.asked[0][0], "what time is it")
 
+    async def test_a_turn_that_says_you_is_never_a_continuation(self):
+        """Minutes after the continuation rule landed, the creator's own turn
+        was swallowed as "more of what he was saying to someone else", and he
+        said so: "I have a conversation with you while you're just bailing out
+        mid-conversation" (live 2026-09-15)."""
+        self.book.enroll("Saeed", _vec(0.0))
+        self.embedder.vector = _vec(0.02)
+        heard = iter(["it isn't fair that you get pizza", "why are you bailing out mid-conversation"])
+        script = _Script(*[(True, 60), (False, 110)] * 2, (False, 10_000))
+
+        class _QuietFirst(_Replies):
+            async def ask(self, text, **kw) -> str:
+                await super().ask(text, **kw)
+                return "QUIET" if "pizza" in text else "I am here."
+
+        replies = _QuietFirst()
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.2, engine="fake")
+        session._stt._inner.transcribe = _transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: len(replies.asked) >= 2, timeout=15.0)
+        self.assertEqual([a[0] for a in replies.asked],
+                         ["it isn't fair that you get pizza", "why are you bailing out mid-conversation"])
+        self.assertIn("I am here", " ".join(tts.spoken))
+
     async def test_a_thank_you_to_someone_else_is_not_answered(self):
         """2026-09-14, live: "Thank you." from across the room got "You're
         welcome." again and again. Courtesy words that name nobody are not

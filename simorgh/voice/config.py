@@ -165,6 +165,12 @@ class Config:
     # recognition is on; without it every voice is "unplaced" and Sim would
     # answer nobody.
     unplaced_needs_name: bool = True
+    # While an exchange with someone is live -- Sim answered them this recently
+    # -- none of the quiet rules apply to that person. The creator, 2026-09-15:
+    # "over the past two three minutes I have been asking you a question, so it
+    # should be obvious that I'm paying attention to you ... not just, suddenly,
+    # this is not for me".
+    conversation_window_s: float = 180.0
     still_after_s: float = 20.0
     # A listener's "uh-huh" under the person, at half volume, when
     # they pause mid-story (voice/delivery.py "hum"): only once they have
