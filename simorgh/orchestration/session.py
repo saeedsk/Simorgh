@@ -217,6 +217,48 @@ _DASH_ON_TV = re.compile(
     re.IGNORECASE)
 
 
+#: "the file is committed", with no tool run to commit it.
+_COMMIT_CLAIM = re.compile(
+    r"\b(?:committed|pushed|checked in|landed)\b[^.!?]{0,40}"
+    r"\b(?:file|files|change|changes|code|skill|repo|repository|main|branch|git)\b"
+    r"|\b(?:file|change|code|skill)\b[^.!?]{0,30}\b(?:is|was|has been)\s+(?:committed|pushed)\b", re.IGNORECASE)
+
+#: "I'll stay quiet unless you address me" -- a standing change to how Sim
+#: behaves, which no reply can make and nothing here stores.
+_PROMISED_BEHAVIOUR = re.compile(
+    r"\b(?:i'?ll|i will|from now on|going forward|i'?m going to)\b[^.!?]{0,70}"
+    r"\b(?:stay quiet|keep quiet|be quiet|stay silent|not respond|won'?t respond|not answer|ignore (?:them|those|the tv)|"
+    r"remember (?:that|this)|keep (?:that|this) in mind|bear (?:that|this) in mind)\b", re.IGNORECASE)
+
+
+def claimed_to_commit(text: str, session) -> str:
+    """Words saying work was committed, when no tool ran -- or "".
+
+    Live 2026-09-15: "The file is committed and callable the same way as
+    my other skills", said in the same turn the runner recorded
+    "finished with uncommitted changes". Nothing had been committed, and
+    the claim was contradicted by Sim's own bookkeeping."""
+    if not text or any(step.tool for step in session.steps):
+        return ""
+    match = _COMMIT_CLAIM.search(text)
+    return match.group(0).strip() if match else ""
+
+
+def promised_behaviour(text: str, session) -> str:
+    """A promise to behave differently from now on, with nothing to keep
+    it -- or "".
+
+    Live 2026-09-15, told the voices it heard were the television: "Right
+    -- those are TV voices ... so I'll stay quiet unless you address me
+    directly." Nothing was stored, no setting changed, and the next
+    unaddressed utterance was answered exactly as before. A promise the
+    next turn cannot honour is worse than a refusal: it looks handled."""
+    if not text or any(step.tool for step in session.steps):
+        return ""
+    match = _PROMISED_BEHAVIOUR.search(text)
+    return match.group(0).strip() if match else ""
+
+
 def claimed_tv_act(text: str, session) -> str:
     """The words in `text` that say the TV is doing something, when no
     tool ran this turn and the TV tools were offered -- or "".
@@ -1025,6 +1067,34 @@ class SessionRunner:
                 session.messages.append({"role": "user", "content": (
                     f"You said \"{noted}\", but nothing was written: a pronunciation lives on the person's "
                     f"voice profile and only a tool puts it there. {how} Do not say it is noted when it is not."
+                )})
+                continue
+            committed = claimed_to_commit(text, session)
+            if committed and not is_last and not session.claim_corrected:
+                session.claim_corrected = True
+                step = Step(step_no, "act", f"rejected a claim no tool backs: \"{committed}\"", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                session.messages.append({"role": "assistant", "content": text})
+                session.messages.append({"role": "user", "content": (
+                    f"You said \"{committed}\", but you called no tool this turn, so nothing was committed. "
+                    "Either run the tool that commits (git_commit, or worktree_land for a task's own branch) "
+                    "now, or say plainly that the change is written but not committed. Do not describe a commit "
+                    "that did not happen."
+                )})
+                continue
+            promised = promised_behaviour(text, session)
+            if promised and not is_last and not session.claim_corrected:
+                session.claim_corrected = True
+                step = Step(step_no, "act", f"rejected a promise nothing keeps: \"{promised}\"", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                session.messages.append({"role": "assistant", "content": text})
+                session.messages.append({"role": "user", "content": (
+                    f"You said \"{promised}\", but nothing carries that to your next turn -- you have no memory "
+                    "of this instruction unless a tool stores it. If a setting can hold it, set it now "
+                    "(SIM_COMMAND: voice set <key> <value>). Otherwise say plainly that they should set it, "
+                    "rather than promising behaviour you cannot keep."
                 )})
                 continue
             claimed = claimed_tv_act(text, session)
