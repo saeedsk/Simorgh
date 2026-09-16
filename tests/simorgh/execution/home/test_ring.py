@@ -372,3 +372,45 @@ class RingTestCase(unittest.IsolatedAsyncioTestCase):
         result = await tools["ring_list"].run({}, ctx=_ctx(_Bus()))
         self.assertFalse(result.ok)
         self.assertTrue("ring setup" in result.error or "ring_doorbell" in result.error, result.error)
+
+
+class WhyThereIsNoStill(unittest.TestCase):
+    """The reason given for an empty snapshot must be one that was
+    checked.
+
+    It read "a battery camera sleeps between events" for every empty
+    snapshot, whatever the camera was. The creator's three Ring cameras
+    are all mains-powered -- a wired doorbell and two floodlight cams,
+    Ring reporting no battery for any of them -- and Sim spoke that
+    invented cause aloud as the reason it could not see, which hid the
+    real one (2026-09-15: "fact check if my ring device is actually
+    battery powered").
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def _refusal(self, camera: RingCamera) -> str:
+        import asyncio
+
+        cloud = _FakeCloud()
+        cloud.stills = False
+        cloud.cams = [camera]
+        tools = {t.name: t for t in ring_tools(Config(repo_root=self.root), cloud=cloud, env={})}
+        bus = _Bus()
+        result = asyncio.run(tools["ring_snapshot"].run({"camera": camera.name}, ctx=_ctx(bus, self.root)))
+        self.assertFalse(result.ok)
+        return result.error or ""
+
+    def test_a_mains_camera_is_not_described_as_asleep(self):
+        mains = RingCamera("33", "Front Flood", "cocoa_floodlight", "stickup_cams", None, has_light=True)
+        said = self._refusal(mains)
+        self.assertNotIn("sleeps between events", said)
+        self.assertIn("mains-powered", said)
+        self.assertIn("no picture", said)
+
+    def test_a_battery_camera_still_says_it_sleeps(self):
+        battery = RingCamera("44", "Back Gate", "stickup_cam", "stickup_cams", 45)
+        self.assertIn("sleeps between events", self._refusal(battery))

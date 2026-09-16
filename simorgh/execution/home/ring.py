@@ -409,7 +409,17 @@ class _RingTool:
         except Exception as exc:  # noqa: BLE001
             return None, f"{cam.name}: {exc.__class__.__name__}: {exc}"
         if not data:
-            return None, f"{cam.name}: Ring had no fresh still (a battery camera sleeps between events)"
+            # Say what is known, not a guess dressed as a fact. This read
+            # "a battery camera sleeps between events" for every empty
+            # snapshot, whatever the camera was -- and the creator's three
+            # cameras are all mains-powered (a wired doorbell and two
+            # floodlight cams, Ring reporting no battery for any of them).
+            # Sim spoke that invented cause aloud as the reason it could
+            # not see, which hid the real one (2026-09-15).
+            why = ("a battery camera sleeps between events" if cam.battery is not None
+                   else "this camera is mains-powered, so it is not asleep -- Ring simply returned no "
+                        "picture (it may be busy with a live view, or the request was throttled)")
+            return None, f"{cam.name}: Ring had no fresh still ({why})"
         path = folder / f"{cam.safe}-{time.strftime('%Y%m%d-%H%M%S', time.localtime(self._clock()))}.jpg"
         path.write_bytes(data)
         return path, ""
