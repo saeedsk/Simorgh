@@ -181,6 +181,8 @@ class Service:
         self._system_state = "running"
         self._pending_prompts: dict[str, dict] = {}  # prompt_id -> payload, oldest-first (dict preserves insertion order)
         self._prompt_timeouts: dict[str, asyncio.Task] = {}  # prompt_id -> its own timeout watchdog
+        # When the last "-- 17:29 --" line was printed (`_out`).
+        self._last_time_marker = 0.0
         self._color = render_mod.color_enabled(self.config.color)
         self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
         # True only while `_repl_main`'s thread is genuinely blocked
@@ -391,6 +393,9 @@ class Service:
         self._live.clear()
         if self._input_pending:
             clear_current_line()
+        marker = self._time_marker()
+        if marker:
+            print(marker)
         print(text)
         self._live.restore()
         if self._input_pending and readline is not None and sys.stdout.isatty():
@@ -398,6 +403,23 @@ class Service:
                 readline.redisplay()
             except Exception:  # noqa: BLE001 -- best-effort cosmetic redraw only
                 pass
+
+    def _time_marker(self) -> str:
+        """A dim time-of-day line, or "" -- printed at the head of a stretch
+        of talk and again after `time_marker_minutes` of quiet.
+
+        Reading a voice log back, "17:29" is what says when Sim heard
+        something; on every line it would bury the conversation (the
+        creator, 2026-09-15)."""
+        gap = float(getattr(self.config, "time_marker_minutes", 0.0) or 0.0)
+        if gap <= 0:
+            return ""
+        now = time.time()
+        if self._last_time_marker and now - self._last_time_marker < gap * 60.0:
+            return ""
+        self._last_time_marker = now
+        rule = "--" if self.config.unicode == "off" else "──"
+        return render_mod.style(f"{rule} {time.strftime('%H:%M')} {rule}", "dim", enabled=self._color)
 
     def _history_path(self):
         explicit = self.config.resolved_history_path()

@@ -40,6 +40,12 @@ class Config:
     # start and the outcome. "verbose as hell", their words.
     narrate_steps: bool = True
     narrate_heartbeat_s: float = 10.0
+    # A dim "-- 17:29 --" line, printed before the first line of a stretch of
+    # talk and again after this many minutes of quiet. The creator, 2026-09-15:
+    # reading a voice chat back, he wants to know when Sim heard what, "but
+    # don't want to enable it for any single conversation line, as it will make
+    # the voice chat log ugly". 0 turns it off.
+    time_marker_minutes: float = 15.0
     # How long the REPL thread holds its splash waiting for the Kernel
     # to reach `running`, so boot progress is not overprinted. Bounded:
     # a boot that never completes still gets a usable prompt.
