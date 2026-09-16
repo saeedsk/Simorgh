@@ -169,6 +169,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 
 
     "cam_snapshot": ("reversible", True),
+    "camera_describe": ("reversible", True),
 
 
     "cam_stream": ("reversible", True),

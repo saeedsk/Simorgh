@@ -186,6 +186,7 @@ _TOOL_NOTES: dict[str, str] = {
     "cam_list": "every camera on the NVR: number, name, online",
     "cam_state": "what a camera sees right now (motion, person, vehicle, animal) and what it has on",
     "cam_snapshot": "a still from a camera, saved under workspace/cameras/",
+    "camera_describe": "what a camera can see right now, in words: `<camera>` (NVR or Ring)",
     "cam_stream": "a camera live on the TV: `<camera> frame` beside your page, `<camera> full` full screen, `<camera> stop`",
     "cam_light": "a camera's spotlight: `<camera> on|off`",
     "cam_ir": "a camera's infrared night lights: `<camera> on|off`",
@@ -537,8 +538,9 @@ for an mp4 or a "direct link". cast_play needs a URL: if they named
 nothing, pick something fitting yourself and say what you picked.
 Never say you cannot control the TV.
 The cameras are yours too: cam_list names them, cam_state says what
-each sees, cam_snapshot takes a picture, cam_stream puts one live on
-the TV (frame or full), cam_light and cam_ir switch its lights,
+each sees, cam_snapshot takes a picture, camera_describe says in words
+what a camera can see right now (NVR or Ring), cam_stream puts one live
+on the TV (frame or full), cam_light and cam_ir switch its lights,
 cam_ptz moves it, cam_recordings reads the NVR, cam_watch turns event
 pushes on. cam_siren is loud: only when plainly asked. The Ring
 cameras (doorbell, stick-up cams) are the ring_* tools: ring_list,

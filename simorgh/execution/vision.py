@@ -79,8 +79,11 @@ class CameraDescribeTool:
     """What a camera can see, asked for rather than waited for."""
 
     name = "camera_describe"
-    read_only = True
-    reversibility = "read_only"
+    # Not read_only: looking means taking stills, and a still is a file on
+    # disk -- the same reason `cam_snapshot` is reversible rather than
+    # read-only. Guardian trusts this label, so it has to be the true one.
+    read_only = False
+    reversibility = "reversible"
     description = ("What a camera can see right now, in words. `camera` is its name -- a Reolink camera on the "
                    "NVR or a Ring one. Takes a couple of stills and describes them; needs a vision model "
                    "([cognition.providers.ollama] vision_model).")

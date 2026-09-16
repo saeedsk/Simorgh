@@ -103,10 +103,14 @@ class CameraDescribeTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.ok)
         self.assertIn("which camera", result.error)
 
-    def test_the_tool_is_offered_and_reads_only(self):
+    def test_the_tool_is_offered_and_says_truly_what_it_does(self):
+        """Looking is not free: it writes two stills. `cam_snapshot` is
+        reversible for that reason and so is this, because Guardian gates
+        on the label rather than on what the tool happens to do."""
         tools = vision_tools(Config(repo_root=self.root))
         self.assertEqual([t.name for t in tools], ["camera_describe"])
-        self.assertTrue(tools[0].read_only, "looking changes nothing")
+        self.assertFalse(tools[0].read_only)
+        self.assertEqual(tools[0].reversibility, "reversible")
 
 
 if __name__ == "__main__":
