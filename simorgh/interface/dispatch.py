@@ -1859,7 +1859,8 @@ async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clon
             shutil.copytree(folder, home)
             record = {"name": review.name, "source": source.name, "commit": commit, "licence": review.licence,
                       "open_licence": review.open_licence, "scripts": list(review.scripts),
-                      "findings": [f"{f.label} {f.path}:{f.line}" for f in review.findings],
+                      "findings": [f"{f.label} {f.path}:{f.line}" for f in review.blocking],
+                      "notes": [f"{f.label} {f.path}:{f.line}" for f in review.notes],
                       "trusted": source.trusted, "path": str(home),
                       "status": "enabled" if (source.trusted and review.clean) else "waiting"}
             await ledger.append(SKILLS_STREAM, Event(
