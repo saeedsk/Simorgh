@@ -472,3 +472,23 @@ class BargeInWithAecTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_person_over_the_echo_barges(self):
         self.assertTrue(await self._run(add_person=True))
 
+
+
+class StopWordTestCase(unittest.TestCase):
+    """The words themselves, when the level gate misses: a turn that opens
+    with "stop" while Sim is speaking cuts the playback ("stop stop I'm
+    saying stop multiple times", the creator, 2026-09-15)."""
+
+    def test_what_counts_as_cutting_in(self):
+        from simorgh.voice.commands import opens_with_stop
+
+        for text in ("stop", "Stop!", "stop stop I'm saying stop multiple times",
+                     "Sim, stop talking", "hold on", "okay wait", "be quiet", "enough"):
+            self.assertTrue(opens_with_stop(text), text)
+
+    def test_what_does_not(self):
+        from simorgh.voice.commands import opens_with_stop
+
+        for text in ("can you stop the music later", "I did not stop at the shop",
+                     "what time is it", "the bus stop is closed"):
+            self.assertFalse(opens_with_stop(text), text)

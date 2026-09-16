@@ -45,4 +45,19 @@ def spoken_command(text: str) -> str | None:
     return _LOOKUP.get(core)
 
 
-__all__ = ["MUTE", "OFF", "RESTART", "STOP", "spoken_command"]
+#: A turn that OPENS with one of these, said while Sim is talking, is a
+#: person cutting in -- whatever else they go on to say. The level gate is
+#: the fast path; this is the one that cannot be fooled by a loud room
+#: ("stop stop I'm saying stop multiple times", the creator, 2026-09-15).
+_STOP_LEAD = re.compile(
+    r"^\s*(?:hey\s+|ok(?:ay)?\s+|please\s+)?(?:sim|simorgh|seem|seam|shin)?\s*[,.!]*\s*"
+    r"(?:stop|wait|hold on|hold it|quiet|be quiet|hush|shush|enough|shut up|no no|"
+    r"بس کن|بسه|صبر کن|ساکت)\b", re.I)
+
+
+def opens_with_stop(text: str) -> bool:
+    """Whether `text` begins by telling Sim to stop."""
+    return bool(_STOP_LEAD.match(text or ""))
+
+
+__all__ = ["MUTE", "OFF", "RESTART", "STOP", "opens_with_stop", "spoken_command"]

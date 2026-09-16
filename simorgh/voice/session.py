@@ -31,7 +31,7 @@ from simorgh.contracts import topics
 
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
 from .backchannel import GREETING, Backchannel, addressed, classify, is_quiet, strip_lead
-from .commands import MUTE, OFF, RESTART, STOP, spoken_command
+from .commands import MUTE, OFF, RESTART, STOP, opens_with_stop, spoken_command
 from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply, register_for_tone
 from .config import Config
 from .lang import language_of
@@ -788,6 +788,13 @@ class VoiceSession:
             return
         self._pipeline.last_heard = text
         self._last_user_text = text
+        if self._player.playing and opens_with_stop(text):
+            # The level gate is the fast path and it can misjudge a room; the
+            # words are the one that cannot. "stop stop I'm saying stop
+            # multiple times" and Sim talked on (the creator, 2026-09-15).
+            await self._player.stop()
+            self.stats.interruptions += 1
+            self._log("info", "voice.stop_word", turn=turn_id, text=text[:40])
         command = spoken_command(text)
         if command is not None:
             await self._obey(turn_id, command, speaker=speaker, clock=clock)
