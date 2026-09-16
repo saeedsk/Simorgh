@@ -477,7 +477,15 @@ class SessionRunner:
         worktrees: bool = False, reground_every_steps: int = 0, keep_recent_steps: int = 2,
         clean_revisions: bool = False, delegation: bool = False, max_depth: int = 3,
         delegate_max_steps: int = 12, escalate_from_attempt: int = 0, parallel_read_tools: int = 1,
+        skills_enabled: bool = False, skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
     ) -> None:
+        # Agent Skills: the catalog rides in `task_rules` and `use_skill` returns
+        # one skill's instructions. Off by default -- every THINK pays for the
+        # catalog (docs/plans/agent-skills-design.md section 5.2).
+        self._skills_enabled = bool(skills_enabled)
+        self._skills_catalog_max_chars = max(0, int(skills_catalog_max_chars))
+        self._skills_roots = tuple(skills_roots or ())
+        self._skill_cache: tuple[list, list] | None = None
         # Independent read-only calls in one reply run together, up to this
         # many per step (change H). 1 is off: one tool call per reply.
         self._parallel_reads = max(1, int(parallel_read_tools))
@@ -842,6 +850,8 @@ class SessionRunner:
                 else:
                     if call.get("tool") == "delegate":
                         ok, summary, detail = await self._delegate(session, call)
+                    elif call.get("tool") == "use_skill":
+                        ok, summary, detail = await self._use_skill(session, call)
                     else:
                         ok, summary, detail = await self._propose_and_await(session, call, step_no)
                     # `detail` (narration/Ledger, generously bounded) vs `summary`
@@ -1031,6 +1041,9 @@ class SessionRunner:
         if (offered and self._delegation and session.depth < self._max_depth
                 and session.profile.scaffold in ("patch", "research") and "delegate" not in offered):
             offered = tuple(offered) + ("delegate",)
+        catalog = self._catalog(session) if offered and not no_tools else ""
+        if catalog and "use_skill" not in offered:
+            offered = tuple(offered) + ("use_skill",)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
         is_chat = session.profile.name == "chat"
         req = Message.new(
@@ -1049,7 +1062,8 @@ class SessionRunner:
                     unavailable=scaffolds.unavailable_note(offered), channel=session.channel,
                     speaker=session.speaker, speaker_relation=session.speaker_relation, room=session.room,
                     speaker_before=getattr(session, "speaker_before", ""),
-                    offered=() if no_tools else None,
+                    offered=() if no_tools else offered,
+                    skills=catalog,
                 ) + (f"\n\n{session.extra_rules}" if getattr(session, "extra_rules", "") else ""),
                 # Live-caught: this request never actually asked Cognition
                 # to parse tool calls -- `expected` was never set, so
@@ -1129,6 +1143,61 @@ class SessionRunner:
             return None
         session.last_think_error = ""
         return reply
+
+    def _skills(self) -> list:
+        """Every valid skill under the configured roots, read once per runner.
+
+        A broken skill is not a crash and not silence: `discover_skills`
+        returns it with a reason, and the reason is logged the first time."""
+        if not self._skills_enabled or not self._skills_roots:
+            return []
+        if self._skill_cache is None:
+            from pathlib import Path
+
+            from simorgh.contracts.skills import discover_skills
+
+            roots = [(Path(root).expanduser().name or "skills", Path(root).expanduser())
+                     for root in self._skills_roots]
+            cards, invalid = discover_skills(roots)
+            self._skill_cache = (cards, invalid)
+            for bad in invalid:
+                self._log_invalid_skill(bad)
+        return list(self._skill_cache[0])
+
+    def _log_invalid_skill(self, bad) -> None:
+        print(f"[skills] ignored {bad.path}: {bad.reason}")
+
+    def _catalog(self, session: Session) -> str:
+        """The `- name: description` lines for this session's profile."""
+        from simorgh.contracts.skills import catalog_text
+
+        cards = self._skills()
+        if not cards:
+            return ""
+        return catalog_text(cards, profile=session.profile.name, max_chars=self._skills_catalog_max_chars)
+
+    async def _use_skill(self, session: Session, call: dict) -> tuple[bool, str, str]:
+        """`USE_SKILL: <name>` -- the skill's own instructions, as a result.
+
+        Nothing outside this process is touched, so it never goes to Guardian
+        (like `delegate`). An unknown name says which names are real rather
+        than failing blankly."""
+        from simorgh.contracts.skills import load_body
+
+        wanted = " ".join(str((call.get("args") or {}).get("argument") or "").split()).strip().lower()
+        cards = {card.name: card for card in self._skills()}
+        card = cards.get(wanted)
+        if card is None:
+            known = ", ".join(sorted(cards)) or "none are loaded"
+            text = f"no skill called {wanted!r}. The skills you have: {known}"
+            return False, text, text
+        try:
+            body = load_body(card)
+        except OSError as exc:
+            text = f"{card.name}: its SKILL.md could not be read ({exc})"
+            return False, text, text
+        header = f"Skill {card.name} ({card.source}, files under {card.path}). Follow it for this task:"
+        return True, f"{header}\n\n{body}", f"loaded the skill {card.name}"
 
     def _parallel_offer(self, offered) -> dict:
         """Which offered tools may run together, when that is switched on."""

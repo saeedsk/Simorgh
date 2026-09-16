@@ -56,6 +56,8 @@ def unavailable_note(offered: tuple[str, ...] | list[str]) -> str:
     return "Do not spend steps on these:\n" + "\n".join(lines)
 
 _TOOL_NOTES: dict[str, str] = {
+    "use_skill": "load one of the skills listed below by name; its instructions come back as the result, "
+                 "and you follow them for the rest of the task",
     "sim_command": "run one of your own commands, exactly as a person would type it: restart, tasks, "
                    "tv show, voice off, status; `help` lists them. Not a shell -- `!` is refused",
     "self_map": "ask your own world model what real subsystems/files make you up -- the authoritative "
@@ -564,7 +566,8 @@ _BY_SCAFFOLD: dict[str, str] = {
 
 def render(profile: Profile, *, subject: str | None = None, task: str | None = None,
            unavailable: str = "", channel: str = "", speaker: str = "", speaker_relation: str = "",
-           room: str = "", offered: tuple[str, ...] | None = None, speaker_before: str = "") -> str:
+           room: str = "", offered: tuple[str, ...] | None = None, speaker_before: str = "",
+           skills: str = "") -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -628,6 +631,13 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
     # common case (kernel/capabilities.py).
     if unavailable:
         tools = f"{tools}\n\n{unavailable}"
+    if skills:
+        # Agent Skills (docs/plans/agent-skills-design.md section 3.2): names and
+        # one line each, never the instructions -- those arrive only when the
+        # task asks for one, which is the whole point of the format.
+        tools = (f"{tools}\n\nSkills you can load with USE_SKILL: <name> -- a folder of instructions "
+                 f"written for a job of this kind. Load one only when it matches what you are doing, "
+                 f"and follow it once you have:\n{skills}")
     return f"{body}\n\n{tools}" if body else tools
 
 

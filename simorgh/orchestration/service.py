@@ -87,7 +87,10 @@ class Service:
                             delegation=self.config.delegation, max_depth=self.config.max_depth,
                             delegate_max_steps=self.config.delegate_max_steps,
                             escalate_from_attempt=self.config.escalate_from_attempt, worktrees=self.config.worktrees,
-                            parallel_read_tools=self.config.parallel_read_tools)
+                            parallel_read_tools=self.config.parallel_read_tools,
+                            skills_enabled=self.config.skills_enabled,
+                            skills_catalog_max_chars=self.config.skills_catalog_max_chars,
+                            skills_roots=tuple(self.config.skills_roots))
             await worker.start()
             self._workers.append(worker)
         self._percept_sub = await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept)

@@ -95,7 +95,8 @@ class Worker:
         heartbeat_s: float = 30.0, worktrees: bool = False, review_benchmark: bool = True,
         reground_every_steps: int = 0, keep_recent_steps: int = 2, clean_revisions: bool = False,
         delegation: bool = False, max_depth: int = 3, delegate_max_steps: int = 12, escalate_from_attempt: int = 0,
-        parallel_read_tools: int = 1,
+        parallel_read_tools: int = 1, skills_enabled: bool = False,
+        skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
     ) -> None:
         self._review_benchmark = review_benchmark
         self._bus = bus
@@ -133,7 +134,8 @@ class Worker:
             reground_every_steps=reground_every_steps, keep_recent_steps=keep_recent_steps,
             clean_revisions=clean_revisions, delegation=delegation, max_depth=max_depth,
             delegate_max_steps=delegate_max_steps, escalate_from_attempt=escalate_from_attempt,
-            parallel_read_tools=parallel_read_tools, **runner_kwargs,
+            parallel_read_tools=parallel_read_tools, skills_enabled=skills_enabled,
+            skills_catalog_max_chars=skills_catalog_max_chars, skills_roots=skills_roots, **runner_kwargs,
         )
         self._subs: list = []
         # Task ids somebody has asked to stop -> whether that cancel was
