@@ -389,6 +389,7 @@ class Service:
         book = getattr(session, "_speakers", None) if session is not None else None
         if book is None:
             book = SpeakerBook(self.config.speakers_dir, threshold=self.config.speaker_threshold, household=HOUSEHOLD,
+                               refine_above=self.config.speaker_refine_above,
                                margin=self.config.speaker_margin, lean=self.config.speaker_lean)
         name = str(payload.get("name") or "").strip()
         if action == "people":

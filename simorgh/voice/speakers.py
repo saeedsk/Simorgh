@@ -70,7 +70,8 @@ REFINE_NOVELTY = 0.9
 #: a take teaches only this far above the threshold, and this clear of
 #: everyone else -- the creator's voice was filed under Aran for a few
 #: turns (2026-09-13) and each of them became one of Aran's takes
-REFINE_ABOVE = 0.2
+REFINE_ABOVE = 0.05   # was 0.2: above what a real voice scores in a real room, so the
+                      # voices that most needed the practice never gave any (2026-09-15)
 REFINE_CLEAR = 0.15
 #: An utterance shorter than this carries too little voice to judge...
 MIN_SECONDS = 0.8
@@ -200,9 +201,16 @@ class SpeakerBook:
     """The household's voices: enrolment, identification, persistence."""
 
     def __init__(self, folder: Path | str = "workspace/voice/speakers", *, threshold: float = DEFAULT_THRESHOLD,
-                 margin: float = DEFAULT_MARGIN, clock=time.time, household=None, lean: float = DEFAULT_LEAN) -> None:
+                 margin: float = DEFAULT_MARGIN, clock=time.time, household=None, lean: float = DEFAULT_LEAN,
+                 refine_above: float = REFINE_ABOVE) -> None:
         self._household = tuple(household or ())
         self.lean = float(lean)
+        # How far above the threshold a take must score before it teaches.
+        # It was +0.20 -- above what the creator's own voice scored in his
+        # room (0.55 against a threshold of 0.5), so the voice that most
+        # needed the practice never gave any: a low score taught nothing and
+        # stayed low (live 2026-09-15, "why is sim not improving").
+        self.refine_above = float(refine_above)
         self._folder = Path(folder)
         self.threshold = float(threshold)
         self.margin = float(margin)
@@ -313,7 +321,7 @@ class SpeakerBook:
         person's own earlier takes is kept: real voices vary that much
         across a room, and the nearest-take rule copes."""
         self._load()
-        name = (name or "").strip()
+        name = self._household_spelling((name or "").strip())
         if not name:
             raise ValueError("a name is needed")
         vector = [float(x) for x in embedding]
@@ -375,6 +383,18 @@ class SpeakerBook:
                                   reason=f"probably {best.name} at {best_score:.2f}; {runner} is close at {second_score:.2f}")
         return Identification(name=best.name, score=best_score, runner_up=runner, runner_up_score=second_score)
 
+    def _household_spelling(self, name: str) -> str:
+        """"saeed" -> "Saeed" for a name the house already knows.
+
+        `voice enroll saeed` after a `voice forget` wrote a lowercase person
+        and Sim addressed him that way (live 2026-09-15). The household table
+        holds the spelling; the typed case should not overrule it."""
+        low = (name or "").strip().lower()
+        for member in self._household:
+            if member.name.lower() == low:
+                return member.name
+        return name
+
     def refine(self, name: str, embedding: Sequence[float]) -> bool:
         """A confident turn becomes a take, quietly: the room, the mood,
         the distance that this take covers and the enrolment did not.
@@ -389,8 +409,8 @@ class SpeakerBook:
         own = self.score(vector, person)
         if own >= REFINE_NOVELTY:
             return False
-        if own < self.threshold + REFINE_ABOVE:
-            return False    # only a clearly confident take teaches
+        if own < self.threshold + self.refine_above:
+            return False    # only a take Sim was sure about teaches
         others = [self.score(vector, o) for o in self._people.values() if o is not person and o.embeddings]
         if others and own - max(others) < REFINE_CLEAR:
             return False    # too close to somebody else's voice to be sure whose lesson this is

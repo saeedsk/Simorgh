@@ -205,6 +205,12 @@ class Config:
     # silently (voice/speakers.py `refine`): the voice model tunes itself
     # to the room without ever asking for training sentences.
     speaker_refine: bool = True
+    # How far above `speaker_threshold` a turn must score before Sim keeps it
+    # as a new take of that voice. At +0.20 the creator's own voice (0.55
+    # against 0.5) never taught anything and never improved; +0.05 learns from
+    # a turn Sim placed confidently, while the 0.15 clear-of-anyone-else rule
+    # still keeps one person's take off another's profile.
+    speaker_refine_above: float = 0.05
     # A turn long enough may hold two people (voice/diarize.py): its
     # words are attributed by voice, window by window, and the model is
     # told "Saeed: ... / Soodeh: ...". Off, or too short, and the whole

@@ -138,7 +138,14 @@ class LeanAndRefineTestCase(unittest.TestCase):
         self.assertEqual(len(self.book.get("Saeed").embeddings), 2)
         self.assertFalse(self.book.refine("Saeed", _vec(0.01)), "a near copy of a take teaches nothing")
         self.assertFalse(self.book.refine("Saeed", _vec(-1.1)), "an unsure take never teaches")
-        self.assertFalse(self.book.refine("Saeed", _vec(-0.85)), "0.66 is confident but not clearly so")
+        # 0.66 used to be refused as "confident but not clearly so". The bar was
+        # +0.20 above the threshold -- above what a real voice scores in a real
+        # room -- so the voices that most needed the practice never gave any
+        # (the creator, 2026-09-15). It is +0.05 now; the old bar is still a
+        # setting, and the clear-of-everyone-else rule is untouched.
+        self.assertTrue(self.book.refine("Saeed", _vec(-0.85)), "0.66 is confident enough to teach")
+        strict = SpeakerBook(self.book._folder, threshold=0.5, margin=0.06, refine_above=0.2)  # noqa: SLF001
+        self.assertFalse(strict.refine("Saeed", _vec(-0.9)), "the old bar refuses it")
         self.assertFalse(self.book.refine("Nobody", _vec(0.0)))
 
     def test_a_take_near_someone_elses_voice_teaches_nobody(self):

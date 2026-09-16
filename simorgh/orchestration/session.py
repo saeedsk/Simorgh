@@ -248,6 +248,30 @@ def claimed_tv_act(text: str, session) -> str:
     return match.group(0).strip() if match else ""
 
 
+#: "I've noted it", said of a name's pronunciation, with nothing written.
+_NOTED_PRONUNCIATION = re.compile(
+    r"\b(?:noted|noting|saved|stored|recorded|written it down|writing it down|made a note|keep saying|"
+    r"i'?ll say it|i'?ll pronounce)\b[^.!?]{0,80}\b(?:name|pronunciation|pronounce|say it)\b"
+    r"|\b(?:pronunciation|how to say (?:your|his|her|their) name)\b[^.!?]{0,80}\b"
+    r"(?:noted|saved|stored|recorded|written down)\b", re.IGNORECASE)
+
+
+def claimed_to_note_a_pronunciation(text: str, session) -> str:
+    """The words that say a pronunciation was written down, when nothing
+    ran this turn -- or "".
+
+    Live 2026-09-15: told "the correct pronunciation of my name is Said",
+    Sim answered "I've noted it so I keep saying your name right" and wrote
+    nothing; the spelling the creator later saw was the one built into
+    `contracts/household.py` all along. `voice pronounce <name> <how>` is
+    what stores it, and until `sim_command` there was no way for the model
+    to reach it at all."""
+    if not text or any(step.tool for step in session.steps):
+        return ""
+    match = _NOTED_PRONUNCIATION.search(text)
+    return match.group(0).strip() if match else ""
+
+
 def unhonoured_marker(text: str, offered: tuple[str, ...]) -> str:
     """A tool the model asked for in the middle of a sentence, or "".
 
@@ -986,6 +1010,23 @@ class SessionRunner:
                 continue
             if invented:
                 text = without_markers(text, invented)
+            noted = claimed_to_note_a_pronunciation(text, session)
+            if noted and not is_last and not session.claim_corrected:
+                session.claim_corrected = True
+                step = Step(step_no, "act", f"rejected a claim no tool backs: \"{noted}\"", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                session.messages.append({"role": "assistant", "content": text})
+                how = ("Write it for real with SIM_COMMAND: voice pronounce <name> <how to say it> "
+                       "-- IPA or a respelling, e.g. voice pronounce Ira Ay-raa."
+                       if "sim_command" in offered_tools(session.profile.tools)
+                       else "You have no tool that can store it, so say plainly that they should type "
+                            "`voice pronounce <name> <how to say it>`.")
+                session.messages.append({"role": "user", "content": (
+                    f"You said \"{noted}\", but nothing was written: a pronunciation lives on the person's "
+                    f"voice profile and only a tool puts it there. {how} Do not say it is noted when it is not."
+                )})
+                continue
             claimed = claimed_tv_act(text, session)
             if claimed and not is_last and not session.claim_corrected:
                 session.claim_corrected = True

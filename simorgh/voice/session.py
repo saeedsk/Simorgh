@@ -153,6 +153,7 @@ class VoiceSession:
             from .speakers import SpeakerBook
 
             self._speakers = SpeakerBook(config.speakers_dir, threshold=config.speaker_threshold, margin=config.speaker_margin,
+                                         refine_above=config.speaker_refine_above,
                                          household=HOUSEHOLD, lean=config.speaker_lean)
         # The engine is opened only once somebody is enrolled (or enrolment
         # starts): a household that never enrolled pays nothing per turn.
