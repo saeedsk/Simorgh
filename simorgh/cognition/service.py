@@ -192,6 +192,7 @@ class Service:
                 real_providers.append(OllamaProvider(
                     model=ollama_cfg.model, base_url=ollama_cfg.base_url, keep_alive=ollama_cfg.keep_alive,
                     num_ctx=ollama_cfg.num_ctx, timeout_seconds=ollama_cfg.timeout_seconds,
+                    vision_model=ollama_cfg.vision_model,
                 ))
                 if "ollama" not in self._config.provider_order:
                     order = [n for n in self._config.provider_order if n != "floor"] + ["ollama"]
@@ -348,9 +349,14 @@ class Service:
             if strong and route and self._ctx is not None:
                 self._ctx.logger.info("cognition.escalated", purpose=purpose.value, route=list(route),
                                       reason=str(payload.get("tier_reason") or ""))
+            # Pictures travel beside the words, as paths (the `images` field
+            # of `cognition.think`): only a provider that can actually see is
+            # dialled for these, so nothing describes a photograph it was
+            # never shown.
+            images = [str(p) for p in (payload.get("images") or []) if str(p).strip()]
             response, floor = await self._router.complete(
                 purpose, think_messages, tools=None,
-                budget=budget, timeout=budget.max_seconds, order=order,
+                budget=budget, timeout=budget.max_seconds, order=order, images=images or None,
             )
         except NoRealProvider as exc:
             await self._error_reply(message, "no_real_provider", str(exc), retryable=True)

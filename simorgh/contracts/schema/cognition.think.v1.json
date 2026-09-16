@@ -42,6 +42,15 @@
         }
       ]
     },
+    "images": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "last_step": {
       "type": [
         "boolean",

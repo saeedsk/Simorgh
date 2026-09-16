@@ -17,6 +17,11 @@ CognitionThink = define(t.COGNITION_THINK, [
     O("tools", List(Str)),
     O("task_rules", Str),  # protected prompt block: how this profile finishes its work
     O("expected", Enum("text", "tool_calls", "edit_blocks", "verdict")),
+    # Pictures to look at, as absolute paths Cognition can read (a camera
+    # still, a screenshot). Paths, not bytes: a base64 JPEG in the payload
+    # would be written into the Ledger for every call. Only a provider
+    # that says `supports_images` is dialled when these are set.
+    O("images", List(Str)),
     O("allow_summarize", Bool),
     O("last_step", Bool),
     # Tool calls left in this attempt. So the assembler can tell the

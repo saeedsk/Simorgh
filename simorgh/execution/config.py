@@ -474,6 +474,30 @@ class Config:
     ring_watch_on_start: bool = True
     ring_snapshot_every_s: float = 300.0
 
+    # -- what the cameras saw (execution/vision.py). A camera event says
+    # only "channel 3, person"; these make Sim take a couple of stills,
+    # look at them, and say in words what is happening -- on screen with
+    # the time, and out loud. The creator, 2026-09-15: "upon receving
+    # event from camra, take couple of still images, do image processign
+    # and figure out what is happneing and send a notification on screen
+    # with date and time, describibg the vent, aslo announcing that with
+    # its voice". Needs a vision model ([cognition.providers.ollama]
+    # vision_model); without one Sim says it cannot look, once.
+    camera_vision: bool = True
+    camera_vision_stills: int = 2
+    # Between the stills: long enough that the second frame is a different
+    # moment (someone has moved, a car has gone past), short enough that
+    # the answer still arrives while it matters.
+    camera_vision_gap_s: float = 1.5
+    # One camera's events collapse into one look for this long. A person
+    # walking past a driveway camera fires motion every few seconds, and
+    # every one of those would otherwise be a model call and a spoken
+    # sentence over the top of the last one.
+    camera_vision_cooldown_s: float = 90.0
+    camera_vision_timeout_s: float = 60.0
+    # Say it out loud as well as on screen.
+    camera_vision_speak: bool = True
+
     # -- render_page (render.py's own module docstring): a real headless-
     # Chromium render via Puppeteer, so Sim can see a page the way a
     # browser actually executes it (JS-driven layout, a runtime error a

@@ -524,6 +524,50 @@ optional and refused by name when absent -- the full version is
 
 Cost control is unchanged: one call per Frigate event, never per frame.
 
+**BUILT 2026-09-15** (`simorgh/execution/vision.py`), to the creator's
+ask: "upon receving event from camra, take couple of still images, do
+image processign and figure out what is happneing and send a
+notification on screen with date and time, describibg the vent, aslo
+announcing that with its voice".
+
+The chain, end to end: `world.camera.event` (published by the Reolink
+NVR watcher and by the Ring watcher, and until now consumed by nobody)
+→ two stills a moment apart through the existing `cam_snapshot` /
+`ring_snapshot` tools → `cognition.think` over the bus, carrying the
+stills → `ui.notice` with the date and time → `voice.speak.request`.
+
+Decisions worth keeping:
+
+- **Paths, not bytes.** `cognition.think` gained `images` as a list of
+  absolute paths. A base64 JPEG in the payload would be written into
+  the Ledger on every call; Cognition reads the file itself.
+- **The Router filters by eyes, not by order.** A provider only sees
+  pictures if it declares `supports_images`; handing an image to a text
+  model does not fail, it answers fluently about a picture it never
+  received. With nothing able to see, the error names the missing
+  setting rather than saying "no provider available".
+- **A second model, not the same one.** `[cognition.providers.ollama]
+  vision_model` (the creator chose `qwen2.5vl:3b`, ~3.2 GB) sits beside
+  the text `model`; the text model is still what answers everything else.
+- **`require_real_provider: true`.** A canned floor sentence about a
+  camera nobody looked at is exactly the "succeeded while saying nothing
+  true" shape Sim is not allowed to have. No answer means no
+  announcement, and "Sim could not look" is said once, not per event.
+- **One look per camera per `camera_vision_cooldown_s`** (90s): a person
+  walking past a driveway camera fires motion every few seconds, and
+  each one would otherwise be a model call and a spoken sentence over
+  the top of the last.
+- The stills are two because one frame cannot tell standing from walking
+  away. The screen line carries the date and time; the spoken line does
+  not -- nobody wants a timestamp read aloud.
+
+Verified live against two real Ring stills of the Garden camera:
+10.6s on this machine's GPU, "a backyard at night with a pool ...
+the scene appears to be still, with no visible movement".
+
+Still not built: Frigate's own classifications, cloud vision, and
+per-camera prompts (a driveway and a nursery want different questions).
+
 ## 9. Tests -- what is not optional
 
 - `contracts/home/fakes.py::FakeHomeAssistant`: an in-process REST +

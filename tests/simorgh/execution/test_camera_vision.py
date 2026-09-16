@@ -1,0 +1,209 @@
+"""What the cameras saw (execution/vision.py).
+
+A camera event says "channel 3, person". These tests are about the
+sentence that comes back: a couple of stills, a model that can see them,
+and the answer on screen with the date and time and out loud.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+import tempfile
+import types
+import unittest
+from pathlib import Path
+
+from simorgh.contracts import topics
+from simorgh.contracts.protocols import ToolResult
+from simorgh.execution.config import Config
+from simorgh.execution.vision import CameraVision
+from tests.simorgh.helpers import FakeClock, assert_valid
+
+
+class _Logger:
+    def __init__(self) -> None:
+        self.warnings: list[tuple] = []
+
+    def warning(self, event, **fields) -> None:
+        self.warnings.append((event, fields))
+
+    def info(self, *a, **k) -> None:
+        pass
+
+    def debug(self, *a, **k) -> None:
+        pass
+
+
+class _Bus:
+    def __init__(self, answer="a delivery van has pulled up and someone is walking to the door") -> None:
+        self.published: list = []
+        self.requests: list = []
+        self._answer = answer
+
+    async def publish(self, message) -> None:
+        assert_valid(message)          # every payload here is a real contract
+        self.published.append(message)
+
+    async def request_or_error(self, message, *, timeout=None):
+        assert_valid(message)
+        self.requests.append(message)
+        if isinstance(self._answer, dict):
+            return types.SimpleNamespace(payload=self._answer)
+        return types.SimpleNamespace(payload={"ok": True, "text": self._answer})
+
+    def of_type(self, topic) -> list:
+        return [m for m in self.published if m.type == topic]
+
+
+class _Snapshot:
+    """Stands in for `cam_snapshot` / `ring_snapshot`."""
+
+    def __init__(self, name="cam_snapshot", *, ok=True, many=False) -> None:
+        self.name = name
+        self.calls: list[dict] = []
+        self._ok = ok
+        self._many = many
+
+    async def run(self, args, *, ctx) -> ToolResult:
+        self.calls.append(dict(args))
+        if not self._ok:
+            return ToolResult(ok=False, error="refused: the camera would not answer")
+        index = len(self.calls)
+        if self._many:
+            return ToolResult(ok=True, metadata={"paths": [f"workspace/cameras/ring/front-{index}.jpg"]})
+        return ToolResult(ok=True, metadata={"path": f"workspace/cameras/front-{index}.jpg"})
+
+
+class _Registry:
+    def __init__(self, **tools) -> None:
+        self._tools = tools
+
+    def get(self, name):
+        return self._tools.get(name)
+
+
+class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.clock = FakeClock()
+        self.logger = _Logger()
+        self.bus = _Bus()
+        self.snapshot = _Snapshot()
+
+    def _vision(self, *, tools=None, **settings) -> CameraVision:
+        config = Config(repo_root=self.root, camera_vision_gap_s=0.0, **settings)
+        ctx = types.SimpleNamespace(clock=self.clock, logger=self.logger, ledger=None, bus=self.bus)
+        registry = _Registry(**({"cam_snapshot": self.snapshot} if tools is None else tools))
+        return CameraVision(config=config, registry=registry, ctx=ctx)
+
+    async def _event(self, vision, **payload) -> None:
+        body = {"channel": 1, "camera": "Front Door", "kinds": ["person"]}
+        body.update(payload)
+        await vision.on_camera_event(types.SimpleNamespace(payload=body))
+        for task in list(vision._tasks):  # noqa: SLF001 -- the looking runs off the bus handler
+            await task
+
+    # -- the whole chain ---------------------------------------------------
+    async def test_an_event_becomes_a_described_scene_on_screen_and_out_loud(self):
+        vision = self._vision()
+        await self._event(vision)
+
+        self.assertEqual(len(self.snapshot.calls), 2, "a couple of stills, not one")
+        self.assertEqual(self.snapshot.calls[0], {"camera": "Front Door"})
+
+        asked = self.bus.requests[-1]
+        self.assertEqual(asked.type, topics.COGNITION_THINK)
+        self.assertEqual(asked.payload["images"],
+                         [str(self.root / "workspace/cameras/front-1.jpg"),
+                          str(self.root / "workspace/cameras/front-2.jpg")],
+                         "absolute paths: Cognition reads them itself")
+        self.assertTrue(asked.payload["require_real_provider"], "no canned floor answer about a camera")
+        self.assertIn("Front Door", asked.payload["messages"][0]["content"])
+        self.assertIn("person", asked.payload["messages"][0]["content"], "what the camera reported is context")
+
+        notice = self.bus.of_type(topics.UI_NOTICE)[-1].payload["text"]
+        self.assertIn("Front Door", notice)
+        self.assertIn("a delivery van has pulled up", notice)
+        self.assertRegex(notice, r"\d{2} \w{3} \d{2}:\d{2}", f"the date and the time belong on screen: {notice!r}")
+
+        spoken = self.bus.of_type(topics.VOICE_SPEAK_REQUEST)[-1].payload["text"]
+        self.assertIn("a delivery van has pulled up", spoken)
+        self.assertNotRegex(spoken, r"\d{2}:\d{2}", "nobody wants the timestamp read aloud")
+
+    # -- not once per motion event ----------------------------------------
+    async def test_one_camera_is_looked_at_once_until_the_cooldown_passes(self):
+        vision = self._vision(camera_vision_cooldown_s=90.0)
+        await self._event(vision)
+        await self._event(vision)
+        self.assertEqual(len(self.bus.requests), 1, "a person in frame keeps firing motion; that is one scene")
+
+        self.clock.advance(91.0)
+        await self._event(vision)
+        self.assertEqual(len(self.bus.requests), 2)
+
+    async def test_a_different_camera_is_its_own_scene(self):
+        vision = self._vision()
+        await self._event(vision)
+        await self._event(vision, camera="Back Gate")
+        self.assertEqual(len(self.bus.requests), 2)
+
+    # -- the other camera source ------------------------------------------
+    async def test_a_ring_event_uses_the_ring_camera_and_its_own_paths(self):
+        ring = _Snapshot("ring_snapshot", many=True)
+        vision = self._vision(tools={"ring_snapshot": ring, "cam_snapshot": self.snapshot})
+        await self._event(vision, host="ring", camera="Driveway")
+        self.assertEqual(len(ring.calls), 2)
+        self.assertEqual(self.snapshot.calls, [], "a Ring event does not go to the NVR")
+        self.assertEqual(self.bus.requests[-1].payload["images"],
+                         [str(self.root / "workspace/cameras/ring/front-1.jpg"),
+                          str(self.root / "workspace/cameras/ring/front-2.jpg")])
+
+    # -- when it cannot ----------------------------------------------------
+    async def test_no_eyes_is_said_once_not_once_per_event(self):
+        self.bus = _Bus(answer={"ok": False, "error": {"code": "no_real_provider",
+                                                       "detail": "nothing here can look at a picture"}})
+        vision = self._vision(camera_vision_cooldown_s=0.0)
+        await self._event(vision)
+        await self._event(vision)
+        notices = [m.payload["text"] for m in self.bus.of_type(topics.UI_NOTICE)]
+        self.assertEqual(len(notices), 1, f"said once: {notices}")
+        self.assertIn("could not look", notices[0])
+        self.assertEqual(self.bus.of_type(topics.VOICE_SPEAK_REQUEST), [], "nothing true to say, so nothing said")
+
+    async def test_a_camera_that_will_not_give_a_still_says_nothing(self):
+        vision = self._vision(tools={"cam_snapshot": _Snapshot(ok=False)})
+        await self._event(vision)
+        self.assertEqual(self.bus.requests, [], "no stills, no guess about what happened")
+        self.assertEqual(self.bus.published, [])
+        self.assertTrue(any(e == "camera_vision_snapshot_refused" for e, _f in self.logger.warnings))
+
+    async def test_no_snapshot_tool_at_all_is_quiet(self):
+        vision = self._vision(tools={})
+        await self._event(vision)
+        self.assertEqual(self.bus.published, [])
+
+    # -- the switches ------------------------------------------------------
+    async def test_turned_off_nothing_happens(self):
+        vision = self._vision(camera_vision=False)
+        await self._event(vision)
+        self.assertEqual(self.snapshot.calls, [])
+        self.assertEqual(self.bus.published, [])
+
+    async def test_the_screen_can_have_it_without_the_voice(self):
+        vision = self._vision(camera_vision_speak=False)
+        await self._event(vision)
+        self.assertEqual(len(self.bus.of_type(topics.UI_NOTICE)), 1)
+        self.assertEqual(self.bus.of_type(topics.VOICE_SPEAK_REQUEST), [])
+
+    async def test_a_model_that_answers_nothing_is_not_announced(self):
+        self.bus = _Bus(answer={"ok": True, "text": "   "})
+        vision = self._vision()
+        await self._event(vision)
+        self.assertEqual(self.bus.published, [], "an empty description is not news")
+
+
+if __name__ == "__main__":
+    unittest.main()

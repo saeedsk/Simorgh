@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from simorgh.cognition.api import ProviderUnavailable, Purpose
 from simorgh.cognition.config import Config
@@ -54,6 +57,60 @@ class OllamaRequest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(OllamaProvider("", transport=_Transport()).available())
         self.assertTrue(OllamaProvider("qwen3:4b", transport=_Transport()).available())
         self.assertFalse(OllamaProvider("qwen3:4b", transport=_Transport(fail=ConnectionRefusedError())).available())
+
+
+class Pictures(unittest.IsolatedAsyncioTestCase):
+    """A camera still reaching a model that can actually see it."""
+
+    def setUp(self) -> None:
+        self.dir = tempfile.TemporaryDirectory()
+        self.still = Path(self.dir.name) / "front-door.jpg"
+        self.still.write_bytes(b"\xff\xd8not-really-a-jpeg")
+        self.addCleanup(self.dir.cleanup)
+
+    async def test_a_picture_goes_to_the_vision_model_as_base64(self):
+        transport = _Transport()
+        provider = OllamaProvider("qwen3:4b", vision_model="qwen2.5vl:3b", transport=transport)
+        await provider.complete([{"role": "user", "content": "what is happening?"}],
+                                tools=None, max_tokens=200, images=[str(self.still)])
+        _method, _url, body, _timeout = transport.calls[-1]
+        self.assertEqual(body["model"], "qwen2.5vl:3b", "the text model cannot see")
+        self.assertEqual(body["messages"][-1]["images"],
+                         [base64.b64encode(self.still.read_bytes()).decode("ascii")])
+
+    async def test_pictures_ride_on_the_question_not_the_system_prompt(self):
+        transport = _Transport()
+        provider = OllamaProvider("qwen3:4b", vision_model="qwen2.5vl:3b", transport=transport)
+        await provider.complete(
+            [{"role": "system", "content": "you are Sim"}, {"role": "user", "content": "what is happening?"}],
+            tools=None, max_tokens=200, images=[str(self.still)])
+        _method, _url, body, _timeout = transport.calls[-1]
+        self.assertNotIn("images", body["messages"][0])
+        self.assertIn("images", body["messages"][1])
+
+    async def test_a_still_that_cannot_be_read_is_one_fewer_angle_not_a_crash(self):
+        transport = _Transport()
+        provider = OllamaProvider("qwen3:4b", vision_model="qwen2.5vl:3b", transport=transport)
+        await provider.complete([{"role": "user", "content": "?"}], tools=None, max_tokens=50,
+                                images=[str(self.still), str(self.still.parent / "gone.jpg")])
+        _method, _url, body, _timeout = transport.calls[-1]
+        self.assertEqual(len(body["messages"][-1]["images"]), 1, "the missing one is dropped, the call still goes")
+
+    async def test_without_a_vision_model_sim_says_so_rather_than_guessing(self):
+        provider = OllamaProvider("qwen3:4b", transport=_Transport())
+        self.assertFalse(provider.supports_images)
+        with self.assertRaises(ProviderUnavailable) as caught:
+            await provider.complete([{"role": "user", "content": "?"}], tools=None, max_tokens=50,
+                                    images=[str(self.still)])
+        self.assertIn("vision_model", str(caught.exception))
+
+    async def test_a_call_with_no_pictures_still_uses_the_text_model(self):
+        transport = _Transport()
+        provider = OllamaProvider("qwen3:4b", vision_model="qwen2.5vl:3b", transport=transport)
+        await provider.complete([{"role": "user", "content": "hi"}], tools=None, max_tokens=50)
+        _method, _url, body, _timeout = transport.calls[-1]
+        self.assertEqual(body["model"], "qwen3:4b")
+        self.assertNotIn("images", body["messages"][-1])
 
 
 class OnlyPurposes(unittest.IsolatedAsyncioTestCase):

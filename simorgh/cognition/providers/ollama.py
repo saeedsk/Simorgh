@@ -13,10 +13,12 @@ reasoning model's thinking off, and is normally limited to chat
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from simorgh.contracts.protocols import ProviderResponse
@@ -35,8 +37,14 @@ class OllamaProvider:
     def __init__(
         self, model: str = "", *, base_url: str = DEFAULT_BASE_URL, keep_alive: str = DEFAULT_KEEP_ALIVE,
         num_ctx: int = DEFAULT_NUM_CTX, timeout_seconds: float = 120.0, transport: Any | None = None,
+        vision_model: str = "",
     ) -> None:
         self._model = model
+        # A second, separate model for calls that carry pictures: the text
+        # model cannot see, and asking it to would get a confident answer
+        # about an image it never received. Empty means Sim cannot look at
+        # anything, and `supports_images` says so rather than guessing.
+        self._vision_model = vision_model
         self._base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self._keep_alive = keep_alive or DEFAULT_KEEP_ALIVE
         self._num_ctx = int(num_ctx or DEFAULT_NUM_CTX)
@@ -49,6 +57,14 @@ class OllamaProvider:
     @property
     def model(self) -> str:
         return self._model
+
+    @property
+    def vision_model(self) -> str:
+        return self._vision_model
+
+    @property
+    def supports_images(self) -> bool:
+        return bool(self._vision_model)
 
     def available(self) -> bool:
         """A model is configured and the local server answers. Checked at most
@@ -68,20 +84,33 @@ class OllamaProvider:
 
     async def complete(
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,
+        images: list[str] | None = None,
     ) -> ProviderResponse:
-        return await asyncio.to_thread(self._complete_sync, messages, max_tokens, timeout)
+        return await asyncio.to_thread(self._complete_sync, messages, max_tokens, timeout, tuple(images or ()))
 
-    def _complete_sync(self, messages: list[dict], max_tokens: int, timeout: float | None) -> ProviderResponse:
-        if not self._model:
+    def _complete_sync(self, messages: list[dict], max_tokens: int, timeout: float | None,
+                       images: tuple[str, ...] = ()) -> ProviderResponse:
+        if images and not self._vision_model:
+            raise ProviderUnavailable(
+                "no Ollama vision model configured ([cognition.providers.ollama] vision_model)")
+        if not images and not self._model:
             raise ProviderUnavailable("no Ollama model configured ([cognition.providers.ollama] model)")
         options: dict = {"num_ctx": self._num_ctx}
         if max_tokens:
             options["num_predict"] = int(max_tokens)
+        sent = [{"role": m.get("role", "user"), "content": m.get("content", "")}
+                for m in messages if m.get("content")] or [{"role": "user", "content": ""}]
+        if images:
+            # Ollama takes pictures as base64 on the message they belong to.
+            # They ride with the last non-system message -- the one actually
+            # asking the question -- so a system prompt never swallows them.
+            encoded = [_encoded(path) for path in images]
+            index = next((i for i in range(len(sent) - 1, -1, -1) if sent[i]["role"] != "system"), len(sent) - 1)
+            sent[index] = {**sent[index], "images": [b for b in encoded if b]}
         body = {
-            "model": self._model, "stream": False, "keep_alive": self._keep_alive, "think": False,
-            "options": options,
-            "messages": [{"role": m.get("role", "user"), "content": m.get("content", "")}
-                         for m in messages if m.get("content")] or [{"role": "user", "content": ""}],
+            "model": self._vision_model if images else self._model,
+            "stream": False, "keep_alive": self._keep_alive, "think": False,
+            "options": options, "messages": sent,
         }
         raw = self._request("POST", "/api/chat", json.dumps(body).encode(),
                             timeout=timeout if timeout is not None else self._timeout_seconds)
@@ -95,7 +124,7 @@ class OllamaProvider:
         return ProviderResponse(
             text=text, provider=self.name,
             input_tokens=int(data.get("prompt_eval_count") or 0), output_tokens=int(data.get("eval_count") or 0),
-            cost_usd=0.0, metadata={"model": data.get("model") or self._model, "done_reason": data.get("done_reason")},
+            cost_usd=0.0, metadata={"model": data.get("model") or body["model"], "done_reason": data.get("done_reason")},
         )
 
     def _request(self, method: str, path: str, body: bytes | None, *, timeout: float) -> str:
@@ -114,6 +143,15 @@ class OllamaProvider:
             raise
         except Exception as exc:  # noqa: BLE001 -- not running, refused, timeout
             raise ProviderUnavailable(f"Ollama request failed: {exc!r}") from exc
+
+
+def _encoded(path: str) -> str:
+    """One picture as base64, or "" when it cannot be read -- a missing
+    still is one fewer angle on the scene, not a failed call."""
+    try:
+        return base64.b64encode(Path(path).read_bytes()).decode("ascii")
+    except Exception:  # noqa: BLE001 -- unreadable, gone, or not a file
+        return ""
 
 
 __all__ = ["OllamaProvider", "DEFAULT_BASE_URL", "DEFAULT_KEEP_ALIVE", "DEFAULT_NUM_CTX"]

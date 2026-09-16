@@ -757,3 +757,57 @@ class ATimeoutSaysSoTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(failures[0]["error"], "", "the line used to say nothing at all")
         self.assertEqual(response.provider, "fast", "the next candidate still got its turn")
         self.assertFalse(floored)
+
+class _SeeingProvider(_FakeProvider):
+    """A provider that can look at a picture, and remembers what it was shown."""
+
+    supports_images = True
+
+    def __init__(self, name: str, **kw):
+        super().__init__(name, **kw)
+        self.saw: list[str] = []
+
+    async def complete(self, messages, *, tools, max_tokens, timeout=None, images=None):
+        self.saw = list(images or [])
+        return await super().complete(messages, tools=tools, max_tokens=max_tokens, timeout=timeout)
+
+
+class Pictures(unittest.IsolatedAsyncioTestCase):
+    """A call carrying stills may only reach a provider with eyes.
+
+    Handing an image to a text model does not fail -- it answers,
+    fluently, about a picture it never received -- so the Router filters
+    rather than trusting the order.
+    """
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.floor = FloorProvider()
+
+    async def test_only_a_provider_that_can_see_is_dialled(self):
+        blind = _FakeProvider("together")
+        seeing = _SeeingProvider("ollama")
+        router = Router([blind, seeing], {}, self.floor, order=("together", "ollama"), clock=self.clock)
+        response, floor = await router.complete(
+            Purpose.CHAT, [{"role": "user", "content": "what is happening?"}], tools=None,
+            budget=_budget(), timeout=30.0, images=["/tmp/front-door.jpg"])
+        self.assertFalse(floor)
+        self.assertEqual(response.provider, "ollama")
+        self.assertEqual(blind.calls, 0, "the text model is never asked to look")
+        self.assertEqual(seeing.saw, ["/tmp/front-door.jpg"])
+
+    async def test_a_call_without_pictures_is_routed_as_usual(self):
+        primary = _FakeProvider("together")
+        router = Router([primary, _SeeingProvider("ollama")], {}, self.floor,
+                        order=("together", "ollama"), clock=self.clock)
+        response, _floor = await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(), timeout=30.0)
+        self.assertEqual(response.provider, "together")
+
+    async def test_nothing_with_eyes_says_so_instead_of_no_provider_available(self):
+        router = Router([_FakeProvider("together")], {}, self.floor, order=("together",), clock=self.clock)
+        with self.assertRaises(NoRealProvider) as caught:
+            await router.complete(Purpose.CHAT, [], tools=None, budget=_budget(require_real=True),
+                                  timeout=30.0, images=["/tmp/front-door.jpg"])
+        said = str(caught.exception)
+        self.assertIn("vision_model", said)
+        self.assertIn("together", said, "names what was tried, so the operator knows where to look")

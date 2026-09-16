@@ -58,6 +58,10 @@ class ProviderConfig:
     base_url: str = ""
     keep_alive: str = ""
     num_ctx: int = 0
+    # A separate local model for calls that carry pictures (a camera still,
+    # a screenshot). The text model above cannot see one; without this, Sim
+    # cannot look at anything and says so.
+    vision_model: str = ""
 
 
 @dataclass(frozen=True)

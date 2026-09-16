@@ -108,6 +108,7 @@ class Router:
     async def complete(
         self, purpose: Purpose, messages: list[dict], *, tools: list[dict] | None,
         budget: Budget, timeout: float, order: tuple[str, ...] | None = None,
+        images: list[str] | None = None,
     ) -> tuple[ProviderResponse, bool]:
         """Returns (response, floor). Raises `NoRealProvider` if every
         real candidate failed/was exhausted and `budget.require_real`;
@@ -131,6 +132,14 @@ class Router:
         # the time the second candidate was dialled (2026-09-10).
         deadline = now + timeout
         names = tuple(order) if order else self._order
+        # A call carrying pictures may only go to a provider that can see
+        # one. Handing images to a text model does not fail -- it answers,
+        # fluently, about an image it never received -- so the filter is
+        # the guard, and an empty list here is an honest "no eyes" below.
+        blind = ()
+        if images:
+            blind = tuple(n for n in names if not getattr(self._by_name.get(n), "supports_images", False))
+            names = tuple(n for n in names if n not in blind)
         for name in names:
             provider = self._by_name.get(name)
             if name in self._purpose_filter and purpose.value not in self._purpose_filter[name]:
@@ -191,6 +200,7 @@ class Router:
                 # are still passed a timeout of their own.
                 response = await self._dial(
                     name, provider, messages, tools, budget.max_tokens_out, share, provider_budget, purpose,
+                    images,
                 )
             except Exception as exc:  # noqa: BLE001 -- ProviderUnavailable or anything else: try the next candidate
                 last_error = exc
@@ -245,10 +255,20 @@ class Router:
                 raise NoRealProvider(
                     f"the {timeout:.0f}s call deadline was exhausted before any provider could be dialled",
                 )
+            if images and blind:
+                # Not "no provider available": every provider is here and
+                # well, none of them has eyes. That tells an operator to
+                # configure a vision model, not to go hunting for a dead
+                # API key.
+                raise NoRealProvider(
+                    "nothing here can look at a picture -- set [cognition.providers.ollama] vision_model "
+                    f"(tried: {', '.join(blind)})",
+                )
             raise NoRealProvider("no real provider available")
         return self._floor.respond_for_purpose(purpose), True
 
-    async def _dial(self, name, provider, messages, tools, max_tokens, share, provider_budget, purpose):
+    async def _dial(self, name, provider, messages, tools, max_tokens, share, provider_budget, purpose,
+                    images=None):
         """One candidate's call, retried once with twice the output room
         when the reply was cut off by `max_tokens`.
 
@@ -258,10 +278,14 @@ class Router:
         one tight review into a canned "no real reviewer" for every call
         during the cooldown (benchmark wave, 2026-09-14)."""
         started = self._clock.now()
+        # Only the providers that declared `supports_images` ever reach here
+        # with pictures, so the keyword is never passed to one that would
+        # not know what to do with it.
+        extra = {"images": list(images)} if images else {}
         try:
             try:
                 return await asyncio.wait_for(
-                    provider.complete(messages, tools=tools, max_tokens=max_tokens, timeout=share),
+                    provider.complete(messages, tools=tools, max_tokens=max_tokens, timeout=share, **extra),
                     timeout=share + _OVERRUN_GRACE_SECONDS,
                 )
             except (asyncio.TimeoutError, TimeoutError) as exc:
@@ -300,7 +324,7 @@ class Router:
                 left -= wait
         next_tokens = max_tokens * 2 if truncated else max_tokens
         return await asyncio.wait_for(
-            provider.complete(messages, tools=tools, max_tokens=next_tokens, timeout=left),
+            provider.complete(messages, tools=tools, max_tokens=next_tokens, timeout=left, **extra),
             timeout=left + _OVERRUN_GRACE_SECONDS,
         )
 

@@ -47,6 +47,7 @@ from .config import Config
 _BLOB_REF = re.compile(r"^blob:[0-9a-f]{64}$")
 from .external import load_external_tools
 from .mcp import McpClient, McpServerConfig, McpToolProxy, mcp_single_arg_key
+from .vision import CameraVision
 from .tools import RunTestsTool, SkillTool, builtin_tools
 from .worktree import WorktreeManager, worktree_tools
 from .verifier import ApprovalVerifier
@@ -101,8 +102,10 @@ def timeout_for(tool, constraints: dict, default_s: float) -> float:
 class Service:
     name = "execution"
     version = "0.1.0"
-    consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED, topics.LEARN_SKILL_ACQUIRED)
-    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS, topics.TOOL_PROBED, topics.TOOL_UNAVAILABLE,)
+    consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED, topics.LEARN_SKILL_ACQUIRED,
+                topics.CAMERA_EVENT)
+    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS, topics.TOOL_PROBED, topics.TOOL_UNAVAILABLE,
+                topics.UI_NOTICE, topics.COGNITION_THINK, topics.VOICE_SPEAK_REQUEST,)
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None,
                  connectors: list | None = None) -> None:
@@ -211,6 +214,12 @@ class Service:
         # TV. The tools' own `ui.dash.state` messages come from
         # "execution" and are not re-played.
         self._subs.append(await ctx.bus.subscribe(topics.DASH_STATE, self._on_dash_state))
+        # A camera event is a fact ("channel 3, person"), not what
+        # happened. `vision.py` turns it into a sentence: a couple of
+        # stills, a model that can see them, and the answer on screen
+        # with the time and out loud.
+        self._vision = CameraVision(config=self._config, registry=self._registry, ctx=ctx)
+        self._subs.append(await ctx.bus.subscribe(topics.CAMERA_EVENT, self._vision.on_camera_event))
         # Half the toolset stands on something outside this repo (Node,
         # a bundled Chromium, an optional pip package). Each is allowed
         # to be absent -- every tool refuses cleanly -- but "absent" was
