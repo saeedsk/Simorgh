@@ -76,9 +76,22 @@ class Config:
     # arm: the catalog is paid on every THINK, so an unused menu is a tax on
     # every task. `skills_roots` is searched in order and the first folder with
     # a name wins; "~" is expanded.
-    skills_enabled: bool = False
+    # On since 2026-09-16, once the catalog stopped being charged where it
+    # cannot be used (`skills_channels`): a voice turn carries none of it,
+    # and a typed one pays 157 tokens for the two bundled skills -- about
+    # $0.008 a day at the creator's 332 calls. Until the scoping existed
+    # this was off precisely because every THINK paid for it (design
+    # section 5.2).
+    skills_enabled: bool = True
     skills_catalog_max_chars: int = 3000
     skills_roots: tuple[str, ...] = ("skills", "~/.simorgh/skills")
+    # Which channels carry the skill catalog at all. The catalog rides in
+    # `task_rules` on EVERY think call, and a spoken turn will never use
+    # "create new skills" or "build an MCP server" -- so voice pays
+    # nothing rather than a little. The creator, 2026-09-16: "our system
+    # should have the concept of being frugal where ever it is possible".
+    # "" is the typed/CLI channel. Empty tuple: no catalog anywhere.
+    skills_channels: tuple[str, ...] = ("", "cli", "http")
     lease_seconds: int = 600
     heartbeat_s: int = 30
     max_depth: int = 3

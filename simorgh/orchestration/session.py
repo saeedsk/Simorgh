@@ -544,6 +544,7 @@ class SessionRunner:
         clean_revisions: bool = False, delegation: bool = False, max_depth: int = 3,
         delegate_max_steps: int = 12, escalate_from_attempt: int = 0, parallel_read_tools: int = 1,
         skills_enabled: bool = False, skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
+        skills_channels: tuple[str, ...] = ("", "cli", "http"),
     ) -> None:
         # Agent Skills: the catalog rides in `task_rules` and `use_skill` returns
         # one skill's instructions. Off by default -- every THINK pays for the
@@ -551,6 +552,9 @@ class SessionRunner:
         self._skills_enabled = bool(skills_enabled)
         self._skills_catalog_max_chars = max(0, int(skills_catalog_max_chars))
         self._skills_roots = tuple(skills_roots or ())
+        # Which channels are charged for the catalog at all (config.py's
+        # `skills_channels`). A voice turn pays nothing rather than a little.
+        self._skills_channels = tuple(skills_channels or ())
         self._skill_cache: tuple[list, list] | None = None
         # Independent read-only calls in one reply run together, up to this
         # many per step (change H). 1 is off: one tool call per reply.
@@ -1279,7 +1283,16 @@ class SessionRunner:
         print(f"[skills] ignored {bad.path}: {bad.reason}")
 
     def _catalog(self, session: Session) -> str:
-        """The `- name: description` lines for this session's profile."""
+        """The `- name: description` lines for this session's profile.
+
+        Nothing at all on a channel that is not listed. A voice turn and a
+        typed one both run the profile named "chat" (`profiles.for_percept`
+        returns VOICE_CHAT or CHAT, and both are named "chat"), so the
+        profile cannot tell them apart -- but the Session carries the
+        channel it came in on, and that can.
+        """
+        if getattr(session, "channel", "") not in self._skills_channels:
+            return ""
         from simorgh.contracts.skills import catalog_text
 
         cards = self._skills()
