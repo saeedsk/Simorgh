@@ -75,6 +75,8 @@ _ITALIC = re.compile(r"(?<!\w)[*_]([^*_\n]+)[*_](?!\w)")
 _BULLET = re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)])\s+")
 # A path: two or more segments ending in a file with an extension, or
 # three or more segments. "and/or" and "24/7" are not paths.
+#: `5m/15m/30m`, `1h/2h`, `24h/7d` -- every segment a number and a unit.
+_DURATION_LIST = re.compile(r"^(?:\d+\s?[a-z]{1,3}/)+\d+\s?[a-z]{1,3}$", re.I)
 _PATHISH = re.compile(r"(?<![\w/])(?:~|\.{0,2}/)?(?:[\w.-]+/){2,}[\w.-]*|(?<![\w/])(?:~|\.{0,2}/)?[\w-]+/[\w-]+\.[a-z]{1,5}\b")
 _SPACES = re.compile(r"[ \t]+")
 
@@ -247,9 +249,18 @@ def speakable(text: str) -> tuple[str, tuple[str, ...]]:
         omitted.append("code")
         return " the command on screen "
     out = _INLINE_CODE.sub(_inline, out)
-    if _PATHISH.search(out):
+    def _path(match: re.Match) -> str:
+        token = match.group(0)
+        # `5m/15m/30m/1h/2h` is a list of time windows, not a path. Live
+        # 2026-09-15: "ranks movers over 5m/15m/30m/1h/2h windows" was
+        # spoken as "ranks movers over a file path that's on screen
+        # windows" -- two or more slash-separated word runs is what a
+        # path looks like, and it is what a list of durations looks like too.
+        if _DURATION_LIST.match(token):
+            return token
         omitted.append("path")
-        out = _PATHISH.sub(" a file path that's on screen ", out)
+        return " a file path that's on screen "
+    out = _PATHISH.sub(_path, out)
     for pattern, spoken in _ABBREVIATIONS:
         out = pattern.sub(spoken, out)
     out = _enumerate_lists(out)
