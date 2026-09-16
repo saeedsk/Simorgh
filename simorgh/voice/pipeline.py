@@ -512,6 +512,7 @@ class Pipeline:
                     "heard_at": turn.heard_at, "answered_at": turn.answered_at,
                     "engine_stt": turn.engine_stt, "engine_tts": turn.engine_tts,
                     **({"metrics": dict(turn.metrics)} if turn.metrics else {}),
+                    **({"segments": list(turn.segments)} if turn.segments else {}),
                 }))
         except Exception as exc:  # noqa: BLE001 -- the turn happened; losing its record is a warning
             if self._logger is not None:

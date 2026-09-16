@@ -123,6 +123,18 @@ _WHO_IS_SPEAKING = re.compile(r"\bwho(?:'s| is| am)\s+(?:i\b|(?:this|that|it)\b|
 _TO_SIM = re.compile(r"\b(?:you|your|you're|youre|you've)\b", re.I)
 
 
+def may_refine(*, segments, probable: bool, refine_on: bool, seconds: float,
+               min_seconds: float, has_vector: bool) -> bool:
+    """Whether this turn may be kept as a take of the speaker's voice.
+
+    Never from a turn two people shared: the whole-turn vector holds both
+    voices, so keeping it teaches one person the other's -- exactly the blend
+    that put Iris's words under the creator's name ("you recognised that as my
+    voice, that was a bad recognition", 2026-09-15). Never from a guess, and
+    never from less speech than the book asks for."""
+    return bool(has_vector and refine_on and not segments and not probable and seconds >= min_seconds)
+
+
 def _speaks_to_sim(text: str) -> bool:
     """Words aimed at Sim: second person, or a question.
 
@@ -729,6 +741,7 @@ class VoiceSession:
                 await self._begin_introduction(turn_id, text, vector, name="" if wanted == "?" else wanted)
                 return
         segments = await self._attribute(turn_id, identification)
+        self._last_segments = [seg.as_dict() for seg in segments]
         if segments:
             from .diarize import lines, speakers_in
 
@@ -741,8 +754,10 @@ class VoiceSession:
             self._speakers.heard(speaker)
             from .speakers import MIN_SECONDS
 
-            if (vector is not None and not identification.probable and self._config.speaker_refine
-                    and self._last_speech_s >= MIN_SECONDS and self._speakers.refine(speaker, vector)):
+            if (may_refine(segments=segments, probable=identification.probable,
+                           refine_on=self._config.speaker_refine, seconds=self._last_speech_s,
+                           min_seconds=MIN_SECONDS, has_vector=vector is not None)
+                    and self._speakers.refine(speaker, vector)):
                 self._log("debug", "voice.speaker_refined", speaker=speaker, score=round(identification.score, 3))
                 # Silently, until the creator asked twice whether Sim was
                 # learning at all and was told no -- by a model that cannot see
@@ -1556,7 +1571,9 @@ class VoiceSession:
             heard_at=(self._clock.now() if self._clock is not None else time.time()) - max(0.0, self._now() - clock.speech_end) if clock.speech_end else 0.0,
             answered_at=self._clock.now() if self._clock is not None else time.time(),
             engine_stt=clock.engine_stt, engine_tts=engine, metrics=metrics if self._config.diagnostics else {},
+            segments=list(getattr(self, "_last_segments", []) or []),
         ))
+        self._last_segments = []
         self._clocks.pop(turn_id, None)
 
     async def say(self, text: str, *, request_id: str = "", lane: str = "") -> str:

@@ -71,6 +71,12 @@ class VoiceTurn:
     # (`stt`, `llm`, `first_audio`, `interruption`), `underruns`,
     # `dropped`, `interrupted`. Metadata only, never text.
     metrics: dict = field(default_factory=dict)
+    #: Who said which words, when a turn held more than one voice
+    #: (voice/diarize.py). `speaker` above is the one Sim answered; without
+    #: this the other person's words were filed under that name -- "Iris said
+    #: watch them ... you recognised that as my voice" (the creator,
+    #: 2026-09-15).
+    segments: list = field(default_factory=list)
 
 
 @dataclass
