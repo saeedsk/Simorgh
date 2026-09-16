@@ -44,3 +44,22 @@ class CourtesyAside(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotANameTestCase(unittest.TestCase):
+    """"Myself" was enrolled as a person (live 2026-09-15): asked "what is
+    your name?", a bare word answer is taken as the name, and the reflexive
+    pronouns were not on the list of words that are not names."""
+
+    def test_pronouns_are_not_names(self):
+        from simorgh.voice.introduce import name_in
+
+        for text in ("Myself.", "myself", "It's myself", "yourself", "This is himself", "mine"):
+            self.assertEqual(name_in(text), "", text)
+
+    def test_real_names_still_pass(self):
+        from simorgh.voice.introduce import name_in
+
+        self.assertEqual(name_in("my name is Aran"), "Aran")
+        self.assertEqual(name_in("Iris."), "Iris")
+        self.assertEqual(name_in("I'm Soodeh"), "Soodeh")

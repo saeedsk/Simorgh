@@ -43,7 +43,14 @@ _NAME_PATTERNS = (
 _NOT_NAMES = {"me", "them", "us", "you", "her", "him", "it", "someone", "anyone", "everyone", "skip", "no", "yes", "nobody", "none", "stop", "quiet", "sim", "simorgh", "okay", "ok", "hello", "hi",
               "what", "why", "who", "sorry", "nothing", "never", "mind", "nevermind", "cancel", "not", "just", "here",
               "so", "going", "also", "a", "an", "the", "very", "really", "fine", "good", "done", "back", "home", "sure",
-              "afraid", "tired", "busy", "hungry", "his", "her", "their", "my", "your", "this", "that", "it"}
+              "afraid", "tired", "busy", "hungry", "his", "her", "their", "my", "your", "this", "that", "it",
+              # Asked "what is your name?", a voice Sim could not place answered
+              # something whisper heard as "Myself", and a person called Myself
+              # was enrolled -- competing with the creator's own voice for every
+              # match afterwards (live 2026-09-15: "At least you should have
+              # asked ... not just adding a random person there").
+              "myself", "yourself", "himself", "herself", "themselves", "ourselves", "itself",
+              "mine", "yours", "speaking", "talking", "again", "nobody's"}
 _SKIP = re.compile(r"^\s*(?:skip|no|none|nothing|never ?mind|pass|not now|later|rather not)\b", re.I)
 _RELATION_LEAD = re.compile(r"^\s*(?:i am|i'm|im|it's|its|this is|his|her|their|the)\s+", re.I)
 # "learn Aran's voice", "enrol Megan" -- and no longer "meet Megan" or
