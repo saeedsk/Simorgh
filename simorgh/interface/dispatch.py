@@ -17,6 +17,8 @@ Interface never fakes a result.
 
 from __future__ import annotations
 
+import asyncio
+import ast
 import dataclasses
 import difflib
 import json
@@ -24,6 +26,7 @@ import os
 import re
 import uuid
 import subprocess
+import urllib.request
 from dataclasses import dataclass
 import shutil
 from pathlib import Path
@@ -1731,6 +1734,70 @@ def _skill_roots() -> list[tuple[str, Path]]:
     return roots
 
 
+#: Where `apply_skill` writes the Python skills Sim builds for itself
+#: (execution/config.py `skill_dir`). A different thing from an Agent
+#: Skill, and until now invisible to `skills list`.
+WRITTEN_SKILLS_DIR = "simorgh_skills"
+
+#: Repositories worth searching. Only ones actually verified to exist and
+#: to hold skills belong here -- a list of plausible-looking URLs that
+#: 404 is worse than a short list.
+SKILL_SOURCES: tuple[tuple[str, str], ...] = (
+    ("anthropics/skills", "document handling, skill authoring, MCP server guidance"),
+)
+
+
+def _first_docline(path: Path) -> str:
+    """A written skill's own description: its module docstring, or its
+    `run()` docstring. Parsed, never imported -- listing what is on disk
+    must not execute it."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError, ValueError):
+        return ""
+    doc = ast.get_docstring(tree) or ""
+    if not doc:
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "run":
+                doc = ast.get_docstring(node) or ""
+                break
+    return " ".join(doc.split())
+
+
+def _written_skills() -> list[tuple[str, str]]:
+    """The skills Sim has written for itself, called as `skill:<name>`.
+
+    The creator, live 2026-09-15: "why the sill doesn't show up in skills
+    list". Because there are two unrelated things called a skill -- an
+    Agent Skill (a SKILL.md folder) and a Python tool Sim wrote -- and
+    this command only ever read the first. A skill Sim built on request
+    was missing from exactly where a person looks for it.
+    """
+    directory = Path(WRITTEN_SKILLS_DIR)
+    if not directory.is_dir():
+        return []
+    return [(path.stem, _first_docline(path))
+            for path in sorted(directory.glob("*.py")) if not path.name.startswith("_")]
+
+
+def _fetch_tree(org_repo: str, *, timeout: float = 15.0) -> list[str]:
+    """Every path in a repository, from GitHub's tree API.
+
+    One request per repository rather than a clone: `anthropics/skills`
+    is 16 MB, and searching it should not cost that.
+    """
+    url = f"https://api.github.com/repos/{org_repo}/git/trees/HEAD?recursive=1"
+    request = urllib.request.Request(url, headers={
+        "User-Agent": "Simorgh", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- github API over https
+        body = json.loads(response.read().decode())
+    return [str(entry.get("path") or "") for entry in (body.get("tree") or [])]
+
+
+def _search_cache_path() -> Path:
+    return SKILLS_HOME.expanduser() / "search-cache.json"
+
+
 def _lock_path() -> Path:
     return SKILLS_HOME.expanduser() / "lock.json"
 
@@ -1809,7 +1876,7 @@ def _skills_inside(root: Path, *, max_depth: int = 3, limit: int = 200) -> list[
     return found
 
 
-async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clone_at) -> Outcome:
+async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clone_at, fetch=_fetch_tree) -> Outcome:
     """Agent Skills: what is here, what a skill contains, and installing one.
 
     Trust belongs to the organisation that maintains a repository (the
@@ -1824,11 +1891,19 @@ async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clon
 
     if sub in ("", "list"):
         cards, invalid = discover_skills(_skill_roots())
-        if not cards and not invalid:
-            lines = ["no skills yet -- `skills install <git-url>`, e.g. skills install github.com/anthropics/skills"]
-        else:
-            lines = [f"{len(cards)} skill(s):"]
+        written = _written_skills()
+        lines: list[str] = []
+        if not cards and not written and not invalid:
+            lines = ["no skills yet -- `skills search` to see what is installable, "
+                     "`skills install <git-url>` to add one"]
+        if cards:
+            lines.append(f"{len(cards)} installed skill(s):")
             lines += [f"  {card.name:24s} {card.source:12s} {card.description[:70]}" for card in cards]
+        # Both kinds, in one place: the Python skills Sim writes are
+        # invoked as `skill:<name>` and were missing from this list.
+        if written:
+            lines.append(f"{len(written)} written by Sim (run as `skill:<name>`):")
+            lines += [f"  {name:24s} {WRITTEN_SKILLS_DIR:12s} {doc[:70]}" for name, doc in written]
         if invalid:
             lines.append(f"{len(invalid)} ignored:")
             lines += [f"  {bad.path}: {bad.reason}" for bad in invalid[:8]]
@@ -1919,6 +1994,62 @@ async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clon
             why = "review flagged something" if not review.clean else "not a trusted org"
             return Outcome(f"{head}: {why}, so it is NOT enabled.\n{review_text(review)}\n"
                            f"`skills approve {review.name}` to enable it, `skills remove {review.name}` to drop it.")
+
+    if sub == "search":
+        # A typed command, so it costs nothing on a model call: the
+        # catalog a task pays for holds only enabled skills. The creator,
+        # 2026-09-15: "this effort should not come with penalty of token
+        # additions".
+        query = rest.strip().lower()
+        cache_path = _search_cache_path()
+        cache: dict = {}
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            cache = {}
+        # A cache is fresh only if it actually holds something. Testing the
+        # timestamp alone made an ABSENT cache look fresh whenever the clock
+        # read less than a day in seconds -- 0.0 > now - 86400 is true for
+        # any small clock -- so nothing was ever fetched and every search
+        # answered "nothing found".
+        cached_sources: dict = dict(cache.get("sources") or {})
+        fresh_enough = bool(cached_sources) and float(cache.get("at") or 0.0) > clock.now() - 86_400.0
+        found: dict[str, list[str]] = cached_sources if fresh_enough else {}
+        problems: list[str] = []
+        if not found:
+            for org_repo, _blurb in SKILL_SOURCES:
+                try:
+                    paths = await asyncio.to_thread(fetch, org_repo)
+                except Exception as exc:  # noqa: BLE001 -- offline is an answer, not a crash
+                    problems.append(f"{org_repo}: {exc!r}"[:160])
+                    continue
+                found[org_repo] = sorted(
+                    p[: -len("/SKILL.md")] for p in paths if p.endswith("/SKILL.md"))
+            if found:
+                try:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_text(json.dumps({"at": clock.now(), "sources": found}), encoding="utf-8")
+                except OSError:
+                    pass
+        lines: list[str] = []
+        total = 0
+        for org_repo, blurb in SKILL_SOURCES:
+            folders = [f for f in found.get(org_repo, []) if not query or query in f.lower()]
+            if not folders:
+                continue
+            total += len(folders)
+            lines.append(f"{org_repo} -- {blurb}")
+            for folder in folders[:30]:
+                lines.append(f"  {folder.rsplit('/', 1)[-1]:24s} skills install github.com/{org_repo}#{folder}")
+            if len(folders) > 30:
+                lines.append(f"  ... and {len(folders) - 30} more")
+        if not lines:
+            said = f"nothing matching {query!r}" if query else "nothing found"
+            return Outcome(f"{said}" + ("\n" + "\n".join(problems) if problems else ""))
+        head = f"{total} skill(s) available" + (f" matching {query!r}" if query else "") + \
+               (" (cached)" if fresh_enough else "")
+        tail = ("\n" + "\n".join(problems)) if problems else ""
+        return Outcome(head + "\n" + "\n".join(lines) + tail)
 
     if sub == "update":
         if not rest:
@@ -2018,7 +2149,7 @@ async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clon
         return Outcome("removed: " + ", ".join(gone))
 
     return Outcome(f"skills: no sub-command {sub!r} -- list | show <name> | review <folder> | "
-                   f"install <git-url> | update <name> | approve <name> | remove <name>")
+                   f"search [text] | install <git-url> | update <name> | approve <name> | remove <name>")
 
 
 async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock) -> Outcome:

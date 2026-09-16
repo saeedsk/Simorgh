@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import types
 import unittest
@@ -234,6 +235,116 @@ class UpdatingAnInstalledSkill(unittest.IsolatedAsyncioTestCase):
         await self._run("remove pdf-reading")
         outcome, _ = await self._run("update pdf-reading")
         self.assertIn("nothing installed", outcome.text)
+
+
+class BothKindsOfSkill(unittest.IsolatedAsyncioTestCase):
+    """The creator, live 2026-09-15: "why the sill doesn't show up in
+    skills list". Two unrelated things are called a skill -- a SKILL.md
+    folder, and a Python tool Sim wrote into simorgh_skills/ and calls as
+    `skill:<name>` -- and this command only ever listed the first."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name) / "home"
+        self._real_home = dispatch_mod.SKILLS_HOME
+        dispatch_mod.SKILLS_HOME = self.home
+        self._cwd = os.getcwd()
+        self.work = Path(self._tmp.name) / "work"
+        (self.work / "simorgh_skills").mkdir(parents=True)
+        os.chdir(self.work)
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        dispatch_mod.SKILLS_HOME = self._real_home
+        self._tmp.cleanup()
+
+    def _written(self, name: str, body: str) -> None:
+        (self.work / "simorgh_skills" / f"{name}.py").write_text(body, encoding="utf-8")
+
+    async def _run(self, args: str):
+        return await dispatch_mod._skills_command(args, ledger=_Ledger(), clock=_clock())  # noqa: SLF001
+
+    async def test_a_skill_sim_wrote_is_listed_where_a_person_looks(self):
+        self._written("hot_stocks", '"""Rank the day\'s movers by percentage."""\n\ndef run():\n    return {}\n')
+        outcome = await self._run("list")
+        self.assertIn("hot_stocks", outcome.text)
+        self.assertIn("Rank the day's movers", outcome.text)
+        self.assertIn("skill:<name>", outcome.text, "and how to call it")
+
+    async def test_the_description_comes_from_run_when_there_is_no_module_docstring(self):
+        self._written("quiet", 'def run():\n    """Say nothing at all."""\n    return {}\n')
+        outcome = await self._run("list")
+        self.assertIn("Say nothing at all", outcome.text)
+
+    async def test_a_broken_skill_file_is_listed_without_being_imported(self):
+        self._written("broken", "def run(:\n")   # deliberately not valid Python
+        outcome = await self._run("list")
+        self.assertIn("broken", outcome.text, "listing must not execute or import it")
+
+    async def test_private_files_are_not_skills(self):
+        self._written("_helpers", '"""Shared bits."""\n')
+        outcome = await self._run("list")
+        self.assertNotIn("_helpers", outcome.text)
+
+    async def test_nothing_at_all_points_at_search(self):
+        outcome = await self._run("list")
+        self.assertIn("skills search", outcome.text)
+
+
+class SearchingForSkills(unittest.IsolatedAsyncioTestCase):
+    """`skills search`: what is installable, without cloning 16 MB and
+    without costing a single prompt token -- it is a typed command, not
+    catalog content."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name) / "home"
+        self._real_home = dispatch_mod.SKILLS_HOME
+        dispatch_mod.SKILLS_HOME = self.home
+        self.calls: list[str] = []
+
+    def tearDown(self):
+        dispatch_mod.SKILLS_HOME = self._real_home
+        self._tmp.cleanup()
+
+    def _fetch(self, org_repo: str):
+        self.calls.append(org_repo)
+        return ["README.md", "skills/pdf/SKILL.md", "skills/pdf/scripts/fill.py",
+                "skills/xlsx/SKILL.md", "skills/skill-creator/SKILL.md", "template/SKILL.md"]
+
+    async def _run(self, args: str, *, fetch=None):
+        return await dispatch_mod._skills_command(  # noqa: SLF001
+            args, ledger=_Ledger(), clock=_clock(), fetch=fetch or self._fetch)
+
+    async def test_it_lists_what_is_installable_with_the_command_to_install_it(self):
+        outcome = await self._run("search")
+        self.assertIn("pdf", outcome.text)
+        self.assertIn("skill-creator", outcome.text)
+        self.assertIn("skills install github.com/anthropics/skills#skills/pdf", outcome.text)
+        self.assertEqual(self.calls, ["anthropics/skills"], "one request per repo, not a clone")
+
+    async def test_a_query_narrows_it(self):
+        outcome = await self._run("search pdf")
+        self.assertIn("pdf", outcome.text)
+        self.assertNotIn("skill-creator", outcome.text)
+
+    async def test_a_query_that_matches_nothing_says_so(self):
+        outcome = await self._run("search nonsense")
+        self.assertIn("nothing matching", outcome.text)
+
+    async def test_being_offline_is_an_answer_not_a_crash(self):
+        def _down(org_repo):
+            raise OSError("no route to host")
+        outcome = await self._run("search", fetch=_down)
+        self.assertIn("nothing found", outcome.text)
+        self.assertIn("no route to host", outcome.text)
+
+    async def test_the_second_search_is_served_from_cache(self):
+        await self._run("search")
+        outcome = await self._run("search")
+        self.assertEqual(self.calls, ["anthropics/skills"], "asked once, not twice")
+        self.assertIn("cached", outcome.text)
+
 
 if __name__ == "__main__":
     unittest.main()
