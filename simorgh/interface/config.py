@@ -46,6 +46,12 @@ class Config:
     # don't want to enable it for any single conversation line, as it will make
     # the voice chat log ugly". 0 turns it off.
     time_marker_minutes: float = 15.0
+    # The voice match score on the heard line: "Saeed: hello  (0.62)". The
+    # creator, 2026-09-15: "why are you not showing the score on the screen,
+    # the voice recognition score?" -- it was computed for every turn and only
+    # ever went to the debug log. A voice Sim cannot place says so on its own
+    # dim line already ("closest is Saeed at 0.44, under the threshold 0.50").
+    show_speaker_score: bool = True
     # How long the REPL thread holds its splash waiting for the Kernel
     # to reach `running`, so boot progress is not overprinted. Bounded:
     # a boot that never completes still gets a usable prompt.
