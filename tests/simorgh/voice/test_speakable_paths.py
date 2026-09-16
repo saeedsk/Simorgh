@@ -35,3 +35,26 @@ class PathsAreForTheScreen(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HearingItsOwnName(unittest.TestCase):
+    """Whisper mishears "Sim" -- as "seam", "seym", and now "team".
+
+    The creator, live 2026-09-15: "I said hey sim, but you listened hey
+    team". Sim answered that it would treat "hey team" as its name from
+    now on, which no reply can do: the list is in the code.
+    """
+
+    def test_the_mishearings_wake_sim(self):
+        from simorgh.voice.session import VoiceSession
+
+        for heard in ("hey sim", "hey seem", "A-seam.", "hey team", "Hey Team, are you there?",
+                      "hi team what is the time"):
+            self.assertTrue(VoiceSession._names_sim(heard), heard)  # noqa: SLF001
+
+    def test_talking_about_a_team_does_not_wake_sim(self):
+        from simorgh.voice.session import VoiceSession
+
+        for heard in ("the team is coming over tomorrow", "our team won", "team meeting at nine",
+                      "I told the team already"):
+            self.assertFalse(VoiceSession._names_sim(heard), heard)  # noqa: SLF001

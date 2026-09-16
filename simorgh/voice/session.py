@@ -508,7 +508,14 @@ class VoiceSession:
         # "Hey Sim" came back from whisper as "A-seam." and Sim stayed quiet,
         # then was asked "why are you not responding?"; "Hey Seym are you
         # there?" the same afternoon (live 2026-09-15).
-        return bool(re.search(r"\b(?:sim|sima|simorgh|sam|seem|seam|seym|syme)\b", text or "", re.I))
+        #
+        # "team" is the same mishearing and cannot join that list bare --
+        # "the team is coming over" would wake Sim in the middle of a
+        # conversation about anything. It counts only where a name goes,
+        # after a greeting ("I said hey sim, but you listened hey team",
+        # the creator, live 2026-09-15).
+        return bool(re.search(r"\b(?:sim|sima|simorgh|sam|seem|seam|seym|syme)\b"
+                              r"|\b(?:hey|hi|hello|ok|okay)\s+teams?\b", text or "", re.I))
 
     def _other_language(self, heard: str) -> str:
         """The language code whisper heard, when it is not one of the
