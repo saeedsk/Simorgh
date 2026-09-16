@@ -36,7 +36,9 @@ Sim should adopt this format as-is, so a skill written for any compatible agent 
 
 ### 3.2 The catalog in every task
 
-A new `skills` block in `task_rules`, rendered by `scaffolds.render`, lists the enabled skills as `- name: description`. It gets a token cap (`[skills] catalog_max_chars`, default 3,000), because every THINK pays for it (§5.2).
+A new `skills` block in `task_rules`, rendered by `scaffolds.render`, lists the enabled skills as `- name: description`. It gets a token cap (`[orchestration] skills_catalog_max_chars`, default 3,000), because every THINK pays for it (§5.2).
+
+**Where the settings live (built 2026-09-15).** Not a `[skills]` section: the module-boundary rule is that no subsystem imports another, so a `simorgh/skills/` package could not be read by Orchestration, which is what renders the catalog and runs `use_skill`. The parser stays in `contracts/skills.py` (subsystems may import contracts) and the settings are `[orchestration] skills_enabled`, `skills_catalog_max_chars`, `skills_roots`.
 
 Skills can be filtered per profile:
 - a skill's optional `allowed_profiles` (a Sim extension, ignored by other agents);
@@ -51,7 +53,7 @@ A model-visible tool, orchestration-local like `delegate`, since it touches no o
 2. The session records `step{tool:"use_skill", summary:name}`.
 3. Re-grounding (`orchestration/progress.py`) keeps "using skill X" in the progress note, so the instructions are not silently lost.
 
-Bundled files are read with `read_file` on the skill's path, allowed read-only by Guardian's path policy for the three skill roots.
+Bundled files are read with `read_file` on the skill's path: `skills/` is in Execution's `readable_roots` and in no write scope (step 3). Installed skills under `~/.simorgh/skills` are outside the repo bound that `pathsafety` enforces, so reading their bundled files waits for the installer (step 4); `use_skill` returns their instructions either way.
 
 ### 3.4 Tool names inside skills
 
@@ -174,12 +176,12 @@ Brand guidelines, internal communications and algorithmic art are not what a hom
 | # | Deliverable | Done when |
 |---|---|---|
 | 1 ✅ (ee89c39) | `contracts/skills.py` parser plus loader for the three roots | parses the spec's examples; invalid skills listed with a reason |
-| 2 | Catalog block in `task_rules` (capped, per-profile) and the `use_skill` tool with the tool-name mapping note | a scripted session loads a skill and its instructions reach the model; the catalog is absent when `[skills] enabled = false` |
-| 3 | Guardian read-only path rule for skill roots; scripts only through `run_script` | a skill script is not run without a gated call |
+| 2 ✅ (ebbae74) | Catalog block in `task_rules` (capped, per-profile) and the `use_skill` tool with the tool-name mapping note | a scripted session loads a skill and its instructions reach the model; the catalog is absent when `[skills] enabled = false` |
+| 3 ✅ (7e5a94f) | Guardian read-only path rule for skill roots; scripts only through `run_script` | a skill script is not run without a gated call |
 | 4 | `skills list/show/remove`; `install` from git at a commit, with the deterministic review, trust tiers (§3.9), `approve`, and `lock.json` | a hostile fixture skill is flagged and not enabled; an approved skill appears in the catalog |
 | 5 | `skills update` with diff and re-approval; `skills search` over configured sources | a changed script needs re-approval |
 | 6 | Default bundled set (licence-checked) | `skills/` committed with `LICENSE`/`NOTICE` |
 | 7 | Distillation writes pending `SKILL.md` | a solved task yields a pending skill for approval |
 | 8 | Benchmark arms: none / default / default+document | results appended to `docs/benchmark-analysis-2026-09-14.md` |
 
-**Deploy.** `[skills] enabled` defaults to true once step 2 lands; the catalog then holds only the bundled trusted-org set, and installed skills follow their tier (§3.9). Step 8 confirms the catalog does not cost benchmark score; if it does, the default flips back to false. Each step is pushed when its tests pass, and the live Sim picks it up on `restart`.
+**Deploy.** `[orchestration] skills_enabled` defaults to true once the bundled set lands (step 6); the catalog then holds only the bundled trusted-org set, and installed skills follow their tier (§3.9). Step 8 confirms the catalog does not cost benchmark score; if it does, the default flips back to false. Each step is pushed when its tests pass, and the live Sim picks it up on `restart`.

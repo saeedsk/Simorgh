@@ -140,6 +140,8 @@ Design: `docs/plans/agent-skills-design.md` (6b7da66, a058536). Step 1 built: `s
 - **Every source:** licence checked at install; fit with Sim's tools checked; enabled only if Sim will use it.
 - **Default:** skills on once the catalog lands, confirmed by a benchmark arm; flip back if the catalog costs score.
 
+**Built 2026-09-15.** Step 1 (parser, ee89c39), step 2 (catalog in `task_rules` + `use_skill`, ebbae74) and step 3 (`skills/` readable, never writable; scripts only through `run_script`, 7e5a94f). Off by default behind `[orchestration] skills_enabled` -- and the settings are there, not in a `[skills]` section, because no subsystem may import another and Orchestration is what renders the catalog.
+
 **Source notes.**
 - `anthropics/skills`: example skills Apache-2.0 (may be bundled); `docx`/`pdf`/`pptx`/`xlsx` source-available (install locally, never commit). Written for Claude's tools.
 - `google/skills`: Gmail, Drive, Docs, Sheets, Calendar, YouTube, Gemini API; Apache-2.0. Most relevant to a home assistant.
@@ -171,6 +173,9 @@ So install freely, but list only enabled, relevant skills, or look skills up wit
 | Mid-conversation "But, I mean..." got QUIET, then "Sim, I was talking to you." | A trailing fragment from the person Sim is already talking with is a pause: "Go on", never QUIET (565cc32) |
 | Ira to Bobby, "it isn't fair that you get pizza for lunch," QUIET; whisper sent the rest as its own turn and Sim answered it | A known voice within `[voice] continuation_quiet_s` (12 s) of a quiet turn, not naming Sim, is the rest of that aside and is not asked (3cca60f) |
 | "We are on the queue." from an unplaced voice became `dash_view` on the TV, refused only because the invented view did not exist | `unplaced_voice_refusal` now refuses every non-read-only tool, not just `start_task` and irreversible ones (0926c8b) |
+| A voice Sim could not place was asked its name, whisper heard "Myself", and a person called Myself was enrolled -- then matched the creator'"'"'s own voice | reflexive pronouns join the words that are not names (ec8338a); `voice forget <name>` clears one already made |
+| The name rule met an empty voice book (the creator deleted his own profile while clearing that entry) and would have silenced the house | with nobody enrolled the rule does not apply (d367650) |
+| "[sd:0.55, sv:0.45] Sah-EED." -- GLM invented a metadata tag where a feeling belongs, and kokoro read the scores aloud | a head tag carrying digits or colons is dropped like any other bracket (3c5cd79) |
 | "- I'm sorry." said to someone on a call got "No need to apologize" spoken into it | `i'm`, `im`, `my`, `bad` added to the courtesy list; a turn is an aside only when every word is filler (098f5a8) |
 
 **Sim could not press its own buttons (fixed, 55baa4f).** `restart`, `tv show`, `tasks`, `voice off` existed only as typed lines: asked out loud, Sim described the command and could not run it, and the creator asked for it twice ("it should be able to restart itself or any other cli command I ask it to run"). Now:
@@ -197,7 +202,7 @@ This is the [[unconnected-wires]] shape again: `system.restart`, the Kernel hand
 1. Size the benchmark's run-to-run noise (repeat the baseline 3 times on the same slices) before judging any switch. Arm 25 is done; run 7f5d624a109a stays excluded.
 2. Re-run the floor-skipped GAIA L2 cases (1 in arm 22, 4 in arm 23).
 3. A gentler re-grounding arm (every 10, keep 4) and a higher reasoning-effort arm.
-4. Skills step 2: catalog in `task_rules`, `use_skill`, trust tiers, `[skills] enabled`.
+4. Skills step 4 on: `skills list/show/install` with the review and trust tiers, the bundled default set, distillation'"'"'s own skills, and the benchmark arm before the catalog is on by default.
 5. Long-run changes D, E remainder, F, G.
 6. The post-backoff hang in the benchmark driver; SWE-bench scorer skips; Docker VM memory after SWE-bench slices (check and restart between waves).
 7. Barge-in "stop"; `restart` the live Sim to load the fixes and the Ollama fallback.
