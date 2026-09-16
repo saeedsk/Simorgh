@@ -189,7 +189,8 @@ This is the [[unconnected-wires]] shape again: `system.restart`, the Kernel hand
 
 **Open: the model ignores its own quiet rules.** Six of the eight misfires were fresh remarks or questions from a voice Sim could not place -- "Who did that?", a parent's "try harder, honey", "What is this game?", "You're in my heart.", and two fragments of the creator's call with a colleague, answered aloud into the call. The scaffold already forbids each one. Rewording it has been tried repeatedly (509247a, 4b35681, cd96667). The candidate fix is deterministic and awaits the creator's call: **an unplaced voice gets no reply at all unless it names Sim or answers something Sim just asked** -- it would have prevented all six, at the cost of guests having to say "Sim". A cheap second model call to judge "is this for me?" is the alternative.
 
-- **Still open:** barge-in "stop" does not interrupt speech; the `voice barge aec off` test is waiting on the creator.
+- **Barge-in, the third report (fixed 2026-09-15).** "I said stop like five, six times" and Sim talked on. The bar for "louder than Sim" is `gain x reference`; the gain was the LOUDEST mic/reference sample of a reply's first 1.2 s, so a person who starts talking inside that window sets the gain with their own voice and is locked out for the rest of that reply -- the same shape as the mic-learnt bars `EchoTracker` was written to replace, returning through the gain. It is the middle sample now (Sim fills most of the window), and `barge_in_speech_ms` is 350, since 450 was still most of a second of "stop".
+- **Open:** speaker diarization -- Iris's words were attributed to the creator when they talked across each other; telling overlapping voices apart is the missing piece (`voice/diarize.py` attributes segments but the blend still lands on one name).; the `voice barge aec off` test is waiting on the creator.
 
 ---
 
