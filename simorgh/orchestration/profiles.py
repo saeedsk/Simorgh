@@ -34,6 +34,10 @@ CHAT = Profile(
            # kind of question as "turn the light off".
            "energy_status", "energy_report", "media_now", "media_control", "media_play",
            "music_now", "music_control", "music_play",
+           # Sim'"'"'s own commands -- restart, tv show, tasks, voice off. Built,
+           # registered, gated, and in no profile at all, so every "run restart"
+           # got "I have no such tool" (live 2026-09-15).
+           "sim_command",
            # Chat could turn the kitchen light on and read the mail, and
            # could not save a text file. Asked for a PowerPoint deck,
            # Sim correctly reported that it had no way to write one and
@@ -186,7 +190,7 @@ VOICE_CHAT = replace(
            # voice got "I can't start Apple Music on your Mac from here" -- true
            # of this profile and of nothing else: the typed chat had these all
            # along (the creator, 2026-09-15).
-           "music_now", "music_control", "music_play",
+           "music_now", "music_control", "music_play", "sim_command",
            "voice_setting", "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "dash_key", "tv_app", "tv_key", "tv_charts",
            "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
            "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch"),

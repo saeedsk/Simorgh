@@ -81,3 +81,11 @@ class MusicByVoiceTestCase(unittest.TestCase):
         for tool in ("music_now", "music_control", "music_play"):
             self.assertIn(tool, VOICE_CHAT.tools, tool)
             self.assertIn(tool, CHAT.tools, tool)
+
+    def test_sim_can_press_its_own_buttons_from_either_chat(self):
+        """Built, registered, gated -- and in no profile, so "run restart" got
+        "I have no such tool" every time (live 2026-09-15)."""
+        from simorgh.orchestration.profiles import CHAT, VOICE_CHAT
+
+        self.assertIn("sim_command", CHAT.tools)
+        self.assertIn("sim_command", VOICE_CHAT.tools)

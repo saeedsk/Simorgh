@@ -53,9 +53,12 @@ class TheRestart(unittest.IsolatedAsyncioTestCase):
         with mock.patch.dict("os.environ", {"SIMORGH_LOADER_NOTES": "/tmp/notes"}):
             await session._restart(1, speaker="Saeed")                 # noqa: SLF001
         self.assertEqual(session.spoken, ["Restarting now."])
-        self.assertEqual([t for t, _ in session.published], [topics.SYSTEM_RESTART])
-        self.assertIn("Saeed", session.published[0][1]["reason"])
-        self.assertTrue(session.published[0][1]["self_check_passed"])
+        # Interface runs it: `system.restart` may only be published by
+        # interface, kernel or execution, and publishing it from here failed
+        # with "policy: voice may not publish system.restart" (live 2026-09-15).
+        self.assertEqual([t for t, _ in session.published], [topics.UI_COMMAND_REQUEST])
+        self.assertEqual(session.published[0][1]["line"], "restart")
+        self.assertIn("Saeed", session.published[0][1]["requested_by"])
 
     async def test_a_voice_sim_cannot_place_is_refused(self):
         session = self._session()

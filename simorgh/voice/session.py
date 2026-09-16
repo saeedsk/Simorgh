@@ -1316,8 +1316,13 @@ class VoiceSession:
         clock.reply_at = self._now()
         await self._speak_reply(turn_id, "Restarting now.", clock, Context())
         self._log("info", "voice.restart", speaker=speaker, turn=turn_id)
-        await self._pipeline._publish(topics.SYSTEM_RESTART, {  # noqa: SLF001
-            "reason": f"{speaker} asked for a restart by voice", "self_check_passed": True})
+        # Interface runs it, not voice: `system.restart` may only be published
+        # by interface, kernel or execution (contracts/topics.py), so doing it
+        # here failed with "policy: voice may not publish system.restart" and
+        # the restart never happened (live 2026-09-15). The typed `restart`
+        # command is exactly what this asks for.
+        await self._pipeline._publish(topics.UI_COMMAND_REQUEST, {  # noqa: SLF001
+            "line": "restart", "requested_by": f"{speaker} by voice"})
 
     async def _report_synthesis(self, report) -> None:
         """A voice that could not be used, or a reply that could not be
