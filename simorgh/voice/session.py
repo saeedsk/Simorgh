@@ -926,7 +926,14 @@ class VoiceSession:
             await self._stay_quiet(turn_id)
             return
         self._room.append(("Sim", _strip_tone(reply), self._now(), "reply"))
-        self._talking_with[speaker or "someone"] = self._now()
+        # Only a NAMED person starts a conversation. "someone" is not a
+        # person -- it is every voice Sim cannot place, merged into one
+        # key, so answering one of them claimed a live conversation with
+        # all of them for `conversation_window_s`. The creator's work call,
+        # 2026-09-16: one mistaken answer, then Sim answered his colleagues
+        # for the next forty minutes, each turn renewing the window.
+        if speaker:
+            self._talking_with[speaker] = self._now()
         took = clock.reply_at - clock.final_at if clock.final_at else 0.0
         context = Context(user_text=text, language=language, turns=self.stats.turns,
                           turns_since_connector=self._turns_since_connector,
@@ -1006,9 +1013,12 @@ class VoiceSession:
         quiet rules apply to that person -- they are talking to Sim, and the
         pace of the exchange says so more reliably than any wording test."""
         window = float(getattr(self._config, "conversation_window_s", 0.0) or 0.0)
-        if window <= 0:
+        if window <= 0 or not speaker:
+            # An unplaceable voice is never "mid-conversation": the quiet
+            # rules are exactly what it needs, and this check is what
+            # turned them all off (see `_speak_reply`).
             return False
-        last = self._talking_with.get(speaker or "someone")
+        last = self._talking_with.get(speaker)
         return last is not None and 0.0 <= self._now() - last <= window
 
     async def _continuation(self, turn_id: int, speaker: str, text: str) -> bool:
