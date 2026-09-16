@@ -69,8 +69,10 @@ async def describe_stills(paths: list[str], *, camera: str, bus, kinds=(), timeo
     body = reply.payload or {}
     if body.get("ok") is False:
         return "", str(body.get("error") or "")[:200]
-    said = str(body.get("text") or "").strip()
-    return said, "" if said else "the model returned nothing"
+    # An empty answer is not a problem to report -- it is nothing to say.
+    # Reporting it turned a dud reply into "Sim could not look" on screen,
+    # which is the line reserved for having no eyes at all.
+    return str(body.get("text") or "").strip(), ""
 
 
 class CameraDescribeTool:
@@ -137,8 +139,9 @@ class CameraDescribeTool:
         said, problem = await describe_stills(
             paths, camera=camera, bus=ctx.bus,
             timeout=float(getattr(self._config, "camera_vision_timeout_s", 60.0)))
-        if problem:
-            return ToolResult(ok=False, error=f"took {len(paths)} still(s) but could not look at them: {problem}")
+        if problem or not said:
+            why = problem or "the model returned nothing"
+            return ToolResult(ok=False, error=f"took {len(paths)} still(s) but could not look at them: {why}")
         return ToolResult(ok=True, output=f"{camera}: {said}",
                           metadata={"camera": camera, "stills": len(paths), "description": said})
 

@@ -805,7 +805,7 @@ class TestBuiltinTools(unittest.TestCase):
             "music_now", "music_control", "music_play",
             "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "cast_use", "cast_setup", "tv_pair", "tv_app", "tv_key", "tv_charts", "memory_forget", "dash_view", "dash_key",
             "cam_setup", "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren",
-            "cam_ptz", "cam_recordings", "cam_watch",
+            "cam_ptz", "cam_recordings", "cam_watch", "camera_describe",
             "ring_setup", "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch", "ring_live",
             "propose_mcp_server", "run_shell", "sim_command",
         })
