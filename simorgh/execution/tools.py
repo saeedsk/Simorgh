@@ -2038,12 +2038,12 @@ class CancelTaskTool:
         if why:
             return ToolResult(ok=False, error=why)
         live = [t for t in tasks if str(t.get("status") or "") not in _TASK_TERMINAL]
-        if everything:
-            targets = list(live)
 
         def _matches(t: dict, prefix: str) -> bool:
             return bool(prefix) and str(t.get("task_id") or "").startswith(prefix)
 
+        if everything:
+            targets = list(live)
         elif task_id:
             targets = [t for t in live if _matches(t, task_id)]
             if len(targets) > 1:
