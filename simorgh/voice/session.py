@@ -977,6 +977,12 @@ class VoiceSession:
             return False
         if self._speakers is None or self._embedder is None:
             return False
+        if not self._speakers.has_voices():
+            # Nobody is enrolled, so nobody can ever be placed: the rule would
+            # silence the whole house. Live 2026-09-15, minutes after it was
+            # written -- the creator deleted his own voice while clearing a
+            # bogus "Myself" entry, and every turn became unplaced.
+            return False
         if int(self._config.introduce_after_turns) > 0:
             # Asking a new voice its name counts its turns on the reply path
             # (`_maybe_ask_who`), so a house that has switched that on must

@@ -297,6 +297,23 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet") and "cannot place" in p.get("reason", "")]
         self.assertEqual(len(quiet), 1)
 
+    async def test_with_nobody_enrolled_the_rule_is_off(self):
+        """The creator deleted his own voice while clearing a bogus entry
+        (2026-09-15). With an empty book nobody can be placed, so requiring
+        Sim's name would silence the house."""
+        self.embedder.vector = _vec(0.0)                       # an empty book: no one to match
+        heard = iter(["what time is it", "and the date"])
+        script = _Script(*[(True, 60), (False, 110)] * 2, (False, 10_000))
+        replies = _Replies("It is nine.")
+        session, bus, tts = _session(_config(), script, replies, self.embedder, self.book)
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.2, engine="fake")
+        session._stt._inner.transcribe = _transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: len(replies.asked) >= 1, timeout=12.0)
+        self.assertEqual(replies.asked[0][0], "what time is it")
+
     async def test_a_thank_you_to_someone_else_is_not_answered(self):
         """2026-09-14, live: "Thank you." from across the room got "You're
         welcome." again and again. Courtesy words that name nobody are not
