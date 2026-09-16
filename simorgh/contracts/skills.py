@@ -134,6 +134,120 @@ def discover_skills(roots: list[tuple[str, Path]]) -> tuple[list[SkillCard], lis
     return sorted(cards.values(), key=lambda c: c.name), invalid
 
 
+#: What a skill may not quietly do. Each is a (label, pattern) pair; the
+#: reviewer reports every match with the file and line, so a person reads
+#: the actual words rather than a verdict.
+_FLAGS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("network", re.compile(r"\b(?:curl|wget|urllib|requests\.(?:get|post)|httpx|fetch\()", re.I)),
+    ("destructive", re.compile(r"\brm\s+-rf\b|\bgit\s+push\b|\bchmod\s+[0-7]{3}\b|\bsudo\b|\bmkfs\b|>\s*/dev/sd", re.I)),
+    ("credentials", re.compile(r"\b(?:API_KEY|SECRET|TOKEN|PASSWORD|\.ssh/|id_rsa|~/\.aws|environ\[)", re.I)),
+    # A skill is instructions, and instructions that argue with Sim's own
+    # rules are the attack this format invites (arxiv 2604.02837).
+    ("overrides Sim's rules", re.compile(
+        r"\b(?:ignore (?:all )?(?:previous|prior|above)|disregard (?:the )?(?:rules|instructions)|"
+        r"you are now|do not tell (?:the )?(?:user|creator|human)|without asking|bypass|"
+        r"no need to (?:ask|confirm)|skip (?:the )?(?:approval|confirmation))\b", re.I)),
+    ("hidden text", re.compile(r"[\u200b-\u200f\u2028-\u202e\ufeff]")),
+)
+#: A licence file next to the skill, or in the repository it came from.
+_LICENCE_FILES = ("LICENSE", "LICENSE.txt", "LICENSE.md", "LICENCE", "COPYING", "NOTICE")
+_OPEN_LICENCES = ("apache license", "mit license", "bsd ", "mozilla public license", "isc license",
+                  "gnu general public", "gnu lesser general public", "the unlicense", "cc0 ")
+
+
+@dataclass(frozen=True)
+class Finding:
+    label: str
+    path: str        # relative to the skill folder
+    line: int
+    text: str        # the line itself, trimmed
+
+
+@dataclass(frozen=True)
+class Review:
+    """What a skill contains, before anyone decides to trust it."""
+
+    name: str
+    licence: str                      # the licence named in a LICENSE file, or ""
+    open_licence: bool                # that licence is a recognised open one
+    scripts: tuple[str, ...] = ()     # paths of executable/code files it ships
+    findings: tuple[Finding, ...] = ()
+    files: int = 0
+    bytes_: int = 0
+
+    @property
+    def clean(self) -> bool:
+        return not self.findings
+
+
+def _licence_of(folder: Path) -> tuple[str, bool]:
+    for name in _LICENCE_FILES:
+        path = folder / name
+        if not path.is_file():
+            continue
+        head = path.read_text(encoding="utf-8", errors="replace")[:400]
+        first = " ".join(head.split())[:120]
+        low = head.lower()
+        return first, any(token in low for token in _OPEN_LICENCES)
+    return "", False
+
+
+def review_skill(folder: Path, *, max_bytes: int = 2_000_000) -> Review:
+    """Read every file of a skill and say what is in it.
+
+    Deterministic and pure: no model, no network, no execution. It reports;
+    a person (or a trusted source, §3.9 of the design) decides."""
+    folder = Path(folder)
+    card = parse_skill(folder / "SKILL.md", source="review")
+    name = card.name if isinstance(card, SkillCard) else folder.name
+    licence, is_open = _licence_of(folder)
+    scripts: list[str] = []
+    findings: list[Finding] = []
+    files = 0
+    total = 0
+    for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        rel = str(path.relative_to(folder))
+        files += 1
+        try:
+            total += path.stat().st_size
+        except OSError:
+            pass
+        if path.suffix.lower() in (".py", ".sh", ".js", ".rb", ".pl", ".ps1", ".bat") or path.stat().st_mode & 0o111:
+            scripts.append(rel)
+        if total > max_bytes:
+            findings.append(Finding("too big to read", rel, 0, f"stopped after {max_bytes} bytes"))
+            break
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            findings.append(Finding("unreadable", rel, 0, str(exc)))
+            continue
+        for number, line in enumerate(text.splitlines(), start=1):
+            for label, pattern in _FLAGS:
+                if pattern.search(line):
+                    findings.append(Finding(label, rel, number, " ".join(line.split())[:160]))
+    return Review(name=name, licence=licence, open_licence=is_open, scripts=tuple(scripts),
+                  findings=tuple(findings), files=files, bytes_=total)
+
+
+def review_text(review: Review) -> str:
+    """The review as a person reads it before approving."""
+    lines = [f"{review.name}: {review.files} file(s), {review.bytes_} bytes",
+             f"licence: {review.licence or 'NONE FOUND'}" + (" (open)" if review.open_licence else "")]
+    if review.scripts:
+        lines.append(f"scripts: {', '.join(review.scripts)}")
+    if not review.findings:
+        lines.append("nothing flagged")
+        return "\n".join(lines)
+    lines.append(f"{len(review.findings)} thing(s) to look at:")
+    for finding in review.findings[:40]:
+        where = f"{finding.path}:{finding.line}" if finding.line else finding.path
+        lines.append(f"  [{finding.label}] {where}  {finding.text}")
+    if len(review.findings) > 40:
+        lines.append(f"  ... and {len(review.findings) - 40} more")
+    return "\n".join(lines)
+
+
 def catalog_text(cards: list[SkillCard], *, profile: str = "", max_chars: int = 3000) -> str:
     """The skills a task may ask for, one line each, within `max_chars`."""
     lines: list[str] = []
@@ -157,4 +271,5 @@ def load_body(card: SkillCard, *, max_chars: int = MAX_BODY_CHARS) -> str:
     return body if len(body) <= max_chars else body[:max_chars] + "\n\n[... cut; read the rest of SKILL.md with read_file]"
 
 
-__all__ = ["InvalidSkill", "SkillCard", "catalog_text", "discover_skills", "load_body", "parse_skill", "split_frontmatter"]
+__all__ = ["Finding", "InvalidSkill", "Review", "SkillCard", "catalog_text", "discover_skills", "load_body",
+           "parse_skill", "review_skill", "review_text", "split_frontmatter"]
