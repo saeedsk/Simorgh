@@ -138,7 +138,7 @@ _TOOL_NOTES: dict[str, str] = {
                      "or not for you, or to be forgotten; say how many things went, from the result, and nothing more",
     "list_tasks": "what is running and waiting: id, status, origin, description -- read it before "
                   "saying anything about the queue",
-    "cancel_task": "stop tasks by id, by origin (curiosity, reflection, ...), or all but one (`keep`); "
+    "cancel_task": "stop tasks: `all` for every one of them, or by id, by origin (curiosity, reflection, ...), or all but one (`keep`); "
                    "the result says what stopped -- repeat exactly that, never claim a clearing it does not list",
     "delegate": "hand ONE bounded investigation to a helper with a fresh context and its own few steps "
                 "(find where X is defined, run these tests and report failures, look up a fact). You get "

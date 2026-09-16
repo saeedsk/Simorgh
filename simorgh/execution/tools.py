@@ -2007,9 +2007,10 @@ class CancelTaskTool:
     name = "cancel_task"
     read_only = False
     reversibility = "reversible"
-    description = ("Stop tasks. Give `task_id` (a prefix is enough), or `origin` (curiosity, reflection, "
-                   "research, project, assistant, human) to stop every running or waiting task of that "
-                   "origin, or `keep` (a task id) to stop everything else. Says what it stopped; repeat that.")
+    description = ("Stop tasks. `all` stops every running and waiting one; or give `task_id` (a prefix is "
+                   "enough), or `origin` (curiosity, reflection, research, project, assistant, human) to stop "
+                   "every task of that origin, or `keep` (a task id) to stop everything else. Says what it "
+                   "stopped; repeat that.")
     args_schema = {"type": "object", "properties": {
         "task_id": {"type": "string"}, "origin": {"type": "string"}, "keep": {"type": "string"},
         "reason": {"type": "string"}}}
@@ -2024,17 +2025,26 @@ class CancelTaskTool:
         task_id = str(args.get("task_id") or "").strip()
         origin = str(args.get("origin") or "").strip().lower()
         keep = str(args.get("keep") or "").strip()
-        if not (task_id or origin or keep):
-            return ToolResult(ok=False, error="say which: task_id, origin, or keep=<the one task to leave running>")
+        # "Just clear all tasks" (the creator, 2026-09-15) had no form at all:
+        # an id, an origin or keep-this-one, and nothing for "everything". The
+        # model wrote CANCEL_TASK with an empty line five times, was refused
+        # five times, and told him to go to the terminal.
+        everything = task_id.lower() in ("all", "everything", "*") or origin in ("all", "everything", "*")
+        if everything:
+            task_id, origin = "", ""
+        if not (everything or task_id or origin or keep):
+            return ToolResult(ok=False, error="say which: `all`, a task_id, an origin, or keep=<the one to leave running>")
         tasks, why = await _task_list(ctx)
         if why:
             return ToolResult(ok=False, error=why)
         live = [t for t in tasks if str(t.get("status") or "") not in _TASK_TERMINAL]
+        if everything:
+            targets = list(live)
 
         def _matches(t: dict, prefix: str) -> bool:
             return bool(prefix) and str(t.get("task_id") or "").startswith(prefix)
 
-        if task_id:
+        elif task_id:
             targets = [t for t in live if _matches(t, task_id)]
             if len(targets) > 1:
                 ids = ", ".join(str(t.get("task_id") or "")[:12] for t in targets)
