@@ -145,13 +145,54 @@ class OllamaProvider:
             raise ProviderUnavailable(f"Ollama request failed: {exc!r}") from exc
 
 
+#: A camera frame is 1310 KB at a Reolink's full resolution and 37 KB from
+#: Ring. Measured 2026-09-15: the same two-frame question took 43.3s on the
+#: NVR pair and 10.6s on the Ring pair. A description of what is happening
+#: does not need the sensor's every pixel, and a doorbell answered forty
+#: seconds late is not an answer.
+VISION_MAX_EDGE = 1024
+
+
+def _shrunk(data: bytes, *, max_edge: int = VISION_MAX_EDGE) -> bytes:
+    """A picture small enough to look at quickly, or the original back.
+
+    Pillow is optional on purpose: without it the picture still goes, just
+    slowly, rather than the model going blind. Lives here rather than beside
+    the cameras because it belongs to encoding, and because Cognition may
+    not import Execution (tests/simorgh/test_module_boundaries.py).
+    """
+    try:
+        from PIL import Image  # type: ignore
+    except ImportError:
+        return data          # no Pillow: the picture still goes, just slowly
+    try:
+        import io
+
+        with Image.open(io.BytesIO(data)) as image:
+            if max(image.size) <= max_edge:
+                return data
+            image = image.convert("RGB")
+            image.thumbnail((max_edge, max_edge))
+            out = io.BytesIO()
+            image.save(out, format="JPEG", quality=80, optimize=True)
+            return out.getvalue() or data
+    except Exception:  # noqa: BLE001 -- a frame Pillow cannot read is still a frame
+        return data
+
+
 def _encoded(path: str) -> str:
     """One picture as base64, or "" when it cannot be read -- a missing
-    still is one fewer angle on the scene, not a failed call."""
+    still is one fewer angle on the scene, not a failed call.
+
+    Shrunk first when it is big: a 1310 KB camera frame took 43s to
+    describe where a 37 KB one took 10.6s (measured 2026-09-15), and the
+    extra pixels say nothing more about what is happening.
+    """
     try:
-        return base64.b64encode(Path(path).read_bytes()).decode("ascii")
+        data = Path(path).read_bytes()
     except Exception:  # noqa: BLE001 -- unreadable, gone, or not a file
         return ""
+    return base64.b64encode(_shrunk(data)).decode("ascii")
 
 
 __all__ = ["OllamaProvider", "DEFAULT_BASE_URL", "DEFAULT_KEEP_ALIVE", "DEFAULT_NUM_CTX"]

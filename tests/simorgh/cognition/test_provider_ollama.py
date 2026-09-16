@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ from pathlib import Path
 from simorgh.cognition.api import ProviderUnavailable, Purpose
 from simorgh.cognition.config import Config
 from simorgh.cognition.providers.base import FloorProvider
-from simorgh.cognition.providers.ollama import OllamaProvider
+from simorgh.cognition.providers.ollama import VISION_MAX_EDGE, OllamaProvider, _shrunk
 from simorgh.cognition.router import Router
 from tests.simorgh.cognition.test_router import _FakeProvider, _budget
 from tests.simorgh.helpers import FakeClock
@@ -129,6 +130,38 @@ class OnlyPurposes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cfg.providers["ollama"].model, "qwen3:4b")
         self.assertEqual(list(cfg.providers["ollama"].only_purposes), ["chat"])
         self.assertNotIn("ollama", Config().providers, "not configured by default")
+
+
+
+class ShrinkingAPictureBeforeLookingAtIt(unittest.TestCase):
+    """A Reolink frame is 1310 KB and a Ring one 37 KB; the same
+    two-frame question took 43.3s against the first pair and 10.6s
+    against the second (measured 2026-09-15). A doorbell answered forty
+    seconds late is not an answer.
+    """
+
+    def _jpeg(self, size) -> bytes:
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGB", size, (90, 120, 160)).save(buffer, format="JPEG", quality=95)
+        return buffer.getvalue()
+
+    def test_a_big_frame_comes_back_smaller(self):
+        big = self._jpeg((2560, 1920))
+        small = _shrunk(big)
+        self.assertLess(len(small), len(big))
+        from PIL import Image
+
+        with Image.open(io.BytesIO(small)) as image:
+            self.assertLessEqual(max(image.size), VISION_MAX_EDGE)
+
+    def test_a_small_frame_is_left_exactly_alone(self):
+        small = self._jpeg((640, 480))
+        self.assertEqual(_shrunk(small), small, "re-encoding a small frame only loses quality")
+
+    def test_something_that_is_not_a_picture_is_returned_unchanged(self):
+        self.assertEqual(_shrunk(b"not a jpeg at all"), b"not a jpeg at all")
 
 
 if __name__ == "__main__":
