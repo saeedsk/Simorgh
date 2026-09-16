@@ -88,6 +88,45 @@ def _unlabelled(text: str) -> str:
     return body.strip() or (text or "").strip()
 
 
+#: A procedure needs more than one step to be one. Every finished chat
+#: turn would otherwise write a "procedure", and episodic memory already
+#: shows where that ends: 2,422 turn transcripts against 134 summaries
+#: (the creator's ledger, 2026-09-16).
+_PROCEDURE_MIN_TOOLS = 2
+
+
+def procedure_from(session, outcome) -> str:
+    """How this task was actually done, in the order it was done -- or "".
+
+    `memory:procedural` had never held a single record. Its only writer
+    was skill acquisition (`learning/pipeline.py`), which fires when Sim
+    writes itself a new tool, and it never had. So the one kind of memory
+    meant to answer "how did I do this last time" was empty while 2,422
+    episodic transcripts answered "what was said".
+
+    Only a completed task, and only the tool steps that actually
+    succeeded: a sequence containing a step that failed is not a recipe
+    for repeating it.
+    """
+    if getattr(outcome, "kind", "") != "completed":
+        return ""
+    tools = [step.tool for step in getattr(session, "steps", [])
+             if getattr(step, "tool", None) and getattr(step, "ok", None) is not False]
+    if len(tools) < _PROCEDURE_MIN_TOOLS:
+        return ""
+    ordered, seen_last = [], ""
+    for tool in tools:            # a tool used twice running is one move, not two
+        if tool != seen_last:
+            ordered.append(tool)
+            seen_last = tool
+    # `user_text` is what the task was asked as; `Session` has no
+    # `description`, and reading one would have fallen through to the
+    # summary on every real procedure while the tests -- built on the same
+    # wrong attribute -- passed.
+    what = (getattr(session, "user_text", "") or getattr(outcome, "result_summary", "") or "a task").strip()
+    return f"To {what[:200]}: " + " -> ".join(ordered)
+
+
 class Worker:
     def __init__(
         self, bus, ledger, *, clock=None, worker_id: str | None = None,
@@ -446,6 +485,19 @@ class Worker:
         event = await self._deoversize_for_ledger(event, ("result_summary", "reason"))
         await self._ledger.append(f"task:{session.task_id}", event)
         await self._bus.publish(msg)
+
+        # What Sim did, so it can be asked how next time. Episodic memory
+        # keeps what was SAID; this keeps what was DONE, and until now
+        # nothing ever wrote one.
+        procedure = procedure_from(session, outcome)
+        if procedure:
+            await self._bus.publish(Message.new(
+                topics.MEMORY_STORE, source=self._bus.source,
+                payload={"kind": "procedural", "content": procedure,
+                         "tags": ["procedure", f"task:{session.task_id}"],
+                         "source_ref": session.task_id},
+                trace_id=session.task_id, clock=self._clock,
+            ))
 
         # `turn.completed` was published for `session.kind == "chat"`
         # only -- but Memory's `_on_turn_completed` is the ONLY thing

@@ -39,6 +39,7 @@ class Service:
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_PAUSED, topics.TASK_COMPLETED,
         topics.TASK_FAILED, topics.TASK_BLOCKED, topics.TURN_COMPLETED,
         topics.ACTION_PROPOSED, topics.VERIFY_REQUESTED, topics.SYSTEM_METRICS,
+        topics.MEMORY_STORE,
     )
 
     def __init__(self, config: Config | None = None) -> None:
