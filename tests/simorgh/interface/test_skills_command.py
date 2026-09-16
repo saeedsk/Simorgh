@@ -164,5 +164,76 @@ Read the labels first.
         self.assertIn("no sub-command", outcome.text)
 
 
+
+class UpdatingAnInstalledSkill(unittest.IsolatedAsyncioTestCase):
+    """`skills update <name>`: re-fetch at the tip, and stop for a person
+    when what Sim actually runs has changed (design section 3.6)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name) / "home"
+        self.repo = Path(self._tmp.name) / "repo"
+        self._real_home = dispatch_mod.SKILLS_HOME
+        dispatch_mod.SKILLS_HOME = self.home
+
+    def tearDown(self):
+        dispatch_mod.SKILLS_HOME = self._real_home
+        self._tmp.cleanup()
+
+    async def _run(self, args, *, folder=None, commit="abc123def456"):
+        async def _clone(source, into):
+            return (folder if folder is not None else self.repo), commit, ""
+        ledger = _Ledger()
+        outcome = await dispatch_mod._skills_command(args, ledger=ledger, clock=_clock(), clone=_clone)  # noqa: SLF001
+        return outcome, ledger
+
+    async def _install(self, folder, commit="abc123def456"):
+        return await self._run("install github.com/anthropics/skills#pdf", folder=folder, commit=commit)
+
+    async def test_nothing_upstream_changed(self):
+        folder = _skill(self.repo.parent / "v1", "pdf", PDF)
+        await self._install(folder)
+        outcome, _ = await self._run("update pdf-reading", folder=folder)
+        self.assertIn("already at", outcome.text)
+
+    async def test_a_changed_script_waits_for_a_person(self):
+        folder = _skill(self.repo.parent / "v1", "pdf", PDF)
+        (folder / "run.py").write_text("print('one')\n", encoding="utf-8")
+        await self._install(folder)
+        (folder / "run.py").write_text("print('two')\n", encoding="utf-8")
+        outcome, ledger = await self._run("update pdf-reading", folder=folder, commit="newcommit0001")
+        self.assertIn("what Sim runs changed", outcome.text)
+        self.assertIn("run.py", outcome.text)
+        self.assertIn("skills approve pdf-reading", outcome.text)
+        self.assertEqual(ledger.events[-1].payload["status"], "waiting")
+
+    async def test_changed_instructions_wait_too(self):
+        folder = _skill(self.repo.parent / "v1", "pdf", PDF)
+        await self._install(folder)
+        (folder / "SKILL.md").write_text(PDF.replace("quote the figure", "quote the figure exactly"), encoding="utf-8")
+        outcome, _ = await self._run("update pdf-reading", folder=folder, commit="newcommit0002")
+        self.assertIn("SKILL.md", outcome.text)
+        self.assertIn("NOT enabled", outcome.text)
+
+    async def test_documentation_only_updates_in_place(self):
+        folder = _skill(self.repo.parent / "v1", "pdf", PDF)
+        await self._install(folder)
+        (folder / "reference.md").write_text("some new prose\n", encoding="utf-8")
+        outcome, ledger = await self._run("update pdf-reading", folder=folder, commit="newcommit0003")
+        self.assertIn("documentation only", outcome.text)
+        self.assertEqual(ledger.events[-1].payload["status"], "enabled")
+
+    async def test_a_skill_with_no_lock_says_so_rather_than_guessing(self):
+        outcome, _ = await self._run("update never-installed")
+        self.assertIn("nothing installed", outcome.text)
+        self.assertIn("reinstall", outcome.text, "Source.name is only org/repo: there is no URL to guess")
+
+    async def test_remove_forgets_the_lock_too(self):
+        folder = _skill(self.repo.parent / "v1", "pdf", PDF)
+        await self._install(folder)
+        await self._run("remove pdf-reading")
+        outcome, _ = await self._run("update pdf-reading")
+        self.assertIn("nothing installed", outcome.text)
+
 if __name__ == "__main__":
     unittest.main()

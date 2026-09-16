@@ -91,6 +91,12 @@ A bundled script never runs because a skill loaded. The model asks for it like a
 
 **Update.** `skills update <name>` re-fetches, diffs against the lock, and needs approval again if any script or instruction changed. A trusted-org skill moves its pinned commit only by an explicit `skills update`; it is never auto-pulled.
 
+Built 2026-09-15. Two things the implementation forced:
+
+- The lock stores the **whole** `Source` (host, org, repo, `#path`) beside the commit. `Source.name` is only `org/repo`, so a record holding just the name has no URL to re-fetch from -- an install written before the lock existed cannot be updated, and `update` says so rather than guessing.
+- The lock hashes **every file**, not `SkillCard.sha256`, which covers `SKILL.md` alone. Diffing against that hash would have missed a changed script entirely -- the one change this section says must stop for approval.
+- What changed decides what happens: a changed script or changed `SKILL.md` drops the skill back to waiting and names the files; a documentation-only change on a trusted org with a clean review updates in place.
+
 **Other commands.** `skills remove <name>`, `skills list` (enabled, pending, invalid), `skills show <name>`.
 
 This review exists because published work documents real attacks and specification violations in skills ([a threat taxonomy](https://arxiv.org/pdf/2604.02837), [semantic fuzzing](https://arxiv.org/pdf/2605.13044), [SkillTester](https://arxiv.org/pdf/2603.28815)).
@@ -179,7 +185,7 @@ Brand guidelines, internal communications and algorithmic art are not what a hom
 | 2 ✅ (ebbae74) | Catalog block in `task_rules` (capped, per-profile) and the `use_skill` tool with the tool-name mapping note | a scripted session loads a skill and its instructions reach the model; the catalog is absent when `[skills] enabled = false` |
 | 3 ✅ (7e5a94f) | Guardian read-only path rule for skill roots; scripts only through `run_script` | a skill script is not run without a gated call |
 | 4 | `skills list/show/remove`; `install` from git at a commit, with the deterministic review, trust tiers (§3.9), `approve`, and `lock.json` | a hostile fixture skill is flagged and not enabled; an approved skill appears in the catalog |
-| 5 | `skills update` with diff and re-approval; `skills search` over configured sources | a changed script needs re-approval |
+| 5 ◐ | `skills update` with diff and re-approval **done**; `skills search` over configured sources still open | a changed script needs re-approval |
 | 6 | Default bundled set (licence-checked) | `skills/` committed with `LICENSE`/`NOTICE` |
 | 7 | Distillation writes pending `SKILL.md` | a solved task yields a pending skill for approval |
 | 8 | Benchmark arms: none / default / default+document | results appended to `docs/benchmark-analysis-2026-09-14.md` |

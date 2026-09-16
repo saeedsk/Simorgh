@@ -1731,6 +1731,42 @@ def _skill_roots() -> list[tuple[str, Path]]:
     return roots
 
 
+def _lock_path() -> Path:
+    return SKILLS_HOME.expanduser() / "lock.json"
+
+
+def _read_lock() -> dict:
+    """What is installed, how to fetch it again, and what it hashed to."""
+    try:
+        return json.loads(_lock_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_lock(lock: dict) -> None:
+    path = _lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(lock, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _file_hashes(folder: Path) -> dict:
+    """sha256 of every file in the skill, by relative path.
+
+    `SkillCard.sha256` hashes SKILL.md alone, so a diff against it would
+    miss a changed script entirely -- the one change section 3.6 says must
+    stop for approval. The lock hashes everything.
+    """
+    import hashlib
+
+    out = {}
+    for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        try:
+            out[str(path.relative_to(folder))] = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            continue
+    return out
+
+
 async def _clone_at(source, into: Path) -> tuple[Path, str, str]:
     """`(folder, commit, problem)` -- a shallow clone, pinned to a commit."""
     url = f"https://{source.host}/{source.org}/{source.repo}.git"
@@ -1863,6 +1899,17 @@ async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clon
                       "notes": [f"{f.label} {f.path}:{f.line}" for f in review.notes],
                       "trusted": source.trusted, "path": str(home),
                       "status": "enabled" if (source.trusted and review.clean) else "waiting"}
+            # The lock is what makes `skills update` possible at all:
+            # `Source.name` is only "org/repo", so without the host, the
+            # #path and the pinned commit there is nothing to re-fetch.
+            lock = _read_lock()
+            lock[review.name] = {
+                "host": source.host, "org": source.org, "repo": source.repo, "path": source.path,
+                "commit": commit, "licence": review.licence, "trusted": source.trusted,
+                "installed_at": clock.now(), "path_on_disk": str(home),
+                "status": record["status"], "files": _file_hashes(home),
+            }
+            _write_lock(lock)
             await ledger.append(SKILLS_STREAM, Event(
                 stream=SKILLS_STREAM, type="installed", ts=clock.now(), trace_id=review.name,
                 causation_id=None, payload=record))
@@ -1872,6 +1919,66 @@ async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clon
             why = "review flagged something" if not review.clean else "not a trusted org"
             return Outcome(f"{head}: {why}, so it is NOT enabled.\n{review_text(review)}\n"
                            f"`skills approve {review.name}` to enable it, `skills remove {review.name}` to drop it.")
+
+    if sub == "update":
+        if not rest:
+            return Outcome("usage: skills update <name>")
+        name = rest.lower()
+        lock = _read_lock()
+        entry = lock.get(name)
+        if entry is None:
+            return Outcome(f"nothing installed called {name!r} with a lock to update from "
+                           "-- `skills` lists what is here; reinstall it to make it updatable")
+        from simorgh.contracts.skills import Source
+
+        source = Source(host=entry["host"], org=entry["org"], repo=entry["repo"], path=entry.get("path", ""))
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder, commit, problem = await clone(source, Path(tmp) / "repo")
+            if problem:
+                return Outcome(f"refused: {problem}")
+            if not (folder / "SKILL.md").is_file():
+                return Outcome(f"no SKILL.md at {source.path or '/'} any more in {source.name}")
+            if commit == entry.get("commit"):
+                return Outcome(f"{name}: already at {commit[:12]} -- nothing upstream has changed")
+            fresh = _file_hashes(folder)
+            was = entry.get("files") or {}
+            changed = sorted(p for p in set(fresh) | set(was) if fresh.get(p) != was.get(p))
+            # A changed script, or changed instructions, is a new thing to
+            # trust -- not the thing that was approved.
+            decisive = [p for p in changed
+                        if p == "SKILL.md" or Path(p).suffix.lower() in (".py", ".sh", ".js", ".rb", ".pl", ".ps1", ".bat")]
+            review = review_skill(folder)
+            head = f"{name}: {entry.get('commit', '')[:12]} -> {commit[:12]}, {len(changed)} file(s) changed"
+            if not decisive and source.trusted and review.clean:
+                home = Path(entry["path_on_disk"])
+                if home.exists():
+                    shutil.rmtree(home)
+                home.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(folder, home)
+                lock[name] = {**entry, "commit": commit, "files": fresh, "licence": review.licence,
+                              "installed_at": clock.now()}
+                _write_lock(lock)
+                await ledger.append(SKILLS_STREAM, Event(
+                    stream=SKILLS_STREAM, type="updated", ts=clock.now(), trace_id=name, causation_id=None,
+                    payload={"name": name, "commit": commit, "changed": changed, "status": "enabled"}))
+                return Outcome(f"{head}; documentation only, review clean -- updated in place\n{review_text(review)}")
+            waiting = SKILLS_HOME.expanduser() / "review" / name
+            waiting.parent.mkdir(parents=True, exist_ok=True)
+            if waiting.exists():
+                shutil.rmtree(waiting)
+            shutil.copytree(folder, waiting)
+            lock[name] = {**entry, "commit": commit, "files": fresh, "status": "waiting",
+                          "path_on_disk": str(waiting), "installed_at": clock.now()}
+            _write_lock(lock)
+            await ledger.append(SKILLS_STREAM, Event(
+                stream=SKILLS_STREAM, type="updated", ts=clock.now(), trace_id=name, causation_id=None,
+                payload={"name": name, "commit": commit, "changed": changed, "status": "waiting"}))
+            why = "what Sim runs changed" if decisive else "the review flagged something"
+            detail = ("\n  " + "\n  ".join(decisive[:10])) if decisive else ""
+            return Outcome(f"{head}; {why}, so it is NOT enabled until you approve it:{detail}\n"
+                           f"{review_text(review)}\n`skills approve {name}` to enable the new version.")
 
     if sub == "approve":
         if not rest:
@@ -1902,13 +2009,16 @@ async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clon
                 gone.append(str(folder))
         if not gone:
             return Outcome(f"no installed skill called {rest!r} (bundled skills are part of the repo)")
+        lock = _read_lock()
+        if lock.pop(rest.lower(), None) is not None:
+            _write_lock(lock)
         await ledger.append(SKILLS_STREAM, Event(
             stream=SKILLS_STREAM, type="removed", ts=clock.now(), trace_id=rest.lower(), causation_id=None,
             payload={"name": rest.lower(), "paths": gone}))
         return Outcome("removed: " + ", ".join(gone))
 
     return Outcome(f"skills: no sub-command {sub!r} -- list | show <name> | review <folder> | "
-                   f"install <git-url> | approve <name> | remove <name>")
+                   f"install <git-url> | update <name> | approve <name> | remove <name>")
 
 
 async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock) -> Outcome:
