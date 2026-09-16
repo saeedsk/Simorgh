@@ -182,6 +182,11 @@ SKILL = Profile(
 VOICE_CHAT = replace(
     CHAT,
     tools=("self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task", "list_tasks", "cancel_task", "memory_forget",
+           # The Mac's own Music app. "Play jazz on the Mac on Apple Music" by
+           # voice got "I can't start Apple Music on your Mac from here" -- true
+           # of this profile and of nothing else: the typed chat had these all
+           # along (the creator, 2026-09-15).
+           "music_now", "music_control", "music_play",
            "voice_setting", "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "dash_key", "tv_app", "tv_key", "tv_charts",
            "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
            "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch"),

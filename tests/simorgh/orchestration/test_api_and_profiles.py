@@ -67,3 +67,17 @@ class TestTheVoiceChatProfile(unittest.TestCase):
         from simorgh.orchestration import profiles
         self.assertIs(profiles.for_percept("cli"), profiles.CHAT)
         self.assertIs(profiles.for_percept(""), profiles.CHAT)
+
+
+class MusicByVoiceTestCase(unittest.TestCase):
+    """"Play jazz on the Mac on Apple Music" got "I can't start Apple Music
+    on your Mac from here" (live 2026-09-15). The tools existed and drove
+    Music.app through osascript; they were in the typed chat profile and
+    not in the spoken one."""
+
+    def test_the_voice_profile_can_reach_the_macs_music(self):
+        from simorgh.orchestration.profiles import CHAT, VOICE_CHAT
+
+        for tool in ("music_now", "music_control", "music_play"):
+            self.assertIn(tool, VOICE_CHAT.tools, tool)
+            self.assertIn(tool, CHAT.tools, tool)
