@@ -29,6 +29,8 @@ import re
 #: (`orchestration/service.py::_on_tool_registered`), so the CLI's
 #: `tool` command understands those too without a second mechanism.
 MARKER_ARG_KEY: dict[str, str] = {
+    # "SIM_COMMAND: restart" -- the line a person would type.
+    "sim_command": "command",
     # The TV (execution/media/cast.py). One line of text each; the tool
     # reads the rest of the line -- `<url> full`, `35 Bedroom` -- itself.
     # Without these rows every spoken "cast it" arrived as no arguments

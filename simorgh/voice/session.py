@@ -31,7 +31,7 @@ from simorgh.contracts import topics
 
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
 from .backchannel import GREETING, Backchannel, addressed, classify, is_quiet, strip_lead
-from .commands import MUTE, OFF, STOP, spoken_command
+from .commands import MUTE, OFF, RESTART, STOP, spoken_command
 from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply, register_for_tone
 from .config import Config
 from .lang import language_of
@@ -774,7 +774,7 @@ class VoiceSession:
         self._last_user_text = text
         command = spoken_command(text)
         if command is not None:
-            await self._obey(turn_id, command)
+            await self._obey(turn_id, command, speaker=speaker, clock=clock)
             return
         if _WHO_IS_SPEAKING.search(text) and self._speakers is not None and self._speakers.has_voices():
             # "Who is talking now?" is a fact the voice layer holds; the
@@ -1159,10 +1159,18 @@ class VoiceSession:
         clock.reply_at = self._now()
         await self._speak_reply(turn_id, said, clock, Context(user_text=text))
 
-    async def _obey(self, turn_id: int, command: str) -> None:
-        """"Stop", "be quiet", "voice off": done here and now, the model
-        never hears of it. Playback is cut, the floor goes back to
-        listening (or, for off/mute, to the service to close)."""
+    async def _obey(self, turn_id: int, command: str, *, speaker: str = "", clock=None) -> None:
+        """"Stop", "be quiet", "voice off", "restart": done here and now,
+        the model never hears of it. Playback is cut, the floor goes back
+        to listening (or, for off/mute, to the service to close).
+
+        `restart` (the creator, by voice, 2026-09-15: "it should be able to
+        restart itself") publishes the same `system.restart` the typed
+        command does, and only for a voice the house knows: an advert
+        saying "restart" must not take Sim down, the same reason as
+        `unplaced_voice_refusal`. Refused aloud when this process was not
+        started by `simloader.py` -- nothing would bring Sim back, and the
+        person asking is not at a keyboard."""
         for task in (self._ack_task, self._still_task):
             if task is not None and not task.done():
                 task.cancel()
@@ -1176,10 +1184,37 @@ class VoiceSession:
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "interrupted": False,
             "command": command, "turn": turn_id})
+        if command == RESTART:
+            await self._restart(turn_id, speaker=speaker, clock=clock)
+            return
         if command in (OFF, MUTE):
             # The service owns on/off; this session is about to be closed by it.
             await self._pipeline._publish(topics.VOICE_CONTROL_REQUEST, {  # noqa: SLF001
                 "action": "off" if command == OFF else "mute"})
+
+    async def _restart(self, turn_id: int, *, speaker: str, clock=None) -> None:
+        """Say one line, then publish `system.restart` -- what
+        `interface/dispatch.py` does for the typed command.
+        `self_check_passed=True` because the loader's own gate is what
+        verifies the source before it runs."""
+        import os
+
+        clock = clock or self._clocks.get(turn_id) or TurnClock(turn_id=turn_id)
+        if not speaker:
+            clock.reply_at = self._now()
+            await self._speak_reply(turn_id, "A restart is only for a voice I know. Say it again "
+                                             "and I'll hear who you are.", clock, Context(is_error=True))
+            return
+        if not os.environ.get("SIMORGH_LOADER_NOTES"):
+            clock.reply_at = self._now()
+            await self._speak_reply(turn_id, "I wasn't started through the loader, so a restart would stop me "
+                                             "for good. Run sim.sh and I'll come back.", clock, Context(is_error=True))
+            return
+        clock.reply_at = self._now()
+        await self._speak_reply(turn_id, "Restarting now.", clock, Context())
+        self._log("info", "voice.restart", speaker=speaker, turn=turn_id)
+        await self._pipeline._publish(topics.SYSTEM_RESTART, {  # noqa: SLF001
+            "reason": f"{speaker} asked for a restart by voice", "self_check_passed": True})
 
     async def _report_synthesis(self, report) -> None:
         """A voice that could not be used, or a reply that could not be

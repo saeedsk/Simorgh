@@ -41,6 +41,7 @@ _TO_COL0 = "\r"
 # `_on_task_event` -- not invented state, the same data the old dim
 # narration line already had.
 _VERBS: dict[tuple[str, str | None], str] = {
+    ("act", "sim_command"): "Running",
     ("gather", None): "Thinking",
     ("act", "read_file"): "Reading",
     ("act", "list_dir"): "Listing",

@@ -58,6 +58,12 @@ TASK_CREATED = "task.created"
 TASK_AVAILABLE = "task.available"
 TASK_CLAIM = "task.claim"
 TASK_CLAIM_REPLY = "task.claim.reply"
+#: Sim running one of its own CLI commands ("restart", "tv show", "tasks"),
+#: asked for by the model through `sim_command` and carried out by Interface
+#: exactly as if it had been typed (the creator, 2026-09-15: "it should be
+#: able to restart itself or any other cli command I ask it to run").
+UI_COMMAND_REQUEST = "ui.command.request"
+UI_COMMAND_REPLY = "ui.command.reply"
 TASK_LIST_REQUEST = "task.list.request"
 TASK_LIST_REPLY = "task.list.reply"
 TASK_WORK_NEXT_REQUEST = "task.work_next.request"

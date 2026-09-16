@@ -113,7 +113,7 @@ class Service:
         topics.PERSONA_STATE_CHANGED, topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_METRICS,
         topics.SYSTEM_HEALTH, topics.GUARDIAN_POSTURE_CHANGED, topics.TURN_COMPLETED,
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_COMPLETED, topics.COGNITION_PROVIDER_STATUS,
-        topics.PERCEPT_TIME_SCHEDULED,
+        topics.PERCEPT_TIME_SCHEDULED, topics.UI_COMMAND_REQUEST,
     )
     produces: tuple[str, ...] = (
         topics.PERCEPT_TEXT_RECEIVED, topics.INTENT_GOAL_STATED, topics.SYSTEM_PAUSE,
@@ -224,6 +224,7 @@ class Service:
             # empty.
             await ctx.bus.subscribe(topics.PERCEPT_TIME_SCHEDULED, self._on_schedule_fired),
             await ctx.bus.subscribe(topics.UI_PROMPT, self._on_prompt),
+            await ctx.bus.subscribe(topics.UI_COMMAND_REQUEST, self._on_command_request),
             await ctx.bus.subscribe(topics.ACTION_NEEDS_HUMAN, self._on_needs_human),
             await ctx.bus.subscribe(topics.ACTION_DENIED, self._on_action_denied),
             await ctx.bus.subscribe(topics.PERSONA_STATE_CHANGED, self._on_persona_state),
@@ -660,6 +661,60 @@ class Service:
                 self._stop_repl.set()
         except Exception as exc:  # noqa: BLE001 -- the REPL must survive a handler crash (spec section 8)
             self._out(render_mod.notice("error", f"[render error] {exc!r}", "interface", enabled=self._color))
+
+    async def _on_command_request(self, message: Message) -> None:
+        """Sim running one of its own CLI commands (`sim_command`).
+
+        The creator, 2026-09-15: "it should be able to restart itself or any
+        other cli command I ask it to run". `restart`, `tv show`, `tasks`,
+        `voice off` were typed-only; the model could describe them and not
+        press them. The line goes through the same `parse` + `dispatch` a
+        typed line does, and is printed so the room can see what Sim ran.
+
+        `!` (the shell escape) is refused here: shell belongs to `run_shell`,
+        which Guardian gates on its own terms, and a bare `!rm -rf` through
+        this path would go around that."""
+        from simorgh.contracts.registry import error_reply_payload
+
+        from .parser import parse
+
+        line = str(message.payload.get("line") or "").strip()
+        asked_by = str(message.payload.get("requested_by") or "sim")
+        async def _ok(text: str, **extra) -> None:
+            await self._ctx.bus.reply(message, type=topics.UI_COMMAND_REPLY,
+                                       payload={"text": text, **extra})
+
+        async def _refused(detail: str, code: str = "refused") -> None:
+            await self._ctx.bus.reply(message, type=topics.UI_COMMAND_REPLY,
+                                       payload=error_reply_payload(code, detail))
+        if not line:
+            await _refused("no command given")
+            return
+        if line.startswith("!"):
+            await _refused("`!` runs a shell command -- use run_shell, which Guardian gates")
+            return
+        command = parse(line)
+        if command is None or command.name is None:
+            await _refused(f"{line!r} is not one of Sim's commands -- `help` lists them", code="unknown_command")
+            return
+        self._out(f"[{asked_by} ran: {line}]")
+        try:
+            outcome = await dispatch(command, bus=self._ctx.bus, clock=self._ctx.clock,
+                                      session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger)
+        except Exception as exc:  # noqa: BLE001 -- a failed command is a result, not a crashed handler
+            await _refused(f"{command.name} failed: {exc!r}", code="command_failed")
+            return
+        if outcome.text:
+            self._out(outcome.text)
+        extra = {}
+        if outcome.task_id:
+            extra["task_id"] = outcome.task_id
+            self._watched_tasks.add(outcome.task_id)
+        if outcome.exit_repl:
+            extra["exit_repl"] = True
+        await _ok(outcome.text or f"{command.name} done", **extra)
+        if outcome.exit_repl:
+            self._stop_repl.set()
 
     async def _seed_activity(self) -> None:
         """Ask Planning what already exists, so the feed can name it.

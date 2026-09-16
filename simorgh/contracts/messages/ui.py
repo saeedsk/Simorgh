@@ -35,3 +35,13 @@ DashState = define(t.DASH_STATE, [O("view", Str), O("timeframe", Str), O("symbol
 UiHookReceived = define(t.UI_HOOK_RECEIVED, [F("name", Str), F("body", Str), O("content_type", Str),
                                              O("remote", Str)],
                         doc="An inbound webhook, body verbatim (capped by the API's body limit).")
+
+UiCommandRequest = define(t.UI_COMMAND_REQUEST, [
+    F("line", Str),                 # exactly what a person would type, without the leading "/"
+    O("requested_by", Str),
+])
+UiCommandReply = define(t.UI_COMMAND_REPLY, [
+    F("text", Str),
+    O("exit_repl", Bool),
+    O("task_id", Str),
+])

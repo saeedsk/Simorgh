@@ -56,6 +56,8 @@ def unavailable_note(offered: tuple[str, ...] | list[str]) -> str:
     return "Do not spend steps on these:\n" + "\n".join(lines)
 
 _TOOL_NOTES: dict[str, str] = {
+    "sim_command": "run one of your own commands, exactly as a person would type it: restart, tasks, "
+                   "tv show, voice off, status; `help` lists them. Not a shell -- `!` is refused",
     "self_map": "ask your own world model what real subsystems/files make you up -- the authoritative "
                 "answer for questions about your own code or architecture; simorgh/ is what runs, src/ is retired v1",
     "read_file": "read a file from the repo, including a PDF (papers/ holds papers)",

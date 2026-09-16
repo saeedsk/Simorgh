@@ -1900,6 +1900,57 @@ class ListTasksTool:
                           metadata={"count": len(rows), "task_ids": [str(t.get("task_id") or "") for t in rows[:40]]})
 
 
+class SimCommandTool:
+    """Sim pressing one of its own CLI commands.
+
+    The creator, 2026-09-15: "it should be able to restart itself or any
+    other cli command I ask it to run". `restart`, `tv show`, `tasks`,
+    `voice off` existed only for a typed line, so asked out loud Sim could
+    describe the command and not run it. Interface carries the line out
+    exactly as if it had been typed (`ui.command.request`).
+
+    Irreversible on purpose: `restart` takes Sim down and back up, and
+    Guardian -- plus `unplaced_voice_refusal` -- must see every call."""
+
+    name = "sim_command"
+    read_only = False
+    reversibility = "irreversible"
+    description = ("Run one of Sim's own commands, exactly as a person would type it: "
+                   "restart, tasks, tv show, voice off, status, help. Not a shell: `!` is refused "
+                   "(use run_shell). `help` lists what there is.")
+    args_schema = {"type": "object", "required": ["command"],
+                   "properties": {"command": {"type": "string", "description": "e.g. \"restart\" or \"tv show\""}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        from simorgh.contracts import topics as _topics
+        from simorgh.contracts.envelope import Message as _Message
+
+        line = str(args.get("command") or "").strip()
+        if not line:
+            return ToolResult(ok=False, error="refused: no command given")
+        if line.startswith("!"):
+            return ToolResult(ok=False, error="refused: `!` runs a shell command -- use run_shell instead")
+        if ctx.bus is None:
+            return ToolResult(ok=False, error="running a command needs the bus, which this session has not got")
+        try:
+            reply = await ctx.bus.request(_Message.new(
+                _topics.UI_COMMAND_REQUEST, source="execution",
+                payload={"line": line, "requested_by": "sim"}), timeout=20.0)
+        except Exception as exc:  # noqa: BLE001 -- no interface, or it did not answer
+            return ToolResult(ok=False, error=f"the command did not run: {exc!r}")
+        payload = getattr(reply, "payload", {}) or {}
+        error = payload.get("error") or {}
+        if error or payload.get("ok") is False:
+            detail = str(error.get("detail") or error.get("code") or payload.get("text") or "")
+            return ToolResult(ok=False, error=f"refused: {detail}" if detail else "the command was refused")
+        text = str(payload.get("text") or "")
+        return ToolResult(ok=True, output=text or f"{line} done",
+                          metadata={"command": line, "task_id": payload.get("task_id", "")})
+
+
 class MemoryForgetTool:
     """"Forget the last minute, that was the TV" (the creator,
     2026-09-13). Sim had said "I'll wipe it from the record" with nothing
@@ -2597,7 +2648,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),
         ReplaceInFileTool(config), StartTaskTool(config), ListTasksTool(config), CancelTaskTool(config),
-        VoiceSettingTool(config), MemoryForgetTool(config),
+        VoiceSettingTool(config), MemoryForgetTool(config), SimCommandTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 
+RESTART = "restart"  # come back up on the source on disk (the creator, by voice, 2026-09-15)
 STOP = "stop"    # be quiet now; keep listening
 OFF = "off"      # stop, and stop listening too
 MUTE = "mute"    # stop listening; a typed `voice unmute` brings it back
@@ -24,6 +25,8 @@ _PHRASES: dict[str, tuple[str, ...]] = {
     MUTE: ("mute", "mute yourself", "stop listening", "mute your mic", "mute the mic", "mute your microphone",
            "mute the microphone", "mute your ears", "stop listening to us", "don't listen", "ears off",
            "گوش نده", "بی‌صدا"),
+    RESTART: ("restart", "restart yourself", "restart now", "reboot", "reboot yourself",
+              "restart please", "ری‌استارت", "ریستارت", "دوباره راه بیفت"),
     STOP: ("stop", "stop talking", "stop it", "be quiet", "quiet", "shut up", "enough", "hush", "shush",
            "that's enough", "okay stop", "ok stop", "stop please", "بس کن", "بسه", "ساکت", "ساکت شو", "خفه شو",
            "دیگه بسه", "کافیه"),
@@ -33,7 +36,7 @@ _MAX_WORDS = 5
 
 
 def spoken_command(text: str) -> str | None:
-    """`STOP`, `OFF`, `MUTE`, or None when `text` is ordinary talk."""
+    """`STOP`, `OFF`, `MUTE`, `RESTART`, or None when `text` is ordinary talk."""
     words = (text or "").strip()
     if not words or len(words.split()) > _MAX_WORDS:
         return None
@@ -42,4 +45,4 @@ def spoken_command(text: str) -> str | None:
     return _LOOKUP.get(core)
 
 
-__all__ = ["MUTE", "OFF", "STOP", "spoken_command"]
+__all__ = ["MUTE", "OFF", "RESTART", "STOP", "spoken_command"]
