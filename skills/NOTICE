@@ -1,0 +1,22 @@
+Bundled Agent Skills
+====================
+
+The skills in this directory are redistributed from the upstream
+repository below, unmodified, under the Apache License 2.0. Each skill
+keeps its own LICENSE.txt.
+
+    upstream: https://github.com/anthropics/skills
+    commit:   34040c9c568585f6929bedeaad110ad08f079624
+    fetched:  2026-09-15
+
+skill-creator   Apache-2.0   drafting and improving skills
+mcp-builder     Apache-2.0   guidance for building MCP servers
+
+Not bundled, and why:
+  pdf, docx, xlsx, pptx   source-available, not open source (c) 2025
+                          Anthropic, PBC -- may not be redistributed
+                          here. Install them locally instead:
+                            skills install github.com/anthropics/skills#skills/pdf
+  webapp-testing          Apache-2.0, but its scripts need Playwright,
+                          which this machine does not have (design
+                          section 5.4). Sim uses render_page instead.
