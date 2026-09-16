@@ -58,3 +58,17 @@ class ScoreOnScreen(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LearntOnScreen(unittest.IsolatedAsyncioTestCase):
+    """Asked twice whether Sim improves its recognition as he talks, the
+    model said no -- while the book was quietly keeping his turns as new
+    takes, 8 of them becoming 12 in an afternoon (2026-09-15)."""
+
+    async def test_a_kept_take_says_so(self):
+        service = _service(Config(show_speaker_score=True))
+        lines = await _lines(service, {"text": "hello", "speaker": "Saeed", "speaker_score": 0.71,
+                                       "speaker_learnt": "learnt your voice: Saeed now has 12 takes",
+                                       "confidence": 1.0, "turn": 1})
+        self.assertEqual(lines[0], "🎤 Saeed: hello  (0.71)")
+        self.assertIn("now has 12 takes", lines[1])

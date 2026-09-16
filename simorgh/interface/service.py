@@ -997,6 +997,8 @@ class Service:
         if getattr(self.config, "show_speaker_score", False) and isinstance(score, (int, float)) and p.get("speaker"):
             tail += f"  ({float(score):.2f})"
         self._out(render_mod.style(f"🎤 {who}: {text}{tail}", "cyan", enabled=self._color))
+        if p.get("speaker_learnt"):
+            self._out(render_mod.style(f"  ↳ {p['speaker_learnt']}", "dim", enabled=self._color))
         if p.get("speaker_note"):
             self._out(render_mod.style(f"  ↳ {p['speaker_note']}", "dim", enabled=self._color))
         session_id = str(p.get("session_id") or "")

@@ -744,7 +744,15 @@ class VoiceSession:
             if (vector is not None and not identification.probable and self._config.speaker_refine
                     and self._last_speech_s >= MIN_SECONDS and self._speakers.refine(speaker, vector)):
                 self._log("debug", "voice.speaker_refined", speaker=speaker, score=round(identification.score, 3))
+                # Silently, until the creator asked twice whether Sim was
+                # learning at all and was told no -- by a model that cannot see
+                # this happen (2026-09-15). The screen says it now.
+                person = self._speakers.get(speaker)
+                self._learnt_note = f"learnt your voice: {speaker} now has {len(person.embeddings)} takes" if person else ""
         who = {"speaker": speaker}
+        learnt, self._learnt_note = getattr(self, "_learnt_note", ""), ""
+        if learnt:
+            who["speaker_learnt"] = learnt
         if segments:
             who["segments"] = [seg.as_dict() for seg in segments]
         if identification is not None:
