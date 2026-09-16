@@ -12,7 +12,14 @@ from .api import Budget
 from .providers import together as together_provider
 
 DEFAULT_PURPOSE_BUDGETS: dict[str, Budget] = {
-    "chat": Budget(12_000, 1_000, 0.05),
+    # 90s, not the 180s default: past that the voice path has given up and the
+    # work is spent on an answer nobody hears (live 2026-09-15: a 109s call,
+    # and two answers binned at 60s). Not lower, either -- the budget is split
+    # between the candidates, and GLM spends 30-50s on a 5,000-token voice
+    # prompt, so a tight cap makes the primary AND the failover both time out
+    # and hands the floor a turn that was going to be answered. `[voice]
+    # reply_timeout_s` sits just above this, so the cap is what binds.
+    "chat": Budget(12_000, 1_000, 0.05, max_seconds=90.0),
     "draft": Budget(40_000, 8_000, 0.5),
     "plan": Budget(24_000, 2_000, 0.2, require_real=False),
     "review": Budget(12_000, 1_000, 0.05, require_real=False),

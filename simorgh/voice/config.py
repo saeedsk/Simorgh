@@ -194,7 +194,10 @@ class Config:
     speak_replies: bool = False
     # How long a spoken turn may wait for Sim's answer before the
     # pipeline says so aloud instead of nothing.
-    reply_timeout_s: float = 60.0
+    # Just above `[cognition] purposes.chat.max_seconds` (90s), so the model
+    # call is what gives up, not this -- a reply that took 58s used to be
+    # binned here after all the work was done (live 2026-09-15).
+    reply_timeout_s: float = 95.0
     # Confidence below which Sim asks "did you say ...?" instead of
     # acting (the never-guess rule).
     min_confidence: float = 0.6

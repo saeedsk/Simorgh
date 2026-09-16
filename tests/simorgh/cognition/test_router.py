@@ -704,3 +704,56 @@ class ATransientFailureIsRetriedOnceTestCase(unittest.IsolatedAsyncioTestCase):
         router = Router([together], {}, FloorProvider(), order=("together",), clock=FakeClock(), transient_backoff_s=0.0)
         await router.complete(Purpose.DRAFT, [], tools=None, budget=_budget(), timeout=30.0)
         self.assertEqual(together.calls, 1)
+
+
+class ATimeoutSaysSoTestCase(unittest.IsolatedAsyncioTestCase):
+    """"cognition.provider_failed provider='together' purpose='chat'
+    error=''" -- a whole evening of failover lines that said nothing (live
+    2026-09-15). `str(asyncio.TimeoutError())` is "", and `_is_transient`
+    had no words to read either."""
+
+    class _Slow:
+        name = "slow"
+
+        def available(self) -> bool:
+            return True
+
+        async def complete(self, messages, *, tools, max_tokens, timeout=None):
+            await asyncio.sleep(30.0)     # longer than any slice this test allows
+            return ProviderResponse(text="too late", provider="slow")
+
+    class _Logger:
+        def __init__(self) -> None:
+            self.warnings: list[tuple[str, dict]] = []
+
+        def warning(self, event: str, **fields) -> None:
+            self.warnings.append((event, fields))
+
+        def info(self, *a, **k) -> None: ...
+        def debug(self, *a, **k) -> None: ...
+        def error(self, *a, **k) -> None: ...
+
+    async def test_the_failover_line_names_the_timeout(self):
+        from simorgh.cognition import router as router_mod
+
+        # Sized from the router's own constants: the slow candidate must run
+        # out of its slice, and the next one must still have a real slice left.
+        floor_s = router_mod._MIN_CANDIDATE_SECONDS          # noqa: SLF001
+        grace = router_mod._OVERRUN_GRACE_SECONDS            # noqa: SLF001
+        router_mod._OVERRUN_GRACE_SECONDS = 0.05             # noqa: SLF001
+        total = max(1.0, floor_s * 4)
+        logger = self._Logger()
+        fast = _FakeProvider("fast")
+        router = Router([self._Slow(), fast], {}, FloorProvider(), order=("slow", "fast"),
+                        clock=type("C", (), {"now": staticmethod(time.monotonic)})(), logger=logger)
+        try:
+            response, floored = await router.complete(
+                Purpose.CHAT, [{"role": "user", "content": "hello"}], tools=None, budget=_budget(), timeout=total)
+        finally:
+            router_mod._OVERRUN_GRACE_SECONDS = grace        # noqa: SLF001
+        failures = [f for event, f in logger.warnings if event == "cognition.provider_failed"]
+        self.assertTrue(failures, logger.warnings)
+        self.assertIn("timed out", failures[0]["error"])
+        self.assertNotEqual(failures[0]["error"], "", "the line used to say nothing at all")
+        self.assertEqual(response.provider, "fast", "the next candidate still got its turn")
+        self.assertFalse(floored)

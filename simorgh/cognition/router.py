@@ -17,7 +17,7 @@ import re
 
 from simorgh.contracts.protocols import Clock, Logger, Provider, ProviderResponse
 
-from .api import Budget, BudgetExceeded, NoRealProvider, Purpose
+from .api import Budget, BudgetExceeded, NoRealProvider, ProviderUnavailable, Purpose
 from .budget import RollingWindowBudget
 from .providers.base import FloorProvider
 from .tokens import estimate_tokens
@@ -259,10 +259,21 @@ class Router:
         during the cooldown (benchmark wave, 2026-09-14)."""
         started = self._clock.now()
         try:
-            return await asyncio.wait_for(
-                provider.complete(messages, tools=tools, max_tokens=max_tokens, timeout=share),
-                timeout=share + _OVERRUN_GRACE_SECONDS,
-            )
+            try:
+                return await asyncio.wait_for(
+                    provider.complete(messages, tools=tools, max_tokens=max_tokens, timeout=share),
+                    timeout=share + _OVERRUN_GRACE_SECONDS,
+                )
+            except (asyncio.TimeoutError, TimeoutError) as exc:
+                # `str(asyncio.TimeoutError())` is "", and that is what the
+                # failover line said for a whole evening: "provider_failed
+                # provider='together' purpose='chat' error=''" (live
+                # 2026-09-15). Nothing to read, and `_is_transient` has no
+                # words to match either.
+                # "timed out" on purpose: `_TRANSIENT` reads these words, so a
+                # slice that ran out still counts as the transient failure it is.
+                raise ProviderUnavailable(
+                    f"{name} timed out after {share + _OVERRUN_GRACE_SECONDS:.0f}s, its slice of this call") from exc
         except Exception as exc:  # noqa: BLE001 -- truncations and transient failures retry once; the caller handles the rest
             left = share - (self._clock.now() - started)
             truncated = bool(getattr(exc, "truncated", False))
