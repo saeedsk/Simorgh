@@ -21,7 +21,7 @@ from dataclasses import replace
 from simorgh.contracts.envelope import Event
 from simorgh.contracts.protocols import Clock, Ledger
 
-from .api import MemoryItem, Turn
+from .api import NOT_A_SUBJECT, MemoryItem, Turn, is_real_contradiction
 from .config import Config
 from .embed import cosine_similarity, embed_text
 from .embedders import Embedder, comparable
@@ -401,6 +401,11 @@ class MemoryEngine:
 
         flagged: list[tuple[str, str, str]] = []
         for tag, items in by_tag.items():
+            # A tag that says where a record came from is not a subject,
+            # and two records sharing only their provenance cannot
+            # contradict each other (see `api.NOT_A_SUBJECT`).
+            if tag in NOT_A_SUBJECT:
+                continue
             distinct = {e.payload.get("content") for _, e in items}
             if len(distinct) < 2:
                 continue
@@ -422,7 +427,7 @@ class MemoryEngine:
             await self._ledger.append(CONTRADICTION_STREAM, Event(
                 stream=CONTRADICTION_STREAM, type="flagged", ts=self._clock.now(), trace_id="", causation_id=None,
                 idempotency_key=f"contradiction:{ref_a}:{ref_b}",
-                payload={"ref_a": ref_a, "ref_b": ref_b, "evidence": evidence},
+                payload={"ref_a": ref_a, "ref_b": ref_b, "evidence": evidence, "tag": tag},
             ))
             flagged.append((ref_a, ref_b, evidence))
         return flagged
@@ -513,6 +518,8 @@ class MemoryEngine:
     async def _contradiction_penalties(self) -> dict[str, float]:
         penalties: dict[str, float] = {}
         for event in await self._ledger.read(CONTRADICTION_STREAM):
+            if not is_real_contradiction(event.payload):
+                continue     # already on disk and wrong: it must stop counting
             penalties[event.payload["ref_a"]] = penalties.get(event.payload["ref_a"], 1.0) * 0.5
             penalties[event.payload["ref_b"]] = penalties.get(event.payload["ref_b"], 1.0) * 0.5
         return penalties

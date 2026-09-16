@@ -57,6 +57,7 @@ from dataclasses import dataclass
 
 from simorgh.contracts.protocols import Ledger
 
+from .api import is_real_contradiction
 from .embed import cosine_similarity, embed_text, sparse_embed_text
 from .embedders import HASHING, comparable
 
@@ -272,6 +273,13 @@ class RecallIndex:
         self.tombstoned.update(event.payload.get("refs", []))
 
     def _apply_contradiction(self, event) -> None:
+        # This is the penalty `retrieve` scores with, so a wrong flag here
+        # does not merely mis-rank a record -- it quarters it. Every
+        # consolidation summary on the creator's ledger carried two of
+        # them (0.5 x 0.5 = 0.25), which is why distilled memory lost to
+        # raw transcripts on every recall (2026-09-16).
+        if not is_real_contradiction(event.payload):
+            return
         for side in ("ref_a", "ref_b"):
             ref = event.payload[side]
             self.penalties[ref] = self.penalties.get(ref, 1.0) * 0.5
