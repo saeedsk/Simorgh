@@ -76,6 +76,7 @@ from .energy.tools import energy_tools
 from .home.tools import home_tools
 from .home.cameras import cameras_tools
 from .home.ring import ring_tools
+from .vision import vision_tools
 from .media.tools import media_tools
 from .security.tools import security_tools
 from .notify import NotifyTool
@@ -2693,6 +2694,10 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         *cameras_tools(config, secrets=secrets),
         # The Ring cameras, through Ring's cloud (execution/home/ring.py).
         *ring_tools(config, secrets=secrets),
+        # Asking a camera what it can see (execution/vision.py). The
+        # watcher describes events by itself; this is the same thing on
+        # request, and the reason the model knows the capability exists.
+        *vision_tools(config, secrets=secrets),
         # Off unless `[execution] shell = true`: the one tool whose blast
         # radius is not bounded by its own arguments (execution/shell.py).
         *((RunShellTool(config),) if getattr(config, "shell", False) else ()),

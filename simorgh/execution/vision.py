@@ -30,7 +30,7 @@ from pathlib import Path
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
-from simorgh.contracts.protocols import ToolContext
+from simorgh.contracts.protocols import ToolContext, ToolResult
 
 # Kept short on purpose: this is spoken aloud, and a paragraph read out
 # by a text-to-speech engine over a doorbell is worse than silence.
@@ -40,6 +40,111 @@ PROMPT = (
     "there and what they are doing. Plain words, no preamble, no markdown, no list. "
     "If the frames are too dark or too blurred to tell, say exactly that instead of guessing."
 )
+
+
+async def describe_stills(paths: list[str], *, camera: str, bus, kinds=(), timeout: float = 60.0) -> tuple[str, str]:
+    """`(description, problem)` for a few stills, through Cognition.
+
+    A function, not a method, because two callers need it: the watcher
+    below, and `camera_describe` -- the tool that lets a person ask.
+    Without the tool the capability existed and the model did not know
+    it: asked "do you have the ability to do image recognition for the
+    ring cameras", Sim answered "no built-in image recognition on my
+    side" while this very code was running (live 2026-09-15).
+    """
+    kinds = [str(k) for k in (kinds or []) if str(k).strip()]
+    kinds_text = f" after the camera reported {', '.join(kinds)}" if kinds else ""
+    prompt = PROMPT.format(count=len(paths), camera=camera, kinds=kinds_text)
+    request = Message.new(
+        topics.COGNITION_THINK, source="execution",
+        payload={
+            "purpose": "chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "budget": {"max_tokens": 200, "max_cost_usd": 0.02},
+            "require_real_provider": True,
+            "images": list(paths),
+        },
+    )
+    reply = await bus.request_or_error(request, timeout=timeout)
+    body = reply.payload or {}
+    if body.get("ok") is False:
+        return "", str(body.get("error") or "")[:200]
+    said = str(body.get("text") or "").strip()
+    return said, "" if said else "the model returned nothing"
+
+
+class CameraDescribeTool:
+    """What a camera can see, asked for rather than waited for."""
+
+    name = "camera_describe"
+    read_only = True
+    reversibility = "read_only"
+    description = ("What a camera can see right now, in words. `camera` is its name -- a Reolink camera on the "
+                   "NVR or a Ring one. Takes a couple of stills and describes them; needs a vision model "
+                   "([cognition.providers.ollama] vision_model).")
+    args_schema = {"type": "object", "required": ["camera"],
+                   "properties": {"camera": {"type": "string"}, "stills": {"type": "integer"}}}
+
+    def __init__(self, config, **kwargs) -> None:
+        self._config = config
+        self._kwargs = {k: v for k, v in kwargs.items() if k in ("env", "secrets", "clock", "settings_home")}
+        self._nvr_given = kwargs.get("nvr")
+        self._ring_given = kwargs.get("cloud")
+
+    def _snapshot_tools(self) -> list:
+        from .home.cameras import CamSnapshotTool
+        from .home.ring import RingSnapshotTool
+
+        nvr = CamSnapshotTool(self._config, nvr=self._nvr_given, **self._kwargs)
+        ring = RingSnapshotTool(self._config, cloud=self._ring_given, **self._kwargs)
+        return [nvr, ring]
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        camera = str(args.get("camera") or "").strip()
+        if not camera:
+            return ToolResult(ok=False, error="which camera? name one, e.g. `camera_describe Front Door`")
+        if ctx.bus is None:
+            return ToolResult(ok=False, error="refused: no bus, so there is nothing to ask about the picture")
+        try:
+            wanted = max(1, min(4, int(args.get("stills") or self._config.camera_vision_stills)))
+        except (TypeError, ValueError):
+            wanted = 2
+        gap = float(getattr(self._config, "camera_vision_gap_s", 1.5))
+        root = Path(self._config.repo_root)
+
+        paths: list[str] = []
+        refusals: list[str] = []
+        for tool in self._snapshot_tools():
+            for index in range(wanted):
+                if index:
+                    await asyncio.sleep(gap)
+                try:
+                    result = await tool.run({"camera": camera}, ctx=ctx)
+                except Exception as exc:  # noqa: BLE001 -- a camera that will not answer is not a crash
+                    refusals.append(f"{tool.name}: {exc!r}"[:160])
+                    break
+                if not result.ok:
+                    refusals.append(f"{tool.name}: {result.error or ''}"[:200])
+                    break
+                meta = result.metadata or {}
+                rels = [meta["path"]] if meta.get("path") else list(meta.get("paths") or [])
+                paths.extend(str(root / rel) for rel in rels)
+            if paths:
+                break
+        if not paths:
+            return ToolResult(ok=False, error="no picture from that camera: " + "; ".join(refusals or ["unknown"]))
+
+        said, problem = await describe_stills(
+            paths, camera=camera, bus=ctx.bus,
+            timeout=float(getattr(self._config, "camera_vision_timeout_s", 60.0)))
+        if problem:
+            return ToolResult(ok=False, error=f"took {len(paths)} still(s) but could not look at them: {problem}")
+        return ToolResult(ok=True, output=f"{camera}: {said}",
+                          metadata={"camera": camera, "stills": len(paths), "description": said})
+
+
+def vision_tools(config, **kwargs) -> list:
+    return [CameraDescribeTool(config, **kwargs)]
 
 
 class CameraVision:
@@ -128,34 +233,19 @@ class CameraVision:
 
     # -- the looking ------------------------------------------------------
     async def _describe(self, stills: list[str], camera: str, payload: dict) -> str:
-        kinds = [str(k) for k in (payload.get("kinds") or []) if str(k).strip()]
-        kinds_text = f" after the camera reported {', '.join(kinds)}" if kinds else ""
-        prompt = PROMPT.format(count=len(stills), camera=camera, kinds=kinds_text)
-        request = Message.new(
-            topics.COGNITION_THINK, source="execution",
-            payload={
-                "purpose": "chat",
-                "messages": [{"role": "user", "content": prompt}],
-                "budget": {"max_tokens": 200, "max_cost_usd": 0.02},
-                # No floor answer: a canned sentence about a camera nobody
-                # looked at is exactly the "succeeded while saying nothing
-                # true" shape Sim is not allowed to have.
-                "require_real_provider": True,
-                "images": stills,
-            },
-        )
-        timeout = float(getattr(self._config, "camera_vision_timeout_s", 60.0))
-        reply = await self._ctx.bus.request_or_error(request, timeout=timeout)
-        body = reply.payload or {}
-        if body.get("ok") is False:
-            detail = str(body.get("error") or {})
+        said, problem = await describe_stills(
+            stills, camera=camera, bus=self._ctx.bus, kinds=payload.get("kinds") or (),
+            timeout=float(getattr(self._config, "camera_vision_timeout_s", 60.0)))
+        if problem:
+            # No floor answer: a canned sentence about a camera nobody
+            # looked at is exactly the "succeeded while saying nothing
+            # true" shape Sim is not allowed to have.
             if not self._said_blind:
                 self._said_blind = True
-                await self._notice(f"📷 {camera}: something happened, but Sim could not look "
-                                   f"({detail[:120]}).")
-            self._ctx.logger.warning("camera_vision_no_answer", camera=camera, detail=detail[:200])
+                await self._notice(f"📷 {camera}: something happened, but Sim could not look ({problem[:120]}).")
+            self._ctx.logger.warning("camera_vision_no_answer", camera=camera, detail=problem[:200])
             return ""
-        return str(body.get("text") or "").strip()
+        return said
 
     # -- the telling ------------------------------------------------------
     async def _announce(self, said: str, camera: str) -> None:
@@ -176,4 +266,4 @@ class CameraVision:
         ))
 
 
-__all__ = ["CameraVision", "PROMPT"]
+__all__ = ["CameraDescribeTool", "CameraVision", "PROMPT", "describe_stills", "vision_tools"]
