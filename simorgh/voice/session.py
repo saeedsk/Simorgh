@@ -35,7 +35,7 @@ from .commands import MUTE, OFF, RESTART, STOP, opens_with_stop, spoken_command
 from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply, register_for_tone
 from .config import Config
 from .lang import language_of
-from .pipeline import NOT_SURE, Pipeline, is_echo
+from .pipeline import NOT_SURE, Pipeline, echoes_recent, is_echo
 from .planner import CONNECTORS, Context, SpokenResponsePlanner
 from .playback import StreamingPlayer
 from .stt.streaming import IncrementalRecogniser
@@ -802,7 +802,13 @@ class VoiceSession:
         # named or mid-exchange (voice/backchannel.py::addressed).
         if await self._bystander(turn_id, speaker, text):
             return
-        if self._pipeline.last_said and is_echo(text, self._pipeline.last_said):
+        # Within the exchange window, test against everything Sim said
+        # recently -- a long reply returns as fragments, each too short
+        # for the run matcher and each landing after `last_said` moved on.
+        recents = list(self._pipeline.recent_said) or [self._pipeline.last_said]
+        in_exchange_now = 0.0 <= self._now() - self._sim_spoke_at <= self._config.exchange_window_s
+        if recents and (echoes_recent(text, recents) if in_exchange_now
+                        else (self._pipeline.last_said and is_echo(text, self._pipeline.last_said))):
             await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
                 "text": text, "confidence": clock.confidence, "seconds": 0.0, "engine": clock.engine_stt,
                 "device": self._config.device, "session_id": session_id, "echo": True, "turn": turn_id})
@@ -1548,6 +1554,7 @@ class VoiceSession:
 
         said = strip_marks(plan.text, for_voice=False)
         self._pipeline.last_said = said
+        self._pipeline.recent_said.append(said)
         self.stats.turns += 1
         metrics = clock.metrics(report)
         if clock.interrupted_at and clock.stopped_at:
@@ -1605,6 +1612,7 @@ class VoiceSession:
 
         shown = strip_marks(plan.text, for_voice=False)
         self._pipeline.last_said = shown
+        self._pipeline.recent_said.append(shown)
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": shown, "seconds": report.seconds, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
             "device": self._config.device, "interrupted": report.interrupted})

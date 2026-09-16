@@ -85,6 +85,68 @@ def is_echo(heard: str, said: str, *, min_words: int = 4, overlap: float = 0.6, 
     return covered / len(heard_words) >= overlap
 
 
+def _spoken_words(text: str) -> list[str]:
+    """The words as they would be SAID, both sides through one transform.
+
+    Sim writes "-8.2%", says "minus eight point two percent", and whisper
+    writes that back as "minus 8.2%". Comparing heard text to what Sim
+    wrote therefore compares across two transforms and misses. Running
+    both through the same one makes them converge.
+    """
+    from .planner import speak_numbers, speak_units
+
+    # `speak_numbers` turns 8.2 into "eight point two" but leaves the sign
+    # as a bare "-", which the word split then drops -- so Sim's written
+    # "COIN -8.2%" and the "minus 8.2%" the microphone hears back differ
+    # by exactly that one token. The engine says "minus"; the comparison
+    # has to know that too.
+    signed = re.sub(r"[-\u2212\u2013\u2014]\s*(?=\d)", " minus ", text or "")
+    return _WORD.findall(speak_units(speak_numbers(signed)).lower())
+
+
+def _holds_run(haystack: list[str], needle: list[str]) -> bool:
+    size = len(needle)
+    if not size or size > len(haystack):
+        return False
+    return any(haystack[i:i + size] == needle for i in range(len(haystack) - size + 1))
+
+
+def echoes_recent(heard: str, recents, *, min_words: int = 4) -> bool:
+    """Whether `heard` is any of Sim's recent replies coming back.
+
+    Two things `is_echo` against `last_said` alone could not catch, both
+    live on 2026-09-15:
+
+    A long reply returns as SEVERAL short fragments. By the time the
+    second arrived, `last_said` held the reply Sim had just given to the
+    first, so every fragment after the first was compared with the wrong
+    utterance. Hence a ring, not one string.
+
+    And a fragment is usually under `min_words`: "minus 8.2%", "Up one
+    percent.", "33 cents". `is_echo` returns False below four words on
+    purpose -- "Can you hear me?" must not be thrown away -- so short
+    text needs a stricter test instead of a looser one: every word of it,
+    in order, inside something Sim actually said. A person does not
+    repeat Sim's exact phrase back; a microphone does.
+    """
+    texts = [t for t in (recents or []) if t]
+    if not texts or not (heard or "").strip():
+        return False
+    if any(is_echo(heard, said, min_words=min_words) for said in texts):
+        return True
+    # Short on the SAME count `is_echo` uses to give up -- its raw words.
+    # Measured in spoken words instead, "minus 8.2%" is five ("minus eight
+    # point two percent") and looked long enough for the run matcher, while
+    # the run matcher had already refused it as three. The fragment fell
+    # between the two tests and neither saw it.
+    if len(_WORD.findall((heard or "").lower())) >= min_words:
+        return False
+    words = _spoken_words(heard)
+    if len(words) < 2:
+        return False
+    return any(_holds_run(_spoken_words(said), words) for said in texts)
+
+
 def spoken_form(text: str) -> str:
     """Markdown out, sentences in. A synthesiser reading `**bold**` and
     bullet dashes aloud is the fastest way to sound like a machine."""
@@ -130,6 +192,9 @@ class Pipeline:
         self.pending_audio: Audio | None = None
         self.last_heard = ""
         self.last_said = ""
+        # The last few things Sim said, newest last: one string could not
+        # catch a reply that comes back as several fragments.
+        self.recent_said: deque = deque(maxlen=6)
         self.speaking = False
         self.listening = False
 
