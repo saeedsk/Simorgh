@@ -84,6 +84,44 @@ class SkillsCommand(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["commit"], "abc123def456")
         self.assertTrue((self.home / "anthropics" / "pdf-reading" / "SKILL.md").is_file())
 
+    async def test_a_collection_repo_says_what_is_inside_it(self):
+        """`skills install github.com/anthropics/skills` is the obvious
+        thing to type, and that repo is a folder per skill. Sim looks
+        inside rather than sending someone to read a file tree by hand
+        (the creator, live 2026-09-15)."""
+        collection = self.repo.parent / "collection"
+        _skill(collection / "document-skills", "pdf", PDF)
+        _skill(collection, "gmail", """---
+name: gmail-triage
+description: Sort the morning inbox
+---
+Read the labels first.
+""")
+        outcome, ledger = await self._run("install github.com/anthropics/skills", folder=collection)
+        self.assertIn("holds 2 skills", outcome.text)
+        self.assertIn("pdf-reading", outcome.text)
+        self.assertIn("document-skills/pdf", outcome.text, "the folder to install, not just the name")
+        self.assertIn("gmail-triage", outcome.text)
+        self.assertIn("skills install github.com/anthropics/skills#", outcome.text, "the next command, spelled out")
+        self.assertEqual(ledger.events, [], "nothing installed until one is chosen")
+
+    async def test_a_repo_holding_exactly_one_skill_just_installs_it(self):
+        """Nothing to choose between."""
+        one = self.repo.parent / "single"
+        _skill(one, "pdf", PDF)
+        outcome, ledger = await self._run("install github.com/anthropics/skills", folder=one)
+        self.assertIn("trusted org, review clean", outcome.text)
+        self.assertEqual(ledger.events[0].payload["name"], "pdf-reading")
+        self.assertTrue((self.home / "anthropics" / "pdf-reading" / "SKILL.md").is_file())
+
+    async def test_a_repo_with_no_skill_anywhere_says_so(self):
+        empty = self.repo.parent / "empty"
+        (empty / "docs").mkdir(parents=True, exist_ok=True)
+        (empty / "docs" / "README.md").write_text("nothing here", encoding="utf-8")
+        outcome, ledger = await self._run("install github.com/anthropics/skills", folder=empty)
+        self.assertIn("no skill in any folder", outcome.text)
+        self.assertEqual(ledger.events, [])
+
     async def test_an_unknown_org_waits_for_a_person(self):
         folder = _skill(self.repo.parent / "other", "pdf", PDF)
         outcome, ledger = await self._run("install github.com/someone/theirs#pdf", folder=folder)

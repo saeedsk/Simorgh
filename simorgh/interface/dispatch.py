@@ -17,6 +17,7 @@ Interface never fakes a result.
 
 from __future__ import annotations
 
+import dataclasses
 import difflib
 import json
 import os
@@ -1745,6 +1746,33 @@ async def _clone_at(source, into: Path) -> tuple[Path, str, str]:
     return (into / source.path if source.path else into), commit, ""
 
 
+def _skills_inside(root: Path, *, max_depth: int = 3, limit: int = 200) -> list[tuple[str, object]]:
+    """Every skill in a collection repository, as `(path inside it, card)`.
+
+    Most published skills do not live at the root of their own repo:
+    `anthropics/skills` is a folder per skill. Typing the repository is
+    the obvious thing to do, and answering "name the skill's own folder
+    with #path" sends someone off to read a file tree by hand (the
+    creator, live 2026-09-15). So Sim looks inside and says what is
+    there."""
+    from simorgh.contracts.skills import SkillCard, parse_skill
+
+    found: list[tuple[str, object]] = []
+    for skill_md in sorted(root.rglob("SKILL.md")):
+        try:
+            parts = skill_md.parent.relative_to(root).parts
+        except ValueError:  # pragma: no cover -- a symlink out of the tree
+            continue
+        if not parts or len(parts) > max_depth or any(part.startswith(".") for part in parts):
+            continue
+        card = parse_skill(skill_md, source="candidate")
+        if isinstance(card, SkillCard):
+            found.append(("/".join(parts), card))
+        if len(found) >= limit:
+            break
+    return found
+
+
 async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clone_at) -> Outcome:
     """Agent Skills: what is here, what a skill contains, and installing one.
 
@@ -1802,7 +1830,27 @@ async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clon
             if problem:
                 return Outcome(f"refused: {problem}")
             if not (folder / "SKILL.md").is_file():
-                return Outcome(f"no SKILL.md at {source.path or '/'} in {source.name} -- name the skill's own folder with #path")
+                inside = _skills_inside(folder)
+                if not inside:
+                    return Outcome(f"no SKILL.md at {source.path or '/'} in {source.name} -- and no skill in any "
+                                   "folder under it either")
+                base = f"{source.host}/{source.org}/{source.repo}"
+                if len(inside) > 1:
+                    width = max(len(card.name) for _rel, card in inside)  # type: ignore[attr-defined]
+                    lines = [f"{source.name} holds {len(inside)} skills -- install one by its folder:"]
+                    for rel, card in inside[:20]:
+                        where = "/".join(p for p in (source.path, rel) if p)
+                        lines.append(f"  {card.name.ljust(width)}  {where}")  # type: ignore[attr-defined]
+                    if len(inside) > 20:
+                        lines.append(f"  … and {len(inside) - 20} more")
+                    first = "/".join(p for p in (source.path, inside[0][0]) if p)
+                    lines.append(f"e.g. skills install {base}#{first}")
+                    return Outcome("\n".join(lines))
+                # Exactly one, so there is nothing to choose between: the
+                # repository IS the skill, one folder down.
+                only_rel, _only_card = inside[0]
+                folder = folder / only_rel
+                source = dataclasses.replace(source, path="/".join(p for p in (source.path, only_rel) if p))
             review = review_skill(folder)
             home = SKILLS_HOME.expanduser() / (source.org.lower() if source.trusted else "review") / review.name
             home.parent.mkdir(parents=True, exist_ok=True)
