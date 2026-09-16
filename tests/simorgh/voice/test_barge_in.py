@@ -243,6 +243,48 @@ class _Voice:
         return self._answers.pop(0) if self._answers else False
 
 
+class GainLearningTestCase(unittest.TestCase):
+    """The bar for "louder than Sim" is `gain x reference`, and the gain is
+    learnt from the first frames of each reply. Learnt as the LOUDEST of
+    them, a person who starts talking inside that window sets it themselves
+    and cannot be heard for the rest of the reply -- "I said stop like five,
+    six times" (the creator, 2026-09-15). The middle sample is Sim's."""
+
+    def _tracker(self, *, calibrate=40):
+        from simorgh.voice.vad import EchoTracker
+
+        tracker = EchoTracker(calibrate_frames=calibrate)
+        tracker.start()
+        tracker.play(_tone(2.0, 8000), at=100.0)
+        return tracker
+
+    def test_a_person_talking_during_calibration_does_not_set_the_bar(self):
+        tracker = self._tracker()
+        reference = tracker.reference(100.2)
+        self.assertGreater(reference, 100.0)
+        for i in range(40):                       # four of them are the person, loud
+            loud = i in (3, 4, 5, 6)
+            tracker.observe(reference * (3.0 if loud else 0.3), 100.2)
+        self.assertAlmostEqual(tracker.gain, 0.3, places=2)
+        self.assertLess(tracker.expected(100.2), reference * 0.5, "the bar follows Sim, not the person")
+
+    def test_the_old_rule_would_have_locked_them_out(self):
+        tracker = self._tracker()
+        reference = tracker.reference(100.2)
+        ratios = [3.0 if i in (3, 4, 5, 6) else 0.3 for i in range(40)]
+        self.assertAlmostEqual(max(ratios), 3.0)          # what the gain used to be
+        for ratio in ratios:
+            tracker.observe(reference * ratio, 100.2)
+        self.assertLess(tracker.gain, max(ratios) / 2)
+
+    def test_a_quiet_reply_still_learns_sims_own_level(self):
+        tracker = self._tracker()
+        reference = tracker.reference(100.2)
+        for _ in range(40):
+            tracker.observe(reference * 0.8, 100.2)
+        self.assertAlmostEqual(tracker.gain, 0.8, places=2)
+
+
 class CompositeDetectorTestCase(unittest.TestCase):
     """Typing, clapping, a chair: loud but not a voice. Sim's own voice
     through the speakers: a voice but not louder than the echo floor.

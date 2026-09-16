@@ -402,7 +402,7 @@ class EchoTracker:
         self._runs: list[tuple[float, float, list[float]]] = []  # (started_at, frame_s, levels)
         self._ends_at = 0.0
         self.gain = float(gain)      # mic RMS per reference RMS; 0 = not yet learnt
-        self._learnt = 0.0           # this reply's estimate so far
+        self._ratios: list[float] = []   # this reply's mic/reference samples
         self._seen = 0               # calibration frames used this reply
         self.replies = 0
 
@@ -411,7 +411,7 @@ class EchoTracker:
         """A new playback: forget the old reference, learn the gain afresh."""
         self._runs.clear()
         self._ends_at = 0.0
-        self._learnt = 0.0
+        self._ratios = []
         self._seen = 0
         self.replies += 1
 
@@ -459,11 +459,30 @@ class EchoTracker:
         if ref < self.MIN_REFERENCE:
             return  # the reference is silent here: the mic hears the room, not Sim
         self._seen += 1
-        self._learnt = max(self._learnt, mic_rms / ref)
-        if self._seen >= self._calibrate and self._learnt > 0.0:
+        self._ratios.append(mic_rms / ref)
+        if self._seen >= self._calibrate and self._ratios:
             # This reply's measurement replaces the last one's: the
             # volume may have changed between them.
-            self.gain = self._learnt
+            self.gain = self._middle()
+
+    def _middle(self) -> float:
+        """The middle of this reply's mic/reference samples.
+
+        It was the LOUDEST, and that is the bug the creator hit again and
+        again: start talking within the first second of a reply -- the usual
+        way to cut someone off -- and your own voice sets the gain, so the
+        bar sits above you for the whole reply and "stop" does nothing
+        ("I said stop like five, six times", 2026-09-15). Sim's echo is most
+        of the window, so the middle sample is Sim's; a few loud frames of a
+        person cannot move it.
+        """
+        ordered = sorted(self._ratios)
+        if not ordered:
+            return 0.0
+        middle = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[middle]
+        return (ordered[middle - 1] + ordered[middle]) / 2.0
 
     def expected(self, now: float) -> float:
         """Sim's own voice at the mic, expected now. `inf` while the gain
@@ -475,7 +494,7 @@ class EchoTracker:
             return float("inf")
         # Learning still (a later reply): the last reply's gain, or this
         # one's so far if the volume has gone up since.
-        gain = max(self.gain, self._learnt) if self._seen < self._calibrate else self.gain
+        gain = max(self.gain, self._middle()) if self._seen < self._calibrate else self.gain
         return gain * self.reference(now)
 
 
