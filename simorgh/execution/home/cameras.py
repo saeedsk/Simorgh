@@ -603,7 +603,8 @@ class CamStreamTool(_CameraTool):
 
 class CamLightTool(_CameraTool):
     name = "cam_light"
-    description = "A camera's spotlight (white LED) on or off."
+    description = ("A camera's spotlight (white LED) on or off. `camera` is one camera, or `all` for every "
+                   "camera at once.")
     args_schema = {"type": "object", "required": ["camera"],
                    "properties": {"camera": {"type": "string"}, "on": {"type": "boolean"}}}
 
@@ -611,6 +612,29 @@ class CamLightTool(_CameraTool):
         wanted, on = _camera_and_switch(args, "on")
         try:
             nvr = self._nvr()
+            # "Turn off all camera lights" was eight separate calls, one
+            # model round trip each, and it ran out of step budget twice
+            # before reaching the last camera (live 2026-09-15). A tool
+            # that can only be told one thing at a time makes the model
+            # spend a turn per camera.
+            if wanted.strip().lower() in ("all", "every", "everything", "*"):
+                cams = await nvr.channels()
+                if not cams:
+                    return ToolResult(ok=False, error="no cameras on the NVR")
+                done, failed = [], []
+                for cam in cams:
+                    try:
+                        await nvr.light(cam.channel, on)
+                        done.append(cam)
+                    except Exception as exc:  # noqa: BLE001 -- one camera refusing is not all of them
+                        failed.append(f"{cam.name}: {exc}")
+                if not done:
+                    return ToolResult(ok=False, error="no spotlight changed: " + "; ".join(failed))
+                said = f"spotlight {'on' if on else 'off'}: " + ", ".join(c.name for c in done)
+                if failed:
+                    said += " -- not " + "; ".join(failed)
+                return ToolResult(ok=True, output=said,
+                                  side_effects=tuple(f"cam_light:{c.channel}" for c in done))
             cam, problem = await self._camera(nvr, wanted)
             if problem:
                 return ToolResult(ok=False, error=problem)

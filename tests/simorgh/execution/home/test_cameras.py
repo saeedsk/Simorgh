@@ -257,3 +257,48 @@ class CamerasTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn('REOLINK_PASSWORD = "pw"', text)
         self.assertEqual(stat.S_IMODE((home / "secrets.toml").stat().st_mode), 0o600)
         self.assertNotIn("pw", result.output)
+
+
+class EveryCameraAtOnce(unittest.TestCase):
+    """The creator, live 2026-09-15: "Turn off all camera lights or
+    floodlights." It was one `cam_light` call per camera, a model round
+    trip each, and the step budget ran out before the last one -- twice,
+    the second time with nothing said but "I could not finish this one".
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.nvr = _FakeNvr()
+        self.tools = {t.name: t for t in cameras_tools(Config(repo_root=self.root), nvr=self.nvr, env={})}
+        self.ctx = ToolContext(action_id="a1", task_id=None, scope={}, constraints={}, data_dir=self.root,
+                               clock=None, logger=None, ledger=None, bus=_Bus())
+
+    def test_all_switches_every_camera_in_one_call(self):
+        result = asyncio.run(self.tools["cam_light"].run({"camera": "all", "on": False}, ctx=self.ctx))
+        self.assertTrue(result.ok, result.error)
+        lit = [c for c in self.nvr.calls if c[0] == "light"]
+        self.assertEqual(len(lit), 3, "one call, every camera")
+        self.assertTrue(all(c[2] is False for c in lit))
+        for name in ("Front Window", "Office", "Pool"):
+            self.assertIn(name, result.output)
+
+    def test_a_camera_that_refuses_does_not_lose_the_others(self):
+        class _Partial(_FakeNvr):
+            async def light(self, ch, on):
+                if ch == 11:
+                    raise RuntimeError("that camera has no spotlight")
+                self.calls.append(("light", ch, on))
+
+        nvr = _Partial()
+        tools = {t.name: t for t in cameras_tools(Config(repo_root=self.root), nvr=nvr, env={})}
+        result = asyncio.run(tools["cam_light"].run({"camera": "all", "on": True}, ctx=self.ctx))
+        self.assertTrue(result.ok, "two cameras did change")
+        self.assertIn("Front Window", result.output)
+        self.assertIn("not Pool", result.output, "and the one that did not is named")
+
+    def test_naming_one_camera_still_names_one_camera(self):
+        result = asyncio.run(self.tools["cam_light"].run({"camera": "Office", "on": True}, ctx=self.ctx))
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual([c for c in self.nvr.calls if c[0] == "light"], [("light", 7, True)])
