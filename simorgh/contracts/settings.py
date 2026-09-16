@@ -138,28 +138,35 @@ def _toml_value(value: object) -> str:
 
 
 def _dump(data: dict) -> str:
-    """A small TOML writer for what `simorgh.toml` holds: scalar keys at
-    the top, then one `[section]` per table of scalars (and one level
-    of `[section.sub]`). Enough for a settings file; not a general one."""
-    lines: list[str] = []
-    for key, value in data.items():
-        if not isinstance(value, dict):
-            lines.append(f"{key} = {_toml_value(value)}")
-    for key, value in data.items():
-        if isinstance(value, dict):
+    """A small TOML writer for what `simorgh.toml` holds: scalars first,
+    then a `[header]` per table, nested to any depth.
+
+    It stopped at two levels, and `persist` rewrites the WHOLE file to
+    change one key. So every `voice set` turned
+    `[cognition.providers.ollama]` -- three deep -- into a Python dict
+    inside a quoted string, because a dict that reached `_toml_value`
+    fell through to `str(value)`. The provider then vanished from the
+    order, and the cameras had nothing that could look at a picture.
+    Live twice: 2026-09-15, and again at 09:07 the next morning after
+    the first repair (the creator's screen: "nothing here can look at a
+    picture ... tried: together, claude_code_cli, gemini, floor").
+
+    A settings writer that silently drops part of the settings is worse
+    than one that refuses, because nothing says so until something
+    downstream is mysteriously off.
+    """
+    def table(value: dict, path: tuple[str, ...]) -> list[str]:
+        lines: list[str] = []
+        if path:
             lines.append("")
-            lines.append(f"[{key}]")
-            for k, v in value.items():
-                if isinstance(v, dict):
-                    continue
-                lines.append(f"{k} = {_toml_value(v)}")
-            for k, v in value.items():
-                if isinstance(v, dict):
-                    lines.append("")
-                    lines.append(f"[{key}.{k}]")
-                    for k2, v2 in v.items():
-                        lines.append(f"{k2} = {_toml_value(v2)}")
-    return "\n".join(lines).strip() + "\n"
+            lines.append("[" + ".".join(path) + "]")
+        lines += [f"{k} = {_toml_value(v)}" for k, v in value.items() if not isinstance(v, dict)]
+        for k, v in value.items():
+            if isinstance(v, dict):
+                lines += table(v, (*path, k))
+        return lines
+
+    return "\n".join(table(data, ())).strip() + "\n"
 
 
 def persist(path: Path, key: str, value: object, *, section: str = "voice") -> None:
