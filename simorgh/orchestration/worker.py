@@ -127,6 +127,9 @@ def procedure_from(session, outcome) -> str:
     return f"To {what[:200]}: " + " -> ".join(ordered)
 
 
+import traceback
+
+
 class Worker:
     def __init__(
         self, bus, ledger, *, clock=None, worker_id: str | None = None,
@@ -413,7 +416,7 @@ class Worker:
             await self._report(session, outcome)
             raise
         except Exception as exc:  # noqa: BLE001 -- same: never let a turn vanish
-            outcome = Outcome("failed", reason=f"the turn crashed: {exc!r}")
+            outcome = Outcome("failed", reason=f"the turn crashed: {exc!r}\n{traceback.format_exc()}")
         await self._report(session, outcome)
 
     async def _artifacts_for(self, session: Session, outcome: Outcome) -> list[str]:
