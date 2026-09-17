@@ -286,6 +286,15 @@ class Config:
     # ungated mirror of the same tokenizer. Set it to
     # "meta-llama/Llama-3.2-1B" once that access has been granted.
     miso_tokenizer: str = "unsloth/Llama-3.2-1B"
+    #: StyleTTS 2 (voice/tts/styletts2.py). A WAV whose voice it follows;
+    #: "" for its own. Measured 2026-09-17: 0.42x real time warm, so
+    #: unlike Chatterbox and Miso this one is quick enough to speak a
+    #: turn rather than wait behind one.
+    styletts2_reference: str = ""
+    #: Its emotion dial, in the package's own words: "higher scale means
+    #: style is more conditional to the input text and hence more
+    #: emotional". 0 lets the tone table choose per feeling.
+    styletts2_embedding_scale: float = 0.0
     expressive_timeout_s: float = 180.0
     # Which replies the expressive engine speaks when `tts` names one
     # (voice/tts/lanes.py): "auto" = `voice test` only (and a spoken

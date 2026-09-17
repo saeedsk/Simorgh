@@ -282,14 +282,42 @@ class SubprocessSynthesiser:
         started = time.monotonic()
         self._proc.stdin.write((json.dumps(request) + "\n").encode("utf-8"))
         await self._proc.stdin.drain()
-        try:
-            line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=self._timeout)
-        except asyncio.TimeoutError:
-            await self._stop()
-            raise RuntimeError(f"{self.name} took more than {self._timeout:.0f}s for {len(text)} characters") from None
-        if not line:
-            raise RuntimeError(f"{self.name} exited (code {self._proc.returncode})")
-        reply = json.loads(line.decode("utf-8"))
+        # An engine's library may print on stdout while it works --
+        # StyleTTS 2 announces "Cloning default target voice...", the
+        # phonemes and a token count -- and stdout is this protocol's
+        # channel. One line was read and parsed, so a line of prose where
+        # a reply belonged was a JSONDecodeError out of a working engine.
+        # The handshake in `_start` learnt this an hour earlier; this is
+        # the same lesson in the place it was not applied.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._timeout
+        reply = None
+        noise: list[str] = []
+        while reply is None:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                await self._stop()
+                raise RuntimeError(f"{self.name} took more than {self._timeout:.0f}s for {len(text)} characters")
+            try:
+                line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=remaining)
+            except asyncio.TimeoutError:
+                await self._stop()
+                raise RuntimeError(f"{self.name} took more than {self._timeout:.0f}s for {len(text)} characters") from None
+            if not line:
+                detail = ("; ".join(noise[-3:]) if noise else "")
+                raise RuntimeError(f"{self.name} exited (code {self._proc.returncode})"
+                                   + (f" after saying: {detail}" if detail else ""))
+            text_line = line.decode("utf-8", "replace").strip()
+            if not text_line:
+                continue
+            try:
+                got = json.loads(text_line)
+            except ValueError:
+                if len(noise) < 20:
+                    noise.append(text_line[:200])
+                continue
+            if isinstance(got, dict) and ("path" in got or "error" in got or "id" in got):
+                reply = got
         if reply.get("error"):
             raise SynthesisRefused(str(reply["error"])[:300])
         path = Path(reply.get("path") or out)

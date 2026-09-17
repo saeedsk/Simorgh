@@ -148,6 +148,7 @@ def open_synthesiser(config: Config) -> tuple[object | None, str]:
         return FakeSynthesiser(), ""
     from .chatterbox import ChatterboxSynthesiser
     from .miso import MisoSynthesiser
+    from .styletts2 import StyleTTS2Synthesiser
 
     # The expressive engines fall back to Kokoro when their environment is
     # missing, so `tts = "chatterbox"` before `voice models chatterbox`
@@ -155,9 +156,10 @@ def open_synthesiser(config: Config) -> tuple[object | None, str]:
     order = {"auto": (KokoroSynthesiser, SaySynthesiser), "kokoro": (KokoroSynthesiser,),
              "piper": (PiperSynthesiser,), "say": (SaySynthesiser,),
              "chatterbox": (ChatterboxSynthesiser, KokoroSynthesiser, SaySynthesiser),
+             "styletts2": (StyleTTS2Synthesiser, KokoroSynthesiser, SaySynthesiser),
              "miso": (MisoSynthesiser, KokoroSynthesiser, SaySynthesiser)}.get(config.tts)
     if order is None:
-        return None, f"unknown tts engine {config.tts!r} (auto | kokoro | piper | say | chatterbox | miso | fake)"
+        return None, f"unknown tts engine {config.tts!r} (auto | kokoro | piper | say | chatterbox | styletts2 | miso | fake)"
     reasons = []
     primary = None
     for cls in order:
@@ -168,6 +170,12 @@ def open_synthesiser(config: Config) -> tuple[object | None, str]:
             reasons.append(f"{cls.name}: {exc}")
     if primary is None:
         return None, "no speech synthesiser (" + "; ".join(reasons) + ") -- pip install kokoro-onnx, or use macOS `say`"
+    # StyleTTS 2 is NOT in this tuple, on purpose. The lane pair exists
+    # because Chatterbox (~1.8x) and Miso (~10x) are slower than speech,
+    # so a spoken turn cannot wait for them and Kokoro takes the turns
+    # beside them. StyleTTS 2 measured 0.42x warm -- faster than it
+    # speaks -- so wrapping it would relegate a quick engine to answering
+    # typed replies only, which is the opposite of the point.
     if isinstance(primary, (ChatterboxSynthesiser, MisoSynthesiser)) and \
             str(getattr(config, "expressive_lane", "auto")) != "always":
         # The expressive engine answers in seconds; a spoken turn cannot

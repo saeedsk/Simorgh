@@ -104,6 +104,45 @@ class TheHandshakeTestCase(unittest.IsolatedAsyncioTestCase):
             await engine._start()  # noqa: SLF001
         self.assertIn("printed nothing", str(caught.exception))
 
+    async def test_chatter_between_the_handshake_and_a_reply_is_stepped_over(self):
+        """The same fault, on the other side of the protocol.
+
+        StyleTTS 2 prints while it works -- "Cloning default target
+        voice...", the phoneme string, a token count -- and stdout is
+        the protocol's channel. `_one` read exactly ONE line and
+        json.loads'd it, so a working engine raised JSONDecodeError at
+        the caller (2026-09-17, caught by running the engine end to end
+        rather than by any test).
+        """
+        wav = self.dir / "out.wav"
+        self._server(
+            'print(\'{"ready": true, "engine": "fake", "rate": 24000}\', flush=True)\n'
+            "line = sys.stdin.readline()\n"
+            "import json, wave\n"
+            "req = json.loads(line)\n"
+            'print("Cloning default target voice...", flush=True)\n'
+            'print("hɛlˈoʊ sɑˈid", flush=True)\n'
+            'print("177", flush=True)\n'
+            f"w = wave.open({str(wav)!r}, 'wb')\n"
+            "w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000)\n"
+            "w.writeframes(b'\\x10\\x20' * 24000)\n"
+            "w.close()\n"
+            f'print(json.dumps({{"id": req["id"], "path": {str(wav)!r}, "rate": 24000, "seconds": 1.0}}), flush=True)')
+        engine = _engine(self.dir)
+        engine._seq = 0                       # noqa: SLF001
+        engine._timeout = 20.0                # noqa: SLF001
+        engine._lock = __import__("asyncio").Lock()   # noqa: SLF001
+        engine._reference = ""                # noqa: SLF001
+        engine.params_for = lambda tone: {}
+        engine.problems = []
+        engine.last_seconds = 0.0
+        engine.last_took_s = 0.0
+        engine._pace = 0.0                    # noqa: SLF001
+        audio = await engine._one("hello", tone="", speed=1.0)   # noqa: SLF001
+        self.assertEqual(audio.sample_rate, 24_000)
+        self.assertGreater(len(audio.pcm), 0, "the reply was lost among the engine's own output")
+        await engine._stop()                  # noqa: SLF001
+
     async def test_an_engine_that_never_hands_over_times_out(self):
         """Noise forever must not mean waiting forever."""
         self._server('import itertools\nfor i in itertools.count():\n    print("still here", flush=True)\n    time.sleep(0.05)')
