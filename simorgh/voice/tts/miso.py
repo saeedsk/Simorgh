@@ -125,6 +125,16 @@ class MisoSynthesiser(SubprocessSynthesiser):
     name = "miso"
     module = ENGINE_MODULE
     server = "miso_server.py"
+    #: Torch 2.4 has no MPS kernel for `aten::unfold_backward`, and
+    #: MisoTTS's decoder uses it -- so synthesis raised
+    #: NotImplementedError on Apple Silicon, no audio was ever written,
+    #: and every layer above still reported a successful `spoken
+    #: (miso)`. This runs that one operator on the CPU.
+    #:
+    #: Measured 2026-09-16: without it, no sound at all; with it, 2.32 s
+    #: of speech in 103 s -- 44x real time. That is why Miso belongs in
+    #: the expressive lane and never in a spoken turn.
+    extra_env = {"PYTORCH_ENABLE_MPS_FALLBACK": "1"}
     load_timeout_s = 1800.0   # 16 GB of weights the first time
 
     def __init__(self, config) -> None:

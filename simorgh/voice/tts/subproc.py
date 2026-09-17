@@ -48,6 +48,34 @@ def venv_python(venv_dir: Path | str, engine: str) -> Path:
     return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+#: Debug allocators macOS inherits into every child. They are ruinously
+#: slow if they engage, and they print at exit even when they do not:
+#: "MallocStackLogging: can't turn off malloc stack logging because it
+#: was not enabled" -- twice, from the two engine subprocesses, every
+#: time Sim shut down (the creator, 2026-09-16: "fix the voice tts
+#: malloc issue"). An engine has no use for any of them, so it is
+#: started without them whatever the parent was started with.
+_DEBUG_ALLOCATORS = (
+    "MallocStackLogging", "MallocStackLoggingNoCompact", "MallocScribble",
+    "MallocPreScribble", "MallocGuardEdges", "MallocErrorAbort", "MallocCheckHeapStart",
+    "MallocCheckHeapEach", "MallocLogFile", "MallocCorruptionAbort",
+    "NSZombieEnabled", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+)
+
+
+def engine_env(extra: dict | None = None) -> dict:
+    """The environment an engine subprocess is started with.
+
+    The parent's, minus the debug allocators (which an engine never
+    wants and which print on the way out), plus unbuffered output so a
+    handshake is not lost in a pipe buffer.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in _DEBUG_ALLOCATORS}
+    env["PYTHONUNBUFFERED"] = "1"
+    env.update(extra or {})
+    return env
+
+
 def engine_available(engine: str, module: str, venv_dir: Path | str = DEFAULT_VENV_DIR) -> tuple[bool, str]:
     """Whether the engine's environment exists and imports its package."""
     python = venv_python(venv_dir, engine)
@@ -141,7 +169,7 @@ class SubprocessSynthesiser:
         if self._proc is not None and self._proc.returncode is None:
             return
         server = SERVERS_DIR / self.server
-        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+        env = engine_env(getattr(self, "extra_env", None))
         self._proc = await asyncio.create_subprocess_exec(
             str(self._python), str(server), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, env=env)
@@ -347,4 +375,4 @@ def create_venv(venv_dir: Path | str, engine: str, *, python: str = "", packages
     return py, ""
 
 
-__all__ = ["DEFAULT_VENV_DIR", "SERVERS_DIR", "SubprocessSynthesiser", "SynthesisRefused", "create_venv", "engine_available", "venv_python"]
+__all__ = ["DEFAULT_VENV_DIR", "engine_env", "SERVERS_DIR", "SubprocessSynthesiser", "SynthesisRefused", "create_venv", "engine_available", "venv_python"]
