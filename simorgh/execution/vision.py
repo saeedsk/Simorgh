@@ -74,10 +74,33 @@ EVENT_PROMPT = (
 #: happening, once per camera, and reused until the camera is renamed or
 #: the file is deleted.
 BASELINE_PROMPT = (
-    "These are {count} still frames from the {camera} camera at a quiet moment"
-    "{kinds}. List, in one sentence, only the PERMANENT things in view -- buildings, "
-    "paths, fences, trees, garden beds, permanently parked vehicles, furniture. "
-    "Do not mention people, animals, weather, the time of day, shadows or light levels. "
+    "These are {count} still frames from the {camera} camera"
+    "{kinds}. List, in one sentence, only the FIXED things in view -- buildings, walls, "
+    "paths, driveways, fences, gates, trees, garden beds, permanent outdoor furniture. "
+    "Do NOT mention anything that could be moved or could leave: people, animals, "
+    "vehicles, packages or parcels, bins, bicycles, toys, tools. "
+    "Do NOT mention weather, the time of day, shadows or light levels. "
+    "Plain words, no preamble."
+)
+
+#: The last of the samples is turned into the baseline by this, which
+#: is the whole point of taking more than one: anything that moved
+#: between the samples was never scenery.
+#:
+#: `permanently parked vehicles` used to be in the list above, and a
+#: camera cannot tell permanent from parked-right-now in frames taken a
+#: moment apart -- so one car in the drive at learning time became part
+#: of the house forever. Packages were not excluded at all, which is
+#: worse: a parcel on the step when the baseline was learnt makes every
+#: later delivery "nothing new", and "was there a package today?" is the
+#: question these cameras are actually asked (the creator, 2026-09-16).
+CONFIRM_PROMPT = (
+    "These are {count} still frames from the {camera} camera{kinds}.\n\n"
+    "At other quiet moments, this camera was described as:\n{baseline}\n\n"
+    "Reply with one sentence listing ONLY the fixed things that are in the frames now "
+    "AND in every one of those descriptions. Leave out anything that appears in some but "
+    "not others -- it moved, so it is not part of the scene. Leave out people, animals, "
+    "vehicles, packages, bins and bicycles even if they appear every time. "
     "Plain words, no preamble."
 )
 
@@ -92,7 +115,22 @@ def _baselines(root: Path) -> dict:
         return {}
 
 
-def _remember_baseline(root: Path, camera: str, scene: str) -> None:
+def _baseline_record(root: Path, camera: str) -> dict:
+    """`{"scene": str, "samples": [str]}` for one camera.
+
+    Tolerates the older shape, where the value was the scene string
+    itself: a baseline already learnt stays learnt across this change.
+    """
+    raw = _baselines(root).get(camera)
+    if isinstance(raw, str):
+        return {"scene": raw, "samples": []}
+    if isinstance(raw, dict):
+        return {"scene": str(raw.get("scene") or ""),
+                "samples": [str(x) for x in (raw.get("samples") or []) if str(x).strip()]}
+    return {"scene": "", "samples": []}
+
+
+def _remember_baseline(root: Path, camera: str, scene: str = "", samples=()) -> None:
     """What this camera always shows, kept between restarts.
 
     A file rather than memory: learning the scene costs a model call, and
@@ -101,7 +139,7 @@ def _remember_baseline(root: Path, camera: str, scene: str) -> None:
     """
     path = root / BASELINE_FILE
     known = _baselines(root)
-    known[camera] = scene
+    known[camera] = {"scene": scene, "samples": [str(x) for x in samples]}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(known, indent=2, sort_keys=True), encoding="utf-8")
@@ -277,16 +315,35 @@ class CameraVision:
             if not stills:
                 return
             root = Path(self._config.repo_root)
-            baseline = _baselines(root).get(camera, "")
+            record = _baseline_record(root, camera)
+            baseline = record["scene"]
             if not baseline:
-                # Nothing known about this camera yet: learn what is always
-                # there from these frames, and say nothing about this event.
-                # One quiet event's worth of silence buys every later event
-                # its meaning.
-                scene, problem = await self._ask(stills, camera, payload, BASELINE_PROMPT)
-                if scene and not problem:
-                    _remember_baseline(root, camera, scene)
-                    self._ctx.logger.info("camera_vision_baseline_learnt", camera=camera, scene=scene[:160])
+                # Nothing confirmed about this camera yet. These frames are
+                # the WORST evidence for "what is always here": the camera
+                # fired because something moved, so whatever triggered it is
+                # in shot. One sample makes that thing part of the house.
+                # So sample several separate events and keep only what
+                # survives all of them.
+                samples = record["samples"]
+                want = max(1, int(getattr(self._config, "camera_vision_baseline_samples", 3)))
+                if len(samples) + 1 >= want:
+                    if samples:
+                        prior = "\n".join(f"- {text}" for text in samples)
+                        scene, problem = await self._ask(stills, camera, payload, CONFIRM_PROMPT,
+                                                         baseline=prior)
+                    else:
+                        # `want` of 1: one look is all that was asked for.
+                        scene, problem = await self._ask(stills, camera, payload, BASELINE_PROMPT)
+                    if scene and not problem:
+                        _remember_baseline(root, camera, scene)
+                        self._ctx.logger.info("camera_vision_baseline_learnt", camera=camera,
+                                              scene=scene[:160], samples=len(samples) + 1)
+                    return
+                sample, problem = await self._ask(stills, camera, payload, BASELINE_PROMPT)
+                if sample and not problem:
+                    _remember_baseline(root, camera, samples=[*samples, sample])
+                    self._ctx.logger.info("camera_vision_baseline_sample", camera=camera,
+                                          have=len(samples) + 1, want=want)
                 return
             said, problem = await self._ask(stills, camera, payload, EVENT_PROMPT, baseline=baseline)
             if problem:
@@ -382,5 +439,5 @@ class CameraVision:
         ))
 
 
-__all__ = ["BASELINE_PROMPT", "CameraDescribeTool", "CameraVision", "EVENT_PROMPT", "NOTHING",
+__all__ = ["BASELINE_PROMPT", "CONFIRM_PROMPT", "CameraDescribeTool", "CameraVision", "EVENT_PROMPT", "NOTHING",
            "PROMPT", "describe_stills", "vision_tools"]
