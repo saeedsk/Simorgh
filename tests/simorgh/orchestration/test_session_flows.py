@@ -459,6 +459,27 @@ class ClaimedTvActTestCase(unittest.TestCase):
         self.assertTrue(claimed_tv_act("It's playing on the TV now.", plain), "the typed chat has the TV tools too")
 
 
+class NothingGoesOnTheTvUnasked(unittest.TestCase):
+    def test_the_claim_guard_corrects_words_but_only_acts_when_asked(self):
+        # Live 2026-09-17, the creator: "dont auto cast dash on tv, unless it
+        # is being asked by user". The guard used to hand the model
+        # `CAST_SHOW: home` after any loose sentence about the dashboard.
+        from simorgh.orchestration import profiles
+        from simorgh.orchestration.api import Session
+        from simorgh.orchestration.session import wanted_tv_act
+
+        def said(text):
+            return Session(task_id="t", kind="chat", mode="execute", profile=profiles.VOICE_CHAT,
+                           worker_id="w", user_text=text, channel="voice")
+
+        for asked in ("put the dashboard on the tv", "play the kpop chart on the TV",
+                      "show me the cameras", "cast the news", "play a video"):
+            self.assertTrue(wanted_tv_act(said(asked)), asked)
+        for idle in ("what did iris tell you tonight", "summarize what she said",
+                     "I just want to go now", "tell me about your day", "how are the markets doing"):
+            self.assertFalse(wanted_tv_act(said(idle)), idle)
+
+
 class DashboardOnTvClaimTestCase(unittest.TestCase):
     def test_saying_the_dashboard_is_on_the_tv_needs_cast_show(self):
         # Live 2026-09-14: "The dashboard's back on the TV now -- home view." after only dash_view.

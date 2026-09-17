@@ -188,6 +188,27 @@ _TV_CLAIM = re.compile(
     r"|\bplaying\s+(?:on|in)\s+(?:the\s+)?(?:tv|family room|youtube))", re.I)
 _TV_TOOLS = ("cast_play", "cast_show", "tv_charts", "tv_app", "tv_key", "dash_view", "cast_stop")
 
+#: Someone asking for the screen: "put the dashboard up", "play X on the TV",
+#: "show me the cameras". Without one of these, nothing goes on the TV.
+_TV_ASK = re.compile(
+    r"\b(?:tv|television|screen|chromecast|cast|dashboard|dash)\b"
+    r"|\b(?:play|show|put|turn|open|pull)\b[^.!?]{0,40}\b(?:up|on|screen|tv)\b"
+    # Things that live nowhere but a screen: "show me the cameras".
+    r"|\b(?:play|show|stream|open|cast|put)\b[^.!?]{0,30}"
+    r"\b(?:camera|cameras|chart|charts|video|youtube|news|markets|wallpaper)\b", re.I)
+
+
+def wanted_tv_act(session) -> bool:
+    """Did they ask for anything on the TV this turn? The claim guard may
+    correct Sim's words whenever it likes, but it may only ask Sim to
+    *act* on the screen when someone asked for the screen.
+
+    Live 2026-09-17, the creator: "dont auto cast dash on tv, unless it is
+    being asked by user either from voice chat or tui". The guard below
+    was handing the model `CAST_SHOW: home` after any loose sentence
+    about the dashboard, and the model obliged -- a cast nobody wanted."""
+    return bool(_TV_ASK.search((getattr(session, "user_text", "") or "")))
+
 
 def invented_markers(text: str, offered: tuple[str, ...]) -> list[str]:
     """Marker-shaped lines naming tools that are not on offer -- the
@@ -1154,9 +1175,12 @@ class SessionRunner:
                 session.messages.append({"role": "assistant", "content": text})
                 session.messages.append({"role": "user", "content": (
                     f"You said \"{claimed}\", but you called no tool this turn, so nothing happened on the TV. "
-                    "If they asked you to play or show something, write the marker on a line of its own now "
-                    "(TV_CHARTS: kpop, CAST_PLAY: <url>, CAST_SHOW: home, TV_KEY: next). If they did not, or you "
-                    "cannot, answer plainly without saying it is done."
+                    "Write the marker on a line of its own now (TV_CHARTS: kpop, CAST_PLAY: <url>, "
+                    "CAST_SHOW: home, TV_KEY: next), or answer plainly without saying it is done."
+                ) if wanted_tv_act(session) else (
+                    f"You said \"{claimed}\", but you called no tool this turn, so nothing happened on the TV -- "
+                    "and nobody asked for the TV. Do not put anything on it. Say what you meant without "
+                    "claiming anything is on the screen."
                 )})
                 continue
 
