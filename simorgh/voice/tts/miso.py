@@ -36,6 +36,47 @@ DEFAULT_REPO = "workspace/voice/engines/MisoTTS"
 ENGINE_MODULE = "generator"
 
 
+#: Upstream hardcodes Meta's own tokenizer repo, which is `gated=manual`
+#: -- every download waits on a human at Meta, so the engine 403s at load
+#: and never speaks a word. `workspace/` is gitignored, so a patch to the
+#: checkout cannot be committed and a fresh `voice models miso` would
+#: quietly restore the gated name. So the override is re-applied here,
+#: after every clone.
+_TOKENIZER_LINE = '    tokenizer_name = "meta-llama/Llama-3.2-1B"'
+_TOKENIZER_PATCH = (
+    "    # Overridable (Simorgh): Meta's repo is gated=manual, so upstream's\n"
+    "    # hardcoded name 403s at load. MISO_TOKENIZER names an ungated\n"
+    "    # mirror of the same Llama 3.2 1B tokenizer.\n"
+    "    import os as _os\n"
+    '    tokenizer_name = _os.environ.get("MISO_TOKENIZER") or "meta-llama/Llama-3.2-1B"'
+)
+
+
+def allow_an_ungated_tokenizer(repo: str | Path, *, log=print) -> str:
+    """Make the checkout's tokenizer name honour `MISO_TOKENIZER`.
+
+    Returns "" when done or already done, else why not. Never raises: a
+    checkout that has changed upstream is a thing to report, not a
+    crash during an install.
+    """
+    source = Path(repo) / "generator.py"
+    try:
+        text = source.read_text()
+    except OSError as exc:
+        return f"could not read {source}: {exc}"
+    if "MISO_TOKENIZER" in text:
+        return ""
+    if _TOKENIZER_LINE not in text:
+        return (f"{source} no longer has the hardcoded tokenizer line; MisoTTS will ask "
+                "Meta's gated repo unless it has been granted access")
+    try:
+        source.write_text(text.replace(_TOKENIZER_LINE, _TOKENIZER_PATCH, 1))
+    except OSError as exc:
+        return f"could not patch {source}: {exc}"
+    log("  pointed the tokenizer at MISO_TOKENIZER (Meta's own repo is gated) ...")
+    return ""
+
+
 def available(venv_dir: str = DEFAULT_VENV_DIR, repo: str = DEFAULT_REPO) -> tuple[bool, str]:
     if not (Path(repo) / "generator.py").is_file():
         return False, f"needs the MisoTTS checkout at {repo} (`voice models miso` clones it)"
@@ -52,6 +93,9 @@ def install(venv_dir: str = DEFAULT_VENV_DIR, repo: str = DEFAULT_REPO, *, log=p
         done = subprocess.run(["git", "clone", "--depth", "1", REPO_URL, str(repo_path)], capture_output=True, text=True, timeout=600)
         if done.returncode != 0:
             return None, f"could not clone MisoTTS: {(done.stderr or done.stdout).strip()[-300:]}"
+    why = allow_an_ungated_tokenizer(repo_path, log=log)
+    if why:
+        log(f"  note: {why}")
     py, problem = create_venv(venv_dir, "miso", python="3.10", editable=str(repo_path), log=log)
     if py is None:
         return py, problem
@@ -93,6 +137,9 @@ class MisoSynthesiser(SubprocessSynthesiser):
                          timeout_s=float(getattr(config, "expressive_timeout_s", 180.0)) * 3)
         self._device = str(getattr(config, "miso_device", "") or "")
         os.environ["MISO_REPO"] = str(Path(self._repo).resolve())
+        tokenizer = str(getattr(config, "miso_tokenizer", "") or "")
+        if tokenizer:
+            os.environ["MISO_TOKENIZER"] = tokenizer
         if self._device:
             os.environ["MISO_DEVICE"] = self._device
 
@@ -103,4 +150,4 @@ class MisoSynthesiser(SubprocessSynthesiser):
         return {"speaker": 0, "temperature": temperature, "max_audio_length_ms": 30_000}
 
 
-__all__ = ["DEFAULT_REPO", "MisoSynthesiser", "REPO_URL", "available", "install"]
+__all__ = ["allow_an_ungated_tokenizer", "DEFAULT_REPO", "MisoSynthesiser", "REPO_URL", "available", "install"]

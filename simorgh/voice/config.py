@@ -279,6 +279,13 @@ class Config:
     miso_reference: str = ""
     miso_repo: str = "workspace/voice/engines/MisoTTS"
     miso_device: str = ""                   # "" = cuda, else mps, else cpu
+    # MisoTTS loads Llama 3.2's tokenizer, and upstream asks Meta's own
+    # repo for it -- which is `gated=manual`: access is granted by hand,
+    # so the engine 403s at load and reports nothing anyone can act on
+    # (the creator, 2026-09-16, heard silence all evening). This is an
+    # ungated mirror of the same tokenizer. Set it to
+    # "meta-llama/Llama-3.2-1B" once that access has been granted.
+    miso_tokenizer: str = "unsloth/Llama-3.2-1B"
     expressive_timeout_s: float = 180.0
     # Which replies the expressive engine speaks when `tts` names one
     # (voice/tts/lanes.py): "auto" = `voice test` only (and a spoken
