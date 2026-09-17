@@ -2705,13 +2705,68 @@ class ConsoleTailTool:
         return ToolResult(ok=True, output="\n".join(lines))
 
 
+
+class RememberPlaceTool:
+    """Where Sim is, told once and kept.
+
+    "Name Tamagamka as your house" -- Sim said "Done" and nothing was
+    written; the name lived on as a single episodic record. And driving,
+    2026-09-16: "There's no setting that stores it, so please just tell
+    me again next session." There is one now.
+    """
+
+    name = "remember_place"
+    description = ("Keep what a place is called, so it survives restarts: `house <name>` names this "
+                   "house; `network <name> is <place>` records what being on a network means "
+                   "(e.g. `network Aranet is home`, `network Woody is the car`); "
+                   "`forget network <name>` drops one. `places` alone lists what is known.")
+    read_only = False
+    reversibility = "reversible"
+    args_schema = {"type": "object", "properties": {"request": {"type": "string"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        from simorgh.contracts import places
+
+        raw = " ".join(str(args.get("request") or "").split())
+        low = raw.lower()
+        if not raw or low in ("places", "list", "where"):
+            line = places.place_line()
+            return ToolResult(ok=True, output=line or "nothing is known about this place yet")
+        if low.startswith("forget network "):
+            net = raw[len("forget network "):].strip()
+            if places.forget_network(net):
+                return ToolResult(ok=True, output=f"forgotten: {net}", side_effects=(f"forgot network {net}",))
+            return ToolResult(ok=False, error=f"nothing known about a network called {net!r}")
+        if low.startswith("house "):
+            name = places.remember_house_name(raw[len("house "):])
+            if not name:
+                return ToolResult(ok=False, error="say what the house is called, e.g. `house Tamagamka`")
+            return ToolResult(ok=True, output=f"this house is {name}", side_effects=(f"house name = {name}",))
+        if low.startswith("network "):
+            rest = raw[len("network "):]
+            for sep in (" is ", " = ", " means "):
+                if sep in rest:
+                    net, place = rest.split(sep, 1)
+                    break
+            else:
+                net, _, place = rest.partition(" ")
+            net, place = places.remember_network(net, place)
+            if not net:
+                return ToolResult(ok=False, error="say both, e.g. `network Aranet is home`")
+            return ToolResult(ok=True, output=f"{net} means {place}", side_effects=(f"network {net} = {place}",))
+        return ToolResult(ok=False, error="say `house <name>`, `network <name> is <place>`, or `places`")
+
+
 def builtin_tools(config: Config, *, secrets=None) -> list:
     """`secrets` is the subsystem's scoped secret store. Only the
     account-backed tools use it, and they take the value at call time so
     a rotated credential is picked up without a restart."""
     return [
         ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), SelfMapTool(config),
-        ConsoleTailTool(config),
+        ConsoleTailTool(config), RememberPlaceTool(config),
         RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),

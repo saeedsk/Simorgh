@@ -187,6 +187,7 @@ _TOOL_NOTES: dict[str, str] = {
     "cam_state": "what a camera sees right now (motion, person, vehicle, animal) and what it has on",
     "cam_snapshot": "a still from a camera, saved under workspace/cameras/",
     "camera_describe": "what a camera can see right now, in words: `<camera>` (NVR or Ring)",
+    "remember_place": "keep what a place is called so it survives a restart: `house <name>`, `network <name> is <place>`, `forget network <name>`, or `places` to list",
     "console_tail": "the last lines Sim printed on its own console, the only way to answer a question about its own screen or output: `<count>` or `<count> <word to filter>`, e.g. `30 error`",
     "cam_stream": "a camera live on the TV: `<camera> frame` beside your page, `<camera> full` full screen, `<camera> stop`",
     "cam_light": "a camera's spotlight: `<camera> on|off`",
@@ -409,12 +410,19 @@ def who_is_here(speaker: str, relation: str, room: str, before: str = "") -> str
     all the time" -- so the name is asked for when the voice changes
     and left to fall naturally while the same person keeps talking."""
     from simorgh.contracts.household import FAMILY, STRANGER, WITH_A_CHILD, describe, is_child, member, roster
+    from simorgh.contracts.places import place_line
 
     lines = []
     if speaker:
         # The household, with its children's ages, is for the household
         # and for people it knows -- not for a voice nobody can name.
         lines.append(FAMILY.format(roster=roster()))
+        # What this place is called, and what a network name means. Told,
+        # never detected -- and the line says so, because "good to be back
+        # on the house Wi-Fi" was a guess dressed as knowledge.
+        where = place_line()
+        if where:
+            lines.append(where)
         relation = relation or describe(speaker)
         who = f"{speaker} ({relation})" if relation else speaker
         lines.append(f"You are speaking with {who}. You know their voice. Use their name the way a person would -- "
