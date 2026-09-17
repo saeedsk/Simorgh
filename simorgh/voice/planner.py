@@ -222,6 +222,12 @@ def speak_numbers(text: str) -> str:
     return _DECIMAL.sub(_decimal, text)
 
 
+#: An ALL-CAPS SNAKE_CASE word opening a reply: a tool marker that was
+#: never parsed as one. Anchored at the head, because a marker is how a
+#: reply STARTS; an acronym mid-sentence is ordinary speech.
+_LEAKED_MARKER = re.compile(r"\A\s*[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+
+
 def speakable(text: str) -> tuple[str, tuple[str, ...]]:
     """Written text made speakable, and what was left out.
 
@@ -230,6 +236,16 @@ def speakable(text: str) -> tuple[str, tuple[str, ...]]:
     enumeration. Numbers stay intelligible. Meaning is never changed."""
     omitted: list[str] = []
     out = text or ""
+    # A tool call the model wrote as prose is not a sentence. `parse_marker`
+    # needs the colon -- `CAM_STATE: all` is a call; `CAM_STATE all` is not,
+    # so it was never a call at all and the raw text went to the speaker.
+    # Live 2026-09-16, mid camera test: Sim said "CAM_STATE all" and
+    # "RING_LIST induction: true" out loud. Nothing downstream could catch
+    # it, because Voice cannot see the tool names -- so the test is the
+    # SHAPE. The underscore is what makes it safe: NVDA, USA and OK are
+    # words a listener may hear; CAM_STATE is not one.
+    if _LEAKED_MARKER.match(out):
+        return "", ("marker",)
     # A stray tag the model opened with -- `[ciallo_05]`, `[thinking]` --
     # is not a word; the known feelings were taken off before this.
     out = _STRAY_TAG.sub("", out)
