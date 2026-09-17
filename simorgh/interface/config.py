@@ -108,6 +108,14 @@ class Config:
     # Long-poll seconds: Telegram holds the connection open until a
     # message arrives, so this is idle cost, not reply latency.
     telegram_poll_s: float = 25.0
+    # Sim over WhatsApp (interface/whatsapp.py), the Business Cloud API.
+    # The token, the phone-number id, the verify token and the app secret
+    # are all secrets; this is who may use it -- phone numbers, matched
+    # however they are punctuated. Empty means NOBODY, as for Telegram.
+    whatsapp_allowed: tuple[str, ...] = ()
+    # Meta's Graph API version, pinned: an unpinned version changes shape
+    # underneath a running house.
+    whatsapp_api_version: str = "v21.0"
     # Observe-tier additions (02-system-architecture.md section 6.2):
     # bounds for the `/api/history` and `/api/logs` read-only queries.
     history_stream: str = "metrics:history"
@@ -166,6 +174,8 @@ class Config:
             api_max_body_bytes=int(data.get("api_max_body_bytes", default.api_max_body_bytes)),
             telegram_allowed=tuple(str(a).strip() for a in (data.get("telegram_allowed") or ()) if str(a).strip()),
             telegram_poll_s=float(data.get("telegram_poll_s", default.telegram_poll_s)),
+            whatsapp_allowed=tuple(str(a).strip() for a in (data.get("whatsapp_allowed") or ()) if str(a).strip()),
+            whatsapp_api_version=str(data.get("whatsapp_api_version", default.whatsapp_api_version)),
             history_stream=str(data.get("history_stream", default.history_stream)),
             history_default_minutes=float(data.get("history_default_minutes", default.history_default_minutes)),
             history_max_points=int(data.get("history_max_points", default.history_max_points)),

@@ -198,6 +198,7 @@ class Service:
         self._input_pending = False
         self._http: HttpApi | None = None
         self._telegram = None
+        self._whatsapp = None
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -341,6 +342,51 @@ class Service:
             # Somebody listed who may use it, but no token to use: that
             # is a half-configured channel, which is worth saying.
             ctx.logger.warning("telegram.not_listening", reason=self._telegram.why_not())
+        # Sim reached over WhatsApp (interface/whatsapp.py). Unlike
+        # Telegram this is dialled INTO: the webhook is a public URL that
+        # starts real tool-using turns in this house, so it is off unless
+        # every credential is present, every body must carry Meta's
+        # signature, and the allow-list still decides who is answered.
+        # Both routes are `auth=False` because Meta cannot send Sim's
+        # bearer token -- the signature is the gate, not the token.
+        from .whatsapp import WhatsAppChannel
+
+        self._whatsapp = WhatsAppChannel(
+            ctx.bus,
+            token=(ctx.secrets.get("SIM_WHATSAPP_TOKEN") or ""),
+            phone_id=(ctx.secrets.get("SIM_WHATSAPP_PHONE_ID") or ""),
+            verify_token=(ctx.secrets.get("SIM_WHATSAPP_VERIFY_TOKEN") or ""),
+            app_secret=(ctx.secrets.get("SIM_WHATSAPP_APP_SECRET") or ""),
+            allowed=self.config.whatsapp_allowed, version=self.config.whatsapp_api_version,
+            logger=ctx.logger, clock=getattr(ctx.clock, "now", None),
+        )
+        if self._whatsapp.configured and self._http is not None:
+            whatsapp = self._whatsapp
+
+            async def _whatsapp_verify(query, _body, _headers):
+                status, body = whatsapp.verify(query)
+                return status, body, "text/plain"
+
+            async def _whatsapp_post(_query, body, headers):
+                signature = ""
+                for key, value in (headers or {}).items():
+                    if str(key).lower() == "x-hub-signature-256":
+                        signature = str(value)
+                        break
+                status, answer = await whatsapp.receive(body, signature=signature)
+                return status, answer, "text/plain"
+
+            self._http.register_route("GET", "/api/whatsapp", _whatsapp_verify, auth=False)
+            self._http.register_route("POST", "/api/whatsapp", _whatsapp_post, auth=False,
+                                      max_body=self.config.api_max_body_bytes, rate=(120, 60.0))
+            started, why = await self._whatsapp.start()
+            if started and not why:
+                print("whatsapp: listening on /api/whatsapp")
+            else:
+                ctx.logger.warning("whatsapp.not_listening", reason=why)
+                print(f"whatsapp: not listening -- {why}")
+        elif self.config.whatsapp_allowed:
+            ctx.logger.warning("whatsapp.not_listening", reason=self._whatsapp.why_not())
         ctx.logger.info("interface.started", session_id=self.session_id)
 
     async def stop(self) -> None:
@@ -389,6 +435,9 @@ class Service:
         if self._telegram is not None:
             await self._telegram.stop()
             self._telegram = None
+        if self._whatsapp is not None:
+            await self._whatsapp.stop()
+            self._whatsapp = None
 
     async def health(self) -> Health:
         if self._ctx is None:

@@ -65,7 +65,13 @@ DEFAULT_SECRETS: dict[str, frozenset[str]] = {
     # `SIM_TELEGRAM_TOKEN` is the bot token for interface/telegram.py.
     # Absent, the channel is simply off and says so; a person who sets
     # it should not also have to remember a `secrets = [...]` line.
-    "interface": frozenset({"SIM_API_TOKEN", "SIM_TELEGRAM_TOKEN"}),
+    # WhatsApp needs four: the Graph token, the phone-number id, the
+    # verify token for Meta's subscription handshake, and the app
+    # secret the webhook checks every body against. Absent, the
+    # channel is off and says which one is missing.
+    "interface": frozenset({"SIM_API_TOKEN", "SIM_TELEGRAM_TOKEN", "SIM_WHATSAPP_TOKEN",
+                            "SIM_WHATSAPP_PHONE_ID", "SIM_WHATSAPP_VERIFY_TOKEN",
+                            "SIM_WHATSAPP_APP_SECRET"}),
     # Execution is where credentials are actually used: every
     # account-backed tool runs here. `vault:*` covers the encrypted
     # store's own namespace (`vault:imap:fastmail:password`) and nothing

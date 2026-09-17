@@ -144,7 +144,7 @@ class SubprocessSynthesiser:
         env = {**os.environ, "PYTHONUNBUFFERED": "1"}
         self._proc = await asyncio.create_subprocess_exec(
             str(self._python), str(server), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL if not os.environ.get("SIMORGH_TTS_DEBUG") else None, env=env)
+            stderr=asyncio.subprocess.PIPE, env=env)
         try:
             line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=self.load_timeout_s)
         except asyncio.TimeoutError:
@@ -155,8 +155,27 @@ class SubprocessSynthesiser:
         except ValueError:
             self._ready = {}
         if not self._ready.get("ready"):
+            # Why it failed, in the message -- not in /dev/null. stderr
+            # was discarded unless SIMORGH_TTS_DEBUG was set, so a real
+            # load failure reached the person as an empty first line and
+            # nothing else. On 2026-09-16 MisoTTS died on a gated
+            # Hugging Face repo and every layer above could only say
+            # `spoken (miso)`; the traceback that named the cause was
+            # thrown away as it was produced.
+            detail = str(self._ready.get("error") or "")
+            if not detail:
+                detail = line.decode("utf-8", "replace").strip()[:200] or "it printed nothing"
+            tail = ""
+            if self._proc is not None and self._proc.stderr is not None:
+                try:
+                    raw = await asyncio.wait_for(self._proc.stderr.read(4000), timeout=2.0)
+                    lines = [l for l in raw.decode("utf-8", "replace").splitlines() if l.strip()]
+                    if lines:
+                        tail = " -- " + "; ".join(lines[-3:])[:400]
+                except (asyncio.TimeoutError, Exception):  # noqa: BLE001 -- diagnosis is best effort
+                    tail = ""
             await self._stop()
-            raise RuntimeError(f"{self.name} failed to load: {self._ready.get('error') or line.decode('utf-8', 'replace')[:200]}")
+            raise RuntimeError(f"{self.name} failed to load: {detail}{tail}")
 
     async def _stop(self) -> None:
         proc, self._proc = self._proc, None
