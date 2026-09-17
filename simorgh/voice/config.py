@@ -171,6 +171,14 @@ class Config:
     # recognition is on; without it every voice is "unplaced" and Sim would
     # answer nobody.
     unplaced_needs_name: bool = True
+    # ...but recognition flickers, and the rule above then costs the person
+    # already talking to Sim a silence mid-sentence ("radio silent with a
+    # bunch of red messages", the creator, 2026-09-16). A voice whose
+    # CLOSEST match is the person Sim is mid-conversation with, scoring at
+    # least the book's `lean`, within `exchange_window_s`, is that person on
+    # a bad frame. All four conditions, because the failure this must not
+    # re-open is answering a room full of colleagues.
+    unplaced_follows_conversation: bool = True
     # While an exchange with someone is live -- Sim answered them this recently
     # -- none of the quiet rules apply to that person. The creator, 2026-09-15:
     # "over the past two three minutes I have been asking you a question, so it

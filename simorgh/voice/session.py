@@ -1088,6 +1088,30 @@ class VoiceSession:
         # Sim asked something a moment ago and this may be the answer to it.
         if 0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s and self._last_ask_addressed:
             return False
+        # Recognition flickers, and this rule then silences the person who
+        # IS talking to Sim, mid-sentence. A voice whose closest match is
+        # someone Sim is already mid-conversation with -- scoring high
+        # enough that only the margin kept it unnamed -- is that person on
+        # a bad frame, not a stranger.
+        #
+        # Deliberately four conditions, because the failure it must not
+        # re-open is the work call. The closest voice must be NAMED; Sim
+        # must have answered that name inside `conversation_window_s`
+        # (which, since "someone" stopped being a person, answering a
+        # stranger can no longer establish); the score must reach the
+        # book's `lean`, so a colleague at 0.18 never qualifies; and Sim
+        # must have spoken within `exchange_window_s`, so this lasts
+        # seconds rather than the conversation window's three minutes.
+        if getattr(self._config, "unplaced_follows_conversation", False):
+            ident = self.last_identification
+            closest = str(getattr(ident, "runner_up", "") or "") if ident is not None else ""
+            lean = float(getattr(self._speakers, "lean", 0.45) or 0.45)
+            score = float(getattr(ident, "runner_up_score", 0.0) or 0.0) if ident is not None else 0.0
+            if (closest and score >= lean and self._in_conversation(closest)
+                    and 0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s):
+                self._log("debug", "voice.unplaced_is_who_sim_is_talking_to",
+                          closest=closest, score=round(score, 3))
+                return False
         self._quiet_on["someone"] = now
         self._room.append(("someone", text, now, "aside"))
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
