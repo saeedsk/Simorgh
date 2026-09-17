@@ -374,7 +374,13 @@ class Service:
         self._no_real_provider_since = self._ctx.clock.now() if floor else None
         parsed = self._parser.parse(response.text, _expected_spec(payload))
         await self._append_call_record(purpose, response, floor, compacted)
-        await self._notice_if_provider_changed(response.provider)
+        # Not for a call that carried pictures: only one provider can see,
+        # so a camera event always "changes" the provider and then changes
+        # it back on the next chat turn. The creator's screen, 2026-09-16:
+        # "thinking moved from together to ollama" twice a minute while
+        # thinking had not moved at all.
+        if not images:
+            await self._notice_if_provider_changed(response.provider)
 
         await self._ctx.bus.reply(message, type=topics.COGNITION_THINK_REPLY, payload={
             "text": parsed.text,
