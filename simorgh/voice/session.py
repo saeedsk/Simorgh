@@ -174,6 +174,8 @@ class VoiceSession:
         self._last_asked_speaker = ""
         self.last_speaker = ""
         self.last_identification = None
+        self._last_skip = ""              # why the last turn was never compared
+        self._scored: dict[int, dict] = {}   # turn_id -> what the book concluded
         self._mic = microphone
         self._detector_factory = detector_factory
         self._clock = clock
@@ -610,7 +612,9 @@ class VoiceSession:
         here either way -- it is kept for this and nothing else."""
         pcm = self._audio.pop(turn_id, None)
         self._last_speech_s = 0.0
+        self._last_skip = ""
         if pcm is None or self._embedder is None or self._speakers is None:
+            self._last_skip = "no_audio" if pcm is None else "no_model"
             return None, None
         from .speakers import MIN_SECONDS, seconds_of
 
@@ -619,13 +623,40 @@ class VoiceSession:
         samples = [x / 32768.0 for x in memoryview(bytes(pcm)).cast("h")]
         self._last_speech_s = seconds_of(samples, 16000)
         if self._last_speech_s < MIN_SECONDS:
+            # The commonest reason a turn carries no name: it was never
+            # compared at all. No threshold can recover these.
+            self._last_skip = "too_short"
             return None, None
         try:
             vector = await asyncio.to_thread(self._embedder.embed, samples, 16000)
         except Exception as exc:  # noqa: BLE001 -- a failed embedding is an unknown speaker, not a failed turn
             self._log("warning", "voice.speaker_embed_failed", error=repr(exc))
+            self._last_skip = "embed_failed"
             return None, None
         return self._speakers.identify(vector), vector
+
+    def _note_score(self, turn_id: int, identification) -> None:
+        """Keep what the book concluded about this turn, so the spoken-turn
+        record can carry the number. Until 2026-09-17 the score was computed
+        and thrown away: 1,275 turns, 70% of them nameless, and not one of
+        them said whether it had scored 0.49 or had never been compared --
+        so the threshold could only ever be argued about, never read off."""
+        note: dict = {"speech_s": round(float(self._last_speech_s), 2)}
+        if identification is None:
+            note["speaker_scored"] = False
+            note["speaker_skipped"] = self._last_skip or "unknown"
+        else:
+            note["speaker_scored"] = True
+            note["speaker_score"] = round(float(identification.score), 3)
+            note["speaker_named"] = identification.name
+            note["speaker_probable"] = bool(identification.probable)
+            if identification.runner_up:
+                note["speaker_runner_up"] = identification.runner_up
+                note["speaker_runner_up_score"] = round(float(identification.runner_up_score), 3)
+        self._scored[turn_id] = note
+        if len(self._scored) > 64:      # turns that never reach a spoken reply
+            for stale in sorted(self._scored)[:-32]:
+                self._scored.pop(stale, None)
 
     async def _attribute(self, turn_id: int, identification) -> list:
         """Who said which words of the turn (voice/diarize.py), when it
@@ -723,6 +754,7 @@ class VoiceSession:
         session_id = str(uuid.uuid4())
         clock = self._clocks.get(turn_id) or TurnClock(turn_id=turn_id)
         identification, vector = await self._identify(turn_id)
+        self._note_score(turn_id, identification)
         if self._enrolling is not None or self._intro is not None:
             # "stop" / "voice off" are obeyed here too -- they became takes
             # 1 and 2 of Aran's voice once (observer, 2026-09-13).
@@ -1639,6 +1671,7 @@ class VoiceSession:
         metrics["lane"] = lane
         metrics["held"] = round(float(getattr(self._tts, "last_hold_s", 0.0)), 2)
         metrics["omitted"] = list(plan.omitted)
+        metrics.update(self._scored.pop(turn_id, {}))
         self.stats.last_metrics = metrics
         engine = getattr(self._tts, "last_engine", "") or self._tts.name
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
