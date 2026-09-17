@@ -22,21 +22,44 @@ RATE = 24_000
 
 
 def _write_pcm16(path: str, samples, rate: int) -> float:
-    """Float samples -> a 16-bit PCM WAV. Returns its length in seconds."""
-    import numpy as np
+    """Float samples -> a 16-bit PCM WAV. Returns its length in seconds.
 
-    data = np.asarray(samples, dtype=np.float32).reshape(-1)
-    if data.size:
-        peak = float(np.abs(data).max())
-        if peak > 1.0:          # some voices come back a little hot
-            data = data / peak
-    pcm = (np.clip(data, -1.0, 1.0) * 32767.0).astype(np.int16)
+    numpy is guarded rather than assumed: every third-party import in
+    this repository is optional or declared so, and an unguarded one
+    fails `tests/simorgh/test_module_boundaries.py`. It ships with
+    torch in practice; without it the stdlib does the same arithmetic
+    more slowly, because an engine that has already rendered the audio
+    should not go silent over a missing helper.
+    """
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover -- numpy arrives with torch
+        np = None
+
+    if np is not None:
+        data = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if data.size:
+            peak = float(np.abs(data).max())
+            if peak > 1.0:      # some voices come back a little hot
+                data = data / peak
+        pcm = (np.clip(data, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
+        frames = len(pcm) // 2
+    else:
+        import array
+
+        floats = [float(x) for x in samples]
+        peak = max((abs(f) for f in floats), default=0.0)
+        if peak > 1.0:
+            floats = [f / peak for f in floats]
+        block = array.array("h", (int(max(-1.0, min(1.0, f)) * 32767.0) for f in floats))
+        pcm, frames = block.tobytes(), len(block)
+
     with wave.open(path, "wb") as handle:
         handle.setnchannels(1)
         handle.setsampwidth(2)
         handle.setframerate(rate)
-        handle.writeframes(pcm.tobytes())
-    return len(pcm) / float(rate or RATE)
+        handle.writeframes(pcm)
+    return frames / float(rate or RATE)
 
 
 def main() -> None:
