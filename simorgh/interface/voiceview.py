@@ -51,10 +51,64 @@ def controlled(payload: dict) -> str:
         error = payload.get("error") or {}
         return f"voice: {payload.get('detail') or error.get('detail') or 'could not do that'}"
     detail = payload.get("detail") or ""
+    from . import render as render_mod
+
+    colour = render_mod.color_enabled()
+    # The settings block and a single setting are panels, coloured like
+    # `help`; everything else is one line with a `voice:` in front.
+    if detail.startswith("voice settings"):
+        return settings_panel(detail, enabled=colour)
+    if " = " in detail.partition("\n")[0] and "\n" in detail:
+        return one_setting(detail, enabled=colour)
     if detail.startswith(("barge-in", "echo cancellation", "settings you can change", "people I know", "nobody is enrolled",
                           "enrolling", "forgot", "say something")) or " = " in detail or " is said " in detail:
         return f"voice: {detail}"
     return status(payload)
+
+
+def settings_panel(detail: str, *, enabled: bool = True) -> str:
+    """`voice set`'s block, coloured the way `help` is coloured.
+
+    The creator, 2026-09-16: "you did a good job in organzeing `voice
+    set` but the font color shoulw be same orange like as output of
+    `help`". `help_panel` paints the command name "warm" (the muted tan
+    at RGB 172,127,79), its section titles "bold" and its preamble
+    "dim"; this gives the settings the same three.
+
+    The colour goes on HERE and not where the text is built, because
+    Voice may not import Interface's renderer -- no subsystem imports
+    another -- so the block arrives as plain text and is painted by its
+    own layout: four spaces is a setting row and its first word is the
+    key, two spaces is a group heading, anything else is the header.
+    A line that matches nothing is left exactly as it came.
+    """
+    from . import render as render_mod
+
+    out = []
+    for line in detail.splitlines():
+        if not line.strip():
+            out.append(line)
+        elif line.startswith("    "):
+            key, sep, rest = line[4:].partition(" ")
+            out.append("    " + render_mod.style(key, "warm", enabled=enabled) + sep + rest)
+        elif line.startswith("  "):
+            out.append("  " + render_mod.style(line[2:], "bold", enabled=enabled))
+        else:
+            out.append(render_mod.style(line, "dim", enabled=enabled))
+    return "\n".join(out)
+
+
+def one_setting(detail: str, *, enabled: bool = True) -> str:
+    """`voice set tts` -- one setting, its key in the same warm as the
+    settings block and as `help`."""
+    from . import render as render_mod
+
+    head, _, rest = detail.partition("\n")
+    key, sep, value = head.partition(" = ")
+    if not sep:
+        return detail
+    coloured = render_mod.style(key, "warm", enabled=enabled) + sep + value
+    return coloured + ("\n" + rest if rest else "")
 
 
 def bench(payload: dict) -> str:

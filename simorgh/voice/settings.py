@@ -13,6 +13,7 @@ running service applies it at once.
 from __future__ import annotations
 
 import shutil
+import textwrap
 from dataclasses import fields, replace
 
 from simorgh.contracts.settings import VOICE_SAFE_KEYS as SAFE_KEYS, persist
@@ -115,6 +116,41 @@ def _fit(text: str, width: int) -> str:
     return text if len(text) <= width else text[: max(1, width - 1)] + "\u2026"
 
 
+#: The engines that are too slow for a spoken turn, so the lane rule
+#: sends the turn to the fast one instead (voice/tts/lanes.py).
+SLOW_ENGINES = ("chatterbox", "miso")
+
+
+def _what_you_will_hear(config: Config, key: str) -> list[str]:
+    """Why the engine named in `tts` may not be the voice in the room.
+
+    The creator, 2026-09-16: "sim says the voice tts is set as miso, but
+    the voice I'm hearing sounds like kokoro". Both were true, and the
+    screen said only the first. `tts` names the EXPRESSIVE engine; with
+    `expressive_lane = auto` -- the default -- every spoken turn and
+    every aside still goes to the fast engine, because Chatterbox and
+    Miso answer in seconds and a spoken turn cannot wait. A setting that
+    is correct and not what you hear needs to say so where it is read,
+    not in a design document.
+    """
+    if key not in ("tts", "expressive_lane", "expressive_min_chars"):
+        return []
+    engine = str(getattr(config, "tts", "") or "")
+    if engine not in SLOW_ENGINES:
+        return []
+    lane = str(getattr(config, "expressive_lane", "auto") or "auto")
+    if lane == "always":
+        return [f"spoken turns are spoken by {engine} -- expect a wait before the first sound"]
+    if lane == "off":
+        return [f"{engine} is never used: expressive_lane = off"]
+    floor = int(getattr(config, "expressive_min_chars", 0) or 0)
+    reach = (f"a spoken reply longer than {floor} characters also goes to {engine}"
+             if floor else "no spoken reply goes to it (expressive_min_chars = 0)")
+    return [f"you will hear the fast engine, not {engine}: expressive_lane = {lane}, so {engine} "
+            f"answers typed replies and `voice test` only",
+            f"{reach}; `voice set expressive_lane always` sends every turn to {engine}"]
+
+
 def explain(config: Config, key: str, *, width: int = 0) -> str:
     """One setting: what it is now, what it means, what it accepts.
 
@@ -128,10 +164,17 @@ def explain(config: Config, key: str, *, width: int = 0) -> str:
     kind, allowed, help_ = SAFE_KEYS[key]
     lines = [f"{key} = {_shown(getattr(config, key, None), kind)}"]
     if help_:
-        lines.append(f"  {_fit(help_, max(20, width - 2))}")
+        lines.extend(textwrap.wrap(help_, width=max(24, width - 2),
+                                   initial_indent="  ", subsequent_indent="    ") or [])
     choices = _allowed(kind, allowed)
     if choices:
-        lines.append(f"  takes: {choices}")
+        lines.extend(textwrap.wrap(f"takes: {choices}", width=max(24, width - 2),
+                                   initial_indent="  ", subsequent_indent="    ") or [])
+    for line in _what_you_will_hear(config, key):
+        # Wrapped, never cut: the second half of each of these lines is
+        # the part that tells a person what to DO about it.
+        lines.extend(textwrap.wrap(line, width=max(24, width - 2),
+                                   initial_indent="  ", subsequent_indent="    ") or [])
     lines.append(f"  change it with `voice set {key} <value>`")
     return "\n".join(lines)
 
@@ -190,7 +233,13 @@ def overview(config: Config, *, width: int = 0) -> str:
             row = f"    {key.ljust(key_w)}{cell}"
             left = width - len(row)
             lines.append((row + _fit(note, left)).rstrip() if left > 12 else row.rstrip())
+    heard = _what_you_will_hear(config, "tts")
+    if heard:
+        lines.append("")
+        for line in heard:
+            lines.extend(textwrap.wrap(line, width=max(24, width - 2),
+                                       initial_indent="  ", subsequent_indent="    ") or [])
     return "\n".join(lines)
 
 
-__all__ = ["GROUPS", "SAFE_KEYS", "apply", "describe", "explain", "overview", "parse", "persist"]
+__all__ = ["GROUPS", "SAFE_KEYS", "apply", "describe", "SLOW_ENGINES", "explain", "overview", "parse", "persist"]
