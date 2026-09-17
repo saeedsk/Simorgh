@@ -48,7 +48,20 @@ class Config:
     # 0.000 against each other (measured 2026-09-09) -- recall finds
     # what Sim already knows how to say and misses what it phrased
     # differently.
-    embedder: str = "auto"  # auto | local | openai | voyage | gemini | hashing
+    # hashing, not auto. `auto` picks a local sentence-transformer the moment
+    # one is importable, and measured on the creator's own store (2,422
+    # records, 2026-09-16) that costs 24.9 SECONDS on the first call -- the
+    # model load plus re-embedding everything -- against 155 ms for hashing.
+    # `orchestration/context.py` allows recall 0.25 s, so every turn in the
+    # first half-minute after boot would lose its memory block silently, and
+    # warm it is still 47 ms against 3 ms, three recalls to a turn.
+    #
+    # What it bought did not pay for that: paraphrase pairs that scored 0.000
+    # became findable (0.197, 0.329), but "turn the lights on" vs "off" went
+    # 0.750 -> 0.893 and stayed the highest score in the set. Better ranking
+    # among related memories, no fix for the case it was chosen for.
+    # `[memory] embedder = "local"` still opts in deliberately.
+    embedder: str = "hashing"  # auto | local | openai | voyage | gemini | hashing
     recency_weight: float = 0.1  # scoring: similarity*confidence + recency_weight*recency_bonus
     # Seconds after start before the first consolidation pass (flag
     # contradictions, prune each kind to its keep count). Consolidation
