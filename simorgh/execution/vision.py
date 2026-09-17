@@ -25,6 +25,7 @@ driveway" into "a car pulling out of the driveway".
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from pathlib import Path
@@ -290,6 +291,8 @@ class CameraVision:
         self._said_blind = False
         # One Ring snapshot at a time across every camera (see `_stills`).
         self._ring_lock = asyncio.Lock()
+        #: The background sweep that learns a scene without being asked.
+        self._sweep: asyncio.Task | None = None
 
     # -- the handler ------------------------------------------------------
     async def on_camera_event(self, message: Message) -> None:
@@ -365,6 +368,101 @@ class CameraVision:
             self._ctx.logger.warning("camera_vision_failed", camera=camera, error=repr(exc))
         finally:
             self._busy.discard(camera)
+
+
+    # -- learning a scene without being asked ------------------------------
+    async def start(self) -> None:
+        """Go and learn what each camera always shows.
+
+        A baseline used to advance only when motion fired a camera, so a
+        quiet camera never learnt one and the first real event on it was
+        judged against nothing. Worse, it made the person responsible for
+        a machine's job: on 2026-09-16 the creator was asked to choose
+        between seeding by hand, walking past each camera, and changing a
+        sample count -- "camera baselining should happen automatically,
+        user should not get bothered with this kind of details, this are
+        machine's job."
+
+        Bounded by construction. Only cameras with no confirmed scene are
+        visited and each visit adds one sample, so the whole cost is
+        `cameras x camera_vision_baseline_samples` model calls, once, on
+        the local vision model -- and the sweep returns for good the
+        moment every camera knows its scene.
+        """
+        if not getattr(self._config, "camera_vision", True):
+            return
+        if not getattr(self._config, "camera_vision_baseline_sweep", True):
+            return
+        if self._sweep is None or self._sweep.done():
+            self._sweep = asyncio.create_task(self._learn_baselines(), name="camera-vision:baselines")
+
+    async def stop(self) -> None:
+        task, self._sweep = self._sweep, None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    async def _learn_baselines(self) -> None:
+        """One sample per unlearned camera, then wait, then again.
+
+        The waiting is the point: three samples taken seconds apart are
+        three views of the same moment, and a parked car would survive
+        all of them. Spread across `camera_vision_baseline_every_s` they
+        are three different moments, which is what makes "only what
+        survives every sample" mean anything.
+        """
+        every = max(30.0, float(getattr(self._config, "camera_vision_baseline_every_s", 300.0)))
+        # No floor here: `every` is floored at 30s, so the loop cannot spin,
+        # and a setting that accepts 0 should mean 0 rather than quietly 1.
+        await asyncio.sleep(max(0.0, float(getattr(self._config, "camera_vision_baseline_first_s", 30.0))))
+        while True:
+            try:
+                todo = await self._unlearned()
+                if not todo:
+                    self._ctx.logger.info("camera_vision_baselines_complete")
+                    return
+                for camera, host in todo:
+                    if camera in self._busy:
+                        continue
+                    self._busy.add(camera)          # `_look` discards it in its own `finally`
+                    await self._look({"host": host, "camera": camera, "kinds": []}, camera)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- a camera is not worth crashing Execution over
+                self._ctx.logger.warning("camera_vision_sweep_failed", error=repr(exc))
+            await asyncio.sleep(every)
+
+    async def _unlearned(self) -> list[tuple[str, str]]:
+        """`(camera, host)` for every camera with no confirmed scene.
+
+        Names come from `metadata["cameras"]`, never from the printed
+        lines: the NVR lists plain strings and Ring lists dicts, and
+        scraping either would break the first time a model changed.
+        """
+        root = Path(self._config.repo_root)
+        out: list[tuple[str, str]] = []
+        for tool_name, host in (("cam_list", ""), ("ring_list", "ring")):
+            tool = self._registry.get(tool_name)
+            if tool is None:
+                continue
+            ctx = ToolContext(
+                action_id=f"camera-baseline-{int(self._ctx.clock.now())}", task_id=None, scope={},
+                constraints={}, data_dir=root, clock=self._ctx.clock, logger=self._ctx.logger,
+                ledger=self._ctx.ledger, bus=self._ctx.bus,
+            )
+            try:
+                result = await tool.run({}, ctx=ctx)
+            except Exception as exc:  # noqa: BLE001 -- a camera source that will not answer is skipped
+                self._ctx.logger.warning("camera_vision_list_failed", source=tool_name, error=repr(exc))
+                continue
+            if not result.ok:
+                continue
+            for entry in (result.metadata or {}).get("cameras") or []:
+                name = str(entry.get("name") if isinstance(entry, dict) else entry or "").strip()
+                if name and not _baseline_record(root, name)["scene"]:
+                    out.append((name, host))
+        return out
 
     # -- the pictures -----------------------------------------------------
     async def _stills(self, payload: dict, camera: str) -> list[str]:

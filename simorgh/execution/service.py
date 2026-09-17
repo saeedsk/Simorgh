@@ -127,6 +127,7 @@ class Service:
         self._capability_detail = ""
         self._probe_task: asyncio.Task | None = None
         self._ring_autostart: asyncio.Task | None = None
+        self._cam_autostart: asyncio.Task | None = None
         self._tv_autostart: asyncio.Task | None = None
         self._probe_results: list = []
         # One worktree per code task (worktree.py); None when the repo
@@ -220,6 +221,9 @@ class Service:
         # with the time and out loud.
         self._vision = CameraVision(config=self._config, registry=self._registry, ctx=ctx)
         self._subs.append(await ctx.bus.subscribe(topics.CAMERA_EVENT, self._vision.on_camera_event))
+        # ...and it learns each camera's scene by itself, rather than waiting
+        # for motion that a quiet camera never sees.
+        await self._vision.start()
         # Half the toolset stands on something outside this repo (Node,
         # a bundled Chromium, an optional pip package). Each is allowed
         # to be absent -- every tool refuses cleanly -- but "absent" was
@@ -228,6 +232,9 @@ class Service:
         self._probe_task = asyncio.create_task(self._probe_capabilities())
         # The Ring watch, by itself, when Ring is set up (`ring_watch_on_start`).
         self._ring_autostart = asyncio.create_task(self._autostart_ring_watch())
+        # ...and the NVR watch, which had no autostart at all: nothing else
+        # publishes `world.camera.event` for those cameras.
+        self._cam_autostart = asyncio.create_task(self._autostart_cam_watch())
         # The dashboard on the TV, by itself, when a TV is remembered (`tv_show_on_start`).
         self._tv_autostart = asyncio.create_task(self._autostart_tv_show())
 
@@ -382,8 +389,12 @@ class Service:
                     payload={"name": tool_name, "reason": reason}))
 
     async def stop(self) -> None:
+        if self._vision is not None:
+            await self._vision.stop()
         if self._ring_autostart is not None and not self._ring_autostart.done():
             self._ring_autostart.cancel()
+        if self._cam_autostart is not None and not self._cam_autostart.done():
+            self._cam_autostart.cancel()
         if self._tv_autostart is not None and not self._tv_autostart.done():
             self._tv_autostart.cancel()
         if self._probe_task is not None and not self._probe_task.done():
@@ -475,6 +486,40 @@ class Service:
             self._ctx.logger.warning("ring_watch_autostart_failed", error=repr(exc))
             return False
         self._ctx.logger.info("ring_watch_autostart", ok=result.ok, detail=(result.output or result.error or "")[:160])
+        return bool(result.ok)
+
+    async def _autostart_cam_watch(self, *, delay_s: float = 20.0) -> bool:
+        """Run `cam_watch on` at boot, so the NVR's motion reaches Sim.
+
+        Ring had this and the NVR did not. `cam_watch` is the only thing
+        that publishes `world.camera.event` for those cameras, so until
+        somebody said "watch the cameras" in a given run, seven cameras
+        detected motion that went nowhere -- no event, no description, no
+        notification. The camera vision built on top of it could learn a
+        scene and then never be asked about one.
+
+        Unlike Ring there is no token to check: the NVR's address and
+        login live in `secrets.toml` and the tool itself refuses cleanly
+        when they are absent, so a house with no NVR logs one refusal at
+        boot and carries on. Returns whether the watch started.
+        """
+        if not getattr(self._config, "cam_watch_on_start", True):
+            return False
+        if delay_s:
+            await asyncio.sleep(delay_s)
+        tool = self._registry.get("cam_watch")
+        if tool is None:
+            return False
+        ctx = ToolContext(action_id="cam-watch-boot", task_id=None, scope={}, constraints={},
+                          data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
+                          ledger=self._ctx.ledger, bus=self._ctx.bus)
+        try:
+            result = await tool.run({"on": True}, ctx=ctx)
+        except Exception as exc:  # noqa: BLE001 -- an NVR that is not there is not a service failure
+            self._ctx.logger.warning("cam_watch_autostart_failed", error=repr(exc))
+            return False
+        self._ctx.logger.info("cam_watch_autostart", ok=result.ok,
+                              detail=(result.output or result.error or "")[:160])
         return bool(result.ok)
 
     async def _autostart_tv_show(self, *, delay_s: float = 25.0) -> bool:

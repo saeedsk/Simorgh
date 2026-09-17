@@ -472,6 +472,13 @@ class Config:
     # still was a day old ("ring cameras are not showing picture", the
     # creator, 2026-09-13).
     ring_watch_on_start: bool = True
+    # The same for the NVR, which had no autostart at all: `cam_watch` is
+    # what publishes `world.camera.event`, so until somebody said "watch the
+    # cameras" this run, seven cameras detected motion that reached nothing
+    # -- vision included. The creator, 2026-09-16: "I expect camera motion
+    # detect work flawlessly once it is enabled ... don't leave task and
+    # corner cases here and there to user."
+    cam_watch_on_start: bool = True
     ring_snapshot_every_s: float = 300.0
 
     # -- what the cameras saw (execution/vision.py). A camera event says
@@ -489,6 +496,14 @@ class Config:
     #: sample is taken from frames the camera fired ON, so whatever moved
     #: is in it; only what recurs across samples is scenery.
     camera_vision_baseline_samples: int = 3
+    #: Learning a scene is the machine's job, not something to ask for:
+    #: a quiet camera never fires, so waiting for motion left it blank.
+    #: The sweep visits only cameras with no scene yet and stops for good
+    #: once every camera has one. Spaced, because three samples seconds
+    #: apart are three views of one moment.
+    camera_vision_baseline_sweep: bool = True
+    camera_vision_baseline_every_s: float = 300.0
+    camera_vision_baseline_first_s: float = 30.0
     # Between the stills: long enough that the second frame is a different
     # moment (someone has moved, a car has gone past), short enough that
     # the answer still arrives while it matters.
