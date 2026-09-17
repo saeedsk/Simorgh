@@ -27,11 +27,25 @@ TONES: dict[str, str] = {
 _ALIASES = {"happy": "bright", "excited": "bright", "cheerful": "bright", "gentle": "warm", "kind": "warm",
             "soft": "warm", "sad": "sorry", "apologetic": "sorry", "grave": "serious", "stern": "serious",
             "urgent": "serious", "relaxed": "calm", "soothing": "calm", "fun": "playful", "teasing": "playful",
-            "joking": "playful", "plain": "neutral", "flat": "neutral"}
+            "joking": "playful", "plain": "neutral", "flat": "neutral",
+            # Farsi: the family speaks it, and the model answers in it. Without
+            # these the tag is only dropped; with them it is also understood.
+            "گرم": "warm", "آرام": "calm", "جدی": "serious", "شاد": "bright",
+            "متاسف": "sorry", "خنثی": "neutral"}
 #: The separators a model puts between words inside one tag. The em dash was
 #: missing, so "[loud and clear -- calm, warm] [calm] Loud and clear." had its
 #: first tag read out (live 2026-09-15).
-_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([A-Za-z][A-Za-z0-9_-]{0,24}(?:[ ,/&+\-–—;]+[A-Za-z][A-Za-z0-9_-]{0,24}){0,5})\s*[\])>]\s*[:\-–—]?\s*", re.I)
+#:
+#: Letters in ANY script. It used to be `[A-Za-z]`, which matched the "c"
+#: of "[código is wrong]" and then died on the "o" with an accent -- so the
+#: tag never matched at all and was read out word for word (live
+#: 2026-09-16). The Farsi "[گرم]" never stood a chance either, and Farsi is
+#: a language this house actually speaks. `[^\W\d_]` is a word character
+#: that is neither a digit nor an underscore: a letter, anywhere.
+#:
+#: The trailing full stop is allowed because a model wrote "[loud and
+#: clear.]" and, the tag being unmatchable, said it out loud.
+_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([^\W\d_][\w-]{0,24}(?:[ ,/&+\-–—;]+[^\W\d_][\w-]{0,24}){0,5})\s*\.?\s*[\])>]\s*[:\-–—]?\s*", re.I | re.U)
 
 
 #: A bracketed block at the head that is plainly not a feeling: it carries
