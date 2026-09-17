@@ -134,7 +134,7 @@ _TOOL_NOTES: dict[str, str] = {
     "voice_setting": "change Sim's own voice live when asked: key=tts_voice value=af_heart (or bf_emma, am_adam, "
                      "af_bella...), key=tts_speed value=1.2, key=volume value=1.3; `voices` alone lists the voices "
                      "-- never say you cannot change your voice",
-    "memory_forget": "forget what you remembered in the last N minutes -- `MEMORY_FORGET: 2` -- when told it was the TV, "
+    "memory_forget": "forget what you remembered in the last N minutes -- `MEMORY_FORGET: 2` -- or `days=5` to reach further back, when told it was the TV, "
                      "or not for you, or to be forgotten; say how many things went, from the result, and nothing more",
     "list_tasks": "what is running and waiting: id, status, origin, description -- read it before "
                   "saying anything about the queue",

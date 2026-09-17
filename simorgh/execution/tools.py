@@ -1952,6 +1952,11 @@ class SimCommandTool:
                           metadata={"command": line, "task_id": payload.get("task_id", "")})
 
 
+#: The furthest back `days` will reach. Long enough for a week of
+#: overheard talk, short enough that it is not a way to erase Sim.
+_FORGET_MAX_DAYS = 30.0
+
+
 class MemoryForgetTool:
     """"Forget the last minute, that was the TV" (the creator,
     2026-09-13). Sim had said "I'll wipe it from the record" with nothing
@@ -1960,9 +1965,11 @@ class MemoryForgetTool:
 
     name = "memory_forget"
     description = ("Forget what was remembered in the last `minutes` (default 2) -- when told the words were the TV's, "
-                   "or not for you, or to be forgotten. `containing` keeps it to records with those words in them. "
+                   "or not for you, or to be forgotten. `days` instead of `minutes` reaches further back, for "
+                   "clearing out old overheard talk. `containing` keeps it to records with those words in them. "
                    "The result says how many records went; repeat that, never more.")
-    args_schema = {"type": "object", "properties": {"minutes": {"type": "number"}, "containing": {"type": "string"}}}
+    args_schema = {"type": "object", "properties": {"minutes": {"type": "number"}, "days": {"type": "number"},
+                                                    "containing": {"type": "string"}}}
     read_only = False
     reversibility = "irreversible"
 
@@ -1970,11 +1977,22 @@ class MemoryForgetTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        # `minutes` stays capped at a day. The cap is not a limitation to
+        # be raised, it is the thing standing between "forget the last
+        # minute, that was the TV" and a wiped memory -- so reaching
+        # further back is a DIFFERENT argument, said on purpose.
+        # Five days of overheard asides (447 records, 2026-09-16) could
+        # not be cleared at all before this; the answer is deliberate
+        # reach, not a bigger number in the same box.
         try:
-            minutes = float(args.get("minutes") or 2.0)
+            days = float(args.get("days") or 0.0)
+            minutes = float(args.get("minutes") or 0.0)
         except (TypeError, ValueError):
-            return ToolResult(ok=False, error="refused: `minutes` is a number")
-        minutes = max(0.1, min(minutes, 24 * 60.0))
+            return ToolResult(ok=False, error="refused: `minutes` and `days` are numbers")
+        if days > 0:
+            minutes = max(0.1, min(days, _FORGET_MAX_DAYS)) * 24 * 60.0
+        else:
+            minutes = max(0.1, min(minutes or 2.0, 24 * 60.0))
         containing = str(args.get("containing") or "").strip()
         bus = getattr(ctx, "bus", None)
         if bus is None:
