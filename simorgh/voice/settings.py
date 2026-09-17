@@ -115,6 +115,27 @@ def _fit(text: str, width: int) -> str:
     return text if len(text) <= width else text[: max(1, width - 1)] + "\u2026"
 
 
+def explain(config: Config, key: str, *, width: int = 0) -> str:
+    """One setting: what it is now, what it means, what it accepts.
+
+    The creator typed `voice set tts` on 2026-09-16 and got "tts must be
+    one of: ..." -- an error, because an empty value fails validation,
+    when he was plainly asking what it was set to. Naming a setting and
+    no value is a question, not a malformed command.
+    """
+    if width <= 0:
+        width = shutil.get_terminal_size((100, 24)).columns
+    kind, allowed, help_ = SAFE_KEYS[key]
+    lines = [f"{key} = {_shown(getattr(config, key, None), kind)}"]
+    if help_:
+        lines.append(f"  {_fit(help_, max(20, width - 2))}")
+    choices = _allowed(kind, allowed)
+    if choices:
+        lines.append(f"  takes: {choices}")
+    lines.append(f"  change it with `voice set {key} <value>`")
+    return "\n".join(lines)
+
+
 def overview(config: Config, *, width: int = 0) -> str:
     """Every settable voice key, grouped, with what it is set to now.
 
@@ -172,4 +193,4 @@ def overview(config: Config, *, width: int = 0) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["GROUPS", "SAFE_KEYS", "apply", "describe", "overview", "parse", "persist"]
+__all__ = ["GROUPS", "SAFE_KEYS", "apply", "describe", "explain", "overview", "parse", "persist"]

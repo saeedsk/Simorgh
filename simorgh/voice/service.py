@@ -442,6 +442,11 @@ class Service:
 
         if not key:
             return True, settings.overview(self.config)
+        # `voice set tts` -- a key and no value is a question about that
+        # setting, not a malformed command. An explicit empty string
+        # (`voice set miso_reference ""`) still sets it to empty.
+        if not raw and key in settings.SAFE_KEYS:
+            return True, settings.explain(self.config, key)
         value, problem = settings.parse(key, raw)
         if problem:
             return False, problem
