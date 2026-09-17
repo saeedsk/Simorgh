@@ -66,6 +66,7 @@ MARKER_ARG_KEY: dict[str, str] = {
     "kb_ask": "question",
     "kb_open": "citation",
     "read_file": "path",
+    "console_tail": "request",
     "list_dir": "path",
     "search_code": "query",
     # Its one optional argument -- see execution/tools.py::SelfMapTool. A

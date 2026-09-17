@@ -50,7 +50,7 @@ try:
 except ImportError:  # POSIX-only
     resource = None  # type: ignore[assignment]
 
-from simorgh.contracts import topics
+from simorgh.contracts import console, topics
 from simorgh.contracts.checkout import (staged_diff, 
     MANIFEST_NAME, TARGET_DJANGO_LABEL, ContainerCheckout, container_run_line, django_label,
     find_enclosing,
@@ -2649,12 +2649,69 @@ class SkillTool:
             )
 
 
+#: The largest number that still reads as "how many lines", not as
+#: something being searched for.
+_CONSOLE_MAX_LINES = 200
+
+
+class ConsoleTailTool:
+    """Sim reading its own console.
+
+    Added because its absence produced a lie. Asked "what was the red
+    message?" on 2026-09-16, Sim had no way to see its own output --
+    the process prints to a tty and nothing captures it -- so it
+    reached for a log file that does not exist, got a refusal, and
+    then described three 429s, a camera timeout and a baseline update,
+    none of which had happened. The answer was fluent and entirely
+    invented.
+
+    A question with no reachable ground truth is where fabrication
+    comes from, so the fix is the tool, not a scolding. The empty
+    result says what to do about it in words, because "" is exactly
+    the input that invited the invention last time.
+    """
+
+    name = "console_tail"
+    description = ("The last lines Sim printed on its own console -- the ONLY way to answer a "
+                   "question about Sim's own screen, output or error messages. "
+                   "`<count>`, or `<count> <word>` to filter, e.g. `30 error`.")
+    read_only = True
+    reversibility = "read_only"
+    args_schema = {"type": "object", "properties": {"request": {"type": "string"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        raw = str(args.get("request") or "").strip()
+        limit, contains = 40, ""
+        head, _, rest = raw.partition(" ")
+        # A bare number is a count only if it could BE one. `429` is all
+        # digits and is obviously an error code, not a request for the
+        # last 429 lines -- and reading it as a count returned a screenful
+        # of unrelated lines for a question about an HTTP status, which is
+        # precisely the "plenty of text, none of it an answer" input that
+        # produced the invented 429s this tool exists to prevent.
+        if head.isdigit() and int(head) <= _CONSOLE_MAX_LINES:
+            limit, contains = max(1, int(head)), rest.strip()
+        elif raw:
+            contains = raw
+        lines = await asyncio.to_thread(console.tail, limit, contains=contains)
+        if not lines:
+            what = f" matching {contains!r}" if contains else ""
+            return ToolResult(ok=True, output=(
+                f"(no console lines recorded{what}. Say that nothing was recorded -- "
+                f"do NOT describe what might have been printed.)"))
+        return ToolResult(ok=True, output="\n".join(lines))
+
+
 def builtin_tools(config: Config, *, secrets=None) -> list:
     """`secrets` is the subsystem's scoped secret store. Only the
     account-backed tools use it, and they take the value at call time so
     a rotated credential is picked up without a restart."""
     return [
         ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), SelfMapTool(config),
+        ConsoleTailTool(config),
         RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),

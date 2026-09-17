@@ -187,6 +187,7 @@ _TOOL_NOTES: dict[str, str] = {
     "cam_state": "what a camera sees right now (motion, person, vehicle, animal) and what it has on",
     "cam_snapshot": "a still from a camera, saved under workspace/cameras/",
     "camera_describe": "what a camera can see right now, in words: `<camera>` (NVR or Ring)",
+    "console_tail": "the last lines Sim printed on its own console, the only way to answer a question about its own screen or output: `<count>` or `<count> <word to filter>`, e.g. `30 error`",
     "cam_stream": "a camera live on the TV: `<camera> frame` beside your page, `<camera> full` full screen, `<camera> stop`",
     "cam_light": "a camera's spotlight: `<camera> on|off`",
     "cam_ir": "a camera's infrared night lights: `<camera> on|off`",

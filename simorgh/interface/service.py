@@ -67,7 +67,7 @@ try:
 except ImportError:  # pragma: no cover -- platform-dependent
     readline = None
 
-from simorgh.contracts import topics
+from simorgh.contracts import console, topics
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
@@ -397,6 +397,9 @@ class Service:
         if marker:
             print(marker)
         print(text)
+        # Printed and, unlike before, written down: console.py explains why a
+        # write-only console produced a fabricated answer on 2026-09-16.
+        console.record(text)
         self._live.restore()
         if self._input_pending and readline is not None and sys.stdout.isatty():
             try:
