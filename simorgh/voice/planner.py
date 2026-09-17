@@ -193,6 +193,8 @@ def speak_units(text: str) -> str:
     return _QUANTITY.sub(_quantity, text)
 
 
+#: A minus sign in front of a number, in any of the dashes a model writes.
+_SIGNED = re.compile(r"(?<![\w])[-\u2212\u2013\u2014]\s*(?=\d)")
 _DECIMAL = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})*|\d+)\.(\d+)(?![\w.])")
 _PERCENT = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?%")
 
@@ -210,6 +212,12 @@ def speak_numbers(text: str) -> str:
     def _percent(match: re.Match) -> str:
         return f"{match.group(1)} percent"
 
+    # A sign belongs to the number, and the engine only guesses at it: Sim
+    # writes "COIN -8.2%", kokoro says "minus eight point two percent", and
+    # whisper writes that back as "minus 8.2%". Saying it explicitly makes
+    # the spoken form Sim's decision rather than the synthesiser's, and lets
+    # the echo check compare like with like (voice/pipeline.py::_spoken_words).
+    text = _SIGNED.sub("minus ", text)
     text = _PERCENT.sub(_percent, text)
     return _DECIMAL.sub(_decimal, text)
 
