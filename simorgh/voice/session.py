@@ -135,6 +135,32 @@ def may_refine(*, segments, probable: bool, refine_on: bool, seconds: float,
     return bool(has_vector and refine_on and not segments and not probable and seconds >= min_seconds)
 
 
+#: Whisper answers with a code ("fa") or with a name ("persian"), and which
+#: depends on the build. Cutting the first two letters served the code and
+#: mangled the name: "persian" became "pe" and "spanish" became "sp", so
+#: Persian -- one of this house's own two languages -- was thrown away as
+#: foreign, unheard, logged as "not a language of this house" (live
+#: 2026-09-17: nine turns discarded in half an hour).
+_LANGUAGE_CODES = {
+    "english": "en", "persian": "fa", "farsi": "fa", "arabic": "ar", "hebrew": "he",
+    "spanish": "es", "french": "fr", "german": "de", "italian": "it", "dutch": "nl",
+    "portuguese": "pt", "russian": "ru", "turkish": "tr", "hindi": "hi", "urdu": "ur",
+    "chinese": "zh", "mandarin": "zh", "japanese": "ja", "korean": "ko", "polish": "pl",
+    "swedish": "sv", "norwegian": "no", "danish": "da", "finnish": "fi", "greek": "el",
+    "hungarian": "hu", "czech": "cs", "romanian": "ro", "ukrainian": "uk", "vietnamese": "vi",
+    "thai": "th", "indonesian": "id", "malay": "ms", "bengali": "bn", "punjabi": "pa",
+    "tamil": "ta", "telugu": "te", "armenian": "hy", "azerbaijani": "az", "kurdish": "ku",
+}
+
+
+def _language_code(value: str) -> str:
+    """A two-letter code from whatever whisper said: a code stays as it is,
+    a name becomes its code, anything unrecognised keeps the old
+    truncation."""
+    text = (value or "").strip().lower()
+    return _LANGUAGE_CODES.get(text, text[:2])
+
+
 def _speaks_to_sim(text: str) -> bool:
     """Words aimed at Sim: second person, or a question.
 
@@ -531,8 +557,8 @@ class VoiceSession:
     def _other_language(self, heard: str) -> str:
         """The language code whisper heard, when it is not one of the
         house's (`[voice] stt_languages`); "" otherwise."""
-        allowed = {c.strip().lower()[:2] for c in (self._config.stt_languages or "").split(",") if c.strip()}
-        code = (heard or "").strip().lower()[:2]
+        allowed = {_language_code(c) for c in (self._config.stt_languages or "").split(",") if c.strip()}
+        code = _language_code(heard)
         if not allowed or not code or code in ("au", "un"):     # auto / unknown
             return ""
         return "" if code in allowed else code

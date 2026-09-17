@@ -547,9 +547,11 @@ class TestRingWatchStartsByItself(_ExecutionServiceTestCase):
         self.assertFalse(await self.service._autostart_ring_watch(delay_s=0))  # noqa: SLF001
         self.assertEqual(len(calls), 1, "switched off in config: left alone")
 
-    async def test_the_dashboard_goes_on_the_remembered_tv_at_boot(self):
+    async def test_the_dashboard_goes_on_the_remembered_tv_at_boot_only_if_asked(self):
         """After a restart the TV stayed on its screensaver until someone
-        typed `tv show` (the creator, 2026-09-14)."""
+        typed `tv show` (the creator, 2026-09-14) -- so this ran at boot.
+        It then turned the TV on at every boot, which nobody asked for
+        (the creator, 2026-09-17), so it is off unless switched on."""
         import dataclasses
 
         await self._start()
@@ -564,10 +566,19 @@ class TestRingWatchStartsByItself(_ExecutionServiceTestCase):
                 return ToolResult(ok=True, output="Sim's dashboard is on Family Room TV (woke the TV)")
 
         self.service._registry["cast_show"] = FakeShow()  # noqa: SLF001
+        # Off by default since 2026-09-17: a TV that is off must stay off when
+        # Sim starts. `cast_show` wakes the TV, and it woke it every boot.
+        self.service._config = dataclasses.replace(self.service._config,  # noqa: SLF001
+                                                   cast_device="Family Room TV")
+        self.assertFalse(await self.service._autostart_tv_show(delay_s=0),  # noqa: SLF001
+                         "a remembered TV is not reason enough: nobody asked")
+        self.assertEqual(calls, [], "the TV is left alone at boot")
         self.service._config = dataclasses.replace(self.service._config, cast_device="")  # noqa: SLF001
         self.assertFalse(await self.service._autostart_tv_show(delay_s=0))  # noqa: SLF001
         self.assertEqual(calls, [], "no TV remembered: nothing to show on")
-        self.service._config = dataclasses.replace(self.service._config, cast_device="Family Room TV")  # noqa: SLF001
+        # Switched on deliberately, it still works.
+        self.service._config = dataclasses.replace(self.service._config, cast_device="Family Room TV",  # noqa: SLF001
+                                                   tv_show_on_start=True)
         self.assertTrue(await self.service._autostart_tv_show(delay_s=0))  # noqa: SLF001
         self.assertEqual(calls, [{}])
         self.service._config = dataclasses.replace(self.service._config, tv_show_on_start=False)  # noqa: SLF001

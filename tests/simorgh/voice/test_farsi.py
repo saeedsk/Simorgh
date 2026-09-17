@@ -148,3 +148,32 @@ class TestRealPiper(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class PersianIsALanguageOfThisHouse(unittest.TestCase):
+    def test_a_language_name_is_not_mistaken_for_a_foreign_code(self):
+        """Whisper answers with a code ("fa") or a name ("persian"), by
+        build. Cutting two letters off a name gave "pe", which is not "fa",
+        so Persian was discarded as foreign and the turn was never heard --
+        nine of them in half an hour (live 2026-09-17). "spanish" -> "sp"
+        gave it away: no ISO code for Spanish is "sp"."""
+        from simorgh.voice.session import VoiceSession, _language_code
+
+        self.assertEqual(_language_code("persian"), "fa")
+        self.assertEqual(_language_code("farsi"), "fa")
+        self.assertEqual(_language_code("fa"), "fa")
+        self.assertEqual(_language_code("english"), "en")
+        self.assertEqual(_language_code("spanish"), "es")
+
+        class _Config:
+            stt_languages = "en,fa"
+
+        class _Session:
+            _config = _Config()
+
+        gate = VoiceSession._other_language
+        for heard in ("persian", "farsi", "fa", "english", "en", "", "auto", "unknown"):
+            self.assertEqual(gate(_Session(), heard), "",
+                             f"{heard!r} is spoken in this house, or is no language at all")
+        for heard, code in (("spanish", "es"), ("arabic", "ar"), ("hebrew", "he"), ("ja", "ja")):
+            self.assertEqual(gate(_Session(), heard), code, f"{heard!r} is genuinely not of this house")
+

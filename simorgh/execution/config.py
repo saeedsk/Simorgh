@@ -458,7 +458,12 @@ class Config:
     # Put the dashboard on the remembered TV by itself at boot, waking the
     # TV first: after a restart the TV stayed on its screensaver until
     # someone typed `tv show` (the creator, 2026-09-14). Needs `cast_device`.
-    tv_show_on_start: bool = True
+    # Off: Sim does not touch the TV at boot. It was on, and a TV that was
+    # off got the WAKEUP key and turned itself on every time Sim started
+    # (the creator, live 2026-09-17: "sim still turning on tv at its
+    # startup ... it should only do that if it wants to cast dashboard on
+    # tv"). Set it true to have the dashboard waiting on a TV already on.
+    tv_show_on_start: bool = False
 
     # -- ring (execution/home/ring.py): the Ring cameras through Ring's
     # cloud. `ring_watch` polls every `ring_poll_s` for new rings and
