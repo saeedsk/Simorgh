@@ -599,8 +599,19 @@ class Service:
         except Exception as exc:  # noqa: BLE001 -- an engine failure is an answer, not a crash
             await self._reply(message, topics.VOICE_SPEAK_REPLY, {"ok": False, "detail": f"could not speak: {exc!r}"})
             return
+        # WHICH engine spoke, not which are open. `_engine_names["tts"]`
+        # is the synthesiser's own name, and for two lanes that is the
+        # PAIR -- "kokoro+miso" -- so `voice test` printed the same line
+        # whichever one made the sound. The creator spent an evening on
+        # that: "sim says the voice tts is set as miso, but the voice I'm
+        # hearing sounde lile kokoro", and no output could settle it.
+        # `LaneSynthesiser.synthesise` already records the engine it
+        # used; nothing read it.
+        tts = getattr(pipeline, "_tts", None)  # noqa: SLF001 -- the engines the pipeline was opened with
+        spoke = str(getattr(tts, "last_engine", "") or "") or self._engine_names["tts"]
         await self._reply(message, topics.VOICE_SPEAK_REPLY, {
-            "ok": True, "seconds": max(0.0, len(said) / 20.0), "engine": self._engine_names["tts"]})
+            "ok": True, "seconds": max(0.0, len(said) / 20.0), "engine": spoke,
+            "lane": "expressive" if str(getattr(self.config, "expressive_lane", "auto")) != "off" else "fast"})
 
     async def _on_listen(self, message) -> None:
         pipeline, why = await self._pipeline_ready()

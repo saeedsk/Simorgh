@@ -144,7 +144,10 @@ def bench(payload: dict) -> str:
 def spoken(payload: dict) -> str:
     if not payload.get("ok"):
         return f"voice: {payload.get('detail') or 'could not speak'}"
-    return f"spoken ({payload.get('engine') or 'tts'})"
+    engine = payload.get("engine") or "tts"
+    # "+" means the pair, not one engine -- an older service that does
+    # not send the engine it used. Say so rather than implying both spoke.
+    return f"spoken ({engine})" if "+" not in engine else f"spoken (one of {engine})"
 
 
 def listened(payload: dict) -> str:
