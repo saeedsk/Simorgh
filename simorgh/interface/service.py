@@ -197,6 +197,7 @@ class Service:
         # a correctness bug.
         self._input_pending = False
         self._http: HttpApi | None = None
+        self._telegram = None
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -317,6 +318,29 @@ class Service:
         # Same reasoning: a missing/not-yet-started Guardian would
         # otherwise hold start() for the full request timeout.
         self._posture_seed_task = asyncio.ensure_future(self._seed_posture(ctx))
+        # Sim reached from a phone (interface/telegram.py). Off unless a
+        # bot token is set AND somebody is listed as allowed to use it:
+        # an external channel is a remote control of this house, so it
+        # is deny-by-default at both ends. A channel that is configured
+        # but admits nobody says so here rather than looking broken.
+        from .telegram import TelegramChannel
+
+        self._telegram = TelegramChannel(
+            ctx.bus, token=(ctx.secrets.get("SIM_TELEGRAM_TOKEN") or ""),
+            allowed=self.config.telegram_allowed, poll_s=self.config.telegram_poll_s,
+            logger=ctx.logger, clock=getattr(ctx.clock, "now", None),
+        )
+        if self._telegram.configured:
+            started, why = await self._telegram.start()
+            if started and not why:
+                print("telegram: listening")
+            else:
+                ctx.logger.warning("telegram.not_listening", reason=why)
+                print(f"telegram: not listening -- {why}")
+        elif self.config.telegram_allowed:
+            # Somebody listed who may use it, but no token to use: that
+            # is a half-configured channel, which is worth saying.
+            ctx.logger.warning("telegram.not_listening", reason=self._telegram.why_not())
         ctx.logger.info("interface.started", session_id=self.session_id)
 
     async def stop(self) -> None:
@@ -362,6 +386,9 @@ class Service:
         if self._http is not None:
             await self._http.stop()
             self._http = None
+        if self._telegram is not None:
+            await self._telegram.stop()
+            self._telegram = None
 
     async def health(self) -> Health:
         if self._ctx is None:
