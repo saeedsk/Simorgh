@@ -48,6 +48,9 @@ FILE_NAME = "heard.jsonl"
 #: Two days, as asked. Purged on write, so it needs no scheduler.
 MAX_AGE_S = 48 * 3600.0
 
+#: Below this an `at` cannot be a wall clock (2001-09-09), so it is one.
+EPOCH_FLOOR = 1.0e9
+
 #: `overheard` is speech that was not for Sim. `memo` is speech someone
 #: asked Sim to keep on purpose. They share a store because "what did I
 #: say this morning?" should find both, and differ by one field because
@@ -72,7 +75,14 @@ def record(text: str, *, speaker: str = "", kind: str = "overheard",
     words = " ".join(str(text or "").split())
     if not words:
         return False
-    entry = {"at": float(at if at is not None else time.time()),
+    # An `at` below the floor is a monotonic clock, not a wall one. Voice
+    # passed `time.monotonic()` here on 2026-09-16 and every line became
+    # unrecallable; this store is read by two subsystems and the next caller
+    # would make the same mistake, so it is corrected here rather than trusted.
+    stamp = float(at) if at is not None else time.time()
+    if stamp < EPOCH_FLOOR:
+        stamp = time.time()
+    entry = {"at": stamp,
              "speaker": " ".join(str(speaker or "").split()) or "someone",
              "text": words[:2000],
              "kind": kind if kind in KINDS else "overheard"}
@@ -199,5 +209,5 @@ def wipe(*, speaker: str = "", kind: str = "", folder: Path | str | None = None)
         return 0
 
 
-__all__ = ["DEFAULT_DIR", "FILE_NAME", "KINDS", "MAX_AGE_S", "heard_path", "purge",
+__all__ = ["DEFAULT_DIR", "EPOCH_FLOOR", "FILE_NAME", "KINDS", "MAX_AGE_S", "heard_path", "purge",
            "recall", "record", "speakers", "transcript", "wipe"]

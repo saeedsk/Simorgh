@@ -202,6 +202,30 @@ Rebuilt in `contracts/overheard.py` — Voice records, Execution reads — with
 `overheard` (read-only) and `overheard_note` (irreversible, because it can wipe).
 Both old modules deleted (58359d1).
 
+**And it shipped broken — a third instance of the same shape, this one mine.**
+The redesign was declared verified on 6,406 green tests. It recorded and
+returned nothing: `voice/session.py` passed `at=self._now()`, and
+`VoiceSession._now()` is `time.monotonic()`, so lines landed with stamps like
+399417 while `recall()` measured `since_s` against `time.time()`.
+
+    recall(since_s=24h)  ->  0 of 16 lines
+
+Found by reading the live `heard.jsonl` — `transcript()` rendered 07:56 for a
+session that began at 20:32 — not by any test. **Every test supplied its own
+`at=1000.0` and compared it against its own `now=1000.0`: internally consistent,
+and never once the real clock.** Two of them then failed when the store learned
+to correct implausible stamps, which revealed that the rest had been passing on
+a timestamp they had not actually chosen.
+
+Fixed at both ends: the call site uses the session's wall clock, and the store
+corrects any `at` below `EPOCH_FLOOR` rather than trusting its callers, since it
+is read by two subsystems. Eight tests now exercise the default clock path.
+
+**The lesson is about the tests, not the clock.** A test that supplies both
+sides of a comparison proves the arithmetic and nothing about the system. Where
+a value crosses a boundary — a clock, a path, a process — at least one test must
+let the real one through.
+
 ## 8. Supervision, honestly
 
 Claude Code observes Sim's steps through a monitor feed *after they happen*. It

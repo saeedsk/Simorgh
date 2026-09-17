@@ -959,7 +959,15 @@ class VoiceSession:
         from simorgh.contracts import overheard
 
         try:
-            overheard.record(text, speaker=speaker, kind=kind, at=self._now(),
+            # Wall clock, NOT `self._now()` -- that is `time.monotonic()`.
+            # This store outlives the process, so a monotonic stamp renders as
+            # a nonsense time of day and makes every line unrecallable: a
+            # `since_s` filter measured against `time.time()` matches none of
+            # them. Shipped that way on 2026-09-16 and caught only by reading
+            # the live file; every test passed because each supplied its own
+            # `at` and so never met the real clock.
+            at = self._clock.now() if self._clock is not None else time.time()
+            overheard.record(text, speaker=speaker, kind=kind, at=at,
                              folder=self._overheard_dir)
         except Exception:  # never let the log break the voice loop
             pass

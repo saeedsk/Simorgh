@@ -25,6 +25,11 @@ from unittest import mock
 
 from simorgh.contracts import overheard
 
+#: A plausible wall clock. `1000.0` is 1970 and the store now corrects it
+#: to `time.time()` -- which silently broke the two tests that did time
+#: arithmetic, and silently rewrote the stamp under the ones that did not.
+BASE = 1_700_000_000.0
+
 
 class OverheardStoreTestCase(unittest.TestCase):
     def setUp(self):
@@ -37,8 +42,8 @@ class OverheardStoreTestCase(unittest.TestCase):
 
     def test_a_line_is_kept_and_comes_back(self):
         self.assertTrue(overheard.record("it isn't fair you get pizza", speaker="Ira",
-                                         at=1000.0, folder=self.folder))
-        got = self._recall(now=1000.0)
+                                         at=BASE, folder=self.folder))
+        got = self._recall(now=BASE)
         self.assertEqual(len(got), 1)
         self.assertEqual(got[0]["speaker"], "Ira")
         self.assertEqual(got[0]["kind"], "overheard")
@@ -48,60 +53,60 @@ class OverheardStoreTestCase(unittest.TestCase):
         self.assertEqual(self._recall(), [])
 
     def test_a_voice_with_no_name_is_someone(self):
-        overheard.record("mumble", at=1000.0, folder=self.folder)
-        self.assertEqual(self._recall(now=1000.0)[0]["speaker"], "someone")
+        overheard.record("mumble", at=BASE, folder=self.folder)
+        self.assertEqual(self._recall(now=BASE)[0]["speaker"], "someone")
 
     def test_two_days_later_it_is_gone(self):
         """"after one or two days purge them" -- and on write, so
         nothing has to remember to run it."""
-        overheard.record("old news", speaker="Ira", at=1000.0, folder=self.folder)
-        overheard.record("new news", speaker="Ira", at=1000.0 + 49 * 3600, folder=self.folder)
-        kept = self._recall(now=1000.0 + 49 * 3600)
+        overheard.record("old news", speaker="Ira", at=BASE, folder=self.folder)
+        overheard.record("new news", speaker="Ira", at=BASE + 49 * 3600, folder=self.folder)
+        kept = self._recall(now=BASE + 49 * 3600)
         self.assertEqual([k["text"] for k in kept], ["new news"])
 
     def test_it_can_be_asked_for_the_last_hour(self):
-        overheard.record("ages ago", speaker="Ira", at=1000.0, folder=self.folder)
-        overheard.record("just now", speaker="Ira", at=1000.0 + 7000, folder=self.folder)
-        got = self._recall(since_s=3600, now=1000.0 + 7000)
+        overheard.record("ages ago", speaker="Ira", at=BASE, folder=self.folder)
+        overheard.record("just now", speaker="Ira", at=BASE + 7000, folder=self.folder)
+        got = self._recall(since_s=3600, now=BASE + 7000)
         self.assertEqual([g["text"] for g in got], ["just now"])
 
     def test_it_can_be_asked_about_one_person(self):
-        overheard.record("hers", speaker="Ira", at=1000.0, folder=self.folder)
-        overheard.record("his", speaker="Aran", at=1000.0, folder=self.folder)
-        self.assertEqual([g["text"] for g in self._recall(speaker="ira", now=1000.0)], ["hers"])
+        overheard.record("hers", speaker="Ira", at=BASE, folder=self.folder)
+        overheard.record("his", speaker="Aran", at=BASE, folder=self.folder)
+        self.assertEqual([g["text"] for g in self._recall(speaker="ira", now=BASE)], ["hers"])
 
     def test_a_memo_is_a_different_kind_in_the_same_store(self):
         """"what did I say this morning?" should find both; "play back
         my memos" should find only one."""
-        overheard.record("overheard thing", speaker="Ira", at=1000.0, folder=self.folder)
-        overheard.record("the gate code is 4417", kind="memo", at=1000.0, folder=self.folder)
-        self.assertEqual(len(self._recall(now=1000.0)), 2)
-        memos = self._recall(kind="memo", now=1000.0)
+        overheard.record("overheard thing", speaker="Ira", at=BASE, folder=self.folder)
+        overheard.record("the gate code is 4417", kind="memo", at=BASE, folder=self.folder)
+        self.assertEqual(len(self._recall(now=BASE)), 2)
+        memos = self._recall(kind="memo", now=BASE)
         self.assertEqual([m["text"] for m in memos], ["the gate code is 4417"])
 
     def test_the_transcript_reads_like_a_transcript(self):
-        overheard.record("hello there", speaker="Iris", at=1000.0, folder=self.folder)
-        line = overheard.transcript(self._recall(now=1000.0))
+        overheard.record("hello there", speaker="Iris", at=BASE, folder=self.folder)
+        line = overheard.transcript(self._recall(now=BASE))
         self.assertIn("Iris: hello there", line)
 
     def test_who_spoke_is_counted(self):
         for _ in range(3):
-            overheard.record("x", speaker="Ira", at=1000.0, folder=self.folder)
-        overheard.record("y", speaker="Aran", at=1000.0, folder=self.folder)
-        self.assertEqual(overheard.speakers(self._recall(now=1000.0)), {"Ira": 3, "Aran": 1})
+            overheard.record("x", speaker="Ira", at=BASE, folder=self.folder)
+        overheard.record("y", speaker="Aran", at=BASE, folder=self.folder)
+        self.assertEqual(overheard.speakers(self._recall(now=BASE)), {"Ira": 3, "Aran": 1})
 
     def test_wipe_with_no_argument_empties_it(self):
         """Someone who says "forget what you heard" means all of it."""
-        overheard.record("a", speaker="Ira", at=1000.0, folder=self.folder)
-        overheard.record("b", speaker="Aran", at=1000.0, folder=self.folder)
+        overheard.record("a", speaker="Ira", at=BASE, folder=self.folder)
+        overheard.record("b", speaker="Aran", at=BASE, folder=self.folder)
         self.assertEqual(overheard.wipe(folder=self.folder), 2)
         self.assertEqual(self._recall(), [])
 
     def test_wipe_can_be_one_person(self):
-        overheard.record("a", speaker="Ira", at=1000.0, folder=self.folder)
-        overheard.record("b", speaker="Aran", at=1000.0, folder=self.folder)
+        overheard.record("a", speaker="Ira", at=BASE, folder=self.folder)
+        overheard.record("b", speaker="Aran", at=BASE, folder=self.folder)
         self.assertEqual(overheard.wipe(speaker="Ira", folder=self.folder), 1)
-        self.assertEqual([g["speaker"] for g in self._recall(now=1000.0)], ["Aran"])
+        self.assertEqual([g["speaker"] for g in self._recall(now=BASE)], ["Aran"])
 
     def test_wiping_nothing_is_zero_not_a_crash(self):
         self.assertEqual(overheard.wipe(folder=self.folder), 0)
@@ -113,10 +118,10 @@ class OverheardStoreTestCase(unittest.TestCase):
             self.assertFalse(overheard.record("x", speaker="Ira", folder=self.folder))
 
     def test_a_corrupt_line_does_not_poison_the_rest(self):
-        overheard.record("good", speaker="Ira", at=1000.0, folder=self.folder)
+        overheard.record("good", speaker="Ira", at=BASE, folder=self.folder)
         path = overheard.heard_path(self.folder)
         path.write_text(path.read_text() + "{not json\n", encoding="utf-8")
-        self.assertEqual([g["text"] for g in self._recall(now=1000.0)], ["good"])
+        self.assertEqual([g["text"] for g in self._recall(now=BASE)], ["good"])
 
 
 if __name__ == "__main__":
