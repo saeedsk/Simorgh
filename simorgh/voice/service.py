@@ -441,8 +441,7 @@ class Service:
         from . import settings
 
         if not key:
-            rows = "; ".join(f"{k} ({t})" for k, t, _h in settings.describe())
-            return True, f"settings you can change here: {rows}"
+            return True, settings.overview(self.config)
         value, problem = settings.parse(key, raw)
         if problem:
             return False, problem
