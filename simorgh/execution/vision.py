@@ -222,6 +222,19 @@ def vision_tools(config, **kwargs) -> list:
     return [CameraDescribeTool(config, **kwargs)]
 
 
+class _NullLock:
+    """`async with` that guards nothing -- the NVR answers concurrently."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+
+_NO_LOCK = _NullLock()
+
+
 class CameraVision:
     """The camera-event watcher. One instance per Execution service."""
 
@@ -237,6 +250,8 @@ class CameraVision:
         self._tasks: set[asyncio.Task] = set()
         # "Sim cannot see" is worth saying once, not once per event.
         self._said_blind = False
+        # One Ring snapshot at a time across every camera (see `_stills`).
+        self._ring_lock = asyncio.Lock()
 
     # -- the handler ------------------------------------------------------
     async def on_camera_event(self, message: Message) -> None:
@@ -304,29 +319,37 @@ class CameraVision:
         root = Path(self._config.repo_root)
         wanted = max(1, int(getattr(self._config, "camera_vision_stills", 2)))
         gap = float(getattr(self._config, "camera_vision_gap_s", 1.5))
+        if ring:
+            # Ring throttles. Three cameras firing at once, two stills each,
+            # is six snapshot calls in a few seconds and every one of them
+            # came back empty all day (2026-09-16) -- while the same cameras
+            # answered in 2.4s when asked one at a time. One frame, and one
+            # caller at a time.
+            wanted = 1
         paths: list[str] = []
-        for index in range(wanted):
-            if index:
-                await asyncio.sleep(gap)
-            ctx = ToolContext(
-                action_id=f"camera-vision-{int(self._ctx.clock.now())}-{index}", task_id=None, scope={},
-                constraints={}, data_dir=root, clock=self._ctx.clock, logger=self._ctx.logger,
-                ledger=self._ctx.ledger, bus=self._ctx.bus,
-            )
-            try:
-                result = await tool.run({"camera": camera}, ctx=ctx)
-            except Exception as exc:  # noqa: BLE001 -- a camera that will not answer is one fewer frame
-                self._ctx.logger.warning("camera_vision_snapshot_failed", camera=camera, error=repr(exc))
-                continue
-            if not result.ok:
-                self._ctx.logger.warning("camera_vision_snapshot_refused", camera=camera,
-                                         detail=(result.error or "")[:160])
-                continue
-            # `cam_snapshot` saves one file and says `path`; `ring_snapshot`
-            # may save several and says `paths`. Both are relative to the root.
-            meta = result.metadata or {}
-            rels = [meta["path"]] if meta.get("path") else list(meta.get("paths") or [])
-            paths.extend(str(root / rel) for rel in rels)
+        async with (self._ring_lock if ring else _NO_LOCK):
+            for index in range(wanted):
+                if index:
+                    await asyncio.sleep(gap)
+                ctx = ToolContext(
+                    action_id=f"camera-vision-{int(self._ctx.clock.now())}-{index}", task_id=None, scope={},
+                    constraints={}, data_dir=root, clock=self._ctx.clock, logger=self._ctx.logger,
+                    ledger=self._ctx.ledger, bus=self._ctx.bus,
+                )
+                try:
+                    result = await tool.run({"camera": camera}, ctx=ctx)
+                except Exception as exc:  # noqa: BLE001 -- a camera that will not answer is one fewer frame
+                    self._ctx.logger.warning("camera_vision_snapshot_failed", camera=camera, error=repr(exc))
+                    continue
+                if not result.ok:
+                    self._ctx.logger.warning("camera_vision_snapshot_refused", camera=camera,
+                                             detail=(result.error or "")[:160])
+                    continue
+                # `cam_snapshot` saves one file and says `path`; `ring_snapshot`
+                # may save several and says `paths`. Both are relative to the root.
+                meta = result.metadata or {}
+                rels = [meta["path"]] if meta.get("path") else list(meta.get("paths") or [])
+                paths.extend(str(root / rel) for rel in rels)
         return paths
 
     # -- the looking ------------------------------------------------------

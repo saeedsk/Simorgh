@@ -165,15 +165,21 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.bus.requests), 2)
 
     # -- the other camera source ------------------------------------------
-    async def test_a_ring_event_uses_the_ring_camera_and_its_own_paths(self):
+    async def test_a_ring_event_uses_the_ring_camera_and_takes_one_frame(self):
+        """One frame from Ring, not two.
+
+        Ring throttles: three cameras firing at once with two stills each
+        is six snapshot calls in a few seconds, and every one came back
+        empty for a whole day (2026-09-16) while the same cameras answered
+        in 2.4s asked singly. The NVR still takes a pair -- it is wired and
+        answers concurrently."""
         ring = _Snapshot("ring_snapshot", many=True)
         vision = self._vision(tools={"ring_snapshot": ring, "cam_snapshot": self.snapshot})
         await self._event(vision, host="ring", camera="Driveway")
-        self.assertEqual(len(ring.calls), 2)
+        self.assertEqual(len(ring.calls), 1, "Ring is asked once")
         self.assertEqual(self.snapshot.calls, [], "a Ring event does not go to the NVR")
         self.assertEqual(self.bus.requests[-1].payload["images"],
-                         [str(self.root / "workspace/cameras/ring/front-1.jpg"),
-                          str(self.root / "workspace/cameras/ring/front-2.jpg")])
+                         [str(self.root / "workspace/cameras/ring/front-1.jpg")])
 
     # -- when it cannot ----------------------------------------------------
     async def test_no_eyes_is_said_once_not_once_per_event(self):
