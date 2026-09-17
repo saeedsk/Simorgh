@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from ..fields import Bool, Enum, F, Float, Int, O, Str
 from ..registry import define
+from .. import channels
 from .. import topics as t
 
 PerceptTextReceived = define(t.PERCEPT_TEXT_RECEIVED, [
-    F("channel", Enum("cli", "api", "chat", "command", "voice")),
+    F("channel", Enum(*channels.ALL)),
     F("text", Str),
     F("session_id", Str),
     O("user_id", Str),

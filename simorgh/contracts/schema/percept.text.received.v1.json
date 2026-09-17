@@ -7,10 +7,12 @@
     "channel": {
       "enum": [
         "cli",
+        "voice",
         "api",
         "chat",
         "command",
-        "voice"
+        "whatsapp",
+        "telegram"
       ],
       "type": "string"
     },
