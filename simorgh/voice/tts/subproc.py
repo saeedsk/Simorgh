@@ -78,6 +78,18 @@ class SubprocessSynthesiser:
     """Base for an engine served from its own venv. Subclasses set `name`,
     `module`, `server` and `params_for(tone)`."""
 
+    #: The engine that actually produced the last audio -- its own name,
+    #: set only after a synthesis really returned sound. `LaneSynthesiser`
+    #: keeps the same field for the same reason, and `voice test` reads
+    #: whichever it finds.
+    #:
+    #: Without this, an engine used on its own (`expressive_lane =
+    #: always` builds no lane) reported through the CONFIGURED name --
+    #: so `voice test` answered `spoken (miso)` because the setting said
+    #: miso, not because miso had spoken. The creator, 2026-09-16, heard
+    #: nothing while being told exactly that.
+    last_engine: str = ""
+
     name = "subprocess"
     module = ""
     server = ""
@@ -224,6 +236,18 @@ class SubprocessSynthesiser:
                 path.unlink()
             except OSError:
                 pass
+        # Empty audio is not a successful synthesis. Without this the
+        # engine returned `Audio(b"", rate)`, the caller played nothing,
+        # and `voice test` answered `spoken (miso)` -- the creator,
+        # 2026-09-16: "i didn't hear anything". An engine that produces
+        # no sound must say so, not succeed quietly.
+        if not pcm:
+            self.last_engine = ""
+            raise SynthesisRefused(
+                f"{self.name} returned no audio for {len(text)} characters "
+                f"(wrote {path})")
+        # Sound really came back: this engine, and no other, spoke.
+        self.last_engine = self.name
         self.last_took_s = round(time.monotonic() - started, 2)
         self.last_seconds = len(pcm) / 2 / float(rate or 24000)
         self._note_pace(self.last_took_s, self.last_seconds)
