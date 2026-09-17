@@ -159,6 +159,12 @@ class VoiceSession:
         # lines not asked of Sim go to the model as context, and two
         # people talking to each other is a reason to stay quiet.
         self._room: deque = deque(maxlen=16)
+        # Durable counterpart: every line not said to Sim, on disk, kept 48 h
+        # (voice/overheard.py) -- "what did we say in the last hour?" asked
+        # hours later, after a restart, needs more than a sixteen-line deque.
+        from .overheard import OverheardLog
+
+        self._overheard = OverheardLog(getattr(config, "overheard_dir", "workspace/voice/overheard"))
         #: when the model stayed quiet on a voice it could not place (voice/session.py::_background)
         self._quiet_unknown: deque = deque(maxlen=8)
         #: whether the last words Sim answered were properly for it: named, or from a voice it knows
@@ -863,6 +869,7 @@ class VoiceSession:
             # and follow nothing Sim said are not a turn; the model is not
             # asked.
             self._room.append((speaker or "someone", text, self._now(), "aside"))
+            self._log_overheard(speaker or "someone", text)
             await self._stay_quiet(turn_id, reason="a courtesy word not said to Sim")
             return
         if await self._background(turn_id, speaker, text):
@@ -884,6 +891,7 @@ class VoiceSession:
                            and self._last_ask_addressed)
             if not in_exchange and not addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0):
                 self._room.append((speaker or "someone", text, now, "aside"))
+                self._log_overheard(speaker or "someone", text)
                 await self._stay_quiet(turn_id)
                 return
             reply = NOT_SURE.format(text=text)
@@ -944,6 +952,13 @@ class VoiceSession:
         await self._speak_reply(turn_id, reply, clock, context)
 
     # ------------------------------------------------------------- the room
+    def _log_overheard(self, speaker: str, text: str) -> None:
+        """Persist a line that was not said to Sim (voice/overheard.py)."""
+        try:
+            self._overheard.add(speaker, text, self._now())
+        except Exception:  # never let the log break the voice loop
+            pass
+
     def _room_lines(self, *, exclude_text: str = "", within_s: float = 180.0, speaker: str = "") -> str:
         """What the model is told of the room: asides that were not for
         Sim, and -- for a voice other than the one Sim just answered, or
@@ -997,6 +1012,7 @@ class VoiceSession:
         if not others:
             return False
         self._room.append((me, text, now, "aside"))
+        self._log_overheard(me, text)
         partner = sorted(others)[0]
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
@@ -1042,6 +1058,7 @@ class VoiceSession:
             return False
         self._quiet_on[me] = now
         self._room.append((me, text, now, "aside"))
+        self._log_overheard(me, text)
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
             "reason": f"more of what {me} was saying to someone else"})
@@ -1114,6 +1131,7 @@ class VoiceSession:
                 return False
         self._quiet_on["someone"] = now
         self._room.append(("someone", text, now, "aside"))
+        self._log_overheard("someone", text)
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
             "reason": "a voice Sim cannot place, not naming Sim: say \"Sim\" and it will answer"})
