@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tomllib
 from pathlib import Path
 
@@ -114,6 +115,27 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
 }
 
 
+#: The whole reply when the model heard words that were not for it
+#: (orchestration/scaffolds.py tells it so in those words). Voice does not
+#: speak it; Memory must not remember it. Here because both read it and
+#: neither may import the other.
+QUIET_REPLY = "QUIET"
+
+
+def is_quiet_reply(text: str) -> bool:
+    """`QUIET` alone, however wrapped or punctuated.
+
+    446 of the creator's 2,422 episodic records ended "Sim: QUIET"
+    (2026-09-16) -- turns Sim judged were not for it, stayed silent on,
+    and wrote down anyway. Among them a work meeting: colleagues' names
+    and business talk, kept because the turn was not empty.
+    """
+    return bool(_QUIET_ONLY.match((text or "").strip()))
+
+
+_QUIET_ONLY = re.compile(r"^\W*quiet\W*$", re.I)
+
+
 def config_path() -> Path:
     """The `simorgh.toml` the Kernel reads: `$SIMORGH_CONFIG`, then
     `./simorgh.toml`, then `~/.simorgh/simorgh.toml` -- kernel/config.py's
@@ -186,5 +208,5 @@ def persist(path: Path, key: str, value: object, *, section: str = "voice") -> N
     tmp.replace(path)
 
 
-__all__ = ["VOICE_SAFE_KEYS", "config_path", "handoff_path", "persist", "read_handoff", "settings_home",
+__all__ = ["QUIET_REPLY", "VOICE_SAFE_KEYS", "is_quiet_reply", "config_path", "handoff_path", "persist", "read_handoff", "settings_home",
            "write_handoff"]

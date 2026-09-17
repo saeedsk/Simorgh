@@ -207,6 +207,13 @@ class Service:
             return
         if payload.get("cancelled"):
             return   # the person moved on before an answer; nothing was said
+        from simorgh.contracts.settings import is_quiet_reply
+
+        if is_quiet_reply(reply_text):
+            # Sim heard words that were not for it and stayed silent. Silence
+            # is not a conversation to remember: 446 of 2,422 episodic
+            # records were these, a work meeting among them (2026-09-16).
+            return
         if str(payload.get("kind") or "chat") != "chat":
             # A task's own model session ends with turn.completed too; its
             # description is not something a person said (the creator's
