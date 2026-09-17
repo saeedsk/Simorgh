@@ -18,7 +18,6 @@ from pathlib import Path
 from simorgh.contracts import topics
 from simorgh.contracts.protocols import ToolResult
 from simorgh.execution.config import Config
-import simorgh.execution.vision as vision_mod
 from simorgh.execution.vision import CameraVision
 from tests.simorgh.helpers import FakeClock, assert_valid
 
@@ -229,9 +228,13 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 
-class _VisionHarness(unittest.IsolatedAsyncioTestCase):
-    """The rig both camera-vision suites run on: a fake clock, a bus
-    that answers with scripted model replies, and one camera event."""
+class ReportingTheEventNotTheHouse(unittest.IsolatedAsyncioTestCase):
+    """The creator, live 2026-09-16, after Sim announced "a residential
+    street with a driveway ... the street is quiet, with no visible
+    movement or people": "you are descbing my home, isntead i expect you
+    to describe the event ... avoide telling me imag estatis componenets
+    an djust tell me what happened".
+    """
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -242,14 +245,8 @@ class _VisionHarness(unittest.IsolatedAsyncioTestCase):
         self.snapshot = _Snapshot()
         self.asked: list = []
 
-    def _vision(self, answers, *, samples=1):
-        """`answers` is consumed one per model call, in order.
-
-        `samples` is how many separate events the camera must see before
-        its scene is trusted. Most tests here are about what happens
-        AFTER a scene exists, so they take the one-shot form; the
-        confirmation itself is tested in `LearningTheSceneTestCase`.
-        """
+    def _vision(self, answers):
+        """`answers` is consumed one per model call, in order."""
         replies = list(answers)
         outer = self
 
@@ -259,8 +256,7 @@ class _VisionHarness(unittest.IsolatedAsyncioTestCase):
                 return types.SimpleNamespace(payload={"ok": True, "text": replies.pop(0)})
 
         self.bus = _AskingBus()
-        config = Config(repo_root=self.root, camera_vision_gap_s=0.0,
-                        camera_vision_baseline_samples=samples)
+        config = Config(repo_root=self.root, camera_vision_gap_s=0.0)
         ctx = types.SimpleNamespace(clock=self.clock, logger=self.logger, ledger=None, bus=self.bus)
         return CameraVision(config=config, registry=_Registry(cam_snapshot=self.snapshot), ctx=ctx)
 
@@ -271,22 +267,13 @@ class _VisionHarness(unittest.IsolatedAsyncioTestCase):
         for task in list(vision._tasks):  # noqa: SLF001
             await task
 
-
-class ReportingTheEventNotTheHouse(_VisionHarness):
-    """The creator, live 2026-09-16, after Sim announced "a residential
-    street with a driveway ... the street is quiet, with no visible
-    movement or people": "you are descbing my home, isntead i expect you
-    to describe the event ... avoide telling me imag estatis componenets
-    an djust tell me what happened".
-    """
-
     async def test_the_first_event_learns_the_scene_and_says_nothing(self):
         vision = self._vision(["a driveway, a wooden trellis and a garden bed"])
         await self._event(vision)
         self.assertEqual(self.bus.published, [], "learning is not news")
         saved = json.loads((self.root / "workspace/cameras/baselines.json").read_text())
-        self.assertIn("driveway", saved["Front"]["scene"])
-        self.assertIn("FIXED things", self.asked[0], "it asked for the scene, not the event")
+        self.assertIn("driveway", saved["Front"])
+        self.assertIn("PERMANENT things", self.asked[0], "it asked for the scene, not the event")
 
     async def test_a_later_event_is_judged_against_that_scene(self):
         vision = self._vision(["a driveway and a garden bed",
@@ -325,67 +312,3 @@ class ReportingTheEventNotTheHouse(_VisionHarness):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class LearningTheSceneTestCase(_VisionHarness):
-    """A camera fires BECAUSE something moved, so the frames it learns
-    from are the worst possible evidence for "what is always here".
-
-    Learning from one event made whatever triggered it part of the
-    house forever: a car in the drive, a bin at the kerb, a parcel on
-    the step. The parcel is the one that bites -- baked into the scene,
-    it makes every later delivery "nothing new", and "was there a
-    package today?" is what these cameras are actually asked.
-    """
-
-    async def test_one_sample_is_not_enough_to_trust(self):
-        vision = self._vision(["a driveway and a parked van"], samples=3)
-        await self._event(vision)
-        saved = json.loads((self.root / "workspace/cameras/baselines.json").read_text())
-        self.assertEqual(saved["Front"]["scene"], "", "one look is not a scene")
-        self.assertEqual(saved["Front"]["samples"], ["a driveway and a parked van"])
-
-    async def test_nothing_is_announced_while_the_scene_is_still_being_learnt(self):
-        vision = self._vision(["a driveway and a van", "a driveway"], samples=3)
-        await self._event(vision)
-        self.clock.advance(1_000)
-        await self._event(vision)
-        self.assertEqual(self.bus.published, [], "learning is not news")
-
-    async def test_the_last_sample_confirms_against_the_earlier_ones(self):
-        vision = self._vision(["a driveway and a parked van", "a driveway and a bin",
-                               "a driveway"], samples=3)
-        for _ in range(3):
-            await self._event(vision)
-            self.clock.advance(1_000)
-        self.assertIn("in every one of those descriptions", self.asked[2])
-        self.assertIn("a driveway and a parked van", self.asked[2], "the earlier samples are shown")
-        self.assertIn("a driveway and a bin", self.asked[2])
-        saved = json.loads((self.root / "workspace/cameras/baselines.json").read_text())
-        self.assertEqual(saved["Front"]["scene"], "a driveway")
-
-    async def test_the_confirmed_scene_is_what_later_events_are_judged_against(self):
-        vision = self._vision(["a driveway and a van", "a driveway and a bin", "a driveway",
-                               "a courier leaving a parcel"], samples=3)
-        for _ in range(4):
-            await self._event(vision)
-            self.clock.advance(1_000)
-        self.assertIn("a driveway", self.asked[3])
-        self.assertIn("parcel", self.bus.of_type(topics.UI_NOTICE)[-1].payload["text"])
-
-    async def test_a_baseline_saved_in_the_older_shape_is_still_honoured(self):
-        """The value used to be the scene string itself. A camera that
-        already learnt its scene must not have to learn it again."""
-        path = self.root / "workspace/cameras/baselines.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"Front": "a driveway and a garden bed"}))
-        vision = self._vision(["a fox crossing the drive"], samples=3)
-        await self._event(vision)
-        self.assertIn("a driveway and a garden bed", self.asked[0])
-        self.assertIn("fox", self.bus.of_type(topics.UI_NOTICE)[-1].payload["text"])
-
-    def test_the_scene_prompts_exclude_what_can_walk_or_be_carried_away(self):
-        for prompt in (vision_mod.BASELINE_PROMPT, vision_mod.CONFIRM_PROMPT):
-            for movable in ("people", "animals", "vehicles", "packages", "bins", "bicycles"):
-                self.assertIn(movable, prompt)
-        self.assertNotIn("permanently parked vehicles", vision_mod.BASELINE_PROMPT)
