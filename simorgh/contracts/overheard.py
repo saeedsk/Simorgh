@@ -55,7 +55,15 @@ EPOCH_FLOOR = 1.0e9
 #: asked Sim to keep on purpose. They share a store because "what did I
 #: say this morning?" should find both, and differ by one field because
 #: "play back my memos" should find only one.
-KINDS = ("overheard", "memo")
+KINDS = ("overheard", "memo", "said")
+
+#: A silence longer than this ends a conversation and the next line
+#: starts a new one. The creator, 2026-09-16: "keep track of overheard,
+#: and separate them to different groups of overheard conversation that
+#: are relevant to each other." Three minutes, because a kitchen
+#: exchange pauses while somebody crosses the room, and an hour later is
+#: plainly a different conversation.
+THREAD_GAP_S = 180.0
 
 _lock = threading.Lock()
 
@@ -90,6 +98,17 @@ def record(text: str, *, speaker: str = "", kind: str = "overheard",
     try:
         with _lock:
             path.parent.mkdir(parents=True, exist_ok=True)
+            # Which conversation this belongs to, decided by the silence
+            # before it rather than by anything in the words: a gap longer
+            # than `THREAD_GAP_S` means the room moved on.
+            existing = _read(path)
+            previous = existing[-1] if existing else None
+            thread = 1
+            if previous is not None:
+                thread = int(previous.get("thread") or 1)
+                if entry["at"] - float(previous.get("at") or 0.0) > THREAD_GAP_S:
+                    thread += 1
+            entry["thread"] = thread
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
             _purge_locked(path, now=entry["at"])
@@ -181,6 +200,29 @@ def speakers(items: list[dict]) -> dict[str, int]:
     return counts
 
 
+def conversations(items: list[dict]) -> list[dict]:
+    """The lines grouped into the exchanges they belong to.
+
+    A flat transcript answers "what was said"; a person asking "what did
+    they talk about" means the separate conversations, each with who was
+    in it and when it ran.
+    """
+    groups: dict[int, list[dict]] = {}
+    for item in items:
+        groups.setdefault(int(item.get("thread") or 1), []).append(item)
+    out = []
+    for thread, lines in sorted(groups.items()):
+        lines.sort(key=lambda i: float(i.get("at") or 0.0))
+        out.append({
+            "thread": thread,
+            "started": float(lines[0].get("at") or 0.0),
+            "ended": float(lines[-1].get("at") or 0.0),
+            "speakers": sorted({str(i.get("speaker") or "someone") for i in lines}),
+            "lines": lines,
+        })
+    return out
+
+
 def wipe(*, speaker: str = "", kind: str = "", folder: Path | str | None = None) -> int:
     """Delete now, rather than waiting for the age to do it.
 
@@ -209,5 +251,6 @@ def wipe(*, speaker: str = "", kind: str = "", folder: Path | str | None = None)
         return 0
 
 
-__all__ = ["DEFAULT_DIR", "EPOCH_FLOOR", "FILE_NAME", "KINDS", "MAX_AGE_S", "heard_path", "purge",
+__all__ = ["DEFAULT_DIR", "EPOCH_FLOOR", "FILE_NAME", "KINDS", "MAX_AGE_S", "THREAD_GAP_S",
+           "conversations", "heard_path", "purge",
            "recall", "record", "speakers", "transcript", "wipe"]

@@ -1653,6 +1653,18 @@ class VoiceSession:
             engine_stt=clock.engine_stt, engine_tts=engine, metrics=metrics if self._config.diagnostics else {},
             segments=list(getattr(self, "_last_segments", []) or []),
         ))
+        # A turn addressed to Sim belongs in the record too. Without it the
+        # store held only asides, so "summarize what Iris said in the last
+        # hour" found nothing while the words sat in `voice:turns` -- a
+        # different stream, owned by Voice, that Execution's tool may not
+        # read (the creator asked three times, 2026-09-16). The person's
+        # words only: Sim's own replies are recoverable elsewhere and would
+        # double a store that keeps a family's conversation.
+        if clock.text:
+            self._log_overheard(
+                self.last_speaker if self.last_identification is not None
+                and self.last_identification.name else "someone",
+                clock.text, kind="said")
         self._last_segments = []
         self._clocks.pop(turn_id, None)
 

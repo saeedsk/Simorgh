@@ -2832,8 +2832,9 @@ class OverheardTool:
     """
 
     name = "overheard"
-    description = ("What was said near you that was NOT said to you, and the memos you were asked to "
-                   "keep: `2 hours`, `from Ira`, `memos`, or nothing for the last day. Kept two days, "
+    description = ("What was said in the room -- both to you and near you -- and the memos you were "
+                   "asked to keep. `2 hours`, `from Ira`, `memos`, `conversations` to list the separate "
+                   "exchanges, `thread 3` for one of them, or nothing for the last day. Kept two days, "
                    "then gone. Say what you found, or that there is nothing.")
     read_only = True
     reversibility = "read_only"
@@ -2848,6 +2849,11 @@ class OverheardTool:
         raw = " ".join(str(args.get("request") or "").split())
         low = raw.lower()
         kind = "memo" if low.startswith("memo") else ""
+        grouped = low.startswith(("conversation", "threads", "groups"))
+        thread = 0
+        if low.startswith("thread "):
+            head = low[7:].strip().split(" ")[0]
+            thread = int(head) if head.isdigit() else 0
         speaker = ""
         if low.startswith("from "):
             speaker = raw[5:].strip()
@@ -2866,6 +2872,22 @@ class OverheardTool:
             return ToolResult(ok=True, output=(
                 f"nothing{what} in the last {hours:g} hour{'s' if hours != 1 else ''}. "
                 f"Say that plainly -- do NOT describe what might have been said."))
+        if thread:
+            lines = [i for i in items if int(i.get("thread") or 1) == thread]
+            if not lines:
+                return ToolResult(ok=True, output=f"there is no conversation {thread} in that window")
+            return ToolResult(ok=True, output=store.transcript(lines),
+                              metadata={"lines": len(lines), "thread": thread})
+        if grouped:
+            convs = store.conversations(items)
+            rows = []
+            for c in convs:
+                when = time.strftime("%H:%M", time.localtime(c["started"]))
+                mins = max(1, int((c["ended"] - c["started"]) / 60))
+                rows.append(f"{c['thread']}. {when}, {mins} min, {', '.join(c['speakers'])} "
+                            f"({len(c['lines'])} lines): {c['lines'][0]['text'][:60]}")
+            return ToolResult(ok=True, output="\n".join(rows),
+                              metadata={"conversations": len(convs)})
         who = store.speakers(items)
         return ToolResult(ok=True, output=store.transcript(items),
                           metadata={"lines": len(items), "speakers": who})
