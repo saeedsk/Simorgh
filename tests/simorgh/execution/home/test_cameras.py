@@ -81,7 +81,10 @@ class _FakeNvr:
     async def unsubscribe(self):
         self.subscribed = None
 
-    def events(self, body):
+    # `async`, like the library: `Host.ONVIF_event_callback` is a
+    # coroutine, and a sync double is what let an unawaited call pass
+    # the suite while no NVR event reached the bus at all (2026-09-16).
+    async def events(self, body):
         return [1] if "channel1" in body else []
 
     async def kinds_for(self, ch):

@@ -189,10 +189,25 @@ class ReolinkNvr:
                 pass
             self._host = None
 
-    def events(self, body: str) -> list[int]:
+    async def events(self, body: str) -> list[int]:
+        """The channels an ONVIF push is about.
+
+        `ONVIF_event_callback` is a coroutine function -- the only one on
+        `Host` this module ever called without awaiting. Unawaited, its
+        body never ran, `list()` raised TypeError on the coroutine object,
+        and `_watch`'s bare `except` swallowed it: every NVR push produced
+        no channels, so `world.camera.event` was never published for a
+        Reolink camera at all. The only trace was a RuntimeWarning about a
+        coroutine never awaited (the creator's console, 2026-09-16).
+
+        It hid in the tests because the fake host declared `def events`,
+        synchronously -- the double had the opposite shape to the library,
+        so the suite proved the caller worked against something that could
+        not exhibit the bug.
+        """
         if self._host is None:
             return []
-        return list(self._host.ONVIF_event_callback(body) or [])
+        return list(await self._host.ONVIF_event_callback(body) or [])
 
     async def kinds_for(self, ch: int) -> list[str]:
         api = await self._api()
@@ -813,8 +828,16 @@ class CamWatchTool(_CameraTool):
             if str(message.payload.get("name")) != "reolink":
                 return
             try:
-                channels = nvr.events(str(message.payload.get("body") or ""))
-            except Exception:  # noqa: BLE001
+                channels = await nvr.events(str(message.payload.get("body") or ""))
+            except Exception as exc:  # noqa: BLE001
+                # Said out loud, not swallowed: this `except` is what kept a
+                # never-awaited coroutine invisible for as long as it was.
+                # Nothing in this module has a logger, and `_on_hook` has no
+                # `ctx`; it does already put camera events on the bus, so the
+                # failure goes the same way rather than inventing plumbing.
+                await bus.publish(Message.new(topics.UI_NOTICE, source="execution", payload={
+                    "level": "warn", "source": "cameras",
+                    "text": f"a camera push could not be read: {exc!r}"[:160]}))
                 return
             for ch in channels:
                 try:
