@@ -33,7 +33,16 @@ def main() -> None:
         return
     rate = int(getattr(generator, "sample_rate", 24000))
     print(json.dumps({"ready": True, "engine": "miso", "device": device, "rate": rate}), flush=True)
-    context_cache: dict[str, list] = {}
+    context_cache: dict[str, list] = {}   # reference path -> cached segments
+    _CACHE_MAX = 8                        # drop oldest-inserted refs beyond this
+
+    def _evict_context_cache() -> None:
+        # dict preserves insertion order, so the first key is the oldest.
+        # A hit re-inserts the key, making this a true LRU.
+        while len(context_cache) > _CACHE_MAX:
+            oldest = next(iter(context_cache))
+            del context_cache[oldest]
+
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -50,6 +59,8 @@ def main() -> None:
             context = []
             if reference:
                 context = context_cache.get(reference)
+                if context is not None:
+                    context_cache[reference] = context_cache.pop(reference)  # touch: move to newest
                 if context is None:
                     try:
                         from generator import Segment
@@ -61,6 +72,7 @@ def main() -> None:
                     audio = ta.functional.resample(audio.squeeze(0), orig_freq=sr, new_freq=rate)
                     context = [Segment(text=str(params.get("reference_text") or ""), speaker=0, audio=audio)]
                     context_cache[reference] = context
+                    _evict_context_cache()
             started = time.monotonic()
             with torch.inference_mode():
                 wav = generator.generate(text=text, speaker=int(params.get("speaker", 0)), context=context,
