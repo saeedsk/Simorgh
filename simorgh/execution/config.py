@@ -492,6 +492,13 @@ class Config:
     # vision_model); without one Sim says it cannot look, once.
     camera_vision: bool = True
     camera_vision_stills: int = 2
+    #: How many cameras Sim looks at once. Seven cameras tripped together
+    #: on 2026-09-16 (23:46) and each spawned its own vision call: seven
+    #: concurrent 17-second questions at one 3B model on one machine,
+    #: which thrashes rather than queues. One at a time answers each in
+    #: 17s instead of all seven badly. The per-camera cooldown is a
+    #: different thing and still applies.
+    camera_vision_concurrency: int = 1
     #: Separate events sampled before a camera's scene is trusted. One
     #: sample is taken from frames the camera fired ON, so whatever moved
     #: is in it; only what recurs across samples is scenery.

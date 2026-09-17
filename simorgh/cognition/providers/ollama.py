@@ -78,9 +78,49 @@ class OllamaProvider:
         try:
             self._request("GET", "/api/version", None, timeout=0.5)
             self._probe_ok = True
-        except Exception:  # noqa: BLE001 -- not running is simply unavailable
+            return self._probe_ok
+        except Exception:  # noqa: BLE001 -- not running
             self._probe_ok = False
+        # Not answering: start it, once per probe window. The creator,
+        # 2026-09-17, choosing how the local engine should come back:
+        # "Sim starts it when needed". Seven cameras went blind on
+        # 2026-09-16 for no reason but a server nobody had started.
+        #
+        # Inside the probe cache on purpose: a machine with no Ollama
+        # tries once every 30 s, not once per request, which is the
+        # difference between a retry and a fork bomb.
+        if self._start_server():
+            try:
+                self._request("GET", "/api/version", None, timeout=2.0)
+                self._probe_ok = True
+            except Exception:  # noqa: BLE001 -- it was started but is not up yet
+                self._probe_ok = False
         return self._probe_ok
+
+    def _start_server(self) -> bool:
+        """Spawn `ollama serve`, detached. False when there is nothing to
+        spawn, which is not an error -- it is a machine without Ollama.
+
+        Detached deliberately: a child of this process dies when Sim
+        exits, and a server that dies with its caller is the fault this
+        is fixing, not a fix for it.
+        """
+        import shutil
+        import subprocess
+
+        binary = shutil.which("ollama")
+        if not binary:
+            return False
+        try:
+            subprocess.Popen(                      # noqa: S603 -- a fixed binary, no shell
+                [binary, "serve"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            return False
+        time.sleep(1.0)     # it binds its port in well under a second
+        return True
 
     async def complete(
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,

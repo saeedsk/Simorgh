@@ -287,6 +287,9 @@ class CameraVision:
         self._last_look: dict[str, float] = {}
         self._busy: set[str] = set()
         self._tasks: set[asyncio.Task] = set()
+        # Built lazily: a Semaphore binds to the loop it is made on,
+        # and this object is constructed before there is one.
+        self._looking: asyncio.Semaphore | None = None
         # "Sim cannot see" is worth saying once, not once per event.
         self._said_blind = False
         # One Ring snapshot at a time across every camera (see `_stills`).
@@ -312,7 +315,24 @@ class CameraVision:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
+    def _gate(self) -> asyncio.Semaphore:
+        if self._looking is None:
+            width = max(1, int(getattr(self._config, "camera_vision_concurrency", 1) or 1))
+            self._looking = asyncio.Semaphore(width)
+        return self._looking
+
     async def _look(self, payload: dict, camera: str) -> None:
+        # Queued, not dropped: a camera that tripped waits its turn
+        # while staying in `_busy`, so its own repeats are still
+        # suppressed and the burst is answered one good answer at a
+        # time rather than seven bad ones at once.
+        try:
+            async with self._gate():
+                await self._look_now(payload, camera)
+        finally:
+            self._busy.discard(camera)
+
+    async def _look_now(self, payload: dict, camera: str) -> None:
         try:
             stills = await self._stills(payload, camera)
             if not stills:
