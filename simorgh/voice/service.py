@@ -53,9 +53,35 @@ _PRODUCES = (
 # different engine or detector; the session alone is rebuilt for the
 # rules it was constructed with; everything else is read per turn by
 # the running session and applies in place.
-_ENGINE_KEYS = frozenset({"stt", "tts", "tts_farsi_voice", "vad_sensitivity", "microphone", "speaker"})
+# `expressive_lane` belongs here because it does not merely pick a lane
+# at speak time -- it decides HOW the synthesiser is built:
+# `tts/__init__.py::open_synthesiser` wraps the expressive engine in a
+# `LaneSynthesiser` only when it is not "always". Without a reopen the
+# stale pair object survives and keeps routing to the fast engine, so
+# the setting is saved, reported, and has no effect. The creator,
+# 2026-09-16, set `expressive_lane = always`, was told it was saved, and
+# went on hearing Kokoro until an unrelated `voice set tts miso` forced
+# the rebuild: "what hapens i stil hear kokoro model not miso :(".
+_ENGINE_KEYS = frozenset({"stt", "tts", "tts_farsi_voice", "vad_sensitivity", "microphone", "speaker",
+                          "expressive_lane"})
 _SESSION_KEYS = frozenset({"barge_in", "endpoint_silence_ms", "min_speech_ms", "stt_partials", "connectors",
                            "max_spoken_sentences", "output"})
+
+
+def _spoken_by(synthesiser, default: str) -> str:
+    """The engine that actually made the last sound.
+
+    A synthesiser may be wrapped -- Polyglot around a lane pair -- and
+    only `LaneSynthesiser` knows which of its two engines spoke. Walk in
+    until something says, else fall back to the name of the whole thing.
+    """
+    node, depth = synthesiser, 0
+    while node is not None and depth < 5:
+        name = str(getattr(node, "last_engine", "") or "")
+        if name:
+            return name
+        node, depth = getattr(node, "_primary", None), depth + 1
+    return default
 
 
 def presence_probes() -> list[dict]:
@@ -607,8 +633,11 @@ class Service:
         # hearing sounde lile kokoro", and no output could settle it.
         # `LaneSynthesiser.synthesise` already records the engine it
         # used; nothing read it.
-        tts = getattr(pipeline, "_tts", None)  # noqa: SLF001 -- the engines the pipeline was opened with
-        spoke = str(getattr(tts, "last_engine", "") or "") or self._engine_names["tts"]
+        # Through the wrappers: `open_synthesiser` may put a
+        # `PolyglotSynthesiser` around the lane pair, and only the
+        # `LaneSynthesiser` inside it records which engine spoke. Reading
+        # the outermost object gave the pair's name again.
+        spoke = _spoken_by(getattr(pipeline, "_tts", None), self._engine_names["tts"])  # noqa: SLF001
         await self._reply(message, topics.VOICE_SPEAK_REPLY, {
             "ok": True, "seconds": max(0.0, len(said) / 20.0), "engine": spoke,
             "lane": "expressive" if str(getattr(self.config, "expressive_lane", "auto")) != "off" else "fast"})
