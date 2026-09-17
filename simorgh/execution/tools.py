@@ -2553,6 +2553,125 @@ class GitDiscardTool:
         )
 
 
+class GitHistoryTool:
+    """What Sim has been doing to itself, read-only.
+
+    The creator, 2026-09-16: "sim should be able to easily see its git
+    history, status and remember it has that skill." Earlier the same
+    evening he had asked Sim directly whether it had read its own git
+    log, and Sim answered: "No -- I still can't run git from here, so no
+    log reading; I can only search and read files directly." He pushed
+    back that git log is basic and that he had granted CLI permission.
+    Sim then said it had started a background build to give itself shell
+    access -- and later said again that it had none.
+
+    Sim was right about the capability and wrong about the remedy. Only
+    three git tools existed (`git_commit`, `git_revert`, `git_discard`),
+    all of them WRITES, and all of them in the task profiles alone: the
+    voice and chat profiles had no git tool at all, and no `run_shell`.
+    So a spoken or typed "what have you changed lately" had nothing to
+    call. This is the same drift that lost `remind` from the voice
+    profile, found the same day.
+
+    The remedy is not `run_shell` in a six-step spoken turn -- that is an
+    unbounded blast radius bought to answer a bounded question. It is one
+    read-only tool that runs exactly three git commands and cannot write:
+    no checkout, no fetch, no config, no arbitrary subcommand.
+    """
+
+    name = "git_history"
+    description = ("Your own recent commits, the branch, and what is uncommitted right now. "
+                   "Empty for the last few commits; a number for more; a path for that file's history. "
+                   "Reads only -- it cannot commit, discard or change anything.")
+    read_only = True
+    reversibility = "read_only"
+    args_schema = {"type": "object", "properties": {"subject": {"type": "string"}}}
+
+    #: Enough to answer "what changed lately" without turning a spoken
+    #: turn into a changelog. A number in the argument overrides it.
+    DEFAULT_COUNT = 10
+    MAX_COUNT = 50
+    #: The status list is the part that grows without bound on a messy
+    #: tree; the commits are already capped by count.
+    MAX_STATUS_LINES = 40
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        subject = str(args.get("subject") or "").strip()
+        count, path = self.DEFAULT_COUNT, ""
+        if subject:
+            head = subject.split()[0]
+            if head.isdigit():
+                count = max(1, min(int(head), self.MAX_COUNT))
+            else:
+                path = subject
+
+        root = tool_root(self._config, ctx, path)
+        git = shutil.which("git")
+        # An honest refusal, not an empty success: a tool must never
+        # succeed while saying nothing true. "No commits" and "no git"
+        # are different answers and must not look alike.
+        if not git:
+            return ToolResult(ok=False, error="git is not installed on this machine")
+        if not (root / ".git").exists():
+            return ToolResult(ok=False, error=f"{root} is not a git repository")
+
+        def run(cmd: list[str]) -> subprocess.CompletedProcess:
+            return subprocess.run([git, "-C", str(root), *cmd], capture_output=True, text=True,
+                                  timeout=30, stdin=subprocess.DEVNULL)
+
+        branch = await asyncio.to_thread(run, ["rev-parse", "--abbrev-ref", "HEAD"])
+        log_cmd = ["log", f"-{count}", "--format=%h  %ad  %s", "--date=short"]
+        if path:
+            log_cmd += ["--", path]
+        log = await asyncio.to_thread(run, log_cmd)
+        status = await asyncio.to_thread(run, ["status", "--porcelain"]
+                                         + (["--", path] if path else []))
+        if log.returncode != 0:
+            detail = (log.stderr or log.stdout).strip()
+            # A path git has never heard of is the likeliest cause, and
+            # saying so beats "git log failed".
+            if path and "unknown revision or path" in detail:
+                return ToolResult(ok=False, error=f"no such path in this repository: {path}")
+            return ToolResult(ok=False, error=f"git log failed: {detail[:300]}")
+
+        on = branch.stdout.strip() if branch.returncode == 0 else "?"
+        dirty = [l for l in status.stdout.splitlines() if l.strip()]
+        lines = [f"branch {on}"]
+        if dirty:
+            shown = dirty[: self.MAX_STATUS_LINES]
+            lines.append(f"{len(dirty)} uncommitted change(s):")
+            lines += [f"  {l}" for l in shown]
+            if len(dirty) > len(shown):
+                lines.append(f"  ... and {len(dirty) - len(shown)} more")
+        else:
+            lines.append("working tree clean")
+        commits = [l for l in log.stdout.splitlines() if l.strip()]
+        # `git log -- <path>` exits 0 with NO output for a path that has
+        # never existed -- the "unknown revision or path" error only
+        # fires on ambiguity. So without this the tool answered "no
+        # commits yet for simorgh/not_here.py" with ok=True, reporting
+        # "nothing has touched this file" and "there is no such file"
+        # in identical words. Caught by its own test.
+        if path and not commits:
+            tracked = await asyncio.to_thread(run, ["ls-files", "--", path])
+            if not tracked.stdout.strip() and not (root / path).exists():
+                return ToolResult(ok=False, error=f"no such path in this repository: {path}")
+        lines.append("")
+        if commits:
+            lines.append(f"last {len(commits)} commit(s)" + (f" touching {path}" if path else "") + ":")
+            lines += [f"  {l}" for l in commits]
+        else:
+            lines.append(f"no commits yet{' for ' + path if path else ''}")
+
+        return ToolResult(
+            ok=True, output="\n".join(lines),
+            metadata={"branch": on, "commits": len(commits), "uncommitted": len(dirty)},
+        )
+
+
 class GitRevertTool:
     """Port of revert_last_commit: `git revert --no-edit HEAD`,
     attributed to Simorgh, never rewrites history."""
@@ -2947,6 +3066,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         OverheardTool(config), OverheardNoteTool(config),
         RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
+        GitHistoryTool(config),
         GitDiscardTool(config),
         ReplaceInFileTool(config), StartTaskTool(config), ListTasksTool(config), CancelTaskTool(config),
         VoiceSettingTool(config), MemoryForgetTool(config), SimCommandTool(config),

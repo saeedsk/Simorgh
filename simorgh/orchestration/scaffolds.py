@@ -155,6 +155,7 @@ _TOOL_NOTES: dict[str, str] = {
                         "already exists and you are editing it, or you will truncate it",
     "apply_skill": "install or update a skill",
     "git_commit": "commit what you have applied, with a message",
+    "git_history": "see your own recent commits, which branch you are on, and what is not committed yet",
     "git_revert": "undo your last commit if it turned out wrong",
     "git_discard": "throw away an uncommitted change you decided against",
     "run_shell": "run a shell command in the repo when no other tool fits",

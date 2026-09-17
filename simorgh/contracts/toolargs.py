@@ -54,6 +54,7 @@ MARKER_ARG_KEY: dict[str, str] = {
     "cast_use": "device",
     "cast_setup": "device",
     "energy_report": "range",
+    "git_history": "subject",
     "media_now": "where",
     "home_find": "query",
     "home_state": "target",

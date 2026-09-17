@@ -137,6 +137,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "run_shell"): "Running",
     ("act", "web_search"): "Searching",
     ("act", "git_commit"): "Committing",
+    ("act", "git_history"): "Reading history",
     ("act", "git_revert"): "Reverting",
     ("act", "git_discard"): "Discarding",
     ("act", "propose_mcp_server"): "Proposing",

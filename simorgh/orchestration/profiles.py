@@ -38,6 +38,10 @@ CHAT = Profile(
            # registered, gated, and in no profile at all, so every "run restart"
            # got "I have no such tool" (live 2026-09-15).
            "sim_command",
+           # "did you read your git log?" -- Sim: "I can't run git from here"
+           # (the creator, 2026-09-16). Read-only: the three write tools
+           # stay in the task profiles where a commit belongs.
+           "git_history",
            # Chat could turn the kitchen light on and read the mail, and
            # could not save a text file. Asked for a PowerPoint deck,
            # Sim correctly reported that it had no way to write one and
@@ -209,7 +213,8 @@ VOICE_CHAT = replace(
            "home_find", "home_state", "home_describe", "home_call", "home_undo",
            "energy_status", "energy_report",
            "media_now", "media_control", "media_play",
-           "kb_search", "kb_ask", "kb_open"),
+           "kb_search", "kb_ask", "kb_open",
+           "git_history"),
     # Six: a search, a cast, a retry, and the answer (the creator,
     # 2026-09-12: "cast something on TV" ran out at five, having listed
     # devices it did not need and hunted for an mp4 -- the rule now says

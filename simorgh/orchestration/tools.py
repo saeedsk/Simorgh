@@ -73,6 +73,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "voice_setting": ("reversible", False),
     "apply_skill": ("reversible", False),
     "git_commit": ("reversible", False),
+    # Reads three git commands and cannot write: no checkout, no fetch,
+    # no arbitrary subcommand. Sim asking what it changed is not an act.
+    "git_history": ("read_only", False),
     "git_revert": ("reversible", False),
     "git_discard": ("reversible", False),
     # A shell can reach the network and anything else on the machine;
@@ -309,6 +312,7 @@ _MARKER_ARG_HINT.update({
         "following line: the complete module source, defining run(**args)."
     ),
     "git_commit": "first line: the one path to commit; second line: the commit message.",
+    "git_history": "empty for your recent commits; a number for more of them; one path for that file's history.",
     "git_revert": "no argument -- write just the marker: GIT_REVERT:",
     "git_discard": "the one path whose uncommitted changes to throw away.",
     "run_tests": "a test file or directory to run (e.g. tests/simorgh/guardian), or empty for the whole suite.",
