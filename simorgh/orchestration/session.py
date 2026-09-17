@@ -244,7 +244,13 @@ _PROMISED_BEHAVIOUR = re.compile(
     # Only the standing one is a promise nothing can keep.
     r"treat (?:those|that|it|them)\b[^.!?]{0,40}\bas\b[^.!?]{0,60}"
     r"\b(?:from now on|next time|in future|going forward|always|from here on)\b)"
-    r"|^\W*(?:noted|got it)\b[^.!?]{0,60}?(?:[-\u2014\u2013:]|\bi'?ve got it\b)"
+    # "Noted -- X" says X was recorded. "Got it --" is how anyone opens a
+    # sentence: live 2026-09-16 it fired on "Got it -- the kettle is on"
+    # and "Got it -- playing the K-pop chart", burning a correction step
+    # on turns that claimed nothing. The real case it was added for
+    # ("Noted -- I've got it. I'll keep that on file") is caught by the
+    # retention verbs above.
+    r"|^\W*noted\b[^.!?]{0,60}?[-\u2014\u2013:]"
     r"|\b(?:i'?ve|i have)\s+(?:noted|stored|saved|recorded|written)\b", re.IGNORECASE)
 
 

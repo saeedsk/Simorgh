@@ -56,6 +56,23 @@ class PromisingBehaviour(unittest.TestCase):
                      "so I'll treat those sounds as my name from now on, whether you say Sim or Seem"):
             self.assertTrue(promised_behaviour(said, _session()), said)
 
+    def test_an_ordinary_opener_is_not_a_promise(self):
+        """"Got it --" is how anyone starts a sentence. Live 2026-09-16,
+        minutes after the widened guard shipped, it fired on "Got it --
+        the kettle is on" and "Got it -- playing the K-pop chart",
+        spending a correction step on turns that claimed nothing. Only
+        "Noted -- X", which says X was recorded, belongs here."""
+        for said in ("Got it — the kettle is on.",
+                     "Got it — I'll check the camera now.",
+                     "Got it — playing the K-pop chart.",
+                     "Got it — that was COIN, down 8.2%.",
+                     "Got it, Saeed."):
+            self.assertEqual(promised_behaviour(said, _session()), "", said)
+
+    def test_noted_followed_by_a_fact_still_counts(self):
+        self.assertTrue(promised_behaviour("Noted — Majalli Xilqat.", _session()))
+        self.assertTrue(promised_behaviour("Noted — I've got it. I'll keep that on file.", _session()))
+
     def test_other_ways_of_claiming_to_keep_something(self):
         for said in ("I'll note that for next time.", "I've stored that against your name.",
                      "I'll hold on to it.", "From now on I'll remember it."):
