@@ -40,6 +40,10 @@ MemoryConsolidated = define(t.MEMORY_CONSOLIDATED, [
     F("window", Float),
     F("distilled", Int),
     F("pruned", Int),
+    # Distillations thrown away this cycle for naming things the
+    # transcript never did (memory/consolidation.py::untraceable).
+    # Optional: a publisher predating the check is still valid.
+    O("refused", Int),
 ])
 MemoryForgotten = define(t.MEMORY_FORGOTTEN, [F("refs", List(Str)), F("reason", Str)])
 # "forget the last minute, that was all from TV" (the creator, 2026-09-13):

@@ -277,9 +277,18 @@ class Service:
                 topics.MEMORY_CONTRADICTION_FLAGGED, source=self._ctx.source,
                 payload={"ref_a": ref_a, "ref_b": ref_b, "evidence": evidence, "confidence_after": 0.5},
             ))
+        if report.refused:
+            # A refusal that tells nobody is the bare `except` this
+            # codebase keeps being bitten by. The distillation that was
+            # thrown away named things the transcript never did, and
+            # that is worth a line: it is the difference between "the
+            # model had nothing to say" and "the model invented".
+            self._ctx.logger.warning("memory.distillation_refused",
+                                     invented=", ".join(report.refused[:10]), count=len(report.refused))
         await self._ctx.bus.publish(Message.new(
             topics.MEMORY_CONSOLIDATED, source=self._ctx.source,
-            payload={"window": window or 0.0, "distilled": 1 if report.distilled else 0, "pruned": sum(report.pruned.values())},
+            payload={"window": window or 0.0, "distilled": 1 if report.distilled else 0,
+                     "pruned": sum(report.pruned.values()), "refused": len(report.refused)},
         ))
         pruned_total = sum(report.pruned.values())
         if pruned_total:

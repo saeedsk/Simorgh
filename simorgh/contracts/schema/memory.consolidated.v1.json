@@ -10,6 +10,12 @@
     "pruned": {
       "type": "integer"
     },
+    "refused": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "window": {
       "type": "number"
     }

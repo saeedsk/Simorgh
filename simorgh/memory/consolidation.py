@@ -7,6 +7,7 @@ a `floor:true` reply, never a fabricated distillation (principle 4.5)."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from simorgh.contracts import topics
@@ -64,11 +65,60 @@ DISTILL_PREFIX = "Transcript to summarise (do not answer it):\n\n"
 NOTHING = "NOTHING"
 
 
+#: Specifics a distillation may not invent: a source path, a commit sha,
+#: a dotted/underscored identifier in backticks. Prose is not checked --
+#: summarising is the job, and paraphrase is not fabrication.
+_SPECIFIC = re.compile(
+    r"\b[\w./-]+\.py\b"            # simorgh/memory.py
+    r"|\b[0-9a-f]{7,40}\b"          # abc1234
+    r"|`([\w./]*[._/][\w./]*)`"      # `prune_old`, `tests/x.py`
+)
+
+
+def untraceable(text: str, window: str) -> list[str]:
+    """Specifics in `text` that appear nowhere in `window`.
+
+    `DISTILL_INSTRUCTION` already says "every statement must be
+    traceable to the transcript -- add nothing". It was not enough. It
+    landed 2026-09-10 (`4c2f59d`, "Sim remembered a conversation that
+    never happened") and on 2026-09-16 a distillation still wrote, into
+    durable memory and in the confident register of a fact:
+
+        "A code note records that `prune_old` in `simorgh/memory.py` was
+         reworked ... Four tests pass in `tests/simorgh/test_memory.py`,
+         committed as `abc1234`/`abc1235`."
+
+    None of it exists. There is no `simorgh/memory.py` (memory is a
+    package), no `prune_old` anywhere in the tree, no
+    `tests/simorgh/test_memory.py`, and neither sha is a valid object.
+    The task it claimed to describe had in fact reported, correctly,
+    "nothing in the source tree was changed, so there is nothing to
+    commit" -- the honest record was the input, and the summary of it
+    was the lie.
+
+    An instruction is a request; this is a check. The asymmetry is
+    deliberate: a name the transcript never mentioned is never a
+    summary of it, whatever else the sentence around it is doing.
+    """
+    seen = window.lower()
+    missing: list[str] = []
+    for match in _SPECIFIC.finditer(text):
+        token = (match.group(1) or match.group(0)).strip()
+        if len(token) < 4 or token.lower() in seen:
+            continue
+        if token not in missing:
+            missing.append(token)
+    return missing
+
+
 @dataclass(frozen=True)
 class ConsolidationReport:
     contradictions: list[tuple[str, str, str]]
     pruned: dict[str, int] = field(default_factory=dict)
     distilled: bool = False
+    #: Specifics a distillation invented, when one was refused for it.
+    #: Non-empty means nothing was stored this cycle, on purpose.
+    refused: list[str] = field(default_factory=list)
 
 
 async def run_consolidation(
@@ -79,6 +129,7 @@ async def run_consolidation(
     pruned = {kind: await engine.prune(kind=kind, keep=keep) for kind, keep in keep_per_kind.items()}
 
     distilled = False
+    refused: list[str] = []
     filters = {"since": since} if since is not None else None
     episodic_items, _ = await engine.retrieve(query="", kinds=["episodic"], k=20, filters=filters)
     if episodic_items:
@@ -101,7 +152,16 @@ async def run_consolidation(
             # `NOTHING` is a real answer, and storing it would be the same
             # class of mistake as storing the essay: filling durable
             # memory with something that was never said.
-            if text and text.upper().strip(".!") != NOTHING:
+            invented = untraceable(text, window) if text else []
+            if invented:
+                # Storing it is the unrecoverable step: a fabrication in
+                # durable memory is indistinguishable from a real memory
+                # forever after, and recall hands it back as history.
+                # Dropping the whole distillation is the right trade --
+                # a lost summary costs one cycle, and the next one runs
+                # over the same window.
+                refused = invented
+            elif text and text.upper().strip(".!") != NOTHING:
                 await engine.store(
                     kind="semantic", content=text,
                     # A reader of this record -- recall, a later
@@ -113,8 +173,9 @@ async def run_consolidation(
                 )
                 distilled = True
 
-    return ConsolidationReport(contradictions=flagged, pruned=pruned, distilled=distilled)
+    return ConsolidationReport(contradictions=flagged, pruned=pruned, distilled=distilled,
+                               refused=refused)
 
 
-__all__ = ["DISTILL_INSTRUCTION", "DISTILL_PREFIX", "NOTHING",
+__all__ = ["DISTILL_INSTRUCTION", "DISTILL_PREFIX", "NOTHING", "untraceable",
            "ConsolidationReport", "run_consolidation"]
