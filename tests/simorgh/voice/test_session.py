@@ -296,6 +296,30 @@ class TestStaleAndEcho(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(task, timeout=3.0)
 
 
+class SimsOwnAsideTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_a_short_aside_is_remembered_as_something_sim_said(self) -> None:
+        """"One more second." came back through the mic as the next turn,
+        took the floor, and the real answer -- 28 seconds in the making --
+        was dropped as stale (live 2026-09-17, the creator: "sim skipped
+        audio response"). `_say_aside` spoke without recording that it
+        had: three words is under `is_echo`'s four-word floor, and only
+        the recents ring catches an utterance that short."""
+        from simorgh.voice.pipeline import echoes_recent
+
+        script = _Script((False, 10_000))
+        session, bus, speaker, tts = _session(_config(), script, _Replies(["anything"]))
+        said = await session._say_aside("aside-1", "One more second.")  # noqa: SLF001
+        self.assertTrue(said, "the fake synthesiser says it")
+        self.assertIn("One more second.", list(session._pipeline.recent_said),  # noqa: SLF001
+                      "an aside is a thing Sim said")
+        self.assertTrue(echoes_recent("One more second.", list(session._pipeline.recent_said)),  # noqa: SLF001
+                        "and hearing it back is an echo, not a turn")
+        self.assertGreater(session._sim_spoke_at, 0.0,  # noqa: SLF001
+                           "the exchange window opens, so the ring is the branch that runs")
+        self.assertEqual(session._pipeline.last_said, "",  # noqa: SLF001
+                         "but the last real reply is untouched: `repeat` still means the reply")
+
+
 def _in_conversation(built):
     """As if Sim had just spoken: the next words are presumably for it."""
     session = built[0]

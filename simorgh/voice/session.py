@@ -1568,6 +1568,15 @@ class VoiceSession:
         except Exception as exc:  # noqa: BLE001
             self._log("warning", "voice.aside_failed", error=repr(exc))
             return False
+        # An aside is a thing Sim said, and Sim must remember saying it.
+        # It did not: "One more second." came back through the mic as the
+        # next turn, took the floor, and the real answer -- 28 seconds in
+        # the making -- was dropped as stale (live 2026-09-17, the
+        # creator: "sim skipped audio response"). `last_said` is left
+        # alone: that is the last real reply, which `repeat` and the
+        # model's context both read.
+        self._pipeline.recent_said.append(text)
+        self._sim_spoke_at = self._now()
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": text, "seconds": 0.0, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
             "device": self._config.device, "interrupted": False, "aside": True, "turn": self.turns.turn_id,
