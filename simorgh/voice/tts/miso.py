@@ -10,6 +10,7 @@ Python 3.10 venv with the MisoTTS checkout on its path."""
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 from .subproc import DEFAULT_VENV_DIR, SubprocessSynthesiser, create_venv, engine_available
@@ -34,7 +35,29 @@ def install(venv_dir: str = DEFAULT_VENV_DIR, repo: str = DEFAULT_REPO, *, log=p
         done = subprocess.run(["git", "clone", "--depth", "1", REPO_URL, str(repo_path)], capture_output=True, text=True, timeout=600)
         if done.returncode != 0:
             return None, f"could not clone MisoTTS: {(done.stderr or done.stdout).strip()[-300:]}"
-    return create_venv(venv_dir, "miso", python="3.10", editable=str(repo_path), log=log)
+    py, problem = create_venv(venv_dir, "miso", python="3.10", editable=str(repo_path), log=log)
+    if py is None:
+        return py, problem
+    # MisoTTS pulls torchtune, which imports `datasets`, which imports
+    # pyarrow -- and the wheels for pyarrow 14 and torch 2.4 are built
+    # against numpy 1.x. Resolution picks numpy 2 anyway, and the whole
+    # chain then dies at import with "_ARRAY_API not found" /
+    # "numpy.core.multiarray failed to import". The engine installed,
+    # reported success, and could never open (the creator ran `voice set
+    # tts miso` on 2026-09-16 and got Kokoro, correctly refused).
+    #
+    # Pinned AFTER the editable install, because that install is what
+    # drags numpy 2 back in.
+    log("  pinning numpy<2 (pyarrow/torch wheels are built against it) ...")
+    import subprocess
+
+    uv = shutil.which("uv")
+    cmd = ([uv, "pip", "install", "--python", str(py), "numpy<2"] if uv
+           else [str(py), "-m", "pip", "install", "-q", "numpy<2"])
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if done.returncode != 0:
+        return None, f"could not pin numpy<2: {(done.stderr or done.stdout).strip()[-300:]}"
+    return py, ""
 
 
 class MisoSynthesiser(SubprocessSynthesiser):
