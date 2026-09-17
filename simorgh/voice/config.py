@@ -304,6 +304,13 @@ class Config:
     # What the fake recogniser "hears", for tests and audio-less machines.
     fake_transcript: str = "hello sim"
 
+    #: Where overheard speech is kept, and for how long. The creator
+    #: asked for "one day, two days ... then purge them"; two days is the
+    #: default and the store purges itself on every write, so nothing has
+    #: to remember to run.
+    overheard_dir: str = "workspace/voice/overheard"
+    overheard_hours: float = 48.0
+
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, object] | None) -> "Config":
         if not mapping:

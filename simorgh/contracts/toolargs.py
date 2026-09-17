@@ -68,6 +68,8 @@ MARKER_ARG_KEY: dict[str, str] = {
     "read_file": "path",
     "console_tail": "request",
     "remember_place": "request",
+    "overheard": "request",
+    "overheard_note": "request",
     "list_dir": "path",
     "search_code": "query",
     # Its one optional argument -- see execution/tools.py::SelfMapTool. A

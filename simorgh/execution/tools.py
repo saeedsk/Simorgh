@@ -2821,6 +2821,100 @@ class RememberPlaceTool:
         return ToolResult(ok=False, error="say `house <name>`, `network <name> is <place>`, or `places`")
 
 
+
+class OverheardTool:
+    """Asking what the room said when it was not talking to Sim.
+
+    This is the half that was missing. `voice/overheard.py` recorded
+    every line and nothing could read it back; `voice/overhear.py` had
+    the queries and was imported by nobody. Both lived in Voice, and the
+    asking happens here -- which is why neither could ever be reached.
+    """
+
+    name = "overheard"
+    description = ("What was said near you that was NOT said to you, and the memos you were asked to "
+                   "keep: `2 hours`, `from Ira`, `memos`, or nothing for the last day. Kept two days, "
+                   "then gone. Say what you found, or that there is nothing.")
+    read_only = True
+    reversibility = "read_only"
+    args_schema = {"type": "object", "properties": {"request": {"type": "string"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        from simorgh.contracts import overheard as store
+
+        raw = " ".join(str(args.get("request") or "").split())
+        low = raw.lower()
+        kind = "memo" if low.startswith("memo") else ""
+        speaker = ""
+        if low.startswith("from "):
+            speaker = raw[5:].strip()
+        hours = 24.0
+        head = low.split(" ")[0] if low else ""
+        if head.replace(".", "", 1).isdigit():
+            try:
+                hours = max(0.1, min(float(head), 48.0))
+            except ValueError:
+                hours = 24.0
+        items = await asyncio.to_thread(
+            store.recall, since_s=hours * 3600.0, speaker=speaker, kind=kind,
+            folder=getattr(self._config, "overheard_dir", None) or store.DEFAULT_DIR)
+        if not items:
+            what = f" from {speaker}" if speaker else (" memos" if kind else "")
+            return ToolResult(ok=True, output=(
+                f"nothing{what} in the last {hours:g} hour{'s' if hours != 1 else ''}. "
+                f"Say that plainly -- do NOT describe what might have been said."))
+        who = store.speakers(items)
+        return ToolResult(ok=True, output=store.transcript(items),
+                          metadata={"lines": len(items), "speakers": who})
+
+
+class OverheardNoteTool:
+    """Keeping one thing on purpose, and forgetting all of it on purpose.
+
+    Labelled irreversible for the wipe, not the memo. A tool's label is
+    its worst capability, and Guardian believes the label -- the same
+    reason `camera_describe` is `reversible` rather than `read_only`
+    because it writes a JPEG.
+    """
+
+    name = "overheard_note"
+    description = ("`memo <what to keep>` saves something the person asked you to remember from what "
+                   "was said; `wipe` forgets ALL overheard speech and memos now, and `wipe <name>` "
+                   "only that person's. Say how many lines went.")
+    read_only = False
+    reversibility = "irreversible"
+    args_schema = {"type": "object", "properties": {"request": {"type": "string"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        from simorgh.contracts import overheard as store
+
+        raw = " ".join(str(args.get("request") or "").split())
+        low = raw.lower()
+        folder = getattr(self._config, "overheard_dir", None) or store.DEFAULT_DIR
+        if low.startswith("wipe"):
+            who = raw[4:].strip()
+            gone = await asyncio.to_thread(store.wipe, speaker=who, folder=folder)
+            what = f" of {who}'s" if who else ""
+            return ToolResult(ok=True, output=f"forgot {gone} line{'s' if gone != 1 else ''}{what}",
+                              side_effects=("overheard wiped",), metadata={"forgotten": gone})
+        if low.startswith("memo"):
+            text = raw[4:].strip(" :-")
+            if not text:
+                return ToolResult(ok=False, error="say what to keep, e.g. `memo the gate code is 4417`")
+            ok = await asyncio.to_thread(store.record, text, speaker="", kind="memo", folder=folder)
+            if not ok:
+                return ToolResult(ok=False, error="the memo could not be written")
+            return ToolResult(ok=True, output=f"kept that: {text[:80]}",
+                              side_effects=("memo kept",), metadata={"kind": "memo"})
+        return ToolResult(ok=False, error="say `memo <what to keep>` or `wipe`")
+
+
 def builtin_tools(config: Config, *, secrets=None) -> list:
     """`secrets` is the subsystem's scoped secret store. Only the
     account-backed tools use it, and they take the value at call time so
@@ -2828,6 +2922,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
     return [
         ReadFileTool(config), ListDirTool(config), SearchCodeTool(config), SelfMapTool(config),
         ConsoleTailTool(config), RememberPlaceTool(config),
+        OverheardTool(config), OverheardNoteTool(config),
         RunPythonSandboxedTool(config), RunJsSandboxedTool(config),
         RunTestsTool(config), ApplySourcePatchTool(config), GitCommitTool(config), GitRevertTool(config),
         GitDiscardTool(config),

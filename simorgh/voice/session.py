@@ -159,12 +159,14 @@ class VoiceSession:
         # lines not asked of Sim go to the model as context, and two
         # people talking to each other is a reason to stay quiet.
         self._room: deque = deque(maxlen=16)
-        # Durable counterpart: every line not said to Sim, on disk, kept 48 h
-        # (voice/overheard.py) -- "what did we say in the last hour?" asked
+        # Durable counterpart: every line not said to Sim, on disk, kept
+        # `overheard_hours` -- "what did we say in the last hour?" asked
         # hours later, after a restart, needs more than a sixteen-line deque.
-        from .overheard import OverheardLog
-
-        self._overheard = OverheardLog(getattr(config, "overheard_dir", "workspace/voice/overheard"))
+        # The store is in Contracts, not here, because the tool that ANSWERS
+        # that question runs in Execution and no subsystem may import
+        # another: a store in Voice is one only Voice can read, which is
+        # exactly how this feature failed twice (contracts/overheard.py).
+        self._overheard_dir = getattr(config, "overheard_dir", "workspace/voice/overheard")
         #: when the model stayed quiet on a voice it could not place (voice/session.py::_background)
         self._quiet_unknown: deque = deque(maxlen=8)
         #: whether the last words Sim answered were properly for it: named, or from a voice it knows
@@ -952,10 +954,13 @@ class VoiceSession:
         await self._speak_reply(turn_id, reply, clock, context)
 
     # ------------------------------------------------------------- the room
-    def _log_overheard(self, speaker: str, text: str) -> None:
-        """Persist a line that was not said to Sim (voice/overheard.py)."""
+    def _log_overheard(self, speaker: str, text: str, *, kind: str = "overheard") -> None:
+        """Persist a line that was not said to Sim (contracts/overheard.py)."""
+        from simorgh.contracts import overheard
+
         try:
-            self._overheard.add(speaker, text, self._now())
+            overheard.record(text, speaker=speaker, kind=kind, at=self._now(),
+                             folder=self._overheard_dir)
         except Exception:  # never let the log break the voice loop
             pass
 

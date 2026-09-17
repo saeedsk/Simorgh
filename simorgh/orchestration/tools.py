@@ -172,6 +172,8 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "camera_describe": ("reversible", True),
     "console_tail": ("read_only", True),
     "remember_place": ("reversible", True),
+    "overheard": ("read_only", True),
+    "overheard_note": ("irreversible", False),
 
 
     "cam_stream": ("reversible", True),
