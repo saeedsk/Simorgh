@@ -193,7 +193,23 @@ VOICE_CHAT = replace(
            "music_now", "music_control", "music_play", "sim_command",
            "voice_setting", "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "dash_key", "tv_app", "tv_key", "tv_charts",
            "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
-           "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch"),
+           "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch",
+           # The things people say OUT LOUD, which this list did not have.
+           # "Remind me in 5 minutes" (the creator, 2026-09-16) found no
+           # `remind` here, so the model reached for `start_task` -- the only
+           # tool it had that could wait -- and the reminder sat behind `auto
+           # off` instead of firing. `CHAT` has had all of these all along.
+           # The same drift was found once before, for the Music tools, and
+           # patched for those alone (2026-09-15, above); this is the rest.
+           #
+           # Answer-shaped only. `apply_source_patch`, `install_package`,
+           # `run_script` and the sandboxes stay out on purpose: a six-step
+           # spoken turn is answered, not built.
+           "remind", "cal_list", "mail_search", "mail_read",
+           "home_find", "home_state", "home_describe", "home_call", "home_undo",
+           "energy_status", "energy_report",
+           "media_now", "media_control", "media_play",
+           "kb_search", "kb_ask", "kb_open"),
     # Six: a search, a cast, a retry, and the answer (the creator,
     # 2026-09-12: "cast something on TV" ran out at five, having listed
     # devices it did not need and hunted for an mp4 -- the rule now says
