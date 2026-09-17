@@ -127,6 +127,9 @@ class Config:
     connectors: bool = True            # the planner's rare "Okay," / "Yeah," lead-ins
     max_spoken_sentences: int = 3      # longer answers are cut here and say there is more on screen
     tts_lookahead: int = 2             # pieces synthesised ahead of playback; more = slower to cancel
+    #: Longest `play_stream` waits for one chunk, or for the speaker to
+    #: finish one, before giving up and releasing `speech_lock`.
+    tts_stall_timeout_s: float = 20.0
     # The moment the person's turn ends, before the recogniser has even
     # finished, Sim says a short "Aha." / "Let me check." / "Sure, one
     # sec." (voice/backchannel.py) and only then goes to think; a person

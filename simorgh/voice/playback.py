@@ -31,13 +31,26 @@ class PlaybackReport:
     interrupted: bool = False
     underruns: int = 0
     dropped_stale: int = 0
+    stalled: bool = False   # gave up waiting; see `stall_timeout_s`
     states: list[PlaybackState] = field(default_factory=list)
 
 
 class StreamingPlayer:
-    def __init__(self, speaker, *, on_state=None) -> None:
+    def __init__(self, speaker, *, on_state=None, stall_timeout_s: float = 20.0) -> None:
+        """`stall_timeout_s` bounds BOTH waits inside `play_stream`: for
+        the next synthesised chunk, and for the speaker to finish one.
+
+        Neither was bounded, and `play_stream` runs holding
+        `speech_lock`. A synthesiser that stopped yielding, or a speaker
+        that never returned, therefore held that lock forever and Sim
+        went silent -- not slow, mute -- until the process was
+        restarted. Measured on the creator's own session: eight turns
+        waited on that lock, 262s lost in total, the worst a single 48.3s
+        wait while no spoken turn was anywhere near it (2026-09-16).
+        """
         self._speaker = speaker
         self._on_state = on_state
+        self._stall_timeout_s = float(stall_timeout_s)
         self._current: str = ""
         self._stop = False
         self._playing: asyncio.Task | None = None
@@ -90,7 +103,13 @@ class StreamingPlayer:
         started = False
         try:
             while not self._stop:
-                first = await queue.get()
+                try:
+                    first = await asyncio.wait_for(queue.get(), timeout=self._stall_timeout_s)
+                except asyncio.TimeoutError:
+                    # The synthesiser stopped yielding. Give up the lock:
+                    # a truncated reply is recoverable, a mute Sim is not.
+                    report.stalled = True
+                    break
                 if first is done:
                     break
                 run = [first]
@@ -126,7 +145,12 @@ class StreamingPlayer:
                         await result
                 self._playing = asyncio.create_task(self._speaker.play(audio))
                 try:
-                    await self._playing
+                    # Generous: the audio's own length plus the stall
+                    # bound. Playing 3s of sound never takes 23s.
+                    await asyncio.wait_for(self._playing, timeout=audio.seconds + self._stall_timeout_s)
+                except asyncio.TimeoutError:
+                    report.stalled = True
+                    break
                 finally:
                     self._playing = None
                 report.chunks += len(run)

@@ -196,7 +196,8 @@ class VoiceSession:
                                           partial_every_ms=config.stt_partial_every_ms)
         self._tts = synthesiser if isinstance(synthesiser, StreamingSynthesiser) else StreamingSynthesiser(
             synthesiser, lookahead=config.tts_lookahead)
-        self._player = StreamingPlayer(speaker, on_state=self._on_playback_state)
+        self._player = StreamingPlayer(speaker, on_state=self._on_playback_state,
+                                       stall_timeout_s=self._config.tts_stall_timeout_s)
         self._planner = SpokenResponsePlanner(max_sentences=config.max_spoken_sentences, connectors=config.connectors,
                                               pronunciations=lambda: self._speakers.pronunciations() if self._speakers else {})
         self.turns = TurnManager(Policy(

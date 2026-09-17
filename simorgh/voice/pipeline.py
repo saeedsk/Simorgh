@@ -445,7 +445,7 @@ class Pipeline:
         captured to its end, is left in `self.pending_audio`."""
         from .playback import StreamingPlayer
 
-        player = StreamingPlayer(self._speaker)
+        player = StreamingPlayer(self._speaker, stall_timeout_s=self._config.tts_stall_timeout_s)
         self._player = player
         if not (self._config.barge_in and self._mic is not None):
             return await player.play_stream(chunks, request_id=request_id)
