@@ -46,9 +46,29 @@ class PromisingBehaviour(unittest.TestCase):
     def test_promising_to_remember_is_caught(self):
         self.assertTrue(promised_behaviour("I'll remember that for next time.", _session()))
 
+    def test_the_three_it_missed_live(self):
+        """A phrasebook catches the phrasings already seen. These three
+        arrived within minutes of shipping the first version
+        (2026-09-15/16), and the shape they share is a claim to RETAIN
+        something with nothing retaining it."""
+        for said in ("Noted — Majalli Xilqat. Who are they, Saeed — a friend?",
+                     "Noted — I've got it. I'll keep that on file, Saeed.",
+                     "so I'll treat those sounds as my name from now on, whether you say Sim or Seem"):
+            self.assertTrue(promised_behaviour(said, _session()), said)
+
+    def test_other_ways_of_claiming_to_keep_something(self):
+        for said in ("I'll note that for next time.", "I've stored that against your name.",
+                     "I'll hold on to it.", "From now on I'll remember it."):
+            self.assertTrue(promised_behaviour(said, _session()), said)
+
     def test_an_answer_that_promises_nothing_is_left_alone(self):
         self.assertEqual(promised_behaviour("That's COIN, down 8.2%.", _session()), "")
         self.assertEqual(promised_behaviour("I'll check the camera now.", _session()), "")
+        self.assertEqual(promised_behaviour("Got it.", _session()), "", "a plain acknowledgement is not a promise")
+        self.assertEqual(promised_behaviour("I noted the time was 9pm in your message.", _session()), "",
+                         "reporting what it read is not claiming to keep it")
+        self.assertEqual(promised_behaviour("I'll treat that as a yes and turn the lights off.", _session()), "",
+                         "treating something as X for THIS turn is not a standing change")
 
 
 if __name__ == "__main__":

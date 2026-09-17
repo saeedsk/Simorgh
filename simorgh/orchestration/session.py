@@ -225,10 +225,27 @@ _COMMIT_CLAIM = re.compile(
 
 #: "I'll stay quiet unless you address me" -- a standing change to how Sim
 #: behaves, which no reply can make and nothing here stores.
+#:
+#: The first version listed the phrasings already seen, and missed three
+#: more within minutes of shipping (2026-09-15/16): "Noted -- Majalli
+#: Xilqat", "I'll keep that on file, Saeed", and "I'll treat those sounds
+#: as my name from now on". Matching phrasings is the wrong shape; the
+#: shape is a claim to RETAIN something, with nothing retaining it. So:
+#: a first-person future plus a retention verb, OR a bare acknowledgement
+#: that stands for one.
 _PROMISED_BEHAVIOUR = re.compile(
     r"\b(?:i'?ll|i will|from now on|going forward|i'?m going to)\b[^.!?]{0,70}"
-    r"\b(?:stay quiet|keep quiet|be quiet|stay silent|not respond|won'?t respond|not answer|ignore (?:them|those|the tv)|"
-    r"remember (?:that|this)|keep (?:that|this) in mind|bear (?:that|this) in mind)\b", re.IGNORECASE)
+    r"\b(?:stay quiet|keep quiet|be quiet|stay silent|not respond|won'?t respond|not answer|"
+    r"ignore (?:them|those|the tv)|remember (?:that|this|it)|keep (?:that|this|it) in mind|"
+    r"bear (?:that|this) in mind|keep (?:that|this|it) on file|"
+    r"(?:note|store|save|record|log) (?:that|this|it)|hold on to (?:that|this|it)|"
+    # "treat those sounds as my name FROM NOW ON" is a standing change;
+    # "I'll treat that as a yes and turn the lights off" is this turn.
+    # Only the standing one is a promise nothing can keep.
+    r"treat (?:those|that|it|them)\b[^.!?]{0,40}\bas\b[^.!?]{0,60}"
+    r"\b(?:from now on|next time|in future|going forward|always|from here on)\b)"
+    r"|^\W*(?:noted|got it)\b[^.!?]{0,60}?(?:[-\u2014\u2013:]|\bi'?ve got it\b)"
+    r"|\b(?:i'?ve|i have)\s+(?:noted|stored|saved|recorded|written)\b", re.IGNORECASE)
 
 
 def claimed_to_commit(text: str, session) -> str:
