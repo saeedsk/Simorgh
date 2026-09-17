@@ -62,8 +62,17 @@ class Config:
     # deliberately absent -- pausing autonomy must never stop the work
     # a person just asked for.
     autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project", "assistant")
+    # `project` and `research` were missing, and `.get(origin, 0)` gave
+    # them 0 -- below curiosity's 1. Every child of an approved plan is
+    # created with `origin="project"` (`service.py::_on_plan_approved`),
+    # so decomposing a goal into steps was what pushed those steps to the
+    # BACK of the queue. Measured 2026-09-16: four self-improvement
+    # project tasks sat behind three Age of Empires clones at weight 2.
+    # A plan the creator approved is the creator's work, so it ranks with
+    # it; `research` is a curiosity-weight investigation.
     priority_weights: dict = field(
-        default_factory=lambda: {"human": 3, "benchmark": 2, "reflection": 2, "assistant": 2, "curiosity": 1}
+        default_factory=lambda: {"human": 3, "project": 3, "benchmark": 2, "reflection": 2,
+                                 "assistant": 2, "curiosity": 1, "research": 1}
     )
     leader: bool = True
     # A decomposition or re-grounding is a real model call. This was an

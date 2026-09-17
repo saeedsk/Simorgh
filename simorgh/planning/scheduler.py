@@ -91,7 +91,17 @@ def select_ready(store: TaskStore, *, priority_weights: dict[str, int], limit: i
             return 0
         return task.attempts
 
-    candidates.sort(key=lambda t: (-priority_weights.get(t.origin, 0), attempts_key(t), t.created_at))
+    # `t.priority` sits AFTER `attempts_key` on purpose. It is the only
+    # way to say "this one matters more" -- the field has existed on the
+    # model, been persisted and round-tripped since the beginning and was
+    # read by NOTHING (96 of 97 tasks ever created carry the default 0,
+    # and the one that set 5 got nothing for it). Putting it above
+    # attempts would let a high-priority ninth retry beat work never
+    # tried, which is the starvation this key was rewritten to fix.
+    # Below it, priority orders the far commoner case: everything waiting
+    # with no attempts yet.
+    candidates.sort(key=lambda t: (-priority_weights.get(t.origin, 0), attempts_key(t),
+                                   -int(getattr(t, "priority", 0) or 0), t.created_at))
     return candidates[:limit]
 
 
@@ -122,7 +132,10 @@ def better_ready(store: TaskStore, task_id: str, *, priority_weights: dict[str, 
     if not top or top[0].id == task_id:
         return None
     best = top[0]
-    if priority_weights.get(best.origin, 0) > priority_weights.get(named.origin, 0):
+    def rank(task: "Task") -> tuple[int, int]:
+        return (priority_weights.get(task.origin, 0), int(getattr(task, "priority", 0) or 0))
+
+    if rank(best) > rank(named):
         return best
     return None
 

@@ -150,7 +150,7 @@ class Intake:
 
     async def on_candidate(
         self, *, kind: str, description: str, subject: str | None, area: str, origin: str = "curiosity",
-        risk: str | None = None, max_steps: int | None = None,
+        risk: str | None = None, max_steps: int | None = None, priority: int = 0,
     ) -> IntakeResult:
         dup = self._find_duplicate(description, origin=origin, subject=subject)
         if dup:
@@ -163,6 +163,7 @@ class Intake:
         task = await self._store.create(
             kind=kind, description=description, subject=subject, origin=origin, mode="execute",
             risk=risk or "low", scope=scope, initial_status="available", max_steps=max_steps,
+            priority=priority,
         )
         return IntakeResult(task, backlog=waiting)
 
