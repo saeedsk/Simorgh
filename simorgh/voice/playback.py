@@ -32,6 +32,7 @@ class PlaybackReport:
     underruns: int = 0
     dropped_stale: int = 0
     stalled: bool = False   # gave up waiting; see `stall_timeout_s`
+    chunk_timeout_s: float = 0.0   # what it actually waited per chunk
     states: list[PlaybackState] = field(default_factory=list)
 
 
@@ -73,12 +74,23 @@ class StreamingPlayer:
                 await result
 
     async def play_stream(self, chunks, *, request_id: str, on_first_audio=None,
-                          on_chunk=None, on_play=None) -> PlaybackReport:
+                          on_chunk=None, on_play=None, chunk_timeout: float | None = None) -> PlaybackReport:
         """Play `chunks` (an async iterable of `AudioChunk`) for
         `request_id` until they end or `stop()` is called. `on_play` is
         told each run of `Audio` the instant it goes to the speaker --
         the reference for anything that must know what the room is
-        about to hear."""
+        about to hear.
+
+        `chunk_timeout` bounds the wait for each synthesised chunk, for
+        a caller that knows this engine is slow. Default is
+        `stall_timeout_s`, which is right for an engine that renders
+        faster than it speaks and WRONG for one that does not: at 20 s
+        it muted MisoTTS entirely, which needs ~65 s for a first piece.
+        Every Miso reply rendered correctly, wrote its wav, and was
+        abandoned here before a sample reached the speaker -- 1,209
+        kokoro turns in the ledger and not one miso (2026-09-16, the
+        creator: "I didn't hear a single word live from sim").
+        """
         report = PlaybackReport(request_id=request_id)
         self.last_report = report
         self._current = request_id
@@ -101,10 +113,14 @@ class StreamingPlayer:
 
         puller = asyncio.create_task(_pull())
         started = False
+        # Never shorter than the default: a slow engine may wait longer,
+        # nothing may wait less.
+        wait_s = max(float(chunk_timeout or 0.0), self._stall_timeout_s)
+        report.chunk_timeout_s = wait_s
         try:
             while not self._stop:
                 try:
-                    first = await asyncio.wait_for(queue.get(), timeout=self._stall_timeout_s)
+                    first = await asyncio.wait_for(queue.get(), timeout=wait_s)
                 except asyncio.TimeoutError:
                     # The synthesiser stopped yielding. Give up the lock:
                     # a truncated reply is recoverable, a mute Sim is not.

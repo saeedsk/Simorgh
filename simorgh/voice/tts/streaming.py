@@ -103,6 +103,11 @@ def edged(pcm: bytes, sample_rate: int, *, ms: int = EDGE_MS) -> bytes:
 CHARS_PER_SECOND = 14.0
 #: the most a slow engine may make the listener wait for a gapless reply
 MAX_HOLD_S = 25.0
+#: A ceiling on waiting for one piece, and the slack over the estimate.
+#: MisoTTS measured 10x warm and 44x cold on the M3 Pro, so a first
+#: piece can be minutes; past this the engine really has stopped.
+MAX_CHUNK_WAIT_S = 300.0
+CHUNK_WAIT_MARGIN = 2.0
 
 
 class StreamingSynthesiser:
@@ -175,6 +180,24 @@ class StreamingSynthesiser:
             return float(ratio or 0.0)
         except Exception:  # noqa: BLE001
             return 0.0
+
+    def chunk_timeout(self, request: TtsRequest) -> float:
+        """How long a player should wait for one piece from this engine.
+
+        `hold_seconds` already knows the shape of this: rendering time
+        is `pace_ratio` times speaking time. A piece takes about that
+        long to make, so waiting less than it guarantees silence --
+        which is exactly what happened to MisoTTS at a flat 20 s.
+
+        0 for an engine that keeps up: the caller keeps its own floor,
+        and the guard that stops a mute Sim is untouched for the fast
+        lane.
+        """
+        ratio = self.pace_ratio(request.lane)
+        if ratio <= 1.15:
+            return 0.0
+        longest = max((len(text) for text, _pause in request.pieces), default=0) / CHARS_PER_SECOND
+        return min(MAX_CHUNK_WAIT_S, ratio * longest * CHUNK_WAIT_MARGIN)
 
     def hold_seconds(self, request: TtsRequest) -> float:
         """How much audio to have in hand before the first piece plays,

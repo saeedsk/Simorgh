@@ -1529,7 +1529,8 @@ class VoiceSession:
             return False
         try:
             async with lock:
-                await self._play(self._tts.synthesise_stream(request), request_id=request.request_id)
+                await self._play(self._tts.synthesise_stream(request), request_id=request.request_id,
+                                 chunk_timeout=self._tts.chunk_timeout(request))
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -1686,7 +1687,8 @@ class VoiceSession:
         self._pipeline.speaking = True
         try:
             async with self._pipeline.speech_lock:
-                report = await self._play(self._tts.synthesise_stream(request), request_id=request.request_id)
+                report = await self._play(self._tts.synthesise_stream(request), request_id=request.request_id,
+                                 chunk_timeout=self._tts.chunk_timeout(request))
         finally:
             self._pipeline.speaking = False
             self._sim_spoke_at = self._now()
