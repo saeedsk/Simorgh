@@ -84,7 +84,7 @@ class SqliteBackend:
             with self._lock:
                 try:
                     return fn(self._conn)  # type: ignore[arg-type]
-                except sqlite3.OperationalError as exc:
+                except sqlite3.Error as exc:
                     raise LedgerUnavailable(str(exc)) from None
 
         return await asyncio.to_thread(locked)
