@@ -485,6 +485,10 @@ class Config:
     # vision_model); without one Sim says it cannot look, once.
     camera_vision: bool = True
     camera_vision_stills: int = 2
+    #: Separate events sampled before a camera's scene is trusted. One
+    #: sample is taken from frames the camera fired ON, so whatever moved
+    #: is in it; only what recurs across samples is scenery.
+    camera_vision_baseline_samples: int = 3
     # Between the stills: long enough that the second frame is a different
     # moment (someone has moved, a car has gone past), short enough that
     # the answer still arrives while it matters.
