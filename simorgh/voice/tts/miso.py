@@ -18,11 +18,28 @@ from .subproc import DEFAULT_VENV_DIR, SubprocessSynthesiser, create_venv, engin
 REPO_URL = "https://github.com/MisoLabsAI/MisoTTS.git"
 DEFAULT_REPO = "workspace/voice/engines/MisoTTS"
 
+#: The module the readiness probe imports, and the reason it is not
+#: `torch`. It was `torch` until 2026-09-16, which is a DEPENDENCY, not
+#: this engine: torch imported perfectly while the engine itself could
+#: not load at all (a numpy 2 ABI break further down the chain, in
+#: torchtune -> datasets -> pyarrow). So `available()` answered True for
+#: an engine that could not speak a word, `open_synthesiser` saw no
+#: problem to fall back from, the refusal guard in `service._set` never
+#: fired, `tts = "miso"` was written into simorgh.toml, and Sim said
+#: "engines reopened; listening again" -- while every turn went on being
+#: spoken by Kokoro. The creator, that evening: "misotts doesn't work".
+#:
+#: An engine is asked about ITSELF. `generator` is the MisoTTS
+#: checkout's own top-level module (its editable install puts it on the
+#: path, so no PYTHONPATH is needed), and importing it exercises the
+#: whole chain that actually has to work.
+ENGINE_MODULE = "generator"
+
 
 def available(venv_dir: str = DEFAULT_VENV_DIR, repo: str = DEFAULT_REPO) -> tuple[bool, str]:
     if not (Path(repo) / "generator.py").is_file():
         return False, f"needs the MisoTTS checkout at {repo} (`voice models miso` clones it)"
-    return engine_available("miso", "torch", venv_dir)
+    return engine_available("miso", ENGINE_MODULE, venv_dir)
 
 
 def install(venv_dir: str = DEFAULT_VENV_DIR, repo: str = DEFAULT_REPO, *, log=print):
@@ -62,7 +79,7 @@ def install(venv_dir: str = DEFAULT_VENV_DIR, repo: str = DEFAULT_REPO, *, log=p
 
 class MisoSynthesiser(SubprocessSynthesiser):
     name = "miso"
-    module = "torch"
+    module = ENGINE_MODULE
     server = "miso_server.py"
     load_timeout_s = 1800.0   # 16 GB of weights the first time
 
