@@ -1723,7 +1723,10 @@ class StartTaskTool:
         "type": "object", "required": ["goal"],
         "properties": {
             "goal": {"type": "string"},
-            "subject": {"type": "string", "description": "the file it will mostly write"},
+            "subject": {"type": "string",
+                        "description": "the file it will mostly write -- a REAL path, one that exists or "
+                                       "whose folder exists. A made-up path is dropped: it would become the "
+                                       "task's write scope and refuse every edit."},
             "steps": {"type": "integer"},
             "kind": {"type": "string", "enum": ["patch", "research", "project"]},
             "authorised": {"type": "boolean",
@@ -1738,6 +1741,39 @@ class StartTaskTool:
     #: afternoon of provider quota before anyone looks.
     MAX_STEPS = 120
     DEFAULT_STEPS = 40
+
+    def _real_subject(self, subject: str) -> tuple[str, str]:
+        """`(subject, "")` when it names a real place; `("", why)` when not.
+
+        An invented subject is worse than no subject, twice over.
+
+        It becomes the task's write scope, so every edit the task tries
+        is refused and the task fails its whole retry budget without
+        writing a line -- `simorgh/watch/baseline`, a directory that has
+        never existed, cost $4.54 across three attempts on 2026-09-16.
+
+        And it silently switches the duplicate check OFF. `Intake.
+        _find_duplicate` skips any task whose subject differs, so two
+        requests for the same work with two different invented paths are
+        never compared: three tasks to show the voice match score (two
+        of them scoring 0.91 and 1.00 similar) and three splash-screen
+        tasks, two running at once. Seven of nine subjects named that
+        day did not exist.
+
+        A path that does not exist YET is fine -- a new file in a real
+        package is how anything gets built. What is not fine is a parent
+        that does not exist either, which is what invention looks like.
+        """
+        raw = " ".join(subject.split())
+        if raw != subject.strip() or " " in raw:
+            return "", f"{subject!r} has spaces in it, so it is not a path"
+        if raw.startswith("/") or ".." in Path(raw).parts:
+            return "", f"{subject!r} is not a path inside the repo"
+        target = Path(self._config.repo_root) / raw
+        if target.exists() or target.parent.is_dir():
+            return raw, ""
+        return "", (f"{subject!r} does not exist, and neither does the folder it would sit in "
+                    f"({str(Path(raw).parent)!r}) -- name a real file or a new one in a real package")
 
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -1789,8 +1825,13 @@ class StartTaskTool:
         payload = {"kind": kind, "description": goal, "origin": "human" if authorised else "assistant",
                    "mode": "execute", "max_steps": steps}
         subject = str(args.get("subject") or "").strip()
+        dropped = ""
         if subject:
-            payload["subject"] = subject
+            named, why = self._real_subject(subject)
+            if named:
+                payload["subject"] = named
+            else:
+                dropped = why
 
         from simorgh.contracts import topics as _topics
         from simorgh.contracts.envelope import Message as _Message
@@ -1821,7 +1862,8 @@ class StartTaskTool:
             return ToolResult(
                 ok=True,
                 output=(f"queued task {task_id} with {steps} steps: {goal}\n"
-                        f"It is NOT running: {why}. "
+                        + (f"(no subject set: {dropped})\n" if dropped else "")
+                        + f"It is NOT running: {why}. "
                         + ("It starts when the system resumes (`resume`). " if authorised or "paused" in why
                            else "It starts when auto is on (`auto on`, or `auto now` for one round) -- or if the "
                                 "person says to go ahead, start it again with authorised=true. ")
@@ -1831,9 +1873,10 @@ class StartTaskTool:
         return ToolResult(
             ok=True,
             output=(f"started task {task_id} with {steps} steps: {goal}\n"
-                    f"It runs in the background and picks up where it leaves off, so it will not "
-                    f"start over the way a chat reply does. `tasks` shows progress; "
-                    f"`cancel {task_id}` stops it."),
+                    + (f"(no subject set: {dropped})\n" if dropped else "")
+                    + f"It runs in the background and picks up where it leaves off, so it will not "
+                      f"start over the way a chat reply does. `tasks` shows progress; "
+                      f"`cancel {task_id}` stops it."),
             side_effects=(f"task {task_id} created",),
             metadata={"task_id": task_id, "steps": steps, "kind": kind, "authorised": authorised})
 
