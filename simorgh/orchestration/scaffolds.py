@@ -578,10 +578,37 @@ _BY_SCAFFOLD: dict[str, str] = {
 }
 
 
+def when_line(now: float) -> str:
+    """The date and time, for a model that otherwise has to guess it.
+
+    Nothing told Sim what day it was. Asked on 2026-09-17 it answered
+    "Tuesday, September 15, 2026" -- confidently, three times, because
+    the first guess was stored as an episodic memory and every later
+    answer recalled it. A fabrication that fed itself, on the question a
+    household asks most.
+
+    The tools always knew: the same evening `remind` scheduled something
+    for "Thu 17 Sep at 01:18" from the same clock. Only the prose was
+    wrong, because the prose had never been told.
+
+    Local time, because the family lives in one. An absent clock yields
+    "" rather than a wrong date -- saying nothing beats saying Tuesday.
+    """
+    if not now:
+        return ""
+    from datetime import datetime
+
+    try:
+        when = datetime.fromtimestamp(float(now))
+    except (OverflowError, OSError, TypeError, ValueError):   # a clock that makes no sense
+        return ""
+    return f"Right now it is {when:%A %-d %B %Y}, {when:%H:%M}."
+
+
 def render(profile: Profile, *, subject: str | None = None, task: str | None = None,
            unavailable: str = "", channel: str = "", speaker: str = "", speaker_relation: str = "",
            room: str = "", offered: tuple[str, ...] | None = None, speaker_before: str = "",
-           skills: str = "") -> str:
+           skills: str = "", now: float = 0.0) -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -623,6 +650,13 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
             f"The file is `{subject}`. You already have it -- read that file first and "
             f"do not go looking for it.\n\n" + body
         )
+    # Ahead of everything, including the task: what day it is is a fact
+    # about the world, not an instruction, and it lives in `task_rules`
+    # because that block is never compacted -- a date that a long tool
+    # result can push out of the prompt is a date Sim will invent again.
+    stamp = when_line(now)
+    if stamp:
+        body = f"{stamp}\n\n{body}" if body else stamp
     # `offered=()` means none at all (the chat wrap-up); None means "the
     # profile's, plus every skill", which `offered_tools(())` also says.
     offered = offered_tools(profile.tools) if offered is None else tuple(offered)
@@ -655,4 +689,4 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
     return f"{body}\n\n{tools}" if body else tools
 
 
-__all__ = ["render"]
+__all__ = ["render", "when_line"]

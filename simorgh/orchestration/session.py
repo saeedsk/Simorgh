@@ -558,6 +558,27 @@ def unplaced_voice_refusal(session: Session, tool: str) -> str:
             "should ask again starting with \"Sim\".")
 
 
+def _epoch(clock) -> float:
+    """Seconds since the epoch from whatever shape of clock this is.
+
+    Interface passes `ctx.clock.now` -- the bound method -- while other
+    callers pass the clock object itself, and tests pass a plain
+    function. Assuming one shape broke 52 tests with
+    `AttributeError: 'function' object has no attribute 'now'`; a prompt
+    stamp is never worth a raised turn, so anything unreadable is 0.0
+    and the date is simply left out.
+    """
+    if clock is None:
+        return 0.0
+    try:
+        if callable(clock):
+            return float(clock())
+        now = getattr(clock, "now", None)
+        return float(now()) if callable(now) else 0.0
+    except Exception:  # noqa: BLE001 -- a stamp must not cost a turn
+        return 0.0
+
+
 class SessionRunner:
     def __init__(
         self, bus, ledger, *, clock=None, worker_id: str = "w1", is_paused=None, is_cancelled=None,
@@ -1202,6 +1223,7 @@ class SessionRunner:
                     speaker_before=getattr(session, "speaker_before", ""),
                     offered=() if no_tools else offered,
                     skills=catalog,
+                    now=_epoch(self._clock),
                 ) + (f"\n\n{session.extra_rules}" if getattr(session, "extra_rules", "") else ""),
                 # Live-caught: this request never actually asked Cognition
                 # to parse tool calls -- `expected` was never set, so
