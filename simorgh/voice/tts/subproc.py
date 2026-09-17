@@ -145,15 +145,44 @@ class SubprocessSynthesiser:
         self._proc = await asyncio.create_subprocess_exec(
             str(self._python), str(server), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, env=env)
-        try:
-            line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=self.load_timeout_s)
-        except asyncio.TimeoutError:
-            await self._stop()
-            raise RuntimeError(f"{self.name} did not come up within {self.load_timeout_s:.0f}s") from None
-        try:
-            self._ready = json.loads(line.decode("utf-8") or "{}")
-        except ValueError:
-            self._ready = {}
+        # An engine may print before it hands over. MisoTTS says "ckpt
+        # path or config path does not exist! Downloading the model from
+        # the Hugging Face Hub..." on stdout, ahead of its own JSON --
+        # and this used to read exactly ONE line and json.loads it, so
+        # that progress note WAS the handshake, parsed to nothing, and
+        # the engine was declared failed while it was still loading
+        # perfectly well. Anything that is not the handshake is noise to
+        # step over, and kept for the error message if one is needed.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.load_timeout_s
+        noise: list[str] = []
+        self._ready = {}
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                await self._stop()
+                raise RuntimeError(f"{self.name} did not come up within {self.load_timeout_s:.0f}s")
+            try:
+                line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=remaining)
+            except asyncio.TimeoutError:
+                await self._stop()
+                raise RuntimeError(f"{self.name} did not come up within {self.load_timeout_s:.0f}s") from None
+            if not line:
+                break       # the server exited without ever handing over
+            text = line.decode("utf-8", "replace").strip()
+            if not text:
+                continue
+            try:
+                got = json.loads(text)
+            except ValueError:
+                if len(noise) < 20:
+                    noise.append(text[:200])
+                continue
+            if isinstance(got, dict) and "ready" in got:
+                self._ready = got
+                break
+            if len(noise) < 20:
+                noise.append(text[:200])
         if not self._ready.get("ready"):
             # Why it failed, in the message -- not in /dev/null. stderr
             # was discarded unless SIMORGH_TTS_DEBUG was set, so a real
@@ -164,7 +193,7 @@ class SubprocessSynthesiser:
             # thrown away as it was produced.
             detail = str(self._ready.get("error") or "")
             if not detail:
-                detail = line.decode("utf-8", "replace").strip()[:200] or "it printed nothing"
+                detail = ("; ".join(noise[-3:]) if noise else "") or "it printed nothing"
             tail = ""
             if self._proc is not None and self._proc.stderr is not None:
                 try:
