@@ -44,7 +44,9 @@ class WordsAndConfidence(unittest.TestCase):
         # whisper_server reports a flat 1.0 and always has, so a morning of
         # mangled transcripts looked exactly like a clean one (2026-09-17).
         self.assertAlmostEqual(confidence_of([math.log(0.9), math.log(0.7)]), 0.8, places=3)
-        self.assertEqual(confidence_of([]), 1.0, "no probabilities is not low confidence")
+        self.assertEqual(confidence_of([]), 0.0,
+                         "nothing decoded is not certainty: a denoiser that erased a "
+                         "sentence scored 1.000 on the silence it left")
 
 
 class TheEngineIsReachable(unittest.TestCase):

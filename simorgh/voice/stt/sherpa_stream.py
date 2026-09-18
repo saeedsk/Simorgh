@@ -90,7 +90,10 @@ def confidence_of(ys_probs) -> float:
     """
     probs = [math.exp(float(p)) for p in (ys_probs or ())]
     if not probs:
-        return 1.0
+        # Nothing was decoded. Reporting 1.0 made silence look like perfect
+        # certainty -- a denoiser that erased a sentence scored 1.000 on the
+        # empty result it left behind (measured 2026-09-17).
+        return 0.0
     return max(0.0, min(1.0, sum(probs) / len(probs)))
 
 

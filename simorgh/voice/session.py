@@ -617,8 +617,14 @@ class VoiceSession:
                     if event.words and event.audio:
                         self._timed[turn_id] = (event.audio, event.words)
                     self.partial = ""
-                    if self._config.keep_audio:
-                        pass  # the streaming path keeps no raw audio: see the privacy note in the README
+                    if self._config.keep_audio and event.audio:
+                        # The streaming path kept none, so `keep_audio` was a
+                        # switch that did nothing here -- and the audio a
+                        # recogniser actually receives is the only honest
+                        # input for calibrating its confidence or judging a
+                        # noise filter. Off by default; the folder it writes
+                        # to is gitignored. Beside each file, what was heard.
+                        self._keep_turn(turn_id, event)
                 before = self.turns.state
                 for action in self.turns.handle_transcript(event):
                     await self._dispatch(action, frame_time=self._now())
@@ -691,6 +697,36 @@ class VoiceSession:
         if len(self._scored) > 64:      # turns that never reach a spoken reply
             for stale in sorted(self._scored)[:-32]:
                 self._scored.pop(stale, None)
+
+    def _keep_turn(self, turn_id: int, event) -> None:
+        """File a turn's audio and what was made of it, for calibration.
+
+        `min_confidence` was written against an engine that reported a flat
+        1.0, so the gate had never once run; the streaming engine reports a
+        real number and tripped it on correct transcripts (2026-09-17).
+        Choosing a threshold, or judging whether a denoiser helps, needs
+        the audio the recogniser actually heard -- not a synthesised
+        approximation, which scored 0.745 where a real voice scores 0.46.
+        """
+        import json as _json
+        import time as _time
+        from pathlib import Path
+
+        try:
+            from .api import Audio
+            from .audio import write_wav
+
+            folder = Path(self._config.audio_dir)
+            stamp = f"{int(_time.time() * 1000)}-{turn_id}"
+            write_wav(folder / f"{stamp}.wav", Audio(bytes(event.audio)))
+            (folder / f"{stamp}.json").write_text(_json.dumps({
+                "at": _time.time(), "turn": turn_id, "text": event.text,
+                "confidence": round(float(event.confidence), 4), "engine": event.engine,
+                "seconds": round(float(event.audio_seconds), 3),
+                **{k: v for k, v in (self._scored.get(turn_id) or {}).items()},
+            }, indent=1), encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            self._log("warning", "voice.turn_not_kept", error=repr(exc))
 
     async def _attribute(self, turn_id: int, identification) -> list:
         """Who said which words of the turn (voice/diarize.py), when it
