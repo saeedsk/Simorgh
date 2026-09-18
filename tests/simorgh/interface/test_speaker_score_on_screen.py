@@ -23,7 +23,10 @@ def _service(config: Config) -> Service:
     service._color = False
     service._input_pending = False
     service._last_time_marker = 1e18          # no time marker in the way
-    service._live = types.SimpleNamespace(clear=lambda: None, restore=lambda: None)
+    service._live = types.SimpleNamespace(clear=lambda: None, restore=lambda: None,
+                                          render=lambda text: None, enabled=False)
+    service._partial_at = 0.0
+    service._partial_turn = None
     return service
 
 

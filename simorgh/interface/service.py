@@ -1025,22 +1025,40 @@ class Service:
         p = message.payload
         text = str(p.get("text") or "").strip()
         if p.get("partial"):
-            # What is being heard so far, provisional: dim, and never
-            # mistakable for a turn (the creator's screen, 2026-09-11,
-            # showed three "you:" lines for one sentence). And not every
-            # partial: a long turn produced thirty near-identical lines
-            # (2026-09-13), so one every few seconds, or when the turn
-            # changes.
+            # The sentence assembles in place, on one line that is
+            # rewritten as the recogniser revises itself -- the creator,
+            # 2026-09-17, after watching it done elsewhere: "I'd like sim
+            # behaves like gemini that they are modifying, updating the
+            # sentence inplace as the user speaks".
+            #
+            # The footer is the right home for it: `live_status.py` owns
+            # redraw-in-place, and `_out` already clears the footer before
+            # every scrolling line and restores it after, so the draft can
+            # never interleave with a backchannel or a task line. It also
+            # retires the old throttle -- one line every few seconds
+            # existed because thirty near-identical *scrolling* lines were
+            # unreadable (2026-09-13); thirty in-place revisions are the
+            # point.
+            if not text:
+                return
+            self._partial_turn = p.get("turn")
+            if getattr(self._live, "enabled", False):
+                self._live.render(render_mod.style(f"  🎤 {text}", "dim", enabled=self._color))
+                return
+            # No footer to draw on (piped, headless, a test): the old
+            # throttled scrolling line, so those runs still show progress.
             import time as _time
 
             now = _time.monotonic()
-            turn = p.get("turn")
-            due = (turn != self._partial_turn or now - self._partial_at >= _PARTIAL_EVERY_S)
-            if text and due:
-                self._partial_turn, self._partial_at = turn, now
+            if now - self._partial_at >= _PARTIAL_EVERY_S or self._partial_turn != p.get("turn"):
+                self._partial_at = now
                 self._out(render_mod.style(f"  🎤 hearing: {text[:80]}{'…' if len(text) > 80 else ''} …",
                                            "dim", enabled=self._color))
             return
+        # The turn is settled: drop the draft, or `_out`'s restore puts it
+        # back underneath the real line (`clear()` erases the screen but
+        # keeps the text; only `render("")` forgets it).
+        self._live.render("")
         if not text:
             self._out(render_mod.style("  🎤 (heard nothing)", "dim", enabled=self._color))
             return
