@@ -54,11 +54,11 @@ class _Replies:
         return self.reply
 
 
-def _session(config, script, replies, embedder, book):
+def _session(config, script, replies, embedder, book, ledger=None):
     bus = _Bus()
     mic = FakeMicrophone(silence(0.03), frame_delay=0.0005)
     speaker, stt, tts = FakeSpeaker(), FakeRecogniser("what time is it", 0.95), FakeSynthesiser()
-    pipeline = Pipeline(bus=bus, clock=None, logger=None, ledger=None, config=config, microphone=mic, speaker=speaker,
+    pipeline = Pipeline(bus=bus, clock=None, logger=None, ledger=ledger, config=config, microphone=mic, speaker=speaker,
                         recogniser=stt, synthesiser=tts, detector_factory=lambda: script)
     pipeline.ask = replies.ask  # type: ignore[method-assign]
     session = VoiceSession(pipeline=pipeline, config=config, microphone=mic, speaker=speaker, recogniser=stt,
@@ -423,3 +423,60 @@ class WhoSaidTestCase(unittest.TestCase):
         self.assertIn("couldn't place the voice", fake._who_said("the pool is cold"))  # noqa: SLF001
         fake._room.append(("Sim", "I don't care for that either", 999.0, "reply"))  # noqa: SLF001
         self.assertEqual(fake._who_said("I don't care"), "That was Ira.", "Sim's own words are not the answer")  # noqa: SLF001
+
+
+class _Ledger:
+    """Captures what was written to `voice:turns`; the fakes pass None."""
+
+    def __init__(self) -> None:
+        self.events: list = []
+
+    async def append(self, stream, event, *, expected_seq=None):
+        self.events.append(event)
+        return len(self.events)
+
+
+class TheRecordKeepsItsOwnTurnsSpeaker(unittest.IsolatedAsyncioTestCase):
+    """A turn's record is written from another method, after the model and
+    the whole spoken reply. Reading `last_speaker` there asked a
+    session-level singleton a per-turn question, and whatever turn began
+    meanwhile answered it instead: 23 of 122 named turns reached
+    `voice:turns` with speaker="" although the book had named them
+    (measured 2026-09-18). Turn 468 wrote "" into the record and "Soodeh"
+    into the episodic line four lines later, across one await.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.5, margin=0.06)
+        self.embedder = _Embedder()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    async def test_a_turn_beginning_meanwhile_does_not_erase_the_name(self) -> None:
+        self.book.enroll("Ira", _vec(0.0)); self.book.enroll("Saeed", _vec(2.0))
+        self.embedder.vector = _vec(0.05)
+        script = _Script((True, 60), (False, 110), (False, 10_000))
+        replies, ledger = _Replies(), _Ledger()
+        # `_config` keeps transcripts off; this test is about what the record says.
+        session, _bus, _tts = _session(_config(keep_transcripts=True), script, replies,
+                                       self.embedder, self.book, ledger=ledger)
+
+        asked = replies.ask
+
+        async def _ask_then_move_on(text, **kw):
+            # Exactly what a turn starting mid-reply does to the singleton.
+            session.last_identification = None
+            session.last_speaker = ""
+            return await asked(text, **kw)
+
+        session._pipeline.ask = _ask_then_move_on  # noqa: SLF001
+
+        # `stats.turns` rises before the record is written, so waiting on it
+        # can stop the session in the gap between the two.
+        await _run_until(session, lambda: any(e.type == "turn" for e in ledger.events), timeout=6.0)
+        turns = [e for e in ledger.events if e.type == "turn"]
+        self.assertTrue(turns, "the turn reached the ledger")
+        self.assertEqual(turns[0].payload["speaker"], "Ira",
+                         "the record must carry the speaker of ITS turn, not the session's latest")

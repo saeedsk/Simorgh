@@ -207,6 +207,7 @@ class VoiceSession:
         self._last_skip = ""              # why the last turn was never compared
         self._last_pcm = b""              # the turn's own audio, for an enrolment take
         self._scored: dict[int, dict] = {}   # turn_id -> what the book concluded
+        self._named: dict[int, str] = {}     # turn_id -> who the book said it was
         self._mic = microphone
         self._detector_factory = detector_factory
         self._clock = clock
@@ -942,6 +943,18 @@ class VoiceSession:
                 # this happen (2026-09-15). The screen says it now.
                 person = self._speakers.get(speaker)
                 self._learnt_note = f"learnt your voice: {speaker} now has {len(person.embeddings)} takes" if person else ""
+        # This turn's answer, kept for this turn. The record is written from
+        # another method, after the model and the whole spoken reply -- so
+        # reading `last_speaker` there asks a session-level singleton a
+        # per-turn question, and whatever turn begins meanwhile answers it.
+        # 23 of 122 named turns reached `voice:turns` with speaker="" though
+        # the book had named them (measured 2026-09-18); turn 468 wrote ""
+        # into the record and "Soodeh" into the episodic line four lines
+        # later, across one await, for the same turn.
+        self._named[turn_id] = speaker
+        if len(self._named) > 64:
+            for stale in sorted(self._named)[:-32]:
+                self._named.pop(stale, None)
         who = {"speaker": speaker}
         learnt, self._learnt_note = getattr(self, "_learnt_note", ""), ""
         if learnt:
@@ -1828,6 +1841,10 @@ class VoiceSession:
         metrics["held"] = round(float(getattr(self._tts, "last_hold_s", 0.0)), 2)
         metrics["omitted"] = list(plan.omitted)
         metrics.update(self._scored.pop(turn_id, {}))
+        named = self._named.pop(turn_id, None)
+        if named is None:      # a turn that never went through _ask_and_speak
+            named = (self.last_speaker if self.last_identification is not None
+                     and self.last_identification.name else "")
         self.stats.last_metrics = metrics
         engine = getattr(self._tts, "last_engine", "") or self._tts.name
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
@@ -1836,7 +1853,7 @@ class VoiceSession:
             **({"metrics": metrics} if self._config.diagnostics else {}),
         })
         await self._pipeline._record(VoiceTurn(  # noqa: SLF001
-            session_id=f"turn-{turn_id}", device=self._config.device, speaker=self.last_speaker if self.last_identification is not None and self.last_identification.name else "", heard=clock.text,
+            session_id=f"turn-{turn_id}", device=self._config.device, speaker=named, heard=clock.text,
             confidence=clock.confidence, said=said,
             heard_at=(self._clock.now() if self._clock is not None else time.time()) - max(0.0, self._now() - clock.speech_end) if clock.speech_end else 0.0,
             answered_at=self._clock.now() if self._clock is not None else time.time(),
@@ -1851,10 +1868,7 @@ class VoiceSession:
         # words only: Sim's own replies are recoverable elsewhere and would
         # double a store that keeps a family's conversation.
         if clock.text:
-            self._log_overheard(
-                self.last_speaker if self.last_identification is not None
-                and self.last_identification.name else "someone",
-                clock.text, kind="said")
+            self._log_overheard(named or "someone", clock.text, kind="said")
         self._last_segments = []
         self._clocks.pop(turn_id, None)
 

@@ -155,3 +155,36 @@ line onto near-silence (the audio is the loudest of its neighbours). And
 one reversal in the other direction: the timing looked like it *exonerated*
 the echo theory until the arithmetic was redone with the recorded
 `response` metric instead of `answered_at - spoken_seconds`.
+
+## The record asked for the speaker in the wrong place (2026-09-18)
+
+23 of 122 named turns reached `voice:turns` with `speaker: ""` while
+their own metrics carried the name the book had given them -- turn 70 at
+0.787, turn 95 at 0.65, both well clear of the 0.50 threshold. Nothing
+was wrong with the identification. The record asked the wrong object.
+
+A turn's speaker is settled in `_ask_and_speak`. The record is written
+from another method, after the model and after the whole reply has been
+spoken -- seconds later -- and it re-read `last_speaker` and
+`last_identification` there: session-level singletons being asked a
+per-turn question. Whatever turn began in the meantime answered it.
+
+Turn 468 shows it inside one function: `""` into the ledger record, and
+`"Soodeh"` into the episodic line four lines further down, across a
+single `await`, for the same turn. Both reads were the same expression.
+
+The name is now kept per turn beside `_scored`, and the record and the
+episodic line both read that. The singletons remain for the places that
+legitimately mean "whoever Sim is talking to now".
+
+**The first theory was wrong, and measuring killed it.** The obvious
+explanation was an overlapping turn -- but 0 of the 23 were overlapped by
+another *recorded* turn. The turn that overwrites the singleton is one
+that never produces a record of its own, which is exactly why the
+overlap test came back empty and why the singleton is the wrong place to
+keep this.
+
+This is the same fault as the echo above, in the other direction: there a
+stale name was applied to audio nobody spoke; here a real name was
+erased. One cause -- per-turn facts kept in session-level state -- two
+opposite symptoms.
