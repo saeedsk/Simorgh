@@ -78,7 +78,7 @@ def describe() -> list[tuple[str, str, str]]:
 #: that hides a setting is worse than an ugly one that shows it.
 GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Listening", ("enabled", "auto_listen", "barge_in", "endpoint_silence_ms",
-                   "min_speech_ms", "vad_sensitivity", "stt_partials")),
+                   "min_speech_ms", "vad_sensitivity", "stt_partials", "barge_in_ratio")),
     ("Hearing the words", ("stt", "stt_stream_model", "stt_language", "stt_languages", "min_confidence")),
     ("Knowing who is talking", ("speaker_id", "speaker_threshold", "speaker_margin",
                                 "speaker_lean", "speaker_refine", "diarize", "diarize_words",

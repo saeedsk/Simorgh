@@ -109,6 +109,10 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                         "when Chatterbox/Miso speaks: auto = typed replies, tests and long answers only (spoken turns stay quick); always; off"),
     "expressive_min_chars": (int, (0, 5000), "0 = never (default); else a spoken reply at least this long goes to the slow engine -- it can hold the floor a minute"),
     "stt_partials": (bool, None, "show what is heard while you are still talking"),
+    "barge_in_ratio": (float, (1.0, 6.0),
+                       "how much louder than Sim's own echo you must be to cut it off. 2.8 needs a "
+                       "raised voice in a quiet room and is unreachable in a car; the words cannot "
+                       "rescue it, because \"stop\" is only heard once this bar is already crossed"),
     "min_confidence": (float, (0.0, 1.0),
                        "below this Sim asks \"did you say ...?\" instead of answering; 0 never asks. "
                        "Engines disagree about what a confidence means -- whisper_server reports a flat "
