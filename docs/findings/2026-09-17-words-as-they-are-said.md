@@ -188,3 +188,47 @@ This is the same fault as the echo above, in the other direction: there a
 stale name was applied to audio nobody spoke; here a real name was
 erased. One cause -- per-turn facts kept in session-level state -- two
 opposite symptoms.
+
+## The queue was self-inflicted, and shedding was never the missing piece (2026-09-18)
+
+I twice named "input-side stale shedding" as the top open item. Reading
+the code killed that: it already exists. At `CAPTURE_START` the session
+does `previous.cancel()` on the in-flight transcription before starting
+the next, so only one STT task lives at a time and no backlog can build
+in the session.
+
+What it does not do is reach the server. The request is
+
+```python
+with urllib.request.urlopen(request, timeout=120) as response:   # in _post
+...
+reply = await asyncio.to_thread(self._post, body, content_type)
+```
+
+and `asyncio.to_thread` is not cancellable. Cancelling abandons the
+*await*; the worker thread keeps the HTTP request open and whisper keeps
+decoding audio nobody will read, for up to 120 s.
+
+The load is worse than one decode per turn. `stt_partials` defaults True
+and nothing in the live config turns it off, so `start_stream` asks for a
+partial every 1.5 s of new audio -- on the whole buffer from the start,
+one in flight at a time. With whisper a partial is a *full* decode: it
+pads every input to a 30 s window, so it costs 2-3.5 s whatever the
+length (measured: decode/audio ratio median 1.65x, max 4.54x). whisper.cpp's
+server exposes no concurrent-request option -- `-t N` parallelises inside
+one computation, nothing spreads requests -- so those partials queue ahead
+of the one decode the answer is waiting on.
+
+Measured on the slow-engine test: **6 decodes without the gate, 2 with
+it**, for one turn.
+
+So partials are now only asked of an engine that can make them faster
+than they are asked for. A decode slower than the cadence sets `outpaced`
+and the turn asks for no more. A streaming engine, where a partial is
+free, is never affected -- which is what `sherpa_stream` was built for,
+and why the language router matters for a Farsi-speaking house.
+
+**Still open, and not addressed here:** a superseded decode continues to
+occupy the server, because the thread cannot be cancelled and the
+connection is not closed. Cutting the count from 6 to 2 reduces the
+pressure; it does not make cancellation mean anything.

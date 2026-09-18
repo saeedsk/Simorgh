@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 
 from ..api import SAMPLE_RATE, SAMPLE_WIDTH, Audio, TranscriptEvent, Utterance
 
@@ -32,6 +33,9 @@ class IncrementalRecogniser:
         self._min = max(100, min_partial_ms) * _BYTES_PER_MS
         self._inflight: asyncio.Task | None = None
         self.partials_made = 0
+        #: partials stop when the engine cannot make them faster than they
+        #: are asked for -- see `start_stream`.
+        self.partials_outpaced = 0
 
     async def warmup(self) -> float:
         """Start an engine that runs a server (whisper-server) now."""
@@ -60,11 +64,30 @@ class IncrementalRecogniser:
         buffer = bytearray()
         decoded_upto = 0
         last_text = ""
+        outpaced = False
+        started_at: float | None = None
+        every_s = self._every / (_BYTES_PER_MS * 1000.0)
         engine = getattr(self._inner, "name", "")
         async for frame in frames:
             buffer += frame
             if self._inflight is not None and self._inflight.done():
                 task, self._inflight = self._inflight, None
+                # A partial is only worth having if the engine can produce it
+                # faster than the cadence asks for one. For a streaming
+                # engine that is free; for whisper a "partial" is a FULL
+                # decode -- it pads every input to a 30 s window, so it costs
+                # 2-3.5 s whatever the length -- and whisper-server decodes
+                # serially. Several of those per turn queue ahead of the
+                # final decode on the one thing the answer is waiting for,
+                # and a superseded one still runs because `asyncio.to_thread`
+                # cannot be cancelled. Live 2026-09-17: stt held 1.8-3.7 s
+                # for twenty minutes, then 46 s, then 174 s for one word.
+                # So: when a partial takes longer than the cadence, this turn
+                # asks for no more of them.
+                if started_at is not None and (time.monotonic() - started_at) > every_s:
+                    outpaced = True
+                    self.partials_outpaced += 1
+                started_at = None
                 try:
                     utterance = task.result()
                 except Exception:  # noqa: BLE001 -- a failed partial is no partial
@@ -75,10 +98,11 @@ class IncrementalRecogniser:
                     yield TranscriptEvent("partial", utterance.text, turn_id, confidence=utterance.confidence,
                                           language=utterance.language, audio_seconds=utterance.seconds,
                                           engine=utterance.engine or engine)
-            if (self._partials and self._inflight is None and len(buffer) >= self._min
+            if (self._partials and not outpaced and self._inflight is None and len(buffer) >= self._min
                     and len(buffer) - decoded_upto >= self._every):
                 decoded_upto = len(buffer)
                 snapshot = Audio(bytes(buffer))
+                started_at = time.monotonic()
                 self._inflight = asyncio.create_task(self._inner.transcribe(snapshot, language=language))
         await self.stop()
         if not buffer:

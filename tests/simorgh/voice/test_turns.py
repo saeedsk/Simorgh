@@ -274,6 +274,46 @@ async def _frames(seconds: float, frame_ms: int = 30):
         yield frame
 
 
+class _SlowRecogniser(FakeRecogniser):
+    """An engine whose decode costs more than the partial cadence -- what
+    whisper is, since it pads every input to a 30 s window."""
+
+    def __init__(self, cost: float = 0.3) -> None:
+        super().__init__()
+        self.calls = 0
+        self._cost = cost
+
+    async def transcribe(self, audio: Audio, *, language: str = "") -> Utterance:
+        self.calls += 1
+        await asyncio.sleep(self._cost)
+        return Utterance(text="word", confidence=0.9, seconds=audio.seconds, engine="slow", language="en")
+
+
+class TestPartialsCostWhatTheEngineCharges(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-17: stt held 1.8-3.7 s for twenty minutes, then 46 s,
+    then 174 s for the single word "Finally.". whisper-server decodes
+    serially and a partial is a full decode, so asking for one every 1.5 s
+    puts several of them in front of the final decode the answer is waiting
+    on -- and a superseded one still runs, because `asyncio.to_thread`
+    cannot be cancelled. An engine that cannot keep up is not asked again.
+    """
+
+    async def test_an_engine_slower_than_the_cadence_is_not_asked_again(self) -> None:
+        inner = _SlowRecogniser(cost=0.3)          # 0.3 s per decode
+        stt = IncrementalRecogniser(inner, partial_every_ms=200, min_partial_ms=200)
+        events = [e async for e in stt.start_stream(_frames(15.0), turn_id=3)]
+        self.assertEqual(stt.partials_outpaced, 1, "the engine was measured and found too slow")
+        self.assertEqual(inner.calls, 2, "one partial tried, then only the final -- not one per cadence")
+        self.assertEqual([e.kind for e in events][-1], "final")
+
+    async def test_an_engine_that_keeps_up_still_gives_partials(self) -> None:
+        inner = _GrowingRecogniser()               # 0.01 s per decode
+        stt = IncrementalRecogniser(inner, partial_every_ms=500, min_partial_ms=500)
+        events = [e async for e in stt.start_stream(_frames(3.0), turn_id=4)]
+        self.assertEqual(stt.partials_outpaced, 0, "a fast engine is never shut off")
+        self.assertGreaterEqual([e.kind for e in events].count("partial"), 1)
+
+
 class TestIncrementalRecogniser(unittest.IsolatedAsyncioTestCase):
     async def test_partials_then_one_final_that_replaces_them(self) -> None:
         inner = _GrowingRecogniser()
