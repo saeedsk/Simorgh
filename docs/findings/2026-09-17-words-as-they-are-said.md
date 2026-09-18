@@ -81,3 +81,77 @@ autostart cause, the gated tokenizer, the flaky test, the margin hole in
 `identify`, the "loader always takes the latest tag", and the partial
 policy above. Each took one command to settle. The habit that works is to
 run the thing, not to reason about it.
+
+## Sim answered its own voice, and put a child's name on it
+
+Turn 82, live, 21:08. Iris counted her spelling score; Sim replied "Nice
+counting, Iris -- eight right out of fifteen...". The next turn in the
+record is `heard: "Nice counting, Iris"`, `speaker: Iris`, answered with
+"Hey, that's my line!".
+
+Nobody said it. The 2.10 s of audio kept for that turn embeds to **-0.114
+against Iris** and matches nobody in the book (best 0.135, Soodeh, against
+a threshold of 0.50), while carrying the highest energy of any turn nearby
+(rms 0.0147, 39% of its 20 ms frames above the speech floor, against 0.0032
+and 1% for Iris's real 13 s turn beside it). Loud, dense, continuous, and
+like no human in the house: a speaker playing into a microphone.
+
+The timeline, from `voice:turns`:
+
+```
+turn-80 speech_end       ...886.78
+turn-80 Sim audio START  ...895.59   (speech_end + response 8.814)
+turn-82 wav window       ...894.94 -> ...897.04   -- overlaps Sim by 1.45 s
+turn-82 STT finished     ...903.83   (speech_end + stt 6.785)  <- echo guard
+turn-80 playback END     ...904.10   <- `recent_said.append` used to be here
+```
+
+**The guard ran 0.27 s before the reply it needed was recorded.** The
+matcher was never at fault: `echoes_recent("Nice counting, Iris", [that
+reply])` returns True, tested against the real strings. It was asked the
+question too early. Any echo whose transcription finishes before Sim stops
+talking escaped -- which, with whisper at 6.8 s and replies at 8.5 s, is
+the common case, not the rare one.
+
+The fix is the lesson the aside path had already written down for itself:
+Sim remembers saying something when it commits to saying it. All three
+speak paths now append to `recent_said` before `_play`, not after;
+`last_said` still moves only when the reply is really finished, because
+`repeat` means the reply.
+
+## The words and the name come from different audio
+
+Same turn, and the more interesting fault. `_identify` scored **0.513 for
+Iris on 0.87 s**, while the recogniser transcribed **2.10 s**. Two buffers,
+one turn (session.py:393-401):
+
+```python
+self._frames.put_nowait(frame)                    # recogniser: EVERY frame
+keep = self._audio.get(self._capturing)
+if keep is not None and event.kind in ("speech_start", "speech") \
+        and not self._echo.active(now):           # speaker book: clean speech only
+    keep += frame
+```
+
+The echo gate on the speaker buffer is deliberate and correct -- a child's
+take captured over Sim's own prompt once scored 0.68 against her father.
+The consequence is not: when the two buffers diverge, the transcript can be
+Sim's echo while the name is measured from whatever clean frames sat beside
+it. Iris was standing there, so Iris got the name, at 0.513 -- thirteen
+thousandths over the line.
+
+Nothing yet notices the divergence. `speech_s` (the identified audio) and
+the kept wav's length are both recorded per turn; a turn whose two numbers
+disagree by more than about a second is a turn whose name should not be
+trusted. Not fixed here.
+
+## Three wrong causes, again
+
+Named and killed in one evening, each by one command: that the matcher's
+`min_words = 4` floor let a three-word echo through (it does, but
+`echoes_recent` catches it anyway -- ran it); that the exchange window had
+closed (it is 20 s and the gap was 8 s); that whisper had hallucinated a
+line onto near-silence (the audio is the loudest of its neighbours). And
+one reversal in the other direction: the timing looked like it *exonerated*
+the echo theory until the arithmetic was redone with the recorded
+`response` metric instead of `answered_at - spoken_seconds`.

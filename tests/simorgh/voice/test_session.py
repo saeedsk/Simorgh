@@ -320,6 +320,42 @@ class SimsOwnAsideTestCase(unittest.IsolatedAsyncioTestCase):
                          "but the last real reply is untouched: `repeat` still means the reply")
 
 
+class SimRemembersBeforeItSpeaks(unittest.IsolatedAsyncioTestCase):
+    """The echo guard runs on whatever `recent_said` holds at that moment,
+    and the microphone hears Sim's opening words while playback is still
+    running -- so recording the utterance after playback finishes is too
+    late by exactly the length of the reply.
+
+    Live turn 82, 2026-09-17: "Nice counting, Iris" was transcribed from
+    2.10 s of audio that overlapped Sim's own reply by 1.45 s. Its guard
+    ran at speech_end + stt = 0.27 s BEFORE playback ended, so the ring
+    was asked about a reply it had not yet been told about. Sim answered
+    its own voice -- "Hey, that's my line!" -- and the speaker book put
+    Iris's name on it from the 0.87 s of clean frames beside the echo.
+    """
+
+    async def test_an_aside_is_in_the_ring_while_it_is_still_being_played(self) -> None:
+        from simorgh.voice.fakes import FakeSpeaker
+        from simorgh.voice.pipeline import echoes_recent
+
+        during: list[list[str]] = []
+
+        class _WatchingSpeaker(FakeSpeaker):
+            async def play(self, audio):
+                during.append(list(session._pipeline.recent_said))  # noqa: SLF001
+                await super().play(audio)
+
+        script = _Script((False, 10_000))
+        session, _bus, _speaker, _tts = _session(_config(), script, _Replies(["anything"]),
+                                                 speaker=_WatchingSpeaker())
+        self.assertTrue(await session._say_aside("aside-1", "One more second."))  # noqa: SLF001
+        self.assertTrue(during, "the speaker was asked to play something")
+        self.assertIn("One more second.", during[0],
+                      "Sim must remember an aside while it is still saying it, not after")
+        self.assertTrue(echoes_recent("One more second.", during[0]),
+                        "and the guard, asked mid-playback, must call it an echo")
+
+
 def _in_conversation(built):
     """As if Sim had just spoken: the next words are presumably for it."""
     session = built[0]

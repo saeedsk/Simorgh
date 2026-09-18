@@ -1696,6 +1696,10 @@ class VoiceSession:
             return False
         try:
             async with lock:
+                # Before playing, for the same reason as a reply: an aside
+                # is short, and its echo can be transcribed and judged
+                # while the speaker is still saying it.
+                self._pipeline.recent_said.append(text)
                 await self._play(self._tts.synthesise_stream(request), request_id=request.request_id,
                                  chunk_timeout=self._tts.chunk_timeout(request))
         except asyncio.CancelledError:
@@ -1710,7 +1714,6 @@ class VoiceSession:
         # creator: "sim skipped audio response"). `last_said` is left
         # alone: that is the last real reply, which `repeat` and the
         # model's context both read.
-        self._pipeline.recent_said.append(text)
         self._sim_spoke_at = self._now()
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": text, "seconds": 0.0, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
@@ -1778,6 +1781,19 @@ class VoiceSession:
                              voice=self._config.tts_voice, speed=delivery.speed, gain=delivery.gain,
                              tone=tone or (delivery.register if delivery.register in ("warm", "bright") else ""),
                              lane=lane)
+        from .pronounce import strip_marks
+
+        said = strip_marks(plan.text, for_voice=False)
+        # Remembered BEFORE the audio goes out, not after. The microphone
+        # hears the opening words while playback is still running, and the
+        # echo guard runs on whatever `recent_said` holds at that moment.
+        # Live turn 82, 2026-09-17: 2.10 s transcribed, 1.45 s of it Sim's
+        # own reply, and its guard ran 0.27 s before this append used to be
+        # reached -- so the ring was asked about a reply it had not yet
+        # been told about. "Nice counting, Iris" came back as Iris's turn,
+        # was answered ("Hey, that's my line!"), and the speaker book
+        # named her from the 0.87 s of clean frames beside the echo.
+        self._pipeline.recent_said.append(said)
         self._pipeline.speaking = True
 
         def _first_audio(seconds: float) -> None:
@@ -1800,11 +1816,7 @@ class VoiceSession:
         self._pipeline.speaking = False
         self._sim_spoke_at = self._now()
         await self._report_synthesis(report)
-        from .pronounce import strip_marks
-
-        said = strip_marks(plan.text, for_voice=False)
         self._pipeline.last_said = said
-        self._pipeline.recent_said.append(said)
         self.stats.turns += 1
         metrics = clock.metrics(report)
         if clock.interrupted_at and clock.stopped_at:
@@ -1861,6 +1873,10 @@ class VoiceSession:
             self.turns.state = AGENT_SPEAKING
             self.turns.speaking_response = 0
             await self._announce(self.turns.state)
+        from .pronounce import strip_marks
+
+        shown = strip_marks(plan.text, for_voice=False)
+        self._pipeline.recent_said.append(shown)   # before playing; see the reply path
         self._pipeline.speaking = True
         try:
             async with self._pipeline.speech_lock:
@@ -1872,11 +1888,7 @@ class VoiceSession:
             if self.turns.state == AGENT_SPEAKING and entered_from == LISTENING:
                 self.turns.state = LISTENING
                 await self._announce(self.turns.state)
-        from .pronounce import strip_marks
-
-        shown = strip_marks(plan.text, for_voice=False)
         self._pipeline.last_said = shown
-        self._pipeline.recent_said.append(shown)
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": shown, "seconds": report.seconds, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
             "device": self._config.device, "interrupted": report.interrupted})
