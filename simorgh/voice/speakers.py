@@ -395,6 +395,47 @@ class SpeakerBook:
                 return member.name
         return name
 
+    def keep_take(self, name: str, pcm: bytes, *, sample_rate: int = 16000, text: str = "",
+                  seconds: float = 0.0, source: str = "enroll", accepted: bool = True) -> str:
+        """Keep the audio a take was made from, beside the person's book.
+
+        The creator, 2026-09-17: "my family memebers are tired of enrolling
+        their voice to sim multiple time". An embedding is welded to the
+        model that made it -- "takes made with another model do not
+        compare" -- so replacing the embedder has meant asking five people
+        to say sentences into a laptop again. The audio does not expire
+        that way: a new model re-embeds these offline, and nobody is asked
+        twice. It is also the only record of how a voice sounds in a
+        kitchen versus a car, which is what one-condition enrolments miss.
+
+        Kept whatever `keep_audio` says: that flag is for debugging
+        ordinary talk, and a sentence somebody deliberately recorded to
+        teach Sim their voice is not that. Returns the file written, or ""
+        -- a take that cannot be filed is never a failed enrolment.
+        """
+        import json as _json
+        import time as _time
+
+        person = self._household_spelling((name or "").strip())
+        if not person or not pcm:
+            return ""
+        try:
+            from .api import Audio
+            from .audio import write_wav
+
+            folder = self._folder / person
+            stamp = f"{int(_time.time() * 1000)}"
+            path = folder / f"{stamp}.wav"
+            write_wav(path, Audio(bytes(pcm), sample_rate))
+            (folder / f"{stamp}.json").write_text(_json.dumps({
+                "name": person, "at": _time.time(), "text": text, "seconds": round(float(seconds), 3),
+                "source": source, "accepted": bool(accepted), "model": SPEAKER_MODEL,
+                "sample_rate": int(sample_rate),
+            }, indent=1), encoding="utf-8")
+            return str(path)
+        except (OSError, ValueError):
+            return ""
+
     def refine(self, name: str, embedding: Sequence[float]) -> bool:
         """A confident turn becomes a take, quietly: the room, the mood,
         the distance that this take covers and the enrolment did not.

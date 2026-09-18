@@ -201,6 +201,7 @@ class VoiceSession:
         self.last_speaker = ""
         self.last_identification = None
         self._last_skip = ""              # why the last turn was never compared
+        self._last_pcm = b""              # the turn's own audio, for an enrolment take
         self._scored: dict[int, dict] = {}   # turn_id -> what the book concluded
         self._mic = microphone
         self._detector_factory = detector_factory
@@ -643,6 +644,9 @@ class VoiceSession:
         pcm = self._audio.pop(turn_id, None)
         self._last_speech_s = 0.0
         self._last_skip = ""
+        # Kept for the enrolment paths: they run after this and are handed
+        # only the embedding, and the frames are dropped here.
+        self._last_pcm = bytes(pcm) if pcm else b""
         if pcm is None or self._embedder is None or self._speakers is None:
             self._last_skip = "no_audio" if pcm is None else "no_model"
             return None, None
@@ -737,6 +741,8 @@ class VoiceSession:
             who = note.split("sounds like ", 1)[1].split(" (")[0] if "sounds like " in note else "someone else"
             await self._say_aside(f"say-{turn_id}", f"That sounded like {who}. Once more, {job['name']}?")
             return
+        self._speakers.keep_take(job["name"], self._last_pcm, text=text,
+                                 seconds=getattr(self, "_last_speech_s", 0.0), source="enroll")
         job["done"] += 1
         if job["done"] >= job["takes"]:
             self._enrolling = None
@@ -1293,6 +1299,11 @@ class VoiceSession:
     async def _introduce_step(self, turn_id: int, text: str, vector) -> None:
         intro = self._intro
         step = intro.feed(text, vector, self._speakers)
+        # Takes gathered by meeting someone are takes all the same; filing
+        # only `voice enroll` would lose every one of these.
+        if vector is not None and intro.name:
+            self._speakers.keep_take(intro.name, self._last_pcm, text=text,
+                                     seconds=getattr(self, "_last_speech_s", 0.0), source="introduce")
         await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
             "text": text, "confidence": 1.0, "seconds": 0.0, "engine": "", "device": self._config.device,
             "turn": turn_id, "enrolling": intro.name or "?", "speaker_note": step.say})
