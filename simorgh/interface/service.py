@@ -1048,16 +1048,16 @@ class Service:
                 # styled line cut to width loses its trailing reset and
                 # leaves fragments on screen -- live-caught (the creator,
                 # 2026-09-17: "I can see the formatting characters").
-                # The colour codes cost raw characters that `render()` counts
-                # but the screen does not, so measure them rather than guess
-                # a margin: a first attempt subtracted six and still handed
-                # over 106 characters for a 100-column window.
-                overhead = len(render_mod.style("x", "dim", enabled=self._color)) - 1
-                room = max(8, render_mod.terminal_width() - 2 - overhead)
+                # Plain text, like every other `render()` caller: the footer
+                # colours itself (`class:sim.footer`), and when the prompt
+                # owns the line the text reaches prompt_toolkit as a style
+                # tuple, which prints escape codes literally -- the creator
+                # saw "^[[2m  🎤 Okay, I'm telling you a story^[[0m" on his
+                # screen (live, 2026-09-17). Styling it here was the bug;
+                # trimming to width only kept the halves from showing.
+                room = max(8, render_mod.terminal_width() - 2)
                 plain = f"  🎤 {text}"
-                if len(plain) > room:
-                    plain = plain[: room - 1] + "…"
-                self._live.render(render_mod.style(plain, "dim", enabled=self._color))
+                self._live.render(plain if len(plain) <= room else plain[: room - 1] + "…")
                 return
             # No footer to draw on (piped, headless, a test): the old
             # throttled scrolling line, so those runs still show progress.
