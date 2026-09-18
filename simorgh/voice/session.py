@@ -228,8 +228,12 @@ class VoiceSession:
             from .introduce import UnknownVoices
 
             self._unknown = UnknownVoices(threshold=config.speaker_threshold, clock=lambda: self._now())
-        self._stt = IncrementalRecogniser(recogniser, partials=config.stt_partials,
-                                          partial_every_ms=config.stt_partial_every_ms)
+        # An engine that streams already gives a partial per chunk; wrapping
+        # it would re-decode the whole buffer over and over, which is exactly
+        # the cost it exists to remove.
+        self._stt = (recogniser if getattr(recogniser, "streaming", False)
+                     else IncrementalRecogniser(recogniser, partials=config.stt_partials,
+                                                partial_every_ms=config.stt_partial_every_ms))
         self._tts = synthesiser if isinstance(synthesiser, StreamingSynthesiser) else StreamingSynthesiser(
             synthesiser, lookahead=config.tts_lookahead)
         self._player = StreamingPlayer(speaker, on_state=self._on_playback_state,

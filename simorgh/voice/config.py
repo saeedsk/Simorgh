@@ -23,7 +23,8 @@ class Config:
     enabled: bool | str = "auto"
     # Engines. "auto" = the best one whose package or binary is present;
     # never a cloud engine (section 0: local first for speech).
-    stt: str = "auto"                  # auto | faster_whisper | whisper_server | whisper_cli | fake
+    stt: str = "auto"                  # auto | faster_whisper | whisper_server | whisper_cli | sherpa | fake
+    stt_stream_model: str = ""         # sherpa's model folder under `model_dir`; "" = the one it ships with
     stt_server_port: int = 0           # whisper_server's port; 0 = a free one
     stt_model: str = "large-v3-turbo"  # faster_whisper model name; whisper_cli: a ggml file name or path
     # "" = detect. Pinned to "en" until 2026-09-11, which made Farsi

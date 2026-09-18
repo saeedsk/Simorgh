@@ -10,6 +10,7 @@ def open_recogniser(config: Config, *, repo_root=None) -> tuple[object | None, s
     best one present -- whisper.cpp's server, then faster-whisper, then
     whisper.cpp's CLI. Never a cloud engine (design section 0)."""
     from .faster_whisper import FasterWhisperRecogniser
+    from .sherpa_stream import SherpaStreamRecogniser
     from .whisper_cli import WhisperCliRecogniser
     from .whisper_server import WhisperServerRecogniser
 
@@ -23,12 +24,17 @@ def open_recogniser(config: Config, *, repo_root=None) -> tuple[object | None, s
     # the Metal server and every turn took ~20 s to hear, low enough in
     # confidence that Sim asked "did you say ...?" of plain words
     # (2026-09-14, live).
+    # `sherpa` is not in "auto" on purpose: it streams, but its model is
+    # zh-en and this house speaks en,fa (`stt_languages`). Auto must not
+    # quietly stop understanding Farsi. Choose it with `voice set stt sherpa`.
     order = {"auto": (WhisperServerRecogniser, FasterWhisperRecogniser, WhisperCliRecogniser),
              "faster_whisper": (FasterWhisperRecogniser,),
              "whisper_server": (WhisperServerRecogniser,),
-             "whisper_cli": (WhisperCliRecogniser,)}.get(config.stt)
+             "whisper_cli": (WhisperCliRecogniser,),
+             "sherpa": (SherpaStreamRecogniser,)}.get(config.stt)
     if order is None:
-        return None, f"unknown stt engine {config.stt!r} (auto | faster_whisper | whisper_server | whisper_cli | fake)"
+        return None, (f"unknown stt engine {config.stt!r} "
+                      "(auto | faster_whisper | whisper_server | whisper_cli | sherpa | fake)")
     reasons = []
     for cls in order:
         try:

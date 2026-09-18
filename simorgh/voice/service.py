@@ -95,6 +95,8 @@ def presence_probes() -> list[dict]:
             return False
 
     stt = []
+    if spec("sherpa_onnx"):
+        stt.append("sherpa (streaming)")
     if spec("faster_whisper"):
         stt.append("faster-whisper")
     if shutil.which("whisper-cli") or shutil.which("whisper-cpp"):
