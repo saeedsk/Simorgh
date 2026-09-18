@@ -44,7 +44,11 @@ from .turns import AGENT_SPEAKING, Actions, LISTENING, Policy, THINKING, TurnMan
 from .vad import CompositeDetector, EchoTracker, EnergyDetector, FrameVad, threshold_for
 
 _END = object()
-_PREROLL_FRAMES = 20  # 600 ms of audio kept from before speech was noticed
+# 1200 ms, not 600: what interrupts Sim is judged from this buffer, and
+# speakers.MIN_SECONDS needs 800 ms of it before a voice can be placed at
+# all. At 600 the check could never run (the creator, in a car, 2026-09-17:
+# a crow cut Sim off at the strictest detector setting there is).
+_PREROLL_FRAMES = 40
 
 
 @dataclass
@@ -381,6 +385,8 @@ class VoiceSession:
                 self._detector.clear_echo()
         event = self._vad.process(frame)
         before = self.turns.state
+        if before == AGENT_SPEAKING and event.kind in ("speech_start", "speech"):
+            event = await self._only_a_voice_we_know(event)
         if before == USER_SPEAKING and event.kind == "speech_end":
             self._maybe_hum(event.speech_ms)
         actions = self.turns.handle_vad(event)
@@ -643,6 +649,58 @@ class VoiceSession:
             await self._announce(self.turns.state)
 
     # ------------------------------------------------------------- answering
+    async def _only_a_voice_we_know(self, event):
+        """Let a crow finish Sim's sentence for it, or not.
+
+        The level gate asks how loud a sound is and the detector asks
+        whether it is speech; neither asks *whose*. Beside a playground,
+        with the detector at its strictest setting (0.70) and the loudness
+        bar at 2.8, a passing car and then a crow each cut Sim off mid
+        reply -- the creator, 2026-09-17: "why would the noise ambient
+        noise like stop you? You should only stop ... if you hear a human,
+        like my voice basically, or any family voice".
+
+        The interrupting sound is already in hand: `_preroll` holds the
+        frames from before the turn manager noticed anything. Embed those
+        and ask the book. Only when the answer is a name does the event
+        stay an interruption; otherwise it is downgraded to silence and
+        Sim talks on.
+
+        Fails OPEN, always. No embedder, nobody enrolled, too little
+        audio, a failed embedding: the interruption stands, exactly as it
+        did before this existed. A gate that failed closed would leave Sim
+        impossible to interrupt, which is the worse fault of the two.
+        """
+        if not self._config.barge_in_known_voice:
+            return event
+        if int(getattr(event, "speech_ms", 0)) < int(self._config.barge_in_speech_ms):
+            return event                      # not yet an interruption; nothing to judge
+        if self._embedder is None or self._speakers is None or not self._speakers.has_voices():
+            return event
+        from dataclasses import replace
+
+        from .speakers import MIN_SECONDS, seconds_of
+
+        pcm = b"".join(self._preroll)
+        if len(pcm) % 2:
+            pcm = pcm[:-1]
+        samples = [x / 32768.0 for x in memoryview(pcm).cast("h")]
+        if seconds_of(samples, 16000) < MIN_SECONDS:
+            return event                      # too little to place; let it through
+        try:
+            vector = await asyncio.to_thread(self._embedder.embed, samples, 16000)
+            who = self._speakers.identify(vector)
+        except Exception as exc:  # noqa: BLE001 -- an unjudged sound still interrupts
+            self._log("warning", "voice.barge_in_not_judged", error=repr(exc))
+            return event
+        if who is not None and who.known:
+            self._log("debug", "voice.barge_in_by", who=who.name, score=round(who.score, 3))
+            return event
+        self._log("info", "voice.barge_in_ignored",
+                  score=round(getattr(who, "score", 0.0), 3),
+                  closest=getattr(who, "runner_up", "") or getattr(who, "name", ""))
+        return replace(event, kind="silence")
+
     async def _identify(self, turn_id: int):
         """Who spoke turn `turn_id`, from its audio: an Identification, or
         None when there is nothing to judge with. The audio is dropped

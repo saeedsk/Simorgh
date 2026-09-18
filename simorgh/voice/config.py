@@ -82,6 +82,10 @@ class Config:
     # this many times louder than the loudest echo heard (2.0 = 6 dB).
     barge_in_calibrate_ms: int = 1200
     barge_in_ratio: float = 2.8
+    # Only a voice the house knows may cut Sim off. Off by default: it can
+    # only be as good as the speaker book, and a house whose voices are
+    # thinly enrolled would find Sim could not be interrupted at all.
+    barge_in_known_voice: bool = False
     # Acoustic echo cancellation for barge-in (voice/aec.py). When on,
     # the barge decision is made on the residual after Sim's own voice
     # -- known exactly, it is what we are playing -- is subtracted from
