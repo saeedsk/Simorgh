@@ -109,6 +109,11 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                         "when Chatterbox/Miso speaks: auto = typed replies, tests and long answers only (spoken turns stay quick); always; off"),
     "expressive_min_chars": (int, (0, 5000), "0 = never (default); else a spoken reply at least this long goes to the slow engine -- it can hold the floor a minute"),
     "stt_partials": (bool, None, "show what is heard while you are still talking"),
+    "min_confidence": (float, (0.0, 1.0),
+                       "below this Sim asks \"did you say ...?\" instead of answering; 0 never asks. "
+                       "Engines disagree about what a confidence means -- whisper_server reports a flat "
+                       "1.0 and never trips it, a streaming engine reports a real number and trips it "
+                       "on short turns"),
     "stt_stream_model": (str, None, "the streaming recogniser's model folder under the model directory; "
                                     "\"\" is the one it ships with"),
     "connectors": (bool, None, "the rare Okay / Yeah lead-ins"),
