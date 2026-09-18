@@ -109,6 +109,8 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                         "when Chatterbox/Miso speaks: auto = typed replies, tests and long answers only (spoken turns stay quick); always; off"),
     "expressive_min_chars": (int, (0, 5000), "0 = never (default); else a spoken reply at least this long goes to the slow engine -- it can hold the floor a minute"),
     "stt_partials": (bool, None, "show what is heard while you are still talking"),
+    "stt_stream_model": (str, None, "the streaming recogniser's model folder under the model directory; "
+                                    "\"\" is the one it ships with"),
     "connectors": (bool, None, "the rare Okay / Yeah lead-ins"),
     "backchannel": (bool, None, "say Aha / Let me check the moment your turn ends, before thinking"),
     "max_spoken_sentences": (int, (1, 30), "longer answers are cut and say there is more on screen"),

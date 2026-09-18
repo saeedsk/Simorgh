@@ -10,6 +10,7 @@ each chunk as it lands -- 6.29 s of speech in 0.20 s on the same machine,
 from __future__ import annotations
 
 import math
+import pathlib
 import unittest
 
 from simorgh.voice.config import Config
@@ -84,6 +85,43 @@ class ItStreamsWhenTheModelIsHere(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final.audio, quiet * 6, "the turn's PCM rides on the final")
         self.assertGreater(final.audio_seconds, 1.0)
         self.assertTrue(getattr(engine, "streaming", False))
+
+
+class ThePartialSettingMeansSomething(unittest.IsolatedAsyncioTestCase):
+    """`stt_partials` is offered as "show what is heard while you are still
+    talking". An engine that streamed regardless would make it a lie.
+
+    Checked once against silence, which produced no partials either way and
+    so proved nothing -- the assertion needs real speech behind it.
+    """
+
+    async def _kinds(self, partials: bool) -> list[str]:
+        import array
+        import wave
+
+        sample = pathlib.Path("workspace/voice/kokoro-sample.wav")
+        engine, why = open_recogniser(Config(stt="sherpa", stt_partials=partials))
+        if engine is None:
+            self.skipTest(why)
+        if not sample.is_file():
+            self.skipTest("no speech sample on this machine")
+        with wave.open(str(sample)) as handle:
+            pcm = handle.readframes(handle.getnframes())
+        raw = array.array("h", pcm).tobytes()
+        step = int(16000 * 0.48) * 2
+
+        async def frames():
+            for at in range(0, len(raw), step):
+                yield raw[at:at + step]
+
+        return [event.kind async for event in engine.start_stream(frames(), turn_id=1)]
+
+    async def test_on_it_builds_the_sentence_and_off_it_says_nothing_until_the_end(self):
+        on = await self._kinds(True)
+        self.assertGreater(on.count("partial"), 3, "the sentence assembles as it is spoken")
+        off = await self._kinds(False)
+        self.assertEqual(off.count("partial"), 0, "asked for quiet, it stays quiet")
+        self.assertEqual(off.count("final"), 1, "the turn still lands")
 
 
 if __name__ == "__main__":

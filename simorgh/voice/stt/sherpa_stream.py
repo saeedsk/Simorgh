@@ -104,6 +104,11 @@ class SherpaStreamRecogniser:
     streaming = True        # session.py asks for this before wrapping
 
     def __init__(self, config, *, repo_root=None, threads: int = 2) -> None:
+        # `stt_partials` is offered in `voice set` as "show what is heard
+        # while you are still talking". A streaming engine that ignored it
+        # would make the setting a lie -- a write path with no read path,
+        # this house's oldest bug shape.
+        self._partials = bool(getattr(config, "stt_partials", True))
         try:
             import sherpa_onnx  # type: ignore
         except ImportError as exc:
@@ -159,7 +164,7 @@ class SherpaStreamRecogniser:
             stream.accept_waveform(SAMPLE_RATE, _floats(frame))
             await asyncio.to_thread(self._drain, stream)
             text = (self._recogniser.get_result(stream) or "").strip()
-            if text and text != said:
+            if self._partials and text and text != said:
                 said = text
                 yield TranscriptEvent("partial", text, turn_id, confidence=1.0, language="",
                                       audio_seconds=len(buffer) / (2 * SAMPLE_RATE), engine=self.name)
