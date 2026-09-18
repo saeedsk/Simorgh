@@ -109,6 +109,13 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                         "when Chatterbox/Miso speaks: auto = typed replies, tests and long answers only (spoken turns stay quick); always; off"),
     "expressive_min_chars": (int, (0, 5000), "0 = never (default); else a spoken reply at least this long goes to the slow engine -- it can hold the floor a minute"),
     "stt_partials": (bool, None, "show what is heard while you are still talking"),
+    "barge_in_speech_ms": (int, (80, 1500),
+                          "how long you must keep talking before it counts as cutting Sim off. "
+                          "350 plus the loudness bar meant a stop landed only after the sentence "
+                          "had finished (the creator, in a car, 2026-09-17)"),
+    "barge_in_calibrate_ms": (int, (0, 3000),
+                              "how much of each reply is spent learning what Sim's own voice sounds "
+                              "like at the microphone; nothing can interrupt during it"),
     "barge_in_ratio": (float, (1.0, 6.0),
                        "how much louder than Sim's own echo you must be to cut it off. 2.8 needs a "
                        "raised voice in a quiet room and is unreachable in a car; the words cannot "
