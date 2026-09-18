@@ -1043,7 +1043,21 @@ class Service:
                 return
             self._partial_turn = p.get("turn")
             if getattr(self._live, "enabled", False):
-                self._live.render(render_mod.style(f"  🎤 {text}", "dim", enabled=self._color))
+                # Fit the *plain* words first, then colour them. `render()`
+                # truncates by raw length, which counts escape bytes, so a
+                # styled line cut to width loses its trailing reset and
+                # leaves fragments on screen -- live-caught (the creator,
+                # 2026-09-17: "I can see the formatting characters").
+                # The colour codes cost raw characters that `render()` counts
+                # but the screen does not, so measure them rather than guess
+                # a margin: a first attempt subtracted six and still handed
+                # over 106 characters for a 100-column window.
+                overhead = len(render_mod.style("x", "dim", enabled=self._color)) - 1
+                room = max(8, render_mod.terminal_width() - 2 - overhead)
+                plain = f"  🎤 {text}"
+                if len(plain) > room:
+                    plain = plain[: room - 1] + "…"
+                self._live.render(render_mod.style(plain, "dim", enabled=self._color))
                 return
             # No footer to draw on (piped, headless, a test): the old
             # throttled scrolling line, so those runs still show progress.

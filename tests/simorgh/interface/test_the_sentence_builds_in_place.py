@@ -90,5 +90,41 @@ class TheSentenceBuildsInPlace(unittest.IsolatedAsyncioTestCase):
                         "a piped or headless run still shows progress")
 
 
+class TheColourCodesAreNeverCutInHalf(unittest.IsolatedAsyncioTestCase):
+    """The creator, live, minutes after the footer landed: "I can see the
+    formatting characters".
+
+    `LiveStatus.render` truncates by raw length, which counts escape bytes
+    the screen never shows. This was the first caller to hand it *styled*
+    text, so a long line was cut mid-sequence: the trailing reset lost, the
+    fragments visible. A first fix subtracted a guessed margin of six and
+    still produced 106 characters for a 100-column window.
+    """
+
+    async def test_a_long_sentence_still_fits_and_keeps_its_reset(self):
+        from simorgh.interface import render as render_mod
+
+        footer = _Footer(enabled=True)
+        service = _service(footer)
+        service._color = True
+        width = render_mod.terminal_width()
+        await _run(service, {"text": "word " * 400, "partial": True, "turn": 1, "confidence": 1.0})
+        drawn = footer.drawn[-1]
+        self.assertLess(len(drawn), width, "render() truncates above this, cutting an escape in half")
+        self.assertTrue(drawn.endswith("\x1b[0m"), "the colour is closed, so it cannot bleed into the prompt")
+        self.assertIn("…", drawn, "the words are trimmed, not the escape codes")
+
+    async def test_a_short_sentence_is_left_whole(self):
+        from simorgh.interface import render as render_mod
+
+        footer = _Footer(enabled=True)
+        service = _service(footer)
+        service._color = True
+        await _run(service, {"text": "Hi Sim", "partial": True, "turn": 1, "confidence": 1.0})
+        self.assertIn("Hi Sim", footer.drawn[-1])
+        self.assertNotIn("…", footer.drawn[-1])
+        self.assertLess(len(footer.drawn[-1]), render_mod.terminal_width())
+
+
 if __name__ == "__main__":
     unittest.main()
