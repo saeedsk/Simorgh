@@ -241,6 +241,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         return Outcome(await _status_panel(bus, vitals))
 
     if name == "help":
+        if args.strip().lower() == "all":
+            return Outcome(render_mod.help_panel(enabled=render_mod.color_enabled(),
+                                                 unicode=render_mod.unicode_mode() != "off", full=True))
         if args.strip():
             return Outcome(render_mod.command_panel(args, enabled=render_mod.color_enabled(),
                                                     unicode=render_mod.unicode_mode() != "off"))

@@ -188,7 +188,7 @@ class HelpPanelTestCase(unittest.TestCase):
     def test_every_command_is_on_the_help_screen_with_its_words(self):
         from simorgh.interface.parser import SUBCOMMANDS
         from simorgh.interface.render import help_panel
-        text = help_panel(enabled=False)
+        text = help_panel(enabled=False, full=True)
         for name in COMMAND_NAMES:
             self.assertIn(f"  {name}", text, name)
         for name, subs in SUBCOMMANDS.items():
@@ -199,6 +199,16 @@ class HelpPanelTestCase(unittest.TestCase):
         self.assertIn("Look around", text)
         self.assertIn("Voice", text)
         self.assertNotIn("\x1b[", text, "no colour when colour is off")
+
+    def test_the_default_screen_is_one_line_per_command(self):
+        # 2026-09-19: the full manual had grown to 120 lines.
+        from simorgh.interface.render import help_panel
+        text = help_panel(enabled=False)
+        for name in COMMAND_NAMES:
+            self.assertIn(f"  {name}", text, name)
+        self.assertNotIn("tv charts", text)
+        self.assertIn("help tv:", text)
+        self.assertLess(len(text.splitlines()), 50)
 
     def test_every_section_names_only_real_commands(self):
         from simorgh.interface.parser import SECTIONS, SUBCOMMANDS

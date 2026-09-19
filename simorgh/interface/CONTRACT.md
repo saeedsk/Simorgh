@@ -212,3 +212,5 @@ Lock it first (`python tools/modlock.py claim interface --by <you> --task "..."`
 - Stage 1 item 3 (2026-09-19): `/api/history` reads the telemetry series `metrics.history` from `ctx.telemetry` and falls back to the `metrics:history` ledger stream (older data, or telemetry off). `HttpApi(telemetry=...)`.
 
 - TUI (2026-09-19): every bottom-of-screen row is fitted as a whole to one column less than the terminal (`panel.fit_row` in `flatten`); fitting each fragment on its own made running rows 10-15 columns too wide, and the wrap left trails on every redraw. `narrate_steps` now defaults to false: background tasks print their start and outcome, their steps show only in the live rows.
+
+- `help` lists one line per command, with `· help <name>: N ways` where a command has several; `help all` is the full manual with every word (the default until 2026-09-19, when it had grown to 120 lines).

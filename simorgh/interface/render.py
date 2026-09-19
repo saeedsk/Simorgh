@@ -978,23 +978,29 @@ def _subcommand_rows(name: str, subs, *, enabled: bool, unicode: bool) -> list[s
             f"  {style(meaning, 'dim', enabled=enabled)}" for sub, meaning in subs]
 
 
-def _section_rows(names, by_name, subcommands, *, enabled: bool, unicode: bool) -> list[str]:
+def _section_rows(names, by_name, subcommands, *, enabled: bool, unicode: bool, full: bool = True) -> list[str]:
     usages = {name: (f"{name} {by_name[name][0]}".strip() if by_name[name][0] and name not in subcommands
                      else name) for name in names}
     column = max(len(u) for u in usages.values())
     rows: list[str] = []
     for name in names:
         _hint, desc = by_name[name]
-        rows.append(f"  {style(usages[name].ljust(column), 'warm', enabled=enabled)}  {desc}")
-        rows.extend(_subcommand_rows(name, subcommands.get(name, ()), enabled=enabled, unicode=unicode))
+        subs = subcommands.get(name, ())
+        more = "" if full or len(subs) < 2 else style(f"  · help {name}: {len(subs)} ways", "dim", enabled=enabled)
+        rows.append(f"  {style(usages[name].ljust(column), 'warm', enabled=enabled)}  {desc}{more}")
+        if full:
+            rows.extend(_subcommand_rows(name, subs, enabled=enabled, unicode=unicode))
     return rows
 
 
-def help_panel(*, enabled: bool = True, unicode: bool = True) -> str:
-    """The help screen: commands in sections, each with its words and
-    what they mean, the way a person reads a manual -- not one flat
-    row per command with the whole usage crammed into a column (the
-    creator, 2026-09-12)."""
+def help_panel(*, enabled: bool = True, unicode: bool = True, full: bool = False) -> str:
+    """The help screen: commands in sections, one line each, and where a
+    command has several ways to use it, where to read them (`help tv`).
+
+    The full manual -- every command with all its words, as the creator
+    asked for on 2026-09-12 -- is `help all`. It was the default until
+    2026-09-19, when it had grown to 120 lines and the creator's screen
+    was "lots of noise"."""
     from .parser import COMMANDS, SECTIONS, SUBCOMMANDS
 
     by_name = {name: (hint, desc) for name, hint, desc in COMMANDS}
@@ -1002,11 +1008,11 @@ def help_panel(*, enabled: bool = True, unicode: bool = True) -> str:
     sections = list(SECTIONS) + ([("More", tuple(n for n in by_name if n not in placed))]
                                  if set(by_name) - placed else [])
     lines = [style(f"{len(by_name)} commands. A leading / is optional everywhere; Tab completes; "
-                   f"`help <command>` shows one command's words.", "dim", enabled=enabled)]
+                   f"`help <command>` shows one command's words; `help all` shows every one.", "dim", enabled=enabled)]
     for title, names in sections:
         lines.append("")
         lines.append(style(title, "bold", enabled=enabled))
-        lines.extend(_section_rows(names, by_name, SUBCOMMANDS, enabled=enabled, unicode=unicode))
+        lines.extend(_section_rows(names, by_name, SUBCOMMANDS, enabled=enabled, unicode=unicode, full=full))
     lines.append("")
     lines.append(f"  {style('!<shell command>', 'warm', enabled=enabled)}  run a shell command directly")
     lines.append(f"  {style('anything else', 'warm', enabled=enabled)}      is chat")
