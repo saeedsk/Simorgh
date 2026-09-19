@@ -72,13 +72,13 @@ class PromptAssembler:
         conversation = "\n\n".join(f"[{m.get('role', 'user')}] {m.get('content', '')}" for m in messages)
         blocks.append(self._block("conversation", conversation, protected=False))
 
+        # The step-budget hints change from step to step, so they ride at
+        # the head of the latest user turn (`turn_note`) and the system
+        # prefix stays byte-identical for a caching provider (stage 4 item 4).
+        turn_note = ""
         if last_step:
-            blocks.append(self._block(
-                "final_turn_hint",
-                "This is your last step -- no more tool calls will be honored. "
-                "Write your final answer now, using whatever you've already learned.",
-                protected=True,
-            ))
+            turn_note = ("This is your last step -- no more tool calls will be honored. "
+                         "Write your final answer now, using whatever you've already learned.")
         elif steps_left is not None and steps_left <= _WINDING_DOWN_STEPS:
             # Told BEFORE the wall, not at it. A run that only learns its
             # budget on the final step has no chance to land what it was
@@ -87,15 +87,11 @@ class PromptAssembler:
             # Live-caught 2026-09-09, three attempts in a row at the same
             # task, each ending "step budget exhausted with work still
             # pending" and each starting again from nothing.
-            blocks.append(self._block(
-                "budget_hint",
-                f"You have {steps_left} tool call(s) left before this attempt ends. "
-                "Get to a state you can hand over: save what you have to a file, then say "
-                "plainly what is done and what is left. Do not start anything new.",
-                protected=True,
-            ))
+            turn_note = (f"You have {steps_left} tool call(s) left before this attempt ends. "
+                         "Get to a state you can hand over: save what you have to a file, then say "
+                         "plainly what is done and what is left. Do not start anything new.")
 
-        return AssembledContext(blocks=tuple(blocks))
+        return AssembledContext(blocks=tuple(blocks), turn_note=turn_note)
 
     async def _user_profile_text(self, trace_id: str = "") -> str:
         reply = await self._try_request(topics.WORLD_ENV_QUERY, {"what": "user_profile", "args": {}}, trace_id)

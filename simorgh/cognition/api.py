@@ -118,6 +118,9 @@ class PromptBlock:
 @dataclass(frozen=True)
 class AssembledContext:
     blocks: tuple[PromptBlock, ...]
+    # Per-turn words (the step-budget hints) that belong at the head of the
+    # latest user turn, not in the cacheable system prefix (stage 4 item 4).
+    turn_note: str = ""
 
     def render(self) -> str:
         return "\n\n".join(b.text for b in self.blocks if b.text)

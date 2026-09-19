@@ -97,6 +97,7 @@ Environment: `SIMORGH_COGNITION_PROVIDER_ORDER` (the test session sets it to `fl
 ## Invariants
 
 - Every `cognition.think` gets exactly one `cognition.think.reply`, success or `error{code, detail, retryable}`.
+- The system prompt holds only what is stable across a session's steps (constitution, persona voice, self summary, user profile, `task_rules`, tool instructions), in that order. The step-budget hints (`last_step`, `steps_left <= 3`) are `AssembledContext.turn_note` and go at the head of the latest user turn, so a caching provider reuses the prefix (stage 4 item 4). The `cognition.provider_call` span carries `tokens_cached` (Together and Gemini report it).
 - While the system is `paused` or `stopping`, a think gets `error.code = "paused"` and no provider is called.
 - Protected blocks are never compacted; if they alone exceed the input budget, or compaction leaves the context over budget, the reply is `context_too_large` and no provider is called.
 - The input ceiling comes from the purpose (`max_tokens_in`), not from the caller's `max_tokens`, unless the caller sets `max_tokens_in`.

@@ -184,6 +184,19 @@ class DeltaGate:
                 self._line, self._line_is_prose = "", False
 
 
+def _with_turn_note(messages: list[dict], note: str) -> list[dict]:
+    """`messages` with `note` at the head of the latest user turn, or as a
+    user turn of its own when the transcript ends on anything else."""
+    if not note:
+        return messages
+    out = list(messages)
+    if out and out[-1].get("role") == "user" and isinstance(out[-1].get("content"), str):
+        out[-1] = {**out[-1], "content": f"{note}\n\n{out[-1]['content']}"}
+    else:
+        out.append({"role": "user", "content": note})
+    return out
+
+
 def _typed_transcript(protected_text: str, messages: list[dict], compacted) -> list[dict] | None:
     """The caller's transcript with its typed tool turns kept (an assistant
     message carrying `tool_calls`, `tool` messages keyed by `tool_call_id`),
@@ -497,8 +510,9 @@ class Service:
             # tool results and layers 3-4 have real per-segment structure
             # to work with, per 04 section 5's compaction pipeline.
             elastic_limit = budget.max_tokens_in - protected_tokens
+            messages = _with_turn_note(payload["messages"], assembled.turn_note)
             compacted = await self._compactor.compact(
-                payload["messages"], limit_tokens=elastic_limit,
+                messages, limit_tokens=elastic_limit,
                 allow_summarize=payload.get("allow_summarize", False),
                 session_id=payload.get("session_id"), purpose=purpose.value,
             )
@@ -532,7 +546,7 @@ class Service:
                 think_messages.append({"role": "user", "content": compacted.text})
             if not think_messages:
                 think_messages.append({"role": "user", "content": ""})  # never call complete() with zero messages
-            native_messages = _typed_transcript(protected_text, payload["messages"], compacted)
+            native_messages = _typed_transcript(protected_text, messages, compacted)
 
             # A per-purpose route, or the strong route when the caller escalates,
             # tried before the default order (design section 7).
@@ -558,6 +572,7 @@ class Service:
                 span.set("provider", response.provider)
                 span.set("tokens_in", response.input_tokens)
                 span.set("tokens_out", response.output_tokens)
+                span.set("tokens_cached", response.cached_input_tokens)
         except NoRealProvider as exc:
             await self._error_reply(message, "no_real_provider", str(exc), retryable=True)
             return

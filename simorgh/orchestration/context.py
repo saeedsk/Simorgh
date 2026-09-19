@@ -194,7 +194,12 @@ class Assembler:
         # calls and their output. A patch session that applied a file and
         # then stopped had, by then, genuinely lost the instruction.
         if task:
-            blocks.append({"role": "user", "content": task})
+            # A chat turn's text is no longer repeated in `task_rules` (it
+            # changed the system prefix every turn, stage 4 item 4), so this
+            # message is its only copy: protected, so Cognition's compactor
+            # never snips the question away under a long run of results.
+            chat = getattr(session.profile, "scaffold", "") == "chat"
+            blocks.append({"role": "user", "content": task, **({"protected": True} if chat else {})})
         if session.carried:
             # A retry continues; it does not start over. Without this the
             # model re-did the first N steps every attempt (2026-09-07).

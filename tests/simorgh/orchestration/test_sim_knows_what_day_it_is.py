@@ -87,8 +87,9 @@ class TheCallerActuallyPassesItTestCase(unittest.TestCase):
 
         from simorgh.orchestration import session
 
-        self.assertIn("now=_epoch(self._clock)", inspect.getsource(session),
-                      "render() takes `now` and the session never passes it")
+        # Since stage 4 item 4 the stamp rides in the latest user turn.
+        self.assertIn("scaffolds.when_line(_epoch(self._clock))", inspect.getsource(session),
+                      "the session never stamps the turn with its clock")
 
     def test_it_reads_either_shape_of_clock(self):
         """Interface passes `ctx.clock.now` -- the bound method -- while

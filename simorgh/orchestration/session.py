@@ -1394,6 +1394,9 @@ class SessionRunner:
         if offered and any(str(m.get("content") or "").startswith(pressure_mod.STUB_MARK) for m in session.messages):
             offered = tuple(offered) + (pressure_mod.RECALL_TOOL,)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
+        # Per-turn material goes to the latest user turn, so the system
+        # prefix stays byte-identical from turn to turn (stage 4 item 4).
+        messages = scaffolds.with_turn_note(messages, scaffolds.when_line(_epoch(self._clock)))
         is_chat = session.profile.name == "chat"
         req = Message.new(
             topics.COGNITION_THINK, source=self._bus.source,
@@ -1411,13 +1414,16 @@ class SessionRunner:
                 # finishing means -- live 2026-09-07, a run applied its
                 # edit and stopped without committing it. See scaffolds.py.
                 "task_rules": scaffolds.render(
-                    session.profile, subject=session.subject, task=session.user_text,
+                    # A chat turn's text is its own latest user turn, already
+                    # in `messages`; in the system prompt it changed the
+                    # prefix on every turn.
+                    session.profile, subject=session.subject,
+                    task=None if session.profile.scaffold == "chat" else session.user_text,
                     unavailable=scaffolds.unavailable_note(offered), channel=session.channel,
                     speaker=session.speaker, speaker_relation=session.speaker_relation, room=session.room,
                     speaker_before=getattr(session, "speaker_before", ""),
                     offered=() if no_tools else offered,
                     skills=catalog,
-                    now=_epoch(self._clock),
                 ) + (f"\n\n{session.extra_rules}" if getattr(session, "extra_rules", "") else ""),
                 # Live-caught: this request never actually asked Cognition
                 # to parse tool calls -- `expected` was never set, so

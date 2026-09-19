@@ -148,7 +148,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 - L1 (critical): tool calls are regex-parsed text markers; the model never sees a tool's description or schema (`tools.py`). Open; stage 2.
 - L2 (critical): the transcript reaches the provider flattened into one user message (Cognition side). Open; stage 2 item 5.
-- L3: no stable prompt prefix; the per-minute clock opens `task_rules` (`scaffolds.py:638, 690-692`). Open; stage 4.
+- L3: no stable prompt prefix. Partly closed 2026-09-19 (stage 4 item 4): the date line leaves `task_rules` for the head of the latest user turn (`scaffolds.with_turn_note`), and a chat turn's words are no longer repeated in `task_rules` (their only copy is a `protected: true` user message, which Cognition's compactor never snips). Two chat turns now send identical `task_rules`; Together served 97% of the second turn's prompt from its cache. Open: the ContextBuilder move and deleting `cognition/assembler.py`.
 - L4: one tool call is ~13 bus messages and ~20 appends (`_propose_and_await`). Open.
 - L5: crash-resume restores the step count but not the context (`resume.py:117-144`). Open; stage 4 item 2.
 - L6 / S10: a chat turn can edit the live checkout and orphan the edit (`profiles.py` CHAT carries `apply_source_patch`, `replace_in_file`, `run_script`, `install_package`). Open.

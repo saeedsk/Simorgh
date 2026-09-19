@@ -611,6 +611,21 @@ _BY_SCAFFOLD: dict[str, str] = {
 }
 
 
+def with_turn_note(messages: list[dict], note: str) -> list[dict]:
+    """`messages` with `note` at the head of the latest user turn -- the
+    per-turn material (the date, soon recall) that must not sit in the
+    cacheable system prefix. A transcript that ends on anything else gets
+    the note as a user turn of its own. The input is not mutated."""
+    if not note:
+        return list(messages)
+    out = list(messages)
+    if out and out[-1].get("role") == "user" and isinstance(out[-1].get("content"), str):
+        out[-1] = {**out[-1], "content": f"{note}\n\n{out[-1]['content']}"}
+    else:
+        out.append({"role": "user", "content": note})
+    return out
+
+
 def when_line(now: float) -> str:
     """The date and time, for a model that otherwise has to guess it.
 
@@ -683,10 +698,12 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
             f"The file is `{subject}`. You already have it -- read that file first and "
             f"do not go looking for it.\n\n" + body
         )
-    # Ahead of everything, including the task: what day it is is a fact
-    # about the world, not an instruction, and it lives in `task_rules`
-    # because that block is never compacted -- a date that a long tool
-    # result can push out of the prompt is a date Sim will invent again.
+    # What day it is is a fact about the world, not an instruction. It
+    # used to lead `task_rules`, which made the system prompt differ on
+    # every turn and defeated prompt caching; the session now puts it at
+    # the head of the latest user turn (`with_turn_note`, stage 4 item 4),
+    # which compaction always keeps. `now` stays for a caller that wants
+    # the old placement.
     stamp = when_line(now)
     if stamp:
         body = f"{stamp}\n\n{body}" if body else stamp

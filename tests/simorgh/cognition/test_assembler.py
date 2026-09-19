@@ -55,10 +55,15 @@ class TestPromptAssemblerNoResponders(unittest.IsolatedAsyncioTestCase):
         conversation = next(b for b in result.blocks if b.name == "conversation")
         self.assertFalse(conversation.protected)
 
-    async def test_last_step_hint_block_is_protected_and_appended_last(self):
+    async def test_last_step_hint_is_a_turn_note_not_a_system_block(self):
+        """Stage 4 item 4: per-step words stay out of the cacheable prefix."""
         result = await self.assembler.assemble(purpose="chat", messages=[{"role": "user", "content": "hi"}], last_step=True)
-        self.assertEqual(result.blocks[-1].name, "final_turn_hint")
-        self.assertTrue(result.blocks[-1].protected)
+        self.assertIn("last step", result.turn_note)
+        self.assertNotIn("final_turn_hint", [b.name for b in result.blocks])
+        few = await self.assembler.assemble(purpose="chat", messages=[], steps_left=2)
+        self.assertIn("2 tool call(s) left", few.turn_note)
+        plenty = await self.assembler.assemble(purpose="chat", messages=[], steps_left=9)
+        self.assertEqual(plenty.turn_note, "")
 
     async def test_task_rules_block_is_protected_when_given(self):
         result = await self.assembler.assemble(purpose="plan", messages=[], task_rules="never touch main")

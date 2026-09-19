@@ -152,6 +152,9 @@ class GeminiProvider:
 
         usage = getattr(response, "usage_metadata", None)
         input_tokens = (getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
+        # Implicit prompt caching: the part of the prompt Gemini served from
+        # its cache (stage 4 item 4 measures it). Part of prompt_token_count.
+        cached = (getattr(usage, "cached_content_token_count", 0) or 0) if usage else 0
         # Thought tokens are billed as output; leaving them out made the
         # budget under-count every call.
         output_tokens = ((getattr(usage, "candidates_token_count", 0) or 0)
@@ -168,7 +171,8 @@ class GeminiProvider:
                 f"Gemini spent its {config.get('max_output_tokens')} output tokens thinking and returned no text")
         return ProviderResponse(
             text=text, provider=self.name, tool_calls=calls,
-            input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=None,
+            input_tokens=max(0, input_tokens - cached), output_tokens=output_tokens, cost_usd=None,
+            cached_input_tokens=cached,
         )
 
     def _get_client(self) -> Any:
