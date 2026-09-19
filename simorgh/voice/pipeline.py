@@ -576,6 +576,7 @@ class Pipeline:
                     "heard": turn.heard[:4000], "confidence": turn.confidence, "said": turn.said[:4000],
                     "heard_at": turn.heard_at, "answered_at": turn.answered_at,
                     "engine_stt": turn.engine_stt, "engine_tts": turn.engine_tts,
+                    **({"language": turn.language} if turn.language else {}),
                     **({"metrics": dict(turn.metrics)} if turn.metrics else {}),
                     **({"segments": list(turn.segments)} if turn.segments else {}),
                 }))

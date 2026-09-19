@@ -232,3 +232,20 @@ and why the language router matters for a Farsi-speaking house.
 occupy the server, because the thread cannot be cancelled and the
 connection is not closed. Cutting the count from 6 to 2 reduces the
 pressure; it does not make cancellation mean anything.
+
+### The language was computed and dropped
+
+Three of four turns from one speaker came back as fluent English nonsense
+("How much you Molly show my thing?", "I don't want to pay down the
+corner") while another person's turns in the same room transcribed
+cleanly -- the signature of Farsi forced through an English-biased decode.
+It could not be confirmed: `_other_language` computes the detected
+language for every turn, uses it to decide whether to stay quiet, and
+then discards it. Neither `voice:turns` nor the kept-audio sidecar
+recorded it, so the one field that would settle "was that simply the
+wrong language?" did not survive the turn.
+
+It is now on `TurnClock`, in the turn record, and in the sidecar beside
+the audio. Nothing behavioural changed; it means the next hours of real
+use answer the question instead of being argued about -- and it is the
+discriminator the language router needs.

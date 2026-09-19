@@ -77,6 +77,14 @@ class VoiceTurn:
     #: watch them ... you recognised that as my voice" (the creator,
     #: 2026-09-15).
     segments: list = field(default_factory=list)
+    #: What the recogniser said it heard. Computed per turn (`_other_language`
+    #: mutes a language the house does not speak) and then discarded, so
+    #: afterwards "was that turn simply the wrong language?" could not be
+    #: answered: three of four turns from one speaker came back as fluent
+    #: English nonsense and nothing recorded whether Farsi had been detected
+    #: (2026-09-18). Last field on purpose -- positional construction of the
+    #: ones above must not shift.
+    language: str = ""
 
 
 @dataclass

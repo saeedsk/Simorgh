@@ -54,10 +54,11 @@ class _Replies:
         return self.reply
 
 
-def _session(config, script, replies, embedder, book, ledger=None):
+def _session(config, script, replies, embedder, book, ledger=None, recogniser=None):
     bus = _Bus()
     mic = FakeMicrophone(silence(0.03), frame_delay=0.0005)
-    speaker, stt, tts = FakeSpeaker(), FakeRecogniser("what time is it", 0.95), FakeSynthesiser()
+    speaker, tts = FakeSpeaker(), FakeSynthesiser()
+    stt = recogniser or FakeRecogniser("what time is it", 0.95)
     pipeline = Pipeline(bus=bus, clock=None, logger=None, ledger=ledger, config=config, microphone=mic, speaker=speaker,
                         recogniser=stt, synthesiser=tts, detector_factory=lambda: script)
     pipeline.ask = replies.ask  # type: ignore[method-assign]
@@ -480,3 +481,46 @@ class TheRecordKeepsItsOwnTurnsSpeaker(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(turns, "the turn reached the ledger")
         self.assertEqual(turns[0].payload["speaker"], "Ira",
                          "the record must carry the speaker of ITS turn, not the session's latest")
+
+
+class _SaysItsLanguage(FakeRecogniser):
+    """An engine that reports the language it detected, as whisper does."""
+
+    def __init__(self, code: str = "en") -> None:
+        super().__init__("what time is it", 0.95)
+        self._code = code
+
+    async def transcribe(self, audio, *, language: str = ""):
+        from dataclasses import replace
+
+        return replace(await super().transcribe(audio, language=language), language=self._code)
+
+
+class TheRecordSaysWhatLanguageWasHeard(unittest.IsolatedAsyncioTestCase):
+    """The language was computed for every turn and then dropped, so
+    afterwards nobody could ask whether a turn had simply been the wrong
+    language. Live 2026-09-18: three of four turns from one speaker came
+    back as fluent English nonsense ("How much you Molly show my thing?")
+    and nothing recorded whether Farsi had been detected.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.book = SpeakerBook(Path(self.tmp.name), threshold=0.5, margin=0.06)
+        self.embedder = _Embedder()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    async def test_the_detected_language_reaches_the_turn_record(self) -> None:
+        self.book.enroll("Ira", _vec(0.0))
+        self.embedder.vector = _vec(0.0)
+        script = _Script((True, 60), (False, 110), (False, 10_000))
+        replies, ledger = _Replies(), _Ledger()
+        session, _bus, _tts = _session(_config(keep_transcripts=True), script, replies,
+                                       self.embedder, self.book, ledger=ledger,
+                                       recogniser=_SaysItsLanguage("en"))
+        await _run_until(session, lambda: any(e.type == "turn" for e in ledger.events), timeout=6.0)
+        turn = next(e for e in ledger.events if e.type == "turn")
+        self.assertEqual(turn.payload.get("language"), "en",
+                         "the turn record must say which language was heard")

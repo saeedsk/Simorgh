@@ -69,6 +69,7 @@ class TurnClock:
     text: str = ""
     confidence: float = 1.0
     engine_stt: str = ""
+    language: str = ""
 
     def metrics(self, report=None) -> dict:
         out: dict = {}
@@ -621,6 +622,7 @@ class VoiceSession:
                         clock.text = event.text
                         clock.confidence = event.confidence
                         clock.engine_stt = event.engine
+                        clock.language = event.language or ""
                     if event.words and event.audio:
                         self._timed[turn_id] = (event.audio, event.words)
                     self.partial = ""
@@ -781,6 +783,7 @@ class VoiceSession:
             (folder / f"{stamp}.json").write_text(_json.dumps({
                 "at": _time.time(), "turn": turn_id, "text": event.text,
                 "confidence": round(float(event.confidence), 4), "engine": event.engine,
+                "language": getattr(event, "language", "") or "",
                 "seconds": round(float(event.audio_seconds), 3),
                 **{k: v for k, v in (self._scored.get(turn_id) or {}).items()},
             }, indent=1), encoding="utf-8")
@@ -1857,7 +1860,8 @@ class VoiceSession:
             confidence=clock.confidence, said=said,
             heard_at=(self._clock.now() if self._clock is not None else time.time()) - max(0.0, self._now() - clock.speech_end) if clock.speech_end else 0.0,
             answered_at=self._clock.now() if self._clock is not None else time.time(),
-            engine_stt=clock.engine_stt, engine_tts=engine, metrics=metrics if self._config.diagnostics else {},
+            engine_stt=clock.engine_stt, engine_tts=engine, language=clock.language,
+            metrics=metrics if self._config.diagnostics else {},
             segments=list(getattr(self, "_last_segments", []) or []),
         ))
         # A turn addressed to Sim belongs in the record too. Without it the
