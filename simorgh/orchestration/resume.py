@@ -136,10 +136,10 @@ async def restore_session(session: Session, ledger) -> int:
         # had shown the model, not only its step count (evaluation L5).
         from simorgh.contracts.session import stream_name
 
-        from .transcript import fold
+        from .transcript import fold, hydrate
 
         try:
-            messages = fold(await ledger.read(stream_name(session.task_id)))
+            messages = await hydrate(ledger, fold(await ledger.read(stream_name(session.task_id))))
         except Exception:  # noqa: BLE001 -- a missing or unreadable transcript: resume as before
             messages = []
         if last.get("note"):

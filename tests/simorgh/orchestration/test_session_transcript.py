@@ -99,3 +99,32 @@ class AConversationIsOnePersistentSession(unittest.IsolatedAsyncioTestCase):
         block = await Assembler(bus=None, ledger=ledger)._working_block(session)  # noqa: SLF001
         self.assertIn("User: the desktop is Orca", block)
         self.assertIn("Sim: Got it.", block)
+
+
+class ALongTurnIsStoredAside(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-19 (trial round): an 8k task text broke the ledger's
+    4096-char inline rule and the session's transcript was never written."""
+
+    async def test_long_text_and_results_round_trip_through_blobs(self):
+        from simorgh.orchestration.transcript import INLINE_MAX, hydrate
+
+        ledger = make_ledger({"backend": "memory"})
+        await ledger.start()
+        long_task, long_result = "t" * 8241, "r" * 9000
+        messages = [{"role": "user", "content": long_task},
+                    {"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": long_result}]
+        await TranscriptWriter(ledger).persist("t9", messages)
+        events = await ledger.read("session:t9")
+        self.assertEqual(len(events), 2)
+        self.assertLess(len(events[0].payload["blocks"][0]["text"]), INLINE_MAX)
+        self.assertEqual(await hydrate(ledger, fold(events)), messages)
+
+    async def test_a_long_answer_joins_the_conversation(self):
+        from simorgh.orchestration.transcript import append_exchange, recent_lines
+
+        ledger = make_ledger({"backend": "memory"})
+        await ledger.start()
+        await append_exchange(ledger, "conv:cli:saeed", user_text="tell me everything", answer="a" * 6000, who="Saeed")
+        lines = await recent_lines(ledger, "conv:cli:saeed", 3)
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[1].startswith("Sim: aaa"))

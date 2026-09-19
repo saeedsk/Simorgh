@@ -15,6 +15,13 @@ from simorgh.contracts import session as s
 from simorgh.contracts.envelope import Event
 
 SNAPSHOT_EVERY = 50
+# The ledger refuses any inline string over 4096 chars; a longer text or
+# tool result is stored as a blob and the turn keeps its head and the ref.
+# Live 2026-09-19 (trial round): a patch session's 8k task text meant its
+# transcript was never written at all.
+INLINE_MAX = 3500
+_HEAD = 600
+_REF = "content_ref"
 
 
 def to_turn(message: dict, seq: int, ts: float = 0.0) -> s.Turn:
@@ -30,11 +37,43 @@ def to_turn(message: dict, seq: int, ts: float = 0.0) -> s.Turn:
     return s.Turn(seq=seq, role=role if role in s.ROLES else "user", blocks=blocks, ts=ts, meta=meta)
 
 
+async def _stored(ledger, turn: s.Turn) -> s.Turn:
+    """`turn` with any text or result too long to sit inline moved to a blob."""
+    blocks, meta = [], dict(turn.meta)
+    for block in turn.blocks:
+        if isinstance(block, s.Text) and len(block.text) > INLINE_MAX:
+            meta[_REF] = await ledger.put_blob(block.text.encode("utf-8"), content_type="text/plain")
+            block = s.Text(block.text[:_HEAD])
+        elif isinstance(block, s.ToolResult) and len(block.content) > INLINE_MAX:
+            ref = await ledger.put_blob(block.content.encode("utf-8"), content_type="text/plain")
+            block = s.ToolResult(block.tool_use_id, block.content[:_HEAD], block.is_error, ref=ref,
+                                 bytes_total=len(block.content))
+        blocks.append(block)
+    return s.Turn(seq=turn.seq, role=turn.role, blocks=tuple(blocks), ts=turn.ts, meta=meta)
+
+
+async def hydrate(ledger, messages: list[dict]) -> list[dict]:
+    """Folded messages with every stored-aside text read back in full; one
+    whose blob is gone keeps its head."""
+    out = []
+    for message in messages:
+        ref = message.pop(_REF, "")
+        if ref:
+            try:
+                message = {**message, "content": (await ledger.get_blob(ref)).decode("utf-8", errors="replace")}
+            except Exception:  # noqa: BLE001 -- a lost blob costs the tail of one turn, not the resume
+                pass
+        out.append(message)
+    return out
+
+
 def to_message(turn: s.Turn) -> dict:
     if turn.role == "tool":
         result = next((b for b in turn.blocks if isinstance(b, s.ToolResult)), None)
         message = {"role": "tool", "tool_call_id": result.tool_use_id if result else "",
                    "content": result.content if result else ""}
+        if result is not None and result.ref:
+            message[_REF] = result.ref
     else:
         message = {"role": turn.role, "content": turn.text()}
         uses = [b for b in turn.blocks if isinstance(b, s.ToolUse)]
@@ -42,6 +81,8 @@ def to_message(turn: s.Turn) -> dict:
             message["tool_calls"] = [{"id": u.id, "tool": u.name, "args": dict(u.input)} for u in uses]
     if turn.meta.get("name"):
         message["name"] = turn.meta["name"]
+    if turn.meta.get(_REF) and turn.role != "tool":
+        message[_REF] = turn.meta[_REF]
     return message
 
 
@@ -69,18 +110,19 @@ class TranscriptWriter:
         list_id, written, seq = self._state.get(session_id, (id(messages), 0, 0))
         if id(messages) != list_id or len(messages) < written:
             # Replaced wholesale: the new transcript is the state from here.
-            turns = [to_turn(m, seq + i, self._now()) for i, m in enumerate(messages)]
+            turns = [await _stored(self._ledger, to_turn(m, seq + i, self._now())) for i, m in enumerate(messages)]
             await self._event(stream, s.COMPACTED, {"turns": [s.turn_to_dict(t) for t in turns],
                                                     "dropped_seq_range": [0, max(0, seq - 1)]})
             self._state[session_id] = (id(messages), len(messages), seq + len(messages))
             return
         for message in messages[written:]:
-            turn = to_turn(message, seq, self._now())
+            turn = await _stored(self._ledger, to_turn(message, seq, self._now()))
             await self._event(stream, s.TURN_APPENDED, s.turn_to_dict(turn))
             seq += 1
             if seq % SNAPSHOT_EVERY == 0:
-                await self._event(stream, s.SNAPSHOT, {"turns": [s.turn_to_dict(to_turn(m, i)) for i, m in
-                                                                 enumerate(messages[:written + 1])]})
+                await self._event(stream, s.SNAPSHOT, {"turns": [
+                    s.turn_to_dict(await _stored(self._ledger, to_turn(m, i)))
+                    for i, m in enumerate(messages[:written + 1])]})
             written += 1
         self._state[session_id] = (id(messages), written, seq)
 
@@ -120,7 +162,7 @@ async def append_exchange(ledger, conversation: str, *, user_text: str, answer: 
     for role, text in (("user", f"{who}: {user_text}" if user_text else ""), ("assistant", answer)):
         if not text:
             continue
-        turn = s.Turn(seq=seq, role=role, blocks=(s.Text(text),), ts=ts)
+        turn = await _stored(ledger, s.Turn(seq=seq, role=role, blocks=(s.Text(text),), ts=ts))
         await ledger.append(stream, Event(stream=stream, type=s.TURN_APPENDED, ts=ts, trace_id=stream,
                                           causation_id=None, payload=s.turn_to_dict(turn)))
         seq += 1
@@ -137,6 +179,7 @@ async def recent_lines(ledger, conversation: str, k: int) -> list[str]:
     events = await ledger.read(stream, from_seq=max(0, int(head) - 2 * k - 4))
     lines = []
     for message in fold(events)[-2 * k:]:
+        message.pop(_REF, None)     # the head is enough for a conversation line
         text = str(message.get("content") or "").strip()
         if not text:
             continue
@@ -144,5 +187,6 @@ async def recent_lines(ledger, conversation: str, k: int) -> list[str]:
     return lines
 
 
-__all__ = ["SNAPSHOT_EVERY", "TranscriptWriter", "append_exchange", "conversation_id", "fold", "recent_lines",
+__all__ = ["INLINE_MAX", "SNAPSHOT_EVERY", "TranscriptWriter", "append_exchange", "conversation_id", "fold",
+           "hydrate", "recent_lines",
            "to_message", "to_turn"]
