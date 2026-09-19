@@ -178,6 +178,35 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text.count("Kitchen lights are on."), 1)
         self.assertIn("interrupted", text)
 
+    async def test_on_the_live_screen_a_spoken_reply_turns_green_when_speech_ends(self):
+        """The creator, 2026-09-19: words, the green line and the speech came
+        one after another. On the live screen the reply stays in the grey
+        live rows while it is spoken and prints green when `voice.spoken`
+        says the speech ended -- once."""
+        import contextlib
+        import io
+        from unittest import mock
+
+        live = mock.MagicMock()
+        live.enabled = True
+        self.service._live = live  # noqa: SLF001
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": "v2", "task_id": "v2", "text": "The kettle is on.", "channel": "voice",
+                "kind": "chat", "floor": False, "tool_steps": 0}))
+            await self._pump()
+            rows = "".join(t for row in self.service._streaming_rows() for _s, t in row)  # noqa: SLF001
+            before = out.getvalue()
+            await self.other.publish(self.other.new(topics.VOICE_SPOKEN, {
+                "text": "The kettle is on.", "seconds": 1.1, "engine": "styletts2", "device": "laptop",
+                "interrupted": False}))
+            await self._pump()
+        self.assertIn("The kettle is on.", rows)
+        self.assertNotIn("sim: The kettle is on.", before)
+        self.assertEqual(out.getvalue().count("sim: The kettle is on."), 1)
+        self.assertEqual(self.service._streaming_rows(), [])  # noqa: SLF001
+
     async def test_a_reply_being_written_shows_in_the_live_rows_and_goes_when_done(self):
         """Stage 3 item 3: deltas grow one line above the prompt; a reset
         takes it back; the finished turn clears it."""

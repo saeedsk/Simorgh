@@ -104,6 +104,9 @@ def _match_pending_answer(typed: str, options: list[str]) -> str | None:
 
 #: seconds between two "hearing:" lines for one turn
 _PARTIAL_EVERY_S = 3.0
+#: A spoken reply that never reports its end still prints green after
+#: this long, plus 0.4 s a word (voice off mid-reply, a crashed player).
+_SPEAKING_FALLBACK_S = 10.0
 
 class Service:
     name = "interface"
@@ -200,6 +203,15 @@ class Service:
         # Voice replies printed at `turn.completed` whose `voice.spoken` has
         # not arrived yet (it comes when playback ends).
         self._voice_replies_shown = 0
+        # Voice replies finished in text and still being SPOKEN, oldest
+        # first: (session id, text). The words stay live and grey until
+        # `voice.spoken` says the speech ended, then print green -- the
+        # creator, 2026-09-19: words, speech and the green line were three
+        # steps one after another; the green line belongs at the end.
+        self._voice_speaking: list[tuple[str, str]] = []
+        # Spoken replies that ended before their `turn.completed` arrived (a
+        # short streamed reply can): already printed, so not queued again.
+        self._voice_spoken_early = 0
         # A reply still being written, per session id (`session.delta`).
         self._streaming: dict[str, str] = {}
         self._color = render_mod.color_enabled(self.config.color)
@@ -1183,6 +1195,8 @@ class Service:
             self._out(render_mod.style(f"  ⏹ {what} -- you said so", "dim", enabled=self._color))
             return
         if message.payload.get("dropped"):
+            if self._voice_reply_settled(tail="  (not spoken)"):
+                return
             self._voice_replies_shown = max(0, self._voice_replies_shown - 1)
             reason = str(message.payload.get("reason") or "you had moved on")
             self._out(render_mod.style(f"  🔇 that answer came too late and was not spoken ({reason})", "dim",
@@ -1195,12 +1209,16 @@ class Service:
                 # -- a beat, not a reply.
                 self._out(render_mod.style(f"  🔊 {text}", "dim", enabled=self._color))
                 return
+            if self._voice_reply_settled(tail=tail):
+                return
             if self._voice_replies_shown > 0:
                 # Already on screen from `turn.completed`.
                 self._voice_replies_shown -= 1
                 if tail:
                     self._out(render_mod.style("  ⏹ interrupted", "dim", enabled=self._color))
                 return
+            if getattr(self._live, "enabled", False):
+                self._voice_spoken_early += 1
             self._out(render_mod.style(f"🔊 sim: {text}{tail}", "green", enabled=self._color))
 
     async def _on_voice_listening(self, message: Message) -> None:
@@ -1560,7 +1578,24 @@ class Service:
         p = message.payload
         self._streaming.pop(str(p.get("session_id") or ""), None)
         text = str(p.get("text") or "").strip()
-        if p.get("channel") == "voice" and text and not p.get("cancelled"):
+        if p.get("channel") == "voice" and text and not p.get("cancelled") and getattr(self._live, "enabled", False):
+            # Live screen: the whole reply stays in the grey live rows while
+            # Sim says it; `_on_voice_spoken` turns it green when it ends.
+            session_id = str(p.get("session_id") or "")
+            if self._voice_spoken_early > 0:
+                self._voice_spoken_early -= 1
+                self._streaming.pop(session_id, None)
+                self._invalidate()
+                fut = self._pending_turns.get(p.get("session_id", ""))
+                if fut is not None and not fut.done():
+                    fut.set_result(p.get("text", ""))
+                return
+            self._streaming[session_id] = text
+            self._voice_speaking.append((session_id, text))
+            self._invalidate()
+            asyncio.get_running_loop().call_later(_SPEAKING_FALLBACK_S + 0.4 * len(text.split()),
+                                                  self._voice_reply_settled, session_id, "")
+        elif p.get("channel") == "voice" and text and not p.get("cancelled"):
             # A spoken reply is on screen as soon as it exists, while Sim is
             # still saying it. It used to wait for `voice.spoken`, which is
             # published when playback ENDS -- the creator, 2026-09-19: "the
@@ -1572,6 +1607,23 @@ class Service:
         fut = self._pending_turns.get(p.get("session_id", ""))
         if fut is not None and not fut.done():
             fut.set_result(p.get("text", ""))
+
+    def _voice_reply_settled(self, session_id: str | None = None, tail: str = "") -> bool:
+        """Print a spoken reply green and take it out of the live rows: the
+        oldest one, or `session_id`'s (the fallback timer, for a reply whose
+        speech never reported). False when there was none waiting."""
+        if not self._voice_speaking:
+            return False
+        index = 0
+        if session_id is not None:
+            index = next((i for i, (sid, _) in enumerate(self._voice_speaking) if sid == session_id), -1)
+            if index < 0:
+                return False
+        sid, text = self._voice_speaking.pop(index)
+        self._streaming.pop(sid, None)
+        self._out(render_mod.style(f"🔊 sim: {text}{tail}", "green", enabled=self._color))
+        self._invalidate()
+        return True
 
 
 __all__ = ["Service", "VERSION"]

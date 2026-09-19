@@ -129,6 +129,7 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                                     "\"\" is the one it ships with"),
     "connectors": (bool, None, "the rare Okay / Yeah lead-ins"),
     "backchannel": (bool, None, "say Aha / Let me check the moment your turn ends, before thinking"),
+    "stream_replies": (bool, None, "speak each sentence as soon as it is written, not after the whole reply"),
     "max_spoken_sentences": (int, (1, 30), "longer answers are cut and say there is more on screen"),
     "diagnostics": (bool, None, "per-turn latencies in voice status"),
     "keep_audio": (bool, None, "keep raw recordings under workspace/voice/audio (off by default)"),

@@ -89,7 +89,7 @@ GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Feeling and the slow engine", ("tone_blend", "expressive_lane", "expressive_min_chars",
                                      "chatterbox_exaggeration", "chatterbox_reference",
                                      "miso_reference", "miso_device")),
-    ("Manner", ("connectors", "backchannel")),
+    ("Manner", ("connectors", "backchannel", "stream_replies")),
     ("Keeping and telling", ("diagnostics", "keep_audio", "keep_transcripts")),
 )
 
