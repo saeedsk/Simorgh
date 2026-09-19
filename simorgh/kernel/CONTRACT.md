@@ -25,6 +25,7 @@ The Kernel is the composition root and the process's owner: it loads `simorgh.to
 | `simorgh/kernel/selfcheck.py` | `--self-check`: proves the action path with stub Guardian/Execution on a private bus |
 | `simorgh/kernel/service.py` | `Kernel` (boot, handlers, shutdown) and `WorkerKernel` (local-multi worker process) |
 | `simorgh/kernel/state.py` | the system state machine |
+| `simorgh/kernel/statusread.py` | `simorgh status` without booting: `GET /api/status` on the running instance, else the last `system.state` read straight from the ledger files |
 | `simorgh/kernel/supervisor.py` | start by layer, health polling, restart with backoff, pause on safety-critical down |
 | `simorgh/kernel/vault.py` | encrypted multi-field credential vault and `vault:` lookups |
 
@@ -67,10 +68,10 @@ The Kernel is the composition root and the process's owner: it loads `simorgh.to
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `system` | simorgh/kernel/service.py:400 (`system.state` events) | the Kernel at boot (`_restore_autonomous_pause`) | forever |
+| `system` | simorgh/kernel/service.py:400 (`system.state` events) | the Kernel at boot (`_restore_autonomous_pause`); `simorgh status` when nothing answers (`statusread.py`, the files read directly, read-only) | forever |
 | `schedule` | simorgh/kernel/scheduler.py:33 (`schedule.added/cancelled/fired`) | the Scheduler at start (`materialize`) | forever |
 | `config:effective` | simorgh/kernel/service.py:473 | simorgh/interface/dispatch.py (`config` command) | forever |
-| `metrics:history` | simorgh/kernel/metrics.py:45 (a `MetricsTable` snapshot every `metrics_every_s`) | simorgh/interface/httpapi.py, simorgh/execution/tools.py | 7d in DEFAULT_RETENTION, but not applied while written (see ledger/CONTRACT.md) |
+| `metrics:history` | simorgh/kernel/metrics.py:45 (a `MetricsTable` snapshot every `metrics_every_s`) | simorgh/interface/httpapi.py, simorgh/execution/tools.py, `simorgh status` offline (`statusread.py`, last sample only) | 7d in DEFAULT_RETENTION, but not applied while written (see ledger/CONTRACT.md) |
 | `trace:<id>` | read only, simorgh/kernel/cli.py:271 (`simorgh trace`) | written by bus/trace.py | 2d |
 
 The Kernel also appends v1 records through `migrate_v1.py` (routes in ledger/migrate_v1.py). The `vault:`, `env:`, `bw:`, `ssm:` strings in `vault.py` are credential-reference prefixes, not ledger streams; the vault is an encrypted file (`vault.py::default_vault_path`).
@@ -109,6 +110,7 @@ Other environment the package reads: `SIMORGH_CONFIG`, `SIMORGH_RUNTIME_DATA_DIR
 - `kernel.config.load_config`, `LoadedConfig`, `ConfigError`; `kernel.api.RuntimeConfig`.
 - `kernel.registry.LAYERS`, `build_factories`, `known_layers`.
 - `kernel.selfcheck.run()` (the `--self-check` proof) and `kernel.vault.Vault`.
+- `kernel.statusread.read_status(config, *, timeout=2.0) -> (snapshot, source_line)`: what `simorgh status` prints. Never constructs a `Kernel`, never starts a Ledger client, never appends. It asks `GET /api/status` at `[interface] http_host`/`http_port` (a wildcard bind is asked on `127.0.0.1`) with `SIM_API_TOKEN` from the Kernel's secret chain, within `--timeout`; if nothing usable answers it reads the last `system.state` on `system` and the last `metrics:history` sample from the ledger files (`jsonl` read backwards, `sqlite` opened `immutable=1`, or `mode=ro` when a `-wal` is present; `memory`/`dynamodb` cannot be read offline and the command exits 1). The JSON on stdout carries `source: "live"` or `source: "ledger"` with `as_of`; the ledger form has `state`, `autonomous_paused`, `previous`/`reason`/`requested_by`, `mode` (from config) and `metrics`, and leaves out `run_id`, `uptime_seconds` and `subsystems`, which nothing records. One line on stderr says which source was used (`status: live, from <url>` or `status: from the ledger, as of <time> (<why not live>)`).
 - Other packages see the Kernel only through `simorgh.contracts.protocols` (`Context`, `Subsystem`, `Health`, `Clock`, `Logger`) and the topics above.
 - Module-level mutable state: `registry.DEFAULT_SECRETS` (a dict; mutating it changes every later boot in the process), `cli._HARD_EXIT` (patched by tests), `configcheck.KNOWN_DEAD_FIELDS`/`EFFECTIVE_DEFAULTS` (dicts read as tables). Process-wide side effect: `cli._configure_logging` installs a root logging handler.
 
@@ -138,6 +140,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/kernel/test_scheduler.py` -- tick cadence and conditions, activity clock, durable schedules replayed at start.
 - `tests/simorgh/kernel/test_state.py` -- legal transitions, idempotent pause/resume, scoped autonomous pause.
 - `tests/simorgh/kernel/test_supervisor_restarts.py` -- a `down` service is restarted with a fresh Context; the ticker drives it (B10).
+- `tests/simorgh/kernel/test_status_reads_never_boots.py` -- `simorgh status` with nothing running reads the ledger and leaves every file unchanged; with an instance answering it prints live data and never reads the ledger; `Kernel` is never constructed.
 - `tests/simorgh/kernel/test_selfcheck.py` -- the self-check proves approval with a verified token, rejects a forged one, and enforces the reserved topics.
 
 ## Known issues (2026-09-18 evaluation)
@@ -150,7 +153,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - B19 (low): `MetricsHistoryWriter` appends a ~2.3 KB snapshot every 10 s. A 7d retention entry was added 2026-09-18 but does not truncate a stream that is still written (ledger/CONTRACT.md). Open; stage 1 item 3 makes it a telemetry sample.
 - B7 (medium): one unbound `LedgerClient` handed to every Context (`context.py:141`). Open; stage 1 item 8.
 - B14 (low): three deployment modes, `WorkerKernel`, the identity registry and `--self-check` cover a topology that has never run. Open; stage 1 item 10.
-- B17 (low): `simorgh status` boots a second Kernel against the live data dir and appends to its ledger. Open; stage 1 item 9.
+- B17 (low): `simorgh status` booted a second Kernel against the live data dir and appended `config:effective` and `system.state` to its ledger. Fixed 2026-09-19 (stage 1 item 9): `statusread.py` asks the running instance or reads the ledger files, read-only (`tests/simorgh/kernel/test_status_reads_never_boots.py`).
 - B18 (low): no registry or cancellation of blocking work; `os._exit` in `cli.py` is the backstop. Open.
 - B16 (medium): the loader killed Sim 250 ms after SIGINT. Fixed 2026-09-18 in `simloader.py` (commit `fd27fc7`); the Kernel side (`Stopper`) was already correct.
 
@@ -161,7 +164,6 @@ Found while writing this contract (not in the catalogue): `[runtime] subsystems`
 - Stage 1 item 1: the Kernel injects a `Telemetry` implementation into every `Context` beside `bus` and `ledger`; `telemetry` joins `LAYERS` layer 0.
 - Stage 1 item 3: `MetricsHistoryWriter` writes telemetry samples instead of `metrics:history`.
 - Stage 1 item 8: `ContextFactory` builds a `LedgerClient` bound to each subsystem's `source`.
-- Stage 1 item 9: `simorgh status` reads `/api/status` or the last `system` event and never boots.
 - Stage 1 item 10: `WorkerKernel` (plan calls it `kernel/worker.py`; it lives in `service.py`) and the identity registry move under `simorgh/_frozen/`.
 - Stage 4 item 4: the Kernel injects in-process reader interfaces (persona, self, memory) for the ContextBuilder.
 - Stage 6 item 6 and stage 7 item 5: reminder delivery moves to `initiative/`; the scheduler publishes `task.wake` at a waiting task's `until` or matching event.

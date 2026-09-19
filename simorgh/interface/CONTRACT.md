@@ -150,6 +150,7 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 - `simorgh.interface.service.Service` (`service.py:108`): the Subsystem, built by the Kernel. Constructor flags `run_repl`, `http_enabled`, `wait_for_boot` let tests run it headless.
 - `simorgh.interface.api`: `Command`, `parse`, `VitalsCache`, `VitalsSnapshot`, used by the Kernel CLI and tests. `dispatch.dispatch`, `dispatch.Outcome` and `httpapi.HttpApi` are imported by tests; nothing in another package imports this one except the Kernel (the module-boundary test forbids it).
 - `HttpApi.register_route(method, path, handler, auth=True, max_body, rate)` is the only way to add a route; `auth=False` is reviewed per route.
+- `GET /api/status` and `config.Config.from_mapping` (`http_host`, `http_port`) are also read from outside the process: `simorgh status` (kernel/statusread.py) finds the running instance there, sending `SIM_API_TOKEN` as a bearer token so a gated server answers with the full snapshot, not only `_PUBLIC_STATUS_KEYS`. A reply must stay a JSON object with a `state` key, or the CLI falls back to the ledger. Changing the route, the port keys or that shape changes `simorgh status`.
 - Types from `simorgh.contracts`: `topics`, `envelope.Message/Event`, `protocols.Context/Health`, `registry.error_reply_payload`, `settings.config_path` (for `mcp approve`), `channels` (channel names), stream-name validation.
 - Module-level mutable state: none beyond constants. Per-instance state that matters: `Service._pending_turns` and `_pending_prompts` (futures keyed by session and prompt id), `TelegramChannel._sessions/_chats` and the WhatsApp equivalents (in memory only, lost on restart), `HttpApi` rate-limit deques and the single in-flight chat.
 
@@ -197,7 +198,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 ## Planned changes (roadmap)
 
-- Stage 1: trace ids kept from the percept through the turn; Ring signalling off the approval path (one `ring_live offer` proposal mints a session token, keepalive and close become HTTP handlers); `simorgh status` reads `/api/status` instead of booting.
+- Stage 1: trace ids kept from the percept through the turn; Ring signalling off the approval path (one `ring_live offer` proposal mints a session token, keepalive and close become HTTP handlers); (`simorgh status` reading `/api/status` instead of booting was done 2026-09-19, kernel/statusread.py.)
 - Stage 3: the TUI and `/api/chat` render `session.delta` as it arrives.
 - Stage 4: one persistent session per (channel, person); the reply-correlation key stays per message.
 - Stage 5: Telegram and WhatsApp resolve the sender and put `speaker` on the percept; typed CLI turns are the owner.

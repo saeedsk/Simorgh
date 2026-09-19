@@ -32,8 +32,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "worker", help="start a local-multi worker process (Orchestration only; see [runtime] mode)"
     )
     worker_p.add_argument("--id", dest="worker_id", required=True, help="this worker's instance id, e.g. w1")
-    status_p = sub.add_parser("status", help="print the current system.status snapshot")
-    status_p.add_argument("--timeout", type=float, default=2.0)
+    status_p = sub.add_parser(
+        "status", help="print the running instance's status, or the last one the ledger recorded (never boots)")
+    status_p.add_argument("--timeout", type=float, default=2.0, help="seconds to wait for the running instance")
     trace_p = sub.add_parser("trace", help="print the causal message trace for an id")
     trace_p.add_argument("trace_id")
     migrate_p = sub.add_parser("migrate-v1", help="import ~/.simorgh/memory.jsonl into the Ledger")
@@ -249,15 +250,23 @@ async def _cmd_worker(config_path: str | None, worker_id: str) -> int:
 
 
 async def _cmd_status(config_path: str | None, timeout: float) -> int:
-    config = load_config(config_path)
-    kernel = Kernel(config)
-    try:
-        await kernel.boot()
-        import json
+    """Ask the running instance, or read what the ledger last recorded.
+    Never boots a Kernel and never appends (B17): the old version built a
+    second Kernel against the live data dir, which could only ever report
+    on itself and wrote `config:effective` and `system.state` events to
+    the live ledger on every call. See `statusread.py`."""
+    import json
 
-        print(json.dumps(kernel.status_snapshot(), indent=2, default=str))
-    finally:
-        await kernel.shutdown()
+    from .statusread import read_status
+
+    config = load_config(config_path)
+    try:
+        snapshot, source_line = read_status(config, timeout=timeout)
+    except LookupError as exc:  # a ledger backend that cannot be read offline
+        print(f"status: nothing answered and {exc}", file=sys.stderr)
+        return 1
+    print(source_line, file=sys.stderr)
+    print(json.dumps(snapshot, indent=2, default=str))
     return 0
 
 
