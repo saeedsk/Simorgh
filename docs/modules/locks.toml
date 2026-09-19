@@ -4,3 +4,27 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.cognition]
+by = "opus-main"
+task = "chat write tools, provider notice, search scope, TUI noise"
+since = "2026-09-19T12:29:46+00:00"
+until = "2026-09-19T20:29:46+00:00"
+
+[locks.execution]
+by = "opus-main"
+task = "chat write tools, provider notice, search scope, TUI noise"
+since = "2026-09-19T12:29:46+00:00"
+until = "2026-09-19T20:29:46+00:00"
+
+[locks.interface]
+by = "opus-main"
+task = "chat write tools, provider notice, search scope, TUI noise"
+since = "2026-09-19T12:29:46+00:00"
+until = "2026-09-19T20:29:46+00:00"
+
+[locks.orchestration]
+by = "opus-main"
+task = "chat write tools, provider notice, search scope, TUI noise"
+since = "2026-09-19T12:29:45+00:00"
+until = "2026-09-19T20:29:45+00:00"
