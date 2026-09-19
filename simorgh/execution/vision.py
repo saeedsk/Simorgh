@@ -277,9 +277,15 @@ _NO_LOCK = _NullLock()
 class CameraVision:
     """The camera-event watcher. One instance per Execution service."""
 
-    def __init__(self, *, config, registry, ctx) -> None:
+    def __init__(self, *, config, registry, ctx, act) -> None:
         self._config = config
         self._registry = registry
+        # `act(tool_name, args, *, rationale) -> ToolResult`: how the
+        # watcher calls `cam_list`/`ring_list`/`*_snapshot`. The Service
+        # passes `SelfActions.run`, so every call is proposed and decided
+        # by Guardian like anyone's (stage 1 item 7, S12); the registry
+        # is only asked whether a tool exists.
+        self._act = act
         self._ctx = ctx
         # When each camera was last looked at, so a person walking past a
         # driveway camera is one description rather than one per motion
@@ -463,20 +469,17 @@ class CameraVision:
         root = Path(self._config.repo_root)
         out: list[tuple[str, str]] = []
         for tool_name, host in (("cam_list", ""), ("ring_list", "ring")):
-            tool = self._registry.get(tool_name)
-            if tool is None:
+            if self._registry.get(tool_name) is None:
                 continue
-            ctx = ToolContext(
-                action_id=f"camera-baseline-{int(self._ctx.clock.now())}", task_id=None, scope={},
-                constraints={}, data_dir=root, clock=self._ctx.clock, logger=self._ctx.logger,
-                ledger=self._ctx.ledger, bus=self._ctx.bus,
-            )
             try:
-                result = await tool.run({}, ctx=ctx)
+                result = await self._act(tool_name, {},
+                                         rationale="camera vision: which cameras still need a baseline")
             except Exception as exc:  # noqa: BLE001 -- a camera source that will not answer is skipped
                 self._ctx.logger.warning("camera_vision_list_failed", source=tool_name, error=repr(exc))
                 continue
             if not result.ok:
+                self._ctx.logger.warning("camera_vision_list_refused", source=tool_name,
+                                         detail=(result.error or "")[:160])
                 continue
             for entry in (result.metadata or {}).get("cameras") or []:
                 name = str(entry.get("name") if isinstance(entry, dict) else entry or "").strip()
@@ -488,8 +491,8 @@ class CameraVision:
     async def _stills(self, payload: dict, camera: str) -> list[str]:
         """A couple of frames, a moment apart, as absolute paths."""
         ring = str(payload.get("host") or "").lower() == "ring"
-        tool = self._registry.get("ring_snapshot" if ring else "cam_snapshot")
-        if tool is None:
+        tool_name = "ring_snapshot" if ring else "cam_snapshot"
+        if self._registry.get(tool_name) is None:
             return []
         root = Path(self._config.repo_root)
         wanted = max(1, int(getattr(self._config, "camera_vision_stills", 2)))
@@ -506,13 +509,9 @@ class CameraVision:
             for index in range(wanted):
                 if index:
                     await asyncio.sleep(gap)
-                ctx = ToolContext(
-                    action_id=f"camera-vision-{int(self._ctx.clock.now())}-{index}", task_id=None, scope={},
-                    constraints={}, data_dir=root, clock=self._ctx.clock, logger=self._ctx.logger,
-                    ledger=self._ctx.ledger, bus=self._ctx.bus,
-                )
                 try:
-                    result = await tool.run({"camera": camera}, ctx=ctx)
+                    result = await self._act(tool_name, {"camera": camera},
+                                             rationale=f"camera vision: a still from {camera}")
                 except Exception as exc:  # noqa: BLE001 -- a camera that will not answer is one fewer frame
                     self._ctx.logger.warning("camera_vision_snapshot_failed", camera=camera, error=repr(exc))
                     continue

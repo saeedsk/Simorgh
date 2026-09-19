@@ -69,6 +69,18 @@ class _Registry:
         return self._tools.get(name)
 
 
+def _direct(registry):
+    """The test's stand-in for the action path: Execution passes
+    `SelfActions.run`, which proposes the call and waits for Guardian and
+    `_on_approved` (test_own_calls_go_through_guardian.py proves that
+    half). Here the fake tool simply answers."""
+
+    async def act(tool_name, args, *, rationale=""):
+        return await registry.get(tool_name).run(args, ctx=None)
+
+    return act
+
+
 class BaselineSweepTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -86,7 +98,8 @@ class BaselineSweepTestCase(unittest.IsolatedAsyncioTestCase):
             tools["cam_list"] = nvr
         if ring is not None:
             tools["ring_list"] = ring
-        vision = CameraVision(config=config, registry=_Registry(**tools), ctx=ctx)
+        vision = CameraVision(config=config, registry=_Registry(**tools), ctx=ctx,
+                              act=_direct(_Registry(**tools)))
 
         async def _look(payload, camera):
             self.looked.append((camera, str(payload.get("host") or "")))

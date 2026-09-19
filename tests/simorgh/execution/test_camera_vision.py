@@ -85,6 +85,18 @@ class _Registry:
         return self._tools.get(name)
 
 
+def _direct(registry):
+    """The test's stand-in for the action path: Execution passes
+    `SelfActions.run`, which proposes the call and waits for Guardian and
+    `_on_approved` (test_own_calls_go_through_guardian.py proves that
+    half). Here the fake tool simply answers."""
+
+    async def act(tool_name, args, *, rationale=""):
+        return await registry.get(tool_name).run(args, ctx=None)
+
+    return act
+
+
 class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -111,7 +123,7 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
         config = Config(repo_root=self.root, camera_vision_gap_s=0.0, **settings)
         ctx = types.SimpleNamespace(clock=self.clock, logger=self.logger, ledger=None, bus=self.bus)
         registry = _Registry(**({"cam_snapshot": self.snapshot} if tools is None else tools))
-        return CameraVision(config=config, registry=registry, ctx=ctx)
+        return CameraVision(config=config, registry=registry, ctx=ctx, act=_direct(registry))
 
     async def _event(self, vision, **payload) -> None:
         body = {"channel": 1, "camera": "Front Door", "kinds": ["person"]}
@@ -262,7 +274,8 @@ class _VisionHarness(unittest.IsolatedAsyncioTestCase):
         config = Config(repo_root=self.root, camera_vision_gap_s=0.0,
                         camera_vision_baseline_samples=samples)
         ctx = types.SimpleNamespace(clock=self.clock, logger=self.logger, ledger=None, bus=self.bus)
-        return CameraVision(config=config, registry=_Registry(cam_snapshot=self.snapshot), ctx=ctx)
+        registry = _Registry(cam_snapshot=self.snapshot)
+        return CameraVision(config=config, registry=registry, ctx=ctx, act=_direct(registry))
 
     async def _event(self, vision, **payload):
         body = {"channel": 1, "camera": "Front", "kinds": ["motion"]}

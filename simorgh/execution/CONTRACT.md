@@ -14,6 +14,7 @@ Core (the part that stays in Execution after stage 9):
 |---|---|
 | `simorgh/execution/__init__.py` | re-exports `Service` |
 | `simorgh/execution/service.py` | `Service`: registry, `_on_approved` dispatch, results, inflight replay, skills, MCP, probes, boot autostarts |
+| `simorgh/execution/selfaction.py` | `SelfActions`: Execution's own tool calls (boot watches, charts autoplay, camera watcher) proposed as `action.proposed{proposed_by: "execution"}` and awaited as `action.result` / `action.denied` by action id |
 | `simorgh/execution/verifier.py` | `ApprovalVerifier`: args hash, expiry, HMAC, replay check on every approval |
 | `simorgh/execution/config.py` | `[execution]` dataclass, `find_repo_root` |
 | `simorgh/execution/tools.py` | the core tools (read/search/list, sandboxes, `run_tests` and its landing gate, patch/replace/commit/revert/discard, tasks, skills, web_fetch, sim_command, memory_forget) and `builtin_tools()` |
@@ -62,7 +63,8 @@ Each subpackage exports one `<name>_tools(config, secrets=...)` factory that `bu
 | `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/execution/service.py | `paused`/`stopping` makes every later approval answer `error="paused"` |
 | `learn.skill.acquired` | `messages/learn.py::LearnSkillAcquired` | simorgh/execution/service.py | loads that one skill as `skill:<name>` (Execution is also its only publisher) |
 | `world.camera.event` | `messages/world.py::CameraEvent` | simorgh/execution/service.py (`vision.py`) | stills plus a vision model call; announces the description |
-| `ui.dash.state` | `messages/ui.py::DashState` | simorgh/execution/service.py | a `charts` view from anyone but Execution autoplays `tv_charts` (a direct tool run, S12) |
+| `ui.dash.state` | `messages/ui.py::DashState` | simorgh/execution/service.py | a `charts` view from anyone but Execution proposes `tv_charts` (in a background task, through `SelfActions`) |
+| `action.result` / `action.denied` | `messages/action.py` | simorgh/execution/selfaction.py | a short-lived subscription per own proposal, matched on `action_id`: the outcome of a call Execution proposed itself (it also publishes both) |
 | `ui.hook.received` | `messages/ui.py::UiHookReceived` | simorgh/execution/home/cameras.py | while `cam_watch` is on, turns the NVR's push into `world.camera.event` |
 | replies | `memory.retrieve`, `cognition.think`, `world.env.query`, `task.create`, `task.list.request`, `ui.command.request`, `memory.forget`, `voice.voices.request`, `voice.control.request` | service.py, vision.py, tools.py | replies to Execution's own `bus.request`s (not subscriptions) |
 
@@ -72,6 +74,7 @@ The generated rows for `action.denied`, `action.result`, `cognition.think`, `per
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
+| `action.proposed` | `messages/action.py::ActionProposed` | simorgh/execution/selfaction.py | Execution's own calls: `ring_watch on` / `cam_watch on` / `cast_show` at boot (per their `*_on_start` keys), `tv_charts` on a charts view, the camera watcher's `cam_list` / `ring_list` / `cam_snapshot` / `ring_snapshot`; `proposed_by="execution"`, no `task_id`, `scope={paths: [], network: true}`, the tool's own declared `reversibility` |
 | `action.result` | `messages/action.py::ActionResult` | simorgh/execution/service.py | once per verified approval (ok, error, timeout, paused, unknown tool); also at boot for each inflight action with `error="interrupted by restart"` |
 | `action.denied` | `messages/action.py::ActionDenied` | simorgh/execution/service.py | token verification failed; always `layer="token"` |
 | `tool.registered` | `messages/tool.py::ToolRegistered` | simorgh/execution/service.py | at boot per tool, per MCP tool, per skill on disk (announced, not loaded), on each skill load; `schema_ref=""` (T2) |
@@ -263,6 +266,7 @@ Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; over
 
 - `simorgh.execution.service.Service` (`name = "execution"`, layer 3): `Service(config=None, extra_tools=None, connectors=None)`; `start(ctx)` refuses to start without `ctx.secrets["__hmac__"]`; `stop()`; `health()` (degraded on the last token failure, an MCP start failure, or a failed free probe). `register_connector()`, `skill_files()`. `consumes` is exact for subscriptions (pinned by `tests/simorgh/test_manifests_match_the_code.py`).
 - The Tool protocol and `ToolResult`, `ToolContext` live in `simorgh/contracts/protocols.py:167-202`: a tool has `name`, `description`, `read_only`, `reversibility` (`read_only | reversible | irreversible`), `args_schema`, `async run(args, *, ctx) -> ToolResult`; an optional `timeout_s` is honoured by `service.py::timeout_for`. `ToolResult` is `ok`, `output`, `output_ref`, `error` (free text; `refused: ...` by convention, T9), `side_effects` (labels), `metadata` (`rows` go to `results/`, `stderr` is appended to `error`). `ToolContext.root` is the task's worktree, set from the proposal's `task_id`, never from arguments.
+- `simorgh.execution.selfaction.SelfActions(bus=, ledger=, logger=, registry=, timeout_for=)`: `await run(tool_name, args, *, rationale, timeout=None) -> ToolResult` proposes the call and returns its outcome (output read back from `output_ref`, metadata from `metadata_ref`; `metadata["denied"]` on a denial). `CameraVision(config=, registry=, ctx=, act=)` takes that `run` as `act`; the registry is only asked whether a tool exists.
 - `extra_tools` and `external_tools` are the seams for tools defined elsewhere; every such tool still runs only through `_on_approved`.
 - Module-level state (risks): `media/androidtv.py:54` `_PENDING` (a pairing in progress, per process); `verifier.py`'s `ReplayGuard` is in memory, so after a restart replay protection rests on token expiry alone; `vision.py:274` `_NO_LOCK`. `media/tvmedia.py:35` resolves its directory from `Path.cwd()`.
 
@@ -270,6 +274,7 @@ Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; over
 
 - No tool runs for an `action.approved` whose args (fetched from Guardian's `received` event on `action:<id>`, blob refs resolved) do not hash to `args_sha256`, whose `expires_at` has passed, whose HMAC does not verify with the Kernel's secret, or whose `action_id` was already consumed; each failure publishes `action.denied{layer: "token"}` and appends `verified{outcome: false}` (`service.py:759-773`, `test_verifier.py`).
 - Only Execution subscribes to `action.approved`; it never subscribes to `action.proposed` (`contracts/topics.py` `SUBSCRIBE_ONLY_BY`).
+- A tool runs only in `Service._on_approved` (or inside another tool's own `run`, passing on the approved call's `ToolContext`). Execution's own calls are proposed through `selfaction.SelfActions.run` and wait for their `action.result` / `action.denied` by action id; a denial, a timeout (the tool's budget plus 30 s) or a bus error comes back as `ToolResult(ok=False)`, is logged (`<event>_denied` / `<event>_failed`) and leaves the feature off, never raised. No `ToolContext` is built anywhere else (`test_own_calls_go_through_guardian.py::TestTheScan`).
 - Execution may publish `action.denied` only with `layer="token"` (`PUBLISH_PAYLOAD_CONSTRAINTS[(action.denied, "execution")]`); it never publishes `action.approved` (`PUBLISH_ONLY_BY`: guardian, kernel). `PUBLISH_ONLY_BY` also allows it `system.restart` and `system.reload`; no code in the package publishes either today.
 - Every verified approval yields exactly one `action.result` (success, error, timeout, crash, `paused`, `unknown tool`); an approval started but unfinished at shutdown yields `error="interrupted by restart"` at the next boot.
 - A tool call's deadline is `constraints.timeout_s`, else the tool's `timeout_s`, else `default_timeout_s` (60 s); the bus handler itself is unbounded so a long gate is not cut from outside.
@@ -281,6 +286,7 @@ Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; over
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract execution`.
 
+- `tests/simorgh/execution/test_own_calls_go_through_guardian.py` -- boot watches, charts autoplay and the camera watcher's list/snapshot are proposed with `proposed_by="execution"` and run through `_on_approved`; a denial runs nothing and leaves the feature off; an AST scan finds no tool run or `ToolContext` outside `_on_approved`.
 - `tests/simorgh/execution/test_verifier.py` -- the six token outcomes: ok, missing args, hash mismatch, expired, bad signature, replay.
 - `tests/simorgh/integration/test_guardian_execution_action_path.py` -- real Guardian + Execution through the Kernel: an approved tool runs, a forged approval is refused before any tool runs, pause and protected paths deny.
 - `tests/simorgh/execution/test_worktree_land_gate.py` -- the landing gate refuses nothing-collected, a gutted suite and a forged exit code; no loader means no second opinion.
@@ -301,7 +307,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - S7 (low): the in-process HMAC is ceremony today; keep it.
 - S8 (medium): physical tools gated like code. Partly addressed in Guardian (`PhysicalRule`, commit `8916e82`); every device tool still declares its own label here.
 - S11 (medium): `shell.py` refusals are a hint, not a boundary. Open; stage 6 tiers.
-- S12 / T3 (high): six direct `tool.run()` calls with synthetic action ids and no proposal, token or `action:` stream: `service.py:488, 521, 547, 565` (Ring/NVR watch and TV autostart, charts autoplay) and `vision.py` list/snapshot calls. Open; stage 1 item 7.
+- S12 / T3 (high): six direct `tool.run()` calls with synthetic action ids and no proposal, token or `action:` stream (Ring/NVR watch and TV autostart, charts autoplay, the camera watcher's list/snapshot). Fixed 2026-09-19 (stage 1 item 7): all go through `selfaction.SelfActions` and `_on_approved`, pinned by an AST scan. Not changed: `camera_describe` and `cam_stream mode=full` run `*_snapshot` / `cast_play` inside their own approved `run` with the caller's context, so Guardian sees the outer call only. Cost: each camera still is now an `action:` stream (L4).
 - S13 / V9 (medium): `sim_command` (`tools.py:1993`) lets the model run any parsed CLI verb; Guardian sees only the wrapper. Open.
 - T2 (high): `tool.registered` ships `schema_ref=""` and no schema. Open; stage 2 item 1.
 - T4 / W3 (high): `ring_live` offer, keepalive and close are each an approved action. Open; stage 1 item 6.
@@ -321,7 +327,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 ## Planned changes (roadmap)
 
-- Stage 1 (`docs/plan/stage-1-telemetry-out-of-the-decision-log.md`): trace ids threaded through Execution's `Message.new` sites (item 2); tool-run spans (item 4); a `deadline` in the envelope that shrinks tool timeouts (item 5); Ring signalling off the approval path, one `ring_live offer` per session (item 6); the six direct tool runs go through `action.proposed` with `proposed_by="execution"` (item 7).
+- Stage 1 (`docs/plan/stage-1-telemetry-out-of-the-decision-log.md`): trace ids threaded through Execution's `Message.new` sites (item 2); tool-run spans (item 4); a `deadline` in the envelope that shrinks tool timeouts (item 5); Ring signalling off the approval path, one `ring_live offer` per session (item 6); the six direct tool runs go through `action.proposed` with `proposed_by="execution"` (item 7, done 2026-09-19).
 - Stage 2 (`docs/plan/stage-2-native-tool-use.md`): `tool.registered` carries the full ToolSpec with `input_schema` (item 1, `_announce_tool`, MCP `inputSchema` unflattened); `ToolResult.error_kind` (item 8).
 - Stage 5 item 6: an effect-free `memory_search` built-in.
 - Stage 6 (`docs/plan/stage-6-self-world-people-tiers-initiative.md`): safety tiers 0-3 computed from the ToolSpec (item 5); `vision.py`'s announce step moves into `initiative/` (item 6); people-aware identity (item 4).

@@ -48,6 +48,7 @@ class _ExecutionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.ledger = make_ledger({"backend": "memory"}, clock=self.clock)
         await self.ledger.start()
         backend = make_backend(BusConfig(backend="memory"), clock=self.clock)
+        self.backend = backend
         self.bus = make_client(backend, source="execution", ledger=self.ledger, clock=self.clock)
         await self.bus.start()
         self.ctx = Context(
@@ -64,6 +65,17 @@ class _ExecutionServiceTestCase(unittest.IsolatedAsyncioTestCase):
     async def _start(self, *, config: ExecutionConfig | None = None) -> None:
         self.service = Service(config=config or ExecutionConfig(repo_root=self.root))
         await self.service.start(self.ctx)
+
+    async def _guardian(self, *, approve: bool = True):
+        """Execution's own calls are proposed (stage 1 item 7); this
+        answers them the way Guardian would."""
+        from tests.simorgh.execution.fake_guardian import FakeGuardian
+
+        guardian = FakeGuardian(self.backend, ledger=self.ledger, clock=self.clock,
+                                secret_hex=self.ctx.secrets["__hmac__"], approve=approve)
+        await guardian.start()
+        self.addAsyncCleanup(guardian.stop)
+        return guardian
 
     async def _wait_for(self, type_: str, *, predicate=None, timeout: float = 2.0) -> Message | None:
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
@@ -524,6 +536,7 @@ class TestRingWatchStartsByItself(_ExecutionServiceTestCase):
 
     async def test_with_a_token_the_watch_is_switched_on_and_without_one_nothing_runs(self):
         await self._start()
+        await self._guardian()
         calls = []
 
         class FakeWatch:
@@ -554,6 +567,7 @@ class TestRingWatchStartsByItself(_ExecutionServiceTestCase):
         import dataclasses
 
         await self._start()
+        await self._guardian()
         calls = []
 
         class FakeShow:

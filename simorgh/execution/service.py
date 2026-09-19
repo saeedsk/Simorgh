@@ -46,6 +46,7 @@ from .config import Config
 # importing the Ledger's helper (the module-boundary rule).
 _BLOB_REF = re.compile(r"^blob:[0-9a-f]{64}$")
 from .external import load_external_tools
+from .selfaction import SelfActions
 from .mcp import McpClient, McpServerConfig, McpToolProxy, mcp_single_arg_key
 from .vision import CameraVision
 from .tools import RunTestsTool, SkillTool, builtin_tools
@@ -107,11 +108,15 @@ class Service:
     # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
     topics.DASH_STATE,
     topics.UI_HOOK_RECEIVED,
+    # The outcome of Execution's own proposals, keyed by action id
+    # (selfaction.py; stage 1 item 7).
+    topics.ACTION_RESULT, topics.ACTION_DENIED,
 )
     # Every topic a message is built on anywhere in the package, requests
     # included; pinned by tests/simorgh/execution/test_produces_manifest.py.
     produces = (
-        topics.ACTION_RESULT, topics.ACTION_DENIED,
+        # `action.proposed`: Execution's own calls (selfaction.py), stage 1 item 7.
+        topics.ACTION_PROPOSED, topics.ACTION_RESULT, topics.ACTION_DENIED,
         topics.TOOL_REGISTERED, topics.TOOL_INVOKED, topics.TOOL_PROBED, topics.TOOL_UNAVAILABLE,
         topics.SYSTEM_METRICS, topics.PERCEPT_WEB_FETCHED, topics.LEARN_SKILL_ACQUIRED,
         topics.UI_NOTICE, topics.VOICE_SPEAK_REQUEST, topics.COGNITION_THINK, topics.MEMORY_RETRIEVE,
@@ -145,6 +150,10 @@ class Service:
         self._ring_autostart: asyncio.Task | None = None
         self._cam_autostart: asyncio.Task | None = None
         self._tv_autostart: asyncio.Task | None = None
+        # Execution's own calls (boot watches, charts autoplay, the camera
+        # watcher) go through `action.proposed` like anyone's (selfaction.py).
+        self._self_actions: SelfActions | None = None
+        self._self_tasks: set[asyncio.Task] = set()
         self._probe_results: list = []
         # One worktree per code task (worktree.py); None when the repo
         # is not a git checkout or `[execution] worktrees = false`.
@@ -235,7 +244,15 @@ class Service:
         # happened. `vision.py` turns it into a sentence: a couple of
         # stills, a model that can see them, and the answer on screen
         # with the time and out loud.
-        self._vision = CameraVision(config=self._config, registry=self._registry, ctx=ctx)
+        # Every tool Execution starts by itself is proposed, decided by
+        # Guardian and run by `_on_approved` like any other (stage 1 item
+        # 7, S12): no second, unguarded way to run a tool.
+        self._self_actions = SelfActions(
+            bus=ctx.bus, ledger=ctx.ledger, logger=ctx.logger, registry=self._registry,
+            timeout_for=lambda tool: timeout_for(tool, {}, self._config.default_timeout_s),
+        )
+        self._vision = CameraVision(config=self._config, registry=self._registry, ctx=ctx,
+                                    act=self._self_actions.run)
         self._subs.append(await ctx.bus.subscribe(topics.CAMERA_EVENT, self._vision.on_camera_event))
         # ...and it learns each camera's scene by itself, rather than waiting
         # for motion that a quiet camera never sees.
@@ -413,6 +430,8 @@ class Service:
             self._cam_autostart.cancel()
         if self._tv_autostart is not None and not self._tv_autostart.done():
             self._tv_autostart.cancel()
+        for task in list(self._self_tasks):
+            task.cancel()
         if self._probe_task is not None and not self._probe_task.done():
             self._probe_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -490,19 +509,8 @@ class Service:
             return False
         if delay_s:
             await asyncio.sleep(delay_s)
-        tool = self._registry.get("ring_watch")
-        if tool is None:
-            return False
-        ctx = ToolContext(action_id="ring-watch-boot", task_id=None, scope={}, constraints={},
-                          data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
-                          ledger=self._ctx.ledger, bus=self._ctx.bus)
-        try:
-            result = await tool.run({"on": True}, ctx=ctx)
-        except Exception as exc:  # noqa: BLE001 -- Ring's cloud being down is not the service's failure
-            self._ctx.logger.warning("ring_watch_autostart_failed", error=repr(exc))
-            return False
-        self._ctx.logger.info("ring_watch_autostart", ok=result.ok, detail=(result.output or result.error or "")[:160])
-        return bool(result.ok)
+        return await self._propose_own("ring_watch", {"on": True}, event="ring_watch_autostart",
+                                       rationale="boot: keep the Ring stills fresh ([execution] ring_watch_on_start)")
 
     async def _autostart_cam_watch(self, *, delay_s: float = 20.0) -> bool:
         """Run `cam_watch on` at boot, so the NVR's motion reaches Sim.
@@ -523,20 +531,8 @@ class Service:
             return False
         if delay_s:
             await asyncio.sleep(delay_s)
-        tool = self._registry.get("cam_watch")
-        if tool is None:
-            return False
-        ctx = ToolContext(action_id="cam-watch-boot", task_id=None, scope={}, constraints={},
-                          data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
-                          ledger=self._ctx.ledger, bus=self._ctx.bus)
-        try:
-            result = await tool.run({"on": True}, ctx=ctx)
-        except Exception as exc:  # noqa: BLE001 -- an NVR that is not there is not a service failure
-            self._ctx.logger.warning("cam_watch_autostart_failed", error=repr(exc))
-            return False
-        self._ctx.logger.info("cam_watch_autostart", ok=result.ok,
-                              detail=(result.output or result.error or "")[:160])
-        return bool(result.ok)
+        return await self._propose_own("cam_watch", {"on": True}, event="cam_watch_autostart",
+                                       rationale="boot: bring NVR motion to Sim ([execution] cam_watch_on_start)")
 
     async def _autostart_tv_show(self, *, delay_s: float = 25.0) -> bool:
         """Run `tv show` at boot when a TV is remembered and `[execution]
@@ -549,36 +545,41 @@ class Service:
             return False
         if delay_s:
             await asyncio.sleep(delay_s)
-        tool = self._registry.get("cast_show")
-        if tool is None:
-            return False
-        ctx = ToolContext(action_id="tv-show-boot", task_id=None, scope={}, constraints={},
-                          data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
-                          ledger=self._ctx.ledger, bus=self._ctx.bus)
-        try:
-            result = await tool.run({}, ctx=ctx)
-        except Exception as exc:  # noqa: BLE001 -- a TV that is off is not the service's failure
-            self._ctx.logger.warning("tv_show_autostart_failed", error=repr(exc))
-            return False
-        self._ctx.logger.info("tv_show_autostart", ok=result.ok, detail=(result.output or result.error or "")[:160])
-        return bool(result.ok)
+        return await self._propose_own("cast_show", {}, event="tv_show_autostart",
+                                       rationale="boot: the dashboard on the remembered TV ([execution] tv_show_on_start)")
 
     async def _on_dash_state(self, message: Message) -> None:
         payload = message.payload or {}
         if str(payload.get("view") or "") != "charts" or getattr(message, "source", "") == "execution":
             return
-        tool = self._registry.get("tv_charts")
-        if tool is None:
+        if self._registry.get("tv_charts") is None:
             return
-        ctx = ToolContext(action_id=f"charts-{message.id}", task_id=None, scope={}, constraints={},
-                          data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
-                          ledger=self._ctx.ledger, bus=self._ctx.bus)
-        try:
-            result = await tool.run({"chart": str(payload.get("chart") or "kpop")}, ctx=ctx)
-        except Exception as exc:  # noqa: BLE001 -- a TV that is off is not the service's failure
-            self._ctx.logger.warning("charts_autoplay_failed", error=repr(exc))
-            return
-        self._ctx.logger.info("charts_autoplay", ok=result.ok, detail=(result.output or result.error or "")[:160])
+        # Off the bus handler: the proposal's answer arrives on the bus,
+        # and a handler that waits on it would hold `ui.dash.state` for
+        # as long as Guardian and the tool take.
+        task = asyncio.create_task(self._propose_own(
+            "tv_charts", {"chart": str(payload.get("chart") or "kpop")}, event="charts_autoplay",
+            rationale="the dashboard's Charts view was chosen: play the chart on the TV"),
+            name="execution:charts-autoplay")
+        self._self_tasks.add(task)
+        task.add_done_callback(self._self_tasks.discard)
+
+    async def _propose_own(self, tool_name: str, args: dict, *, event: str, rationale: str) -> bool:
+        """Run one of Execution's own calls through the action path and
+        log how it went. Returns whether it ran and succeeded; a denial,
+        a timeout or an absent tool leaves the feature off and is logged,
+        never raised."""
+        if self._registry.get(tool_name) is None or self._self_actions is None:
+            return False
+        result = await self._self_actions.run(tool_name, args, rationale=rationale)
+        detail = (result.output or result.error or "")[:160]
+        if (result.metadata or {}).get("denied"):
+            self._ctx.logger.warning(f"{event}_denied", detail=detail)
+        elif not result.ok:
+            self._ctx.logger.warning(f"{event}_failed", detail=detail)
+        else:
+            self._ctx.logger.info(event, ok=True, detail=detail)
+        return bool(result.ok)
 
     async def _on_skill_acquired(self, message: Message) -> None:
         if message.source == "execution":
