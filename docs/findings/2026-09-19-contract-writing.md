@@ -26,13 +26,13 @@ Five general-purpose agents, 19 modules split by layer. Each edited only its own
 | The benchmark runner resolved checkouts against the cwd | benchmark | `3a441a5` |
 | No test pinned that a landing publishes `learn.self_patch.applied` | orchestration | test added |
 | `verification` was a namespace package, invisible to the tools, with no contract | verification | `8b7e4dd` |
+| Verification's own pytest runs inherited Sim's full environment (every provider key) with no resource limits; one of the three runs executes the model's own tests on a copy of the task's tree (the other two run tests already on main, which the agent's report overstated) | verification | this commit |
 
 ## Open, by what they risk
 
 **Safety and correctness (do first)**
 
-- `verification/checks/_baseline.py:166, 215, 271`: Verification runs `git` and `pytest` itself with `subprocess.run` on a copy of the task's worktree -- tests the model wrote, with the full environment, outside Guardian and the sandbox limits. Its docstring says it never runs a tool.
-- `verification/service.py:108`: `_paused` is written and never read; verifications run while the system is paused.
+- `verification/service.py:108`: `_paused` is written and never read; verifications run while the system is paused. Left open on purpose: deferring one would run into Orchestration's 300 s verification wait and risk accepting a task unverified, which is worse. Decide together with stage 4's budgets.
 - `planning/planmode.py:1-8`: plans under review or waiting for a person are held in memory only; the `plan:<id>` stream the docstring describes is never written, so a restart loses them.
 - `contracts/settings.py:161-171` vs `kernel/config.py:157`: `config_path()` and the Kernel can resolve different `simorgh.toml` files when the data dir is not the default (the B11 shape).
 - `kernel/config.py`: `[runtime] subsystems` and `disabled` are parsed and never applied, so no subsystem can be switched off by config.

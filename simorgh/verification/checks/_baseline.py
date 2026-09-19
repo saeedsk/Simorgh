@@ -167,13 +167,51 @@ def _present_at_base(dest: Path, nodeids: tuple[str, ...]) -> tuple[str, ...] | 
             [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
              "--collect-only", "--continue-on-collection-errors", *on_disk],
             capture_output=True, text=True, cwd=dest, timeout=BASELINE_TIMEOUT_S / 2,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, env=_scrubbed_env(), preexec_fn=_limits(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
     collected = {line.strip() for line in done.stdout.splitlines() if "::" in line}
     known.update(n for n in nodeids if n in collected)
     return tuple(n for n in nodeids if n in known)
+
+
+#: What these pytest runs inherit from Sim's environment: enough to find
+#: Python and a temp dir, nothing that holds a credential. Two of the three
+#: run code already on main (tests present at the session's base
+#: revision); `still_failing_here` runs failing tests on a copy of the
+#: task's own tree -- code the model just wrote. All three ran with Sim's
+#: full environment (every provider key) and no resource limits, outside
+#: Guardian (found writing verification's CONTRACT.md, 2026-09-19).
+_ENV_KEEP = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TZ", "PYTHONPATH", "VIRTUAL_ENV")
+#: CPU seconds and address space for one baseline run, like run_tests.
+_RUN_CPU_S = 600
+_RUN_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def _scrubbed_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k in _ENV_KEEP or k.startswith("LC_")}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
+def _limits():
+    """preexec_fn applying CPU, memory and core-dump limits (POSIX only)."""
+    try:
+        import resource
+    except ImportError:  # pragma: no cover -- not POSIX
+        return None
+
+    def _set() -> None:
+        for res, value in ((resource.RLIMIT_CPU, _RUN_CPU_S), (getattr(resource, "RLIMIT_AS", None), _RUN_MEMORY_BYTES),
+                           (resource.RLIMIT_CORE, 0)):
+            if res is None:
+                continue
+            try:
+                resource.setrlimit(res, (value, value))
+            except (ValueError, OSError):
+                pass
+    return _set
 
 
 def failing_at_base(base_ref: str, nodeids: tuple[str, ...]) -> frozenset[str] | None:
@@ -216,7 +254,7 @@ def failing_at_base(base_ref: str, nodeids: tuple[str, ...]) -> frozenset[str] |
                 [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                  "--continue-on-collection-errors", *runnable],
                 capture_output=True, text=True, cwd=dest, timeout=remaining,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL, env=_scrubbed_env(), preexec_fn=_limits(),
             )
         except (OSError, subprocess.SubprocessError):
             return None
@@ -272,7 +310,7 @@ def still_failing_here(root: Path, nodeids: tuple[str, ...]) -> frozenset[str] |
                 [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                  "--continue-on-collection-errors", *nodeids],
                 capture_output=True, text=True, cwd=dest, timeout=RERUN_TIMEOUT_S,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL, env=_scrubbed_env(), preexec_fn=_limits(),
             )
         except (OSError, subprocess.SubprocessError):
             return None
