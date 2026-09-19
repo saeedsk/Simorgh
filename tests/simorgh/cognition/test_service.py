@@ -495,3 +495,29 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _TimedProvider(_FakeProvider):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.timeouts: list = []
+
+    async def complete(self, messages, *, tools, max_tokens, timeout=None):
+        self.timeouts.append(timeout)
+        return await super().complete(messages, tools=tools, max_tokens=max_tokens, timeout=timeout)
+
+
+class APurposeTimeCapApplies(CognitionServiceTestCase):
+    """The purpose's max_seconds reaches the provider call (found writing
+    cognition's CONTRACT.md, 2026-09-19: chat's 90 s never applied; every
+    think ran against the 180 s default)."""
+
+    async def test_a_chat_think_is_bounded_by_the_chat_cap(self):
+        provider = _TimedProvider("fake_llm", text="hello")
+        await self._make(providers=[provider])
+        await self.bus.request(Message.new(topics.COGNITION_THINK, source="test", payload={
+            "purpose": "chat", "messages": [{"role": "user", "content": "hi"}],
+            "budget": {"max_tokens": 100, "max_cost_usd": 0.1}, "require_real_provider": False,
+        }), timeout=5.0)
+        self.assertTrue(provider.timeouts)
+        self.assertLessEqual(max(t for t in provider.timeouts if t is not None), 90.0)

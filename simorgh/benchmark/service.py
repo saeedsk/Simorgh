@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
@@ -397,8 +398,12 @@ class Service:
                 }, clock=ctx.clock.now,
             ))))
 
+        # The repository this package lives in, not the process cwd, so
+        # attachments and SWE-bench checkouts land where the file tools
+        # resolve paths (found writing benchmark's CONTRACT.md, 2026-09-19).
         runner = Runner(ctx.bus, config=self._config, clock=ctx.clock.now,
-                        on_progress=_progress, on_start=_starting)
+                        on_progress=_progress, on_start=_starting,
+                        repo_root=Path(__file__).resolve().parents[2])
         try:
             finished = await runner.run(suite, model=self._model, note=record.note, record=record)
         except asyncio.CancelledError:

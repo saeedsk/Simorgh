@@ -292,6 +292,10 @@ class Service:
             max_tokens_out=req_budget.get("max_tokens", budget_cfg.max_tokens_out if budget_cfg else 1_000),
             max_cost_usd=req_budget.get("max_cost_usd", budget_cfg.max_cost_usd if budget_cfg else 0.05),
             require_real=payload.get("require_real_provider", False),
+            # The purpose's own time cap. It was left out, so every think ran
+            # against the 180 s default and chat's 90 s never applied (found
+            # writing cognition's CONTRACT.md, 2026-09-19).
+            max_seconds=req_budget.get("max_seconds", budget_cfg.max_seconds if budget_cfg else 180.0),
         )
 
         if self._paused:

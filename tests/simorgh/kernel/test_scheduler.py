@@ -284,3 +284,43 @@ class TestASpentReminderStaysSpent(TestSchedulerDurableSchedules):
         view.load({"old": {"label": "x", "fire_at": 1.0, "every_seconds": None,
                            "payload": {}, "requested_by": "", "cancelled": False}})
         self.assertEqual([s.schedule_id for s in view.active()], ["old"])
+
+
+class ASchedulePausedIsDeferredNotFired(unittest.IsolatedAsyncioTestCase):
+    """A schedule that comes due while the system is paused fires after
+    resume, not during the pause and not never (found writing kernel's
+    CONTRACT.md, 2026-09-19: _fire_after never checked is_running)."""
+
+    async def asyncSetUp(self):
+        self.clock = FakeClock()
+        self.backend, self.bus, self.ledger = await _make_bus_and_ledger(self.clock)
+        self.fired: list[Message] = []
+        self.running = False
+
+        async def _collect(message: Message) -> None:
+            self.fired.append(message)
+
+        self._sub = await self.bus.subscribe(topics.PERCEPT_TIME_SCHEDULED, _collect)
+        self.scheduler = Scheduler(
+            bus=self.bus, ledger=self.ledger, clock=self.clock, logger=_NullLogger(),
+            idle_threshold_s=999999.0, idle_tick_cooldown_s=3.0, sleep_every_s=999999.0,
+            max_schedule_duration_s=86400.0, is_running=lambda: self.running,
+        )
+        await self.scheduler.start()
+
+    async def asyncTearDown(self):
+        await self.scheduler.stop()
+        await self._sub.unsubscribe()
+        await self.backend.stop()
+        await self.ledger.stop()
+
+    async def test_due_during_a_pause_fires_after_resume(self):
+        await self.bus.publish(Message.new(
+            topics.SYSTEM_SCHEDULE_ADD, source="interface",
+            payload={"schedule_id": "p1", "at": self.clock.now() + 60.0, "label": "call the vet"},
+        ))
+        await _pump(60)
+        self.assertEqual(self.fired, [], "nothing fires while paused")
+        self.running = True
+        await _pump(60)
+        self.assertEqual([m.payload["label"] for m in self.fired], ["call the vet"])

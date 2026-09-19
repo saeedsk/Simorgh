@@ -267,6 +267,12 @@ class Scheduler:
 
     async def _fire_after(self, sched: _Schedule, delay: float) -> None:
         await self._clock.sleep(delay)
+        # Deferred, not dropped, while the system is paused: the docstring
+        # promised schedules do not fire while paused and this never checked
+        # (found writing kernel's CONTRACT.md, 2026-09-19). A reminder that
+        # came due during a pause fires once the system is running again.
+        while not sched.cancelled and not self._is_running():
+            await self._clock.sleep(1.0)
         if sched.cancelled:
             return
         now = self._clock.now()
