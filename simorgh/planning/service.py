@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 from simorgh.contracts import topics
-from simorgh.contracts.envelope import Message
+from simorgh.contracts.envelope import Event, Message
 from simorgh.contracts.protocols import Context, Health
 from simorgh.contracts.registry import error_reply_payload
 
@@ -31,6 +31,7 @@ from .model import (
     PENDING,
     TERMINAL_STATUSES,
     Scope,
+    Step,
     Task,
 )
 from .rollup import is_stalled, project_status
@@ -42,6 +43,9 @@ VERSION = "0.1.0"
 
 _SECOND_TICK_COUNTER_KEY = "n"
 
+
+#: Every change to a plan-mode plan, as its whole state (see `_persist_changed_plans`).
+PLANS_STREAM = "planning:plans"
 
 class Service:
     name = NAME
@@ -102,11 +106,14 @@ class Service:
         self._intake: Intake | None = None
         self._scheduler: Scheduler | None = None
         self._cognition: BusCognitionCaller | None = None
-        # Plan-mode state, keyed by plan_id -- see planmode.PlanState. Not
-        # in the Ledger as independent state; rebuilt lazily on demand
-        # from the plan:<id> stream would be step 9's remaining work
-        # (documented in the spec's own open questions / README).
+        # Plan-mode state, keyed by plan_id -- see planmode.PlanState.
+        # Recorded to `planning:plans` whenever a plan changes and replayed
+        # at start (`_restore_plans`), so a plan under review or waiting for
+        # a person survives a restart. Until 2026-09-19 it lived only here
+        # and a restart lost every pending plan (found writing planning's
+        # CONTRACT.md).
         self._plans: dict[str, planmode.PlanState] = {}
+        self._persisted_plans: dict[str, str] = {}
         self._plan_by_task: dict[str, str] = {}
         self._prompt_to_plan: dict[str, str] = {}
         self._project_completed_emitted: set[str] = set()
@@ -145,6 +152,7 @@ class Service:
         self._cancel_requested: dict[str, str] = {}   # task id -> reason, while a worker holds it
         self._store = TaskStore(ctx.ledger, ctx.clock)
         await self._store.rebuild()
+        await self._restore_plans()
         self._intake = Intake(self._store, dedupe_threshold=self.config.dedupe_similarity_threshold,
                               max_backlog=self.config.max_backlog,
                               autonomous_origins=tuple(self.config.autonomous_origins))
@@ -173,8 +181,8 @@ class Service:
             topics.TASK_BLOCKED: self._on_task_blocked,
             topics.TASK_CANCEL: self._on_task_cancel,
             topics.TASK_CLEAR_REQUEST: self._on_task_clear,
-            topics.PLAN_REVIEWED: self._on_plan_reviewed,
-            topics.UI_PROMPT_ANSWERED: self._on_prompt_answered,
+            topics.PLAN_REVIEWED: self._persisting(self._on_plan_reviewed),
+            topics.UI_PROMPT_ANSWERED: self._persisting(self._on_prompt_answered),
             topics.RESEARCH_FINDING_RECORDED: self._on_research_finding,
             topics.REFLECT_PATTERNS_FOUND: self._on_patterns_found,
             topics.REFLECT_DRIFT_DETECTED: self._on_drift_detected,
@@ -376,6 +384,7 @@ class Service:
             return
         if task.kind == "project" and task.mode == "plan":
             await self._on_plan_worker_result(task, p.get("artifacts") or [])
+            await self._persist_changed_plans()
             return
         if task.status != COMPLETED:
             await self._store.transition(task_id, COMPLETED, note=p.get("result_summary", ""))
@@ -928,6 +937,7 @@ class Service:
         await self._end_cancelled_after_expiry()
         await self._reconsider_blocked()
         await self._reconsider_awaiting_human()
+        await self._persist_changed_plans()
         # A ready task used to be offered in exactly two places: the
         # moment it was created (`_announce_created`), and the IDLE
         # tick -- which only fires after `idle_threshold_s` (10s) of
@@ -1232,6 +1242,56 @@ class Service:
         else:
             state.status = planmode.REJECTED
             await self._store.transition(state.task_id, FAILED, note="plan rejected by human")
+
+    # -- plan persistence ----------------------------------------------------
+    def _persisting(self, handler):
+        """A bus handler that records every plan it changed."""
+        async def _run(message: Message) -> None:
+            try:
+                await handler(message)
+            finally:
+                await self._persist_changed_plans()
+        return _run
+
+    async def _persist_changed_plans(self) -> None:
+        """Append the whole state of every plan that differs from what was
+        last recorded. Compared by content, so a handler that touched a
+        plan in any of its branches cannot forget to save it."""
+        if self._ctx is None:
+            return
+        for plan_id, state in list(self._plans.items()):
+            record = json.loads(json.dumps(asdict(state), default=str))  # tuples -> lists: the ledger stores JSON
+            fingerprint = json.dumps(record, sort_keys=True, default=str)
+            if self._persisted_plans.get(plan_id) == fingerprint:
+                continue
+            await self._ctx.ledger.append(PLANS_STREAM, Event(
+                stream=PLANS_STREAM, type="plan.state", ts=self._ctx.clock.now(), trace_id=state.task_id,
+                causation_id=None, payload=record,
+            ))
+            self._persisted_plans[plan_id] = fingerprint
+
+    async def _restore_plans(self) -> None:
+        """Replay `planning:plans`: the latest record of each plan wins;
+        plans already resolved stay out of memory (a late `plan.reviewed`
+        for one is a no-op either way)."""
+        try:
+            events = await self._ctx.ledger.read(PLANS_STREAM)
+        except Exception:  # noqa: BLE001 -- no stream yet is no plans
+            return
+        latest: dict[str, dict] = {}
+        for event in events:
+            if event.type == "plan.state" and event.payload.get("plan_id"):
+                latest[event.payload["plan_id"]] = dict(event.payload)
+        for plan_id, record in latest.items():
+            self._persisted_plans[plan_id] = json.dumps(record, sort_keys=True, default=str)
+            if record.get("status") in planmode.RESOLVED_STATUSES:
+                continue
+            steps = [Step(**{**st, "depends_on": tuple(st.get("depends_on") or ())}) for st in record.get("steps") or []]
+            state = planmode.PlanState(**{**record, "steps": steps})
+            self._plans[plan_id] = state
+            self._plan_by_task[state.task_id] = plan_id
+            if state.status == planmode.AWAITING_HUMAN and state.prompt_id:
+                self._prompt_to_plan[state.prompt_id] = plan_id
 
     async def _reconsider_awaiting_human(self) -> None:
         """Spec section 5.4: an unanswered human-approval prompt must not

@@ -1,10 +1,9 @@
 """Plan Mode's decision logic (spec section 5.4): the approval policy
 matrix and the revision diff. Kept free of bus/Ledger calls so it's
 testable as pure functions; `service.py` wires it to real messages.
-`PlanState` is process-local convenience state -- the durable record is
-the `plan:<id>` Ledger stream (spec section 4); a restart rebuilds it by
-replay, this dict is just a fast-path cache the same way `TaskIndex` is
-for tasks.
+`PlanState` is the in-memory state of one plan; its durable record is the
+`planning:plans` Ledger stream, where `service.py` appends the whole state
+whenever it changes and replays it at start (since 2026-09-19).
 """
 
 from __future__ import annotations

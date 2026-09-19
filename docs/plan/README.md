@@ -28,4 +28,11 @@ This directory is the executable form of Part II of `../reviews/2026-09-18/archi
 - The full test suite is the bless gate and a nightly job, not a per-commit cost. Module-scoped runs are the norm (`../testing.md`).
 - Several agents will work in parallel under module locks (`../AGENTS.md`).
 
+**Decided by the creator on 2026-09-19:**
+
+- Real-model runs for stage 0's gate are approved with a hard cap of **$25** for the gate as a whole.
+- An **Anthropic API key** will be added as the second native-tool provider for stage 2 (the creator adds the key; the adapter reads it from `~/.simorgh/secrets.toml` and has its own daily cap).
+- **Home Assistant runs on this laptop** (Docker). Frigate/go2rtc follows the same choice unless CPU contention with voice says otherwise; measure before adding Frigate.
+- Audio keeping stays on (7 days / 500 MB bound); the pre-rebirth ledger archive was deleted.
+
 **Decisions still open for the creator** (collected from the stage files' "open questions"): listed at the bottom of each stage file; the coordinator should surface them before starting that stage.

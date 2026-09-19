@@ -167,7 +167,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - L9 -- consumer groups, claim RPC, leases and heartbeats for one in-process worker (Planning's claim and lease half, Orchestration's worker half). Open; stage 4 item 10 puts the lease protocol behind a flag.
 - W7 -- `task.dependency.satisfied` has no subscriber; allow-listed as an audit event (`b5c2671`).
 - Evaluation section 9.2 (not a catalogue id): a decomposed project has never produced a child that ran to completion; decomposition is a numbered-list regex (`decomposer.py::parse_steps`), and projects have no waiting states. Stage 7.
-- Not in the catalogue, found while writing this: `Service.consumes` omits `task.cancel` and `task.clear.request`, which are subscribed through the handler dict (`service.py:171-172`); the manifest test's `subscribe(topics.X` pattern cannot see dict-built subscriptions, so for this package it checks nothing. Plan-mode state is in memory only, although `planmode.py:1-8` says it is rebuilt from a `plan:<id>` stream that nothing writes.
+- Plans under review or waiting for a person were held in memory only and lost on restart. Fixed 2026-09-19: every change is appended to `planning:plans` and replayed at start, prompt mapping included (`test_plans_survive_a_restart.py`).
 
 ## Planned changes (roadmap)
 
