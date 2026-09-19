@@ -54,6 +54,12 @@ _MODEL_CREDENTIALS = frozenset({
 #: the offline floor instead (cognition/service.py reads this).
 _FLOOR_ONLY = "SIMORGH_COGNITION_PROVIDER_ORDER"
 
+#: Memory's default embedder is `auto`, which loads a local
+#: sentence-transformers model when one is installed: a test would pass or
+#: fail by what this machine has. Tests get hashing unless they inject an
+#: encoder (memory/embedders.py reads this).
+_NO_LOCAL_EMBEDDER = "SIMORGH_NO_LOCAL_EMBEDDER"
+
 
 def pytest_configure(config):
     # The loader's gate runs with `-m "not live"`: a boot must not fail
@@ -69,8 +75,10 @@ def _no_ambient_simorgh_env():
     for key in stashed:
         del os.environ[key]
     os.environ[_FLOOR_ONLY] = "floor"
+    os.environ[_NO_LOCAL_EMBEDDER] = "1"
     try:
         yield
     finally:
         os.environ.pop(_FLOOR_ONLY, None)
+        os.environ.pop(_NO_LOCAL_EMBEDDER, None)
         os.environ.update(stashed)

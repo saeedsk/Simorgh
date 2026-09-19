@@ -76,6 +76,12 @@ class Service:
         try:
             records = await self.engine.warm()
             self._ctx.logger.info("memory.index_warmed", records=records)
+            # A local model loads here, in a thread, after the index (stage 5
+            # item 1): recall answers from hashing meanwhile, then what was
+            # hashed is re-embedded and persisted.
+            seconds = await self.engine.warm_embedder()
+            if seconds:
+                self._ctx.logger.info("memory.embedder_warmed", seconds=round(seconds, 1))
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 -- an unwarmed index is slow, not broken
