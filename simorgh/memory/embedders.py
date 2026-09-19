@@ -233,6 +233,11 @@ class Embedder:
         except EmbeddingUnavailable as exc:
             # A misconfigured name must not take memory down with it.
             self.provider, self._degraded = HASHING, str(exc)
+        # A local model is loaded by `warm()`, in a thread at boot (stage 5
+        # item 1): until then `embed` answers from hashing at once instead
+        # of making the first recall wait 25 s for the model (measured
+        # 2026-09-16). An injected encoder is already warm.
+        self.ready = self.provider != "local" or encoder is not None
 
     @property
     def degraded(self) -> str:
@@ -267,9 +272,33 @@ class Embedder:
         self._cache[key] = answer
         return answer
 
+    def warm(self) -> float:
+        """Load the local model; the seconds it took. Blocking -- run it in
+        a thread. Clears the cache, which holds hashing stand-ins."""
+        import time
+
+        started = time.monotonic()
+        if self.provider == "local" and not self.ready:
+            self._encode_local("warm up")
+            self._cache.clear()
+            self.ready = True
+        return time.monotonic() - started
+
+    def embed_many(self, texts: list[str]) -> list[tuple[str, tuple[float, ...]]]:
+        """Several at once: one batched model call for a local model (the
+        backfill after warm-up), `embed` each otherwise. Blocking."""
+        if self.provider == "local" and self.ready and texts:
+            try:
+                encoded = self._encode_local(list(texts))
+                return [("local", _normalise(tuple(float(x) for x in row))) for row in encoded]
+            except Exception as exc:  # noqa: BLE001 -- one at a time, each degrading on its own
+                if self._logger is not None:
+                    self._logger.warning("embedding_batch_fell_back", error=repr(exc))
+        return [self.embed(text) for text in texts]
+
     def _embed_uncached(self, text: str) -> tuple[str, tuple[float, ...]]:
         text = (text or "").strip()
-        if not text or self.provider == HASHING:
+        if not text or self.provider == HASHING or not self.ready:
             return HASHING, embed_text(text)
         try:
             if self.provider == "local":

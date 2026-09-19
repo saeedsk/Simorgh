@@ -57,6 +57,7 @@ Requests it makes: `cognition.think` (`purpose="consolidate"`, 30 s timeout) fro
 | `memory:{kind}` (`episodic`, `semantic`, `procedural`) | simorgh/memory/store.py:35 | none directly (others go through `memory.retrieve`); tools/bench_recall.py | forever (no `memory:` entry in DEFAULT_RETENTION) |
 | `memory:tombstones` | simorgh/memory/store.py:31 | - | forever |
 | `memory:contradictions` | simorgh/memory/store.py:32 | - | forever |
+| `memory:vectors` | simorgh/memory/store.py `write_vector` (stage 5 item 1) | `recall.py` at sync | forever; `vector.stored{ref, provider, v}`, `v` the float32 vector in base64; one per record per embedder, written only for a dense embedder |
 
 Not streams: `working:{session_id}:{i}` is the ref of a window item (never persisted; the window resets with the process); `contradiction:{ref_a}:{ref_b}` is the idempotency key of a contradiction event; `person:{name}` is a record tag. Long content (over 3,500 chars) goes to a Ledger blob with a preview inline (`store.py:138-173`).
 
@@ -123,7 +124,8 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Planned changes (roadmap)
 
 - Stage 4 (session stream): the `session:<id>` stream becomes the working tier; `WorkingMemory` as fed today is the stopgap it replaces.
-- Stage 5 (memory tiers), all under the `memory` lock: item 1 warms the embedder in a boot thread and persists a vector per record with its embedder name; item 2 a float32 matrix plus BM25 fused by reciprocal rank; item 3 a `memory:facts` store (`Fact{subject, predicate, object, valid_from, valid_to, superseded_by, ...}`) extracted at consolidation, replacing `memory.contradiction.flagged`; item 4 an entity-linked facts block and per-person digest; item 7 person namespaces on every channel; item 8 forgetting by score, never a linked fact. This file is to be rewritten for the four tiers when stage 5 lands.
+- Stage 5 item 1 done 2026-09-19: a local embedder loads in a thread after the index is built (`MemoryEngine.warm_embedder`); until then `Embedder.embed` answers from hashing at once, and afterwards the hashed records are re-embedded in batches (`RecallIndex.upgrade`, `Embedder.embed_many`) and persisted to `memory:vectors`, which a restart reads instead of re-embedding. The default embedder stays `hashing` until item 2's matrix makes a dense recall cheap.
+- Stage 5 (memory tiers), all under the `memory` lock: item 1 (above); item 2 a float32 matrix plus BM25 fused by reciprocal rank; item 3 a `memory:facts` store (`Fact{subject, predicate, object, valid_from, valid_to, superseded_by, ...}`) extracted at consolidation, replacing `memory.contradiction.flagged`; item 4 an entity-linked facts block and per-person digest; item 7 person namespaces on every channel; item 8 forgetting by score, never a linked fact. This file is to be rewritten for the four tiers when stage 5 lands.
 
 ## Working on this module
 

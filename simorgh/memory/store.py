@@ -14,6 +14,8 @@ doesn't survive the way consolidated long-term memory does.
 
 from __future__ import annotations
 
+import asyncio
+
 import uuid
 from collections import defaultdict, deque
 from dataclasses import replace
@@ -163,6 +165,33 @@ class MemoryEngine:
         ))
         return f"{stream}:{seq}"
 
+    async def write_vector(self, ref: str, provider: str, vector) -> None:
+        """Persist one dense vector (stage 5 item 1): `memory:vectors`."""
+        from .recall import VECTOR_STREAM, encode_vector
+
+        await self._ledger.append(VECTOR_STREAM, Event(
+            stream=VECTOR_STREAM, type="vector.stored", ts=self._clock.now(), trace_id="", causation_id=None,
+            idempotency_key=f"{VECTOR_STREAM}:{ref}:{provider}",
+            payload={"ref": ref, "provider": provider, "v": encode_vector(vector)},
+        ))
+
+    async def persist_vectors(self) -> int:
+        """Write the dense vectors computed since the last call."""
+        fresh = self._index.take_fresh()
+        for ref, provider, vector in fresh:
+            await self.write_vector(ref, provider, vector)
+        return len(fresh)
+
+    async def warm_embedder(self) -> float:
+        """Load a local model in a thread, then re-embed and persist what
+        was hashed while it loaded. Recall answers from hashing meanwhile.
+        Returns the seconds the load took (0 for any other embedder)."""
+        if getattr(self._embedder, "ready", True):
+            return 0.0
+        seconds = await asyncio.to_thread(self._embedder.warm)
+        await self._index.upgrade(write=self.write_vector)
+        return seconds
+
     async def warm(self, kinds=KINDS) -> int:
         """Build the recall index before anything asks a question of it.
 
@@ -175,6 +204,7 @@ class MemoryEngine:
         front of somebody's first question.
         """
         await self._index.sync(kinds, on_record=self._note_content_ref)
+        await self.persist_vectors()
         return sum(len(self._index.index_for(kind)) for kind in kinds)
 
     async def _resolve_content(self, items: list) -> list:
@@ -243,6 +273,9 @@ class MemoryEngine:
         filters = filters or {}
         durable = [kind for kind in kinds if kind != "working"]
         await self._index.sync(durable, on_record=self._note_content_ref)
+        if self._index.kinds and any(index.fresh for index in self._index.kinds.values()):
+            # New records embedded by this recall: persisted off its path.
+            self._persisting = asyncio.ensure_future(self.persist_vectors())
         tombstoned = self._index.tombstoned
         penalties = self._index.penalties
         # `(provider, vector)`, because a vector is only comparable to
