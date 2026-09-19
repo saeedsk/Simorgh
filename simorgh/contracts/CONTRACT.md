@@ -154,3 +154,5 @@ Found while writing this contract (not in the catalogue): `settings.config_path(
 Lock it first (`python tools/modlock.py claim contracts --by <you> --task "..."`), commit the lock, edit only `simorgh/contracts/`, `tests/simorgh/contracts/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py contracts` before committing; commit subject `contracts: <what changed>`.
 
 This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run agent may, with the lock, because a person is accountable for the commit.
+
+- Envelope (stage 1 item 5, 2026-09-19): `Message.deadline` (optional absolute epoch time; validated > 0 when set) is when the caller stops waiting. `Message.caused` carries it forward; `reply` does not. `envelope.time_left(message, now)` returns the seconds left (never below 0) or None. Consumers: bus (sets it), cognition, execution.

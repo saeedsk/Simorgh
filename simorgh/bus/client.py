@@ -262,7 +262,12 @@ class BusClient:
     async def request(self, message: Message, *, timeout: float | None = None) -> Message:
         await self._ensure_inbox()
         timeout = self._config.request_default_timeout if timeout is None else timeout
-        message = message.with_(reply_to=self._inbox_pattern)
+        # The caller stops waiting at `now + timeout`: say so on the wire so
+        # the responder can shrink its own timeouts (stage 1 item 5). An
+        # earlier deadline already on the message is kept.
+        limit = float(self._clock()) + float(timeout)
+        deadline = limit if message.deadline is None else min(message.deadline, limit)
+        message = message.with_(reply_to=self._inbox_pattern, deadline=deadline)
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         self._pending[message.id] = fut

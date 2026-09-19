@@ -150,3 +150,5 @@ Found while writing this contract (not in the catalogue): `_on_think` builds its
 Lock it first (`python tools/modlock.py claim cognition --by <you> --task "..."`), commit the lock, edit only `simorgh/cognition/`, `tests/simorgh/cognition/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py cognition` before committing; commit subject `cognition: <what changed>`.
 
 - Telemetry (stage 1 item 4, 2026-09-19): each provider call is a span `cognition.provider_call` (attrs `purpose`, `provider`, `tokens_in`, `tokens_out`), parented to the `cognition.think` message.
+
+- Deadline (stage 1 item 5, 2026-09-19): a think's time cap is shrunk to the request's `deadline` less 0.5 s, but never below the Router's one-candidate minimum (5 s), which would turn a short wait into a floor reply without dialling anyone.

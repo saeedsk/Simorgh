@@ -36,7 +36,7 @@ from pathlib import Path
 
 from simorgh.bus.client import UNBOUNDED
 from simorgh.contracts import topics
-from simorgh.contracts.envelope import Event, Message
+from simorgh.contracts.envelope import Event, Message, time_left
 from simorgh.contracts.protocols import Health, ToolContext, NULL_TELEMETRY
 
 from . import pathsafety
@@ -98,6 +98,13 @@ def timeout_for(tool, constraints: dict, default_s: float) -> float:
     if isinstance(own, (int, float)) and own > 0:
         return float(own)
     return float(default_s)
+
+
+def within_deadline(timeout: float, message: Message, now: float) -> float:
+    """`timeout`, shrunk to what the proposer will still wait when the
+    approval carries a deadline (stage 1 item 5); never below 0.1 s."""
+    left = time_left(message, now)
+    return float(timeout) if left is None else max(0.1, min(float(timeout), left))
 
 
 class Service:
@@ -824,6 +831,10 @@ class Service:
             await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "started", {"action_id": action_id, "tool": tool.name}))
             start = time.monotonic()
             timeout = timeout_for(tool, approved.get("constraints") or {}, self._config.default_timeout_s)
+            # Never outlast the proposer's wait (stage 1 item 5): an
+            # approval caused by a proposal carries its deadline.
+            now = self._ctx.clock.now() if hasattr(self._ctx.clock, "now") else self._ctx.clock()
+            timeout = within_deadline(timeout, message, now)
             root = self._worktrees.root_for(task_id) if self._worktrees is not None else None
             ctx = ToolContext(
                 action_id=action_id, task_id=task_id, scope=scope, constraints=approved.get("constraints") or {},

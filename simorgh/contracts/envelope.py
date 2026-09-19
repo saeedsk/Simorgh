@@ -58,6 +58,12 @@ class Message:
     reply_to: str | None = None
     idempotency_key: str | None = None
     payload: dict = field(default_factory=dict)
+    # When the caller stops waiting, as an absolute epoch time (stage 1
+    # item 5). `bus.request` sets it from its timeout; `caused()` carries
+    # it forward, so an action approved for a proposal still knows how long
+    # the session will wait. A consumer shrinks its own timeout to what is
+    # left (`time_left`). None: no deadline, today's behaviour.
+    deadline: float | None = None
 
     # --- construction -----------------------------------------------------
     @classmethod
@@ -78,6 +84,7 @@ class Message:
         schema_version: int | None = None,
         ts: float | None = None,
         clock: ClockFn | None = None,
+        deadline: float | None = None,
     ) -> "Message":
         """Build a message with a fresh uuid4 id and a producer timestamp
         from `clock` (default: `time.time`). `priority` defaults to 9 for
@@ -104,6 +111,7 @@ class Message:
             reply_to=reply_to,
             idempotency_key=idempotency_key,
             payload=dict(payload or {}),
+            deadline=float(deadline) if deadline is not None else None,
         )
 
     def reply(self, type: str, payload: dict, *, source: str, clock: ClockFn | None = None) -> "Message":
@@ -123,6 +131,7 @@ class Message:
     def caused(self, type: str, payload: dict, *, source: str, **routing: Any) -> "Message":
         """A follow-on message in the same trace, caused by this one."""
         routing.setdefault("partition_key", self.partition_key)
+        routing.setdefault("deadline", self.deadline)
         return Message.new(type, source=source, payload=payload, trace_id=self.trace_id,
                            causation_id=self.id, **routing)
 
@@ -188,6 +197,8 @@ def validate(message: Message) -> Message:
             errors.append(f"{name} is required")
     if message.ttl_seconds is not None and message.ttl_seconds <= 0:
         errors.append("ttl_seconds must be > 0 when set")
+    if message.deadline is not None and message.deadline <= 0:
+        errors.append("deadline must be an epoch time > 0 when set")
     try:
         _assert_no_nan(message.payload, "$.payload")
     except ContractError as exc:
@@ -237,4 +248,12 @@ class Event:
             raise ContractError(f"bad event: {exc}") from None
 
 
-__all__ = ["CATALOG_VERSION", "ContractError", "Event", "Message", "canonical_json", "validate"]
+__all__ = ["time_left", "CATALOG_VERSION", "ContractError", "Event", "Message", "canonical_json", "validate"]
+
+
+def time_left(message: Message, now: float) -> float | None:
+    """Seconds until `message.deadline` (never below 0), or None when the
+    message carries no deadline."""
+    if message.deadline is None:
+        return None
+    return max(0.0, message.deadline - now)

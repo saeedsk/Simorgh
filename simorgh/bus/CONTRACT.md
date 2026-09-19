@@ -137,3 +137,5 @@ Found while writing this contract (not in the catalogue), fixed 2026-09-19: a tr
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim bus --by <you> --task "..."`), commit the lock, edit only `simorgh/bus/`, `tests/simorgh/bus/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py bus` before committing; commit subject `bus: <what changed>`.
+
+- `request(message, timeout=...)` stamps `deadline = min(existing, now + timeout)` on the message (stage 1 item 5).

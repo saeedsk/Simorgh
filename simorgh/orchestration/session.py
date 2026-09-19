@@ -1663,10 +1663,16 @@ class SessionRunner:
             rationale=f"step {step_no} of {session.profile.name} session",
             proposed_by=self._bus.source, kind=session.kind,
         )
+        # How long this session waits for the result, on the wire (stage 1
+        # item 5): the approval carries it to Execution, which never runs
+        # the tool past it. A person's later yes is caused by their answer,
+        # not by this proposal, so it is not cut short by it.
+        wait_s = _ACTION_TIMEOUTS.get(str(call.get("tool") or ""), self._action_timeout_s)
+        now = _epoch(self._clock)
         msg = Message.new(
             topics.ACTION_PROPOSED, source=self._bus.source,
             payload=payload, partition_key=f"task:{session.task_id}",
-            trace_id=session.trace, clock=self._clock,
+            trace_id=session.trace, clock=self._clock, deadline=(now + wait_s) if now else None,
         )
         await self._bus.publish(msg)
         tool_name = call.get("tool")

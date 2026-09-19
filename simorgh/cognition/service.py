@@ -13,7 +13,7 @@ import dataclasses
 import os
 
 from simorgh.contracts import topics
-from simorgh.contracts.envelope import Event, Message
+from simorgh.contracts.envelope import Event, Message, time_left
 from simorgh.contracts.protocols import Context, Health, ProviderResponse, NULL_TELEMETRY
 from simorgh.contracts.registry import error_reply_payload
 
@@ -93,6 +93,20 @@ def _tool_instruction_block(payload: dict) -> str | None:
             lines.append(f"{tool.upper()}'s own argument format:\n{hint}")
     return "\n\n".join(lines)
 
+
+
+def _within_deadline(max_seconds: float, message: Message, now: float) -> float:
+    """The think's time cap, shrunk to what the caller will still wait
+    (stage 1 item 5), less half a second so the reply beats its timeout --
+    but never below what the Router needs to dial one candidate
+    (`router._MIN_CANDIDATE_SECONDS`): shrinking under it turns every short
+    wait into a floor reply without trying a provider at all."""
+    left = time_left(message, now)
+    if left is None:
+        return max_seconds
+    from .router import _MIN_CANDIDATE_SECONDS
+
+    return min(float(max_seconds), max(_MIN_CANDIDATE_SECONDS, left - 0.5))
 
 class Service:
     name = "cognition"
@@ -302,7 +316,9 @@ class Service:
             # The purpose's own time cap. It was left out, so every think ran
             # against the 180 s default and chat's 90 s never applied (found
             # writing cognition's CONTRACT.md, 2026-09-19).
-            max_seconds=req_budget.get("max_seconds", budget_cfg.max_seconds if budget_cfg else 180.0),
+            max_seconds=_within_deadline(
+                req_budget.get("max_seconds", budget_cfg.max_seconds if budget_cfg else 180.0),
+                message, self._ctx.clock.now() if hasattr(self._ctx.clock, "now") else self._ctx.clock()),
         )
 
         if self._paused:

@@ -179,3 +179,5 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim orchestration --by <you> --task "..."`), commit the lock, edit only `simorgh/orchestration/`, `tests/simorgh/orchestration/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py orchestration` before committing; commit subject `orchestration: <what changed>`.
+
+- Deadline (stage 1 item 5, 2026-09-19): `action.proposed` carries `deadline = now + the session's wait for that tool` (`_ACTION_TIMEOUTS` or `action_timeout_s`).
