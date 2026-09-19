@@ -70,7 +70,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 
 | Key | Default | Read in the package |
 |---|---|---|
-| `provider_order` | `('together', 'claude_code_cli', 'gemini', 'floor')` | yes |
+| `provider_order` | `('together', 'gemini', 'claude_code_cli', 'floor')` | yes |
 | `providers` | `field(default_factory=lambda: {'together': ProviderConfig(ma` | yes |
 | `purposes` | `field(default_factory=lambda: dict(DEFAULT_PURPOSE_BUDGETS))` | partly: `max_tokens_in/out` and `max_cost_usd` are read; `max_seconds` and `require_real` are not (see Known issues) |
 | `routes` | `field(default_factory=dict)` | yes |
