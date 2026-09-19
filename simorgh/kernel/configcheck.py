@@ -262,6 +262,13 @@ def _with(section: dict, path: str, value) -> dict:
     return out
 
 
+#: Keys the Kernel itself reads from every subsystem's section, which no
+#: subsystem Config parses: `secrets` (ContextFactory scopes the secret
+#: store with it). Reported as unread on the first live boot of the check
+#: (2026-09-19, `[execution] secrets`).
+KERNEL_READ_KEYS = frozenset({"secrets"})
+
+
 def unread_keys(cls, section: dict, baseline: dict | None = None) -> list[str]:
     """The keys of `section` nothing reads: changing the value of each
     changes nothing in the parsed config. A key merely set to its default
@@ -276,6 +283,8 @@ def unread_keys(cls, section: dict, baseline: dict | None = None) -> list[str]:
         return []
     unread = []
     for path, value in _leaves(dict(section)):
+        if path.split(".", 1)[0] in KERNEL_READ_KEYS:
+            continue
         other = _perturbed(value)
         if other is None:
             continue

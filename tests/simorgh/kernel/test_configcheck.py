@@ -277,6 +277,9 @@ class ARestatedDefaultIsNotATypo(unittest.TestCase):
     def test_a_correct_key_at_its_default_is_quiet(self) -> None:
         self.assertEqual(dead_sections(_Config({"guardian": {"physical": {"auto_approve": False}}})), [])
 
+    def test_the_kernels_own_secrets_key_is_read(self) -> None:
+        self.assertEqual(dead_sections(_Config({"execution": {"secrets": ["GITHUB_TOKEN"]}})), [])
+
     def test_a_misspelt_nested_key_is_named(self) -> None:
         from simorgh.guardian.config import Config as GuardianConfig
         from simorgh.kernel.configcheck import unread_keys
