@@ -312,6 +312,12 @@ class Config:
     expressive_min_chars: int = 0     # 0 = a spoken turn never takes the slow lane in auto (it held the floor 78 s once)
     keep_audio: bool = False
     audio_dir: str = "workspace/voice/audio"
+    # Kept turns are the family's own voices. They were written with no
+    # retention at all (2026-09-18 evaluation, V11); now the oldest go
+    # once a turn is older than this many days or the folder is larger
+    # than this many megabytes, whichever comes first. 0 disables a bound.
+    keep_audio_days: float = 7.0
+    keep_audio_max_mb: float = 500.0
     keep_transcripts: bool = True
     # The device name a turn is recorded under (satellites will bring
     # their own).

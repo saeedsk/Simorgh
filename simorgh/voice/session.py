@@ -177,6 +177,53 @@ def _speaks_to_sim(text: str) -> bool:
     return bool(stripped) and (stripped.endswith("?") or bool(_TO_SIM.search(stripped)))
 
 
+def prune_kept_audio(folder, *, days: float, max_mb: float, now: float) -> int:
+    """Delete kept turns (a `.wav` and its `.json`) older than `days`,
+    then the oldest until the folder is under `max_mb`. Returns how many
+    turns went. Never raises: retention must not stop a turn."""
+    from pathlib import Path
+
+    try:
+        wavs = sorted(Path(folder).glob("*.wav"), key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return 0
+    removed = 0
+
+    def _drop(wav) -> None:
+        nonlocal removed
+        for path in (wav, wav.with_suffix(".json")):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        removed += 1
+
+    keep = []
+    for wav in wavs:
+        try:
+            age_days = (now - wav.stat().st_mtime) / 86400.0
+        except OSError:
+            continue
+        if days and age_days > days:
+            _drop(wav)
+        else:
+            keep.append(wav)
+    if max_mb:
+        def _size(w):
+            try:
+                return w.stat().st_size + (w.with_suffix(".json").stat().st_size if w.with_suffix(".json").exists() else 0)
+            except OSError:
+                return 0
+        total = sum(_size(w) for w in keep)
+        limit = max_mb * 1024 * 1024
+        for wav in keep:
+            if total <= limit:
+                break
+            total -= _size(wav)
+            _drop(wav)
+    return removed
+
+
 class VoiceSession:
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
                  detector_factory, clock=None, logger=None, embedder=None, speakers=None) -> None:
@@ -789,6 +836,9 @@ class VoiceSession:
             }, indent=1), encoding="utf-8")
         except (OSError, ValueError) as exc:
             self._log("warning", "voice.turn_not_kept", error=repr(exc))
+            return
+        prune_kept_audio(Path(self._config.audio_dir), days=self._config.keep_audio_days,
+                         max_mb=self._config.keep_audio_max_mb, now=_time.time())
 
     async def _attribute(self, turn_id: int, identification) -> list:
         """Who said which words of the turn (voice/diarize.py), when it
