@@ -5,6 +5,18 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.cognition]
+by = "opus-main"
+task = "Gemini key from secrets.toml"
+since = "2026-09-19T07:32:15+00:00"
+until = "2026-09-19T09:32:15+00:00"
+
+[locks.kernel]
+by = "opus-main"
+task = "Gemini key from secrets.toml"
+since = "2026-09-19T07:32:15+00:00"
+until = "2026-09-19T09:32:15+00:00"
+
 [locks.tools]
 by = "opus-main"
 task = "stage 0 item 30: capped real-model gate"

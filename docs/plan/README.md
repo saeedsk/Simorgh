@@ -31,7 +31,7 @@ This directory is the executable form of Part II of `../reviews/2026-09-18/archi
 **Decided by the creator on 2026-09-19:**
 
 - Real-model runs for stage 0's gate are approved with a hard cap of **$25** for the gate as a whole.
-- An **Anthropic API key** will be added as the second native-tool provider for stage 2 (the creator adds the key; the adapter reads it from `~/.simorgh/secrets.toml` and has its own daily cap).
+- **Gemini** is the second native-tool provider for stage 2: the creator added `GEMINI_API_KEY` to `~/.simorgh/secrets.toml` (2026-09-19). Stage 2 item 4 builds Gemini function declarations first; an Anthropic adapter is optional later.
 - **Home Assistant runs on this laptop** (Docker). Frigate/go2rtc follows the same choice unless CPU contention with voice says otherwise; measure before adding Frigate.
 - Audio keeping stays on (7 days / 500 MB bound); the pre-rebirth ledger archive was deleted.
 
