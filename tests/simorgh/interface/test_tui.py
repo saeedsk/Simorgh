@@ -530,7 +530,8 @@ class TestTheTaskListRendering(unittest.TestCase):
             {"task_id": "moving", "kind": "patch", "status": "in_progress",
              "origin": "human", "description": "now"},
         ])
-        self.assertLess(out.index("moving"), out.index("waiting"))
+        rows = [line.split()[1] for line in out.splitlines() if line.startswith("  ") and len(line.split()) > 1]
+        self.assertLess(rows.index("moving"), rows.index("waiting"))
 
 
 class TestThePanelToolbar(unittest.IsolatedAsyncioTestCase):

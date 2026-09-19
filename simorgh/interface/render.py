@@ -9,6 +9,8 @@ scroll-region sequences.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import os
 import re
 import shutil
@@ -838,106 +840,7 @@ def task_list(tasks: list[dict], projects: list[dict], *, limit: int = 20, enabl
     "what is Sim doing" is the question being asked, and truncated with a
     count of what was left out rather than printing a hundred lines.
     """
-    if not tasks and not projects:
-        return "no tasks"
-
-    order = ["in_progress", "available", "blocked", "awaiting_human", "pending", "paused", "failed", "completed"]
-    by_status: dict[str, list[dict]] = {}
-    for task in tasks:
-        by_status.setdefault(task.get("status", "?"), []).append(task)
-
-    lines: list[str] = []
-    summary = "  ".join(
-        style(f"{len(by_status[s])} {s}", _STATUS_COLOR.get(s, "dim"), enabled=enabled)
-        for s in order if by_status.get(s)
-    )
-    extra = [s for s in by_status if s not in order]
-    if extra:
-        summary += "  " + "  ".join(f"{len(by_status[s])} {s}" for s in sorted(extra))
-    lines.append(f"{len(tasks)} task(s): {summary}" if summary else f"{len(tasks)} task(s)")
-
-    shown = 0
-    for status in order + sorted(extra):
-        group = by_status.get(status)
-        if not group:
-            continue
-        for task in group:
-            if shown >= limit:
-                break
-            lines.append("  " + _task_line(task, enabled=enabled))
-            shown += 1
-        if shown >= limit:
-            break
-    if len(tasks) > shown:
-        lines.append(style(f"  ... {len(tasks) - shown} more (`tasks all` to see them)", "dim", enabled=enabled))
-
-    if projects:
-        by_id = {t.get("task_id"): t for t in tasks}
-        lines.append("")
-        lines.append(f"{len(projects)} project(s):")
-        for project in projects[:limit]:
-            lines.append("  " + _project_line(project, by_id, enabled=enabled))
-        if len(projects) > limit:
-            lines.append(style(f"  ... {len(projects) - limit} more", "dim", enabled=enabled))
-    return "\n".join(lines)
-
-
-def _project_line(project: dict, by_id: dict, *, enabled: bool = True) -> str:
-    """One project row.
-
-    Live-caught (the creator, 2026-09-07): every project read `pending
-    0/0 steps` while the same ids appeared as `claimed` in the task list
-    directly above -- two different answers about one task on one screen.
-    The rollup is computed from a project's children, so with no children
-    it reports `pending` regardless of what the project itself is doing.
-    A project with no steps says so, in its own real status.
-    """
-    project_id = project.get("project_id", "?")
-    task = by_id.get(project_id, {})
-    total = project.get("total", 0)
-    if not total:
-        status = task.get("status", "?")
-        return (
-            f"{project_id[:12]:12s}  "
-            f"{style(f'{status:<12s}', _STATUS_COLOR.get(status, 'dim'), enabled=enabled)}  "
-            + style("not broken down into steps yet", "dim", enabled=enabled)
-        )
-    rollup = project.get("rollup", "?")
-    stalled = "  stalled" if project.get("stalled") else ""
-    return (
-        f"{project_id[:12]:12s}  "
-        f"{style(f'{rollup:<12s}', _STATUS_COLOR.get(rollup, 'dim'), enabled=enabled)}  "
-        f"{project.get('done', 0)}/{total} steps{stalled}"
-    )
-
-
-def _task_line(task: dict, *, enabled: bool = True) -> str:
-    from .activity import short_title
-
-    status = task.get("status", "?")
-    origin = task.get("origin", "?")
-    # A name, not the prompt: the description is a paragraph and a list
-    # is read at a glance (the creator, 2026-09-12).
-    prefix_width = display_width(f"{'x' * 12}  {'x' * 12}  {'x' * 8}  {'x' * 9}  ")
-    room = max(20, terminal_width() - prefix_width - 2)
-    description = task.get("title") or short_title(task.get("description") or "", subject=task.get("subject"),
-                                                   limit=max(56, room))
-    # Measure the prefix rather than guessing its width -- guessing is
-    # exactly how this line came to be 87 columns on an 80-column
-    # terminal (observer, 2026-09-08).
-    prefix = (
-        f"{task.get('task_id', '?')[:12]:12s}  "
-        f"{status:<12s}  {task.get('kind', '?'):<8s}  {origin:<9s}  "
-    )
-    description = fit(description, max(20, terminal_width() - display_width(prefix) - 2))
-    return (
-        f"{task.get('task_id', '?')[:12]:12s}  "
-        f"{style(f'{status:<12s}', _STATUS_COLOR.get(status, 'dim'), enabled=enabled)}  "
-        f"{task.get('kind', '?'):<8s}  "
-        f"{style(f'{origin:<9s}', 'dim', enabled=enabled)}  {description}"
-    )
-
-
+    return _task_panel(tasks, projects, limit=limit, enabled=enabled)
 
 def command_panel(topic: str, *, enabled: bool = True, unicode: bool = True) -> str:
     """`help voice`: that command's usage and every word it takes, alone
@@ -1019,37 +922,6 @@ def help_panel(*, enabled: bool = True, unicode: bool = True, full: bool = False
     return "\n".join(lines)
 
 
-def capabilities_panel(latest: dict[str, dict], *, enabled: bool = True, unicode: bool = True) -> str:
-    """`capabilities`: what Sim can reach, ready first, one aligned row
-    each -- a dot, the name, what uses it, and the detail, cut to the
-    terminal. Until 2026-09-19 it was `[yes]`/`[NO ]` with the detail on
-    a second line, which the creator asked to make "visually more
-    pleasant"."""
-    ready = sorted(n for n, p in latest.items() if p.get("ok"))
-    missing = sorted(n for n, p in latest.items() if not p.get("ok"))
-    on, off = ("\u25cf", "\u25cb") if unicode else ("+", "-")
-    name_w = max((len(n) for n in latest), default=0)
-    use_w = min(28, max((len(", ".join(p.get("tools") or ())) for p in latest.values()), default=0))
-    width = terminal_width()
-
-    def row(name: str, good: bool) -> str:
-        payload = latest[name]
-        uses = ", ".join(payload.get("tools") or ())
-        uses = uses if len(uses) <= use_w else uses[: max(1, use_w - 1)] + "\u2026"
-        detail = " ".join(str(payload.get("detail") or "").split())
-        dot = style(on if good else off, "green" if good else "red", enabled=enabled)
-        head = f"  {dot} {style(name.ljust(name_w), 'bold' if good else 'warm', enabled=enabled)}  "
-        tail = style(uses.ljust(use_w), "dim", enabled=enabled) + "  " + detail
-        return fit(head + tail, width - 1)
-
-    lines = [style(f"Capabilities \u00b7 {len(ready)} of {len(latest)} ready", "bold", enabled=enabled)]
-    if ready:
-        lines += ["", style("Ready", "green", enabled=enabled)] + [row(n, True) for n in ready]
-    if missing:
-        lines += ["", style("Not available", "red", enabled=enabled)] + [row(n, False) for n in missing]
-    return "\n".join(lines)
-
-
 def _cut_words(text: str, width: int) -> str:
     """`text` in at most `width` columns, cut at a word, with an ellipsis."""
     text = " ".join(str(text or "").split())
@@ -1061,32 +933,168 @@ def _cut_words(text: str, width: int) -> str:
     return cut.rstrip(" ,.;:-") + "\u2026"
 
 
-def skills_panel(cards, written, invalid, *, written_dir: str, enabled: bool = True, unicode: bool = True) -> str:
-    """`skills list` as a panel: installed Agent Skills and the ones Sim
-    wrote, each an aligned row with its description cut at a word to the
-    terminal (it was cut mid-word at 70 characters and the source column
-    overflowed into it -- the creator, 2026-09-19)."""
+
+# ------------------------------------------------------------------ panels
+# One look for every listing command: a bold title with a dim count, then
+# sections, then one aligned row per item -- a coloured mark, a bold name,
+# dim columns, and a detail cut at a word to the terminal. The creator,
+# 2026-09-19, of the first two: "I like this new panel style".
+
+_MARKS = {
+    "good": ("\u25cf", "+", "green"), "bad": ("\u25cb", "-", "red"),
+    "warn": ("\u25d0", "~", "yellow"), "busy": ("\u25cf", "*", "cyan"),
+    "idle": ("\u25cb", ".", "dim"),
+}
+
+
+@dataclass
+class PanelRow:
+    name: str
+    cells: tuple[str, ...] = ()
+    detail: str = ""
+    mark: str | None = None        # good | bad | warn | busy | idle
+
+
+@dataclass
+class PanelSection:
+    title: str
+    rows: list[PanelRow] = field(default_factory=list)
+    tone: str = "warm"
+    note: str = ""
+
+
+def panel(title: str, sections: list[PanelSection], *, count: str = "", footer: str = "",
+          enabled: bool = True, unicode: bool = True) -> str:
+    """Render a panel. Columns are aligned across all sections; each column
+    is at most 28 wide; the detail takes what is left and is cut at a word."""
     width = terminal_width() - 1
-    dot = "\u25cf" if unicode else "*"
-    rows = [(c.name, c.source, c.description) for c in cards] + [(n, "by Sim", d) for n, d in written]
-    name_w = max((len(n) for n, _s, _d in rows), default=0)
-    src_w = max((len(s) for _n, s, _d in rows), default=0)
+    rows = [row for section in sections for row in section.rows]
+    marked = any(row.mark for row in rows)
+    name_w = min(32, max((display_width(r.name) for r in rows), default=0))
+    ncells = max((len(r.cells) for r in rows), default=0)
+    cell_w = [min(28, max((display_width(r.cells[i]) for r in rows if len(r.cells) > i), default=0))
+              for i in range(ncells)]
 
-    def row(name: str, source: str, description: str) -> str:
-        head = f"  {style(dot, 'green', enabled=enabled)} {style(name.ljust(name_w), 'bold', enabled=enabled)}  " \
-               f"{style(source.ljust(src_w), 'dim', enabled=enabled)}  "
-        room = max(10, width - (6 + name_w + src_w))
-        return head + _cut_words(description, room)
+    def pad(text: str, w: int) -> str:
+        text = _cut_words(text, w) if display_width(text) > w else text
+        return text + " " * (w - display_width(text))
 
-    total = len(cards) + len(written)
-    lines = [style(f"Skills \u00b7 {total}", "bold", enabled=enabled)]
-    if cards:
-        lines += ["", style("Installed", "warm", enabled=enabled)] + [row(c.name, c.source, c.description) for c in cards]
-    if written:
-        lines += ["", style("Written by Sim", "warm", enabled=enabled)
-                  + style(f"  \u00b7 run one as skill:<name> \u00b7 {written_dir}/", "dim", enabled=enabled)]
-        lines += [row(n, "by Sim", d) for n, d in written]
-    if invalid:
-        lines += ["", style(f"Ignored ({len(invalid)})", "red", enabled=enabled)]
-        lines += [f"  {_cut_words(f'{bad.path}: {bad.reason}', width - 2)}" for bad in invalid[:8]]
+    def line(row: PanelRow) -> str:
+        head = "  "
+        if marked:
+            glyph, plain, colour = _MARKS.get(row.mark or "idle", _MARKS["idle"])
+            head += style(glyph if unicode else plain, colour, enabled=enabled) + " "
+        head += style(pad(row.name, name_w), "bold", enabled=enabled)
+        used = 2 + (2 if marked else 0) + name_w
+        for i in range(ncells):
+            text = row.cells[i] if i < len(row.cells) else ""
+            head += "  " + style(pad(text, cell_w[i]), "dim", enabled=enabled)
+            used += 2 + cell_w[i]
+        if row.detail:
+            room = max(10, width - used - 2)
+            head += "  " + _cut_words(row.detail, room)
+        return head.rstrip()
+
+    top = style(title, "bold", enabled=enabled)
+    if count:
+        top += style(f" \u00b7 {count}", "dim", enabled=enabled)
+    lines = [top]
+    for section in sections:
+        if not section.rows and not section.note:
+            continue
+        lines.append("")
+        heading = style(section.title, section.tone, enabled=enabled) if section.title else ""
+        if section.note:
+            heading += ("  " if heading else "") + style(section.note, "dim", enabled=enabled)
+        if heading:
+            lines.append(heading)
+        lines += [line(row) for row in section.rows]
+    if footer:
+        lines += ["", style(footer, "dim", enabled=enabled)]
     return "\n".join(lines)
+
+
+def capabilities_panel(latest: dict[str, dict], *, enabled: bool = True, unicode: bool = True) -> str:
+    """`capabilities`: what Sim can reach, ready first."""
+    def rows(good: bool) -> list[PanelRow]:
+        return [PanelRow(name, (", ".join(p.get("tools") or ()),), str(p.get("detail") or ""),
+                         "good" if good else "bad")
+                for name, p in sorted(latest.items()) if bool(p.get("ok")) == good]
+
+    ready = rows(True)
+    return panel("Capabilities", [PanelSection("Ready", ready, "green"),
+                                  PanelSection("Not available", rows(False), "red")],
+                 count=f"{len(ready)} of {len(latest)} ready", enabled=enabled, unicode=unicode)
+
+
+def skills_panel(cards, written, invalid, *, written_dir: str, enabled: bool = True, unicode: bool = True) -> str:
+    """`skills list`: installed Agent Skills and the ones Sim wrote."""
+    sections = [
+        PanelSection("Installed", [PanelRow(c.name, (c.source,), c.description, "good") for c in cards]),
+        PanelSection("Written by Sim", [PanelRow(n, ("by Sim",), d, "good") for n, d in written],
+                     note=f"run one as skill:<name> \u00b7 {written_dir}/"),
+        PanelSection(f"Ignored ({len(invalid)})" if invalid else "",
+                     [PanelRow(str(b.path), (), str(b.reason), "bad") for b in invalid[:8]], "red"),
+    ]
+    return panel("Skills", sections, count=str(len(cards) + len(written)), enabled=enabled, unicode=unicode)
+
+
+
+_TASK_SECTIONS = (
+    ("in_progress", "Running", "busy"), ("awaiting_human", "Waiting for you", "warn"),
+    ("blocked", "Blocked", "warn"), ("available", "Waiting", "idle"), ("pending", "Queued behind others", "idle"),
+    ("paused", "Paused", "idle"), ("failed", "Failed", "bad"), ("completed", "Done", "good"),
+)
+
+
+def _task_panel(tasks: list[dict], projects: list[dict], *, limit: int = 20, enabled: bool = True,
+                unicode: bool = True) -> str:
+    """`tasks` as a panel: a section per status, work in flight first; each
+    row the id, kind and origin, then the task's title."""
+    from .activity import short_title
+
+    if not tasks and not projects:
+        return "no tasks"
+    by_status: dict[str, list[dict]] = {}
+    for task in tasks:
+        by_status.setdefault(task.get("status", "?"), []).append(task)
+    order = list(_TASK_SECTIONS) + [(s, s.replace("_", " ").capitalize(), "idle")
+                                    for s in sorted(by_status) if s not in dict((k, 1) for k, _t, _m in _TASK_SECTIONS)]
+    sections: list[PanelSection] = []
+    shown = 0
+    for status, title, mark in order:
+        group = by_status.get(status) or []
+        rows = []
+        for task in group:
+            if shown >= limit:
+                break
+            name = task.get("title") or short_title(task.get("description") or "", subject=task.get("subject"), limit=90)
+            rows.append(PanelRow(str(task.get("task_id", "?"))[:12], (str(task.get("kind", "?")),
+                                                                        str(task.get("origin", "?"))), name, mark))
+            shown += 1
+        if rows:
+            sections.append(PanelSection(title, rows, _STATUS_COLOR.get(status, "dim"),
+                                         note=f"{status} \u00b7 {len(group)}"))
+    if projects:
+        by_id = {t.get("task_id"): t for t in tasks}
+        rows = []
+        for project in projects[:limit]:
+            pid = str(project.get("project_id", "?"))
+            total = project.get("total", 0)
+            if not total:
+                status = by_id.get(pid, {}).get("status", "?")
+                rows.append(PanelRow(pid[:12], (status,), "not broken down into steps yet", "idle"))
+            else:
+                stalled = " \u00b7 stalled" if project.get("stalled") else ""
+                rows.append(PanelRow(pid[:12], (str(project.get("rollup", "?")),),
+                                     f"{project.get('done', 0)}/{total} steps{stalled}",
+                                     "warn" if project.get("stalled") else "busy"))
+        sections.append(PanelSection("Projects", rows, note=f"{len(projects)} project(s)"))
+    counts = " \u00b7 ".join(f"{len(by_status[k])} {t.lower()}" for k, t, _m in _TASK_SECTIONS if by_status.get(k))
+    footer = ""
+    if len(tasks) > shown:
+        footer = f"... {len(tasks) - shown} more \u2014 `tasks all` to see them"
+    elif len(projects) > limit:
+        footer = f"... {len(projects) - limit} more projects"
+    return panel("Tasks", sections, count=f"{len(tasks)} task(s)" + (f" \u00b7 {counts}" if counts else ""),
+                 footer=footer, enabled=enabled, unicode=unicode)

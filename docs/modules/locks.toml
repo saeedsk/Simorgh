@@ -34,3 +34,9 @@ by = "opus-main"
 task = "chat write tools, provider notice, search scope, TUI noise"
 since = "2026-09-19T12:29:45+00:00"
 until = "2026-09-19T20:29:45+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "panel styling for voice views"
+since = "2026-09-19T12:55:24+00:00"
+until = "2026-09-19T20:55:24+00:00"
