@@ -11,12 +11,6 @@ task = "Gemini key from secrets.toml"
 since = "2026-09-19T07:32:15+00:00"
 until = "2026-09-19T09:32:15+00:00"
 
-[locks.execution]
-by = "opus-main"
-task = "stage0 item 29: skill load race"
-since = "2026-09-19T07:39:36+00:00"
-until = "2026-09-19T15:39:36+00:00"
-
 [locks.kernel]
 by = "opus-main"
 task = "Gemini key from secrets.toml"
@@ -28,9 +22,3 @@ by = "opus-main"
 task = "stage 0 item 30: capped real-model gate"
 since = "2026-09-19T07:22:45+00:00"
 until = "2026-09-19T11:22:45+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "stage0 item 29: flaky ten-turn deadline"
-since = "2026-09-19T07:41:09+00:00"
-until = "2026-09-19T15:41:09+00:00"
