@@ -62,6 +62,32 @@ def _write_pcm16(path: str, samples, rate: int) -> float:
     return frames / float(rate or RATE)
 
 
+def _at_speed(samples, speed: float):
+    """`samples` played `speed` times as fast, pitch kept.
+
+    StyleTTS 2's `inference()` takes no speed, and `tts_speed` was sent
+    here and dropped: the creator changed it and heard no difference
+    (2026-09-19). librosa's phase-vocoder stretch ships in this venv; a
+    speed within 2% of 1, or no librosa, returns the audio untouched.
+    """
+    try:
+        speed = float(speed or 1.0)
+    except (TypeError, ValueError):
+        return samples
+    speed = max(0.5, min(2.0, speed))
+    if abs(speed - 1.0) < 0.02:
+        return samples
+    try:
+        import librosa
+        import numpy as np
+    except ImportError:
+        return samples
+    data = np.asarray(samples, dtype=np.float32).reshape(-1)
+    if data.size < 2048:
+        return samples
+    return librosa.effects.time_stretch(data, rate=speed)
+
+
 def main() -> None:
     try:
         import torch
@@ -119,6 +145,7 @@ def main() -> None:
                     diffusion_steps=int(params.get("diffusion_steps", 5)),
                     embedding_scale=float(params.get("embedding_scale", 1.0)),
                 )
+            wav = _at_speed(wav, req.get("speed", 1.0))
             out = str(req.get("out") or f"/tmp/styletts2-{rid}.wav")
             seconds = _write_pcm16(out, wav, RATE)
             # An engine that returns no sound must say so, not succeed
