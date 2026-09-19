@@ -18,6 +18,9 @@ class ToolsFacet:
             "name": name, "read_only": payload.get("read_only", True),
             "reversibility": payload.get("reversibility", "read_only"),
             "provider": payload.get("provider", "builtin"), "available": True,
+            # Kept for the prompt and for Guardian's typed reads (stage 2).
+            "description": payload.get("description", ""),
+            "input_schema": payload.get("input_schema") or {"type": "object"},
         }
 
     def names(self, *, available_only: bool = True) -> list[str]:

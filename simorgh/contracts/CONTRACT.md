@@ -160,3 +160,5 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - `streamnames.WRITERS` (prefix -> subsystems allowed to write) and `writers_for(stream)` (longest prefix; None when unlisted), stage 1 item 8. Two-writer prefixes: `action:` (guardian, execution), `task:` (planning, orchestration), `capabilities` (execution, voice). Kernel-only: `system`, `schedule`, `config:`, `metrics:`.
 
 - `Telemetry.event` takes an optional `end` (a timed span measured by the caller).
+
+- `tool.registered` gains optional `input_schema` (an object schema), stage 2 item 1. Consumers: worldmodel (ToolsFacet keeps it with the description), orchestration (item 2 will render it).

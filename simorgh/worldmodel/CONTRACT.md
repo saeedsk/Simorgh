@@ -125,3 +125,5 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim worldmodel --by <you> --task "..."`), commit the lock, edit only `simorgh/worldmodel/`, `tests/simorgh/worldmodel/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py worldmodel` before committing; commit subject `worldmodel: <what changed>`.
+
+- ToolsFacet keeps each tool's `description` and `input_schema` from `tool.registered` (stage 2 item 1).
