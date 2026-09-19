@@ -207,6 +207,42 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out.getvalue().count("sim: The kettle is on."), 1)
         self.assertEqual(self.service._streaming_rows(), [])  # noqa: SLF001
 
+    async def test_a_dropped_reply_marks_its_own_line_not_the_oldest(self):
+        """Live 2026-09-19: a drop for one turn marked "Yes, I'm here!" (another
+        turn's reply) as not spoken, and it was then spoken and printed twice."""
+        import contextlib
+        import io
+        from unittest import mock
+
+        live = mock.MagicMock()
+        live.enabled = True
+        self.service._live = live  # noqa: SLF001
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            for turn, sid, heard in ((1, "s1", "what do you mean"), (2, "s2", "are you there")):
+                await self.other.publish(self.other.new(topics.VOICE_TRANSCRIPT, {
+                    "text": heard, "confidence": 0.9, "seconds": 1.0, "engine": "w", "device": "d",
+                    "session_id": sid, "turn": turn}))
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": "s2", "task_id": "s2", "text": "Yes, I'm here!", "channel": "voice",
+                "kind": "chat", "floor": False, "tool_steps": 0}))
+            await self._pump()
+            await self.other.publish(self.other.new(topics.VOICE_SPOKEN, {
+                "text": "", "seconds": 0.0, "engine": "", "device": "d", "interrupted": False,
+                "dropped": True, "reason": "moved on", "turn": 1}))
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": "s1", "task_id": "s1", "text": "Nothing, sorry.", "channel": "voice",
+                "kind": "chat", "floor": False, "tool_steps": 0}))
+            await self._pump()
+            await self.other.publish(self.other.new(topics.VOICE_SPOKEN, {
+                "text": "Yes, I'm here!", "seconds": 1.0, "engine": "k", "device": "d", "interrupted": False,
+                "turn": 2}))
+            await self._pump()
+        text = out.getvalue()
+        self.assertEqual(text.count("Yes, I'm here!"), 1)
+        self.assertNotIn("Yes, I'm here!  (not spoken)", text)
+        self.assertIn("Nothing, sorry.  (not spoken)", text)
+
     async def test_a_quiet_voice_reply_never_reaches_the_screen(self):
         """Live 2026-09-19: "🔊 sim: QUIET" printed by the fallback timer."""
         import contextlib

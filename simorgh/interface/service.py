@@ -212,6 +212,10 @@ class Service:
         # Spoken replies that ended before their `turn.completed` arrived (a
         # short streamed reply can): already printed, so not queued again.
         self._voice_spoken_early = 0
+        # Voice's turn number -> the chat session id (`voice.transcript`).
+        self._turn_sessions: dict = {}
+        # Sessions whose reply Voice dropped before the reply was finished.
+        self._voice_dropped: set = set()
         # A reply still being written, per session id (`session.delta`).
         self._streaming: dict[str, str] = {}
         self._color = render_mod.color_enabled(self.config.color)
@@ -1136,6 +1140,13 @@ class Service:
                 self._out(render_mod.style(f"  🎤 hearing: {text[:80]}{'…' if len(text) > 80 else ''} …",
                                            "dim", enabled=self._color))
             return
+        if p.get("turn") is not None and p.get("session_id"):
+            # Voice numbers its turns; the chat keys them by session. This
+            # is the one event carrying both, so a later `voice.spoken` or
+            # dropped reply (turn only) finds its own line.
+            self._turn_sessions[p["turn"]] = str(p["session_id"])
+            if len(self._turn_sessions) > 64:
+                self._turn_sessions.pop(next(iter(self._turn_sessions)))
         # The turn is settled: drop the draft, or `_out`'s restore puts it
         # back underneath the real line (`clear()` erases the screen but
         # keeps the text; only `render("")` forgets it).
@@ -1194,8 +1205,18 @@ class Service:
             what = {"stop": "stopped", "off": "voice off", "mute": "muted"}.get(message.payload["command"], "stopped")
             self._out(render_mod.style(f"  ⏹ {what} -- you said so", "dim", enabled=self._color))
             return
+        owner = self._turn_sessions.get(message.payload.get("turn"))
         if message.payload.get("dropped"):
-            if self._voice_reply_settled(tail="  (not spoken)"):
+            # Only ITS reply is marked; with no owner known, none is -- the
+            # fallback timer prints it. Settling the oldest marked "Yes, I'm
+            # here!" as not spoken, and it was then spoken and printed again
+            # (live 2026-09-19).
+            if owner and self._voice_reply_settled(owner, tail="  (not spoken)"):
+                return
+            if owner:
+                self._voice_dropped.add(owner)      # its reply is still being written
+                return
+            if self._voice_speaking:
                 return
             self._voice_replies_shown = max(0, self._voice_replies_shown - 1)
             reason = str(message.payload.get("reason") or "you had moved on")
@@ -1208,6 +1229,8 @@ class Service:
                 # The "Aha." / "Let me check." said the moment a turn ends
                 # -- a beat, not a reply.
                 self._out(render_mod.style(f"  🔊 {text}", "dim", enabled=self._color))
+                return
+            if owner and self._voice_reply_settled(owner, tail=tail):
                 return
             if self._voice_reply_settled(tail=tail, said=text):
                 return
@@ -1594,6 +1617,15 @@ class Service:
             if self._voice_spoken_early > 0:
                 self._voice_spoken_early -= 1
                 self._streaming.pop(session_id, None)
+                self._invalidate()
+                fut = self._pending_turns.get(p.get("session_id", ""))
+                if fut is not None and not fut.done():
+                    fut.set_result(p.get("text", ""))
+                return
+            if session_id in self._voice_dropped:
+                self._voice_dropped.discard(session_id)
+                self._streaming.pop(session_id, None)
+                self._out(render_mod.style(f"🔊 sim: {text}  (not spoken)", "green", enabled=self._color))
                 self._invalidate()
                 fut = self._pending_turns.get(p.get("session_id", ""))
                 if fut is not None and not fut.done():

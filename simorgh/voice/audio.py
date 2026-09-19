@@ -209,6 +209,57 @@ class FfmpegMicrophone:
 
 
 # ----------------------------------------------------------------- playback
+#: Speech crosses zero on 5-20% of samples averaged over a piece; white
+#: noise on about half. A loud piece above NOISE_ZCR is not speech.
+NOISE_ZCR = 0.35
+NOISE_RMS = 1500.0
+NOISE_DIR = Path("workspace/voice/noise")
+
+
+def noise_report(audio: Audio) -> str:
+    """"" for audio that could be speech; else why it looks like noise.
+
+    The creator heard "awful noise" before replies (2026-09-19) and every
+    synthesised piece measured offline was clean speech. This check runs on
+    what actually goes to the speaker, so the next burst is caught with the
+    evidence rather than guessed at.
+    """
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover -- numpy arrives with every engine
+        return ""
+    if len(audio.pcm) % SAMPLE_WIDTH:
+        return f"odd byte count {len(audio.pcm)}: the samples are misaligned"
+    samples = np.frombuffer(audio.pcm, dtype=np.int16).astype(np.float64)
+    if samples.size < audio.sample_rate // 20:      # under 50 ms: too short to judge
+        return ""
+    rms = float(np.sqrt(np.mean(samples * samples)))
+    zcr = float(np.mean(np.abs(np.diff(np.sign(samples))) > 0))
+    if rms >= NOISE_RMS and zcr >= NOISE_ZCR:
+        return f"rms {rms:.0f}, zero-crossing rate {zcr:.2f} at {audio.sample_rate} Hz, {samples.size} samples"
+    return ""
+
+
+def _refuse_noise(audio: Audio) -> bool:
+    """True (and logged, and kept for inspection) when `audio` is noise."""
+    why = noise_report(audio)
+    if not why:
+        return False
+    import logging
+    import time as _time
+
+    path = ""
+    try:
+        NOISE_DIR.mkdir(parents=True, exist_ok=True)
+        target = NOISE_DIR / f"{int(_time.time() * 1000)}.wav"
+        write_wav(target, audio)
+        path = str(target)
+    except OSError:
+        pass
+    logging.getLogger("simorgh.voice").warning("voice.noise_refused %s; kept at %s", why, path or "(not kept)")
+    return True
+
+
 class SounddeviceSpeaker:
     name = "sounddevice"
 
@@ -225,6 +276,8 @@ class SounddeviceSpeaker:
         except ImportError as exc:  # pragma: no cover -- both are optional
             raise RuntimeError("sounddevice playback needs numpy and sounddevice") from exc
 
+        if _refuse_noise(audio):
+            return
         samples = np.frombuffer(audio.pcm, dtype=np.int16)
         await asyncio.to_thread(sd.play, samples, audio.sample_rate, blocking=True)
 
@@ -252,6 +305,8 @@ class CommandSpeaker:
     _proc = None
 
     async def play(self, audio: Audio) -> None:
+        if _refuse_noise(audio):
+            return
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(wav_bytes(audio))
             path = tmp.name
