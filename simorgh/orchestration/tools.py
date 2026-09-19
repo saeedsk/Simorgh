@@ -642,8 +642,19 @@ def offered_tools(profile_tools: tuple[str, ...]) -> tuple[str, ...]:
     # read_file (observer, 2026-09-08). A profile names the tools that
     # session should have; registration adds skills to it, and must
     # never subtract.
-    offered = list(profile_tools)
-    offered.extend(sorted(t for t in known if t.startswith("skill:")))
+    offered: list[str] = []
+    for name in profile_tools:
+        if "*" in name or "?" in name:
+            # An agent file may name tools by pattern (`cam_*`, stage 4 item
+            # 7): the registered tools that match, or -- before anything has
+            # registered -- the policy table's.
+            import fnmatch
+
+            pool = known or set(_TOOL_POLICY)
+            offered.extend(t for t in sorted(pool) if fnmatch.fnmatchcase(t, name) and t not in offered)
+        elif name not in offered:
+            offered.append(name)
+    offered.extend(sorted(t for t in known if t.startswith("skill:") and t not in offered))
     return tuple(offered)
 
 

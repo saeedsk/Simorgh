@@ -15,11 +15,11 @@ Orchestration owns the agent loop: it claims a task (or takes a conversational p
 | `simorgh/orchestration/claims.py` | `unsupported_claims`: a final answer's claims checked against the step log |
 | `simorgh/orchestration/config.py` | `[orchestration]` dataclass |
 | `simorgh/orchestration/context.py` | `Assembler`: conversation window, memory block and transcript for one think |
-| `simorgh/orchestration/profiles.py` | CHAT, VOICE_CHAT, PATCH, RESEARCH, PLAN, SKILL profiles and their selection |
+| `simorgh/orchestration/profiles.py` | Loads the agent definitions (`agents/<name>.md`: TOML frontmatter `tools` (globs allowed), `read_only`, `max_steps`, `max_revisions`, `scaffold`, `max_output_tokens`, `verify`, `extends`; the scaffold as body; `<!-- -->` notes never reach the prompt) into CHAT, VOICE_CHAT, PATCH, RESEARCH, PLAN, SKILL; an unknown key is refused |
 | `simorgh/orchestration/pressure.py` | Compaction by token pressure: stub old tool results at 70%, progress note at 85%; `recall_result` |
 | `simorgh/orchestration/progress.py` | Progress note used by re-grounding and clean revisions |
 | `simorgh/orchestration/resume.py` | Rebuilds a session from its `task:<id>` stream (crash vs retry) |
-| `simorgh/orchestration/scaffolds.py` | Renders the `task_rules` block per scaffold, channel and speaker; tool-down notes |
+| `simorgh/orchestration/scaffolds.py` | Renders the `task_rules` block per scaffold, channel and speaker (the workflow text from the agent file, `scaffold_body`); tool-down notes |
 | `simorgh/orchestration/service.py` | The `Service`: starts workers, chat hand-off, tool registry replay, metrics |
 | `simorgh/orchestration/stophook.py` | The Stop hook: one bounce per turn for a final answer that claims what no tool did (commit, promise, TV, pronunciation, any effect in chat) |
 | `simorgh/orchestration/session.py` | `SessionRunner`: the step loop, proposals, verify, worktree landing, honesty guards |

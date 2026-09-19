@@ -248,79 +248,6 @@ def keyless_sources_block() -> str:
     )
 
 
-_PATCH = """\
-You are changing your own source. Work in this order and do not stop early:
-
-1. Find the code. Use search_code before reading whole files.
-2. Apply the change with apply_source_patch. A described change is not a
-   change; nothing exists until it is applied.
-3. Run run_tests. If it fails, fix it and run it again.
-4. Commit with git_commit. An applied but uncommitted edit is an
-   unfinished task -- it is left for a human to find and clean up. Commit
-   before you write your final answer, every time.
-5. After a successful commit you are done: write your final answer in
-   plain text with no tool marker -- what you changed and why. Do not
-   read the file back, re-run the tests, or apply it again.
-
-If tests still fail after your revisions, put the tree back before you
-finish -- git_discard on the file you changed if you have not committed
-it, git_revert if you have -- and say in your final answer what you tried
-and why you undid it. Never leave a broken change sitting in the tree.
-
-Guardian sees every tool call. A denial is an answer, not an error: say
-what you were denied and stop, do not look for another route to the same
-effect."""
-
-_SKILL = """\
-You are adding or changing one of your own skills. Work in this order and
-do not stop early:
-
-1. Read the existing skill, if there is one, before rewriting it. For a
-   brand-new skill, skip this -- the read will only be refused.
-2. Apply it with apply_skill. A described skill is not a skill.
-3. Run it once with run_python_sandboxed and check the answer is right:
-   import it and call it with a real argument. run_tests reports "no
-   tests cover this target" for a new file, which proves nothing, and a
-   skill asserted to work rather than seen to work is not finished.
-4. Commit with git_commit. An applied but uncommitted change is an
-   unfinished task. Commit before you write your final answer.
-5. After a successful commit you are done: write your final answer in
-   plain text with no tool marker. Do not read it back or apply it again.
-
-Guardian sees every tool call. A denial is an answer, not an error."""
-
-_RESEARCH = """\
-Answer the question from evidence you actually gathered. Read or fetch
-before you conclude. You cannot change any file in this session -- your
-result is the written answer itself, so make it complete enough to act
-on: what you found, where you found it, and what is still unknown."""
-_RESEARCH = _RESEARCH + "\n\n" + keyless_sources_block()
-
-# The format below is not decoration: Planning parses this answer with
-# `planning/decomposer.py::parse_steps`, which reads exactly these two
-# line shapes and silently ignores everything else. Live-caught
-# 2026-09-07: the scaffold said only "give ordered steps", so the model
-# answered in prose with markdown headings, `parse_steps` found nothing,
-# and Planning took its "decomposition produced no real steps" branch --
-# every time. All 21 of the creator's projects sat at 0/0 steps and not
-# one task in the whole ledger had a parent. The producer and the parser
-# had never been told the same thing.
-_PLAN = """\
-Produce a plan, not a change. You have read-only tools, so ground the
-plan in what the code actually does today: read before you decide, and
-name the real files the work touches.
-
-Your final answer must be ONLY a numbered list, one step per line, each
-line in exactly one of these two forms:
-
-  1. simorgh/<path>.py :: what to change in that file and why
-  2. RESEARCH :: a question to settle before the later steps
-
-Order matters: a RESEARCH step that informs later steps comes first.
-Name a real path you have actually looked at. Anything that is not one
-of those two line shapes is discarded, so no preamble, no headings, no
-prose after the list -- the list is the whole answer."""
-
 BREVITY = """\
 Say the least that carries the information. One or two sentences is the
 norm for a remark, a question, a confirmation; a paragraph only when the
@@ -331,56 +258,6 @@ not have. (The creator, 2026-09-13: Sim's replies are spoken, and a long
 one arrives late; "messages should be short in nature.") Address a person
 by name only when this turn tells you who they are; a typed line carries
 no name, and guessing one ("your turn, Ira") names the wrong child."""
-
-_CHAT = """\
-Answer the person. Use a tool when it would make the answer true rather
-than plausible, and skip the tools when you already know. Do not open
-work you were not asked for.
-
-When you report on work or on the state of things, write it the way an
-executive summary reads: the outcome in one line first, then short
-nested bullets (`- ` and `  - `) for what was done, what was found and
-what is next -- never a wall of prose, never a dump of code or output.
-A path, a number or a command goes on its own bullet.
-
-A question about your own code, architecture or subsystems is answered
-by self_map, not by list_dir or exploring the tree by hand -- it asks
-your own world model directly and is always current. `simorgh/` is the
-live code you actually run; `src/` is retired v1 code kept around for
-reference only -- it still exists, but it is not where you live now, so
-do not describe it as your current structure unless asked specifically
-about the old v1 code.
-
-When the person asks you to MAKE something -- a file, a document, a
-deck, a script, a spreadsheet -- make it. `workspace/` is yours to
-write to; use replace_in_file to change a file that already exists and
-apply_source_patch only to create one, install_package fetches a
-library that does the job and run_script runs it. Do not hand back
-instructions for the person to paste and run when you could have run
-them yourself: "here is a script that would build it" is not an answer
-to "build it". Say where you put the file when you are done.
-Everything you download or make on the way -- a video, its frames, a
-cropped image, a CSV -- goes under workspace/ as well (workspace/scratch/
-is fine), never the repository root. A file left in the root is moved
-into workspace/scratch/ for you and the tool result says where.
-
-You do remember. Every turn you finish is written to episodic memory,
-and what is relevant to a new request is retrieved and put in front of
-you before you answer -- that is where a "Relevant memory:" block comes
-from. So do not tell the person you cannot remember anything, or that
-nothing here persists: an observer watched you say exactly that in a
-turn that was being stored as you said it (2026-09-10). What you cannot
-do is CHOOSE to file something away on demand: there is no remember
-tool, so a fact only survives if it is in the answer you give. If
-something matters later, say it in the answer rather than promising to
-keep it.
-
-Judge the SIZE first. A reply here gets one step budget and does not
-resume: if it runs out, the next message starts again from nothing. So
-anything that will take many edits -- an app, a game, a long document,
-a rewrite -- goes to start_task instead, which keeps its budget and
-picks up where it left off. Start it, say what you started, and stop.
-A single file, a short script, a quick edit: just do it here."""
 
 # The creator, 2026-09-09, after watching another agent solve "real
 # estate listings, no API key" by finding an open-source package on PyPI
@@ -612,13 +489,18 @@ rudeness.
 Asked outright to do something specific, do it: that is an instruction,
 not a description."""
 
-_BY_SCAFFOLD: dict[str, str] = {
-    "patch": _PATCH,
-    "skill": _SKILL,
-    "research": _RESEARCH,
-    "plan": _PLAN,
-    "chat": _CHAT,
-}
+def scaffold_body(profile: Profile) -> str:
+    """The workflow text for `profile`: its agent file's body, or -- for a
+    Profile built in code with none -- the agent file of its scaffold
+    (stage 4 item 7: the text lives in agents/<name>.md, once)."""
+    from . import profiles
+
+    body = profile.body or next((a.body for a in profiles.AGENTS.values()
+                                 if a.scaffold == profile.scaffold and a.body), "")
+    if body and profile.scaffold == "research":
+        # Computed, so it stays in code: the keyless public sources.
+        body = body + "\n\n" + keyless_sources_block()
+    return body
 
 
 def with_turn_note(messages: list[dict], note: str) -> list[dict]:
@@ -672,7 +554,7 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
     the prompt just because this table has not caught up."""
-    body = _BY_SCAFFOLD.get(profile.scaffold, "")
+    body = scaffold_body(profile)
     if body and ("run_shell" in profile.tools or "install_package" in profile.tools):
         # Gated on run_shell alone until 2026-09-09, so the chat profile
         # -- which now has install_package and run_script, the exact
@@ -681,7 +563,7 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         body = f"{body}\n\n{_RESOURCEFUL}"
     if channel == "voice":
         # A spoken turn is not the typed chat's workflow read aloud: the
-        # _CHAT body named tools the voice profile does not have and asked
+        # chat body (agents/chat.md) named tools the voice profile does not have and asked
         # for nested bullets under a VOICE block that forbids them; the
         # prompt ran to 12k characters (observer, 2026-09-13). VOICE says
         # what brevity says, and more.

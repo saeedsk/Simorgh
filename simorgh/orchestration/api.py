@@ -36,6 +36,9 @@ class Profile:
         "Answer now with what you have, even if incomplete."
     )
     verify: bool = True
+    # The scaffold text from the agent's definition file (agents/<name>.md);
+    # "" leaves `scaffolds.py` to its built-in text for `scaffold`.
+    body: str = ""
 
 
 @dataclass

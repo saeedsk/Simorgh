@@ -34,6 +34,10 @@ DEFAULT_PROTECTED_SUBJECTS: tuple[str, ...] = (
     # means the undo mechanism is not the system's to edit.
     "simloader.py",
     "sim.sh",
+    # The agent definitions (stage 4 item 7): which tools a session may
+    # ask for and what it is told to do. A session that could edit its own
+    # agent file could grant itself any tool.
+    "agents/",
     # The machine, not only the repository (2026-09-18 evaluation, S2).
     # Substrings, matched case-folded like everything above, so the
     # absolute (`/Users/x/.simorgh/secrets.toml`), home-relative
