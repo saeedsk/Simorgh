@@ -53,10 +53,10 @@ def _guardian_kind(kind: str) -> str:
 class VerificationService:
     name = "verification"
     version = "0.1.0"
-    consumes = (topics.VERIFY_REQUESTED, topics.PLAN_PROPOSED, topics.SYSTEM_STATE_CHANGED)
+    consumes = (topics.VERIFY_REQUESTED, topics.PLAN_PROPOSED, topics.SYSTEM_STATE_CHANGED, topics.ACTION_RESULT)
     produces = (
         topics.VERIFY_RESULT, topics.PLAN_REVIEWED, topics.ACTION_PROPOSED,
-        topics.GUARDIAN_REVIEW, topics.COGNITION_THINK, topics.UI_NOTICE,
+        topics.GUARDIAN_REVIEW, topics.COGNITION_THINK,
     )
 
     def __init__(self, config: VerificationConfig | None = None) -> None:

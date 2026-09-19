@@ -101,6 +101,12 @@ task = "stage 0 item 31: CONTRACT.md prose (agents)"
 since = "2026-09-19T06:46:31+00:00"
 until = "2026-09-19T10:46:31+00:00"
 
+[locks.verification]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:51+00:00"
+until = "2026-09-19T10:46:51+00:00"
+
 [locks.voice]
 by = "opus-main"
 task = "stage 0 item 31: CONTRACT.md prose (agents)"

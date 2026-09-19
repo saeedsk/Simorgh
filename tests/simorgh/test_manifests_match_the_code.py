@@ -29,7 +29,8 @@ pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ("bus", "ledger", "cognition", "memory", "worldmodel", "planning", "guardian", "execution",
-            "learning", "reflection", "curiosity", "persona", "benchmark", "voice", "interface", "orchestration")
+            "verification", "learning", "reflection", "curiosity", "persona", "benchmark", "voice", "interface",
+            "orchestration")
 _CONSTS = {n: v for n, v in vars(T).items() if n.isupper() and isinstance(v, str) and "." in v}
 _SUBSCRIBE = re.compile(r"subscribe\(\s*topics\.([A-Z_][A-Z0-9_]*)")
 _REFERENCE = re.compile(r"\btopics\.([A-Z_][A-Z0-9_]*)\b")
@@ -41,7 +42,8 @@ def _sources(package: str) -> list[str]:
 
 
 def _service(package: str):
-    return importlib.import_module(f"simorgh.{package}.service").Service
+    module = importlib.import_module(f"simorgh.{package}.service")
+    return getattr(module, "Service", None) or getattr(module, "VerificationService")
 
 
 @pytest.mark.parametrize("package", PACKAGES)
