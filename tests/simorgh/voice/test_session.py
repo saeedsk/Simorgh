@@ -22,7 +22,7 @@ class _Bus:
     def __init__(self) -> None:
         self.published: list[tuple[str, dict]] = []
 
-    def new(self, topic: str, payload: dict):
+    def new(self, topic: str, payload: dict, **_kw):
         return (topic, payload)
 
     async def publish(self, message) -> None:
