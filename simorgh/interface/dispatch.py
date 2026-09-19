@@ -464,6 +464,13 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
     from . import voiceview
 
     verb, rest = _benchmark_word(args)
+    # `voice voices = af_bella` and `voice tts_voice af_bella` are how people
+    # actually try to pick a voice (the creator, 2026-09-19): both are
+    # `voice set tts_voice ...`, and a bare setting name reads it back.
+    if verb == "voices" and rest.strip().startswith("="):
+        verb, rest = "set", f"tts_voice {rest.strip()}"
+    elif verb in ("tts_voice", "stt", "tts", "tts_speed", "volume", "stt_model"):
+        verb, rest = "set", f"{verb} {rest}".strip()
     if verb in ("", "status"):
         return await _request(bus, topics.VOICE_STATUS_REQUEST, {}, timeout=10.0, render=voiceview.status)
     if verb in ("on", "off", "mute", "unmute"):

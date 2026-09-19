@@ -173,7 +173,8 @@ def voices(payload: dict) -> str:
     current = payload.get("current") or ""
     shown = ", ".join(f"*{n}" if n == current else n for n in names[:60])
     more = f" (+{len(names) - 60} more)" if len(names) > 60 else ""
-    return f"{payload.get('engine')}: {shown}{more}\n  `[voice] tts_voice = \"<name>\"` to change it"
+    now = f" (now: {current})" if current else ""
+    return f"{payload.get('engine')}: {shown}{more}\n  `voice set tts_voice <name>` to change it{now}"
 
 
 def devices(payload: dict) -> str:

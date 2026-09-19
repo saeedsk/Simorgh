@@ -478,7 +478,18 @@ class Service:
         # setting, not a malformed command. An explicit empty string
         # (`voice set miso_reference ""`) still sets it to empty.
         if not raw and key in settings.SAFE_KEYS:
-            return True, settings.explain(self.config, key)
+            text = settings.explain(self.config, key)
+            if key == "tts_voice":
+                # The engine's own list, when it is open: which names are
+                # real depends on `tts` (StyleTTS2's are reference clips).
+                tts = self._injected["synthesiser"] or (self._pipeline._tts if self._pipeline else None)  # noqa: SLF001
+                try:
+                    names = list(tts.voices()) if tts is not None else []
+                except Exception:  # noqa: BLE001 -- the list is a courtesy, the value is the answer
+                    names = []
+                if names:
+                    text += f"\n  {getattr(tts, 'name', 'tts')} has: " + ", ".join(names[:40])
+            return True, text
         value, problem = settings.parse(key, raw)
         if problem:
             return False, problem

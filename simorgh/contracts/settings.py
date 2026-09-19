@@ -71,7 +71,7 @@ def read_handoff(name: str, home: Path | None = None) -> dict[str, str]:
 #: key -> (type, allowed values or (low, high) range, help)
 VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "enabled": (bool, None, "listen on boot"),
-    "tts_voice": (str, None, "the voice id (Kokoro: af_heart, af_jessica, ...; `voice voices` lists them)"),
+    "tts_voice": (str, None, "the voice for the current engine (`voice voices` lists them, the current one starred)"),
     "tts_farsi_voice": (str, None, "the Piper voice for Farsi"),
     "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),
     "stt_languages": (str, None, "the languages the house speaks, e.g. en,fa -- a turn heard in another is not answered; \"\" for any"),
