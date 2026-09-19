@@ -59,17 +59,11 @@ The generated rows for `learn.self_patch.applied`, `learn.self_patch.reverted`, 
 
 | Key | Default | Read in the package |
 |---|---|---|
-| `max_draft_attempts` | `3` | NO (declared, never read) |
-| `max_pipeline_wall_seconds` | `900.0` | NO (declared, never read) |
-| `action_timeout_seconds` | `60.0` | NO (declared, never read) |
-| `verify_timeout_seconds` | `300.0` | NO (declared, never read) |
-| `hot_swap_slots` | `('logic', 'emotion', 'skills')` | NO (declared, never read) |
 | `explore_bonus` | `0.15` | yes (`strategy.py`) |
 | `min_samples_for_trust` | `5` | yes (`strategy.py`) |
 | `blocked_sample_weight` | `0.5` | yes (`outcomes.py::on_task_blocked`) |
-| `max_concurrent_pipelines` | `2` | NO (declared, never read) |
 
-The six unread keys belonged to the retired PatchPipeline.
+The six keys that belonged to the retired PatchPipeline (`max_draft_attempts`, `max_pipeline_wall_seconds`, `action_timeout_seconds`, `verify_timeout_seconds`, `hot_swap_slots`, `max_concurrent_pipelines`) were removed from the dataclass on 2026-09-19; `from_mapping` drops any key it does not know, so writing one changes nothing and the Kernel's config check reports the section (`tests/simorgh/learning/test_config.py`).
 
 ## Public Python surface
 
@@ -97,12 +91,13 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/learning/test_competence.py` -- the projection math (Laplace, shrinkage, UCB1, calibration) and apply == rebuild, state/load round trip.
 - `tests/simorgh/learning/test_strategy.py` -- the `learn.strategy.suggest.reply` shape against the real schema, floor and overall-rate fallbacks.
 - `tests/simorgh/learning/test_service.py` -- health is `ok` and counts untyped turns; `draft_candidate` is not a registered tool.
+- `tests/simorgh/learning/test_config.py` -- `[learning]` has exactly the three live keys; a retired pipeline key changes nothing.
 
 ## Known issues (2026-09-18 evaluation)
 
 - C1 / W1 (critical): the self-improvement topic was never published by the real landing path. Fixed 2026-09-18 outside this package: `orchestration/session.py::_land` publishes `learn.self_patch.applied` (commit `1e486f1`). `learn.self_patch.reverted` still has no publisher.
 - C2 / W2 (critical): 91% of outcomes were chat turns typed `unknown` with `succeeded=True`. Partly fixed 2026-09-18 (commit `62318d3`): completed and failed untyped turns are skipped. Still open: a `task.completed` is recorded `succeeded=True` whatever the verify verdict (`outcomes.py:133`), `on_task_blocked` does not skip `unknown` (`outcomes.py:148-156`), and competence still gates nothing (only rendered in the self summary).
-- C14: PatchPipeline, Correlator and strategy suggestion had no publisher or requester. Partly fixed 2026-09-18 (commit `62318d3`, pipeline deleted, health ok). Still dead: `Correlator`, `_propose_action`, `_request_verify`, the `action.result` / `action.denied` subscriptions, the six pipeline config keys and the `learn:patch:` read.
+- C14: PatchPipeline, Correlator and strategy suggestion had no publisher or requester. Partly fixed 2026-09-18 (commit `62318d3`, pipeline deleted, health ok). Still dead: `Correlator`, `_propose_action`, `_request_verify`, the `action.result` / `action.denied` subscriptions and the `learn:patch:` read (the six pipeline config keys were removed 2026-09-19).
 - W7: one-sided topics. `learn.strategy.suggest` (no requester) and `learn.self_patch.reverted` (no publisher) are allow-listed with a reason (commit `cd807d4`, `b5c2671`).
 - Thin tests (called out by earlier reviews): four files; no test drives the service through a real bus subscription.
 
