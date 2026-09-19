@@ -43,7 +43,7 @@ A test with a real `asyncio.sleep(> 0.05)`, a `subprocess.run`, or a fixture ove
 
 ## 3. What makes a test worth keeping
 
-The 2026-09-18 evaluation (section 4.8) and the per-directory analysis in `docs/reviews/2026-09-18/tests/` found three kinds of test in this tree. Keep the first two; delete or merge the third.
+The 2026-09-18 evaluation (section 4.8) found three kinds of test in this tree. Keep the first two; delete or merge the third.
 
 1. **Behaviour tests.** Real subsystem objects on an in-memory bus and ledger, a fake provider, a fake clock; assert what the system *does*. `tests/simorgh/integration/test_cli_end_to_end.py` is the model: it boots every subsystem and drives `_handle_line`. These found the real bugs. Add a case here when you find a seam bug.
 2. **Contract tests.** Small, fast, and specific: this topic exists and has both sides; this schema has these fields; this stream is named here; this config key has this default and is read; only Guardian publishes `action.approved`. These are what let an agent change a module alone.
@@ -63,8 +63,7 @@ Speed and confidence are traded through the tiers, not by skipping tests:
 ## 5. Cleanup done on 2026-09-19
 
 - Deleted `tests/test_*.py` (41 files, 881 tests, 11.5k lines) with the v1 tree they tested. The suite dropped from 6,652 to 5,762 tests and from 16:40 to 1:34.
-- `tests/simorgh/execution/media/test_cast.py` hit an unpatched 30 s constant (`cast.py:674`); patched in the test.
-- `tests/simorgh/voice/test_session.py::TestTenTurns::test_ten_consecutive_turns_flow_and_are_measured` is timing-flaky (it failed the baseline run and passes alone); marked `slow` pending a fake-clock rewrite under the `voice` lock.
+- Still open (stage 0 item 29): `tests/simorgh/execution/media/test_cast.py` hits an unpatched 30 s constant (`cast.py:674`); `tests/simorgh/voice/test_session.py::TestTenTurns` and `tests/simorgh/integration/test_local_multi_worker_crash_resume.py` are timing-flaky under xdist (each failed once in a full run and passed alone) and need the `slow` marker and a fake clock.
 - `pyproject.toml` now declares the markers and `testpaths`; `pytest-timeout` is recommended (`pip install pytest-timeout`, then `--timeout=120` in the full tier) so a hang is a failure, not a stall.
 
-The per-directory value analysis (what each directory covers, which files are the contract tier, which are shape tests to merge or delete, what is not covered at all) is in `docs/reviews/2026-09-18/tests/`. Executing it is stage 0 item "test-suite consolidation" in `docs/plan/stage-0-safety-gaps-wires-gate.md`, one module at a time under that module's lock.
+The per-directory value analysis (what each directory covers, which files are the contract tier, which are shape tests to merge or delete, what is not covered at all) has not been written yet; producing it and executing it is stage 0 item 29 in `docs/plan/stage-0-safety-gaps-wires-gate.md`, one module at a time under that module's lock.
