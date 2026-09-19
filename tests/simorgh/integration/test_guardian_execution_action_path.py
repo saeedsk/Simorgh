@@ -117,7 +117,7 @@ class TestGuardianExecutionActionPath(unittest.IsolatedAsyncioTestCase):
         await collector.start()
 
         await kernel.bus.publish(_proposal(
-            "a1", tool="read_file", args={"path": "docs/blueprint/subsystems/09-guardian.md"},
+            "a1", tool="read_file", args={"path": "docs/ARCHITECTURE.md"},
         ))
         result = await _wait_for(collector.events, "a1", topics.ACTION_RESULT)
 
@@ -154,7 +154,7 @@ class TestGuardianExecutionActionPath(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         await kernel.bus.publish(_proposal(
-            "paused-1", tool="read_file", args={"path": "docs/blueprint/subsystems/09-guardian.md"},
+            "paused-1", tool="read_file", args={"path": "docs/ARCHITECTURE.md"},
         ))
         denied = await _wait_for(collector.events, "paused-1", topics.ACTION_DENIED)
 

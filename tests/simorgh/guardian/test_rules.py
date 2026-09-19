@@ -111,7 +111,7 @@ class TestProtectedRule(unittest.IsolatedAsyncioTestCase):
 
     async def test_abstains_for_an_unprotected_path(self):
         decision = await _evaluate(
-            ProtectedRule(), _proposal(args={"path": "docs/blueprint/subsystems/09-guardian.md"}), _ctx(),
+            ProtectedRule(), _proposal(args={"path": "docs/ARCHITECTURE.md"}), _ctx(),
         )
         self.assertEqual(decision.kind, "abstain")
 

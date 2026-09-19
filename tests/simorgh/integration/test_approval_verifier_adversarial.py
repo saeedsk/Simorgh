@@ -114,7 +114,7 @@ class TestToctouSwap(_AdversarialTestCase):
 
         # A real proposal for a real, legitimate read.
         await kernel.bus.publish(_proposal(
-            "swap-1", tool="read_file", args={"path": "docs/blueprint/subsystems/09-guardian.md"},
+            "swap-1", tool="read_file", args={"path": "docs/ARCHITECTURE.md"},
         ))
         result = await _wait_for(collector.events, "swap-1", topics.ACTION_RESULT)
         self.assertIsNotNone(result, "the legitimate proposal never even completed")
@@ -163,7 +163,7 @@ class TestToctouSwap(_AdversarialTestCase):
         # A second, legitimate proposal reuses the exact same action_id
         # with different args.
         await kernel.bus.publish(_proposal(
-            "swap-2", tool="read_file", args={"path": "docs/blueprint/subsystems/09-guardian.md"},
+            "swap-2", tool="read_file", args={"path": "docs/ARCHITECTURE.md"},
         ))
         await asyncio.sleep(0.3)
         results = [m for m in collector.events if m.payload.get("action_id") == "swap-2" and m.type == topics.ACTION_RESULT]
@@ -183,7 +183,7 @@ class TestExpiryBoundary(_AdversarialTestCase):
         await collector.start()
 
         await kernel.bus.publish(_proposal(
-            "exp-1", tool="read_file", args={"path": "docs/blueprint/subsystems/09-guardian.md"},
+            "exp-1", tool="read_file", args={"path": "docs/ARCHITECTURE.md"},
         ))
         # Let the approval issue, then wait past its 0.05s TTL before any
         # tool actually gets to run: pause the system right after
@@ -283,7 +283,7 @@ class TestReplayViaLiveCapture(_AdversarialTestCase):
         await kernel.bus.subscribe(topics.TOOL_INVOKED, _count_invocations)
 
         await kernel.bus.publish(_proposal(
-            "replay-live-1", tool="read_file", args={"path": "docs/blueprint/subsystems/09-guardian.md"},
+            "replay-live-1", tool="read_file", args={"path": "docs/ARCHITECTURE.md"},
         ))
         result = await _wait_for(collector.events, "replay-live-1", topics.ACTION_RESULT)
         self.assertIsNotNone(result)
@@ -325,7 +325,7 @@ class TestCrossProcessForgery(_AdversarialTestCase):
         await collector.start()
 
         await kernel.bus.publish(_proposal(
-            "forge-1", tool="read_file", args={"path": "docs/blueprint/subsystems/09-guardian.md"},
+            "forge-1", tool="read_file", args={"path": "docs/ARCHITECTURE.md"},
         ))
         # Let the real proposal's own approval run and complete first so
         # the "received" ledger record definitely exists with real args.
@@ -338,7 +338,7 @@ class TestCrossProcessForgery(_AdversarialTestCase):
         # approval for a brand-new action_id pointing at the same real
         # "received" record's args shape, using a guessed/wrong secret.
         wrong_secret = b"\xff" * 32
-        args = {"path": "docs/blueprint/subsystems/09-guardian.md"}
+        args = {"path": "docs/ARCHITECTURE.md"}
         args_sha256 = security.canonical_args_sha256(args)
         expires_at = time.time() + 60
         forged_token = security.approval_token(wrong_secret, "forge-2", "read_file", args_sha256, expires_at)
@@ -392,7 +392,7 @@ class TestConcurrentRetryStorm(_AdversarialTestCase):
         await kernel.bus.subscribe(topics.TOOL_INVOKED, _count_invocations)
 
         await kernel.bus.publish(_proposal(
-            "race-1", tool="read_file", args={"path": "docs/blueprint/subsystems/09-guardian.md"},
+            "race-1", tool="read_file", args={"path": "docs/ARCHITECTURE.md"},
         ))
         # Wait for the real action.approved to be captured, but race two
         # extra deliveries of the identical message concurrently BEFORE
