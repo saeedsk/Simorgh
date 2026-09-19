@@ -90,9 +90,9 @@ class Config:
     # the barge decision is made on the residual after Sim's own voice
     # -- known exactly, it is what we are playing -- is subtracted from
     # what the mic hears, so a person is detected by being ABSENT from
-    # the reference, not by being louder than Sim. OFF by default: a
-    # simulated echo is not a promise about a real room, and the level
-    # gate above is the safe fallback. `voice barge aec` toggles it live.
+    # the reference, not by being louder than Sim. On by default, though
+    # a simulated echo is not a promise about a real room, and the level
+    # gate above is the fallback. `voice barge aec` toggles it live.
     # All four keys reach only the legacy `Pipeline` capture path; the
     # live `VoiceSession` never builds the canceller, so today they change
     # nothing in a running Sim (evaluation V7).
