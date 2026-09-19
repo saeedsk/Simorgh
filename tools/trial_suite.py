@@ -222,7 +222,9 @@ async def run_one(trial: Trial, root: str, timeout_s: float) -> Result:
             "cognition": {
                 "provider_order": [p for p in os.environ.get("SIMORGH_TRIAL_PROVIDERS", "together,floor").split(",") if p],
                 "providers": {"together": {"max_spend_usd": float(os.environ.get("SIMORGH_TRIAL_MAX_USD", "1.0")),
-                                           "window_seconds": 86400.0}},
+                                           "window_seconds": 86400.0,
+                                           # markers | native: the stage 2 before/after (item 9)
+                                           "tool_dialect": os.environ.get("SIMORGH_TRIAL_TOOL_DIALECT", "markers")}},
             },
         }, None),
         secrets=EnvSecretStore({}),
@@ -501,7 +503,11 @@ if __name__ == "__main__":
     parser.add_argument("--providers", default=None, help="comma-separated provider order (default: together,floor)")
     parser.add_argument("--max-usd", type=float, default=None, help="spend cap per trial for together (default 1.0)")
     parser.add_argument("--total-usd", type=float, default=None, help="stop starting trials once this much is spent")
+    parser.add_argument("--dialect", choices=("markers", "native"), default=None,
+                        help="Together's tool dialect for this run (default markers)")
     args = parser.parse_args()
+    if args.dialect is not None:
+        os.environ["SIMORGH_TRIAL_TOOL_DIALECT"] = args.dialect
     if args.providers is not None:
         os.environ["SIMORGH_TRIAL_PROVIDERS"] = args.providers
     if args.max_usd is not None:
