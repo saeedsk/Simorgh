@@ -351,3 +351,5 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - `search_code` never descends into `site-packages`, `node_modules`, `venvs`, `.venv`, `venv`, `dist-packages` (`_NOT_SEARCHED`), and decodes ripgrep output with `errors="replace"` (a non-UTF-8 byte used to fail the search).
 
 - Camera pushes: `camera.event` is published for every channel as before, but a `ui.notice` only for more than bare motion (a person, a vehicle, an animal), at most once per camera per `NOTICE_EVERY_S` (120 s).
+
+- `execution:tools` `registered` records carry `description` and `input_schema` for builtin, MCP and skill tools, so Guardian's boot-time replay knows each tool's arguments (stage 2 item 7).

@@ -1,6 +1,6 @@
 # Stage 2 -- Schemas to the model, then native tool use behind a capability flag
 
-Status: **in progress** (2026-09-19: items 1-6 built; the native switch (item 9) exists with every provider still on markers; items 7-8 in progress; the flip waits for a BFCL/trial win) · Depends on: stage 0 item 30 (the gate) · Estimated: 3 weeks · Modules touched: contracts, execution, cognition, orchestration, guardian, benchmark
+Status: **in progress** (2026-09-19: items 1-8 done; the native switch (item 9) exists and was measured: Together native 6/7 on the trial suite, the same as markers, so no provider is flipped yet) · Depends on: stage 0 item 30 (the gate) · Estimated: 3 weeks · Modules touched: contracts, execution, cognition, orchestration, guardian, benchmark
 
 ## Outcome
 
@@ -26,7 +26,10 @@ Done 2026-09-19:
 - Items 5-6: native replies run every call (reads together, changes in order, stop at the first failure) and keep typed turns; a native provider gets the typed transcript when it fits uncompacted.
 - Item 9 (switch only): `[cognition.providers.<name>] tool_dialect = "native"`.
 
-Next: measure BFCL and the trial suite with Together on native vs the marker baseline (88%, 6/7), flip VOICE_CHAT's provider only on a win. Then (typed turns and N calls per turn in `session.py`, native path only), then item 9 (flip VOICE_CHAT on the provider that wins BFCL).
+- Items 7-8: Guardian judges proposals by the registered tool (class, read-only) and checks arguments against its schema (a new `schema` layer; required arguments and value kinds only, tolerant of today's marker shapes); tool results carry `error_kind` (refused, unconfigured, transient, failed) and readers use it instead of the error's words. Found on the way: denials from six Guardian layers were never delivered (the bus rejected their layer names); they now go out as `policy` with the rule in the reasons.
+- Item 9 measured 2026-09-19: trial suite with Together native 6/7 ($0.042) vs markers 5/7, 6/7, 6/7. A tie, so no flip; BFCL in the benchmark unit scores text and does not exercise the native path. Next measurement: more trial rounds, or a native-aware BFCL harness.
+
+Next: (typed turns and N calls per turn in `session.py`, native path only), then item 9 (flip VOICE_CHAT on the provider that wins BFCL).
 
 1. **`ToolSpec` on the wire.** *Lock `contracts`, `execution`, `worldmodel`.* (T2)
    - What: `tool.registered` carries `name, description, input_schema, reversibility, read_only, network, cost_class, source, tags`.

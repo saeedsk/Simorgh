@@ -630,3 +630,14 @@ class TestASkillAppliedInAWorktreeLoadsFromIt(_ExecutionServiceTestCase):
         ))
         await asyncio.sleep(0.1)
         self.assertEqual(calls, [])
+
+
+class TheToolsStreamCarriesEachSchema(_ExecutionServiceTestCase):
+    """Guardian replays execution:tools at boot (stage 2 item 7); the record
+    must hold what the bus message held."""
+
+    async def test_a_registered_builtin_is_recorded_with_its_schema(self):
+        await self._start()
+        records = [e.payload for e in await self.ledger.read("execution:tools") if e.type == "registered"]
+        read_file = next(r for r in records if r["name"] == "read_file")
+        self.assertIn("path", read_file["input_schema"]["properties"])

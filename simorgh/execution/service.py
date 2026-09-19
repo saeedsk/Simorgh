@@ -238,6 +238,10 @@ class Service:
                 # Ledger, so anything reading the stream back -- the CLI's
                 # `tool` listing -- had names and no idea what they do.
                 "description": tool.description,
+                # Guardian replays this stream at boot to learn each tool's
+                # arguments (stage 2 item 7); the bus message had them, the
+                # durable record did not.
+                "input_schema": input_schema_of(tool),
             }))
 
         # Skills already on disk get ANNOUNCED, not loaded. Loading stays
@@ -525,6 +529,7 @@ class Service:
             await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
                 "name": tool.name, "provider": "mcp", "reversibility": tool.reversibility,
                 "read_only": tool.read_only, "marker_arg_key": mcp_single_arg_key(tool.args_schema),
+                "description": tool.description, "input_schema": input_schema_of(tool),
             }))
 
     async def _on_state_changed(self, message: Message) -> None:
@@ -731,6 +736,7 @@ class Service:
         await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
             "name": tool.name, "provider": "skill", "reversibility": tool.reversibility,
             "read_only": tool.read_only, "marker_arg_key": tool.marker_arg_key,
+            "description": tool.description, "input_schema": input_schema_of(tool),
         }))
         return tool
 

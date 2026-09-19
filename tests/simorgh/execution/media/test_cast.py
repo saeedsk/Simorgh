@@ -484,7 +484,12 @@ class AndroidTvToolsTestCase(unittest.IsolatedAsyncioTestCase):
         cast.states = ["PLAYING"]      # the first video plays on and on
         r = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=aaaaaaaaaaa", "mode": "full"}, ctx=_ctx(bus))
         self.assertTrue(r.ok, r.error)
-        await asyncio.sleep(0.05)      # the fetch is done; the watcher is polling
+        # Wait for the fetch to finish and the watcher to poll -- a fixed
+        # 50 ms failed under a busy test run (2026-09-19).
+        for _ in range(300):
+            if [c for c in cast.calls if c[0] == "media_state"]:
+                break
+            await asyncio.sleep(0.01)
         self.assertTrue([c for c in cast.calls if c[0] == "media_state"])
         shown_before = len([c for c in cast.calls if c[0] == "show_page"])
         # somebody drives the TV: a new video; the old video's player goes idle for a moment
