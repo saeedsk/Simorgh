@@ -162,3 +162,5 @@ Lock it first (`python tools/modlock.py claim cognition --by <you> --task "..."`
 - The "thinking moved" notice compares the provider that answered with the last one that answered the SAME route (`_last_by_route`), so a deliberate route (drafts on the strong tier, chat on the default) is not announced; only a failover within a route is.
 
 - A single-line marker argument also ends where another UPPERCASE known marker starts on the same line (`first_line_argument(text, markers)`); live 2026-09-19 `READ_FILE: a.pyREAD_FILE: a.py` reached read_file whole.
+
+- Default `provider_order` (2026-09-19): together, gemini, claude_code_cli, floor. Gemini was behind the Claude Code CLI, so a Together timeout cost a 30 s CLI turn and Claude quota while Gemini was unused.

@@ -68,9 +68,12 @@ class ProviderConfig:
 class Config:
     # The creator, 2026-09-07: Together is Sim's LLM now, GLM-5.3-Flash the
     # default model. It leads the order, so it is what answers unless it is
-    # unavailable (no TOGETHER_API_KEY) or out of budget; the Claude Code
-    # CLI and Gemini stay behind it as failover, and the floor behind them.
-    provider_order: tuple[str, ...] = ("together", "claude_code_cli", "gemini", "floor")
+    # unavailable (no TOGETHER_API_KEY) or out of budget. Gemini is second
+    # (the creator, 2026-09-19: "added GEMINI_API_KEY as 2nd llm provider"):
+    # a Together timeout used to fail over to the Claude Code CLI, 30 s a
+    # turn and the creator's Claude quota, while Gemini sat unused behind
+    # it. The CLI is the last real provider, then the floor.
+    provider_order: tuple[str, ...] = ("together", "gemini", "claude_code_cli", "floor")
     providers: Mapping[str, ProviderConfig] = field(default_factory=lambda: {
         "together": ProviderConfig(
             # 1500 until 2026-09-11, when a spoken conversation reached
