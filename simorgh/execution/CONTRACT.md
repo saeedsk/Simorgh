@@ -4,206 +4,109 @@ One-line status: layer 3 · 21,657 lines · 60 test files · lock: `execution` i
 
 ## Purpose
 
-TODO: 3-6 sentences: what this module owns, what it must never do, the one design decision that shapes it.
+Execution is the only place a side effect happens: it owns the tool registry (about 100 tools: 42 core tools, six domain subpackages, worktree tools, on-demand `skill:<name>` tools, MCP proxies and external adapters) and runs a tool only in answer to an `action.approved` from Guardian, reporting `action.result` (`service.py:755-938`). It must never run a tool whose approval it has not verified itself: before any dispatch it recomputes the canonical args hash from the proposal Guardian recorded on `action:<id>` and re-checks Guardian's HMAC token, expiry and replay (`verifier.py`, `service.py:759-773`); a failure publishes `action.denied` with `layer="token"` and nothing runs. The shaping decision is "Guardian sees every call": every capability, including device control, video signalling and self-landing, is a Tool behind one approval path, which buys one audit trail at the cost of per-call ceremony (L4, T4). Code tasks edit a per-task git worktree and land on main only through `worktree_land`: rebase, a whole-suite gate re-judged by `simloader.unit_verdict`, then `git merge --ff-only` (`worktree.py:178-251`, `tools.py:1297-1323`). The package is Guardian-protected: Sim's own tasks cannot edit it.
 
 ## Files
 
+Core (the part that stays in Execution after stage 9):
+
 | File | For |
 |---|---|
-| `simorgh/execution/__init__.py` | TODO |
-| `simorgh/execution/capabilities.py` | TODO |
-| `simorgh/execution/config.py` | TODO |
-| `simorgh/execution/container.py` | TODO |
-| `simorgh/execution/doctext.py` | TODO |
-| `simorgh/execution/domainstatus.py` | TODO |
-| `simorgh/execution/energy/__init__.py` | TODO |
-| `simorgh/execution/energy/api.py` | TODO |
-| `simorgh/execution/energy/meters.py` | TODO |
-| `simorgh/execution/energy/tools.py` | TODO |
-| `simorgh/execution/external.py` | TODO |
-| `simorgh/execution/geocode.py` | TODO |
-| `simorgh/execution/home/__init__.py` | TODO |
-| `simorgh/execution/home/cameras.py` | TODO |
-| `simorgh/execution/home/registry.py` | TODO |
-| `simorgh/execution/home/ring.py` | TODO |
-| `simorgh/execution/home/tools.py` | TODO |
-| `simorgh/execution/htmltext.py` | TODO |
-| `simorgh/execution/knowledge/__init__.py` | TODO |
-| `simorgh/execution/knowledge/api.py` | TODO |
-| `simorgh/execution/knowledge/chunk.py` | TODO |
-| `simorgh/execution/knowledge/embed.py` | TODO |
-| `simorgh/execution/knowledge/index.py` | TODO |
-| `simorgh/execution/knowledge/parse.py` | TODO |
-| `simorgh/execution/knowledge/retrieve.py` | TODO |
-| `simorgh/execution/knowledge/sources.py` | TODO |
-| `simorgh/execution/knowledge/tools.py` | TODO |
-| `simorgh/execution/listingsources.py` | TODO |
-| `simorgh/execution/mcp.py` | TODO |
-| `simorgh/execution/media/__init__.py` | TODO |
-| `simorgh/execution/media/androidtv.py` | TODO |
-| `simorgh/execution/media/cast.py` | TODO |
-| `simorgh/execution/media/musicapp.py` | TODO |
-| `simorgh/execution/media/tools.py` | TODO |
-| `simorgh/execution/media/tvmedia.py` | TODO |
-| `simorgh/execution/netsafety.py` | TODO |
-| `simorgh/execution/notify.py` | TODO |
-| `simorgh/execution/packages.py` | TODO |
-| `simorgh/execution/pathsafety.py` | TODO |
-| `simorgh/execution/pdftext.py` | TODO |
-| `simorgh/execution/pim/__init__.py` | TODO |
-| `simorgh/execution/pim/accounts.py` | TODO |
-| `simorgh/execution/pim/api.py` | TODO |
-| `simorgh/execution/pim/connectors/__init__.py` | TODO |
-| `simorgh/execution/pim/connectors/caldav.py` | TODO |
-| `simorgh/execution/pim/connectors/fakes.py` | TODO |
-| `simorgh/execution/pim/connectors/imap.py` | TODO |
-| `simorgh/execution/pim/ics.py` | TODO |
-| `simorgh/execution/pim/nlp.py` | TODO |
-| `simorgh/execution/pim/tools.py` | TODO |
-| `simorgh/execution/realestate.py` | TODO |
-| `simorgh/execution/remote.py` | TODO |
-| `simorgh/execution/render.py` | TODO |
-| `simorgh/execution/script.py` | TODO |
-| `simorgh/execution/security/__init__.py` | TODO |
-| `simorgh/execution/security/api.py` | TODO |
-| `simorgh/execution/security/findings.py` | TODO |
-| `simorgh/execution/security/selfcheck.py` | TODO |
-| `simorgh/execution/security/tools.py` | TODO |
-| `simorgh/execution/service.py` | TODO |
-| `simorgh/execution/shell.py` | TODO |
-| `simorgh/execution/tools.py` | TODO |
-| `simorgh/execution/verifier.py` | TODO |
-| `simorgh/execution/vision.py` | TODO |
-| `simorgh/execution/websearch.py` | TODO |
-| `simorgh/execution/worktree.py` | TODO |
-| `simorgh/execution/writewatch.py` | TODO |
+| `simorgh/execution/__init__.py` | re-exports `Service` |
+| `simorgh/execution/service.py` | `Service`: registry, `_on_approved` dispatch, results, inflight replay, skills, MCP, probes, boot autostarts |
+| `simorgh/execution/verifier.py` | `ApprovalVerifier`: args hash, expiry, HMAC, replay check on every approval |
+| `simorgh/execution/config.py` | `[execution]` dataclass, `find_repo_root` |
+| `simorgh/execution/tools.py` | the core tools (read/search/list, sandboxes, `run_tests` and its landing gate, patch/replace/commit/revert/discard, tasks, skills, web_fetch, sim_command, memory_forget) and `builtin_tools()` |
+| `simorgh/execution/worktree.py` | `WorktreeManager` and `worktree_open` / `worktree_land` / `worktree_close` |
+| `simorgh/execution/pathsafety.py` | the read/write path boundary: readable roots, root files, credential names, traversal |
+| `simorgh/execution/netsafety.py` | SSRF guard for outbound URLs (`web_fetch`, `render_page`) |
+| `simorgh/execution/shell.py` | `run_shell` (on by default) and its refusal table, including credential reads |
+| `simorgh/execution/script.py` | `run_script`: Python with the repo importable and network on |
+| `simorgh/execution/container.py` | `run_container`: a command in a Docker image with a scratch mount |
+| `simorgh/execution/remote.py` | `run_remote`: a command over SSH (off unless `remote = true`) |
+| `simorgh/execution/writewatch.py` | discovers what a shell/script command wrote, for `session.wrote` |
+| `simorgh/execution/capabilities.py` | boot probes (node, puppeteer, docker, bandit, homeharvest, connectors) and the `capabilities` stream |
+| `simorgh/execution/domainstatus.py` | per-domain configured/working connectors for the probes |
+| `simorgh/execution/mcp.py` | stdio MCP client and `McpToolProxy` for human-configured servers |
+| `simorgh/execution/external.py` | adapters for LangChain / pydantic_ai / Composio / callables behind the Tool protocol |
+| `simorgh/execution/packages.py` | `find_package`, `install_package` (age floor, daily cap, denylist) |
+| `simorgh/execution/websearch.py` | `web_search` with spacing and a call budget |
+| `simorgh/execution/htmltext.py` | HTML to readable text for `web_fetch` |
+| `simorgh/execution/pdftext.py` | PDF to text |
+| `simorgh/execution/doctext.py` | DOCX, spreadsheet, CSV, image to text for `read_file` |
+| `simorgh/execution/render.py` | `render_page` / `browse_page` via Node + Puppeteer |
+| `simorgh/execution/notify.py` | `notify`: push a message to a person (irreversible) |
+| `simorgh/execution/geocode.py` | `geocode` via Nominatim |
+| `simorgh/execution/realestate.py` | `search_listings` |
+| `simorgh/execution/listingsources.py` | the listing data sources behind `search_listings` |
+| `simorgh/execution/vision.py` | `CameraVision` (describes `world.camera.event`, speaks it) and `camera_describe` |
+
+Domain subpackages (stage 9 moves each to `simorgh/domains/<name>/`):
+
+| Subpackage | For |
+|---|---|
+| `simorgh/execution/knowledge/` (api, chunk, embed, index, parse, retrieve, sources, tools) | the creator's documents: sqlite FTS5 + vector index; `kb_status`, `kb_sources`, `kb_search`, `kb_open`, `kb_ask` |
+| `simorgh/execution/pim/` (api, accounts, ics, nlp, tools, connectors/caldav, imap, fakes) | calendar and mail, read-only, credentials from the vault; `cal_list`, `mail_search`, `mail_read`, `remind` (publishes `system.schedule.add`) |
+| `simorgh/execution/security/` (api, findings, selfcheck, tools) | Sim's own security posture, local and advisory; `sec_self`, `sec_posture`, `sec_findings`, `sec_show`, `sec_accept` |
+| `simorgh/execution/home/` (registry, tools, cameras, ring) | Home Assistant `home_find/state/describe/call/undo`; Reolink NVR `cam_*` (11 tools); Ring `ring_*` (8 tools) |
+| `simorgh/execution/energy/` (api, meters, tools) | meters and tariffs through Home Assistant; `energy_status`, `energy_report`, `energy_tariff` |
+| `simorgh/execution/media/` (tools, cast, androidtv, musicapp, tvmedia) | HA `media_*`, Chromecast `cast_*`, dashboard `dash_view`/`dash_key`, Android TV `tv_*`, macOS Music `music_*` |
+
+Each subpackage exports one `<name>_tools(config, secrets=...)` factory that `builtin_tools()` splices in (`tools.py:3105-3163`); device integrations take optional SDKs and refuse by name when absent.
 
 ## Consumes
 
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `action.approved` | `messages/action.py::ActionApproved` | simorgh/execution/service.py | TODO |
-| `action.denied` | `messages/action.py::ActionDenied` | simorgh/execution/service.py | TODO |
-| `action.result` | `messages/action.py::ActionResult` | simorgh/execution/service.py | TODO |
-| `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/execution/service.py | TODO |
-| `learn.skill.acquired` | `messages/learn.py::LearnSkillAcquired` | simorgh/execution/service.py | TODO |
-| `percept.web.fetched` | `messages/percept.py::PerceptWebFetched` | simorgh/execution/service.py | TODO |
-| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/execution/service.py | TODO |
-| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/execution/service.py | TODO |
-| `tool.probed` | `messages/tool.py::ToolProbed` | simorgh/execution/service.py | TODO |
-| `tool.registered` | `messages/tool.py::ToolRegistered` | simorgh/execution/service.py | TODO |
-| `tool.unavailable` | `messages/tool.py::ToolUnavailable` | simorgh/execution/service.py | TODO |
-| `ui.dash.state` | `messages/ui.py::DashState` | simorgh/execution/service.py | TODO |
-| `ui.hook.received` | `messages/ui.py::UiHookReceived` | simorgh/execution/home/cameras.py | TODO |
-| `ui.notice` | `messages/ui.py::UiNotice` | simorgh/execution/home/cameras.py, simorgh/execution/service.py | TODO |
-| `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | simorgh/execution/service.py | TODO |
-| `world.camera.event` | `messages/world.py::CameraEvent` | simorgh/execution/service.py | TODO |
+| `action.approved` | `messages/action.py::ActionApproved` | simorgh/execution/service.py | verifies the token, runs the tool (group `execution`, no bus handler timeout), publishes the result |
+| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/execution/service.py | `paused`/`stopping` makes every later approval answer `error="paused"` |
+| `learn.skill.acquired` | `messages/learn.py::LearnSkillAcquired` | simorgh/execution/service.py | loads that one skill as `skill:<name>` (Execution is also its only publisher) |
+| `world.camera.event` | `messages/world.py::CameraEvent` | simorgh/execution/service.py (`vision.py`) | stills plus a vision model call; announces the description |
+| `ui.dash.state` | `messages/ui.py::DashState` | simorgh/execution/service.py | a `charts` view from anyone but Execution autoplays `tv_charts` (a direct tool run, S12) |
+| `ui.hook.received` | `messages/ui.py::UiHookReceived` | simorgh/execution/home/cameras.py | while `cam_watch` is on, turns the NVR's push into `world.camera.event` |
+| replies | `memory.retrieve`, `cognition.think`, `world.env.query`, `task.create`, `task.list.request`, `ui.command.request`, `memory.forget`, `voice.voices.request`, `voice.control.request` | service.py, vision.py, tools.py | replies to Execution's own `bus.request`s (not subscriptions) |
+
+The generated rows for `action.denied`, `action.result`, `cognition.think`, `percept.web.fetched`, `system.metrics`, `tool.*`, `ui.notice` and `voice.speak.request` as consumed topics were wrong (Execution publishes them) and are deleted.
 
 ## Produces
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `action.denied` | `messages/action.py::ActionDenied` | simorgh/execution/service.py | TODO |
-| `action.result` | `messages/action.py::ActionResult` | simorgh/execution/service.py | TODO |
-| `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/execution/service.py, simorgh/execution/vision.py | TODO |
-| `memory.retrieve` | `messages/memory.py::MemoryRetrieve` | simorgh/execution/service.py | TODO |
-| `percept.web.fetched` | `messages/percept.py::PerceptWebFetched` | simorgh/execution/service.py | TODO |
-| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/execution/service.py | TODO |
-| `system.schedule.add` | `messages/system.py::SystemScheduleAdd` | simorgh/execution/pim/tools.py | TODO |
-| `tool.invoked` | `messages/tool.py::ToolInvoked` | simorgh/execution/service.py | TODO |
-| `tool.probed` | `messages/tool.py::ToolProbed` | simorgh/execution/service.py | TODO |
-| `tool.registered` | `messages/tool.py::ToolRegistered` | simorgh/execution/service.py | TODO |
-| `tool.unavailable` | `messages/tool.py::ToolUnavailable` | simorgh/execution/service.py | TODO |
-| `ui.dash.key` | `messages/ui.py::UiDashKey` | simorgh/execution/media/cast.py | TODO |
-| `ui.dash.state` | `messages/ui.py::DashState` | simorgh/execution/media/cast.py | TODO |
-| `ui.hook.received` | `messages/ui.py::UiHookReceived` | simorgh/execution/home/cameras.py | TODO |
-| `ui.notice` | `messages/ui.py::UiNotice` | simorgh/execution/home/cameras.py, simorgh/execution/home/ring.py, simorgh/execution/service.py, simorgh/execution/vision.py | TODO |
-| `ui.tv.state` | `messages/ui.py::TvState` | simorgh/execution/home/cameras.py, simorgh/execution/media/cast.py | TODO |
-| `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | simorgh/execution/service.py, simorgh/execution/vision.py | TODO |
-| `world.camera.event` | `messages/world.py::CameraEvent` | simorgh/execution/home/cameras.py, simorgh/execution/home/ring.py, simorgh/execution/service.py | TODO |
-| `world.env.query` | `messages/world.py::WorldEnvQuery` | simorgh/execution/tools.py | TODO |
+| `action.result` | `messages/action.py::ActionResult` | simorgh/execution/service.py | once per verified approval (ok, error, timeout, paused, unknown tool); also at boot for each inflight action with `error="interrupted by restart"` |
+| `action.denied` | `messages/action.py::ActionDenied` | simorgh/execution/service.py | token verification failed; always `layer="token"` |
+| `tool.registered` | `messages/tool.py::ToolRegistered` | simorgh/execution/service.py | at boot per tool, per MCP tool, per skill on disk (announced, not loaded), on each skill load; `schema_ref=""` (T2) |
+| `tool.invoked` | `messages/tool.py::ToolInvoked` | simorgh/execution/service.py | after each tool run that returned (not on timeout or crash) |
+| `tool.probed` / `tool.unavailable` | `messages/tool.py` | simorgh/execution/service.py | after each probe pass (boot, and after a successful `install_package`); unavailable only for failed free probes |
+| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/execution/service.py | at boot, the `skills` gauge |
+| `percept.web.fetched` | `messages/percept.py::PerceptWebFetched` | simorgh/execution/service.py | after a successful `web_fetch` (no consumer; allow-listed one-sided) |
+| `learn.skill.acquired` | `messages/learn.py::LearnSkillAcquired` | simorgh/execution/service.py | after a successful `apply_skill` of a `.py` subject |
+| `ui.notice` | `messages/ui.py::UiNotice` | service.py, vision.py, home/cameras.py, home/ring.py | a proposed MCP server; a camera description; watcher notices |
+| `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | simorgh/execution/vision.py | a camera description, when `camera_vision_speak` |
+| `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/execution/vision.py | request with images and `require_real_provider=True` |
+| `memory.retrieve` | `messages/memory.py::MemoryRetrieve` | simorgh/execution/service.py | request for a skill's procedural description on load |
+| `world.camera.event` | `messages/world.py::CameraEvent` | home/cameras.py, home/ring.py | NVR push or Ring poll saw motion/person/ring |
+| `ui.tv.state` / `ui.dash.state` / `ui.dash.key` | `messages/ui.py` | media/cast.py, home/cameras.py | the TV page's mode, the dashboard view, a remote key |
+| `system.schedule.add` | `messages/system.py::SystemScheduleAdd` | simorgh/execution/pim/tools.py | `remind` |
+| tool-driven requests | `task.create`, `task.list.request`, `task.cancel`, `ui.command.request`, `memory.forget`, `voice.voices.request`, `voice.control.request`, `world.env.query` | simorgh/execution/tools.py | `start_task`, `list_tasks`, `cancel_task`, `sim_command`, `memory_forget`, `voice_setting`, `self_map` |
+
+The Service's `produces` tuple lists only ten of these; the publish direction is not pinned by `tests/simorgh/test_manifests_match_the_code.py`.
 
 ## Ledger streams
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `action:{action_id}` | simorgh/execution/service.py | simorgh/cognition/compaction.py, simorgh/cognition/config.py, simorgh/guardian/service.py, simorgh/interface/benchmarkchart.py, simorgh/ledger/compaction.py, simorgh/ledger/service.py, simorgh/ledger/streams.py, simorgh/verification/config.py, simorgh/verification/service.py, simorgh/verification/verdict.py, simorgh/voice/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `alpine:` | simorgh/execution/config.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `c:calendar` | simorgh/execution/pim/connectors/caldav.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `caldav:{name}` | simorgh/execution/pim/connectors/caldav.py, simorgh/execution/pim/connectors/fakes.py | simorgh/interface/dispatch.py, simorgh/kernel/cli.py, simorgh/kernel/secrets.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_ir:{cam.channel}` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_light:{c.channel}` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_light:{cam.channel}` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_ptz:{cam.channel}` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_siren:{cam.channel}` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_stream:stop` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_stream:stop-main` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_stream:{c.channel}` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_watch:off` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cam_watch:on` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cast_play:frame` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cast_play:{name}` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cast_show:{name}` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cast_stop:frame` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cast_stop:{name}` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cast_volume:{name}` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `connector:{connector.name}` | simorgh/execution/capabilities.py | simorgh/contracts/connector.py, simorgh/interface/dispatch.py, simorgh/voice/planner.py, simorgh/voice/session.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `d:href` | simorgh/execution/pim/connectors/caldav.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `d:response` | simorgh/execution/pim/connectors/caldav.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `dash_key:{key}` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `debian:` | simorgh/execution/config.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `error:` | simorgh/execution/render.py | simorgh/benchmark/api.py, simorgh/benchmark/runner.py, simorgh/bus/backends/aws.py, simorgh/bus/backends/memory.py, simorgh/bus/backends/sqlite.py, simorgh/bus/client.py, simorgh/bus/factory.py, simorgh/cognition/providers/claude_code.py, simorgh/cognition/providers/gemini.py, simorgh/cognition/providers/ollama.py, simorgh/cognition/router.py, simorgh/contracts/messages/cognition.py, simorgh/contracts/protocols.py, simorgh/contracts/registry.py, simorgh/interface/dashfeeds.py, simorgh/interface/dispatch.py, simorgh/kernel/cli.py, simorgh/kernel/vault.py, simorgh/ledger/client.py, simorgh/ledger/service.py, simorgh/orchestration/api.py, simorgh/orchestration/context.py, simorgh/orchestration/scaffolds.py, simorgh/orchestration/session.py, simorgh/verification/api.py, simorgh/verification/checks/render.py, simorgh/verification/service.py, simorgh/voice/delivery.py, simorgh/voice/planner.py, simorgh/voice/session.py, simorgh/voice/tts/streaming.py, simorgh/voice/tts/subproc.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `execution:inflight` | simorgh/execution/service.py | simorgh/ledger/compaction.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `execution:tools` | simorgh/execution/service.py | simorgh/interface/dispatch.py, simorgh/ledger/compaction.py, simorgh/orchestration/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `fe80:` | simorgh/execution/render.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `file_create:{rel}` | simorgh/execution/home/cameras.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `file_create:{r}` | simorgh/execution/home/ring.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `file_create:{subject}` | simorgh/execution/tools.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `file_write:{subject}` | simorgh/execution/tools.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `git_discard:{subject}` | simorgh/execution/tools.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `golang:` | simorgh/execution/config.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `home:{service}:{entity_id}` | simorgh/execution/home/tools.py | simorgh/contracts/console.py, simorgh/contracts/settings.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `imap:{name}` | simorgh/execution/pim/connectors/imap.py | simorgh/interface/dispatch.py, simorgh/kernel/cli.py, simorgh/kernel/registry.py, simorgh/kernel/secrets.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `javascript:` | simorgh/execution/render.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `mcp:proposals` | simorgh/execution/tools.py | simorgh/interface/dispatch.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `media:play:{entity_id}` | simorgh/execution/media/tools.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `media:{op}:{entity_id}` | simorgh/execution/media/tools.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `music:play` | simorgh/execution/media/musicapp.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `music:{op}` | simorgh/execution/media/musicapp.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `no:cacheprovider` | simorgh/execution/tools.py | simorgh/verification/checks/_baseline.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `node:` | simorgh/execution/config.py | simorgh/contracts/fields.py, simorgh/interface/dashfeeds.py, simorgh/planning/dag.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `python:` | simorgh/execution/config.py, simorgh/execution/container.py | simorgh/orchestration/tools.py, simorgh/voice/tts/subproc.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `ring_light:{cam.safe}` | simorgh/execution/home/ring.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `ring_live:{cam.safe}` | simorgh/execution/home/ring.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `ring_live:{cam.safe}:close` | simorgh/execution/home/ring.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `ring_siren:{cam.safe}` | simorgh/execution/home/ring.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `ring_watch:off` | simorgh/execution/home/ring.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `ring_watch:on` | simorgh/execution/home/ring.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `run_shell:<command>` | simorgh/execution/writewatch.py | simorgh/benchmark/swebench.py, simorgh/guardian/rules.py, simorgh/verification/checks/didanything.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `rust:` | simorgh/execution/config.py | simorgh/learning/competence.py, simorgh/learning/config.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `sim:api` | simorgh/execution/security/api.py, simorgh/execution/security/selfcheck.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `sim:guardian` | simorgh/execution/security/selfcheck.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `sim:process` | simorgh/execution/security/selfcheck.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `skill:` | simorgh/execution/service.py | simorgh/contracts/toolargs.py, simorgh/interface/dispatch.py, simorgh/orchestration/tools.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `skill:{name}` | simorgh/execution/service.py | simorgh/contracts/toolargs.py, simorgh/interface/dispatch.py, simorgh/orchestration/tools.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `skill:{path.stem}` | simorgh/execution/service.py | simorgh/contracts/toolargs.py, simorgh/interface/dispatch.py, simorgh/orchestration/tools.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `skill:{skill_name}` | simorgh/execution/tools.py | simorgh/contracts/toolargs.py, simorgh/interface/dispatch.py, simorgh/orchestration/tools.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `spotify:` | simorgh/execution/media/tools.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `tv_app:{name}` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `tv_charts:{name}` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `tv_key:{name}` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `tv_pair:{name}` | simorgh/execution/media/cast.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `ubuntu:` | simorgh/execution/config.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `urn:ietf:params:xml:ns:caldav` | simorgh/execution/pim/connectors/caldav.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `vault:home_assistant:token` | simorgh/execution/home/tools.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `vault:home_assistant:url` | simorgh/execution/home/tools.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `vault:{account.cred_id}:password` | simorgh/execution/pim/accounts.py | simorgh/kernel/registry.py, simorgh/kernel/secrets.py, simorgh/kernel/vault.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `vault:{account.cred_id}:value` | simorgh/execution/pim/accounts.py | simorgh/kernel/registry.py, simorgh/kernel/secrets.py, simorgh/kernel/vault.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `worktree_land:{landed.commit}` | simorgh/execution/worktree.py | simorgh/orchestration/api.py | see ledger/compaction.py DEFAULT_RETENTION |
+| `action:{action_id}` | simorgh/execution/service.py (reads Guardian's `received`, appends `verified`) | written first by guardian; read by verification, voice, interface | 30d (`action:`) |
+| `execution:inflight` | simorgh/execution/service.py (`started`/`finished`) | - | 7d |
+| `execution:tools` | simorgh/execution/service.py (`registered`) | simorgh/interface/dispatch.py, simorgh/orchestration/service.py | 30d |
+| `capabilities` | simorgh/execution/capabilities.py (`probed`) | - | forever (no entry) |
+| `mcp:proposals` | simorgh/execution/tools.py (`propose_mcp_server`) | simorgh/interface/dispatch.py | forever (no entry) |
+
+Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; oversized proposal args are read back with `get_blob`. Large row sets go to `results/<action_id>.json`, not the Ledger. Deleted rows: every `name:{x}` string the generator matched in a tool (`file_write:`, `git_discard:`, `cam_*:`, `ring_*:`, `cast_*:`, `tv_*:`, `media:`, `music:`, `home:{service}:{entity_id}`, `worktree_land:{sha}`, `run_shell:`, `skill:`) is a `ToolResult.side_effects` label or a tool name, not a stream; `vault:...` are secret refs; `python:`, `node:`, `alpine:`, `fe80:`, `javascript:`, `urn:...`, `d:href` and the rest are string literals; `task:{task_id}` appears only in comments.
 
 ## Config
 
-`[execution]` in simorgh.toml; dataclass in `simorgh/execution/config.py`.
+
+`[execution]` in simorgh.toml; dataclass in `simorgh/execution/config.py`. `Config.from_mapping` passes flat keys straight through (unknown keys dropped); a `repo_root` key also sets `repo_root_named = True` (`config.py:598-626`), which is what turns worktrees on. `sim.sh` supplies it through `SIMORGH_EXECUTION_REPO_ROOT`. Domain keys (`knowledge_*`, `pim_*`, `security_*`, `home_*`, `energy_*`, `media_*`, `cast_*`, `ring_*`, `cam_*`, `camera_vision_*`) are read only by their subpackage. Several keys are also read with `getattr(config, "x", default)` (B15), e.g. `service.py:249-251, 474, 510, 534`.
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -211,11 +114,11 @@ TODO: 3-6 sentences: what this module owns, what it must never do, the one desig
 | `default_timeout_s` | `60.0` | yes |
 | `max_output_bytes` | `65536` | yes |
 | `blob_inline_threshold_bytes` | `4096` | yes |
-| `approval_max_age_s` | `120.0` | NO (declared, never read) |
+| `approval_max_age_s` | `120.0` | NO (declared, never read; expiry is Guardian's `expires_at`, see `kernel/configcheck.py:103-115`) |
 | `repo_root` | `field(default_factory=lambda: find_repo_root())` | yes |
 | `repo_root_named` | `False` | yes |
 | `readable_roots` | `('src', 'docs', 'tests', 'simorgh', 'simorgh_skills', 'paper` | yes |
-| `readable_root_files` | `('README.md', 'CLAUDE.md', 'requirements.txt', 'simorgh.toml` | NO (declared, never read) |
+| `readable_root_files` | `('README.md', 'CLAUDE.md', 'requirements.txt', 'simorgh.toml` | NO (declared, never read; `pathsafety.py:58` hardcodes `ROOT_FILES`) |
 | `write_scopes_source` | `('simorgh/', 'simorgh_skills/', 'tests/', 'tools/', 'docs/',` | yes |
 | `worktrees` | `True` | yes |
 | `worktree_dir` | `''` | yes |
@@ -358,84 +261,71 @@ TODO: 3-6 sentences: what this module owns, what it must never do, the one desig
 
 ## Public Python surface
 
-TODO: the `Service` class; any `api.py` types other packages import via contracts; module-level singletons (risks).
+- `simorgh.execution.service.Service` (`name = "execution"`, layer 3): `Service(config=None, extra_tools=None, connectors=None)`; `start(ctx)` refuses to start without `ctx.secrets["__hmac__"]`; `stop()`; `health()` (degraded on the last token failure, an MCP start failure, or a failed free probe). `register_connector()`, `skill_files()`. `consumes` is exact for subscriptions (pinned by `tests/simorgh/test_manifests_match_the_code.py`).
+- The Tool protocol and `ToolResult`, `ToolContext` live in `simorgh/contracts/protocols.py:167-202`: a tool has `name`, `description`, `read_only`, `reversibility` (`read_only | reversible | irreversible`), `args_schema`, `async run(args, *, ctx) -> ToolResult`; an optional `timeout_s` is honoured by `service.py::timeout_for`. `ToolResult` is `ok`, `output`, `output_ref`, `error` (free text; `refused: ...` by convention, T9), `side_effects` (labels), `metadata` (`rows` go to `results/`, `stderr` is appended to `error`). `ToolContext.root` is the task's worktree, set from the proposal's `task_id`, never from arguments.
+- `extra_tools` and `external_tools` are the seams for tools defined elsewhere; every such tool still runs only through `_on_approved`.
+- Module-level state (risks): `media/androidtv.py:54` `_PENDING` (a pairing in progress, per process); `verifier.py`'s `ReplayGuard` is in memory, so after a restart replay protection rests on token expiry alone; `vision.py:274` `_NO_LOCK`. `media/tvmedia.py:35` resolves its directory from `Path.cwd()`.
 
 ## Invariants
 
-TODO: the rules that must hold, as testable sentences; include contracts/topics.py policy entries naming this module.
+- No tool runs for an `action.approved` whose args (fetched from Guardian's `received` event on `action:<id>`, blob refs resolved) do not hash to `args_sha256`, whose `expires_at` has passed, whose HMAC does not verify with the Kernel's secret, or whose `action_id` was already consumed; each failure publishes `action.denied{layer: "token"}` and appends `verified{outcome: false}` (`service.py:759-773`, `test_verifier.py`).
+- Only Execution subscribes to `action.approved`; it never subscribes to `action.proposed` (`contracts/topics.py` `SUBSCRIBE_ONLY_BY`).
+- Execution may publish `action.denied` only with `layer="token"` (`PUBLISH_PAYLOAD_CONSTRAINTS[(action.denied, "execution")]`); it never publishes `action.approved` (`PUBLISH_ONLY_BY`: guardian, kernel). `PUBLISH_ONLY_BY` also allows it `system.restart` and `system.reload`; no code in the package publishes either today.
+- Every verified approval yields exactly one `action.result` (success, error, timeout, crash, `paused`, `unknown tool`); an approval started but unfinished at shutdown yields `error="interrupted by restart"` at the next boot.
+- A tool call's deadline is `constraints.timeout_s`, else the tool's `timeout_s`, else `default_timeout_s` (60 s); the bus handler itself is unbounded so a long gate is not cut from outside.
+- File tools resolve paths inside `repo_root` (or the task's worktree) under `readable_roots` / write scopes; absolute paths, `..`, and credential-shaped names are refused (`test_pathsafety.py`). `run_shell` refuses reads of `~/.simorgh/secrets.toml`, the vault, `.ssh`, `.aws`, `.gnupg` and keychain dumps (`test_shell.py`).
+- `worktree_land` fast-forwards main only after a clean rebase and a green whole-suite gate that `simloader.unit_verdict` (loaded from the main checkout) also accepts: exit 0, no failure in the summary, tests ran, count within 10% of the loader baseline; a missing loader means no second opinion, not a refusal (`test_worktree_land_gate.py`). Worktrees are made only for a named `repo_root`.
+- Execution imports only `simorgh.contracts`, `simorgh.bus.client` (for `UNBOUNDED`, `service.py:37`) and the standard library plus optional third-party SDKs imported lazily (`tests/simorgh/test_module_boundaries.py`).
 
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract execution`.
 
-- `tests/simorgh/execution/energy/test_energy.py` -- TODO: what it pins
-- `tests/simorgh/execution/home/test_cameras.py` -- TODO: what it pins
-- `tests/simorgh/execution/home/test_home.py` -- TODO: what it pins
-- `tests/simorgh/execution/home/test_onvif_events_are_awaited.py` -- TODO: what it pins
-- `tests/simorgh/execution/home/test_ring.py` -- TODO: what it pins
-- `tests/simorgh/execution/knowledge/test_chunk.py` -- TODO: what it pins
-- `tests/simorgh/execution/knowledge/test_index_and_scan.py` -- TODO: what it pins
-- `tests/simorgh/execution/knowledge/test_retrieve_and_tools.py` -- TODO: what it pins
-- `tests/simorgh/execution/media/test_androidtv.py` -- TODO: what it pins
-- `tests/simorgh/execution/media/test_cast.py` -- TODO: what it pins
-- `tests/simorgh/execution/media/test_media.py` -- TODO: what it pins
-- `tests/simorgh/execution/media/test_musicapp.py` -- TODO: what it pins
-- `tests/simorgh/execution/media/test_tvmedia.py` -- TODO: what it pins
-- `tests/simorgh/execution/pim/test_connectors_and_tools.py` -- TODO: what it pins
-- `tests/simorgh/execution/pim/test_ics_and_nlp.py` -- TODO: what it pins
-- `tests/simorgh/execution/security/test_security.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_camera_baseline_sweep.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_camera_describe.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_camera_vision.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_cameras_are_looked_at_one_at_a_time.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_cancel_all_tasks.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_capabilities.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_console_tail.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_container.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_doctext.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_external.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_geocode.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_git_history.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_htmltext.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_listingsources.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_mcp.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_memory_forget.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_notify.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_overheard_tools.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_packages.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_pathsafety.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_pdftext.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_realestate.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_remote.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_render.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_replace_in_file.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_result_handback.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_run_tests_budget_and_loop.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_run_tests_failure_marker.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_script.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_search_code_cannot_read_a_credential.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_service.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_sim_command.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_skills_are_readable.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_start_task.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_task_subject_is_real.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_tests_and_commits_in_a_nested_checkout.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_tool_unavailable_is_announced.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_tools.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_two_runs_share_a_checkout.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_verifier.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_websearch.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_websearch_spacing.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_worktree.py` -- TODO: what it pins
-- `tests/simorgh/execution/test_writewatch.py` -- TODO: what it pins
+- `tests/simorgh/execution/test_verifier.py` -- the six token outcomes: ok, missing args, hash mismatch, expired, bad signature, replay.
+- `tests/simorgh/integration/test_guardian_execution_action_path.py` -- real Guardian + Execution through the Kernel: an approved tool runs, a forged approval is refused before any tool runs, pause and protected paths deny.
+- `tests/simorgh/execution/test_worktree_land_gate.py` -- the landing gate refuses nothing-collected, a gutted suite and a forged exit code; no loader means no second opinion.
+- `tests/simorgh/execution/test_worktree.py` -- open from HEAD, edits and commits stay on the task branch, rebase, gate, fast-forward, close.
+- `tests/simorgh/execution/test_pathsafety.py` -- the path boundary never raises and refuses every escape.
+- `tests/simorgh/execution/test_shell.py` -- `run_shell` refuses credential reads.
+- `tests/simorgh/execution/test_tool_unavailable_is_announced.py` -- `tool.unavailable` / `tool.probed` payloads and ordering.
+- `tests/simorgh/execution/test_result_handback.py` -- `action.result` carries `metadata_ref` and stderr; rows go to `results/` capped.
 
 ## Known issues (2026-09-18 evaluation)
 
-TODO: catalogue ids from docs/reviews/2026-09-18/architecture-evaluation.md section 13 that name this module.
+- S2 (critical): the vault, ledger and machine were outside every protected list. Fixed 2026-09-18 (commit `19f69ce`): Guardian protects them and `run_shell` refuses to read them.
+- S3 (high): protected paths are checked on the proposal's text, and `worktree.py::_land` never diffs the branch against protected subjects before fast-forwarding. Open; stage 2 item 7 (typed args in Guardian).
+- S4 (high): skills. Partly fixed 2026-09-18 (commit `8fb3d21`): `apply_skill` is `irreversible` and always goes to a human (`HumanOnlyRule`). Open: skill-call arguments are not scanned; `SkillTool` runs rlimited with an empty env but with `cwd=repo_root` (`tools.py:2845-2866`).
+- S5 (high): the landing gate was weaker than the boot gate. Fixed 2026-09-18 (commit `c009699`).
+- S7 (low): the in-process HMAC is ceremony today; keep it.
+- S8 (medium): physical tools gated like code. Partly addressed in Guardian (`PhysicalRule`, commit `8916e82`); every device tool still declares its own label here.
+- S11 (medium): `shell.py` refusals are a hint, not a boundary. Open; stage 6 tiers.
+- S12 / T3 (high): six direct `tool.run()` calls with synthetic action ids and no proposal, token or `action:` stream: `service.py:488, 521, 547, 565` (Ring/NVR watch and TV autostart, charts autoplay) and `vision.py` list/snapshot calls. Open; stage 1 item 7.
+- S13 / V9 (medium): `sim_command` (`tools.py:1993`) lets the model run any parsed CLI verb; Guardian sees only the wrapper. Open.
+- T2 (high): `tool.registered` ships `schema_ref=""` and no schema. Open; stage 2 item 1.
+- T4 / W3 (high): `ring_live` offer, keepalive and close are each an approved action. Open; stage 1 item 6.
+- T6 (medium): about a third of tools never proposed; knowledge, energy and the HA-backed tools cannot work today. Open; stage 9.
+- T7 (medium): one 60 s default timeout; `install_package` and knowledge scans report timeout while the thread keeps running; nothing writes `constraints.timeout_s`. Open; stage 1 item 5, stage 7 item 8.
+- T8 (medium): five parallel device SDK wrappers sharing state through `workspace/`. Open.
+- T9 (low): errors are free text (`refused:` prefix). Open; stage 2 item 8.
+- T10 (low): sandboxes declare `read_only=True` with `reversibility="reversible"`; Guardian ignores `read_only`. Open.
+- T11 (low): probes skip the device SDKs and ffmpeg. Open.
+- L4 (medium): ~13 bus messages and ~20 appends per tool call, plus the `action:` read-back in `_fetch_proposal`. Open; stage 1.
+- B12 (medium): `_land` runs `git merge --ff-only` in the live checkout, advancing whatever HEAD is, not `main` by name (`worktree.py:243`). Open.
+- B15 (medium): `getattr(config, ...)` reads with defaults (e.g. `service.py:249-251`); `tools.py:3159` reads `getattr(config, "shell", False)` against a dataclass default of `True`. Open; stage 0 item 26.
+- B18 (low): blocking `subprocess.run` in tools, threaded but not cancellable. Open; stage 7 item 8.
+- P7 (low): an unpatched 30 s constant in `media/cast.py` slows the suite. Open.
+- W10 (low): 21.6k lines holding six product domains next to the verifier. Open; stage 9 item 1.
+- Not in the catalogue: the `produces` manifest omits most published topics (`tool.invoked`, `learn.skill.acquired`, `world.camera.event`, `ui.tv.state`, the tool-driven requests); `stop()` reads `self._vision`, which is only set late in `start()` (`service.py:226, 396`), so a `start()` that fails early makes `stop()` raise.
 
 ## Planned changes (roadmap)
 
-TODO: stage numbers from docs/plan/ and what changes here.
+- Stage 1 (`docs/plan/stage-1-telemetry-out-of-the-decision-log.md`): trace ids threaded through Execution's `Message.new` sites (item 2); tool-run spans (item 4); a `deadline` in the envelope that shrinks tool timeouts (item 5); Ring signalling off the approval path, one `ring_live offer` per session (item 6); the six direct tool runs go through `action.proposed` with `proposed_by="execution"` (item 7).
+- Stage 2 (`docs/plan/stage-2-native-tool-use.md`): `tool.registered` carries the full ToolSpec with `input_schema` (item 1, `_announce_tool`, MCP `inputSchema` unflattened); `ToolResult.error_kind` (item 8).
+- Stage 5 item 6: an effect-free `memory_search` built-in.
+- Stage 6 (`docs/plan/stage-6-self-world-people-tiers-initiative.md`): safety tiers 0-3 computed from the ToolSpec (item 5); `vision.py`'s announce step moves into `initiative/` (item 6); people-aware identity (item 4).
+- Stage 7 item 8 (`docs/plan/stage-7-long-horizon.md`): `run_tests`, `run_container` and the landing gate as subprocesses killed on deadline.
+- Stage 8 items 5 and 9: `policy_adopt` landing through the gate; HA routine mining.
+- Stage 9 (`docs/plan/stage-9-consolidation-and-breadth.md`): the six domains move to `simorgh/domains/<name>/` behind `extra_tools`, leaving registry, verifier, sandboxes, worktrees and path/net safety here, the only part Guardian-protected (item 1, target under 8,000 lines); `vision.py` and the watchers move to `perception/` (item 4); MCP-first for new capability (item 9); `browse_page` becomes a snapshot-act loop (item 10).
 
 ## Working on this module
 
