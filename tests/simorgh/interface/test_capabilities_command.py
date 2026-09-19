@@ -50,8 +50,9 @@ class CapabilitiesCommandTestCase(unittest.IsolatedAsyncioTestCase):
             _probed("docker", False, "daemon not running", tools=("run_container",)),
         ])
         text = (await _capabilities_command(ledger)).text
-        self.assertIn("1/2 capabilities available", text)
-        self.assertIn("missing: docker", text)
+        self.assertIn("1 of 2 ready", text)
+        self.assertIn("Not available", text)
+        self.assertIn("docker", text.split("Not available", 1)[1])
         self.assertIn("daemon not running", text)
 
     async def test_it_names_the_tools_a_missing_capability_costs(self):
@@ -67,7 +68,7 @@ class CapabilitiesCommandTestCase(unittest.IsolatedAsyncioTestCase):
             _probed("puppeteer", True, "puppeteer 25.8.0"),
         ])
         text = (await _capabilities_command(ledger)).text
-        self.assertIn("1/1 capabilities available", text)
+        self.assertIn("1 of 1 ready", text)
         self.assertNotIn("missing", text)
         self.assertIn("25.8.0", text)
 

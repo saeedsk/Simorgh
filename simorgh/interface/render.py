@@ -1017,3 +1017,76 @@ def help_panel(*, enabled: bool = True, unicode: bool = True, full: bool = False
     lines.append(f"  {style('!<shell command>', 'warm', enabled=enabled)}  run a shell command directly")
     lines.append(f"  {style('anything else', 'warm', enabled=enabled)}      is chat")
     return "\n".join(lines)
+
+
+def capabilities_panel(latest: dict[str, dict], *, enabled: bool = True, unicode: bool = True) -> str:
+    """`capabilities`: what Sim can reach, ready first, one aligned row
+    each -- a dot, the name, what uses it, and the detail, cut to the
+    terminal. Until 2026-09-19 it was `[yes]`/`[NO ]` with the detail on
+    a second line, which the creator asked to make "visually more
+    pleasant"."""
+    ready = sorted(n for n, p in latest.items() if p.get("ok"))
+    missing = sorted(n for n, p in latest.items() if not p.get("ok"))
+    on, off = ("\u25cf", "\u25cb") if unicode else ("+", "-")
+    name_w = max((len(n) for n in latest), default=0)
+    use_w = min(28, max((len(", ".join(p.get("tools") or ())) for p in latest.values()), default=0))
+    width = terminal_width()
+
+    def row(name: str, good: bool) -> str:
+        payload = latest[name]
+        uses = ", ".join(payload.get("tools") or ())
+        uses = uses if len(uses) <= use_w else uses[: max(1, use_w - 1)] + "\u2026"
+        detail = " ".join(str(payload.get("detail") or "").split())
+        dot = style(on if good else off, "green" if good else "red", enabled=enabled)
+        head = f"  {dot} {style(name.ljust(name_w), 'bold' if good else 'warm', enabled=enabled)}  "
+        tail = style(uses.ljust(use_w), "dim", enabled=enabled) + "  " + detail
+        return fit(head + tail, width - 1)
+
+    lines = [style(f"Capabilities \u00b7 {len(ready)} of {len(latest)} ready", "bold", enabled=enabled)]
+    if ready:
+        lines += ["", style("Ready", "green", enabled=enabled)] + [row(n, True) for n in ready]
+    if missing:
+        lines += ["", style("Not available", "red", enabled=enabled)] + [row(n, False) for n in missing]
+    return "\n".join(lines)
+
+
+def _cut_words(text: str, width: int) -> str:
+    """`text` in at most `width` columns, cut at a word, with an ellipsis."""
+    text = " ".join(str(text or "").split())
+    if display_width(text) <= width:
+        return text
+    cut = fit(text, max(1, width - 1), ellipsis="")
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,.;:-") + "\u2026"
+
+
+def skills_panel(cards, written, invalid, *, written_dir: str, enabled: bool = True, unicode: bool = True) -> str:
+    """`skills list` as a panel: installed Agent Skills and the ones Sim
+    wrote, each an aligned row with its description cut at a word to the
+    terminal (it was cut mid-word at 70 characters and the source column
+    overflowed into it -- the creator, 2026-09-19)."""
+    width = terminal_width() - 1
+    dot = "\u25cf" if unicode else "*"
+    rows = [(c.name, c.source, c.description) for c in cards] + [(n, "by Sim", d) for n, d in written]
+    name_w = max((len(n) for n, _s, _d in rows), default=0)
+    src_w = max((len(s) for _n, s, _d in rows), default=0)
+
+    def row(name: str, source: str, description: str) -> str:
+        head = f"  {style(dot, 'green', enabled=enabled)} {style(name.ljust(name_w), 'bold', enabled=enabled)}  " \
+               f"{style(source.ljust(src_w), 'dim', enabled=enabled)}  "
+        room = max(10, width - (6 + name_w + src_w))
+        return head + _cut_words(description, room)
+
+    total = len(cards) + len(written)
+    lines = [style(f"Skills \u00b7 {total}", "bold", enabled=enabled)]
+    if cards:
+        lines += ["", style("Installed", "warm", enabled=enabled)] + [row(c.name, c.source, c.description) for c in cards]
+    if written:
+        lines += ["", style("Written by Sim", "warm", enabled=enabled)
+                  + style(f"  \u00b7 run one as skill:<name> \u00b7 {written_dir}/", "dim", enabled=enabled)]
+        lines += [row(n, "by Sim", d) for n, d in written]
+    if invalid:
+        lines += ["", style(f"Ignored ({len(invalid)})", "red", enabled=enabled)]
+        lines += [f"  {_cut_words(f'{bad.path}: {bad.reason}', width - 2)}" for bad in invalid[:8]]
+    return "\n".join(lines)

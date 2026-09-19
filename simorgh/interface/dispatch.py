@@ -1617,23 +1617,8 @@ async def _capabilities_command(ledger: LedgerClient) -> Outcome:
         name = str(payload.get("name") or "")
         if name:
             latest[name] = payload
-    lines = []
-    for name in sorted(latest):
-        payload = latest[name]
-        mark = "yes" if payload.get("ok") else "NO "
-        tools = ", ".join(payload.get("tools") or ())
-        detail = str(payload.get("detail") or "").strip()
-        line = f"  [{mark}] {name}"
-        if tools:
-            line += f"  ({tools})"
-        if detail:
-            line += f"\n        {detail}"
-        lines.append(line)
-    missing = [n for n, p in latest.items() if not p.get("ok")]
-    header = f"{len(latest) - len(missing)}/{len(latest)} capabilities available"
-    if missing:
-        header += f" -- missing: {', '.join(sorted(missing))}"
-    return Outcome(header + "\n" + "\n".join(lines), exit_repl=False)
+    return Outcome(render_mod.capabilities_panel(latest, enabled=render_mod.color_enabled(),
+                                                 unicode=render_mod.unicode_mode() != "off"), exit_repl=False)
 
 
 async def _mcp_pending_proposals(ledger: LedgerClient) -> dict[str, dict]:
@@ -1899,22 +1884,12 @@ async def _skills_command(args: str, *, ledger: LedgerClient, clock, clone=_clon
     if sub in ("", "list"):
         cards, invalid = discover_skills(_skill_roots())
         written = _written_skills()
-        lines: list[str] = []
         if not cards and not written and not invalid:
-            lines = ["no skills yet -- `skills search` to see what is installable, "
-                     "`skills install <git-url>` to add one"]
-        if cards:
-            lines.append(f"{len(cards)} installed skill(s):")
-            lines += [f"  {card.name:24s} {card.source:12s} {card.description[:70]}" for card in cards]
-        # Both kinds, in one place: the Python skills Sim writes are
-        # invoked as `skill:<name>` and were missing from this list.
-        if written:
-            lines.append(f"{len(written)} written by Sim (run as `skill:<name>`):")
-            lines += [f"  {name:24s} {WRITTEN_SKILLS_DIR:12s} {doc[:70]}" for name, doc in written]
-        if invalid:
-            lines.append(f"{len(invalid)} ignored:")
-            lines += [f"  {bad.path}: {bad.reason}" for bad in invalid[:8]]
-        return Outcome("\n".join(lines))
+            return Outcome("no skills yet -- `skills search` to see what is installable, "
+                           "`skills install <git-url>` to add one")
+        return Outcome(render_mod.skills_panel(cards, written, invalid, written_dir=WRITTEN_SKILLS_DIR,
+                                               enabled=render_mod.color_enabled(),
+                                               unicode=render_mod.unicode_mode() != "off"))
 
     if sub == "show":
         if not rest:
