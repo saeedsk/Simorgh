@@ -6,6 +6,7 @@ Design documents live in `docs/plans/`; benchmark analyses in `docs/benchmark-an
 
 | Date | File | Covers |
 |---|---|---|
+| 2026-09-19 | [2026-09-19-contract-writing.md](2026-09-19-contract-writing.md) | What writing the 19 CONTRACT.md files found: ~45 uncatalogued problems, 16 fixed the same night, the rest indexed by risk |
 | 2026-09-19 | [2026-09-19-stage-0.md](2026-09-19-stage-0.md) | The cleanup and the rebirth: v1 and the old docs removed, test tiers and module locks, stage 0 items 1-16 with before/after numbers (suite 16:40 -> 1:34) |
 | 2026-09-16 | [2026-09-16-voice-cameras-task-quality.md](2026-09-16-voice-cameras-task-quality.md) | A write-only console and the answer it invented, camera baselines learnt from one motion frame, the speech lock, tone tags in any script, recognition flicker, invented task subjects defeating dedupe, two dead wires in Planning, overheard speech built twice and reachable neither time |
 | 2026-09-14 | [2026-09-14-benchmark-analysis.md](2026-09-14-benchmark-analysis.md) | Benchmark analysis |

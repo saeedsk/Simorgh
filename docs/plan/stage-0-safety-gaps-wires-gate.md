@@ -1,6 +1,6 @@
 # Stage 0 -- Close the safety gaps, wire what exists, promote the gate
 
-Status: **in progress** (started 2026-09-18 evening; items 1-28 done except V7, 30 partly, 29 and 31 open) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, learning, worldmodel, curiosity, ledger, interface, memory, orchestration, contracts, kernel, cognition, reflection, voice, simloader, tools, shared, docs
+Status: **in progress** (started 2026-09-18 evening; items 1-28 and 31 done except V7, 30 partly, 29 open, plus the follow-ups from contract writing) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, learning, worldmodel, curiosity, ledger, interface, memory, orchestration, contracts, kernel, cognition, reflection, voice, simloader, tools, shared, docs
 
 ## Outcome
 
@@ -56,12 +56,14 @@ Each item is one commit. **Done** items record the commit so a reader can diff t
 26. **No config fallback contradicts its default; `getattr(config, ...)` reads only go down.** Ten contradicting fallbacks aligned (`shell` keeps a safer one, allow-listed); `tests/simorgh/test_config_is_read_typed.py` ratchets the count at 127. Commit `f8195fe`. (B15)
 28. **Voice.** V1 (`1f68f37`), V11 (retention), V8 (per-turn facts keyed by turn id, `68e5ea4`). Open: V7 below.
 
+31. **CONTRACT.md for every module**, written by five parallel agents from the code; no TODO left; every contract-test list resolves. Commits `3588e97`, `f1dd4fe`, `c840d24`. Package READMEs removed (`723c9e3`). The agents found ~45 uncatalogued problems; 16 fixed the same night (`docs/findings/2026-09-19-contract-writing.md`).
+
 ### Open
 
 28. **The echo canceller.** *Lock `voice`.* (V7) The NLMS canceller is built only in `Pipeline`'s speak path, which the live `VoiceSession` never runs: wire it into `VoiceSession` or delete it. Decide by measuring echo false-positives with it on and off on speakers (needs the microphone; record in findings).
 29. **Test-suite consolidation, one directory at a time.** (Done so far: v1 tests deleted; full tier 1:34-1:52; module tier skips `slow`; the 30 s cast test takes 0.2 s.) *Parallel per module; lock the module.* Using `docs/testing.md` section 3 and the per-directory analysis in `docs/reviews/2026-09-18/tests/` when it exists: mark `slow`, `integration`, `contract`; merge duplicate shape tests; delete tests that test a mock or a constant; name the contract tier in the module's `CONTRACT.md`. Target: full tier under 5 minutes; module tier under 60 s for every module. Acceptance: `python tools/modtest.py --tier full` time recorded in findings.
 30. **The rest of the gate.** *Lock `tools`, `docs`.* A kill-and-resume trial (`tools/trial.py --kill-at-step N`: kill -9 mid-task in a repo copy; the resumed task must not redo a step or repeat an irreversible action) and a trial-suite run (3 repeats) plus one GAIA slice through the benchmark unit, all with the real model; record the numbers with the recall scenario's in `docs/findings/`.
-31. **CONTRACT.md prose.** *Parallel per module; lock the module.* Fill Purpose, the Files "For" column, the Consumes/Produces "Does/When" columns, Invariants, the contract-test list with what each pins, Known issues (catalogue ids) and Planned changes (stage numbers). The tables are generated; correct any over-match (a topic listed under Consumes that the module only publishes).
+32. **Follow-ups from contract writing, safety first.** *Lock the module.* Verification's `_baseline.py` runs the model's tests with `subprocess.run` outside Guardian and the sandbox; Verification ignores pause; Planning's plans under review are lost on restart; `config_path()` and the Kernel can disagree on which `simorgh.toml`; `[runtime] subsystems/disabled` are not applied. Then the dead-code list in `docs/findings/2026-09-19-contract-writing.md`, module by module.
 
 ## Measurements after
 
