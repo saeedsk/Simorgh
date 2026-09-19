@@ -39,7 +39,7 @@ _PREFIX = "SIMORGH_"
 
 #: ...except these, which select behaviour rather than redirect state,
 #: and which a caller may legitimately set for a whole run.
-_KEEP = frozenset({"SIMORGH_OBSERVER_RUN_ID"})
+_KEEP = frozenset({"SIMORGH_OBSERVER_RUN_ID", "SIMORGH_LEDGER_WRITER_AUDIT"})
 
 #: The operator's model keys. With them in the environment, every test
 #: that booted a real Kernel made a paid, networked Together call (a second

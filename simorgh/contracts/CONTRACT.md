@@ -156,3 +156,5 @@ Lock it first (`python tools/modlock.py claim contracts --by <you> --task "..."`
 This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run agent may, with the lock, because a person is accountable for the commit.
 
 - Envelope (stage 1 item 5, 2026-09-19): `Message.deadline` (optional absolute epoch time; validated > 0 when set) is when the caller stops waiting. `Message.caused` carries it forward; `reply` does not. `envelope.time_left(message, now)` returns the seconds left (never below 0) or None. Consumers: bus (sets it), cognition, execution.
+
+- `streamnames.WRITERS` (prefix -> subsystems allowed to write) and `writers_for(stream)` (longest prefix; None when unlisted), stage 1 item 8. Two-writer prefixes: `action:` (guardian, execution), `task:` (planning, orchestration), `capabilities` (execution, voice). Kernel-only: `system`, `schedule`, `config:`, `metrics:`.

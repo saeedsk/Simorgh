@@ -35,3 +35,53 @@ def stream_name_rule() -> str:
 
 
 __all__ = ["MAX_STREAM_NAME", "is_valid_stream", "stream_name_rule"]
+
+
+# Which subsystems may write which streams (stage 1 item 8). Filled from a
+# recorded run of every test that boots subsystems (SIMORGH_LEDGER_WRITER_AUDIT),
+# not from the informational owner table in `ledger/streams.py`, which had
+# drifted. A stream matching no prefix here is unrestricted.
+WRITERS: dict[str, frozenset[str]] = {
+    # Two writers each, both observed: Guardian records the decision,
+    # Execution the run; Planning owns the task, Orchestration its steps.
+    "action:": frozenset({"guardian", "execution"}),
+    "task:": frozenset({"planning", "orchestration"}),
+    "project:": frozenset({"planning"}),
+    "plan:": frozenset({"planning"}),
+    "planning:": frozenset({"planning"}),
+    "guardian:": frozenset({"guardian"}),
+    # The self model and the world are WorldModel's alone (the
+    # evaluation's example: Reflection must not write `self:model`).
+    "self:": frozenset({"worldmodel"}),
+    "world:": frozenset({"worldmodel"}),
+    "memory:": frozenset({"memory"}),
+    "persona:": frozenset({"persona"}),
+    "cognition:": frozenset({"cognition"}),
+    "verify:": frozenset({"verification"}),
+    "learn:": frozenset({"learning"}),
+    "reflect:": frozenset({"reflection"}),
+    "reflection:": frozenset({"reflection"}),
+    "curiosity:": frozenset({"curiosity"}),
+    "voice:": frozenset({"voice"}),
+    "benchmark:": frozenset({"benchmark"}),
+    "execution:": frozenset({"execution"}),
+    "mcp:": frozenset({"execution"}),
+    "capabilities": frozenset({"execution", "voice"}),
+    "ledger:": frozenset({"ledger"}),
+    # The Kernel's own streams: it writes them through its own client,
+    # which is not bound; no subsystem writes them.
+    "system": frozenset({"kernel"}),
+    "schedule": frozenset({"kernel"}),
+    "config:": frozenset({"kernel"}),
+    "metrics:": frozenset({"kernel"}),
+}
+
+
+def writers_for(stream: str) -> frozenset[str] | None:
+    """The subsystems allowed to write `stream`, by its longest matching
+    prefix in `WRITERS`; None when no prefix names it."""
+    best = None
+    for prefix, who in WRITERS.items():
+        if (stream == prefix or stream.startswith(prefix)) and (best is None or len(prefix) > len(best[0])):
+            best = (prefix, who)
+    return None if best is None else best[1]

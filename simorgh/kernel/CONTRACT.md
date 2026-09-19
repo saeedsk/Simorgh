@@ -179,3 +179,5 @@ Found while writing this contract (not in the catalogue): `[runtime] subsystems`
 Lock it first (`python tools/modlock.py claim kernel --by <you> --task "..."`), commit the lock, edit only `simorgh/kernel/`, `tests/simorgh/kernel/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py kernel` before committing; commit subject `kernel: <what changed>`.
 
 This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run agent may, with the lock, because a person is accountable for the commit.
+
+- `ContextFactory.build` gives each subsystem a `BoundLedger` for its name (stage 1 item 8); the Kernel's own client is unbound.
