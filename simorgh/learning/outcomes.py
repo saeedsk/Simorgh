@@ -149,6 +149,9 @@ class OutcomeRecorder:
         p = message.payload
         task_id = p["task_id"]
         task_type, strategy, cost_usd, duration_s, run = await self._task_facts(task_id)
+        if task_type == "unknown":  # a blocked chat turn is no more an outcome than a finished one (C2)
+            self.skipped_unknown += 1
+            return
         await self._record(task_id=task_id, task_type=task_type, succeeded=False,
                             weight=self._config.blocked_sample_weight, verdict="blocked",
                             cost_usd=cost_usd, duration_s=duration_s, strategy=strategy, stated_confidence=None,

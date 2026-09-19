@@ -113,6 +113,7 @@ class Service:
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None,
                  connectors: list | None = None) -> None:
+        self._vision = None  # built in start(); stop() may run without it (a failed or skipped start)
         self._config = config or Config()
         self._extra_tools = extra_tools or []
         # Account-backed integrations (contracts/connector.py). Each one
