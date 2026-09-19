@@ -171,3 +171,14 @@ class ArgumentHintsMatchTheDispatcherTestCase(unittest.TestCase):
             self.assertIn(name, NO_ARGUMENT_COMMANDS)
         # `help voice` is a topic, so `help` declares one (2026-09-13).
         self.assertNotIn("help", NO_ARGUMENT_COMMANDS)
+
+
+class AQuestionMarkBeforeACommandIsHelp(unittest.TestCase):
+    """2026-09-19: `? interests` went to chat twice, 30 s each."""
+
+    def test_it(self):
+        from simorgh.interface.parser import parse
+
+        self.assertEqual((parse("? interests").name, parse("? interests").args), ("help", "interests"))
+        self.assertEqual(parse("? interests'").args, "interests")
+        self.assertIsNone(parse("? what is the weather").name)

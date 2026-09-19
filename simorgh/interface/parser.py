@@ -248,6 +248,13 @@ def parse(line: str) -> Command | None:
         # model something: `?` went to chat and got "I'm here -- what would
         # you like?" (the creator, 2026-09-14).
         return Command(name="help", args="", raw=raw)
+    head, _, topic = stripped.lstrip("/").partition(" ")
+    topic = topic.strip().strip("'\"`").lower()
+    if head == "?" and topic.split(" ", 1)[0] in COMMAND_NAMES:
+        # `? interests` is `help interests`. It went to chat twice on the
+        # creator's screen (2026-09-19), 30 s each, and the model explained
+        # its own source code instead of listing the command's words.
+        return Command(name="help", args=topic, raw=raw)
 
     explicit = stripped.startswith("/")
     body = stripped[1:] if explicit else stripped
