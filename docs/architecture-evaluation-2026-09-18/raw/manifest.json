@@ -1,0 +1,2091 @@
+{
+ "session_dir": "/Users/saeed/.claude/projects/-Users-saeed-ws-Simorgh/488b3cca-edac-4c83-98e1-f1e7db34bf14",
+ "workflows": {
+  "review": {
+   "dir": "/Users/saeed/.claude/projects/-Users-saeed-ws-Simorgh/488b3cca-edac-4c83-98e1-f1e7db34bf14/subagents/workflows/wf_07270914-dd5",
+   "script": "simorgh-architecture-review-wf_07270914-dd5.js",
+   "agents": [
+    {
+     "agentId": "a715acf78cfb36ac4",
+     "label": "read:bus-ledger-substrate",
+     "phase": "Read",
+     "tool_calls": 37,
+     "has_result": true,
+     "file": "review/readers/bus-ledger-substrate.md",
+     "transcript": "agent-a715acf78cfb36ac4.jsonl"
+    },
+    {
+     "agentId": "abd7043be6f35c8e9",
+     "label": "read:kernel-lifecycle-config",
+     "phase": "Read",
+     "tool_calls": 52,
+     "has_result": true,
+     "file": "review/readers/kernel-lifecycle-config.md",
+     "transcript": "agent-abd7043be6f35c8e9.jsonl"
+    },
+    {
+     "agentId": "a84c731b55bc166ab",
+     "label": "read:agent-loop-orchestration",
+     "phase": "Read",
+     "tool_calls": 62,
+     "has_result": true,
+     "file": "review/readers/agent-loop-orchestration.md",
+     "transcript": "agent-a84c731b55bc166ab.jsonl"
+    },
+    {
+     "agentId": "a91a85b6ffc524cee",
+     "label": "read:safety-guardian-execution",
+     "phase": "Read",
+     "tool_calls": 58,
+     "has_result": true,
+     "file": "review/readers/safety-guardian-execution.md",
+     "transcript": "agent-a91a85b6ffc524cee.jsonl"
+    },
+    {
+     "agentId": "a76ed2f36101ffa0e",
+     "label": "read:cognition-memory-selfmodel",
+     "phase": "Read",
+     "tool_calls": 55,
+     "has_result": true,
+     "file": "review/readers/cognition-memory-selfmodel.md",
+     "transcript": "agent-a76ed2f36101ffa0e.jsonl"
+    },
+    {
+     "agentId": "a51ac0007f1773faf",
+     "label": "read:voice-interface-surfaces",
+     "phase": "Read",
+     "tool_calls": 79,
+     "has_result": true,
+     "file": "review/readers/voice-interface-surfaces.md",
+     "transcript": "agent-a51ac0007f1773faf.jsonl"
+    },
+    {
+     "agentId": "abc546b92da3c502d",
+     "label": "read:tools-domains-integrations",
+     "phase": "Read",
+     "tool_calls": 64,
+     "has_result": true,
+     "file": "review/readers/tools-domains-integrations.md",
+     "transcript": "agent-abc546b92da3c502d.jsonl"
+    },
+    {
+     "agentId": "a55cd2a7d595cba47",
+     "label": "read:testing-observability-process",
+     "phase": "Read",
+     "tool_calls": 48,
+     "has_result": true,
+     "file": "review/readers/testing-observability-process.md",
+     "transcript": "agent-a55cd2a7d595cba47.jsonl"
+    },
+    {
+     "agentId": "a71f79ca69ea5355d",
+     "label": "read:big-picture-proportionality",
+     "phase": "Read",
+     "tool_calls": 77,
+     "has_result": true,
+     "file": "review/readers/big-picture-proportionality.md",
+     "transcript": "agent-a71f79ca69ea5355d.jsonl"
+    },
+    {
+     "agentId": "a60fe7a67a49483c4",
+     "label": "refute:correctness:Live default auto-approves every irrever",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/live-default-auto-approves-every-irrever.correctness.md",
+     "transcript": "agent-a60fe7a67a49483c4.jsonl"
+    },
+    {
+     "agentId": "ae19d95b58b1d816f",
+     "label": "refute:proportionality:Live default auto-approves every irrever",
+     "phase": "Refute",
+     "tool_calls": 12,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/live-default-auto-approves-every-irrever.proportionality.md",
+     "transcript": "agent-ae19d95b58b1d816f.jsonl"
+    },
+    {
+     "agentId": "a5b71070fa06a1162",
+     "label": "refute:correctness:The vault, the ledger and the machine ar",
+     "phase": "Refute",
+     "tool_calls": 15,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/the-vault-the-ledger-and-the-machine-ar.correctness.md",
+     "transcript": "agent-a5b71070fa06a1162.jsonl"
+    },
+    {
+     "agentId": "a189e0c8c735397cc",
+     "label": "refute:proportionality:The vault, the ledger and the machine ar",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/the-vault-the-ledger-and-the-machine-ar.proportionality.md",
+     "transcript": "agent-a189e0c8c735397cc.jsonl"
+    },
+    {
+     "agentId": "a5502d89374a0c267",
+     "label": "refute:correctness:Protected paths are enforced on the prop",
+     "phase": "Refute",
+     "tool_calls": 19,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/protected-paths-are-enforced-on-the-prop.correctness.md",
+     "transcript": "agent-a5502d89374a0c267.jsonl"
+    },
+    {
+     "agentId": "a583e5677b9e42462",
+     "label": "refute:proportionality:Protected paths are enforced on the prop",
+     "phase": "Refute",
+     "tool_calls": 16,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/protected-paths-are-enforced-on-the-prop.proportionality.md",
+     "transcript": "agent-a583e5677b9e42462.jsonl"
+    },
+    {
+     "agentId": "abd24bfaab3a8f196",
+     "label": "refute:correctness:Skills are persistent, unconfined arbitr",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/skills-are-persistent-unconfined-arbitr.correctness.md",
+     "transcript": "agent-abd24bfaab3a8f196.jsonl"
+    },
+    {
+     "agentId": "acc265f7490f51355",
+     "label": "refute:proportionality:Skills are persistent, unconfined arbitr",
+     "phase": "Refute",
+     "tool_calls": 16,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/skills-are-persistent-unconfined-arbitr.proportionality.md",
+     "transcript": "agent-acc265f7490f51355.jsonl"
+    },
+    {
+     "agentId": "ac6085cbac00e04a9",
+     "label": "refute:correctness:The landing gate is weaker than the boot",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/the-landing-gate-is-weaker-than-the-boot.correctness.md",
+     "transcript": "agent-ac6085cbac00e04a9.jsonl"
+    },
+    {
+     "agentId": "a4f642f75bd91e0e8",
+     "label": "refute:proportionality:The landing gate is weaker than the boot",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/the-landing-gate-is-weaker-than-the-boot.proportionality.md",
+     "transcript": "agent-a4f642f75bd91e0e8.jsonl"
+    },
+    {
+     "agentId": "ab50f612408054f45",
+     "label": "refute:correctness:Guardian trusts the proposer's reversibi",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/guardian-trusts-the-proposer-s-reversibi.correctness.md",
+     "transcript": "agent-ab50f612408054f45.jsonl"
+    },
+    {
+     "agentId": "aa89e7f349a49e131",
+     "label": "refute:proportionality:Guardian trusts the proposer's reversibi",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/guardian-trusts-the-proposer-s-reversibi.proportionality.md",
+     "transcript": "agent-aa89e7f349a49e131.jsonl"
+    },
+    {
+     "agentId": "ad9e0c427aab99880",
+     "label": "refute:correctness:The HMAC token is real between processes",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/the-hmac-token-is-real-between-processes.correctness.md",
+     "transcript": "agent-ad9e0c427aab99880.jsonl"
+    },
+    {
+     "agentId": "a55a90c0dae70b344",
+     "label": "refute:proportionality:The HMAC token is real between processes",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/the-hmac-token-is-real-between-processes.proportionality.md",
+     "transcript": "agent-a55a90c0dae70b344.jsonl"
+    },
+    {
+     "agentId": "ac28d1b4908bfb4ed",
+     "label": "refute:correctness:Physical-world tools are gated identical",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/physical-world-tools-are-gated-identical.correctness.md",
+     "transcript": "agent-ac28d1b4908bfb4ed.jsonl"
+    },
+    {
+     "agentId": "aaf9cbda2116d91f7",
+     "label": "refute:proportionality:Physical-world tools are gated identical",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/physical-world-tools-are-gated-identical.proportionality.md",
+     "transcript": "agent-aaf9cbda2116d91f7.jsonl"
+    },
+    {
+     "agentId": "ae8ed91cd08312532",
+     "label": "refute:correctness:Adaptive immunity never learns from shel",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/adaptive-immunity-never-learns-from-shel.correctness.md",
+     "transcript": "agent-ae8ed91cd08312532.jsonl"
+    },
+    {
+     "agentId": "a96dec87a5a18e203",
+     "label": "refute:proportionality:Adaptive immunity never learns from shel",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/adaptive-immunity-never-learns-from-shel.proportionality.md",
+     "transcript": "agent-a96dec87a5a18e203.jsonl"
+    },
+    {
+     "agentId": "ac9fcda0a91da40da",
+     "label": "refute:correctness:Chat sessions edit the live checkout whi",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/chat-sessions-edit-the-live-checkout-whi.correctness.md",
+     "transcript": "agent-ac9fcda0a91da40da.jsonl"
+    },
+    {
+     "agentId": "a9e21bbb8670d3717",
+     "label": "refute:proportionality:Chat sessions edit the live checkout whi",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/chat-sessions-edit-the-live-checkout-whi.proportionality.md",
+     "transcript": "agent-a9e21bbb8670d3717.jsonl"
+    },
+    {
+     "agentId": "a7f4fd7a2711ff6bf",
+     "label": "refute:correctness:The hand-maintained denylist is doing se",
+     "phase": "Refute",
+     "tool_calls": 12,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/the-hand-maintained-denylist-is-doing-se.correctness.md",
+     "transcript": "agent-a7f4fd7a2711ff6bf.jsonl"
+    },
+    {
+     "agentId": "a10614bae37739379",
+     "label": "refute:proportionality:The hand-maintained denylist is doing se",
+     "phase": "Refute",
+     "tool_calls": 15,
+     "has_result": true,
+     "file": "review/refutations/safety-guardian-execution/the-hand-maintained-denylist-is-doing-se.proportionality.md",
+     "transcript": "agent-a10614bae37739379.jsonl"
+    },
+    {
+     "agentId": "ae4e8d811ec4c2e9c",
+     "label": "refute:correctness:The self-improvement loop is open: compe",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/the-self-improvement-loop-is-open-compe.correctness.md",
+     "transcript": "agent-ae4e8d811ec4c2e9c.jsonl"
+    },
+    {
+     "agentId": "a890c3d76b8d3b47f",
+     "label": "refute:proportionality:The self-improvement loop is open: compe",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/the-self-improvement-loop-is-open-compe.proportionality.md",
+     "transcript": "agent-a890c3d76b8d3b47f.jsonl"
+    },
+    {
+     "agentId": "aee82115ef898ffba",
+     "label": "refute:correctness:Failover to the Claude Code CLI is invis",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/failover-to-the-claude-code-cli-is-invis.correctness.md",
+     "transcript": "agent-aee82115ef898ffba.jsonl"
+    },
+    {
+     "agentId": "a39b64c2939760983",
+     "label": "refute:proportionality:Failover to the Claude Code CLI is invis",
+     "phase": "Refute",
+     "tool_calls": 16,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/failover-to-the-claude-code-cli-is-invis.proportionality.md",
+     "transcript": "agent-a39b64c2939760983.jsonl"
+    },
+    {
+     "agentId": "a731b820e85a021bb",
+     "label": "refute:correctness:Curiosity appends a ledger event every 3",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/curiosity-appends-a-ledger-event-every-3.correctness.md",
+     "transcript": "agent-a731b820e85a021bb.jsonl"
+    },
+    {
+     "agentId": "ae3be8eba47627f4e",
+     "label": "refute:proportionality:Curiosity appends a ledger event every 3",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/curiosity-appends-a-ledger-event-every-3.proportionality.md",
+     "transcript": "agent-ae3be8eba47627f4e.jsonl"
+    },
+    {
+     "agentId": "a3306e9ef1e154e6a",
+     "label": "refute:correctness:No native tool calling: tools are a firs",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/no-native-tool-calling-tools-are-a-firs.correctness.md",
+     "transcript": "agent-a3306e9ef1e154e6a.jsonl"
+    },
+    {
+     "agentId": "a8eecdeab5f6ac4c1",
+     "label": "refute:proportionality:No native tool calling: tools are a firs",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/no-native-tool-calling-tools-are-a-firs.proportionality.md",
+     "transcript": "agent-a8eecdeab5f6ac4c1.jsonl"
+    },
+    {
+     "agentId": "a3f1959c2d2dddb4d",
+     "label": "refute:correctness:The Self Model is volatile: a restart fo",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/the-self-model-is-volatile-a-restart-fo.correctness.md",
+     "transcript": "agent-a3f1959c2d2dddb4d.jsonl"
+    },
+    {
+     "agentId": "af4dc0a39d7bda9dd",
+     "label": "refute:proportionality:The Self Model is volatile: a restart fo",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/the-self-model-is-volatile-a-restart-fo.proportionality.md",
+     "transcript": "agent-af4dc0a39d7bda9dd.jsonl"
+    },
+    {
+     "agentId": "aa6886445bc4e0192",
+     "label": "refute:correctness:Reflection's critiques undo Memory's own",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/reflection-s-critiques-undo-memory-s-own.correctness.md",
+     "transcript": "agent-aa6886445bc4e0192.jsonl"
+    },
+    {
+     "agentId": "a3b0b283eaeffa625",
+     "label": "refute:proportionality:Reflection's critiques undo Memory's own",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/reflection-s-critiques-undo-memory-s-own.proportionality.md",
+     "transcript": "agent-a3b0b283eaeffa625.jsonl"
+    },
+    {
+     "agentId": "a1e7eec432b66b48f",
+     "label": "refute:correctness:Chat and voice sessions are per-turn tas",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/chat-and-voice-sessions-are-per-turn-tas.correctness.md",
+     "transcript": "agent-a1e7eec432b66b48f.jsonl"
+    },
+    {
+     "agentId": "a67c683c977271b02",
+     "label": "refute:proportionality:Chat and voice sessions are per-turn tas",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/chat-and-voice-sessions-are-per-turn-tas.proportionality.md",
+     "transcript": "agent-a67c683c977271b02.jsonl"
+    },
+    {
+     "agentId": "a2eccdbd1674fbfae",
+     "label": "refute:correctness:Curiosity's budget throttle reads fields",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/curiosity-s-budget-throttle-reads-fields.correctness.md",
+     "transcript": "agent-a2eccdbd1674fbfae.jsonl"
+    },
+    {
+     "agentId": "a4978e621f8b36b74",
+     "label": "refute:proportionality:Curiosity's budget throttle reads fields",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/curiosity-s-budget-throttle-reads-fields.proportionality.md",
+     "transcript": "agent-a4978e621f8b36b74.jsonl"
+    },
+    {
+     "agentId": "a3ce364837400d736",
+     "label": "refute:correctness:The recall time budget, not the embedder",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/the-recall-time-budget-not-the-embedder.correctness.md",
+     "transcript": "agent-a3ce364837400d736.jsonl"
+    },
+    {
+     "agentId": "a2b33c4ebe9aab694",
+     "label": "refute:proportionality:The recall time budget, not the embedder",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/the-recall-time-budget-not-the-embedder.proportionality.md",
+     "transcript": "agent-a2b33c4ebe9aab694.jsonl"
+    },
+    {
+     "agentId": "a1aa0ca40e684d143",
+     "label": "refute:correctness:The floor provider is an in-band success",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/the-floor-provider-is-an-in-band-success.correctness.md",
+     "transcript": "agent-a1aa0ca40e684d143.jsonl"
+    },
+    {
+     "agentId": "ae796967e20dd2a05",
+     "label": "refute:proportionality:The floor provider is an in-band success",
+     "phase": "Refute",
+     "tool_calls": 13,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/the-floor-provider-is-an-in-band-success.proportionality.md",
+     "transcript": "agent-ae796967e20dd2a05.jsonl"
+    },
+    {
+     "agentId": "a8a15fed20b93bb26",
+     "label": "refute:correctness:Cognition's 'no real provider' health ti",
+     "phase": "Refute",
+     "tool_calls": 3,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/cognition-s-no-real-provider-health-ti.correctness.md",
+     "transcript": "agent-a8a15fed20b93bb26.jsonl"
+    },
+    {
+     "agentId": "a127eb8cae29ca7dc",
+     "label": "refute:proportionality:Cognition's 'no real provider' health ti",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/cognition-s-no-real-provider-health-ti.proportionality.md",
+     "transcript": "agent-a127eb8cae29ca7dc.jsonl"
+    },
+    {
+     "agentId": "a3ff581d61a80af51",
+     "label": "refute:correctness:RollingWindowBudget replays its whole st",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/rollingwindowbudget-replays-its-whole-st.correctness.md",
+     "transcript": "agent-a3ff581d61a80af51.jsonl"
+    },
+    {
+     "agentId": "a4f4280a703812c3a",
+     "label": "refute:proportionality:RollingWindowBudget replays its whole st",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/rollingwindowbudget-replays-its-whole-st.proportionality.md",
+     "transcript": "agent-a4f4280a703812c3a.jsonl"
+    },
+    {
+     "agentId": "abb1b34559f694234",
+     "label": "refute:correctness:Learning's patch pipeline, Reflection's",
+     "phase": "Refute",
+     "tool_calls": 15,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/learning-s-patch-pipeline-reflection-s.correctness.md",
+     "transcript": "agent-abb1b34559f694234.jsonl"
+    },
+    {
+     "agentId": "acb276752344ae816",
+     "label": "refute:proportionality:Learning's patch pipeline, Reflection's",
+     "phase": "Refute",
+     "tool_calls": 15,
+     "has_result": true,
+     "file": "review/refutations/cognition-memory-selfmodel/learning-s-patch-pipeline-reflection-s.proportionality.md",
+     "transcript": "agent-acb276752344ae816.jsonl"
+    },
+    {
+     "agentId": "a7469a6624d4d0946",
+     "label": "refute:correctness:Tool calls are regex-parsed text markers",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/tool-calls-are-regex-parsed-text-markers.correctness.md",
+     "transcript": "agent-a7469a6624d4d0946.jsonl"
+    },
+    {
+     "agentId": "ab1f27a63c7191722",
+     "label": "refute:proportionality:Tool calls are regex-parsed text markers",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/tool-calls-are-regex-parsed-text-markers.proportionality.md",
+     "transcript": "agent-ab1f27a63c7191722.jsonl"
+    },
+    {
+     "agentId": "a4b35a627b43c0e15",
+     "label": "refute:correctness:The whole transcript is flattened into o",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/the-whole-transcript-is-flattened-into-o.correctness.md",
+     "transcript": "agent-a4b35a627b43c0e15.jsonl"
+    },
+    {
+     "agentId": "ad4f83e101de64cf5",
+     "label": "refute:proportionality:The whole transcript is flattened into o",
+     "phase": "Refute",
+     "tool_calls": 13,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/the-whole-transcript-is-flattened-into-o.proportionality.md",
+     "transcript": "agent-ad4f83e101de64cf5.jsonl"
+    },
+    {
+     "agentId": "a5f866fd9c161902c",
+     "label": "refute:correctness:No stable prompt prefix and no prompt ca",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/no-stable-prompt-prefix-and-no-prompt-ca.correctness.md",
+     "transcript": "agent-a5f866fd9c161902c.jsonl"
+    },
+    {
+     "agentId": "a3d4ff5eb39a15e1a",
+     "label": "refute:proportionality:No stable prompt prefix and no prompt ca",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/no-stable-prompt-prefix-and-no-prompt-ca.proportionality.md",
+     "transcript": "agent-a3d4ff5eb39a15e1a.jsonl"
+    },
+    {
+     "agentId": "ac0997004fbf2bda3",
+     "label": "refute:correctness:One tool call costs ~13 bus messages and",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/one-tool-call-costs-13-bus-messages-and.correctness.md",
+     "transcript": "agent-ac0997004fbf2bda3.jsonl"
+    },
+    {
+     "agentId": "a74c3594f8d1567ad",
+     "label": "refute:proportionality:One tool call costs ~13 bus messages and",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/one-tool-call-costs-13-bus-messages-and.proportionality.md",
+     "transcript": "agent-a74c3594f8d1567ad.jsonl"
+    },
+    {
+     "agentId": "ad68be1f95f3da65f",
+     "label": "refute:correctness:Crash-resume restores the step count but",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/crash-resume-restores-the-step-count-but.correctness.md",
+     "transcript": "agent-ad68be1f95f3da65f.jsonl"
+    },
+    {
+     "agentId": "afc1e49b38c31a132",
+     "label": "refute:proportionality:Crash-resume restores the step count but",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/crash-resume-restores-the-step-count-but.proportionality.md",
+     "transcript": "agent-afc1e49b38c31a132.jsonl"
+    },
+    {
+     "agentId": "a0507257e3e9a04b7",
+     "label": "refute:correctness:A chat turn can edit the live checkout,",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/a-chat-turn-can-edit-the-live-checkout.correctness.md",
+     "transcript": "agent-a0507257e3e9a04b7.jsonl"
+    },
+    {
+     "agentId": "a212fb48cb3cec279",
+     "label": "refute:proportionality:A chat turn can edit the live checkout,",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/a-chat-turn-can-edit-the-live-checkout.proportionality.md",
+     "transcript": "agent-a212fb48cb3cec279.jsonl"
+    },
+    {
+     "agentId": "a1e105896802a4466",
+     "label": "refute:correctness:The chat profile is a 20-step, 72-tool,",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/the-chat-profile-is-a-20-step-72-tool.correctness.md",
+     "transcript": "agent-a1e105896802a4466.jsonl"
+    },
+    {
+     "agentId": "ae645ddf4ac78f455",
+     "label": "refute:proportionality:The chat profile is a 20-step, 72-tool,",
+     "phase": "Refute",
+     "tool_calls": 12,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/the-chat-profile-is-a-20-step-72-tool.proportionality.md",
+     "transcript": "agent-ae645ddf4ac78f455.jsonl"
+    },
+    {
+     "agentId": "a0af96e0bfe5fdb43",
+     "label": "refute:correctness:Domain and channel knowledge has leaked",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/domain-and-channel-knowledge-has-leaked.correctness.md",
+     "transcript": "agent-a0af96e0bfe5fdb43.jsonl"
+    },
+    {
+     "agentId": "a614f9d654204e39e",
+     "label": "refute:proportionality:Domain and channel knowledge has leaked",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/domain-and-channel-knowledge-has-leaked.proportionality.md",
+     "transcript": "agent-a614f9d654204e39e.jsonl"
+    },
+    {
+     "agentId": "add7b786fc2dd315b",
+     "label": "refute:correctness:Consumer groups, claim RPC, leases, hear",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/consumer-groups-claim-rpc-leases-hear.correctness.md",
+     "transcript": "agent-add7b786fc2dd315b.jsonl"
+    },
+    {
+     "agentId": "abc266c2b13b053eb",
+     "label": "refute:proportionality:Consumer groups, claim RPC, leases, hear",
+     "phase": "Refute",
+     "tool_calls": 21,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/consumer-groups-claim-rpc-leases-hear.proportionality.md",
+     "transcript": "agent-abc266c2b13b053eb.jsonl"
+    },
+    {
+     "agentId": "aacfd9bd350c9ee7a",
+     "label": "refute:correctness:The 2026-style loop features are built a",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/the-2026-style-loop-features-are-built-a.correctness.md",
+     "transcript": "agent-aacfd9bd350c9ee7a.jsonl"
+    },
+    {
+     "agentId": "a65934f7a74cc710a",
+     "label": "refute:proportionality:The 2026-style loop features are built a",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/the-2026-style-loop-features-are-built-a.proportionality.md",
+     "transcript": "agent-a65934f7a74cc710a.jsonl"
+    },
+    {
+     "agentId": "a72991570161218e7",
+     "label": "refute:correctness:session_id is never sent on cognition.th",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/session-id-is-never-sent-on-cognition-th.correctness.md",
+     "transcript": "agent-a72991570161218e7.jsonl"
+    },
+    {
+     "agentId": "aa1e49d2a37d75d46",
+     "label": "refute:proportionality:session_id is never sent on cognition.th",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/agent-loop-orchestration/session-id-is-never-sent-on-cognition-th.proportionality.md",
+     "transcript": "agent-aa1e49d2a37d75d46.jsonl"
+    },
+    {
+     "agentId": "a7fb180eb22c3fe9a",
+     "label": "refute:correctness:Compaction's blob sweep reads the entire",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/compaction-s-blob-sweep-reads-the-entire.correctness.md",
+     "transcript": "agent-a7fb180eb22c3fe9a.jsonl"
+    },
+    {
+     "agentId": "ab1b7dc1a2e991f2b",
+     "label": "refute:proportionality:Compaction's blob sweep reads the entire",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/compaction-s-blob-sweep-reads-the-entire.proportionality.md",
+     "transcript": "agent-ab1b7dc1a2e991f2b.jsonl"
+    },
+    {
+     "agentId": "aad6bd48530f7794c",
+     "label": "refute:correctness:One file plus one sidecar per trace_id:",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/one-file-plus-one-sidecar-per-trace-id.correctness.md",
+     "transcript": "agent-aad6bd48530f7794c.jsonl"
+    },
+    {
+     "agentId": "a7cb4d72de76151e3",
+     "label": "refute:proportionality:One file plus one sidecar per trace_id:",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/one-file-plus-one-sidecar-per-trace-id.proportionality.md",
+     "transcript": "agent-a7cb4d72de76151e3.jsonl"
+    },
+    {
+     "agentId": "a95453679b1476276",
+     "label": "refute:correctness:Retention only ever deletes trace stream",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/retention-only-ever-deletes-trace-stream.correctness.md",
+     "transcript": "agent-a95453679b1476276.jsonl"
+    },
+    {
+     "agentId": "a3ed2549949789b5c",
+     "label": "refute:proportionality:Retention only ever deletes trace stream",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/retention-only-ever-deletes-trace-stream.proportionality.md",
+     "transcript": "agent-a3ed2549949789b5c.jsonl"
+    },
+    {
+     "agentId": "a51466c267ff125d1",
+     "label": "refute:correctness:The at-least-once machinery covers 5 sub",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-at-least-once-machinery-covers-5-sub.correctness.md",
+     "transcript": "agent-a51466c267ff125d1.jsonl"
+    },
+    {
+     "agentId": "a56a3577b80047dde",
+     "label": "refute:proportionality:The at-least-once machinery covers 5 sub",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-at-least-once-machinery-covers-5-sub.proportionality.md",
+     "transcript": "agent-a56a3577b80047dde.jsonl"
+    },
+    {
+     "agentId": "a93f71c11e8589f77",
+     "label": "refute:correctness:The 5 ms wake-all ticker costs ~5% of a",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-5-ms-wake-all-ticker-costs-5-of-a.correctness.md",
+     "transcript": "agent-a93f71c11e8589f77.jsonl"
+    },
+    {
+     "agentId": "af3d7b2c064c5c95c",
+     "label": "refute:proportionality:The 5 ms wake-all ticker costs ~5% of a",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-5-ms-wake-all-ticker-costs-5-of-a.proportionality.md",
+     "transcript": "agent-af3d7b2c064c5c95c.jsonl"
+    },
+    {
+     "agentId": "a97be5bf47987f636",
+     "label": "refute:correctness:Broadcast subscriptions run up to 16 han",
+     "phase": "Refute",
+     "tool_calls": 16,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/broadcast-subscriptions-run-up-to-16-han.correctness.md",
+     "transcript": "agent-a97be5bf47987f636.jsonl"
+    },
+    {
+     "agentId": "a5a8b27b01b94337b",
+     "label": "refute:proportionality:Broadcast subscriptions run up to 16 han",
+     "phase": "Refute",
+     "tool_calls": 14,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/broadcast-subscriptions-run-up-to-16-han.proportionality.md",
+     "transcript": "agent-a5a8b27b01b94337b.jsonl"
+    },
+    {
+     "agentId": "ad34dd6822d7209cd",
+     "label": "refute:correctness:The Ledger is a second, untyped, unguard",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-ledger-is-a-second-untyped-unguard.correctness.md",
+     "transcript": "agent-ad34dd6822d7209cd.jsonl"
+    },
+    {
+     "agentId": "aff5d984f2dc351f9",
+     "label": "refute:proportionality:The Ledger is a second, untyped, unguard",
+     "phase": "Refute",
+     "tool_calls": 12,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-ledger-is-a-second-untyped-unguard.proportionality.md",
+     "transcript": "agent-aff5d984f2dc351f9.jsonl"
+    },
+    {
+     "agentId": "a379ffca4ec7ed587",
+     "label": "refute:correctness:Multi-process and cloud substrate (sqlit",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/multi-process-and-cloud-substrate-sqlit.correctness.md",
+     "transcript": "agent-a379ffca4ec7ed587.jsonl"
+    },
+    {
+     "agentId": "a9f765d3e49834b41",
+     "label": "refute:proportionality:Multi-process and cloud substrate (sqlit",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/multi-process-and-cloud-substrate-sqlit.proportionality.md",
+     "transcript": "agent-a9f765d3e49834b41.jsonl"
+    },
+    {
+     "agentId": "ad331c224d20ce626",
+     "label": "refute:correctness:The compaction record never contains blo",
+     "phase": "Refute",
+     "tool_calls": 3,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-compaction-record-never-contains-blo.correctness.md",
+     "transcript": "agent-ad331c224d20ce626.jsonl"
+    },
+    {
+     "agentId": "ad500ed51ac11c02c",
+     "label": "refute:proportionality:The compaction record never contains blo",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-compaction-record-never-contains-blo.proportionality.md",
+     "transcript": "agent-ad500ed51ac11c02c.jsonl"
+    },
+    {
+     "agentId": "a5c49a8b26f9ae6e9",
+     "label": "refute:correctness:Guardian enforces the reversibility labe",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/guardian-enforces-the-reversibility-labe.correctness.md",
+     "transcript": "agent-a5c49a8b26f9ae6e9.jsonl"
+    },
+    {
+     "agentId": "a5443e7a7b73afa19",
+     "label": "refute:proportionality:Guardian enforces the reversibility labe",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/guardian-enforces-the-reversibility-labe.proportionality.md",
+     "transcript": "agent-a5443e7a7b73afa19.jsonl"
+    },
+    {
+     "agentId": "af61a79401e3c3194",
+     "label": "refute:correctness:The model never sees description or args",
+     "phase": "Refute",
+     "tool_calls": 15,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/the-model-never-sees-description-or-args.correctness.md",
+     "transcript": "agent-af61a79401e3c3194.jsonl"
+    },
+    {
+     "agentId": "adab8843469d6ac0c",
+     "label": "refute:proportionality:The model never sees description or args",
+     "phase": "Refute",
+     "tool_calls": 21,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/the-model-never-sees-description-or-args.proportionality.md",
+     "transcript": "agent-adab8843469d6ac0c.jsonl"
+    },
+    {
+     "agentId": "a031bef9556aee29e",
+     "label": "refute:correctness:Execution and the camera watcher run too",
+     "phase": "Refute",
+     "tool_calls": 14,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/execution-and-the-camera-watcher-run-too.correctness.md",
+     "transcript": "agent-a031bef9556aee29e.jsonl"
+    },
+    {
+     "agentId": "a2f0788e608d1f2fd",
+     "label": "refute:proportionality:Execution and the camera watcher run too",
+     "phase": "Refute",
+     "tool_calls": 19,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/execution-and-the-camera-watcher-run-too.proportionality.md",
+     "transcript": "agent-a2f0788e608d1f2fd.jsonl"
+    },
+    {
+     "agentId": "a25f2145139497e6b",
+     "label": "refute:correctness:WebRTC signalling is modelled as agent a",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/webrtc-signalling-is-modelled-as-agent-a.correctness.md",
+     "transcript": "agent-a25f2145139497e6b.jsonl"
+    },
+    {
+     "agentId": "a59cf96a3b9f24162",
+     "label": "refute:proportionality:WebRTC signalling is modelled as agent a",
+     "phase": "Refute",
+     "tool_calls": 12,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/webrtc-signalling-is-modelled-as-agent-a.proportionality.md",
+     "transcript": "agent-a59cf96a3b9f24162.jsonl"
+    },
+    {
+     "agentId": "aff0c6592871700fe",
+     "label": "refute:correctness:The reversibility taxonomy has had no ru",
+     "phase": "Refute",
+     "tool_calls": 18,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/the-reversibility-taxonomy-has-had-no-ru.correctness.md",
+     "transcript": "agent-aff0c6592871700fe.jsonl"
+    },
+    {
+     "agentId": "ae38e569b0dabc66e",
+     "label": "refute:proportionality:The reversibility taxonomy has had no ru",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/the-reversibility-taxonomy-has-had-no-ru.proportionality.md",
+     "transcript": "agent-ae38e569b0dabc66e.jsonl"
+    },
+    {
+     "agentId": "a514cc50cc2c78073",
+     "label": "refute:correctness:26% of the tool layer (5,523 lines) has",
+     "phase": "Refute",
+     "tool_calls": 15,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/26-of-the-tool-layer-5-523-lines-has.correctness.md",
+     "transcript": "agent-a514cc50cc2c78073.jsonl"
+    },
+    {
+     "agentId": "a06f724a9a9369f94",
+     "label": "refute:proportionality:26% of the tool layer (5,523 lines) has",
+     "phase": "Refute",
+     "tool_calls": 12,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/26-of-the-tool-layer-5-523-lines-has.proportionality.md",
+     "transcript": "agent-a06f724a9a9369f94.jsonl"
+    },
+    {
+     "agentId": "a6bab399a713262d1",
+     "label": "refute:correctness:One 60-second service timeout for 97 of",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/one-60-second-service-timeout-for-97-of.correctness.md",
+     "transcript": "agent-a6bab399a713262d1.jsonl"
+    },
+    {
+     "agentId": "aec058c61836fbba2",
+     "label": "refute:proportionality:One 60-second service timeout for 97 of",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/one-60-second-service-timeout-for-97-of.proportionality.md",
+     "transcript": "agent-aec058c61836fbba2.jsonl"
+    },
+    {
+     "agentId": "af6647495191fc8a4",
+     "label": "refute:correctness:Device integrations are five parallel SD",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/device-integrations-are-five-parallel-sd.correctness.md",
+     "transcript": "agent-af6647495191fc8a4.jsonl"
+    },
+    {
+     "agentId": "ab30d30cfd916a61e",
+     "label": "refute:proportionality:Device integrations are five parallel SD",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/device-integrations-are-five-parallel-sd.proportionality.md",
+     "transcript": "agent-ab30d30cfd916a61e.jsonl"
+    },
+    {
+     "agentId": "a9aa834fcc0c7777a",
+     "label": "refute:correctness:Tool errors are a string convention with",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/tool-errors-are-a-string-convention-with.correctness.md",
+     "transcript": "agent-a9aa834fcc0c7777a.jsonl"
+    },
+    {
+     "agentId": "ae3b001aaae152a67",
+     "label": "refute:proportionality:Tool errors are a string convention with",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/tool-errors-are-a-string-convention-with.proportionality.md",
+     "transcript": "agent-ae3b001aaae152a67.jsonl"
+    },
+    {
+     "agentId": "aa2eb04dd4fd44ecc",
+     "label": "refute:correctness:Decorative metadata: read_only contradic",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/decorative-metadata-read-only-contradic.correctness.md",
+     "transcript": "agent-aa2eb04dd4fd44ecc.jsonl"
+    },
+    {
+     "agentId": "ab65244df2a2d0e94",
+     "label": "refute:proportionality:Decorative metadata: read_only contradic",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/decorative-metadata-read-only-contradic.proportionality.md",
+     "transcript": "agent-ab65244df2a2d0e94.jsonl"
+    },
+    {
+     "agentId": "a51886e348ea3b647",
+     "label": "refute:correctness:Boot probes cover the libraries that are",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/boot-probes-cover-the-libraries-that-are.correctness.md",
+     "transcript": "agent-a51886e348ea3b647.jsonl"
+    },
+    {
+     "agentId": "a05b54cd03bbe5ff0",
+     "label": "refute:proportionality:Boot probes cover the libraries that are",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/tools-domains-integrations/boot-probes-cover-the-libraries-that-are.proportionality.md",
+     "transcript": "agent-a05b54cd03bbe5ff0.jsonl"
+    },
+    {
+     "agentId": "ab7e8cbdd93bfdb3a",
+     "label": "refute:correctness:A superseded spoken turn's 'quiet' outco",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/a-superseded-spoken-turn-s-quiet-outco.correctness.md",
+     "transcript": "agent-ab7e8cbdd93bfdb3a.jsonl"
+    },
+    {
+     "agentId": "a7d98a1743dba3239",
+     "label": "refute:proportionality:A superseded spoken turn's 'quiet' outco",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/a-superseded-spoken-turn-s-quiet-outco.proportionality.md",
+     "transcript": "agent-a7d98a1743dba3239.jsonl"
+    },
+    {
+     "agentId": "abb4655fd5869f9a2",
+     "label": "refute:correctness:Camera stills and live HLS of the house",
+     "phase": "Refute",
+     "tool_calls": 3,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/camera-stills-and-live-hls-of-the-house.correctness.md",
+     "transcript": "agent-abb4655fd5869f9a2.jsonl"
+    },
+    {
+     "agentId": "a7059cb316bc9f262",
+     "label": "refute:proportionality:Camera stills and live HLS of the house",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/camera-stills-and-live-hls-of-the-house.proportionality.md",
+     "transcript": "agent-a7059cb316bc9f262.jsonl"
+    },
+    {
+     "agentId": "a2c1ce0563b5fc811",
+     "label": "refute:correctness:Four ad-hoc session models and no identi",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/four-ad-hoc-session-models-and-no-identi.correctness.md",
+     "transcript": "agent-a2c1ce0563b5fc811.jsonl"
+    },
+    {
+     "agentId": "a014f0e1f8dd8fe5b",
+     "label": "refute:proportionality:Four ad-hoc session models and no identi",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/four-ad-hoc-session-models-and-no-identi.proportionality.md",
+     "transcript": "agent-a014f0e1f8dd8fe5b.jsonl"
+    },
+    {
+     "agentId": "ac9b9bc7177df3f21",
+     "label": "refute:correctness:Interface's `consumes`/`produces` manife",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/interface-s-consumes-produces-manife.correctness.md",
+     "transcript": "agent-ac9b9bc7177df3f21.jsonl"
+    },
+    {
+     "agentId": "aed2aabd6d672b396",
+     "label": "refute:proportionality:Interface's `consumes`/`produces` manife",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/interface-s-consumes-produces-manife.proportionality.md",
+     "transcript": "agent-aed2aabd6d672b396.jsonl"
+    },
+    {
+     "agentId": "a8ee4aa13a20fdecb",
+     "label": "refute:correctness:Interface fetches the outside world itse",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/interface-fetches-the-outside-world-itse.correctness.md",
+     "transcript": "agent-a8ee4aa13a20fdecb.jsonl"
+    },
+    {
+     "agentId": "ae214417e8b74da89",
+     "label": "refute:proportionality:Interface fetches the outside world itse",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/interface-fetches-the-outside-world-itse.proportionality.md",
+     "transcript": "agent-ae214417e8b74da89.jsonl"
+    },
+    {
+     "agentId": "ab6dcec061a79bede",
+     "label": "refute:correctness:Persona is observable but its cost is ou",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/persona-is-observable-but-its-cost-is-ou.correctness.md",
+     "transcript": "agent-ab6dcec061a79bede.jsonl"
+    },
+    {
+     "agentId": "a20a01ef23dacc284",
+     "label": "refute:proportionality:Persona is observable but its cost is ou",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/persona-is-observable-but-its-cost-is-ou.proportionality.md",
+     "transcript": "agent-a20a01ef23dacc284.jsonl"
+    },
+    {
+     "agentId": "accd8ae0bfcda8403",
+     "label": "refute:correctness:Voice is two half-generations: Pipeline",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/voice-is-two-half-generations-pipeline.correctness.md",
+     "transcript": "agent-accd8ae0bfcda8403.jsonl"
+    },
+    {
+     "agentId": "aa07000ef1579f535",
+     "label": "refute:proportionality:Voice is two half-generations: Pipeline",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/voice-is-two-half-generations-pipeline.proportionality.md",
+     "transcript": "agent-aa07000ef1579f535.jsonl"
+    },
+    {
+     "agentId": "ad8673765dc169545",
+     "label": "refute:correctness:Per-turn facts still live in session sin",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/per-turn-facts-still-live-in-session-sin.correctness.md",
+     "transcript": "agent-ad8673765dc169545.jsonl"
+    },
+    {
+     "agentId": "ad7fe708f35819459",
+     "label": "refute:proportionality:Per-turn facts still live in session sin",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/per-turn-facts-still-live-in-session-sin.proportionality.md",
+     "transcript": "agent-ad7fe708f35819459.jsonl"
+    },
+    {
+     "agentId": "a59c8c8731f77340d",
+     "label": "refute:correctness:`sim_command` is a Guardian-opaque comma",
+     "phase": "Refute",
+     "tool_calls": 12,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/sim-command-is-a-guardian-opaque-comma.correctness.md",
+     "transcript": "agent-a59c8c8731f77340d.jsonl"
+    },
+    {
+     "agentId": "a52a9fd5fcdb082ea",
+     "label": "refute:proportionality:`sim_command` is a Guardian-opaque comma",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/sim-command-is-a-guardian-opaque-comma.proportionality.md",
+     "transcript": "agent-a52a9fd5fcdb082ea.jsonl"
+    },
+    {
+     "agentId": "a20f78c4add99abff",
+     "label": "refute:correctness:Language is detected twice and consumed",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/language-is-detected-twice-and-consumed.correctness.md",
+     "transcript": "agent-a20f78c4add99abff.jsonl"
+    },
+    {
+     "agentId": "a2d1efd56c0296341",
+     "label": "refute:proportionality:Language is detected twice and consumed",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/language-is-detected-twice-and-consumed.proportionality.md",
+     "transcript": "agent-a2d1efd56c0296341.jsonl"
+    },
+    {
+     "agentId": "a854a1199f736ec6a",
+     "label": "refute:correctness:Family speech is being kept on disk with",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/family-speech-is-being-kept-on-disk-with.correctness.md",
+     "transcript": "agent-a854a1199f736ec6a.jsonl"
+    },
+    {
+     "agentId": "aad1f7d3e89da901a",
+     "label": "refute:proportionality:Family speech is being kept on disk with",
+     "phase": "Refute",
+     "tool_calls": 3,
+     "has_result": true,
+     "file": "review/refutations/voice-interface-surfaces/family-speech-is-being-kept-on-disk-with.proportionality.md",
+     "transcript": "agent-aad1f7d3e89da901a.jsonl"
+    },
+    {
+     "agentId": "a12841f154164eb7f",
+     "label": "refute:correctness:The only check that catches real blocker",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/the-only-check-that-catches-real-blocker.correctness.md",
+     "transcript": "agent-a12841f154164eb7f.jsonl"
+    },
+    {
+     "agentId": "a616aaa731a4915a5",
+     "label": "refute:proportionality:The only check that catches real blocker",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/the-only-check-that-catches-real-blocker.proportionality.md",
+     "transcript": "agent-a616aaa731a4915a5.jsonl"
+    },
+    {
+     "agentId": "adcac94d2e41f641e",
+     "label": "refute:correctness:Five of eleven mechanical checks can nev",
+     "phase": "Refute",
+     "tool_calls": 9,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/five-of-eleven-mechanical-checks-can-nev.correctness.md",
+     "transcript": "agent-adcac94d2e41f641e.jsonl"
+    },
+    {
+     "agentId": "a346fcf952fefdaec",
+     "label": "refute:proportionality:Five of eleven mechanical checks can nev",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/five-of-eleven-mechanical-checks-can-nev.proportionality.md",
+     "transcript": "agent-a346fcf952fefdaec.jsonl"
+    },
+    {
+     "agentId": "a2dbdb4bfcdbe13bd",
+     "label": "refute:correctness:full_suite_ran fails 90% of the time bec",
+     "phase": "Refute",
+     "tool_calls": 13,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/full-suite-ran-fails-90-of-the-time-bec.correctness.md",
+     "transcript": "agent-a2dbdb4bfcdbe13bd.jsonl"
+    },
+    {
+     "agentId": "a49ef6ad25a366f03",
+     "label": "refute:proportionality:full_suite_ran fails 90% of the time bec",
+     "phase": "Refute",
+     "tool_calls": 13,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/full-suite-ran-fails-90-of-the-time-bec.proportionality.md",
+     "transcript": "agent-a49ef6ad25a366f03.jsonl"
+    },
+    {
+     "agentId": "a09b8fdee204783e6",
+     "label": "refute:correctness:Tracing produces 46k one-event streams a",
+     "phase": "Refute",
+     "tool_calls": 18,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/tracing-produces-46k-one-event-streams-a.correctness.md",
+     "transcript": "agent-a09b8fdee204783e6.jsonl"
+    },
+    {
+     "agentId": "a528eb54ac14179de",
+     "label": "refute:proportionality:Tracing produces 46k one-event streams a",
+     "phase": "Refute",
+     "tool_calls": 14,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/tracing-produces-46k-one-event-streams-a.proportionality.md",
+     "transcript": "agent-a528eb54ac14179de.jsonl"
+    },
+    {
+     "agentId": "a78999a8e6d18b129",
+     "label": "refute:correctness:11.5k lines of tests and a verification",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/11-5k-lines-of-tests-and-a-verification.correctness.md",
+     "transcript": "agent-a78999a8e6d18b129.jsonl"
+    },
+    {
+     "agentId": "ac6a2a272ba449d83",
+     "label": "refute:proportionality:11.5k lines of tests and a verification",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/11-5k-lines-of-tests-and-a-verification.proportionality.md",
+     "transcript": "agent-ac6a2a272ba449d83.jsonl"
+    },
+    {
+     "agentId": "af5bb8c1090740b2e",
+     "label": "refute:correctness:No regression benchmark for the daily pa",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/no-regression-benchmark-for-the-daily-pa.correctness.md",
+     "transcript": "agent-af5bb8c1090740b2e.jsonl"
+    },
+    {
+     "agentId": "a583cc7ca9106231d",
+     "label": "refute:proportionality:No regression benchmark for the daily pa",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/no-regression-benchmark-for-the-daily-pa.proportionality.md",
+     "transcript": "agent-a583cc7ca9106231d.jsonl"
+    },
+    {
+     "agentId": "acb11c8e85e9ebca3",
+     "label": "refute:correctness:The suite is in-process and uses real ti",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/the-suite-is-in-process-and-uses-real-ti.correctness.md",
+     "transcript": "agent-acb11c8e85e9ebca3.jsonl"
+    },
+    {
+     "agentId": "aec66f4f8446ac67a",
+     "label": "refute:proportionality:The suite is in-process and uses real ti",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/the-suite-is-in-process-and-uses-real-ti.proportionality.md",
+     "transcript": "agent-aec66f4f8446ac67a.jsonl"
+    },
+    {
+     "agentId": "a00de6135544532bf",
+     "label": "refute:correctness:Knowledge about what works is spread acr",
+     "phase": "Refute",
+     "tool_calls": 2,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/knowledge-about-what-works-is-spread-acr.correctness.md",
+     "transcript": "agent-a00de6135544532bf.jsonl"
+    },
+    {
+     "agentId": "a68257eb100d8af63",
+     "label": "refute:proportionality:Knowledge about what works is spread acr",
+     "phase": "Refute",
+     "tool_calls": 2,
+     "has_result": true,
+     "file": "review/refutations/testing-observability-process/knowledge-about-what-works-is-spread-acr.proportionality.md",
+     "transcript": "agent-a68257eb100d8af63.jsonl"
+    },
+    {
+     "agentId": "a4e6157c5c488226f",
+     "label": "refute:correctness:The Supervisor never supervises: no heal",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/the-supervisor-never-supervises-no-heal.correctness.md",
+     "transcript": "agent-a4e6157c5c488226f.jsonl"
+    },
+    {
+     "agentId": "a6216aedc9dace660",
+     "label": "refute:proportionality:The Supervisor never supervises: no heal",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/the-supervisor-never-supervises-no-heal.proportionality.md",
+     "transcript": "agent-a6216aedc9dace660.jsonl"
+    },
+    {
+     "agentId": "abdb3b3b70a493114",
+     "label": "refute:correctness:A cwd-relative `simorgh.toml` write can",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/a-cwd-relative-simorgh-toml-write-can.correctness.md",
+     "transcript": "agent-abdb3b3b70a493114.jsonl"
+    },
+    {
+     "agentId": "aa0398d9b15ce3d5e",
+     "label": "refute:proportionality:A cwd-relative `simorgh.toml` write can",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/a-cwd-relative-simorgh-toml-write-can.proportionality.md",
+     "transcript": "agent-aa0398d9b15ce3d5e.jsonl"
+    },
+    {
+     "agentId": "afe015a6064cc06f2",
+     "label": "refute:correctness:The loader boots and rolls back the deve",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/the-loader-boots-and-rolls-back-the-deve.correctness.md",
+     "transcript": "agent-afe015a6064cc06f2.jsonl"
+    },
+    {
+     "agentId": "a019d8489e2f8fa45",
+     "label": "refute:proportionality:The loader boots and rolls back the deve",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/the-loader-boots-and-rolls-back-the-deve.proportionality.md",
+     "transcript": "agent-a019d8489e2f8fa45.jsonl"
+    },
+    {
+     "agentId": "a7a688c6d421bca14",
+     "label": "refute:correctness:The boot gate is skipped by hand about h",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/the-boot-gate-is-skipped-by-hand-about-h.correctness.md",
+     "transcript": "agent-a7a688c6d421bca14.jsonl"
+    },
+    {
+     "agentId": "af46901498260b832",
+     "label": "refute:proportionality:The boot gate is skipped by hand about h",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/the-boot-gate-is-skipped-by-hand-about-h.proportionality.md",
+     "transcript": "agent-af46901498260b832.jsonl"
+    },
+    {
+     "agentId": "abde4e478b455684c",
+     "label": "refute:correctness:Three deployment modes and a multi-proce",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/three-deployment-modes-and-a-multi-proce.correctness.md",
+     "transcript": "agent-abde4e478b455684c.jsonl"
+    },
+    {
+     "agentId": "a19868da05f60c3cc",
+     "label": "refute:proportionality:Three deployment modes and a multi-proce",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/three-deployment-modes-and-a-multi-proce.proportionality.md",
+     "transcript": "agent-a19868da05f60c3cc.jsonl"
+    },
+    {
+     "agentId": "aeb33622879ea9ccf",
+     "label": "refute:correctness:Configuration is four mechanisms: sectio",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/configuration-is-four-mechanisms-sectio.correctness.md",
+     "transcript": "agent-aeb33622879ea9ccf.jsonl"
+    },
+    {
+     "agentId": "a36edede816453a4a",
+     "label": "refute:proportionality:Configuration is four mechanisms: sectio",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/configuration-is-four-mechanisms-sectio.proportionality.md",
+     "transcript": "agent-a36edede816453a4a.jsonl"
+    },
+    {
+     "agentId": "ac5e84c45b6543785",
+     "label": "refute:correctness:Under the loader, a terminal SIGINT SIGK",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/under-the-loader-a-terminal-sigint-sigk.correctness.md",
+     "transcript": "agent-ac5e84c45b6543785.jsonl"
+    },
+    {
+     "agentId": "a3f3757cfe4aba2f7",
+     "label": "refute:proportionality:Under the loader, a terminal SIGINT SIGK",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/under-the-loader-a-terminal-sigint-sigk.proportionality.md",
+     "transcript": "agent-a3f3757cfe4aba2f7.jsonl"
+    },
+    {
+     "agentId": "aa045559492edd444",
+     "label": "refute:correctness:`simorgh status` boots a second full Ker",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/simorgh-status-boots-a-second-full-ker.correctness.md",
+     "transcript": "agent-aa045559492edd444.jsonl"
+    },
+    {
+     "agentId": "a6023e02b5fd7be15",
+     "label": "refute:proportionality:`simorgh status` boots a second full Ker",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/simorgh-status-boots-a-second-full-ker.proportionality.md",
+     "transcript": "agent-a6023e02b5fd7be15.jsonl"
+    },
+    {
+     "agentId": "ac814ff9735e9531a",
+     "label": "refute:correctness:os._exit is a symptom, not the disease:",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/os-exit-is-a-symptom-not-the-disease.correctness.md",
+     "transcript": "agent-ac814ff9735e9531a.jsonl"
+    },
+    {
+     "agentId": "aea75f8d14231c3b9",
+     "label": "refute:proportionality:os._exit is a symptom, not the disease:",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/os-exit-is-a-symptom-not-the-disease.proportionality.md",
+     "transcript": "agent-aea75f8d14231c3b9.jsonl"
+    },
+    {
+     "agentId": "a910cdd944891be4b",
+     "label": "refute:correctness:The Kernel's own metrics history is the",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/the-kernel-s-own-metrics-history-is-the.correctness.md",
+     "transcript": "agent-a910cdd944891be4b.jsonl"
+    },
+    {
+     "agentId": "a1d2ef6a9030d5ccb",
+     "label": "refute:proportionality:The Kernel's own metrics history is the",
+     "phase": "Refute",
+     "tool_calls": 13,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/the-kernel-s-own-metrics-history-is-the.proportionality.md",
+     "transcript": "agent-a1d2ef6a9030d5ccb.jsonl"
+    },
+    {
+     "agentId": "a04a19bcfca6e9521",
+     "label": "refute:correctness:`contracts` has become a utility package",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/contracts-has-become-a-utility-package.correctness.md",
+     "transcript": "agent-a04a19bcfca6e9521.jsonl"
+    },
+    {
+     "agentId": "a4e2dc7dd1c7e4d9b",
+     "label": "refute:proportionality:`contracts` has become a utility package",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/contracts-has-become-a-utility-package.proportionality.md",
+     "transcript": "agent-a4e2dc7dd1c7e4d9b.jsonl"
+    },
+    {
+     "agentId": "a17747a30e13560bb",
+     "label": "refute:correctness:Logging is never configured: structured",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/logging-is-never-configured-structured.correctness.md",
+     "transcript": "agent-a17747a30e13560bb.jsonl"
+    },
+    {
+     "agentId": "ae92e31327dcac919",
+     "label": "refute:proportionality:Logging is never configured: structured",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": true,
+     "file": "review/refutations/kernel-lifecycle-config/logging-is-never-configured-structured.proportionality.md",
+     "transcript": "agent-ae92e31327dcac919.jsonl"
+    },
+    {
+     "agentId": "ad23d41b8b7f2d702",
+     "label": "refute:correctness:The self-improvement feedback loop liste",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/the-self-improvement-feedback-loop-liste.correctness.md",
+     "transcript": "agent-ad23d41b8b7f2d702.jsonl"
+    },
+    {
+     "agentId": "a15efbe0c59d8d980",
+     "label": "refute:proportionality:The self-improvement feedback loop liste",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/the-self-improvement-feedback-loop-liste.proportionality.md",
+     "transcript": "agent-a15efbe0c59d8d980.jsonl"
+    },
+    {
+     "agentId": "ac50cd4251b8f0329",
+     "label": "refute:correctness:Competence learning records every chat t",
+     "phase": "Refute",
+     "tool_calls": 12,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/competence-learning-records-every-chat-t.correctness.md",
+     "transcript": "agent-ac50cd4251b8f0329.jsonl"
+    },
+    {
+     "agentId": "a92831ae6abe025f5",
+     "label": "refute:proportionality:Competence learning records every chat t",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/competence-learning-records-every-chat-t.proportionality.md",
+     "transcript": "agent-a92831ae6abe025f5.jsonl"
+    },
+    {
+     "agentId": "a4657fadee03799c5",
+     "label": "refute:correctness:The Guardian action path is being used a",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/the-guardian-action-path-is-being-used-a.correctness.md",
+     "transcript": "agent-a4657fadee03799c5.jsonl"
+    },
+    {
+     "agentId": "af9cfc00c99c034cb",
+     "label": "refute:proportionality:The Guardian action path is being used a",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/the-guardian-action-path-is-being-used-a.proportionality.md",
+     "transcript": "agent-af9cfc00c99c034cb.jsonl"
+    },
+    {
+     "agentId": "a6a3d3357332a552f",
+     "label": "refute:correctness:The per-stream JSONL ledger plus bus tra",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/the-per-stream-jsonl-ledger-plus-bus-tra.correctness.md",
+     "transcript": "agent-a6a3d3357332a552f.jsonl"
+    },
+    {
+     "agentId": "a28160c93a973a976",
+     "label": "refute:proportionality:The per-stream JSONL ledger plus bus tra",
+     "phase": "Refute",
+     "tool_calls": 12,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/the-per-stream-jsonl-ledger-plus-bus-tra.proportionality.md",
+     "transcript": "agent-a28160c93a973a976.jsonl"
+    },
+    {
+     "agentId": "aa7cf157162bb5d06",
+     "label": "refute:correctness:Three deployment modes and seven backend",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/three-deployment-modes-and-seven-backend.correctness.md",
+     "transcript": "agent-aa7cf157162bb5d06.jsonl"
+    },
+    {
+     "agentId": "abb74e1e85b4669ce",
+     "label": "refute:proportionality:Three deployment modes and seven backend",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/three-deployment-modes-and-seven-backend.proportionality.md",
+     "transcript": "agent-abb74e1e85b4669ce.jsonl"
+    },
+    {
+     "agentId": "a17476e2eb695f96d",
+     "label": "refute:correctness:Typed config is read stringly: 123 `geta",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/typed-config-is-read-stringly-123-geta.correctness.md",
+     "transcript": "agent-a17476e2eb695f96d.jsonl"
+    },
+    {
+     "agentId": "a7e189976ab3b5ab4",
+     "label": "refute:proportionality:Typed config is read stringly: 123 `geta",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/typed-config-is-read-stringly-123-geta.proportionality.md",
+     "transcript": "agent-a7e189976ab3b5ab4.jsonl"
+    },
+    {
+     "agentId": "a2604bb7625963252",
+     "label": "refute:correctness:25 of 137 non-reply topics have only one",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": true,
+     "file": "review/refutations/big-picture-proportionality/25-of-137-non-reply-topics-have-only-one.correctness.md",
+     "transcript": "agent-a2604bb7625963252.jsonl"
+    },
+    {
+     "agentId": "a91ce9a73d070cebf",
+     "label": "refute:proportionality:25 of 137 non-reply topics have only one",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": false,
+     "file": "review/refutations/big-picture-proportionality/25-of-137-non-reply-topics-have-only-one.proportionality.md",
+     "transcript": "agent-a91ce9a73d070cebf.jsonl"
+    },
+    {
+     "agentId": "abbd8e4b412bfd5a4",
+     "label": "refute:correctness:The chat profile now binds 72 tools (58",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": false,
+     "file": "review/refutations/big-picture-proportionality/the-chat-profile-now-binds-72-tools-58.correctness.md",
+     "transcript": "agent-abbd8e4b412bfd5a4.jsonl"
+    },
+    {
+     "agentId": "a1f537d4a46af50f0",
+     "label": "refute:proportionality:The chat profile now binds 72 tools (58",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": false,
+     "file": "review/refutations/big-picture-proportionality/the-chat-profile-now-binds-72-tools-58.proportionality.md",
+     "transcript": "agent-a1f537d4a46af50f0.jsonl"
+    },
+    {
+     "agentId": "a9245511eca56d661",
+     "label": "refute:correctness:Docs and tests each outweigh the code, a",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": false,
+     "file": "review/refutations/big-picture-proportionality/docs-and-tests-each-outweigh-the-code-a.correctness.md",
+     "transcript": "agent-a9245511eca56d661.jsonl"
+    },
+    {
+     "agentId": "adf536977e2d9da09",
+     "label": "refute:proportionality:Docs and tests each outweigh the code, a",
+     "phase": "Refute",
+     "tool_calls": 3,
+     "has_result": false,
+     "file": "review/refutations/big-picture-proportionality/docs-and-tests-each-outweigh-the-code-a.proportionality.md",
+     "transcript": "agent-adf536977e2d9da09.jsonl"
+    },
+    {
+     "agentId": "ab5e40e6a34682ec6",
+     "label": "refute:correctness:Execution is a 21.6k-line God package ho",
+     "phase": "Refute",
+     "tool_calls": 2,
+     "has_result": false,
+     "file": "review/refutations/big-picture-proportionality/execution-is-a-21-6k-line-god-package-ho.correctness.md",
+     "transcript": "agent-ab5e40e6a34682ec6.jsonl"
+    },
+    {
+     "agentId": "a06246d7d9cce2229",
+     "label": "refute:proportionality:Execution is a 21.6k-line God package ho",
+     "phase": "Refute",
+     "tool_calls": 2,
+     "has_result": false,
+     "file": "review/refutations/big-picture-proportionality/execution-is-a-21-6k-line-god-package-ho.proportionality.md",
+     "transcript": "agent-a06246d7d9cce2229.jsonl"
+    },
+    {
+     "agentId": "ae2fdd3d6c6321e98",
+     "label": "refute:correctness:Compaction's blob sweep reads the entire",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/compaction-s-blob-sweep-reads-the-entire.correctness.md",
+     "transcript": "agent-ae2fdd3d6c6321e98.jsonl"
+    },
+    {
+     "agentId": "a00e124464e203c52",
+     "label": "refute:proportionality:Compaction's blob sweep reads the entire",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/compaction-s-blob-sweep-reads-the-entire.proportionality.md",
+     "transcript": "agent-a00e124464e203c52.jsonl"
+    },
+    {
+     "agentId": "ad5261506953087c7",
+     "label": "refute:correctness:One file plus one sidecar per trace_id:",
+     "phase": "Refute",
+     "tool_calls": 11,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/one-file-plus-one-sidecar-per-trace-id.correctness.md",
+     "transcript": "agent-ad5261506953087c7.jsonl"
+    },
+    {
+     "agentId": "a0098f42e8e36ddef",
+     "label": "refute:proportionality:One file plus one sidecar per trace_id:",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": false,
+     "file": "review/refutations/bus-ledger-substrate/one-file-plus-one-sidecar-per-trace-id.proportionality.md",
+     "transcript": "agent-a0098f42e8e36ddef.jsonl"
+    },
+    {
+     "agentId": "aa3ce19e57416dce5",
+     "label": "refute:correctness:Retention only ever deletes trace stream",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/retention-only-ever-deletes-trace-stream.correctness.md",
+     "transcript": "agent-aa3ce19e57416dce5.jsonl"
+    },
+    {
+     "agentId": "a04ff2b83bdf9f7d6",
+     "label": "refute:proportionality:Retention only ever deletes trace stream",
+     "phase": "Refute",
+     "tool_calls": 13,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/retention-only-ever-deletes-trace-stream.proportionality.md",
+     "transcript": "agent-a04ff2b83bdf9f7d6.jsonl"
+    },
+    {
+     "agentId": "ac407f184ceea7741",
+     "label": "refute:correctness:The at-least-once machinery covers 5 sub",
+     "phase": "Refute",
+     "tool_calls": 16,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-at-least-once-machinery-covers-5-sub.correctness.md",
+     "transcript": "agent-ac407f184ceea7741.jsonl"
+    },
+    {
+     "agentId": "a6573895925969da3",
+     "label": "refute:proportionality:The at-least-once machinery covers 5 sub",
+     "phase": "Refute",
+     "tool_calls": 18,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-at-least-once-machinery-covers-5-sub.proportionality.md",
+     "transcript": "agent-a6573895925969da3.jsonl"
+    },
+    {
+     "agentId": "ada0dc167c32480ae",
+     "label": "refute:correctness:The 5 ms wake-all ticker costs ~5% of a",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-5-ms-wake-all-ticker-costs-5-of-a.correctness.md",
+     "transcript": "agent-ada0dc167c32480ae.jsonl"
+    },
+    {
+     "agentId": "a818056e1aa1c9c94",
+     "label": "refute:proportionality:The 5 ms wake-all ticker costs ~5% of a",
+     "phase": "Refute",
+     "tool_calls": 10,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-5-ms-wake-all-ticker-costs-5-of-a.proportionality.md",
+     "transcript": "agent-a818056e1aa1c9c94.jsonl"
+    },
+    {
+     "agentId": "ab4c63e5bd7c74562",
+     "label": "refute:correctness:Broadcast subscriptions run up to 16 han",
+     "phase": "Refute",
+     "tool_calls": 6,
+     "has_result": false,
+     "file": "review/refutations/bus-ledger-substrate/broadcast-subscriptions-run-up-to-16-han.correctness.md",
+     "transcript": "agent-ab4c63e5bd7c74562.jsonl"
+    },
+    {
+     "agentId": "a85e7312d1d451121",
+     "label": "refute:proportionality:Broadcast subscriptions run up to 16 han",
+     "phase": "Refute",
+     "tool_calls": 2,
+     "has_result": false,
+     "file": "review/refutations/bus-ledger-substrate/broadcast-subscriptions-run-up-to-16-han.proportionality.md",
+     "transcript": "agent-a85e7312d1d451121.jsonl"
+    },
+    {
+     "agentId": "ac1dd62d32260f779",
+     "label": "refute:correctness:The Ledger is a second, untyped, unguard",
+     "phase": "Refute",
+     "tool_calls": 7,
+     "has_result": false,
+     "file": "review/refutations/bus-ledger-substrate/the-ledger-is-a-second-untyped-unguard.correctness.md",
+     "transcript": "agent-ac1dd62d32260f779.jsonl"
+    },
+    {
+     "agentId": "a24fe02ad9a6cd578",
+     "label": "refute:proportionality:The Ledger is a second, untyped, unguard",
+     "phase": "Refute",
+     "tool_calls": 4,
+     "has_result": false,
+     "file": "review/refutations/bus-ledger-substrate/the-ledger-is-a-second-untyped-unguard.proportionality.md",
+     "transcript": "agent-a24fe02ad9a6cd578.jsonl"
+    },
+    {
+     "agentId": "a7b7e8b14bb1aa9b1",
+     "label": "refute:correctness:Multi-process and cloud substrate (sqlit",
+     "phase": "Refute",
+     "tool_calls": 8,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/multi-process-and-cloud-substrate-sqlit.correctness.md",
+     "transcript": "agent-a7b7e8b14bb1aa9b1.jsonl"
+    },
+    {
+     "agentId": "a5e82689d3118243d",
+     "label": "refute:proportionality:Multi-process and cloud substrate (sqlit",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": false,
+     "file": "review/refutations/bus-ledger-substrate/multi-process-and-cloud-substrate-sqlit.proportionality.md",
+     "transcript": "agent-a5e82689d3118243d.jsonl"
+    },
+    {
+     "agentId": "a7065bf1fd121e424",
+     "label": "refute:correctness:The compaction record never contains blo",
+     "phase": "Refute",
+     "tool_calls": 5,
+     "has_result": true,
+     "file": "review/refutations/bus-ledger-substrate/the-compaction-record-never-contains-blo.correctness.md",
+     "transcript": "agent-a7065bf1fd121e424.jsonl"
+    },
+    {
+     "agentId": "a4c6bb5737f78cf83",
+     "label": "refute:proportionality:The compaction record never contains blo",
+     "phase": "Refute",
+     "tool_calls": 3,
+     "has_result": false,
+     "file": "review/refutations/bus-ledger-substrate/the-compaction-record-never-contains-blo.proportionality.md",
+     "transcript": "agent-a4c6bb5737f78cf83.jsonl"
+    },
+    {
+     "agentId": "a06eb4b89d582e221",
+     "label": "refute:correctness:The Supervisor never supervises: no heal",
+     "phase": "Refute",
+     "tool_calls": 3,
+     "has_result": false,
+     "file": "review/refutations/kernel-lifecycle-config/the-supervisor-never-supervises-no-heal.correctness.md",
+     "transcript": "agent-a06eb4b89d582e221.jsonl"
+    },
+    {
+     "agentId": "a4677d6ddeb9b7ab8",
+     "label": "refute:proportionality:The Supervisor never supervises: no heal",
+     "phase": "Refute",
+     "tool_calls": 1,
+     "has_result": false,
+     "file": "review/refutations/kernel-lifecycle-config/the-supervisor-never-supervises-no-heal.proportionality.md",
+     "transcript": "agent-a4677d6ddeb9b7ab8.jsonl"
+    },
+    {
+     "agentId": "aaaa9f6593b0b77f1",
+     "label": "refute:correctness:A cwd-relative `simorgh.toml` write can",
+     "phase": "Refute",
+     "tool_calls": 1,
+     "has_result": false,
+     "file": "review/refutations/kernel-lifecycle-config/a-cwd-relative-simorgh-toml-write-can.correctness.md",
+     "transcript": "agent-aaaa9f6593b0b77f1.jsonl"
+    }
+   ],
+   "done": 205,
+   "pending": 17
+  },
+  "panel": {
+   "dir": "/Users/saeed/.claude/projects/-Users-saeed-ws-Simorgh/488b3cca-edac-4c83-98e1-f1e7db34bf14/subagents/workflows/wf_160a1894-e1e",
+   "script": "simorgh-rearchitecture-panel-wf_160a1894-e1e.js",
+   "agents": [
+    {
+     "agentId": "a673eb5981b99ca30",
+     "label": "propose:harness",
+     "phase": "Propose",
+     "tool_calls": 28,
+     "has_result": true,
+     "file": "panel/proposals/harness.md",
+     "transcript": "agent-a673eb5981b99ca30.jsonl"
+    },
+    {
+     "agentId": "a0ec0d2e4ab14f248",
+     "label": "propose:cognitive",
+     "phase": "Propose",
+     "tool_calls": 30,
+     "has_result": true,
+     "file": "panel/proposals/cognitive.md",
+     "transcript": "agent-a0ec0d2e4ab14f248.jsonl"
+    },
+    {
+     "agentId": "a2b4da49c83f23022",
+     "label": "propose:systems",
+     "phase": "Propose",
+     "tool_calls": 42,
+     "has_result": true,
+     "file": "panel/proposals/systems.md",
+     "transcript": "agent-a2b4da49c83f23022.jsonl"
+    },
+    {
+     "agentId": "a1ed85cc6b6584f61",
+     "label": "propose:embodied",
+     "phase": "Propose",
+     "tool_calls": 31,
+     "has_result": true,
+     "file": "panel/proposals/embodied.md",
+     "transcript": "agent-a1ed85cc6b6584f61.jsonl"
+    },
+    {
+     "agentId": "a686ba6decb3d0748",
+     "label": "judge:1",
+     "phase": "Judge",
+     "tool_calls": 51,
+     "has_result": true,
+     "file": "panel/judges/judge-1.md",
+     "transcript": "agent-a686ba6decb3d0748.jsonl"
+    },
+    {
+     "agentId": "a1a026b22dbb75760",
+     "label": "judge:2",
+     "phase": "Judge",
+     "tool_calls": 16,
+     "has_result": true,
+     "file": "panel/judges/judge-2.md",
+     "transcript": "agent-a1a026b22dbb75760.jsonl"
+    },
+    {
+     "agentId": "ad53f8c07d8c0fb77",
+     "label": "judge:3",
+     "phase": "Judge",
+     "tool_calls": 33,
+     "has_result": true,
+     "file": "panel/judges/judge-3.md",
+     "transcript": "agent-ad53f8c07d8c0fb77.jsonl"
+    },
+    {
+     "agentId": "ae4a307e4bf4332f6",
+     "label": "synthesis",
+     "phase": "Synthesise",
+     "tool_calls": 3,
+     "has_result": true,
+     "file": "panel/synthesis.md",
+     "transcript": "agent-ae4a307e4bf4332f6.jsonl"
+    }
+   ],
+   "done": 8,
+   "pending": 0
+  }
+ }
+}

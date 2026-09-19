@@ -1,0 +1,1661 @@
+# judge:1
+
+*Workflow: panel · Phase: Judge · Agent id: `a686ba6decb3d0748` · Tool calls: 51*
+
+## Task given to the agent
+
+```text
+You are on a design panel for Simorgh, a from-scratch personal AI agent. The creator's ask, verbatim: "as a very professional top of the line AI and AI agent scientist and the most expert in this domain, look at the high level architecture of Simorgh, and suggest where we went right and how we should re-architect Sim to make sure Sim is aligned on where the AI agent future lies and be highly performing, highly sophisticated, advanced agent that we can continue investing in, adding features and make more and more intelligent -- and how we can improve its reasoning, ability to perform long tasks, better interact with environment and user, and how building blocks and modules can get improved both in terms of merging modules or adding new modules or algorithms or methods to make sure Sim is a state of the art and cutting edge AI agent and at some point it can be considered AGI."
+  
+  
+  ESTABLISHED FACTS ABOUT SIMORGH TODAY (verified against the code at /Users/saeed/ws/Simorgh on 2026-09-18; do not re-derive, but do read the cited files to understand them):
+  - ~87k lines in simorgh/, 18 subsystem packages composed by a Kernel (kernel/registry.py LAYERS), talking only through a typed async Bus (in-memory by default; sqlite and AWS SNS/SQS backends exist), 175 topic constants, 174 JSON schemas. The import rule "only contracts is shared" genuinely holds (only kernel imports other subsystems).
+  - All state is an append-only Ledger of events (ledger/backends/jsonl.py, fsync per append). Live ledger: 1.4 GB, 118,215 stream files (88,356 trace:<id>, 26,737 action:<id>, 2,431 task:<id>); biggest single streams are metrics:history 114 MB, curiosity:ticks 43 MB, persona:state 17 MB.
+  - Every effect is action.proposed -> Guardian (12 rules, HMAC token) -> action.approved -> Execution (re-verifies token) -> action.result. Structural, bus-enforced, proved at boot.
+  - THE MODEL DOES NOT USE NATIVE TOOL CALLING. Every provider adapter (cognition/providers/together.py, claude_code.py, ollama.py, gemini.py) accepts a tools= argument and ignores it. Tool calls are parsed out of free text by a home-grown marker protocol (cognition/parser.py: one string argument per MARKER: line, plus a JSON second-line hack for multi-arg tools; orchestration/tools.py maps markers to tools). One action per step, except batches of read-only calls. Consequently orchestration/session.py (1,942 lines) carries a family of regex police for model text: invented_markers, unhonoured_marker, _transcript_echo (fabricated results), claimed_to_commit, promised_behaviour, claimed_tv_act, claimed_to_note_a_pronunciation -- each a live-caught incident turned into a heuristic.
+  - Tool results reach the model bounded at 8,000 chars (session.py _MODEL_RESULT_CHARS) with an explicit "cut" note; ledger detail at 2,000 chars.
+  - A CLI chat turn is a THROWAWAY Session: interface mints a fresh session_id per typed line; there is no transcript; continuity = memory recall (orchestration/context.py). Memory recall = hashed bag-of-words embeddings by default (memory/embed.py, sha256 token buckets, 256 dims; "hashing" is the configured default because sentence-transformers cost 24.9 s on first call), scoring EVERY record on every recall (memory/store.py retrieve), under a 0.25 s timeout -- so the memory block silently vanishes once the store is large or the machine is loaded.
+  - Cognition: router over five providers (Together primary, Claude CLI, Gemini, Ollama, a deterministic "floor"), per-provider rolling budgets, purpose filters, compaction. Prompt assembly is split between cognition/assembler.py (persona voice + self summary as protected blocks) and orchestration/context.py (memory block + task + carried attempt notes + messages).
+  - Growth layer: Learning (outcomes, competence table, self-patch pipeline that names a tool self_patch.draft that does not exist), Reflection (observer only), Curiosity (idle-tick exploration). World Model holds the Self Model; capabilities["tools"] is never written.
+  - Self-modification: patch/skill tasks work in a git worktree of the named repo and land on main via rebase + whole-suite gate + fast-forward (docs/plans/worktree-landing-design.md). Boot goes through simloader.py which runs a curated core test set and rolls back to the last sim-good-N tag on failure. Guardian protects docs/SOUL.md, simorgh/{guardian,execution,contracts,kernel}/, simloader.py, sim.sh; tests/ is NOT protected.
+  - Voice: 10.2k lines (vad, turns, stt/, tts/, speakers with TitaNet, session.py 1,961 lines, planner, playback, echo tracker). Measured live 2026-09-18: stt 1.8-6.8 s, llm 1.3-9.5 s, full response 4-17 s.
+  - Interface: 10.7k lines (CLI/TUI, dispatch.py 2,234 lines of command dispatch, httpapi.py, dashfeeds, Telegram, WhatsApp); subscribes to 30 topics. Live config binds http to 0.0.0.0; auth only if SIM_API_TOKEN is set.
+  - Execution: 21.6k lines, 98 tools at runtime across files/code/git, sandboxes, web, packages + domains knowledge/pim/security/home/energy/media. Home Assistant is NOT configured; cameras are RTSP -> local ffmpeg -> HLS on disk; workspace/ is 11 GB (voice 6.4 GB, cameras 3.8 GB).
+  - v1 (src/, 16.4k lines, 39 test files) is retired but still in the tree. No pyproject.toml, no ruff/mypy config. 1,118 comments in simorgh/ are dated incident notes ("live-caught 2026-09-07 ...").
+  - Test suite: 447 test files / 90k lines (larger than the code); the project's own retrospective (docs/blueprint/07-post-cutover-review.md section 4) concluded unit tests assert code shape and missed every real blocker; real bugs were found by running single watched tasks (tools/trial.py) and observer waves.
+  - The creator is one person, hands-free style (delegates heavily to coding agents), runs Sim on one laptop for one family; cloud model is the primary brain, Ollama is fallback only. Stated purpose (docs/SOUL.md): a capable, trustworthy, continuously improving assistant that grows more skilled without growing less safe; corrigibility and restraint are directives.
+  
+  
+  Rules:
+  - Read to confirm, do not re-audit: docs/module-map.md, docs/blueprint/01-vision-and-principles.md, docs/blueprint/02-system-architecture.md, and the code paths named above (orchestration/session.py _run and _think, orchestration/context.py, cognition/router.py, cognition/parser.py, memory/store.py, worldmodel/selfmodel.py, guardian/rules.py, learning/service.py, reflection/service.py, curiosity/service.py, voice/session.py top). Do not modify files, do not boot the system, do not run the suite, do not call paid models.
+  - Think at the level of architecture, algorithms and methods, not bug fixes. Be specific: name the module, what it becomes, what algorithm/method/data structure replaces what, and what measurable capability it unlocks.
+  - Ground every claim about "where agents are going" in patterns that are well established by 2026 and that you are confident about (native structured tool use; single-loop agent harnesses with context management and compaction; sub-agent delegation with isolated contexts; skills/procedural memory; hierarchical planning with verification and critic loops; tiered memory (working/episodic/semantic/procedural) with real embeddings and retrieval indexes; MCP as the tool-integration standard; computer-use/browser agents; eval-driven development; model routing by task; long-horizon agents that checkpoint and resume). If you cite a specific paper or system, only do so when you are sure it exists; otherwise describe the pattern generically. Flag uncertainty explicitly.
+  - On "AGI": be honest and precise. Say what an architecture like this can and cannot deliver, what "more general" concretely means for a household agent, and which investments compound.
+  - Proportionality: one developer, one laptop, one family, cloud model as brain. Every recommendation must be achievable incrementally without a rewrite from zero, and must preserve the proposal->approval->effect safety invariant and corrigibility.
+  - Your final text is data for an orchestrator, not a message to a human. Return only the structured output.
+  
+  
+  You are JUDGE 1: a sceptical staff engineer who has to maintain it. Score each of the four proposals below on every criterion, name the best ideas to graft from each, and resolve where they contradict each other. Verify any claim about Sim's code that a score depends on by reading the file. Return only the structured scores.
+  
+  PROPOSALS:
+  [
+   {
+    "lens": "The modern agent harness (2026 coding/computer-use agent shape): one agent loop over a typed turn transcript, native structured tool use with JSON-schema tools, parallel tool calls, streaming deltas, token-pressure compaction with protected prefix, hooks (pre/post tool, stop, pre-compact, session-start), declarative agent definitions as permission modes, sub-agents with isolated context, skills as procedural memory, resumable sessions. Applied to Simorgh with one non-negotiable: Guardian stays the mandatory PreToolUse hook for every effect (action.proposed -> HMAC-approved -> Execution), and corrigibility (pause/stop/human gate) stays structural.",
+    "what_sim_got_right": [
+     {
+      "decision": "The action path is structural: action.proposed -> Guardian (12 ordered rules, HMAC token) -> action.approved -> Execution (re-verifies token) -> action.result, with the subscribe/publish invariants enforced by the Bus and proved at boot (contracts/topics.py SUBSCRIBE_ONLY_BY/PUBLISH_ONLY_BY, kernel/selfcheck.py).",
+      "why_it_matters_for_the_future": "Every 2026 harness has a permission layer; almost all implement it as convention inside the loop (a hook callback the loop may forget to call). Sim's is a bus topology no code path can bypass, and it is exactly the shape a parallel-tool-call, sub-agent, self-modifying agent needs: N tool_use blocks in one turn become N proposals, each independently gated, and a child agent cannot inherit an approval. This is the one part of the design that becomes MORE valuable as autonomy grows.",
+      "keep_or_strengthen": "Keep byte-for-byte. Make it the loop's mandatory PreToolUse hook (the harness cannot construct a ToolResult for an external tool except from an action.result). Extend Guardian's protected paths to the new agent-definition directory and the hooks package, since those now hold permission posture (principle 4.11: loosening is human-only)."
+     },
+     {
+      "decision": "Append-only Ledger as the only truth, with projections rebuilt from it; task:<id> streams; orchestration/resume.py distinguishing a crash (continue the attempt) from a retry (new budget, carried memory of earlier attempts).",
+      "why_it_matters_for_the_future": "Resumable, checkpointed long-horizon sessions are the defining property of long-task agents. Sim already has the substrate (durable step events, lease heartbeat, worker-agnostic resume); what it lacks is that the transcript itself is not on the ledger. Once the session transcript is a stream, resume, replay, audit, eval-from-traces and compaction all read the same data.",
+      "keep_or_strengthen": "Strengthen: add a session:<id> stream (typed turns) as the unit of persistence for chat, tasks and sub-agents alike; snapshot every N events. Fix the cost side separately (fsync per append and one trace stream per message are what made 118k stream files)."
+     },
+     {
+      "decision": "Contracts-only import rule, 175 typed topics, 174 JSON schemas, one package per subsystem; only Kernel composes.",
+      "why_it_matters_for_the_future": "This is what makes the re-architecture below feasible incrementally: moving orchestration+cognition into one agent package changes no other subsystem, and replacing Memory's internals is invisible to everyone. It is also what lets coding agents work on modules in parallel (the creator's actual development style).",
+      "keep_or_strengthen": "Keep. Stop using it as the reason tool descriptions do not reach the model: tool.registered already carries description and args_schema across the bus, so the boundary was never the blocker."
+     },
+     {
+      "decision": "Profiles (per-kind tool allowlists, step budgets, verify flag, scaffold text) plus per-profile scaffolds rendered into a protected task_rules block; a 'chat' profile that can write files, install packages and start tasks.",
+      "why_it_matters_for_the_future": "This is the harness pattern of declarative agent definitions / permission modes (an agent = tools + model + budget + system prompt + isolation). Sim reached it from the other side, one live-caught incident at a time, and the content of those scaffolds is hard-won and correct.",
+      "keep_or_strengthen": "Strengthen into files: agents/<name>.md with frontmatter (tools, model_tier, max_turns, max_cost_usd, max_wall_s, max_parallel_tools, verify, isolation, compaction thresholds) and the scaffold as body; Guardian-protected; loaded by Kernel. profiles.py and scaffolds.py become the loader."
+     },
+     {
+      "decision": "Skills in the open Agent Skills format (SKILL.md with frontmatter; catalog of name+description in every task; body loaded only on use_skill), discovered from configured roots, per-profile allowlists.",
+      "why_it_matters_for_the_future": "Procedural memory as files the model can read, the creator can diff, and Guardian can protect is the pattern that scales capability without code: a skill is cheaper, safer and more transferable than a tool or a subsystem. It is also the natural OUTPUT of a self-improvement loop.",
+      "keep_or_strengthen": "Keep. Make skills the primary artifact the growth layer produces (reflection/distillation.py already drafts them) and gate promotion on an eval delta, not on a model's opinion."
+     },
+     {
+      "decision": "In-process delegation (`delegate`): a child Session with fresh context, its own small budget, read-only research profile, summary-only return, depth cap, and tier escalation when a helper fails.",
+      "why_it_matters_for_the_future": "Sub-agents with isolated context are how 2026 harnesses keep the parent's context clean and parallelize exploration; running the child in-process (not through the task queue) is the right call for a one-worker deployment and avoids the self-deadlock the design doc identified.",
+      "keep_or_strengthen": "Generalize into a `Task(agent, brief, isolation, budget)` built-in tool that can spawn any agent definition (research, verify, planner, skill-writer), concurrently up to a cap, each on its own session stream."
+     },
+     {
+      "decision": "Progress-note re-grounding (goal / done / learned / next / open questions as a structured JSON note) replacing the transcript every N steps, forced on context_too_large, and carried across attempts.",
+      "why_it_matters_for_the_future": "Structured summaries with a preserved 'next' are the compaction strategy that actually works for long tasks (a free-form summary loses the plan). Sim already has the right note shape.",
+      "keep_or_strengthen": "Keep the note; change the trigger from step count to measured token pressure, precede it with cheaper tool-result aging, and apply it to chat sessions too."
+     },
+     {
+      "decision": "Cognition router: ordered failover with per-provider rolling budgets replayed from the ledger, shared deadline slices, cooldown circuit breaker, truncation retry, purpose filters, image-capability filter, tier escalation (strong tier on attempt N or helper failure).",
+      "why_it_matters_for_the_future": "Model routing by task and cost is standard; the operational details here (billable-on-failure accounting, deadline sharing so the last candidate still gets a slice) are the ones most harnesses get wrong. This is a real asset.",
+      "keep_or_strengthen": "Keep as the core of a slimmer `llm/` gateway. Add streaming, native tool dialects, prompt-cache-aware ordering and per-purpose reasoning effort."
+     },
+     {
+      "decision": "Verification as an independent evaluator that never runs tools itself: eleven mechanical checks cheapest-first, model checklist at LIGHT+ rigor, trajectory scoring, an explicit insufficient_evidence outcome; worktree landing = rebase + whole-suite gate + fast-forward; simloader boots through a curated core test set and rolls back to the last sim-good tag.",
+      "why_it_matters_for_the_future": "Critic loops and self-modification with a mechanical floor are what make 'continuously improving without becoming less safe' more than a slogan. Few personal agents have any of this; Sim has all three.",
+      "keep_or_strengthen": "Keep. Make Verification the Stop hook of every task agent (bounded revise loop) and expose it as a `verify` sub-agent; add a trajectory check 'claimed effect has a matching tool_result' from the session stream, which replaces most regex police."
+     },
+     {
+      "decision": "Honesty doctrine in the wire: a floor never fabricates; non_answer is distinct from rejection; 'memory could not be consulted' is a different prompt from 'no memory matched'; failovers and denials are logged, never silent.",
+      "why_it_matters_for_the_future": "Agents fail worst when a tool result says something false. This doctrine carries straight into a native ToolResult{is_error, content} protocol and into evals.",
+      "keep_or_strengthen": "Keep as a written rule for every ToolResult and every compaction stub ('[result of read_file, 41,203 chars, ref session:x#12]' is honest; a silent cut is not)."
+     },
+     {
+      "decision": "Measure-from-the-ledger discipline: tools/trial.py and trial_suite.py (single watched real tasks), observer waves, docs/findings/, and a benchmark unit (GAIA, BFCL, SWE-bench with per-model history).",
+      "why_it_matters_for_the_future": "Eval-driven development is the only way a one-person team can re-architect the loop without regressing. The project's own retrospective says the 90k-line unit suite missed every real blocker and the trial harness found them all.",
+      "keep_or_strengthen": "Make it the merge gate: every migration stage below lands only with trial-suite and benchmark deltas recorded in docs/findings/."
+     }
+    ],
+    "where_it_diverges_from_the_future": [
+     {
+      "current": "Tool calls are parsed out of free text by a marker protocol: `NAME: argument` on its own line, one string argument, a JSON-second-line hack for multi-field tools, a hand-maintained _CODE_BEARING_MARKERS set that has been wrong every time a tool was added, and tool_hints as prose. Every provider adapter ignores tools=. Execution tools already declare JSON args_schema and descriptions; both are thrown away before the model sees them. MCP tools with more than one property cannot be called at all (mcp_single_arg_key).",
+      "future_pattern": "Native structured tool use: the model receives ToolSpec{name, description, input_schema} in the provider's dialect (OpenAI-style functions for Together/Ollama, Anthropic tools, Gemini function declarations), emits typed tool_use blocks with JSON input validated against the schema, and receives tool_result blocks keyed by the call id. The ProviderResponse.tool_calls field already exists and is never filled.",
+      "gap": "This single divergence is the root of the session.py regex-police family (invented_markers, unhonoured_marker, _transcript_echo, claimed_to_commit, promised_behaviour, claimed_tv_act, claimed_to_note_a_pronunciation), of the 246-tool-runs-without-a-write incident, of the first-line-argument truncations, of multi-arg tools being unreachable, and of a measurable BFCL ceiling. With schemas, an unknown tool is a schema error not a regex catch, a multi-line payload is a JSON string, and 'narrating a call' has no syntax to leak through."
+     },
+     {
+      "current": "A CLI chat turn is a throwaway Session: interface mints a fresh session_id per typed line; no transcript; continuity = memory recall (two or three bus requests, 0.25 s, bag-of-words), which the code itself documents losing 'falcon/sparrow' and giving two different birthdays two turns apart.",
+      "future_pattern": "One persistent, resumable session per (channel, person) with an append-only typed transcript that is compacted, not discarded; memory recall augments the transcript instead of standing in for it.",
+      "gap": "Multi-turn coherence, corrections, 'what did I just say', and resumption after restart all depend on this. It is also why chat cannot be compacted (nothing to compact) and why the per-turn recall must be so aggressive."
+     },
+     {
+      "current": "Prompt assembly is split across two subsystems (cognition/assembler.py: constitution, persona voice, self summary, user profile, task_rules; orchestration/context.py: memory block, task, carried notes, messages), each block fetched by a bus request with a 0.25 s timeout, silently omitted on timeout, with the ordering unstable per turn.",
+      "future_pattern": "One ContextBuilder inside the loop with an explicit token budget per section, a stable prefix order (constitution -> persona -> self summary -> tools -> skills catalog -> transcript) for provider prompt caching, and per-turn variable material (memory recall) placed inside the latest user turn so the cached prefix survives.",
+      "gap": "Today the prompt silently changes shape under load (the memory block vanishing is 'the normal case, not an edge' per the code) and no prefix is cacheable, so every call pays full input price and latency."
+     },
+     {
+      "current": "Memory: hashed bag-of-words embeddings (sha256 token buckets, 256 dims) because the real embedder costs 24.9 s on first call; an inverted index made hashing recall fast (21 ms at 10k), but relevance is vocabulary overlap; working memory exists and is never fed; semantic memory is free-text distillations, with contradiction handling by header prose ('later lines win').",
+      "future_pattern": "Tiered memory: working (the transcript), episodic (turn records with real dense embeddings in a local index), semantic (a fact store with explicit supersession chains per person/subject/attribute), procedural (skills); hybrid retrieval (BM25 + dense, reciprocal-rank fusion, recency/person/confidence rerank); retrieval also exposed to the model as a tool for agentic recall.",
+      "gap": "Recall quality is the ceiling on 'knows the family across months'. A correction should win by data structure (superseded_by), not by asking the model to notice which line is later."
+     },
+     {
+      "current": "One action per step, except a batch of read-only markers; tool results bounded at 8,000 chars by a class constant; compaction triggered by step count (reground every N) and only for non-chat; Cognition's five-layer compaction pipeline operates on flat message dicts with no turn structure.",
+      "future_pattern": "A step is one model turn that may contain N tool_use blocks (reads run concurrently, writes serialize in order); compaction driven by measured tokens against the model's window: first age out old tool_result content into re-fetchable stubs, then a structured summary of everything but the protected prefix and the last M turns; applies to every session kind.",
+      "gap": "Long tasks spend steps on things that should be one turn, and hit context_too_large before the reground fires; chat never compacts at all."
+     },
+     {
+      "current": "No streaming anywhere: providers return whole completions (Together via to_thread), Voice waits 1.3-9.5 s for the full reply before planning TTS; measured full response 4-17 s.",
+      "future_pattern": "Provider stream() yielding text and tool_use deltas; the harness publishes deltas to surfaces; Voice's existing StreamingSynthesiser/StreamingPlayer consume sentence-sized chunks as they arrive; a tool_use start triggers a short spoken filler.",
+      "gap": "Time-to-first-audio is the dominant felt latency for the family, and the last stage of the voice pipeline is already built for streaming input it never receives."
+     },
+     {
+      "current": "Growth is three subsystems: Learning (its PatchPipeline is unreachable: no publisher for learn.pipeline.run, and draft_candidate is not a registered tool; health reports degraded), Reflection (observer only, drafts skills to a directory), Curiosity (idle-tick exploration). Self Model is in-memory per process, capabilities['tools'] never written.",
+      "future_pattern": "One eval-driven improvement loop: review traces and benchmark failures -> produce skills, memory facts, and config/prompt proposals -> land them through the same gated loop (worktree + suite + evals) -> update a Self Model that is a fold of ledger streams (tool registry, benchmark history, outcomes).",
+      "gap": "Self-improvement currently happens only when the creator types `improve`; the designed autonomous path does not run. Merging the three into one service with one output type (a proposal through the harness) is what makes the growth layer real."
+     },
+     {
+      "current": "Regex police in session.py as the honesty mechanism: each a live-caught incident turned into a heuristic, each with a once-per-session correction turn, all specific to marker-era failure modes.",
+      "future_pattern": "One generic Stop hook: 'the assistant's final text claims an effect and this turn has no tool_result from a mutating tool' -> bounce once with the list of tools that could do it; plus Verification's trajectory check for tasks.",
+      "gap": "The heuristics are unbounded in number and cost a correction turn each; with structured tool use most of their trigger conditions cannot occur."
+     },
+     {
+      "current": "Cognition is a bus service that assembles prompts, parses markers, compacts and routes; Orchestration is a bus service that runs the loop; the loop talks to its own brain by bus request with a think timeout.",
+      "future_pattern": "The loop owns context, parsing and compaction (they are loop concerns); the LLM layer is a library gateway (routing, budgets, streaming, dialects, token counting) injected into the loop; the bus carries effects, events, perception and surfaces, not the loop's inner monologue.",
+      "gap": "Today a think is a bus round-trip carrying the whole prompt as a payload (and every message gets a trace stream); the 300 s handler timeout was once every task's wall budget. The bus is the right instrument for effects and events, the wrong one for a synchronous, streaming, large-payload call inside one process."
+     },
+     {
+      "current": "interface/dispatch.py: 2,234 lines of command dispatch, a separate command language from the model's tools, bridged by a `sim_command` tool that routes model text back into CLI dispatch.",
+      "future_pattern": "Slash commands are skills or tools the same loop uses; the TUI renders the session stream (the same typed turns the ledger holds); operator commands stay as a thin shell.",
+      "gap": "Two vocabularies drift; the model reaches operator functions through a string tunnel with no schema."
+     },
+     {
+      "current": "Tests: 447 files / 90k lines, asserting code shape; the project's own review says they missed every real blocker; real signal came from watched single-task trials and observer waves.",
+      "future_pattern": "Eval-driven development: a small scenario suite (recorded provider fixtures for determinism, a live-gated tier for real models) plus the benchmark unit as the merge gate; unit tests only where the logic is pure.",
+      "gap": "The migration below cannot be done safely with the current gate; the trial suite must be promoted first."
+     }
+    ],
+    "target_architecture": {
+     "one_paragraph": "Keep the substrate (Bus, Ledger, Kernel, Contracts) and the safety path (Guardian, Execution with its token verifier, Verification, worktree landing, simloader) exactly as they are. Collapse the thinking path -- orchestration (session, context, profiles, scaffolds, tools mapping, progress, resume, worker) plus cognition's assembler, parser, compaction and the marker protocol -- into one `agent/` package: a single Harness loop over a typed, ledger-persisted turn transcript, native JSON-schema tools rendered per provider dialect, parallel tool_use blocks (reads concurrent, writes serialized), streaming deltas to surfaces, token-pressure compaction with a protected prefix, hooks (PreToolUse = Guardian proposal, mandatory; PostToolUse; Stop; PreCompact; SessionStart), declarative agent definitions as permission modes, and a `Task` built-in for isolated sub-agents. Cognition shrinks to an `llm/` gateway (providers, router, budgets, tiers, streaming, tokens, cache-aware ordering) injected into the loop by the Kernel through a contracts protocol, the same way bus and ledger clients are. Memory becomes four real tiers with a dense index and a fact store with supersession. Learning, Reflection and Curiosity merge into one `improve/` service whose only output is proposals through the same harness (skills, memory facts, config/prompt PRs), scored by evals. The Bus remains the fabric for effects (action.*), tool registry, task lifecycle, perception, surfaces, growth events, system control and multi-process mode -- not for prompt-block RPC.",
+     "modules": [
+      {
+       "name": "agent (the Harness)",
+       "from": "merge of orchestration/{session,context,profiles,scaffolds,tools,progress,resume,worker,claims} + cognition/{assembler,parser,compaction} + the marker protocol (kept as a fallback dialect)",
+       "responsibility": "Run one loop for every session kind (chat, voice-chat, task, project, sub-agent): build context, stream the model, execute tool_use blocks through Guardian, append typed turns to the session stream, compact under token pressure, delegate, stop; resume any session from its stream.",
+       "key_algorithms_or_methods": [
+        "Turn model: Session{id, agent, channel, person, parent_id, depth, budget{turns, tokens, cost_usd, wall_s}, state}; Turn{seq, role: system|user|assistant|tool, blocks[], ts, meta{provider, model, in_tokens, out_tokens, cost}}; Block = Text | ToolUse{id, name, input} | ToolResult{tool_use_id, content, is_error, ref, bytes_total} | Image{ref}. Persisted as ledger stream session:<id> with events session.turn.appended / session.compacted{summary, dropped_seq_range} / session.snapshot; state = fold of the stream.",
+        "Loop: while not stopped: check pause/cancel -> ContextBuilder.build(session) -> llm.stream(...) -> collect assistant turn -> if no tool_use: Stop hooks (claimed-effect check, Verification for task agents with bounded revise) -> done; else partition tool_use blocks: read-only set run concurrently via asyncio.gather over propose_and_await, mutating list run sequentially in block order stopping at first is_error; append ONE tool turn with N ToolResult blocks in the original order; budgets checked in turns, tokens, USD and wall-clock; last-turn and winding-down hints kept from today's assembler.",
+        "PreToolUse hook (mandatory, not configurable): ToolUse -> action.proposed{action_id = tool_use.id, tool, args = input (schema-validated), scope, reversibility, session_id, agent} -> await action.approved|denied|needs_human -> Execution -> action.result -> ToolResult. Denial becomes ToolResult{is_error: true, content: 'denied by <rule>: <reason>'} so the model adapts. needs_human parks the session (state = awaiting_human, event on the stream) and resumes on ui reply. Built-in tools with no external effect (Task, use_skill, memory_search, recall_result, plan/todo) bypass Guardian exactly as delegate/use_skill do today, and are the only ones that may.",
+        "ToolRegistryView: ToolSpec{name, description, input_schema (JSON Schema object), reversibility, network, cost_class, source: execution|mcp:<server>|builtin, tags} folded from tool.registered (replayed at boot, as service.py already does); jsonschema validation before proposing (stdlib-only validator for the subset used, or the optional jsonschema package); unknown name -> ToolResult{is_error}. Marker dialect retained only for providers whose capability flag says supports_tools = false (floor, Claude CLI wrapper, tool-less local models).",
+        "Agent definitions: agents/<name>.md, frontmatter {tools: allowlist with globs like 'mcp:*' and 'cam_*', model_tier, max_turns, max_cost_usd, max_wall_s, max_parallel_tools, verify, isolation: fresh|fork, compaction: {age_results_at: 0.7, summarize_at: 0.85, keep_recent_turns: 6}, channels}, body = the scaffold text. Guardian-protected directory. Replaces profiles.py + scaffolds.py; today's CHAT/PATCH/RESEARCH/SKILL/VOICE_CHAT become five files.",
+        "ContextBuilder: fixed prefix order for prompt caching -- constitution, persona voice, self summary, user profile, agent body, tool specs, skills catalog -- then the compacted transcript; per-turn variable material (memory recall block, environment notices, time) injected as a block at the head of the latest user turn, never in the prefix. Section token budgets, explicit; unavailable sections rendered as an honest note (kept from context.py). Reads persona/self/memory through injected read protocols (in-process in single mode), not 0.25 s bus RPCs.",
+        "Compactor: measure tokens (provider count when available, estimate otherwise) against the model window. Layer A (age_results_at): ToolResult content older than keep_recent_turns replaced by a stub '[result of <tool> <args-preview>, <N> chars, ref session:<id>#<seq>]' that the model can re-fetch with recall_result. Layer B (summarize_at): today's ProgressNote (goal/done/learned/next/open questions) written by a cheap purpose over everything except the protected prefix and the last M turns; chat uses a 'conversation so far' flavour with facts-about-people preserved. PreCompact hook lets the agent definition add 'preserve X'. session.compacted event; the ledger keeps everything.",
+        "Delegation: built-in Task{agent, brief, isolation: fresh|fork(last K turns), budget} -> child Session on its own session stream, run in-process (never via the task queue, so a one-worker deployment cannot deadlock), depth <= max_depth, concurrency <= max_children; returns final text bounded as a ToolResult; tier escalation on helper failure kept. Projects = a parent session whose plan step spawns children and awaits them; Planning's DAG scheduler orders them.",
+        "Hooks: SessionStart (resume from stream; carried attempt notes), UserPromptSubmit (memory recall injection; person/channel tagging), PreToolUse (Guardian; budget; pause), PostToolUse (side-effect record: uncommitted files, created paths, write-watch), Stop (claimed-effect-without-tool bounce once; Verification for verify: true agents with bounded revise), PreCompact. Implemented as an ordered list per agent definition; the Guardian hook cannot be removed.",
+        "Streaming: llm.stream yields Delta{text | tool_use_start{id,name} | tool_use_input_json | stop{reason}}; the harness publishes session.delta on the bus (bus-only, not ledgered) for the TUI, HTTP feed and Voice; the completed turn is what reaches the ledger. Cancellation on system.stop drops the stream and records a truncated turn honestly.",
+        "Budgets and resume: turn/token/USD/wall-clock per attempt from the agent definition or the task; resume.py logic kept (crash = continue, retry = new budget with carried note), now reading the session stream instead of task.step summaries."
+       ],
+       "interfaces": "Consumes: task.available (claim), percept.text.received / voice turns (open or continue a session), action.approved|denied|needs_human|result (by action_id), tool.registered, system.pause|stop|resume, ui.reply. Produces: action.proposed, task.started|step|progress|completed|failed|blocked, turn.completed, session.delta (bus-only), memory.store. Injected protocols from Kernel: Llm (stream/complete/count_tokens/tiers), MemoryReader, SelfModelReader, PersonaReader, Ledger, Bus. Unlocks: BFCL and BFCL-parallel as a direct measure; steps per task down; correction turns per 100 turns to ~0; resume after kill -9 mid-task; TTFT visible in the TUI."
+      },
+      {
+       "name": "llm (provider gateway)",
+       "from": "cognition minus assembler/parser/compaction: providers/, router.py, budget.py, tokens.py, api.py",
+       "responsibility": "Turn (system, messages, tools, budget, purpose, tier) into a streamed model response in the right provider dialect, with routing, failover, budgets and cost accounting; no prompt assembly, no parsing of prose.",
+       "key_algorithms_or_methods": [
+        "Provider protocol: capabilities{supports_tools, supports_streaming, supports_images, context_window, cache_prefix} + stream(system, messages, tools, max_tokens, timeout, reasoning_effort) -> AsyncIterator[Delta]; complete() derived from stream.",
+        "Dialect adapters: Together (OpenAI-compatible chat completions with tools/tool_choice and streaming; confident the API supports it, per-model support must be measured -- flag: the current low-cost model's tool-calling quality is unknown until benchmarked), Ollama (chat API tools for tool-capable models), Gemini (function declarations), a direct Anthropic Messages API adapter when a key is configured (tool_use/tool_result blocks, streaming, prompt caching); the Claude Code CLI wrapper stays text-only and is marked supports_tools = false.",
+        "Router kept: ordered failover, shared deadline slices, cooldown, truncation retry, billable-on-failure, purpose filters; add tier selection by task class (chat/default, code/strong, verdict/cheap) with escalation rules already present; per-purpose reasoning_effort.",
+        "Token counting per provider where offered, estimate otherwise; cache-aware: report cached_input_tokens (field exists) and expose prefix-stability hints to the ContextBuilder.",
+        "Floor provider kept as the deterministic last resort, now answering with an honest text-only turn and never a tool_use."
+       ],
+       "interfaces": "A library injected into agent/ and improve/ via contracts.protocols.Llm; also still answers cognition.think on the bus for other subsystems (Planning decomposer, Memory consolidation, Verification checklist) until they are moved to the injected protocol. Produces cognition.provider.status, budget metrics. Unlocks: tokens/$ per purpose with cache hits; TTFT."
+      },
+      {
+       "name": "memory",
+       "from": "keep package; rebuild store internals (store.py, recall.py, embed.py, consolidation.py)",
+       "responsibility": "Four tiers -- working (the session transcript, owned by agent/), episodic (turn records), semantic (facts with supersession), procedural (skills) -- with hybrid retrieval and a model-callable search tool.",
+       "key_algorithms_or_methods": [
+        "Embeddings: a small sentence-embedding model (MiniLM-class, ~384 dims) loaded in a background thread at boot; hashing remains the floor until it is warm and forever when the optional dependency is absent; every record stores which embedder produced its vector (already the convention).",
+        "Index: a numpy matrix per kind with brute-force cosine (sub-10 ms to ~100k records); an ANN library only if the store passes ~200k; BM25 over a stdlib inverted index; hybrid via reciprocal rank fusion; rerank by recency half-life, person tag, confidence, contradiction penalty (all existing signals); optional cheap-model rerank of the top 20 for chat.",
+        "Fact store (semantic tier): Fact{id, person, subject, attribute, value, ts, source_ref (session:<id>#<seq>), confidence, superseded_by}; extraction at turn end by a cheap purpose ('extract durable facts about people, places, devices, preferences'); supersession by key (person, subject, attribute); recall renders 'X (was Y until <date>)' so a correction wins by structure.",
+        "Consolidation on system.tick.sleep kept: episodic -> facts + skill candidates; the live-caught 'answered instead of summarised' guard kept.",
+        "Agentic recall: memory_search{query, kinds, person, since} exposed as a built-in tool so the model can look again when the injected block is not enough."
+       ],
+       "interfaces": "Consumes turn.completed, memory.store/forget; answers MemoryReader (in-process) and memory.retrieve (bus). Produces memory.stored/consolidated/contradiction.flagged. Unlocks: recall@k on a scripted 30-turn household eval; the 'falcon/sparrow' and 'birthday correction' cases pass by construction."
+      },
+      {
+       "name": "guardian",
+       "from": "keep",
+       "responsibility": "Sole approver of every effect; posture; charter; human gate.",
+       "key_algorithms_or_methods": [
+        "Rules now read typed args (input validated against the tool's schema) instead of a raw 'argument' string: ProtectedRule and ScopeRule get exact paths, DenylistRule gets exact code fields.",
+        "Permission posture per agent definition (plan/read-only, guarded, auto) folded into ModeRule; loosening remains a human config change.",
+        "Protected subjects extended: agents/ definitions, agent/hooks/, evals/ gate config."
+       ],
+       "interfaces": "Unchanged topics. Unlocks: denial precision (fewer false denials on multi-field tools)."
+      },
+      {
+       "name": "execution",
+       "from": "keep",
+       "responsibility": "The hands: tools, sandboxes, worktrees, MCP, domains.",
+       "key_algorithms_or_methods": [
+        "tool.registered carries the full ToolSpec (description, input_schema, reversibility, network, cost_class) -- the fields already exist on each Tool class.",
+        "MCP proxies pass input_schema through unflattened; servers configured via propose_mcp_server remain Guardian-gated; MCP is the integration standard for new external capability, preferred over hand-written tools.",
+        "Browser/computer-use: browse_page grows into a snapshot-act loop (accessibility-tree snapshot, act by element id) used by a `browser` sub-agent definition; Home Assistant connection when configured."
+       ],
+       "interfaces": "Unchanged topics; ToolSpec richer. Unlocks: MCP tools callable 100%; per-tool success rate as the module's handle."
+      },
+      {
+       "name": "verification",
+       "from": "keep",
+       "responsibility": "Independent critic: mechanical checks, checklist, trajectory; plan review.",
+       "key_algorithms_or_methods": [
+        "Invoked as the Stop hook of verify: true agents with a bounded revise loop (feedback -> one more turn, max_revisions).",
+        "New trajectory check over the session stream: every claimed effect in the final text has a matching successful ToolResult from a mutating tool; replaces claimed_to_commit / claimed_tv_act / promised_behaviour.",
+        "Also runnable as a `verify` sub-agent with fresh context for high-rigor tasks."
+       ],
+       "interfaces": "Unchanged topics. Unlocks: false-completion rate on the trial suite."
+      },
+      {
+       "name": "planning",
+       "from": "keep, slimmed",
+       "responsibility": "Goals -> projects -> task DAG; plan mode; re-grounding; rollups; leases.",
+       "key_algorithms_or_methods": [
+        "Decomposition by a `planner` sub-agent that returns a typed Plan artifact (JSON: steps with subject, acceptance criteria, depends_on, agent) validated by schema, replacing the numbered-list regex parse.",
+        "Project sessions wait on children (parent_id/depends_on honoured in intake; DAG scheduler orders children; rollup on completion).",
+        "Re-grounding kept as the same purpose, now reading the parent session's progress note."
+       ],
+       "interfaces": "Unchanged topics plus plan artifact schema. Unlocks: decomposition depth > 0 actually producing children that run."
+      },
+      {
+       "name": "improve (growth loop)",
+       "from": "merge of learning + reflection + curiosity",
+       "responsibility": "Turn evidence (traces, outcomes, benchmark runs, denials, drift) into proposals through the harness: skills, memory facts, config/prompt changes, exploration tasks; maintain competence.",
+       "key_algorithms_or_methods": [
+        "Nightly loop on system.tick.sleep: run the eval suite and benchmarks (budget-capped), mine failed traces (reflection's pattern/denial miners kept), draft skills with a `skill-writer` sub-agent (distillation.py kept), extract facts, propose config/prompt tweaks as PRs via the worktree path.",
+        "Promotion rule: a skill or prompt change is kept only if the relevant eval improves and none regress (A/B on the trial suite); otherwise it is filed as a candidate with its evidence.",
+        "Curiosity's drive-weighted sampler over the capability map becomes the scheduler for idle-time improvement tasks (diversity by construction kept); competence table now fed by benchmark deltas and task outcomes together.",
+        "Delete PatchPipeline and the unreachable learn.pipeline.run path; `improve <path> <desc>` already runs through the agent loop."
+       ],
+       "interfaces": "Consumes task.*, action.*, verify.result, benchmark.*, system.tick.sleep; produces action.proposed (through the harness as tasks), learn.competence.updated, reflect.*, curiosity.candidate, memory.store. Unlocks: benchmark trend per week; skills-that-helped ratio."
+      },
+      {
+       "name": "worldmodel (Self Model)",
+       "from": "keep; make it a fold",
+       "responsibility": "Environment facets and the Self Model as a projection of ledger streams.",
+       "key_algorithms_or_methods": [
+        "Self Model = fold of tool.registered (capabilities.tools finally written), skills catalog, learn.competence.updated, benchmark history, learn.self_patch.*, system.started; replayed on boot; rendered summary cached and re-rendered on change, served to ContextBuilder in-process.",
+        "Open questions wired from reflection's critique output (the one-line contracts addition the README names)."
+       ],
+       "interfaces": "Unchanged. Unlocks: 'what can you do' answered from data; staleness per facet."
+      },
+      {
+       "name": "interface",
+       "from": "keep; slim dispatch",
+       "responsibility": "CLI/TUI/HTTP/chat channels rendering the session stream.",
+       "key_algorithms_or_methods": [
+        "TUI renders session.delta and session turns (tool_use -> tree line, tool_result -> collapsed block) -- the same objects the ledger holds; no per-line session minting.",
+        "Operator commands that the model should reach become skills or tools with schemas; sim_command shrinks to the operator-only set (restart, pause, mode)."
+       ],
+       "interfaces": "Consumes session.delta, turn.completed, ui.*; produces percept.text.received, ui.reply. Unlocks: dispatch.py line count down; the model reaches every operator function through a schema."
+      },
+      {
+       "name": "voice",
+       "from": "keep",
+       "responsibility": "Mic -> words -> session turn; assistant deltas -> speech.",
+       "key_algorithms_or_methods": [
+        "Consume session.delta text: sentence chunker feeding the existing StreamingSynthesiser/StreamingPlayer; on tool_use_start of a slow-class tool, speak a short filler; barge-in cancels the stream.",
+        "Per-turn facts stay on the turn record (the 2026-09-18 lesson)."
+       ],
+       "interfaces": "Unchanged plus session.delta. Unlocks: first_audio measured from speech_end drops toward STT + TTFT."
+      },
+      {
+       "name": "substrate: bus, ledger, kernel, contracts",
+       "from": "keep",
+       "responsibility": "Fabric, truth, composition, agreements.",
+       "key_algorithms_or_methods": [
+        "Contracts gain: Turn/Block/ToolSpec/Plan/Fact schemas; protocols Llm, MemoryReader, SelfModelReader, PersonaReader.",
+        "Kernel injects those protocol implementations into agent/ (single mode: in-process objects; local-multi/aws: bus-backed adapters with real timeouts) exactly as it injects bus/ledger clients -- the boundary test stays green.",
+        "Ledger: session streams append per turn (not per block); trace streams per session not per message; batched fsync."
+       ],
+       "interfaces": "Unchanged. Unlocks: stream count and disk growth as the ledger's handle."
+      }
+     ],
+     "merges": [
+      "orchestration + cognition/{assembler,parser,compaction} + profiles + scaffolds + context.py -> agent/ (one loop, one ContextBuilder, one Compactor, one hook list)",
+      "learning + reflection + curiosity -> improve/ (one growth loop whose only output type is a proposal through the harness)",
+      "profiles.py + scaffolds.py -> agents/<name>.md definitions (loader stays in agent/)",
+      "the five session.py regex police + Verification's claim checks -> one Stop hook + one trajectory check",
+      "interface dispatch commands that the model needs -> skills/tools with schemas (sim_command shrinks to operator-only)"
+     ],
+     "additions": [
+      "Native tool protocol: ToolSpec across the bus, per-provider dialect rendering, JSON-schema validation, tool_use/tool_result turns, parallel blocks",
+      "session:<id> ledger stream with typed turns; persistent sessions per (channel, person); resume from stream",
+      "Streaming provider interface and session.delta surface feed; Voice sentence chunker on deltas",
+      "Direct Anthropic Messages API adapter (when a key exists) as a second native-tool provider; capability flags per provider",
+      "Hooks list per agent definition (Guardian PreToolUse mandatory)",
+      "Built-in tools: Task, memory_search, recall_result, plan/todo",
+      "Memory: dense embedder at boot in a thread, numpy index, BM25, RRF, Fact store with supersession",
+      "Eval suite (evals/): recorded-fixture scenario evals (household 30-turn recall, tool use, long task resume) + benchmark unit as the merge gate",
+      "Planner sub-agent with a typed Plan artifact schema",
+      "pyproject.toml + ruff (cheap, and the migration moves many files)"
+     ],
+     "deletions_or_freezes": [
+      "Marker protocol: frozen as a fallback dialect for supports_tools = false providers; no new markers, no new _CODE_BEARING entries",
+      "session.py regex police family: deleted after Stage 5, replaced by the Stop hook and trajectory check",
+      "Learning PatchPipeline / learn.pipeline.run / draft_candidate references: deleted (unreachable today)",
+      "Per-line throwaway chat sessions: deleted",
+      "Double prompt assembly (cognition/assembler.py + orchestration/context.py): one ContextBuilder",
+      "Bus RPC for prompt blocks at 0.25 s timeouts: replaced by injected read protocols in single-process mode",
+      "src/ (v1): deleted from the tree, kept in git history and a tag",
+      "Step-count-triggered reground: replaced by token-pressure compaction"
+     ]
+    },
+    "capability_programs": [
+     {
+      "capability": "Reasoning",
+      "current_state": "One think per step at low reasoning effort on the cheapest Together model; tool calls parsed from prose (a parse tax on every step); no plan/act/critique separation inside a task except Verification at the end; tier escalation only on attempt N or helper failure; BFCL/GAIA/SWE-bench scored but not gating anything.",
+      "method": "(1) Native structured tool use removes the parse tax and the correction turns. (2) Router picks tier and reasoning effort by task class at the first call (chat: default/low; code/patch: strong or extended reasoning; verdicts: cheap), with today's escalation kept. (3) Plan-then-act for task agents: a `planner` sub-agent writes a typed plan with acceptance criteria; the executing agent keeps a plan/todo block in the protected prefix and updates it with the built-in plan tool. (4) Critic loop: Verification as the Stop hook with max_revisions bounded revise; for high-rigor tasks a fresh-context `verify` sub-agent reviews the diff and trajectory. (5) Self-consistency only for verdict purposes (3 cheap samples, majority), never for drafts.",
+      "how_to_measure": "BFCL and BFCL-parallel (tool use), GAIA L1/L2 (multi-step reasoning), SWE-bench Verified subset resolved rate; per-tool success rate; correction turns per 100 turns; cost per resolved case.",
+      "first_increment": "Ship ToolSpec (description + input_schema) to the model and native function calling on Together behind a provider capability flag; run BFCL and the trial suite before/after on the same model; record in docs/findings/."
+     },
+     {
+      "capability": "Long tasks",
+      "current_state": "Budget = steps per attempt (cap 200), retries carry a mechanical note of at most 6,000 chars, reground every N steps for non-chat only, tool results cut at 8,000 chars by constant, no wall-clock budget, context_too_large reported as 'no real provider' until recently, projects mark themselves complete when children are created and never wait; resume distinguishes crash vs retry (good); worktree landing works.",
+      "method": "Session transcript as a ledger stream (checkpoint = every turn, resume = fold); budgets in turns + tokens + USD + wall-clock; compaction by measured token pressure (age tool results into re-fetchable stubs at 70% of the window, structured progress note at 85%, protected prefix never touched); projects as parent sessions that spawn child sub-agents per plan step and await them (DAG order), each child fresh-context; long runs report through notify and park on needs_human without losing state; lease heartbeat kept.",
+      "how_to_measure": "SWE-bench Verified resolved rate at >= 50 turns; fraction of tasks finished within one attempt; resume-after-kill success (kill -9 mid-task, must continue without redoing steps); context tokens per turn over a 100-turn run (should plateau); projects that produce and complete children (today: zero).",
+      "first_increment": "Persistent sessions with a session:<id> stream for chat and tasks (interface stops minting per-line ids), then switch reground to token pressure with tool-result aging; verify with a scripted 60-turn task under tools/trial.py."
+     },
+     {
+      "capability": "Environment interaction",
+      "current_state": "98 tools with real JSON schemas that the model never sees; MCP client works but flattens schemas to one property or leaves the tool uncallable; browse_page exists; cameras via RTSP->ffmpeg->HLS; Cast/Android TV; Home Assistant not configured; perception is text only (camera and TV events exist on the bus but never enter a session).",
+      "method": "ToolSpec passthrough with schema validation; MCP as the default way to add capability (full schemas, Guardian-gated like everything else); a `browser` sub-agent definition over a snapshot-act browse loop (accessibility tree snapshot, act by element id, bounded steps); Home Assistant connection when the creator configures it; environment events (camera.event, tv.state, calendar, reminders) delivered into the relevant session as user-role environment turns so the agent can act on them under the same gate.",
+      "how_to_measure": "Per-tool success rate and p95 latency (module handle); MCP tools callable %; BFCL-parallel; a scripted household eval (lights, TV, reminders, mail lookup, camera snapshot) end-to-end completion rate; browser task suite (login-free sites) completion.",
+      "first_increment": "Publish full ToolSpec on tool.registered and render it to the model; pass MCP schemas through unflattened; measure how many of the 98 + MCP tools are callable with correct arguments on the first try (today: every multi-field tool depends on a hand-written hint)."
+     },
+     {
+      "capability": "User interaction",
+      "current_state": "Throwaway chat sessions; continuity by bag-of-words recall with silent failure under load; no streaming (voice response 4-17 s); persona and self summary fetched by RPC every think; correction turns from regex police; person-scoped memory only on voice turns.",
+      "method": "One persistent session per (channel, person) with compaction; streaming deltas to the TUI and to Voice's sentence chunker (first audio after the first sentence, spoken filler on slow tool_use); UserPromptSubmit hook injects hybrid memory recall inside the latest user turn (prefix stays cached); memory_search tool for agentic recall; Fact store with supersession so corrections win by structure; persona/self summary read in-process and cached; proactive shares and notifications appended to the same session as assistant turns so they have context.",
+      "how_to_measure": "Time-to-first-token and first_audio (Voice already logs these); a 30-turn scripted recall eval from the observer's real cases (machine names, birthday correction, per-person secrets) with recall@k and correction-wins rate; correction turns per 100 turns (police triggers -> Stop-hook bounces); user-visible latency p50/p95 per channel.",
+      "first_increment": "Streaming think reply (Together streaming + session.delta) and Voice consuming sentence chunks; measure first_audio before/after on the same turns."
+     },
+     {
+      "capability": "Self-improvement",
+      "current_state": "Self-patch via worktree landing + gate + simloader rollback works when the creator asks; Learning's autonomous PatchPipeline is unreachable; Reflection drafts skills to a directory nobody promotes; Curiosity explores on idle ticks; Self Model is in-memory and never records tools; benchmarks exist with history but gate nothing.",
+      "method": "One eval-driven improve loop: nightly (budget-capped) run the eval suite and benchmarks, mine failed traces and denials, draft skills (SKILL.md) with a skill-writer sub-agent, extract durable facts, propose prompt/config/tool changes as PRs through the worktree path; promote a change only when its target eval improves and none regress (A/B on the trial suite); competence table fed by benchmark deltas and outcomes; Self Model as a fold of the ledger; Guardian protects the harness, agent definitions, hooks and eval gate so the loop can never loosen its own gate.",
+      "how_to_measure": "Benchmark trend per week per model; skills promoted vs drafted, and skills that measurably helped; self-patch land rate and rollback count from simloader; Self Model staleness (tools listed vs tools registered).",
+      "first_increment": "Wire reflection's distillation output into simorgh_skills with an A/B on the trial suite (skill on vs off) and promote only on improvement; delete PatchPipeline; write capabilities.tools from tool.registered."
+     }
+    ],
+    "migration_path": [
+     {
+      "stage": "0. Promote the gate",
+      "weeks": 1,
+      "does": "Make tools/trial_suite.py + the benchmark unit + a recorded-fixture scenario eval (household 30-turn recall, one tool-use scenario, one long-task resume) the merge gate for every stage below; add pyproject.toml + ruff; delete src/ (tag it).",
+      "unlocks": "A gate that catches loop breakage; a clean tree for many file moves.",
+      "risk": "Low. Fixture recording needs one real provider run per scenario (cost cents)."
+     },
+     {
+      "stage": "1. Schemas to the model",
+      "weeks": 1,
+      "does": "tool.registered carries full ToolSpec (fields already exist on each Tool); orchestration renders name + description + argument shape into the prompt; MCP schemas unflattened in the registry view. No protocol change yet.",
+      "unlocks": "Immediate first-try argument accuracy on multi-field tools; BFCL baseline on the current marker protocol.",
+      "risk": "Prompt grows (98 tools); mitigate by per-agent allowlists (already exist) and a short-form rendering."
+     },
+     {
+      "stage": "2. Native tool use behind a capability flag",
+      "weeks": 2,
+      "does": "Provider protocol gains capabilities + tool dialects; Together (OpenAI-compatible functions) fills ProviderResponse.tool_calls; session loop consumes tool_calls with JSON-schema validation and returns tool_result turns keyed by id; markers remain for supports_tools = false providers; Guardian path unchanged (action_id = tool_use id). Add the direct Anthropic API adapter if a key is configured.",
+      "unlocks": "BFCL/trial-suite delta; the regex police become mostly unreachable; multi-field and MCP tools callable.",
+      "risk": "The cheap Together model's tool-calling quality is unmeasured; some models emit malformed JSON. Keep the marker fallback per provider and compare per model on BFCL before flipping the default."
+     },
+     {
+      "stage": "3. Session stream and persistent sessions",
+      "weeks": 2,
+      "does": "contracts: Turn/Block schemas; session:<id> ledger stream; agent loop appends turns; interface keeps one session per (channel, person); resume.py reads the stream; memory recall stays injected.",
+      "unlocks": "Multi-turn continuity, resume after restart, evals from real transcripts, compaction has something to compact in chat.",
+      "risk": "Ledger growth per turn; mitigate with per-turn (not per-block) appends, snapshots, and trace streams per session."
+     },
+     {
+      "stage": "4. agent/ and llm/ packages",
+      "weeks": 2,
+      "does": "Pure moves with shims: orchestration + cognition/{assembler,parser,compaction} + profiles/scaffolds -> agent/; providers/router/budget/tokens -> llm/; one ContextBuilder with fixed prefix order; Kernel injects Llm/MemoryReader/SelfModelReader/PersonaReader protocols; agents/<name>.md definitions loaded, Guardian-protected.",
+      "unlocks": "One place to reason about the loop; prompt-cache hits; no silent block loss.",
+      "risk": "The largest diff of the plan under a one-person team. Land as file moves first, behaviour changes second; trial suite after each."
+     },
+     {
+      "stage": "5. Streaming, parallel tool calls, hooks",
+      "weeks": 2,
+      "does": "llm.stream + session.delta; Voice sentence chunker; N tool_use blocks per turn (reads concurrent, writes serialized) each proposed to Guardian; hooks list formalized; regex police replaced by one Stop hook + Verification trajectory check.",
+      "unlocks": "TTFT/first_audio; steps per task down; the session.py file shrinks by the police and batching special cases.",
+      "risk": "Streaming with tool calls has provider quirks (partial JSON); buffer tool_use input until stop; keep non-streaming path as fallback."
+     },
+     {
+      "stage": "6. Token-pressure compaction and sub-agents",
+      "weeks": 2,
+      "does": "Compactor (result aging with recall_result stubs, then progress note) driven by measured tokens, applied to all session kinds; Task built-in over agent definitions; projects wait on in-process children via Planning's DAG; planner sub-agent with typed Plan artifact.",
+      "unlocks": "100+ turn tasks without context_too_large; projects that actually produce and finish children.",
+      "risk": "Over-aggressive aging loses needed detail; keep_recent_turns per agent definition and the re-fetch tool bound the damage."
+     },
+     {
+      "stage": "7. Memory rebuild",
+      "weeks": 3,
+      "does": "Dense embedder loaded in a boot thread (hashing floor), numpy index, BM25, RRF, Fact store with supersession, memory_search tool, consolidation producing facts; recall injected via UserPromptSubmit hook inside the latest user turn.",
+      "unlocks": "Recall eval passes by construction; person-scoped memory on every channel.",
+      "risk": "Optional dependency and model download on the laptop; strictly optional with the hashing floor and an explicit 'memory degraded' note."
+     },
+     {
+      "stage": "8. improve/ merge and eval-driven growth",
+      "weeks": 3,
+      "does": "Merge learning + reflection + curiosity; delete PatchPipeline; nightly capped eval/benchmark run; skill distillation with A/B promotion; Self Model as a ledger fold including tools and benchmark history; competence from deltas.",
+      "unlocks": "Autonomous, measured improvement that lands through the same gate as everything else.",
+      "risk": "Cost of nightly evals; cap by budget and run the cheap tier; never let the loop touch Guardian, agents/, hooks or the gate (protected)."
+     },
+     {
+      "stage": "9. Environment breadth (ongoing)",
+      "weeks": 3,
+      "does": "MCP-first for new capability; browser sub-agent over a snapshot-act loop; Home Assistant when configured; environment events into sessions as environment turns; household end-to-end eval.",
+      "unlocks": "'More general' measured as household task coverage.",
+      "risk": "Each integration is its own long tail; keep every one behind a tool with a schema and Guardian's reversibility class."
+     }
+    ],
+    "agi_honesty": "An architecture like this -- a frontier model called through a harness with tools, tiered memory, sub-agents, skills and a gated self-improvement loop -- does not become AGI by architecture. Its general intelligence is the model's; the harness decides how much of it reaches the world, how reliably, for how long, and how safely. Nothing here learns weights, and no amount of loop design gives Sim competence the model it calls does not have. What this architecture CAN deliver, and what 'more general' concretely means for a household agent: (1) coverage -- a rising fraction of the family's real goals completable end-to-end (files, web, calendar, mail, home devices, TV, cameras, code) without the creator stepping in, measured by a scripted household eval; (2) horizon -- tasks that span hours, restarts and human interruptions with the same safety profile, measured by resume and long-task evals; (3) transfer -- a skill or fact learned in one task helping on a held-out one, measured by A/B on the trial suite; (4) continuity -- knowing the family across months with corrections that stick; (5) breadth of environment -- new capability arriving as MCP servers and skills rather than subsystems. What compounds: the eval suite, the memory substrate, the skills library, the ledger of transcripts (every future eval and distillation reads it), and the model upgrades that a clean native-tool gateway makes free. What does not compound: more regex police, more bespoke command dispatch, more subsystems, and any growth mechanism not scored by an eval. The honest framing the blueprint already adopts is the right one: generality is a queryable number in the Ledger, and the Self Model should report it, including what Sim still cannot do. Two limits to state plainly: the loop cannot verify its own honesty without external checks (Verification, evals, the creator), and corrigibility must stay outside anything the improve loop can touch -- which this proposal keeps by Guardian-protecting agent definitions, hooks and the eval gate.",
+    "biggest_risk_of_this_proposal": "That it becomes a second rewrite. One developer, ~87k lines, a 90k-line test suite that asserts shape and missed every real blocker, and a plan that moves the loop, the brain gateway and the protocol. If Stage 4 (the package consolidation) is attempted before Stage 0 (a gate that catches loop breakage) or alongside Stage 2 (protocol change), weeks of green tests can hide a broken agent, and the live checkout is what boots the family's assistant. Mitigation is procedural and non-negotiable: one stage in flight at a time, each landed through the worktree path with trial-suite and benchmark deltas recorded in docs/findings/, file moves separated from behaviour changes, and the marker protocol kept as a per-provider fallback until native tool use beats it on BFCL for the model actually in use. The secondary risk is specific: the low-cost Together model's native tool-calling quality is unmeasured and may be worse than markers; measure per model before flipping the default, and configure a second native-tool provider so the harness is not judged by one model's quirks.",
+    "key": "harness"
+   },
+   {
+    "lens": "Cognitive architecture and long-horizon autonomy: memory tiers and retrieval, self model and world model as estimated quantities, goal trees with checkpoints and critics for multi-day work, and a growth loop that actually closes (outcome -> estimate -> proposed change -> evaluated -> adopted -> retired). Verified against the code at /Users/saeed/ws/Simorgh on 2026-09-18; no files modified, nothing booted, no paid calls.",
+    "what_sim_got_right": [
+     {
+      "decision": "All state is an append-only Ledger of events and every status, competence figure and the Self Model are (meant to be) projections rebuilt from the log (ledger/, learning/competence.py::CompetenceTable is a real fold over learn:outcomes; orchestration/resume.py rebuilds attempts from task:<id>).",
+      "why_it_matters_for_the_future": "Long-horizon agents live or die on checkpoint/resume and on replayable history. Every pattern this proposal needs -- durable goal trees, checkpoints, a fact store with supersession, competence posteriors, eval baselines -- is 'one more projection over streams that already exist'. Nothing has to be re-platformed.",
+      "keep_or_strengthen": "Strengthen: make the Self Model and the memory indexes actual projections with snapshots (today the Self Model is in-memory only and the recall index is rebuilt at boot). Add a `checkpoint` event type to task streams. Keep fsync-per-append for action/task streams; move high-volume trace/metrics streams to batched appends (that is a ledger lens problem, but it is what makes the cognitive projections cheap)."
+     },
+     {
+      "decision": "Structural safety: proposal -> Guardian (12 rules, HMAC) -> Execution, enforced by bus topology and proved at boot, with corrigibility (pause/stop) as the first rule.",
+      "why_it_matters_for_the_future": "Every serious 2026 agent harness is bolting a permission chokepoint on after the fact; Sim has it natively, which is exactly what lets a self-improving loop be safe: a learned policy, a new skill, a routing change or a self-patch can all be 'just another proposal'. The growth loop below adopts nothing except through action.proposed.",
+      "keep_or_strengthen": "Keep unchanged. Strengthen by giving the growth loop's policy store (`growth:policies`) protected-subject status for loosening and by adding one Guardian rule: a proposal may add guidance or restrictions to a task type's rules, never touch guardian/, contracts/, kernel/, execution/verifier.py (already protected) or the policy store's own gate."
+     },
+     {
+      "decision": "Worker/Session separation with lease heartbeat, attempts that carry a note, and resume from the task's own stream (orchestration/worker.py, resume.py, session.py::_run).",
+      "why_it_matters_for_the_future": "This is the skeleton of a checkpoint-and-resume long-horizon agent: a task already survives crashes and spans attempts. What is missing is a model-authored checkpoint (the progress note exists but is off) and explicit waiting states, not a new loop.",
+      "keep_or_strengthen": "Strengthen: turn on `reground_every_steps=3` (the spec's own value, 16-orchestration.md 3.5); persist the model's progress note as the carried note between attempts instead of the mechanical 220-char-per-step summary; add WAITING(until|event|human) as a task status with scheduler wake-ups."
+     },
+     {
+      "decision": "A competence table that is a proper statistic: Laplace-smoothed success per task_type, shrinkage toward 0.5 below min_samples, UCB1-style exploration bonus, calibration bins from stated vs empirical confidence (learning/competence.py).",
+      "why_it_matters_for_the_future": "A self model that is an estimated quantity with uncertainty, not a string, is what makes directed exploration (Thompson sampling over Beta posteriors), model escalation and honest 'I am bad at X' possible. The primitive is right; it is under-consumed (compute_gaps returns [], strategy.suggest has no caller).",
+      "keep_or_strengthen": "Strengthen: expose the posterior (alpha, beta, last-updated) per task_type and per (task_type, strategy) over the bus; implement compute_gaps from it; add per-tool reliability/latency and per-provider-per-purpose quality as sibling estimates."
+     },
+     {
+      "decision": "Epistemic honesty as a design rule: 'unavailable' is distinct from 'absent' (context.py MEMORY_UNAVAILABLE_NOTE), truncation is announced (memory/store.py TRUNCATION_NOTICE), distillation is refused when it invents specifics (memory/consolidation.py::untraceable), verification has an insufficient-evidence outcome.",
+      "why_it_matters_for_the_future": "Memory systems fail silently and corruptly; a fact store with provenance and supersession only works if the extractor is held to traceability. Sim already has the check; the rebuilt consolidation below reuses it on structured facts instead of prose.",
+      "keep_or_strengthen": "Keep; generalise: every fact carries source_refs, every recall says how many matched but were cut, every self-model figure carries its sample count."
+     },
+     {
+      "decision": "Purpose-typed cognition calls (chat, draft, consolidate, review, reground, decompose, verify) with per-purpose budgets and a router that takes a per-call provider order (cognition/router.py::complete(order=...), session.py::_tier).",
+      "why_it_matters_for_the_future": "Model routing by task is a settled pattern; the seam already exists. Today all purposes go to one model at one effort (long-run-context-design.md section 1). Making purpose select a tier is config plus a small router change, not architecture.",
+      "keep_or_strengthen": "Strengthen: purpose -> tier map in [cognition]; plan/decompose/critique/verify on the strong tier, reground/consolidate/classify on the cheap tier; escalate_from_attempt=1."
+     },
+     {
+      "decision": "Curiosity's diversity by construction: sample the area from real inventories with drive-weighted softmax, then ask the model to propose within it (curiosity/sampler.py, drives.py).",
+      "why_it_matters_for_the_future": "Directed exploration that does not collapse onto the model's favourite topic is the correct shape for intrinsic motivation. The scoring inputs are broken (gap constant, targets are only Sim's own code areas), not the mechanism.",
+      "keep_or_strengthen": "Strengthen: feed it real gaps (Beta posteriors), extend the target space from repo areas to household entities and recurring unanswered questions, replace the softmax over point scores with Thompson sampling over posteriors."
+     },
+     {
+      "decision": "Verification is a separate subsystem with mechanical checks cheapest-first, plan review, trajectory scoring and a bounded evaluator-optimizer revision loop (max_revisions=2 for patch/skill; session.py::_verify_then_finish).",
+      "why_it_matters_for_the_future": "Plan-verify-critic loops are how long tasks stay on course. The pieces exist; they only run at the end of a task. Moving the critic to checkpoints is a wiring change.",
+      "keep_or_strengthen": "Strengthen: invoke trajectory scoring at every checkpoint (progress note) against the task's acceptance criteria, not only at terminal; feed its verdict into re-planning."
+     },
+     {
+      "decision": "Skills as procedural memory (SKILL.md catalog, use_skill, Reflection's distillation of a solved task into a skill task; contracts/skills.py).",
+      "why_it_matters_for_the_future": "Skills/procedural memory is the one form of learning a harness around a fixed model can do that compounds. The plumbing is in place and gated by Guardian.",
+      "keep_or_strengthen": "Keep; make skills one of four typed 'policy artifacts' in the growth loop so a skill is adopted only when it beats baseline on the cases that motivated it."
+     },
+     {
+      "decision": "'Only contracts is shared' and a typed bus: subsystems can be merged or split without touching neighbours as long as topics are preserved.",
+      "why_it_matters_for_the_future": "The merge of Learning+Reflection+Curiosity proposed below is possible precisely because their topics are the interface; the rest of the system will not notice.",
+      "keep_or_strengthen": "Keep."
+     }
+    ],
+    "where_it_diverges_from_the_future": [
+     {
+      "current": "Memory recall = hashed bag-of-words (memory/embed.py, 256 sha256 buckets) scored over every record via an exact inverted index (memory/recall.py); three recalls per turn (matched k=8, recent k=6, person k=5), 0.25 s budget, 4,000-char block; flat records with tags; contradictions = 'two most recent distinct under the first tag, penalise both 0.5' (store.py::flag_contradictions); supersession is a sentence in the prompt header asking the model to prefer later lines.",
+      "future_pattern": "Tiered memory (working/episodic/semantic/procedural) with real embeddings computed off the hot path, hybrid lexical+dense retrieval with rank fusion, filters by person/time/entity, and a semantic tier that is a fact store with first-class supersession and provenance; consolidation extracts and merges facts rather than summarising prose.",
+      "gap": "Paraphrases score 0.0 (measured in embedders.py); a correction and the thing it corrected arrive as peers; 'the machine names' failure documented in context.py is structural, not a tuning problem. The local embedder was rejected because its 24.9 s first call broke the 0.25 s recall budget -- the fix is to embed at store time in the background and persist vectors, not to give up on semantics."
+     },
+     {
+      "current": "A chat turn is a throwaway Session with a fresh session_id per line; there is no transcript; continuity is similarity recall. WorkingMemory exists in memory/store.py and nothing feeds it.",
+      "future_pattern": "Persistent conversation threads per (person, channel) with compaction; working memory is the thread plus the current task's progress note; long-term recall supplements it rather than replacing it.",
+      "gap": "Sim cannot reliably remember what was said two turns ago unless the vocabulary overlaps. The class that would hold the thread is already written and unwired."
+     },
+     {
+      "current": "Self Model is in-memory only (selfmodel.py docstring), capabilities['tools'] never written, compute_gaps returns [], open_questions never populated; the summary is a 300-token string of counts.",
+      "future_pattern": "A self model that is a durable projection of estimated quantities with uncertainty: competence posteriors per task type and strategy, calibration, per-tool reliability and latency, per-provider quality per purpose, expected cost -- consumed by routing, planning and exploration, not only rendered into a prompt.",
+      "gap": "Every consumer of self-knowledge (Curiosity's gap drive, Planning's risk, Cognition's tier choice) is either reading a constant or not reading at all."
+     },
+     {
+      "current": "World Model facets are the repository (capability_map, file_index, git_state) plus a regex-fed user_profile facet. No persistent household state; cameras, TV, presence arrive as tool results and are forgotten; percepts are text only.",
+      "future_pattern": "An environment state store: entities (people, rooms, devices, cameras, calendars) with observed state, last_seen, source and staleness; 'observe' tools that return diffs against known state; a compact 'world now' block in the prompt for household turns, symmetric with the self summary.",
+      "gap": "For a household agent the world model is the house, not the repo. Sim re-observes everything from scratch on every question and cannot notice change."
+     },
+     {
+      "current": "Planning decomposes only into patch/research steps under simorgh/ (planning/decomposer.py); a project is COMPLETED when its children exist and no session waits on them (long-run-context-design.md section 1); re-grounding is one STILL_VALID yes/no per stale child; no acceptance criteria per node; no waiting states or wake-ups for tasks.",
+      "future_pattern": "Hierarchical goal trees (goal -> milestones -> tasks) with acceptance criteria per node, checkpoints, event-driven waits (time, human answer, external event) with scheduler wake-ups, a critic at each checkpoint, and re-planning as a structured revision of the subtree given what changed.",
+      "gap": "Sim cannot run a multi-day household or research goal; it can only fan out code tasks and lose track of them."
+     },
+     {
+      "current": "The growth loop is open at every seam: Learning's PatchPipeline is unreachable (no publisher, no self_patch.draft tool; service.py::UNREACHABLE); Reflection's critiques and lessons are stored as episodic prose nobody reads back; patterns become task proposals or limitation strings; strategy.suggest has no caller; Curiosity sees a constant gap. Nothing ever changes a prompt, a policy, a route or a scaffold as a result of experience.",
+      "future_pattern": "A closed loop: outcomes -> posteriors -> diagnosed failure clusters -> a typed change artifact (rule, skill, routing, code patch) -> evaluated against a held-out case set in isolation -> adopted through the gate -> monitored and retired. Eval-driven development applied to the agent's own policies.",
+      "gap": "Three subsystems each own a fragment of one loop, and the fragments do not connect. Merging them is the fix, not more wires between them."
+     },
+     {
+      "current": "Curiosity's target space is Sim's own code areas (worldmodel capability_map); ideas are PATCH/RESEARCH on the repo.",
+      "future_pattern": "Directed exploration by expected information gain over the agent's competence posteriors and over the user's world: unanswered recurring questions, stale facts, devices never probed, skills never exercised.",
+      "gap": "Idle time improves Sim's codebase, not Sim's usefulness to the family."
+     },
+     {
+      "current": "One model, one reasoning effort, purposes differ only in budgets; no separation of planner, actor and critic; verification only at terminal; free-text marker tool protocol with regex police for fabrication (session.py invented_markers, _transcript_echo, claimed_to_commit...).",
+      "future_pattern": "Native structured tool use; purpose-routed models with escalation; plan-act-critique separation; cheap-model voting for verdicts (reground, verify) instead of one sample.",
+      "gap": "The tool-protocol part belongs to another lens, but it is a prerequisite here: the regex police are the cost of asking a model to act through prose, and a critic cannot be trusted while results can be echoed as text."
+     },
+     {
+      "current": "Evaluation: 447 test files asserting shape; the trial harness (tools/trial.py, trial_suite.py) and the benchmark unit exist and found every real bug, but no learned change is gated by them and there is no recall/continuity eval built from the ledger's real conversations.",
+      "future_pattern": "Every behavioural change -- learned or hand-made -- must beat a baseline on a held-out case set; memory has a recall@k eval on real questions; long tasks have a resume-after-kill eval.",
+      "gap": "Without this, the growth loop below would adopt changes that fit their motivating case and regress the rest; the project's own retrospective already documents that failure mode for humans."
+     }
+    ],
+    "target_architecture": {
+     "one_paragraph": "Keep the substrate (Bus, Ledger, Kernel), the action path (Guardian, Execution, Verification) and Cognition's routing seam exactly as they are. Rebuild the cognitive core behind unchanged contracts: Memory becomes four real tiers with a fact store and hybrid retrieval; World Model becomes two durable projections -- a Self Model of estimated quantities and an Environment State of household entities -- and absorbs Persona's user model; Planning becomes goal trees with acceptance criteria, checkpoints, waiting states and a checkpoint critic; Orchestration keeps its one loop but runs persistent threads, progress-note compaction and isolated delegation. Merge Learning, Reflection and Curiosity into one Growth subsystem that owns a single loop over a versioned policy store: estimate (posteriors), diagnose (failure clusters), propose (rule | skill | routing | patch), evaluate (held-out cases in a worktree), adopt (through Guardian), retire (TTL and regression). Every recommendation is a projection, a wire, or a merge; none is a rewrite, and nothing acts on the world except through action.proposed.",
+     "modules": [
+      {
+       "name": "memory",
+       "from": "keep (internals rebuilt: store.py, recall.py, consolidation.py, embedders.py)",
+       "responsibility": "Four tiers. Working: not a Ledger stream -- the per-(person, channel) rolling thread (the existing unfed WorkingMemory class, fed from turn.completed keyed by person+channel) plus the current task's progress note. Episodic: turn/step/critique records as today, indexed at write time. Semantic: a fact store `memory:facts` of (subject, predicate, object, valid_from, valid_to, superseded_by, confidence, source_refs, person_scope) with first-class supersession. Procedural: skills (SKILL.md) and adopted growth policies, plus tool-usage recipes distilled from successful trajectories.",
+       "key_algorithms_or_methods": [
+        "Hybrid retrieval: BM25 over real tokens (extend the existing inverted index in recall.py with tf and doc length; stdlib) UNION dense top-N (local sentence-transformers as the optional adapter that already exists in embedders.py), fused by reciprocal rank fusion, then person/time/channel filters and the existing recency and confidence terms. Hashing stays as the floor when the dense index is cold.",
+        "Embed at store time in a background thread and persist vectors as a projection file keyed by ref (array('f') per record); warm at boot in the background; recall never waits on embedding. This removes the 24.9 s first-call problem that got the local embedder switched off.",
+        "Fact extraction at consolidation: cognition purpose=consolidate returns JSON triples, each with the quoted span it came from; the existing untraceable() check is applied per triple (a triple whose subject/object never appears in the window is dropped). Same-(subject, predicate, scope) with a different object stated by the fact's owner supersedes: append `superseded` and set valid_to on the old fact. Replaces the symmetric 0.5 penalty of flag_contradictions, which currently punishes the correction as much as the error.",
+        "Entity linking at recall: names of known people/devices/places in the query (from World Model's entity list) pull their current facts into a separate, small 'facts' block rendered before the episodic block.",
+        "Person digest: at sleep, a ~150-token per-person summary regenerated from current facts (never from prose), delivered as a protected block when that person is the speaker; supersedes the regex user_profile facet.",
+        "Forgetting: retention score = f(recency, access count, number of linked facts, tombstones); prune episodic below the score, never facts with live links; keep the forget_window tool.",
+        "Recall budget raised to ~1.0 s and prefetched: Orchestration issues the recall on percept.text.received (for voice, on the STT partial) in parallel with session setup, so the model waits on nothing."
+       ],
+       "interfaces": "Unchanged topics memory.store/retrieve/forget/stored/consolidated; add memory.fact.stored/superseded and a `facts` field on memory.retrieve.reply; the `working` kind is served from the thread keyed by (person, channel) as well as session_id."
+      },
+      {
+       "name": "worldmodel",
+       "from": "keep + merge of persona.user_model into it; selfmodel.py becomes a fold of a durable self:model stream",
+       "responsibility": "Two durable projections. Self Model: state (identity/SOUL hash, registered tools -- written from tool.registered, which is the missing wire -- providers, active goals, restarts) and estimated quantities (competence Beta posteriors per task_type and per (task_type, strategy) with time decay; calibration as expected calibration error; per-tool p(ok) and latency quantiles from action.result; per-provider quality per purpose from verify.result; expected cost per task type; staleness per fact). Environment State: entities (people, rooms, devices, cameras, calendars, vehicles) with observed value, last_seen, source, confidence and typical change rate; fed from action.result of home/media/pim tools, camera.event, tv.state, voice speaker identification, and calendar reads.",
+       "key_algorithms_or_methods": [
+        "Beta(alpha, beta) per task_type with exponential forgetting (weight = 0.5^(age/half_life)); compute_gaps returns areas ranked by posterior mean minus a confidence term, with sample counts -- today it returns [] and Curiosity sees 0.6 everywhere.",
+        "Staleness = age / typical change rate learned per entity from its observation history; a 'world now' block renders only entities under a staleness threshold and marks the rest as unknown, so the model never reasons on a device state from yesterday as if current.",
+        "Self summary rendered from the posteriors with sample counts ('patch:memory 62% over 13, overconfident'), and a 'what I am bad at' line computed, not copied from limitation strings.",
+        "self:model and world:home as Ledger projections with snapshots every N events; rebuilt on boot in milliseconds."
+       ],
+       "interfaces": "Keep self.summary/self.gaps/world.env.query; add world.entity.observed (published) and self.estimate.request/reply (a posterior for a task_type, for Planning risk and Cognition tier choice); PERSONA_USER_MODEL_UPDATED becomes a memory.fact.stored with subject=person."
+      },
+      {
+       "name": "planning",
+       "from": "keep; model.py, decomposer.py, reground.py, service.py extended",
+       "responsibility": "Goal trees for any kind of work, not only code: Goal -> Milestone -> Task, each node with acceptance criteria (a checklist Verification can evaluate), a checkpoint ref, a risk estimate from the Self Model, and a waiting_on condition. Owns re-planning: given the tree and what changed since the last checkpoint, revise the subtree and log plan.revised.",
+       "key_algorithms_or_methods": [
+        "Decomposition prompt produces typed nodes {kind: patch|research|action|question|wait, acceptance: [...], depends_on} with kind 'action' scoped to tool families (home, pim, web, files) so a household goal decomposes without naming a repo path.",
+        "WAITING status with wake condition (until: ts | event: topic+filter | human: question_id); the Kernel scheduler publishes task.wake; a human answer arrives as a task.answer event and resumes; project sessions wait on children by subscribing to task.completed/failed, never through the work queue (avoids the documented workers=1 deadlock).",
+        "Checkpoint critic: at every progress note, Verification's trajectory scorer is asked, against the node's acceptance criteria, for {on_track|drifting|blocked, unmet: [...], next}; two consecutive drifting verdicts trigger re-planning rather than continuing.",
+        "Re-grounding as re-planning: replace STILL_VALID yes/no with a structured revision call on the cheap tier that returns the revised subtree; verdict voting (3 cheap samples, majority) for the yes/no cases that remain.",
+        "Risk from the Self Model: a node whose task_type posterior mean is below threshold or sample count is low is scheduled with plan mode and a human gate; high-competence nodes run autonomously (reversibility-weighted oversight, principle 4.10, now data-driven)."
+       ],
+       "interfaces": "Keep plan.proposed/approved/revised, task.*; add task.waiting, task.wake, task.answer, plan.node.verified. Rollup stays a pure function of children."
+      },
+      {
+       "name": "orchestration",
+       "from": "keep; switch on what exists, add threads and checkpoint hooks",
+       "responsibility": "One loop, unchanged shape: gather -> think -> act (through Guardian) -> verify. Runs persistent conversation threads, progress-note compaction, isolated delegation, and publishes checkpoints the critic and resume can use.",
+       "key_algorithms_or_methods": [
+        "Progress-note re-grounding on (reground_every_steps=3, keep_recent_steps=2); the note becomes the carried note across attempts and the checkpoint the critic scores.",
+        "Persistent thread per (person, channel): last N turns kept in Orchestration's WorkingMemory, placed before the memory block; compaction of the thread by the same progress-note mechanism when long.",
+        "Delegation on: fresh-context sub-session for research with summary-only return (exists behind `delegation`); parallel read-only batches on.",
+        "Escalation: attempt >= 2 or a failed critic verdict routes the next think to the strong tier (escalate_from_attempt=1, `_tier` exists).",
+        "Speculative recall: memory and world-now blocks fetched on percept, not on think."
+       ],
+       "interfaces": "Unchanged; task.progress already exists and becomes the checkpoint event; add task.checkpoint.scored consumed from Verification."
+      },
+      {
+       "name": "growth",
+       "from": "merge of learning + reflection + curiosity (topics preserved; packages folded into simorgh/growth/ with estimate.py, diagnose.py, policies.py, explore.py, monitors.py)",
+       "responsibility": "The single closed loop over a versioned policy store `growth:policies`. Estimate: outcomes -> posteriors (CompetenceTable, calibration, reliability). Diagnose: at sleep, cluster failures by (task_type, verify failure kind, denied tool, drift kind, critic 'unmet' items) into lesson candidates with evidence refs. Propose: one of four typed artifacts -- a task-type rule (a line rendered by scaffolds for that task_type), a skill, a routing change (purpose or task_type -> tier), or a code patch (through the existing worktree landing). Evaluate: run the candidate against a held-out case set for that task_type (trial suite cases and benchmark cases tagged by task_type) in a worktree; adopt only on no regression plus at least one motivating case fixed. Adopt: through action.proposed(tool=policy_adopt) so Guardian gates it; the policy becomes active and is read by scaffolds.render, the Router and the skills catalog. Retire: TTL and re-evaluation; a policy whose task_type posterior falls after adoption is reverted (bounded rollback, same shape as simloader). Explore: Thompson sampling over competence posteriors and over world-model unknowns chooses idle work.",
+       "key_algorithms_or_methods": [
+        "Thompson sampling: per area draw from Beta(alpha, beta), pick the lowest draw (largest expected gain), then the existing 'ask the model to propose within this target' step; boredom still flattens by raising the temperature. Replaces the constant-gap softmax.",
+        "Failure clustering: group terminal failures in the window by a small feature vector (task_type, verify check that failed, tool denied, critic unmet item text hashed); a cluster with >= 3 members and rate above the type's baseline becomes a lesson candidate. Deterministic, no model call; the model is asked only to phrase the rule.",
+        "Sequential adoption test: for cheap policies (rules, routing) the eval is the held-out set; for skills and patches it is the full gate plus the held-out set; a candidate never becomes active on its motivating case alone.",
+        "Policy artifact schema: {id, kind, task_type|purpose, body, evidence_refs, evaluated_on, baseline, result, adopted_at, ttl, status}. Task-type rules are the first kind because they close the loop with the least machinery: Reflection's lesson becomes a line every future session of that type reads.",
+        "Exploration targets extended beyond repo areas: unanswered recurring questions from threads, stale high-query facts, devices never probed, skills never exercised."
+       ],
+       "interfaces": "Keeps publishing learn.*, reflect.*, curiosity.* so no consumer changes; adds growth.policy.proposed/adopted/retired and growth.lesson.found; consumes task.*, verify.result, action.result/denied, plan.node.verified, system.tick.sleep/idle, self.estimate.reply."
+      },
+      {
+       "name": "cognition",
+       "from": "keep; router.py and config.py gain a purpose -> tier map; providers gain native tool calling (other lens, prerequisite)",
+       "responsibility": "Unchanged: routing, budgets, compaction, prompt assembly. Adds: tier by purpose and by escalation; verdict voting for reground/verify; a 'world now' protected block for household turns; the person digest as a protected block when the speaker is known.",
+       "key_algorithms_or_methods": [
+        "purpose -> ordered provider list from config; strong tier for plan/decompose/critique/verify-on-failure, cheap tier for reground/consolidate/classify/critique-on-success; escalation overrides per call (the `order` parameter exists).",
+        "Majority vote of 3 cheap samples for yes/no verdicts; a split vote is 'unknown', which already defers to the existing plan.",
+        "Prompt assembly order: constitution, voice, self summary (from posteriors), person digest, world now, active task-type rules (from growth policies), task rules, thread, memory facts, memory episodic, conversation."
+       ],
+       "interfaces": "Unchanged cognition.think; payload gains optional `tier` and `vote` fields."
+      },
+      {
+       "name": "persona",
+       "from": "keep, minus user_model.py (moved into memory facts / worldmodel people entities)",
+       "responsibility": "Mood, emotion floor, voice register, proactive-sharing pacing. Stays out of the call path.",
+       "key_algorithms_or_methods": [
+        "Mood continues to modulate exploration temperature and voice register only."
+       ],
+       "interfaces": "Unchanged persona.voice, persona.state.changed; persona.user_model.updated retired in favour of memory.fact.stored."
+      },
+      {
+       "name": "verification",
+       "from": "keep",
+       "responsibility": "As today plus the checkpoint critic (trajectory scoring against acceptance criteria mid-task) and the held-out eval runner used by the growth loop's adoption test.",
+       "key_algorithms_or_methods": [
+        "Acceptance-criteria checklist evaluation returning unmet items, with insufficient-evidence preserved.",
+        "Eval runner: given a policy candidate and a task_type, run the tagged case set in a worktree and report pass/fail per case against the stored baseline."
+       ],
+       "interfaces": "Add verify.checkpoint.request/reply and verify.eval.request/reply."
+      }
+     ],
+     "merges": [
+      "learning + reflection + curiosity -> growth (one loop, one policy store; their published topics are preserved so nothing else changes)",
+      "persona.user_model -> memory facts with subject=person, surfaced through worldmodel's people entities and a per-person digest",
+      "memory.WorkingMemory (unfed) + orchestration session transcript -> one working-memory tier owned by Orchestration, keyed by (person, channel) and by task"
+     ],
+     "additions": [
+      "memory:facts stream with supersession and provenance; fact extraction at consolidation (JSON triples, per-triple traceability)",
+      "Hybrid BM25 + dense retrieval with rank fusion; background embedding at store time; persisted vector projection",
+      "self:model as a durable projection of estimated quantities (Beta posteriors, calibration, tool reliability, provider quality per purpose); compute_gaps implemented; capabilities.tools written",
+      "world:home environment-state projection and a 'world now' prompt block",
+      "Goal-tree nodes with acceptance criteria; WAITING status with scheduler wake-ups; project sessions that wait on children by event",
+      "Checkpoint critic (Verification at every progress note)",
+      "growth:policies store with four artifact kinds and eval-gated adoption through Guardian",
+      "Thompson-sampled exploration over posteriors and world unknowns",
+      "Purpose -> tier routing and verdict voting",
+      "A recall/continuity eval built from real ledger conversations (recall@k on labeled questions) and a resume-after-kill eval for long tasks"
+     ],
+     "deletions_or_freezes": [
+      "Retire learning/pipeline.py PatchPipeline and the self_patch.draft/skill.draft tool names: unreachable and superseded by worktree landing through Orchestration (docs/plans/worktree-landing-design.md)",
+      "Freeze the regex police family in orchestration/session.py (invented_markers, unhonoured_marker, _transcript_echo, claimed_to_commit, promised_behaviour, claimed_tv_act, claimed_to_note_a_pronunciation): no new members; delete each as native tool calling makes it unreachable",
+      "Replace memory/store.py::flag_contradictions' symmetric penalty with supersession; keep the contradictions stream read-only for history",
+      "Freeze persona/user_model.py regex extraction once facts exist",
+      "Freeze curiosity's repo-area-only target space as the default; household/world targets first",
+      "Delete src/ (v1) from the tree; it still aims the decomposer's DEFAULT_SOURCE_ROOTS at retired code",
+      "Stop rendering limitation strings from patterns into the self summary once posteriors render 'what I am bad at' from data"
+     ]
+    },
+    "capability_programs": [
+     {
+      "capability": "reasoning",
+      "current_state": "One model at low reasoning effort for every purpose (long-run-context-design.md section 1); tool use through free-text markers, one action per step, regex police for fabricated results; no planner/actor/critic separation; verification only at task end; reground and review verdicts from one sample; the plan profile exists (read-only, 8 steps) but is used only for projects.",
+      "method": "Separate the roles by purpose and route by tier: plan/decompose/critique/verify-on-failure on the strong tier, act on the cheap tier, escalate on a failed attempt or a drifting critic verdict (cognition/router.py order parameter and session.py::_tier already exist). Write acceptance criteria before acting (the plan profile's output becomes the task's checklist). Critic at checkpoints via Verification's trajectory scorer. Majority vote of three cheap samples for yes/no verdicts. Native tool calling with parallel read batches (prerequisite from the tool lens) so reasoning tokens are not spent on protocol compliance.",
+      "how_to_measure": "The benchmark unit already in the tree (GAIA-L1, BFCL, SWE-bench lite) per model/config; the trial suite pass rate; steps and cost per solved task; critic precision (fraction of 'drifting' verdicts followed by a failure if ignored) read off task streams.",
+      "first_increment": "Config only: purpose -> tier map with review/decompose/reground on a stronger Together model, escalate_from_attempt=1; run the trial suite and one benchmark wave before and after; record in docs/findings/."
+     },
+     {
+      "capability": "long tasks",
+      "current_state": "Transcript grows unbounded until context_too_large; progress-note re-grounding, delegation, clean revisions and parallel reads are built and switched off (orchestration/config.py); retries carry a mechanical note; a project is COMPLETED when children exist and nothing waits on them; no waiting states or wake-ups; verification only at terminal; the Self Model is rebuilt from nothing at each boot.",
+      "method": "Checkpointed goal trees. Data: task:<id> gains checkpoint events (the existing task.progress note plus acceptance status, open files, waiting_on); Planning nodes carry acceptance criteria and depends_on; a WAITING status with wake condition (until|event|human) and Kernel scheduler wake-ups; project sessions wait on children via task.completed/failed events, never the queue. Loop: think -> act -> every 3 steps write the note, replace the transcript, ask the critic against the acceptance criteria; two drifting verdicts -> re-plan the subtree; the note is what the next attempt or the next day starts from. Delegation with isolated context for research legs so exploration noise never enters the parent's context.",
+      "how_to_measure": "Long-run benchmark arm (tools/bench_instance.py waves exist): completion rate of tasks needing more than one attempt; context tokens per step (must plateau, not grow); resume-after-kill success rate (kill the process mid-task in a repo copy, count tasks that finish without redoing steps); wall-clock to completion for a three-day scripted household goal (wait on a calendar event, then act).",
+      "first_increment": "Switch on reground_every_steps=3 and keep_recent_steps=2; make the model's progress note the carried note across attempts (resume.py already reads task.progress); measure tokens per step and multi-attempt completion on the trial suite."
+     },
+     {
+      "capability": "environment interaction",
+      "current_state": "98 tools including home/media/pim/cameras, but no persistent environment state: every household question re-observes; World Model facets are the repository; tool results reach the model as 8,000-char text with no structured state; camera.event and tv.state are published and not folded anywhere the model can read; Home Assistant not configured; MCP exists only as a proposal tool.",
+      "method": "An environment-state projection (world:home) of entities with observed value, last_seen, source, confidence and a learned typical change rate; fed from action.result of home/media/pim tools, camera.event, tv.state, and voice speaker identification (who is present). Observe-tools return diffs against the last known state ('living room: TV on since 19:02, lights unchanged'). A 'world now' protected block (~200 tokens) for household turns, rendering only fresh entities and naming stale ones as unknown. MCP client in Execution (Guardian still sees every call) for external services rather than hand-written tools. Optional: images to a vision-capable provider are already routed (router.py blind filter); camera snapshots become percepts with a world-entity tag.",
+      "how_to_measure": "Staleness distribution per entity (the module map's own handle); fraction of household questions answered from state with zero tool calls; tool success rate and p95 latency per tool from action streams; false-fresh rate (state rendered as current but contradicted by the next observation).",
+      "first_increment": "WorldModel subscribes to tv.state, camera.event and action.result for the home/media tool families, keeps world:home as a projection, and answers world.env.query{what:'home_now'}; Cognition renders it as a protected block for chat/voice; measure how often it is used by counting turns that answer without a tool."
+     },
+     {
+      "capability": "user interaction",
+      "current_state": "Throwaway session per typed line; no thread; continuity is three similarity recalls with hashed bag-of-words under 0.25 s; user model is two regexes ('I prefer', 'call me'); per-person memory tags exist; corrections are not superseded, only ordered; voice full response 4-17 s with recall on the critical path.",
+      "method": "Persistent thread per (person, channel) as working memory placed before recall; a fact store with supersession so a correction replaces the old value and the model is told it was corrected; a per-person digest regenerated from facts at sleep, rendered as a protected block when that person speaks; entity-linked facts for names mentioned in the query; speculative recall started on percept (for voice, on the STT partial) so the model never waits on memory; recall budget raised to ~1 s once it is off the critical path. Persona keeps mood and register; the user model becomes facts about people.",
+      "how_to_measure": "A continuity regression set built from the ledger's real failures documented in context.py (the two machine names, the corrected birthday) plus new labeled question/answer pairs: recall@k for facts and exact-answer rate for corrections; voice response latency (stt/llm/first_audio already measured); count of 'I don't have that in my notes' answers when the fact exists.",
+      "first_increment": "Feed the existing WorkingMemory from turn.completed keyed by (speaker or 'typed', channel) and render the last 6 turns before the memory block; run the continuity set before and after. Zero new contracts."
+     },
+     {
+      "capability": "self-improvement",
+      "current_state": "Outcomes and a real competence table exist but feed only a 300-token summary; strategy.suggest has no caller; Learning's PatchPipeline is unreachable (Health reports it); Reflection's critiques become episodic prose and limitation strings; patterns become task proposals; Curiosity's gap drive is a constant because compute_gaps returns []; self-patches land through worktree + gate + simloader rollback (this part works); nothing changes a prompt, policy, route or skill from experience; the Self Model is not durable.",
+      "method": "One closed loop in a merged Growth subsystem over a versioned policy store: estimate (Beta posteriors with decay per task_type and strategy; calibration; tool reliability) -> diagnose (deterministic clustering of failures by task_type, verify check, denied tool, critic unmet items; >= 3 members above baseline = lesson candidate) -> propose one typed artifact (task-type rule, skill, routing change, code patch) -> evaluate on a held-out tagged case set in a worktree against the stored baseline -> adopt via action.proposed(policy_adopt) through Guardian -> monitor; retire on TTL or posterior drop, with bounded rollback. Exploration by Thompson sampling over the posteriors and over world unknowns. Rules first because they close the loop cheapest: scaffolds.render reads active rules for the task_type.",
+      "how_to_measure": "Competence posterior per task_type over time (the module map's handle) with sample counts; number of adopted policies surviving 30 days vs retired; eval delta per adoption (held-out pass rate before/after); regression count attributed to a policy; exploration yield (fraction of curiosity tasks that raised a posterior).",
+      "first_increment": "Implement compute_gaps from CompetenceTable and write capabilities.tools from tool.registered (two wires, no contracts change); add a growth:rules projection read by scaffolds.render and a policy_adopt tool gated by Guardian; let Reflection's first lesson become a task-type rule only after it passes the trial-suite cases for that type."
+     }
+    ],
+    "migration_path": [
+     {
+      "stage": "1. Wire what exists",
+      "weeks": 2,
+      "does": "compute_gaps from the competence table; capabilities.tools from tool.registered; reground_every_steps=3 and the model's note as the carried note; WorkingMemory fed per (person, channel) and rendered before recall; purpose -> tier routing with escalate_from_attempt=1; delegation and parallel reads on for research/patch. Build the continuity eval set from the ledger and the resume-after-kill trial.",
+      "unlocks": "Measurable gains on continuity, long-task completion and steps per task with zero contract changes; the eval sets every later stage is gated by.",
+      "risk": "Low. Behaviour changes are config and two producers; each can be reverted by config. The only subtle one is the thread block changing what the model sees first -- run the continuity set before and after."
+     },
+     {
+      "stage": "2. Memory tiers",
+      "weeks": 3,
+      "does": "BM25 over real tokens in recall.py; background embedding at store time with a persisted vector projection; hybrid retrieval with rank fusion; memory:facts with supersession and per-triple traceability at consolidation; person digests; entity-linked facts block; recall prefetched on percept with a 1 s budget.",
+      "unlocks": "Paraphrase recall, corrections that win, per-person continuity, and a memory that gets better the more the family talks to Sim.",
+      "risk": "Ranking changes silently. Mitigate with the labeled recall set from stage 1 as a gate, keep hashing as the cold floor, and keep every fact's source_refs so a wrong fact can be traced and tombstoned."
+     },
+     {
+      "stage": "3. Self and world as projections",
+      "weeks": 2,
+      "does": "self:model as a durable fold with Beta posteriors, calibration, per-tool reliability/latency and per-provider quality per purpose; self.estimate.request/reply; world:home entity projection fed from home/media/camera/tv events; 'world now' and self summary rendered from data.",
+      "unlocks": "Planning risk, routing and exploration all read real estimates; household questions answered from state; a self summary that says what it is bad at with sample counts.",
+      "risk": "Medium-low: a stale world block rendered as fresh would mislead the model. Mitigate with the staleness threshold and 'unknown' rendering, and the false-fresh metric."
+     },
+     {
+      "stage": "4. Goal trees, waits and the checkpoint critic",
+      "weeks": 3,
+      "does": "Typed nodes with acceptance criteria (action/question/wait kinds beyond patch/research); WAITING status with scheduler wake-ups and task.answer; project sessions wait on children by event; Verification checkpoint scoring against acceptance criteria; re-planning as subtree revision; verdict voting.",
+      "unlocks": "Multi-day household and research goals that pause, wake, re-plan and finish; drift caught mid-task, not at the end.",
+      "risk": "The documented workers=1 deadlock if a wait ever goes through the queue; keep waits event-driven and add the integration scenario from long-run-context-design.md as a gate. Critic false positives could thrash re-planning: require two consecutive drifting verdicts."
+     },
+     {
+      "stage": "5. Growth merge and the policy loop",
+      "weeks": 4,
+      "does": "Fold learning/, reflection/, curiosity/ into growth/ preserving their topics; growth:policies store; failure clustering; task-type rules as the first artifact kind, routing second, skills third, patches through the existing landing; eval-gated adoption via policy_adopt through Guardian; TTL, monitoring, bounded rollback; Thompson-sampled exploration over posteriors and world unknowns.",
+      "unlocks": "The loop closes: experience changes future behaviour, and only when it demonstrably helps. Idle time improves usefulness to the family, not only the repo.",
+      "risk": "Highest of the plan: a self-modifying loop with weak evals adopts overfitted rules. Mitigate: no adoption without a held-out case set for that task_type; rules may only add guidance or restrictions; Guardian protects the policy store's own gate; every adoption is a revertible ledger event and a git commit where code is involved."
+     },
+     {
+      "stage": "6. Native tool use and police retirement (dependent on the tool lens)",
+      "weeks": 3,
+      "does": "Provider adapters honour tools=; parser keeps markers as the floor/Ollama fallback; delete each regex police function as its failure becomes structurally impossible; parallel tool calls native.",
+      "unlocks": "Reasoning tokens spent on the task, a critic that can trust tool results, and ~600 lines of heuristics gone from session.py.",
+      "risk": "Provider differences in tool-call formats; keep the marker path as a fallback and gate on BFCL and the trial suite."
+     }
+    ],
+    "agi_honesty": "What this architecture is: a harness around a cloud model. Its reasoning ceiling is the provider's; Sim does not learn at the weight level and the blueprint rightly says so (01-vision section 3). What it can become, and what compounds: (1) a memory that gets better with every conversation -- facts with supersession, per-person digests, hybrid recall -- so the family experiences an assistant that knows them; (2) a world model of the house so answers come from state and actions are diffs, not re-observation; (3) long-horizon autonomy -- goal trees that pause, wake, re-plan and finish over days without a human holding the thread; (4) procedural learning -- skills, task-type rules and routing that are adopted only when they beat a baseline and retired when they stop helping; (5) calibrated self-knowledge -- posteriors with sample counts driving when to ask, when to escalate and when to act alone. Together these give 'more general' a concrete meaning for a household agent: more task types with measured competence above threshold without per-task engineering, more of the family's world modelled, longer autonomous horizons with fewer interventions, and no safety regressions -- each a number in the ledger, as the blueprint's own AGI stance asks. What it cannot deliver: general intelligence independent of the provider, open-ended learning of new cognitive abilities, or anything that would justify the word AGI in its usual sense; a strong foundation model plus this harness will look far more capable than the same harness on a weak one, and that gap is the model's, not Sim's. Investments that compound: the ledger and evals (every change measured), the fact store (every conversation improves the next), the world model (every observation saves a tool call), skills and policies (every solved problem reusable), and the safety chokepoint (every new capability inherits the gate). Investments that do not compound: per-incident regex heuristics, more tools without persistent state, more prompt text without a policy store, and a bigger test suite that asserts shape. Honest framing for the creator: build toward 'the most capable, trustworthy, self-improving personal agent on one laptop', measured by its own competence table; if the underlying models keep improving, the harness proposed here is the one that will let Sim absorb that improvement without a rewrite.",
+    "biggest_risk_of_this_proposal": "Closing the growth loop before the evaluation harness that must gate it. A self-modifying loop with weak evals will adopt rules, routes and skills that fit their motivating case and quietly regress everything else, and the project's own retrospective (07-post-cutover-review.md section 4) already shows that shape-asserting tests miss exactly this; the trial suite and observer waves are the only things that have ever caught a real blocker. So the order matters more than the content: stage 1's continuity, resume-after-kill and per-task-type case sets are not optional prerequisites, they are the loop's safety mechanism, and no policy kind should be adoptable until its task_type has a held-out set with a stored baseline. The secondary risk is scope drift into a rewrite: the memory rebuild and the growth merge must stay behind unchanged contracts (same topics, same schemas) so the 447-file suite, the boot self-check and the Guardian invariant continue to hold at every commit; the moment a stage requires touching contracts/ and guardian/ together, it has left the proportional path.",
+    "key": "cognitive"
+   },
+   {
+    "lens": "PRODUCTION SYSTEMS and evaluation: substrate (bus + event-sourced ledger + per-message trace streams + fsync + 18 packages in one process) judged against the actual load (one laptop, one family, ~1.4 GB / 118k stream files after two weeks) and the actual need (one process, resume after crash, auditability, a voice path with a human waiting); tracing, latency budgets, evals as the gate, per-step model routing, and safety tiers.",
+    "what_sim_got_right": [
+     {
+      "decision": "The action path is structural, not policy: only Guardian subscribes to action.proposed, only Execution to action.approved, approval is an HMAC over (action_id | tool | sha256(args) | expires), Execution re-verifies, and kernel/selfcheck.py proves the wire (forged token refused, pause denies) before any work runs.",
+      "why_it_matters_for_the_future": "Every 2026 harness pattern this review recommends (native tool calling, sub-agents, MCP servers, skills, computer-use) produces MORE ways for a model to reach an effect. A chokepoint enforced by the bus topology survives all of them unchanged: a native tool_use block, an MCP tool and a sub-agent's call all still become one action.proposed. This is the one design decision that lets the rest be swapped freely.",
+      "keep_or_strengthen": "Keep verbatim. Strengthen by recording every Guardian decision (rule that fired, tier, posture) as a span attribute on the turn, so approvals/denials per tier per day is a dashboard number rather than a ledger grep."
+     },
+     {
+      "decision": "contracts/ is the only shared dependency, enforced by an AST boundary test; kernel/registry.py is the single composition root; the Tool protocol already carries name, description, read_only, reversibility and args_schema (contracts/protocols.py:195-200).",
+      "why_it_matters_for_the_future": "Native tool calling needs a JSON schema per tool; the safety tiers below need a reversibility class per tool; MCP needs a tool descriptor. All three already exist on the Tool protocol. The migration to structured tool use is a serialization of what is there, not a redesign, and the boundary test keeps any one package replaceable without a rewrite.",
+      "keep_or_strengthen": "Keep. Strengthen by making args_schema the single source for the model-facing tool definition, the CLI `tool` command, and Guardian's subject extraction (guardian/rules.py _SUBJECT_ARG_KEYS currently guesses 'subject'/'path')."
+     },
+     {
+      "decision": "Task state is an append-only task:<id> stream, and orchestration/resume.py distinguishes a crash (continue the same attempt, steps already spent) from a retry (fresh budget, carried notes, kept uncommitted edits).",
+      "why_it_matters_for_the_future": "This is exactly the checkpoint-and-resume shape long-horizon agents need. The event stream per task is also the raw material for replayable traces: a task's stream already contains every think, every action and every result, in order.",
+      "keep_or_strengthen": "Keep as the ONLY event-sourced truth for agent state (task, action, guardian, plan, memory writes, self-model). Strengthen by adding an explicit checkpoint event after every irreversible action and by treating the stream as the replay fixture for evals (see evals package)."
+     },
+     {
+      "decision": "Honest floors everywhere: a floor-answered benchmark case is skipped rather than scored wrong; a memory block that could not be consulted says so in the prompt (context.py MEMORY_UNAVAILABLE_NOTE); a suite that cannot be scored to the published scorer is refused (benchmark/README).",
+      "why_it_matters_for_the_future": "Eval-driven development only works if the numbers are trustworthy. Most teams discover late that outages, floor answers and partial runs contaminated their baseline; Sim already labels them. This discipline is what makes the migration below measurable at each stage.",
+      "keep_or_strengthen": "Keep. Strengthen by sizing noise explicitly (the 2026-09-15 finding: two identical L3 runs gave 3/21 and 9/25) -- every capability suite reports a confidence interval from >=3 repeats before any switch flips."
+     },
+     {
+      "decision": "Measurement from the ledger and the running system (tools/trial.py, tools/trial_suite.py, observer waves, benchmark unit that drives task.create through the whole bus rather than calling Cognition), plus the retrospective's own conclusion that shape tests missed every blocker.",
+      "why_it_matters_for_the_future": "This is the seed of an eval harness in the 2026 sense: scripted tasks, automatic pass/fail on system behaviour, repeated until stable. The project already learned the lesson most agent teams learn a year in.",
+      "keep_or_strengthen": "Strengthen into the primary gate: trial_suite + benchmark + a household suite become `simorgh/evals`, and simloader's bless runs them (it already can with --full) rather than CORE_TESTS alone."
+     },
+     {
+      "decision": "simloader.py: stdlib-only bootloader that never runs the code it judges, tags sim-good-N only after an independent gate, bounded rollback, decisions printed and written where Sim reads them.",
+      "why_it_matters_for_the_future": "A self-editing agent needs an A/B image pattern with an external judge; this is it. It also gives the substrate migration a safe shape: every stage lands behind the same gate and rolls back the same way.",
+      "keep_or_strengthen": "Keep. Make the gate the eval suite (not only unit tests) and add a 'watch' phase: after handoff, the loader stays alive for N minutes and counts span-level SLO breaches (voice p95, tool error rate) as a bad image."
+     },
+     {
+      "decision": "Cognition's production plumbing: per-provider rolling budgets replayed from the ledger, estimated-cost check before dialling, a shared deadline split across failover candidates, transient retry, cooldown circuit breaker, truncated-retry with doubled tokens, image-capable filtering.",
+      "why_it_matters_for_the_future": "Per-step routing (frontier vs fast vs local) is a policy layered on exactly these primitives: candidate order, budget, deadline share. Nothing here needs replacing.",
+      "keep_or_strengthen": "Keep. Add the missing input to routing: a latency budget and a risk tier per request, so the router chooses the route rather than only the order."
+     },
+     {
+      "decision": "Every tool has a reversibility class (read_only | reversible | irreversible) and anything unlisted defaults to irreversible (orchestration/tools.py); Guardian's last rule gates on it; Execution's write-watching and worktree landing make code edits revertible commits.",
+      "why_it_matters_for_the_future": "Reversibility-weighted oversight is the accepted way to give an agent autonomy without giving it blast radius. The classes exist; they only need to become explicit tiers with different approval, rate limits and audit.",
+      "keep_or_strengthen": "Keep; formalise as four tiers (below) and restore the human gate for tier 3 only, which the 2026-09-07 auto-approve default currently collapses."
+     }
+    ],
+    "where_it_diverges_from_the_future": [
+     {
+      "current": "Tool calls are parsed out of free text by a marker protocol (cognition/parser.py: one string per MARKER: line, _CODE_BEARING_MARKERS and MARKER_SPLIT_FIRST_LINE hacks for multi-arg tools). Every provider adapter accepts tools= and drops it (together.py complete() -> _complete_sync(messages, max_tokens, timeout)); cognition/service.py:358 passes tools=None to the router. session.py then polices the text with seven regex families (invented_markers, unhonoured_marker, _transcript_echo, claimed_to_commit, promised_behaviour, claimed_tv_act, claimed_to_note_a_pronunciation), each a live-caught incident turned into a heuristic.",
+      "future_pattern": "Native structured tool use: tools sent as JSON schemas, the model returns typed tool_use blocks with ids, results go back as tool_result blocks bound to those ids, several calls per turn are normal. The harness never parses prose for intent; a claim of an action with no tool_use block is simply text.",
+      "gap": "Reliability and step cost. Each police rule exists because prose and action are the same channel. With typed calls, fabricated-result echo, invented tools, first-line-only arguments and 'promised behaviour' are not failure modes of the protocol; the regexes and their 1,100 dated comments stop being load-bearing. args_schema already exists on every Tool, so this is a serializer plus adapter changes, not a redesign."
+     },
+     {
+      "current": "Tracing is a Ledger stream per message: trace:<trace_id> files, 88,356 of them, fsync per append, retention by deleting files older than 2 days, boot stats the directory. Metrics (metrics:history 114 MB), curiosity ticks (43 MB) and mood samples (persona:state 17 MB) are appended to the same event log with the same durability as a git commit.",
+      "future_pattern": "OpenTelemetry-shaped tracing: one trace per turn/task, spans for think, guardian, tool, verify, stt, tts with start/end, status and attributes; stored in a queryable table (sqlite WAL is enough at this scale); sampled and retained per root span; telemetry (metrics, ticks, mood) in a time-series table with row-level retention and downsampling, never in the decision log.",
+      "gap": "Latency questions ('why was that turn 9 s?') are unanswerable today without joining 88k files; disk grows ~700 MB/week from streams no decision depends on; the ledger's durability guarantee is paid on every mood sample. A spans table answers p50/p95 per stage in milliseconds and is the substrate every SLO below is measured on."
+     },
+     {
+      "current": "Default ledger backend is one JSONL file per stream with fsync per append and a snapshot every 200 events; sqlite WAL exists (ledger/backends/sqlite.py) but is not the default. Projections (Planning's TaskStore, Learning's competence, Memory's recall index) rebuild by replaying streams at boot.",
+      "future_pattern": "Event-sourced only where the events ARE the decisions (task, action, guardian, plan, self-model, memory writes); everything derived lives as relational projections in the same sqlite file, updated incrementally and queryable with SQL; jsonl kept as an export/import format.",
+      "gap": "118k files and 1.4 GB for one household's fortnight; boot cost proportional to file count; 'list open tasks' is a replay, not a query. The sqlite backend already exists; the divergence is defaults and the absence of projection tables."
+     },
+     {
+      "current": "A CLI chat turn is a throwaway Session (interface/service.py:943 mints a uuid per typed line); there is no transcript; continuity is three memory recalls (matched, recent-6, per-person) over hashed bag-of-words vectors, scoring every record, under a 0.25 s timeout that is crossed at ~1,000 records under load (context.py's own comment).",
+      "future_pattern": "A durable conversation (thread) per channel and person, with a transcript that is compacted, plus tiered memory: working = the thread; episodic = turns; semantic = distilled facts; procedural = skills. Retrieval is an index lookup over real embeddings (a pre-warmed local embedder, vectors persisted), not a scan under a timer.",
+      "gap": "'What did I just say?' fails by construction; the memory block silently vanishes once the store is the size consolidation itself targets (2,000 per kind). The 24.9 s sentence-transformers cold start is a boot-time warm-up problem, not a reason to use hashing at recall time."
+     },
+     {
+      "current": "The voice path has one 95 s reply timeout (voice/config.py reply_timeout_s) and a 20 s TTS stall timeout; cognition chat max_seconds is 90 s; the bus request default is 30 s and the memory-bus handler timeout is 300 s. Measured 2026-09-18: stt 1.8-6.8 s, llm 1.3-9.5 s, full response 4-17 s. No deadline travels with the message; no stage has a budget.",
+      "future_pattern": "End-to-end latency budgets: a deadline in the envelope, propagated and shrunk at each hop; per-stage budgets (STT final, first model token, first audio) with breaches recorded as span events; fast-tier routing and streaming for conversational turns so first audio does not wait for the whole reply.",
+      "gap": "Nothing enforces the budget a person experiences; every timeout is a local guard. Without spans the p95 is not even known per stage, so the 4-17 s spread cannot be attributed."
+     },
+     {
+      "current": "Routing is an ordered failover list plus one 'strong' tier requested by orchestration on attempt >= N or after a helper returned nothing (session.py _tier; cognition/service.py routes['strong']). A chat turn and a patch step take the same primary route; reasoning_effort is a constant 'low'.",
+      "future_pattern": "Per-step routing by (purpose, risk tier, context size, latency budget, expected difficulty): a fast/cheap model for tool-argument formatting, summaries, backchannel and simple chat; the frontier model for planning, code changes and verification; local only as fallback; effort/thinking as a routed parameter; route quality measured per suite.",
+      "gap": "Cost and latency are spent uniformly; the one lever that could halve voice latency (route chat to a fast tier, stream) is not a routing input today."
+     },
+     {
+      "current": "447 test files / 90k lines assert code shape; the 8-minute gate is unit tests; the project's own retrospective (07-post-cutover-review.md section 4) says they missed every real blocker; real bugs came from trial.py, trial_suite.py, observer waves and benchmark waves.",
+      "future_pattern": "Eval-driven development: capability suites with scripted tasks and automatic scoring; replayable traces (record a task's spans and provider responses, replay with a fixture provider to test the harness deterministically); regression benchmarks per capability with noise sizing; the eval suite is the release gate.",
+      "gap": "Unit tests remain useful for contracts and pure functions, but the gate measures the wrong thing. The pieces of the right gate already exist in tools/ and benchmark/; they are not a package, not deterministic, and not what bless runs by default."
+     },
+     {
+      "current": "The growth layer: Learning is unreachable (no publisher for learn.pipeline.run; proposes draft_candidate which is not registered -- learning/service.py UNREACHABLE), Reflection observes, Curiosity writes a 43 MB tick stream, and the Self Model's capabilities['tools'] is never written.",
+      "future_pattern": "Skills as procedural memory are the unit of learning: a successful trajectory is distilled into a SKILL.md, evaluated on a held-out variant, promoted or discarded; code self-patches land only through the worktree + eval gate; competence is computed from eval results, not self-reported outcomes.",
+      "gap": "Learning produces no measured capability change; three packages implement one loop's three halves without the middle (evaluation). use_skill and simorgh_skills already exist, so the promotion loop is the missing piece."
+     },
+     {
+      "current": "Guardian: 12 rules in fixed order, posture (guarded/trusted/locked), irreversible_requires_human, and since 2026-09-07 sim.sh auto-approves irreversible actions. Reversibility is binary at the last rule.",
+      "future_pattern": "Explicit safety tiers tied to reversibility, blast radius and origin, each with its own approval, rate limit and audit; the human gate reserved for the tier where it is cheap and matters (external, physical, financial); tightening automatic, loosening human-only.",
+      "gap": "With auto-approve on, a git commit in a worktree and a siren or a message to a third party are the same tier. Tiering restores the human gate exactly where the creator would want to be asked, without slowing the rest."
+     },
+     {
+      "current": "One asyncio process runs 18 packages; heavy work (whisper, TTS engines, ffmpeg HLS, pytest -n auto for landing) runs in threads or subprocesses inside it; a busy tool thread ignored SIGTERM until os._exit was added; a 300 s bus handler timeout was every task's wall budget until made unbounded.",
+      "future_pattern": "A single-loop harness with sub-agents in isolated contexts, and heavy or latency-critical services (STT/TTS, sandboxes, test runs) out of process behind deadlines and health, so a stuck engine cannot stall the loop or block shutdown.",
+      "gap": "local-multi mode already exists for workers; voice engines and the landing gate are the two things that still hold the main loop hostage."
+     }
+    ],
+    "target_architecture": {
+     "one_paragraph": "Keep the bus, the contracts-only import rule, the Guardian chokepoint and the kernel; change what is underneath and around them. The Ledger becomes a sqlite-WAL store by default with two halves: a decision log that stays event-sourced (task:<id>, action:<id>, guardian, plan, memory writes, self-model changes) and a telemetry store of plain tables (spans, metrics_ts, samples) with row-level retention; jsonl becomes export/import. Tracing becomes spans: one root span per turn or task, child spans per think, guardian decision, tool call, verify, stt and tts, written by the bus trace writer into the spans table and sampled per root. Tool calling becomes native: a ToolSchema serialised from each Tool's args_schema is sent to providers that support it, the model's tool_use blocks become action.proposed unchanged, results return as tool_result messages, and the marker protocol survives only as a fallback for Ollama and the floor. Orchestration gains a durable Conversation (thread per channel and person, transcript, compaction) so a typed line is a turn in a thread rather than a session; Memory gains a persisted vector index over a pre-warmed real embedder. A deadline field in the envelope propagates end to end and a per-step router picks a route by purpose, risk tier, context size and latency budget. Learning, Reflection and Curiosity merge into one Growth package whose unit of learning is a skill promoted by evaluation; benchmark, trial.py, trial_suite.py and observer_kit merge into an Evals package that is the loader's bless gate. Safety tiers are explicit on every action and every Guardian decision is a span attribute.",
+     "modules": [
+      {
+       "name": "ledger",
+       "from": "keep (simorgh/ledger), default backend switched to sqlite",
+       "responsibility": "Decision log (event-sourced, per-stream seq, CAS) plus projection tables and a blob store, in one WAL database; jsonl as export/import.",
+       "key_algorithms_or_methods": [
+        "sqlite WAL with (stream, seq) primary key for CAS (already in backends/sqlite.py)",
+        "projection tables updated incrementally on append (tasks, actions, competence) instead of replay-at-boot; replay kept as the rebuild path",
+        "row-level retention per table (DELETE WHERE ts < cutoff) replacing per-file deletion",
+        "group_commit: batch fsync for telemetry writes, per-append fsync only for decision streams"
+       ],
+       "interfaces": "Unchanged Ledger protocol (append/read/head/snapshot/blobs) for decision streams; new `query(table, where)` for projections; `export_jsonl(stream)` / `import_jsonl`."
+      },
+      {
+       "name": "telemetry",
+       "from": "merge of bus/trace.py + kernel/metrics.py + the read side of interface/dashfeeds",
+       "responsibility": "Spans, metrics and samples: every turn/task is a trace with child spans; metrics and mood/tick samples go to time-series tables; SLO evaluation per stage.",
+       "key_algorithms_or_methods": [
+        "OpenTelemetry-shaped span model: trace_id, span_id, parent_id, name, start, end, status, attrs(JSON); the existing trace_id/causation_id on Message map directly",
+        "sampling per root span (keep every span of a sampled turn), not per message",
+        "downsampling of metrics_ts on the sleep tick (1 s -> 1 min after a day)",
+        "SLO table: stage -> budget; breach = span event, counted per day"
+       ],
+       "interfaces": "`span(name, parent, attrs)` context manager offered via Context to every subsystem; `spans.query(trace_id)`; `simorgh trace <id>` renders the tree from the table; HTTP /api/traces and /api/metrics read it."
+      },
+      {
+       "name": "cognition",
+       "from": "keep (simorgh/cognition); add toolcalling.py, routing.py; parser.py demoted to fallback",
+       "responsibility": "Providers with native tool use, per-step routing, budgets, compaction.",
+       "key_algorithms_or_methods": [
+        "ToolSchema serialiser: Tool.args_schema -> provider tool definitions (OpenAI-style function schema for Together/Ollama, Anthropic tool blocks for the Claude path, Gemini function declarations)",
+        "tool_use/tool_result message shapes in contracts; a ParsedOutput that carries typed calls with ids",
+        "routing table keyed by (purpose, tier, context_tokens_bucket, latency_budget_bucket) -> ordered candidates + effort; measured route quality from evals feeds the table",
+        "existing deadline share, cooldown, budget estimate unchanged; deadline now taken from the envelope"
+       ],
+       "interfaces": "cognition.think gains `tools: [ToolSchema]`, `deadline`, `risk_tier`; reply carries `tool_calls: [{id, tool, args}]` typed; marker parsing only when the provider lacks tool support."
+      },
+      {
+       "name": "orchestration (harness)",
+       "from": "keep (simorgh/orchestration); session.py shrinks as the police leave; add conversation.py",
+       "responsibility": "The single loop: gather -> think -> propose -> verify; durable threads; checkpoints; sub-agent delegation.",
+       "key_algorithms_or_methods": [
+        "Conversation: thread_id = (channel, person); transcript persisted in the decision log; compaction via cognition layers 1-5 on the transcript",
+        "tool results returned as tool_result messages bound to tool_use ids; several read-only calls per turn without the _read_batch heuristic",
+        "budgets in (tokens, usd, wall) per attempt instead of steps; checkpoint event after every irreversible action; resume.py unchanged in intent",
+        "delegate: sub-agent with fresh context and its own budget, returns a summary only (exists; put into an eval arm)"
+       ],
+       "interfaces": "percept.text.received carries thread_id; turn.completed carries the thread's compacted state ref; task.step gains span_id."
+      },
+      {
+       "name": "memory",
+       "from": "keep (simorgh/memory); add index.py; embedders pre-warmed",
+       "responsibility": "Tiered memory: working (the thread), episodic, semantic, procedural (skills); retrieval by index.",
+       "key_algorithms_or_methods": [
+        "real embedder loaded in a thread at boot (the 24.9 s is paid once, off the critical path); hashing only until it is warm",
+        "persisted vector index in sqlite (vectors as blobs, brute-force cosine over an in-RAM float32 matrix is sufficient at 10^4-10^5 records; an ANN library is optional later)",
+        "hybrid retrieval: BM25/inverted index + vector, reciprocal-rank fusion, then the existing confidence x recency scoring",
+        "consolidation on sleep: episodic -> semantic facts with supersedes links so a correction retires the fact it corrects"
+       ],
+       "interfaces": "memory.retrieve unchanged on the wire; adds `thread_id`; the 0.25 s timeout becomes a budget from the envelope deadline."
+      },
+      {
+       "name": "guardian",
+       "from": "keep (simorgh/guardian); add tiers.py",
+       "responsibility": "Sole approver; explicit safety tiers; every decision a span attribute.",
+       "key_algorithms_or_methods": [
+        "Tier 0 read-only in scope: allow, log. Tier 1 reversible in scope (worktree edits, memory store, config that can be undone): allow in guarded, deny in locked. Tier 2 irreversible but local and bounded (commit/land, sandboxed shell/script/container, package install, device actions with undo): allow if the tool declares an undo or posture is trusted, else escalate; rate-limited per hour. Tier 3 external, physical or financial (notify a third party, run_remote, sirens, mail send, purchases, publishing): human always, in every posture",
+        "tier = f(reversibility, scope, origin, blast_radius) computed from the Tool protocol fields plus a per-tool override table",
+        "posture tightening on failure streaks and denial rates (exists); loosening only via human config"
+       ],
+       "interfaces": "action.approved/denied gain `tier` and `rule`; guardian.posture unchanged; ui.prompt only for tier 3."
+      },
+      {
+       "name": "execution",
+       "from": "keep (simorgh/execution); heavy tools moved behind out-of-process services",
+       "responsibility": "Tools, sandboxes, worktrees, MCP client; structured results.",
+       "key_algorithms_or_methods": [
+        "ToolResult carries a structured payload + blob ref + a short model-facing summary (progressive disclosure replaces the 8,000-char cut)",
+        "per-tool deadline from the envelope; a tool call is a span with success/latency",
+        "MCP stdio client kept as the integration standard for external services (Home Assistant and similar via their MCP servers, human-configured)",
+        "sandbox/test runs and media pipelines as subprocesses with kill-on-deadline, never threads"
+       ],
+       "interfaces": "action.result gains `span_id`, `summary`, `result_ref`; tool.registered publishes the ToolSchema list so World Model can finally write capabilities['tools']."
+      },
+      {
+       "name": "verification",
+       "from": "keep (simorgh/verification)",
+       "responsibility": "The critic: mechanical checks cheapest-first, checklist, trajectory; also the scorer inside evals.",
+       "key_algorithms_or_methods": [
+        "critic loop only where an oracle exists (tests, schema, diff applies); the LLM reviewer stays off for research (their own finding: not a net gain)",
+        "trajectory metrics computed from spans rather than re-reading task streams"
+       ],
+       "interfaces": "Unchanged verify.requested/result; a pure-function `score(trajectory, oracle)` exported for evals."
+      },
+      {
+       "name": "growth",
+       "from": "merge of learning + reflection + curiosity",
+       "responsibility": "One loop: notice (reflection), propose (curiosity sampler), evaluate (evals), promote (skill or patch); competence from evals.",
+       "key_algorithms_or_methods": [
+        "skill distillation from a successful trajectory -> SKILL.md candidate -> held-out variant task -> promote if it beats no-skill",
+        "diversity sampler kept verbatim (drives, staleness, gaps)",
+        "competence table = eval pass rates per capability, not self-reported task outcomes",
+        "self-patch only via worktree landing gated by evals; the unreachable PatchPipeline frozen"
+       ],
+       "interfaces": "growth.candidate, growth.promoted, learn.competence.updated (kept name); ticks sampled into telemetry, not the decision log."
+      },
+      {
+       "name": "evals",
+       "from": "merge of simorgh/benchmark + tools/trial.py + tools/trial_suite.py + tools/observer_kit.py",
+       "responsibility": "Capability suites, replayable traces, regression benchmarks, noise sizing; the bless gate.",
+       "key_algorithms_or_methods": [
+        "record/replay: a FixtureProvider that answers cognition.think from a recorded trace (by prompt hash) so harness changes are tested deterministically without a model",
+        "suites: household (fake devices), conversation (30-turn scripted recall), code (SWE-bench slice), research (GAIA L1), tool-use (BFCL); each scored automatically",
+        ">=3 repeats and a bootstrap CI per suite before any switch flips",
+        "results table in telemetry; dashboard chart per capability"
+       ],
+       "interfaces": "`evals run <suite> --repeats N`; simloader bless calls it; results on benchmark.progress (kept)."
+      },
+      {
+       "name": "voice",
+       "from": "keep (simorgh/voice); engines out of process",
+       "responsibility": "Mic to words to speech with a budget per stage.",
+       "key_algorithms_or_methods": [
+        "deadline propagation: speech_end + budget -> envelope deadline; STT final <= 1.0 s, first model token <= 1.5 s, first audio <= 0.5 s after first sentence (targets to measure, not promises)",
+        "chat turns routed to the fast tier with streaming; first sentence to TTS while the rest generates",
+        "STT/TTS engines as subprocess services with health and p95 in spans"
+       ],
+       "interfaces": "Unchanged bus messages; TurnClock metrics become spans."
+      },
+      {
+       "name": "interface",
+       "from": "keep (simorgh/interface); dispatch.py split by domain",
+       "responsibility": "CLI/TUI/HTTP/channels over threads, not sessions.",
+       "key_algorithms_or_methods": [
+        "thread registry per channel and person",
+        "auth on by default for non-loopback binds"
+       ],
+       "interfaces": "percept.text.received carries thread_id; /api/threads."
+      },
+      {
+       "name": "worldmodel, planning, persona, kernel, contracts, bus",
+       "from": "keep",
+       "responsibility": "As today, with: capabilities['tools'] written from tool.registered; persona mood written to samples; envelope gains deadline, span_id, tier; bus handler timeout no longer a wall budget.",
+       "key_algorithms_or_methods": [
+        "contracts: ToolSchema, tool_use/tool_result message shapes, deadline and span fields on Message"
+       ],
+       "interfaces": "Additive contract changes only."
+      },
+      {
+       "name": "src/ (v1)",
+       "from": "delete",
+       "responsibility": "None.",
+       "key_algorithms_or_methods": [],
+       "interfaces": "None."
+      }
+     ],
+     "merges": [
+      "learning + reflection + curiosity -> growth (one propose/evaluate/promote loop; keep the diversity sampler)",
+      "bus/trace.py + kernel/metrics.py + interface dashfeeds read side -> telemetry (spans + metrics_ts)",
+      "benchmark + tools/trial.py + tools/trial_suite.py + tools/observer_kit.py -> evals (the bless gate)",
+      "the seven regex police in orchestration/session.py -> deleted as native tool use makes each unreachable; marker fallback keeps invented_markers only"
+     ],
+     "additions": [
+      "native tool calling (ToolSchema serialiser + adapter support + tool_use/tool_result contracts)",
+      "spans table and per-root sampling; SLO table per stage",
+      "Conversation threads with transcripts and compaction",
+      "persisted vector index with a pre-warmed real embedder; hybrid retrieval",
+      "deadline propagation in the envelope",
+      "per-step routing table keyed by purpose x tier x context x latency",
+      "record/replay FixtureProvider and capability suites with noise sizing",
+      "explicit safety tiers 0-3 with tier on every decision"
+     ],
+     "deletions_or_freezes": [
+      "src/ (v1) deleted",
+      "PatchPipeline frozen until it is reachable through the worktree + eval gate",
+      "jsonl demoted from default backend to export/import",
+      "trace:<id> per-message streams removed in favour of spans",
+      "metrics:history, curiosity:ticks, persona:state as event streams removed (samples table instead)",
+      "step count as the task budget (replaced by tokens/usd/wall)",
+      "300 s bus handler timeout as an implicit wall budget",
+      "the 8,000-char tool-result cut (replaced by summary + blob ref)"
+     ]
+    },
+    "capability_programs": [
+     {
+      "capability": "reasoning",
+      "current_state": "One think per step; one action per step except read-only batches; tool intent parsed from prose; 'strong' tier only on retry; reasoning_effort fixed at low; the LLM answer reviewer was measured as not a net gain (111 correct and 111 wrong rejected); leading benchmark failure is 'step budget exhausted', not wrong reasoning.",
+      "method": "Native tool use with several tool_use blocks per turn; effort/thinking as a routed parameter per step (planning and code steps get the frontier route and higher effort, formatting and summaries get the fast route); plan-then-act for tasks whose budget exceeds a threshold, with the plan stored as an artifact in the task stream and re-grounded against it; critic loop only where a mechanical oracle exists (tests, schema, diff applies), never a free-form LLM reviewer on research.",
+      "how_to_measure": "BFCL-parallel and GAIA L1-L3 with >=3 repeats and a CI; wasted-step rate from spans (a step whose tool result changed no state); fabricated-claim rate (today's police counters become span events so the baseline is known before the police are removed).",
+      "first_increment": "Native tool calling in the Together adapter and the orchestration tool_result path, marker fallback kept; run BFCL-parallel and one GAIA slice before/after, 3 repeats each."
+     },
+     {
+      "capability": "long tasks",
+      "current_state": "Per-attempt step budget; resume.py carries notes and kept edits across attempts; re-grounding built (no measured gain); delegate built but never in an arm; the bus handler timeout was the wall budget until unbounded; sqlite lease still caps; worktree landing with whole-suite gate.",
+      "method": "Budget in (tokens, usd, wall) per attempt; a checkpoint event after every irreversible action so resume starts from state, not from a note; sub-agents (delegate) with isolated context and their own budgets for exploration; transcript compaction on the thread; test-first patch loop where verification is the oracle; heavy steps (test suite, container) out of process with deadlines so a stuck step is a span timeout, not a stalled loop.",
+      "how_to_measure": "SWE-bench Verified slice resolved rate with 3 repeats; fraction of tasks ending in budget exhaustion; induced-crash resume success (an eval that kills the process mid-task and checks the task finishes on restart with no duplicated irreversible action); wall time per resolved task from root spans.",
+      "first_increment": "Replace the step cap with a (tokens, usd, wall) budget and put delegate into one eval arm; add the kill-and-resume eval."
+     },
+     {
+      "capability": "environment interaction",
+      "current_state": "98 tools across files/code/git, sandboxes, web, packages and six domains; static MCP client; Home Assistant not configured; cameras via RTSP -> ffmpeg -> HLS on disk (3.8 GB); tool results cut at 8,000 chars; browser tools exist; capabilities['tools'] in the Self Model never written.",
+      "method": "MCP as the integration standard for external services (human-configured servers, discovered tools flow through the same Guardian path); structured ToolResult with summary + blob ref (progressive disclosure: the model asks for more of a result rather than receiving a cut); every tool call a span with success and latency; browser/computer-use as an isolated sub-agent with its own budget and tier; tool.registered publishes schemas so the Self Model knows its hands.",
+      "how_to_measure": "Per-tool success rate and p95 latency from spans (the module map's own suggested handle); a household suite of 10-20 scripted tasks against fake devices run nightly; denial rate per tier.",
+      "first_increment": "Span per tool call with success/latency and the household suite built on tools/trial_suite.py's scoring shape."
+     },
+     {
+      "capability": "user interaction",
+      "current_state": "Throwaway session per typed line; no transcript; continuity is three memory recalls over hashed bag-of-words under 0.25 s that vanish at ~1,000 records under load; voice full response 4-17 s; speaker identification via TitaNet; barge-in works; per-person memory filtering on voice.",
+      "method": "Durable Conversation thread per channel and person with a transcript in the prompt and compaction; tiered memory with a pre-warmed real embedder and a persisted index; chat routed to the fast tier and streamed sentence-by-sentence into TTS; deadline propagation with per-stage budgets (STT final, first token, first audio) and breaches counted; per-person privacy kept as a thread property rather than a tag filter.",
+      "how_to_measure": "A 30-turn scripted conversation suite: recall@1 for 'what did I just say', a corrected fact answered correctly N turns later, a fact told to one family member not surfacing to another; response p50/p95 per stage from spans; count of stage-budget breaches per day.",
+      "first_increment": "Conversation object with a transcript in the prompt (the memory recalls stay as they are), and the embedder warmed in a boot thread with vectors persisted; measure the conversation suite before/after."
+     },
+     {
+      "capability": "self-improvement",
+      "current_state": "Learning unreachable (no publisher, tool not registered); Reflection observes and distils skill candidates; Curiosity samples areas and writes ticks; skills exist (simorgh_skills, use_skill); worktree landing gated by the unit suite; simloader tags known-good images; competence is derived from self-reported task outcomes.",
+      "method": "Skills as the unit of learning: successful trajectory -> distilled SKILL.md -> evaluated on a held-out variant -> promoted only if it beats no-skill; code self-patches land only through worktree + the eval gate; competence table computed from eval pass rates; the bless gate is the eval suite; the diversity sampler chooses what to try next from measured gaps.",
+      "how_to_measure": "Skill promotion rate and measured lift per promoted skill on its capability suite; regressions caught by the gate per month; self-patch acceptance rate; competence calibration (stated vs measured) per capability.",
+      "first_increment": "Make simloader bless run the eval suite by default and write competence from its results; freeze PatchPipeline."
+     }
+    ],
+    "migration_path": [
+     {
+      "stage": "0. Telemetry cut-over",
+      "weeks": 1,
+      "does": "Add spans and metrics_ts tables to the sqlite ledger; bus trace writer writes spans (one root per turn/task, children per think/guardian/tool/verify/stt/tts) instead of trace:<id> files; kernel metrics, curiosity ticks and persona mood go to samples with row retention; `simorgh trace` and the dashboard read the tables; jsonl decision streams untouched.",
+      "unlocks": "Per-stage p50/p95 for voice and tasks in milliseconds; disk growth stops; boot no longer stats 118k files; every later stage is measurable.",
+      "risk": "Consumers of trace streams (interface dashfeeds, reflection's trajectory reads) must be ported the same week or they read nothing; mitigated by keeping the old writer behind a switch for one bless cycle."
+     },
+     {
+      "stage": "1. Native tool calling",
+      "weeks": 2,
+      "does": "ToolSchema from args_schema; tool_use/tool_result shapes in contracts; Together, Claude CLI and Gemini adapters send tools and return typed calls; orchestration feeds results as tool_result messages; Guardian path unchanged; marker parsing kept for Ollama/floor; each regex police rule removed once its span counter reads zero for a bless cycle.",
+      "unlocks": "Multi-argument and multi-call tools without per-tool hacks; fabricated-result and invented-tool classes disappear; session.py shrinks.",
+      "risk": "Prompt-shape regressions on the marker fallback path; a provider that half-supports tools; mitigated by running BFCL and one GAIA slice per adapter before enabling by default."
+     },
+     {
+      "stage": "2. Conversation and memory index",
+      "weeks": 2,
+      "does": "Conversation threads with transcripts and compaction; interface and voice send thread_id; embedder pre-warmed at boot; vectors persisted; hybrid retrieval; memory timeout taken from the envelope deadline.",
+      "unlocks": "Continuity across lines, restarts and channels; recall that does not vanish under load.",
+      "risk": "Per-person privacy on voice currently lives in a tag filter and must become a thread property before the old filter is removed; measured by the conversation suite's cross-person case."
+     },
+     {
+      "stage": "3. Evals as the gate",
+      "weeks": 2,
+      "does": "simorgh/evals package from benchmark + trial harness + observer kit; FixtureProvider record/replay from spans; household, conversation, code, research and tool-use suites with repeats and CIs; simloader bless runs it; results in telemetry.",
+      "unlocks": "Every switch and every later stage has a number with an interval; harness changes testable without a model.",
+      "risk": "Eval cost in dollars and minutes; mitigated by a fast tier for scoring and replay for harness-only changes."
+     },
+     {
+      "stage": "4. Latency budgets and per-step routing",
+      "weeks": 2,
+      "does": "deadline and tier fields on Message; per-stage budgets and SLO table; routing table keyed by purpose x tier x context x latency with measured route quality; chat to the fast tier with streaming into TTS; STT/TTS engines as subprocess services.",
+      "unlocks": "Voice p95 attributable and reducible; cost per turn falls for the common case.",
+      "risk": "A fast tier that answers worse; only enabled per route when the conversation suite shows no loss."
+     },
+     {
+      "stage": "5. Long-horizon",
+      "weeks": 3,
+      "does": "(tokens, usd, wall) budgets; checkpoint events; delegate in an arm; plan artifact for large tasks; landing gate and sandboxes out of process with deadlines; kill-and-resume eval.",
+      "unlocks": "SWE-bench-shaped tasks finishing rather than exhausting budgets; safe shutdown mid-task.",
+      "risk": "Worktree landing and checkpoints interacting badly on retry; bounded by the resume eval."
+     },
+     {
+      "stage": "6. Growth merge and cleanup",
+      "weeks": 2,
+      "does": "learning + reflection + curiosity -> growth; skill promotion loop through evals; competence from evals; PatchPipeline frozen; src/ deleted; tiers 0-3 explicit in Guardian with tier 3 human-gated in every posture; capabilities['tools'] written.",
+      "unlocks": "Measured self-improvement; the Self Model finally knows its tools; a human is asked exactly when it matters.",
+      "risk": "Losing the diversity sampler's behaviour in the merge; keep sampler.py and its regression test verbatim."
+     }
+    ],
+    "agi_honesty": "This architecture is a harness around a frontier model: reasoning comes from the provider, and the harness adds memory, tools, safety, continuity and measured improvement. Its ceiling on general capability is the model's ceiling; nothing here learns at the weight level, and the blueprint says so. What the harness CAN deliver, and what 'more general' concretely means for a household agent, is breadth times depth times autonomy: more task domains completed end to end (code, research, home devices, media, calendar, conversation), longer horizons per task (hours, with resume), across more surfaces (voice, chat, TV, phone), with fewer hand-written per-incident heuristics and with a person asked only at tier 3. Progress toward that is measurable as a capability-suite matrix, which is the honest version of the blueprint's 'generality as a queryable number'. The investments that compound are the ones that survive a model swap: eval suites, span data (replayable), skills, the memory index, tool schemas and the safety tiers. The ones that do not compound are regex police, dated incident comments and per-tool argument hacks; they are paid again with every new model. With the migration above, Sim can become a state-of-the-art personal agent harness of the shape production harnesses have in 2026, continuously improving on measured suites. It will not be AGI under any definition that requires learning beyond its model, open-ended competence growth without a human choosing what to measure, or capability that exceeds the frontier model it routes to; calling it that would contradict the SOUL.md directive on transparency.",
+    "biggest_risk_of_this_proposal": "Half-migration. The project's own dominant bug shape is the unconnected wire (a slot with one side implemented), and a substrate migration is the largest producer of unconnected wires there is: two trace formats, two tool protocols, two memory indexes, two budgets, each half-read by something. For one developer working through coding agents, the failure mode is a live, self-editing system that boots from a checkout with both halves present, where the loader's gate is green because the unit suite still asserts the old shape. Mitigation is ordering and deletion discipline: telemetry first (stage 0) because every later stage is judged by it; evals as the gate (stage 3) before routing or long-horizon changes; every stage behind a config switch; and no stage begins until the previous stage's old path has been deleted and the eval suite has passed on the deleted-path build. The Guardian invariant and corrigibility are untouched by every stage, which is what makes the migration safe to do live.",
+    "key": "systems"
+   },
+   {
+    "lens": "Embodied household agent and human interaction: voice, presence, several people, cameras and devices, proactive behaviour. Reviewed against the code at /Users/saeed/ws/Simorgh on 2026-09-18 (docs/module-map.md, docs/blueprint/01 and 02, docs/plans/home-automation-design.md, orchestration/session.py _run/_think, orchestration/context.py, orchestration/tools.py, orchestration/profiles.py VOICE_CHAT, orchestration/scaffolds.py who_is_here, cognition/router.py, cognition/parser.py, memory/store.py retrieve, worldmodel/selfmodel.py + service.py facets, guardian/rules.py, contracts/home/policy.py, contracts/household.py, contracts/places.py, contracts/overheard.py, execution/home/{tools,registry,cameras}.py, execution/vision.py, persona/user_model.py, voice/{session,turns,speakers,config}.py, interface/{service,telegram}.py).",
+    "what_sim_got_right": [
+     {
+      "decision": "One bus-enforced action path: action.proposed -> Guardian (only subscriber) -> HMAC-bound action.approved -> Execution (only subscriber, re-verifies). Every camera siren, light, cast and door call already goes through it (execution/home/cameras.py docstring: 'Every call is a tool call, so Guardian sees it -- the siren above all').",
+      "why_it_matters_for_the_future": "A home agent's failure mode is not a bad answer, it is a bad actuation at 3am. The chokepoint is the one thing that lets presence-aware, person-aware and time-aware rules be added in a single place without any reasoning path being able to route around them. It is also what makes a future 'Home Assistant creates the automation, Sim only proposes it' split enforceable.",
+      "keep_or_strengthen": "Keep verbatim. Strengthen by carrying the requesting person and channel on every proposal (today Proposal has no requester field; guardian/api.py) so rules can be per person, and by making Guardian recompute physical safety itself (see divergences)."
+     },
+     {
+      "decision": "'Sim does not speak to devices. Sim speaks to Home Assistant.' and 'hard safety automations live in HA, not Sim' (docs/plans/home-automation-design.md section 0), with a pure classify_call in contracts/home/policy.py that is pessimistic by default (unknown domain => human).",
+      "why_it_matters_for_the_future": "This is the well-established shape for household agents: one device hub with a uniform entity model (entity_id, state, attributes, domain.service), a local rules engine that survives the agent being down, and an agent that owns judgment rather than drivers. Every serious home-agent stack in 2026 sits on HA or an equivalent hub, not on per-vendor code.",
+      "keep_or_strengthen": "Keep the decision; actually execute it. HA is not configured today and the designed simorgh/home/ subsystem (bridge, trigger engine, monitors, HomeRule) was never built; only the five home_* tools exist. Section 2.4 (HA events -> percepts) and section 7 (Guardian HomeRule) are the two halves to land first."
+     },
+     {
+      "decision": "Honesty rules in the physical layer: 'ambiguity is refused, never guessed' (execution/home/registry.py), 'report what the house did, not what HA accepted' (home_call snapshots before/after), 'unknown is a real answer' with scores travelling on every identification (voice/speakers.py), and may_refine never learning a voice from a shared or guessed turn.",
+      "why_it_matters_for_the_future": "Trust in a household agent is lost by one confident wrong act: naming the wrong child, turning on the wrong light and saying it was the right one. These rules are the asymmetry a home agent needs: silence and 'I am not sure' are cheap, a wrong actuation is not.",
+      "keep_or_strengthen": "Keep and generalise into a single contract for perception claims: every percept (speaker, presence, camera description, entity state) carries a confidence and a source, and the prompt renders the confidence rather than the bare claim."
+     },
+     {
+      "decision": "Turn taking as a pure state machine (voice/turns.py: idle/listening/user_speaking/thinking/agent_speaking/interrupted; hybrid end-of-turn with semantic shortening; monotonic turn and response ids so stale audio is dropped) and barge-in gated by an echo tracker fed from what was actually played.",
+      "why_it_matters_for_the_future": "Full-duplex, interruptible conversation is the floor for a voice agent in 2026 and the state machine is exactly the piece that must stay testable without a microphone as latency work (streaming STT, sentence-chunked TTS) lands around it.",
+      "keep_or_strengthen": "Keep. Strengthen by making the manager consume streaming partials and a streaming reply (so 'agent_speaking' can begin at the first sentence while the model is still generating) and by adding an explicit HOLD state for a proactive utterance waiting for the floor."
+     },
+     {
+      "decision": "Household roster and places in contracts (contracts/household.py with names, sexes, ages, IPA; contracts/places.py house name and network->place map; contracts/overheard.py 48-hour store with purge), so the write side (tools) and the read side (prompt) share one source without importing each other.",
+      "why_it_matters_for_the_future": "The home agent's most valuable state is small, durable, per-person and per-place. Putting it in contracts is the right instinct for an entity model that every channel and subsystem must agree on.",
+      "keep_or_strengthen": "Strengthen into a real people/entity model (person_id with per-channel identities, role tier, per-person permissions and memory namespace) instead of a frozen tuple plus a voice book plus a Telegram allow-list."
+     },
+     {
+      "decision": "Per-person memory tags (memory/service.py tags person:<name> on voice turns; orchestration/context.py third recall filtered by person and _theirs() so a child's lines are not shown to a stranger) and scaffolds.who_is_here rendering who is speaking, who spoke before, and the room's asides as 'context, not questions'.",
+      "why_it_matters_for_the_future": "Multi-person households need memory partitioning and addressee awareness; most agent frameworks assume one user. Sim already has the seeds of both.",
+      "keep_or_strengthen": "Keep; extend the person tag to every channel (Telegram/WhatsApp/CLI turns carry no person today) and move the addressee decision out of regexes into a structured percept field."
+     },
+     {
+      "decision": "Measuring from the Ledger (voice:turns carries stt/llm/first_audio/response per turn; docs/module-map.md section 8) rather than from unit tests; durable reminders in kernel/scheduler.py rebuilt from the schedule stream.",
+      "why_it_matters_for_the_future": "Latency, addressee accuracy, presence accuracy and false-announcement rate are the handles that decide whether a family keeps using a voice agent. They are only measurable if every turn is recorded with its timings and outcome, which is already true.",
+      "keep_or_strengthen": "Keep; add labelled ground truth (who was actually speaking, was it addressed to Sim, who was home) as a small ledger stream the family can correct from the phone, so the handles become precision/recall rather than counts."
+     }
+    ],
+    "where_it_diverges_from_the_future": [
+     {
+      "current": "There is no perception subsystem. Percept topics are text/file/web/time only (contracts/topics.py PERCEPT_*). Camera events (world.camera.event) are published by Execution's own camera and Ring watchers and consumed by execution/vision.py, which calls Cognition with images and then speaks via voice.speak.request, all inside Execution. The HA event bridge (design section 2.4) does not exist; HA is not configured.",
+      "future_pattern": "Embodied agents have a perception layer that turns sensors into typed, timestamped, confidence-bearing percepts (speech with speaker and room, entity state changes, presence evidence, detections with descriptions) that a world model folds and the policy layer consumes. Actuation and perception are separate subsystems.",
+      "gap": "Execution is both hands and eyes; nothing can subscribe to 'someone arrived at the front door' as a percept, only to a camera channel number. The intelligent layer the design reserved for Sim ('lights on when motion unless it is 3am and someone just went to bed') cannot be written because the 'someone just went to bed' fact exists nowhere."
+     },
+     {
+      "current": "There is no world state of the home. The only 'room' is a 16-line deque in voice/session.py (self._room), per voice session, lost on restart. World Model facets are codebase-shaped (file_index, git_state, capability_map, tools, user_profile). Presence is not modelled at all; contracts/places.py stores a house name and a network->place map that is TOLD, not detected.",
+      "future_pattern": "A home world state: HA's area/device/entity registry mirrored locally, live entity states via the HA websocket, a presence belief per person per area fused from evidence (speaker id, device trackers, motion, camera person detections) with decay, and derived situation facts (nobody home, quiet hours, TV playing, a child alone). Rendered as a compact block in every prompt and queryable by rules.",
+      "gap": "The model reasons about the house from the last 16 spoken lines. Proactive behaviour, routine learning and person-aware safety all need this state and none of them can be built without it."
+     },
+     {
+      "current": "Identity is per channel and never joined: voice -> SpeakerBook name; Telegram -> allow-list by username, then a session per chat_id (interface/telegram.py); WhatsApp similar; CLI -> implicitly the creator; HA person entities unused. action.proposed carries no requester (guardian/api.py Proposal has no person field), so Guardian cannot know whether a 9-year-old or the owner asked for the siren. Persona's user model extracts two regex facets ('I prefer', 'call me') and is one model, not one per person.",
+      "future_pattern": "A person/entity model: one person_id with linked identities (voice embedding set, Telegram id, WhatsApp number, HA person, CLI), a role tier (owner, adult, child, guest, unknown), per-person permissions on tool groups, a per-person memory namespace and a per-person preference model updated from what they actually do, not only from what they say.",
+      "gap": "Per-person permissions and step-up verification for dangerous requests are impossible today; per-person memory only works for voice; the same family member is three different strangers across channels."
+     },
+     {
+      "current": "Guardian trusts the proposer's physical safety label. orchestration/tools.py line 700 computes reversibility from classify_call and the comment says 'Guardian recomputes the same answer from the same pure function rather than trusting this', but nothing under simorgh/guardian/ imports classify_call (grep confirms). ReversibilityRule only reads proposal.reversibility. One knob (SIMORGH_GUARDIAN_AUTO_APPROVE, on by default since 2026-09-07) auto-approves irreversible actions for code and for the house alike; policy.py's own docstring says 'for the house that default is wrong'.",
+      "future_pattern": "Physical actions are gated on a separate axis from code changes: reversibility recomputed at the gate from the arguments, plus who asked, who is present, what time it is, what the alarm state is, per-entity rate limits and safe ranges, with hard safety living in HA. Code changes are gated by tests, worktrees and rollback; a house is gated by people and presence.",
+      "gap": "The safety invariant is structurally sound but the house-specific rule was designed (home-automation-design.md section 7 HomeRule) and not built; today a forged or mislabelled reversibility from any proposer path other than orchestration/tools.py would be honoured, and the default posture treats a door like a docstring."
+     },
+     {
+      "current": "Proactive behaviour is scattered and uncoordinated: curiosity.sharing -> persona.sharing -> ui.notice (text, hourly cap); execution/vision.py speaks camera descriptions on its own; kernel reminders fire; voice/session.py backchannels. None of them knows who is present, whether someone is asleep, or whether Sim is already mid-conversation.",
+      "future_pattern": "A single initiative policy: every unprompted utterance is a proposal scored by urgency and relevance against an interruption cost derived from the world state (who is here, activity, time, channel), with class-specific thresholds (safety alerts always, FYI only when idle, growth notes only in a digest) and channel selection by presence (voice if in the room, phone if away).",
+      "gap": "Sim can wake a sleeping child to describe the postman, and cannot decide to text the owner instead of speaking to an empty room."
+     },
+     {
+      "current": "Spoken latency is 4-17 s end to end (stt 1.8-6.8 s with whisper large-v3-turbo finalising after end of turn, llm 1.3-9.5 s awaited to completion, then planner, then TTS). The voice profile (orchestration/profiles.py VOICE_CHAT) offers ~60 tools by name in free text with a 6-step marker loop and a 0.25 s memory timeout that silently drops the memory block under load.",
+      "future_pattern": "Streaming end to end: streaming STT with early finalisation, token streaming from the model into sentence-boundary TTS, a fast lane (small or local model) for acknowledgements and simple intents, and native structured tool calls so a spoken 'turn the kitchen light off' is one function call, not a parsed marker. First-audio p50 near 1 s is the established bar.",
+      "gap": "Every second past ~1.5 s is a turn the family will not take. The marker protocol and the 8 regex police in orchestration/session.py exist because tool use is parsed from prose; native tool calling removes the class of bug and most of the latency in the tool path."
+     },
+     {
+      "current": "Dialogue policy is regexes and prompt prose: _WHO_SAID, _WHO_IS_SPEAKING, _I_AM, _TO_SIM in voice/session.py; addressed() heuristics in voice/backchannel.py; exchange windows and bystander logic inside the session; who_is_here prose in scaffolds.py. It lives in Voice only, so a Telegram message from the same person has none of it.",
+      "future_pattern": "A structured dialogue state shared across channels: each percept carries addressee (to_sim, aside, to_person X) with confidence from a small classifier, the conversation state per person (open thread, last exchange, pending question from Sim), and the model reads it as data. The same policy answers 'who said that' from the world state rather than a regex.",
+      "gap": "Every new incident becomes another regex in a 1,961-line session file; the policy cannot be measured (no labelled addressee set) or reused across channels."
+     },
+     {
+      "current": "No routine learning. HA history is not read (HA not configured), no trigger engine (design section 4 never built), no procedural memory of household patterns; the persona user model learns from explicit statements only.",
+      "future_pattern": "Routines mined from the hub's state history and presence: per (entity, service) time-of-day x weekday distributions, co-occurrence within windows (frequent-episode mining), person-conditioned preferences (temperature, brightness, volume) learnt from actual actions; proposed as suggestions, confirmed by a person, then installed as HA automations that run without Sim.",
+      "gap": "Sim cannot notice that the kitchen lights go off at 22:30 on school nights, so it cannot offer to do it, and cannot know that 23:30 with lights on is unusual."
+     },
+     {
+      "current": "Cameras are RTSP -> local ffmpeg -> HLS segments on disk, with stills and event JSON under workspace/cameras (3.8 GB); detection comes from the NVR's own AI kinds. Ring is a second bespoke path.",
+      "future_pattern": "An open-source detection and NVR layer (Frigate with go2rtc, as the design's section 1 already chose) publishes person/car/package detections with snapshots and clips over MQTT/HA; the agent consumes events and asks a vision model only about the event crop, not the whole scene.",
+      "gap": "Sim carries streaming plumbing and retention it should not own, and the 'describe the event not the scene' problem (execution/vision.py, live 2026-09-16) is what Frigate's zones and object tracking already solve."
+     },
+     {
+      "current": "Interface is a 10.7k-line monolith: CLI/TUI, 2,234-line command dispatch, HTTP API + dashboard + dashfeeds, Telegram, WhatsApp, TV page, benchmark views. Voice is a separate 10-11k-line subsystem that also carries dialogue policy, room memory and pronunciation. Chat sessions are throwaway (one session_id per typed line).",
+      "future_pattern": "Thin channel adapters (audio, CLI, Telegram, WhatsApp, web/WS, TV as an output device) that all produce the same person-resolved percept and consume the same delivery request; a separate admin/observability plane; persistent per-person conversations with a transcript and compaction.",
+      "gap": "Channel logic and admin logic change for different reasons and are tested differently; the household 'conversation' has no home because each surface owns its own."
+     },
+     {
+      "current": "Memory recall is hashed bag-of-words, scores every record on every call under a 0.25 s timeout; per-person filtering exists only for voice; there is no procedural/routine kind in use by the house.",
+      "future_pattern": "Tiered memory (working transcript, episodic per person, semantic facts about people and places, procedural routines) with a real embedding index and hybrid lexical+vector retrieval; recall budgeted in tokens, not by a wall-clock race.",
+      "gap": "The memory block that carries 'which machine is falcon' or 'Ira's bedtime' vanishes exactly when the house is busy."
+     }
+    ],
+    "target_architecture": {
+     "one_paragraph": "Keep the substrate exactly as it is (Bus with reserved topology, append-only Ledger, Kernel layers, Guardian as sole approver with HMAC tokens, Execution as sole actor, worktree landing for self-patches). Around it, add the three things a home agent needs and Sim lacks: a Perception subsystem that turns microphones, cameras and the Home Assistant event stream into typed, confidence-bearing percepts; a Home World State inside World Model (entity/area registry, live states, a presence belief per person per area, derived situation facts) that every prompt and every rule reads; and a People model in contracts with one person_id per family member joined across voice, Telegram, WhatsApp, CLI and HA, carrying a role tier, permissions and a memory namespace. Move the conversational policy out of voice/session.py into a cross-channel Attention and Dialogue component that labels each percept with an addressee and keeps one conversation per person; merge the four sources of unprompted speech into one Initiative policy scored against interruption cost and presence. Split the physical-action tier in Guardian onto its own axis (HomeRule recomputing classify_call, PersonRule, PresenceRule, its own auto-approve setting) while code changes keep the test-and-rollback gate. Shrink Voice to audio I/O (VAD, turns, streaming STT, sentence-chunked TTS, speaker embeddings, echo) and shrink Interface to channel adapters plus an admin plane. Replace the marker protocol with native tool calling and add a fast lane so a spoken turn answers in about a second. Learning gains a routine miner over HA history that proposes automations a person confirms and HA runs without Sim. Everything is additive to the existing packages; nothing bypasses proposal -> approval -> effect.",
+     "modules": [
+      {
+       "name": "Perception",
+       "from": "new package simorgh/perception/, built from execution/vision.py, the cam_watch/ring_watch event loops in execution/home/cameras.py and ring.py, the designed-but-unbuilt HA bridge (docs/plans/home-automation-design.md section 2.4), and Voice's transcript publication",
+       "responsibility": "Sensors in, typed percepts out. Owns the HA websocket subscription (state_changed, automation_triggered), camera/detection events (from the NVR today, Frigate/MQTT when adopted), the vision look at an event's frames, and the enrichment of a spoken turn (speaker, room/device, addressee guess) before it is published. Never actuates.",
+       "key_algorithms_or_methods": [
+        "HA websocket client with subscribe_events(state_changed) and periodic full-state resync; each change -> percept.home.state_changed{entity_id, old, new, attributes, area, ts}",
+        "Camera event -> two stills a moment apart -> cognition.think with images and the camera's known static-scene words excluded -> percept.home.detection{camera, area, kinds, description, confidence, snapshot_ref}; move to Frigate's tracked-object events when installed so only the object crop is described",
+        "Speaker attribution as a percept field: {person_id or unknown, score, margin} from Voice's SpeakerBook, plus room/device id of the microphone",
+        "Percept dedupe and rate limits per source (a motion sensor flapping is one percept with a count, not forty)"
+       ],
+       "interfaces": "Consumes: audio transcripts from Voice (voice.transcript), world.camera.event, HA websocket. Publishes: percept.text.received (unchanged schema plus person_id, channel, device, addressee), percept.home.state_changed, percept.home.detection, percept.presence.evidence. Requests: cognition.think (images)."
+      },
+      {
+       "name": "Home World State (World Model facet 'home')",
+       "from": "extends simorgh/worldmodel/ (new facets/home.py, facets/presence.py); absorbs voice/session.py's _room deque and contracts/places.py",
+       "responsibility": "The single, durable, queryable picture of the house: entity/area/device registry mirrored from HA, current entity states, per-person per-area presence belief, the last N minutes of what was said in each room, and derived situation facts (nobody_home, quiet_hours, someone_asleep, tv_playing, child_alone, alarm_state). Rendered as a compact prompt block and answered as world.env.query{what:'home'}.",
+       "key_algorithms_or_methods": [
+        "Entity state table as a Ledger projection of percept.home.state_changed (rebuildable; snapshot on sleep tick), keyed by entity_id with area from HA's registry",
+        "Presence: per (person, area) belief updated by evidence likelihoods (speaker id score, HA device_tracker/router presence, motion in an area, camera person detection, a phone message from outside) with exponential time decay; report a distribution and 'unknown', never a bare name",
+        "Situation facts as small pure rules over states + presence + clock (quiet hours per household config; asleep = bedroom motion silent for T after lights off; child_alone = only child presences above threshold)",
+        "Room transcript ring per area (replaces the in-session deque) with a 3-minute horizon for asides and 48-hour overheard store from contracts/overheard.py"
+       ],
+       "interfaces": "Consumes: percept.home.*, percept.presence.evidence, percept.text.received, voice.spoken. Replies: world.env.query{what: home|presence|room}. Publishes: world.home.situation_changed{fact, value, confidence} for rules and Initiative. Only writer of the home:state projection."
+      },
+      {
+       "name": "People (identity, roles, permissions, per-person memory)",
+       "from": "merge of contracts/household.py + voice/speakers.py's SpeakerBook identities + interface/telegram.py and whatsapp.py allow-lists (contracts/channels.py) + persona/user_model.py, as a contracts/people.py schema with the store owned by World Model",
+       "responsibility": "One person_id per household member and per known guest, with linked identities (voice embedding set, Telegram id, WhatsApp number, HA person entity, CLI/owner), a role tier (owner, adult, child, guest, unknown), a permission table over tool groups and home safety classes, a memory namespace, and a preference model updated from actions as well as words.",
+       "key_algorithms_or_methods": [
+        "Identity resolution at the channel edge: every adapter resolves sender -> person_id before publishing a percept; unresolved stays 'unknown' with the raw handle kept for the owner to link",
+        "Permission matrix: role x {read_only, media, reversible_home, human_home, code, memory_forget} -> allow | ask(owner) | deny; children default to media + read_only + reversible lights in their own area",
+        "Step-up verification for human-class requests by voice: speaker score >= 0.70 and margin >= 0.10 required, otherwise confirm on the person's phone channel; never from an unknown voice",
+        "Preference learning per person: exponential moving estimates of chosen brightness/temperature/volume per area from confirmed home_call results; explicit statements still via the existing facet store, now keyed by person_id"
+       ],
+       "interfaces": "Readers: Guardian (PersonRule), Orchestration (scaffold who_is_here, memory filters), Initiative (channel selection), Memory (namespace). Writers: the owner via a people_* tool set (link identity, set role, forget person), all through Guardian."
+      },
+      {
+       "name": "Attention and Dialogue Policy",
+       "from": "extracted from voice/session.py (_bystander, addressed/exchange window, _room_lines, _WHO_SAID/_WHO_IS_SPEAKING/_I_AM answers, backchannel) and orchestration/scaffolds.py who_is_here; new package simorgh/dialogue/ or a sub-package of orchestration",
+       "responsibility": "Decide, for every percept from any channel, whether it is addressed to Sim, an aside, a command, a question, or a reply to Sim's pending question; keep one open conversation per person with a bounded transcript; answer identity questions from the world state; hand a turn to Orchestration with the right profile, speaker and situation.",
+       "key_algorithms_or_methods": [
+        "Addressee classification as a scored decision: name/wake mention, question shape, speaker continuity within an exchange window, whether Sim asked something of this person, gaze-less heuristics from the room record, and a fast-lane model call for ambiguous cases; output {label, confidence}, below threshold -> record as aside, never answer",
+        "Per-person conversation state (open thread id, last exchange ts, pending_question) persisted as a Ledger projection so a Telegram reply continues the kitchen conversation",
+        "Clarification policy: ask exactly when an ambiguity would change an actuation (registry Ambiguous) or when the addressee score is mid-band and the utterance is a command; otherwise stay silent",
+        "Labelled-set evaluation: the owner marks 'that was for Sim / not for Sim / wrong person' from the phone; precision/recall on that set is the module's handle"
+       ],
+       "interfaces": "Consumes: percept.text.received (enriched). Publishes: turn.requested{person_id, channel, profile, situation} to Orchestration, dialogue.aside.recorded to World State. Replies: dialogue.who_said, dialogue.state for prompts."
+      },
+      {
+       "name": "Initiative (unprompted behaviour)",
+       "from": "merge of curiosity/sharing.py + persona/sharing.py + execution/vision.py's announce step + delivery of kernel/scheduler.py reminders + voice backchannel greetings",
+       "responsibility": "The only path by which Sim speaks or messages without being asked. Scores each candidate utterance against the interruption cost implied by the home world state, picks the channel by presence, and proposes the delivery as an action so Guardian and the Ledger see it.",
+       "key_algorithms_or_methods": [
+        "Utility = urgency(class) x relevance(person) - cost(activity, time, channel); classes: safety_alert (always, all channels), event_fyi (only when someone is present and not asleep, else to the owner's phone), reminder (to its person, wherever they are), growth/news (only in a requested digest or when idle with an adult present)",
+        "Presence-aware routing: voice in the area where the person is (belief > 0.6), else phone channel, else queue for the next time they address Sim",
+        "Per-person do-not-disturb windows, per-class cooldowns, and a hard daily cap; every delivery is action.proposed{tool: speak|notify, reversibility: 'attention'} so 'Sim talks too much' is a Guardian posture, not a code change",
+        "Floor coordination with the turn manager: a proactive utterance waits for LISTENING/idle and yields to any person speaking"
+       ],
+       "interfaces": "Consumes: world.home.situation_changed, percept.home.detection, schedule.fired, curiosity.share.proposed, persona.share.proposed. Publishes: action.proposed (deliveries), initiative.suppressed{why} for measurement. Executes via existing voice.speak.request and channel send tools."
+      },
+      {
+       "name": "Voice (audio I/O only)",
+       "from": "keep simorgh/voice/ but shrink: vad.py, turns.py, stt/, tts/, speakers.py (embeddings only), playback.py, aec.py, delivery.py, pronounce.py stay; session.py loses room memory, bystander, identity regexes and who-said answers",
+       "responsibility": "Microphone frames to text with speaker vectors and timing; text to speech with streaming, barge-in and echo suppression; nothing about who the person is beyond the embedding, nothing about what to say.",
+       "key_algorithms_or_methods": [
+        "Streaming STT as the primary path (stt/sherpa_stream.py zipformer) with the hybrid end-of-turn using its partials; large-v3-turbo only as an offline rescoring lane for kept audio",
+        "Reply streaming: accept a token stream from Cognition, split at sentence boundaries through the planner, synthesise sentence n+1 while n plays; first audio target < 1.0 s after the reply starts",
+        "Fast lane: a canned/cached acknowledgement or a small-model one-liner when the main model is expected to exceed 2 s (predicted from the tool set requested), spoken as a bridge, never as the answer",
+        "Per-device sessions (several microphones/rooms) each with its own TurnManager, echo tracker and calibration; a device id travels on every transcript"
+       ],
+       "interfaces": "Publishes: voice.transcript{device, text, partial|final, speaker_vector_ref, score}, voice.spoken. Consumes: voice.speak.request (now with priority and 'may_interrupt' from Initiative). Metrics per turn unchanged in voice:turns."
+      },
+      {
+       "name": "Channels (thin adapters) and Admin plane",
+       "from": "split of simorgh/interface/: cli/tui + telegram.py + whatsapp.py + httpapi WS chat + tv page become simorgh/channels/; httpapi dashboard, dashfeeds.py, vitals.py, benchmarkview.py, panel.py become simorgh/admin/; dispatch.py becomes a command registry",
+       "responsibility": "Channels: resolve sender to person_id, publish the same enriched percept as voice, deliver replies and initiative messages, keep one conversation per person per channel. Admin: observe-then-control plane behind auth, where every control is itself a guarded action.",
+       "key_algorithms_or_methods": [
+        "Command registry: each 'sim command' is a declared tool with a schema, callable from CLI, Telegram or voice through the same path (dispatch.py's 2,234 lines become data plus small handlers)",
+        "Persistent conversations: a session_id per (person, channel) that survives lines and restarts, with a transcript projection and compaction, replacing the throwaway session per typed line",
+        "HTTP: bind 127.0.0.1 by default, require SIM_API_TOKEN for anything but the LAN TV page; WhatsApp/Telegram webhooks verified as today",
+        "TV and Cast as output devices registered in the world state (area, capabilities) so Initiative can choose them"
+       ],
+       "interfaces": "Publishes percept.text.received (person-resolved). Consumes turn.completed, initiative deliveries. Admin reads Ledger projections and proposes control actions through Guardian."
+      },
+      {
+       "name": "Guardian (physical tier on its own axis)",
+       "from": "keep simorgh/guardian/; add rules from home-automation-design.md section 7 plus person and presence rules; split config",
+       "responsibility": "Unchanged as the sole approver. Adds a physical-action axis whose posture, auto-approve setting and rules are separate from the code-change axis.",
+       "key_algorithms_or_methods": [
+        "HomeRule: for home_call, cam_*, ring_*, media/cast and any tool tagged physical, recompute classify_call from the proposal's args (never trust proposal.reversibility), apply CLIMATE_HARD_LIMITS, ALWAYS_HUMAN_SERVICES, alarm state from the world state, per-entity rate limits (no more than N toggles per minute), and 'nobody home => no unlock, no disarm'",
+        "PersonRule: requester person_id and role from the proposal against the People permission matrix; unknown or child requesting human-class -> deny with a spoken reason; adult requesting human-class -> escalate to the owner's phone with a one-tap approve that mints the token",
+        "PresenceRule: a human-class approval by voice requires the approving person to be present (belief > 0.8) and speaker-verified; otherwise the phone path",
+        "Config: [guardian.physical] auto_approve = false, irreversible_requires_human = true, independent of [guardian] used by sim.sh's SIMORGH_GUARDIAN_AUTO_APPROVE; tightening automatic (a denied unlock attempt raises posture for an hour), loosening only by the owner"
+       ],
+       "interfaces": "Same topics; Proposal gains requester{person_id, role, channel, verified} and physical{service, entity_id, area} fields in contracts/messages/action.py."
+      },
+      {
+       "name": "Execution home actuation (kept, narrowed)",
+       "from": "keep simorgh/execution/home/, media/, energy/; remove watchers and vision (to Perception); add automation and scene tools",
+       "responsibility": "Do exactly what was approved against HA and the media devices, and report what the house actually did.",
+       "key_algorithms_or_methods": [
+        "home_call unchanged (before/after snapshot, undo table); add home_scene_apply and home_automation_create/enable/disable (all human class; YAML rendered from a Sim routine proposal) so learnt routines run inside HA",
+        "Registry seeded from HA's area/device registry rather than name fuzzing alone; ambiguity still refused",
+        "Camera actuation (siren, PTZ, lights) stays; streaming to the TV moves to go2rtc/Frigate URLs when adopted",
+        "Workspace retention: snapshots and HLS bounded by age and size; clips belong to the NVR"
+       ],
+       "interfaces": "Unchanged action.approved -> action.result; new tool schemas registered as native tool definitions."
+      },
+      {
+       "name": "Routine Learning (in Learning)",
+       "from": "new module simorgh/learning/routines.py; reads HA history via Perception's state projection; writes procedural memory",
+       "responsibility": "Find recurring household patterns and per-person preferences, propose them as suggestions, and hand a confirmed one to HA as an automation.",
+       "key_algorithms_or_methods": [
+        "Per (entity, action) time-of-day x weekday histograms with kernel smoothing; a routine candidate when a mode has support >= 4 weeks and concentration >= 0.6 of occurrences within a 30-minute window",
+        "Episode mining: co-occurrences within a 10-minute window across entities and presence changes (arrive_home -> hallway light + thermostat) with minimum support and confidence; person-conditioned when presence attribution is confident",
+        "Anomaly flag: an expected routine that did not happen (lights still on past the learnt window with someone_asleep) becomes an Initiative candidate of class event_fyi",
+        "Suggestion lifecycle in the Ledger: proposed -> shown -> accepted|declined|snoozed; declined twice is never proposed again; accepted -> home_automation_create (human class) with the person's confirmation as the approval"
+       ],
+       "interfaces": "Consumes home:state projection and presence history on system.tick.sleep. Publishes learn.routine.proposed to Initiative, memory.store{kind: procedural}. Proposes actions only through Guardian."
+      },
+      {
+       "name": "Memory (tiered, per person)",
+       "from": "keep simorgh/memory/; replace the default embedder and add namespaces",
+       "responsibility": "Working transcript per conversation, episodic per person, semantic facts about people/places/devices, procedural routines and skills; retrieval budgeted in tokens.",
+       "key_algorithms_or_methods": [
+        "Real sentence embeddings (the existing sentence-transformers adapter, warmed at boot in a thread so the 24.9 s first call never lands on a turn) with an on-disk vector index; hybrid score = lexical BM25 + cosine + recency + confidence",
+        "Namespaces: person:<id> tag on every channel's turns (not only voice), household-shared facts explicit; recall filters by the requester and by role (a child's diary lines never surface to a guest)",
+        "Retrieval budget in tokens with a hard floor that always includes the last K working turns; the 0.25 s race replaced by an index that answers in tens of ms",
+        "Consolidation on sleep writes people/place/device facts to semantic memory and routines to procedural memory"
+       ],
+       "interfaces": "Unchanged memory.retrieve/store; filters gain person_id and role."
+      },
+      {
+       "name": "Cognition (native tools, lanes)",
+       "from": "keep simorgh/cognition/; providers implement tools=; add a lane router",
+       "responsibility": "Native structured tool calls on every provider that supports them, the marker parser kept only as the floor; a fast lane for acknowledgements, intent classification and addressee scoring; the main lane for reasoning; a vision lane for percepts.",
+       "key_algorithms_or_methods": [
+        "Tool schemas generated from Execution's registered tools (already JSON-described) and passed natively; parallel tool calls allowed for read-only groups; the regex police in orchestration/session.py retired one by one as each incident class becomes impossible",
+        "Lane routing by purpose: ack/intent/addressee -> small fast model (local or cheapest cloud) with a 400 ms budget; chat/draft -> primary; vision -> a multimodal provider; each lane with its own rolling budget",
+        "Streaming completion surfaced on the bus (cognition.think.partial) so Voice can start speaking at the first sentence"
+       ],
+       "interfaces": "cognition.think gains stream=true and lane; replies carry structured tool_calls."
+      }
+     ],
+     "merges": [
+      "curiosity/sharing.py + persona/sharing.py + execution/vision.py announce step + reminder delivery -> Initiative (one policy for all unprompted speech)",
+      "contracts/household.py + voice SpeakerBook identities + Telegram/WhatsApp allow-lists + persona/user_model.py -> People model (one person_id across channels)",
+      "voice/session.py room/bystander/identity regexes + scaffolds.who_is_here -> Attention and Dialogue Policy (cross-channel)",
+      "execution/vision.py + cam_watch/ring_watch loops + the designed HA bridge -> Perception",
+      "voice/session.py _room deque + contracts/places.py -> Home World State facet",
+      "interface CLI/TUI + telegram + whatsapp + WS chat + TV page -> Channels; interface dashboard/dashfeeds/vitals/benchmark views -> Admin plane; dispatch.py -> command registry of declared tools"
+     ],
+     "additions": [
+      "simorgh/perception/ with the HA websocket bridge (percept.home.state_changed) and detection percepts",
+      "worldmodel facets: home (entity/area/state projection), presence (per-person per-area belief with decay), situation facts",
+      "contracts/people.py schema + people_* tools (link identity, set role, forget) + requester fields on action.proposed",
+      "Guardian HomeRule/PersonRule/PresenceRule and a separate [guardian.physical] posture and auto-approve setting",
+      "Initiative policy with interruption cost, presence-aware channel choice, class thresholds, and every delivery as a guarded action",
+      "Routine miner in Learning and home_automation_create/enable/disable tools (human class)",
+      "Streaming path: cognition.think.partial, sentence-chunked TTS, streaming STT as primary, fast lane for acks",
+      "Native tool calling in every provider adapter; tool schemas generated from the registry",
+      "Real embedding index with per-person namespaces; persistent per-(person, channel) conversations with compaction",
+      "Labelled ground-truth streams (addressee, speaker, presence corrections from the phone) as the evaluation sets for the household handles",
+      "Frigate/go2rtc adoption for cameras (design section 1) with Sim consuming MQTT/HA events; workspace retention policy"
+     ],
+     "deletions_or_freezes": [
+      "Freeze the marker protocol (cognition/parser.py, orchestration/tools.py marker maps) as the floor only; stop adding marker hints",
+      "Retire the regex police in orchestration/session.py (invented_markers, unhonoured_marker, _transcript_echo, claimed_*) one per incident class as native tool calling and the Initiative/People model make each impossible; keep the ledger record of why each existed",
+      "Delete the ffmpeg->HLS relay and on-disk camera event JSON once Frigate/go2rtc serves streams and events; bound workspace/cameras",
+      "Remove the single SIMORGH_GUARDIAN_AUTO_APPROVE from covering physical tools; it may keep covering code",
+      "Drop the throwaway session-per-typed-line in interface/service.py _handle_chat once persistent conversations exist",
+      "Freeze new features in voice/session.py until room memory, bystander and identity regexes have moved out; the file is the home of every per-turn-fact-in-session-state bug",
+      "Retire src/ (v1) from the tree; it is a 16k-line attractor for coding agents' searches"
+     ]
+    },
+    "capability_programs": [
+     {
+      "capability": "Reasoning (for a household: situated reasoning over who, where, when, and what the house is doing)",
+      "current_state": "The model reasons from persona + self summary + a memory block (hashed bag-of-words, silently dropped past 0.25 s) + the last 16 spoken lines of one microphone + a 60-tool marker list; no house state, no presence, no structured addressee; tool calls parsed from prose with 8 regex guards; one action per step; chat sessions are throwaway.",
+      "method": "Give the model the situation as data, not prose: a compact 'house block' (areas with notable states, presence distribution, situation facts, time and quiet-hours flag) and a 'dialogue block' (who is speaking with what confidence, addressee label, open thread with this person, pending question) assembled by Orchestration from world.env.query{home, presence} and dialogue.state; native tool calling with schemas generated from the registry so a spoken command is one structured call; lane routing (fast model for ack/intent/addressee, primary for reasoning, vision for frames); a verify step for physical actions that reads home_call's before/after snapshot and says what changed. Reasoning quality then comes from the frontier model plus grounded context, which is the pattern that works in 2026: structured tool use, context management, critic loops on effects.",
+      "how_to_measure": "A household eval set of 200 spoken/typed requests with labelled correct tool call and correct addressee (built from the ledger's voice:turns and corrected from the phone): tool-call exact-match rate, wrong-entity actuation rate (must be 0), clarification-when-ambiguous rate, and answer correctness on 'who/where/what is on' questions against the world state. Track per model in simorgh/benchmark alongside GAIA/BFCL.",
+      "first_increment": "Implement tools= natively in cognition/providers/together.py and claude_code.py for the VOICE_CHAT profile only; generate schemas from Execution's registry; add the house block from a stub 'home' facet fed by a manual HA state dump; run the 200-case set before and after. Two weeks."
+     },
+     {
+      "capability": "Long tasks (household horizon: hours to weeks, e.g. 'watch the driveway tonight', 'keep the house at 21 while Soodeh is home', 'learn when we go to bed')",
+      "current_state": "Long work exists only as code tasks with step budgets, leases and worktrees; a spoken turn is 6 steps; reminders are durable one-shots; there is no standing intent, no trigger engine (designed, unbuilt), no checkpointed monitors; a 'watch' is a tool that runs until the process dies.",
+      "method": "Standing intents as Ledger-backed objects (design section 4's rule shape: trigger, conditions, action, expiry, owner person, class) evaluated by a small engine on percepts and situation changes, never by a model in the loop per event; each firing is a normal action.proposed with the intent as requester context; the model is used to compile a spoken request into an intent (with a read-back confirmation) and to summarise outcomes, not to poll. Long-horizon checkpointing: an intent's state (last fired, count, suppressed reasons) is a projection rebuilt on restart (Flow 7). Hard safety intents are never Sim's: they are installed into HA as automations through the human-class tool. Sub-tasks with isolated contexts (delegate exists) handle the research half of a long household job.",
+      "how_to_measure": "Intent survival across restart (100%), firing latency from percept to action.proposed (p95 < 2 s), false firings per week on the labelled situation stream, and the fraction of standing intents that expire or are cancelled by the owner as 'annoying' (target < 10%). Ledger streams intent:<id> make all four countable.",
+      "first_increment": "Build the intent object and engine over the existing schedule stream plus percept.home.state_changed, with three intents: 'tell me when someone is at the front door after 22:00', 'lights off in the kitchen when nobody has been there for 20 minutes', 'remind Aran at 20:30 on school nights'; all firings through Guardian; two weeks after the HA bridge exists."
+     },
+     {
+      "capability": "Environment interaction (Home Assistant as the hub, cameras and events as perception, actuation gated by people and presence)",
+      "current_state": "Five home_* tools over HA REST (HA not configured), Reolink/Ring tools with bespoke watchers, ffmpeg HLS relays, Cast/Android TV tools; classify_call exists but Guardian does not recompute it; no HA event ingestion; no presence; cameras described whole-scene by a vision model.",
+      "method": "Perception subsystem with an HA websocket bridge (state_changed -> percepts) and a full-state resync; Frigate/go2rtc for detection and streams with Sim consuming tracked-object events; a home world state projection with presence belief fusion (speaker id, device trackers, motion, detections, decay); Guardian HomeRule/PersonRule/PresenceRule on a separate physical axis with its own auto-approve default false; home_call unchanged in shape (ambiguity refused, before/after snapshot, undo); automation create/enable/disable as human-class tools so routines run inside HA; registry seeded from HA's area/device registry. Every physical effect remains proposal -> approval -> effect.",
+      "how_to_measure": "Percept lag from HA state change to projection (p95 < 500 ms on LAN); presence accuracy against a one-week diary the family corrects from the phone (per-person area accuracy > 85%, unknown reported rather than wrong); actuation correctness on the eval set (wrong entity 0, refused-ambiguous rate); human-class attempts that reached Execution without a person's approval (must be 0, with a self-check drill like the forged-token one); camera announcements judged 'described the event, not the scene' > 90%.",
+      "first_increment": "Install HA on a separate box per the design, configure HOME_ASSISTANT_URL/TOKEN, add the Guardian HomeRule that imports classify_call and recomputes from args, add [guardian.physical] with auto_approve=false, and add a kernel self-check drill that proposes lock.unlock with reversibility='reversible' and asserts it is escalated. One week; it closes the most serious gap before anything else grows."
+     },
+     {
+      "capability": "User interaction (turn taking, barge-in, latency, several people, when to speak unprompted, when to ask)",
+      "current_state": "Solid turn manager and barge-in gate; 4-17 s spoken responses; addressee and identity by regex inside voice/session.py; no per-person conversation across channels; proactive speech from four uncoordinated sources; bystander suppression by exchange windows; children handled by prompt prose; no labelled data for any of it.",
+      "method": "Latency: streaming STT primary, LLM token streaming into sentence-boundary TTS, fast-lane acknowledgements, native tool calls; target first audio p50 <= 1.2 s, p95 <= 2.5 s from end of speech for tool-free turns. Turn taking: keep the state machine, add a HOLD state for initiative and per-device sessions. Addressee: a scored classifier over name mention, question shape, exchange continuity, pending question, with a fast-model tie-break; below threshold means silence. Identity: People model with speaker verification scores and step-up on the phone for human-class requests. Proactivity: Initiative policy with interruption cost from presence/activity/time, presence-aware channel choice, class thresholds, daily caps, every delivery a guarded action. Asking: ask only when the answer changes an actuation or the addressee is mid-band on a command; otherwise act or stay quiet. Children: role tier limits tools and initiative classes, not just tone.",
+      "how_to_measure": "From voice:turns and the new labelled streams: first-audio p50/p95 per turn class; addressee precision/recall (target > 0.9/0.85) on a 500-line labelled set including asides and cross-talk; speaker misattribution rate (< 2%, unknown allowed); false-interruption rate from barge-in (crow-and-TV set); unprompted utterances per day per person and the fraction the family marks unwanted (< 10%); clarification questions per actuation request (bounded, not zero).",
+      "first_increment": "Wire cognition.think.partial -> planner -> StreamingSynthesiser so Sim speaks the first sentence while the model is still writing, and make sherpa streaming the primary STT with whisper as the rescoring lane; measure first_audio before and after on the same 50 spoken turns. Two weeks; it is the change the family notices most."
+     },
+     {
+      "capability": "Self-improvement (for a household: learning routines, preferences and identities safely, plus the existing code-level path)",
+      "current_state": "Code self-patching works (worktree, gate, rollback); competence table per task type; curiosity explores the codebase; persona learns two regex facets; the speaker book refines voices under strict rules; nothing learns from the house; the self model's capabilities['tools'] is never written; reflection observes but does not act.",
+      "method": "Three learning loops with different gates. (1) Routine mining from HA history and presence (time-of-day x weekday histograms, windowed episode mining, person-conditioned preferences) producing suggestions with a proposed -> shown -> accepted/declined lifecycle; accepted routines become HA automations through a human-class tool, so learning changes the house only with a person's yes and runs without Sim afterwards. (2) Identity and preference refinement from confirmed events (speaker takes from verified solo turns as today; brightness/temperature/volume estimates from confirmed home_call results; corrections from the phone as labelled data). (3) Code self-patching as today, but driven by the household handles: an eval-driven loop where a regression in addressee precision or first-audio p95 opens a patch task with the failing cases attached. Reflection's findings feed the Self Model's competence per household task type (actuation, identification, announcement) so Initiative and Guardian posture can read 'I misidentify voices in the car'. Loosening any gate stays human-only.",
+      "how_to_measure": "Routine suggestions accepted / shown (target > 40% after a month), routines later disabled by the owner (< 15%); preference estimate error on held-out actions; speaker-book precision over time; the household eval set's scores per release (no metric may drop across a bless); number of learning-driven changes that reached HA without a person's approval (0).",
+      "first_increment": "After four weeks of HA history exists: the histogram miner over light/switch/climate events with a weekly digest of at most three suggestions delivered through Initiative to the owner only; accepted ones rendered as HA automation YAML and installed via the human-class tool. Three weeks including the tool."
+     }
+    ],
+    "migration_path": [
+     {
+      "stage": "0. Close the physical-safety gap and stand up the hub",
+      "weeks": 1,
+      "does": "Install Home Assistant on a separate box (design section 1), configure HOME_ASSISTANT_URL/TOKEN; add Guardian HomeRule importing contracts/home/policy.classify_call and recomputing from proposal args; add [guardian.physical] posture with auto_approve=false and irreversible_requires_human=true, separate from the code axis and from sim.sh's SIMORGH_GUARDIAN_AUTO_APPROVE; add a kernel self-check drill (mislabelled lock.unlock must be escalated); add requester{person_id, role, channel, verified} to action.proposed with 'unknown' as the default.",
+      "unlocks": "Every later stage can add physical actuation without widening risk; the design's core decision becomes real.",
+      "risk": "Low. Purely additive; the only behaviour change is that house actions stop being auto-approved, which the policy docstring already says is right."
+     },
+     {
+      "stage": "1. People model and person-resolved channels",
+      "weeks": 2,
+      "does": "contracts/people.py (person_id, linked identities, role tier, permission matrix, memory namespace) with a store in World Model; channel adapters resolve sender -> person_id (Telegram/WhatsApp ids, CLI = owner, voice = speaker book match with score); Guardian PersonRule over the matrix; memory tags person:<id> on every channel; scaffolds read role and relation from the model instead of the frozen tuple.",
+      "unlocks": "Per-person permissions (a child cannot trigger the siren), per-person memory across channels, step-up verification later.",
+      "risk": "Medium: identity linking mistakes are the new failure class; keep 'unknown' as the default and make every link an owner action through Guardian."
+     },
+     {
+      "stage": "2. Perception subsystem and Home World State",
+      "weeks": 3,
+      "does": "New simorgh/perception/ with the HA websocket bridge (percept.home.state_changed, full resync), move execution/vision.py and the cam/ring watchers into it as detection percepts; World Model gains the home facet (entity/area/state projection) and presence facet (belief fusion with decay) and situation facts; Orchestration renders a house block into every prompt; voice/session.py's _room moves to the room transcript ring in the world state.",
+      "unlocks": "Situated reasoning, presence-aware anything, the trigger engine, routine mining. Also the first honest answer to 'who is home'.",
+      "risk": "Medium: presence fusion over-claims if evidence weights are guessed; ship it reporting distributions and measure against a diary before any rule depends on it."
+     },
+     {
+      "stage": "3. Streaming voice path and native tool calls for the spoken profile",
+      "weeks": 3,
+      "does": "cognition.think.partial streaming; planner splits at sentence boundaries into StreamingSynthesiser; sherpa streaming STT primary with whisper rescoring; fast lane for acknowledgements; tools= implemented natively in Together/Claude/Gemini adapters for VOICE_CHAT with schemas generated from the registry; marker parser retained as the floor.",
+      "unlocks": "First-audio p50 near 1 s; the spoken command becomes one structured call; two or three regex guards can be retired immediately.",
+      "risk": "Medium-high on regressions in echo/barge-in (earlier audio starts while the mic is open) and provider differences in tool-call schemas; gate with the existing voice bench and the 50-turn latency set."
+     },
+     {
+      "stage": "4. Attention and Dialogue Policy extracted, persistent conversations",
+      "weeks": 2,
+      "does": "Move addressee/bystander/exchange-window/who-said logic out of voice/session.py into a cross-channel dialogue module producing {addressee, confidence} per percept and a per-(person, channel) conversation with a transcript projection and compaction; replace the session-per-typed-line in interface with the same conversation object; add the phone-side correction commands that build the labelled set.",
+      "unlocks": "Measurable addressee precision; the same conversation continues from kitchen to Telegram; voice/session.py drops to audio plumbing.",
+      "risk": "Medium: it touches the file with the most live-caught fixes; port each regex as a test case in the labelled set before deleting it."
+     },
+     {
+      "stage": "5. Initiative policy",
+      "weeks": 2,
+      "does": "One module for all unprompted speech: merge curiosity/persona sharing, camera announcements and reminder delivery; utility vs interruption cost from the world state; presence-aware channel choice; per-person DND and class caps; every delivery as action.proposed{reversibility: attention}; HOLD state in the turn manager.",
+      "unlocks": "Sim can be proactive without being a nuisance, and 'too chatty' becomes a Guardian posture the owner can set.",
+      "risk": "Low-medium: the merge changes when existing shares arrive; measure unwanted-utterance rate from the phone corrections for two weeks before raising any class threshold."
+     },
+     {
+      "stage": "6. Standing intents and routine learning",
+      "weeks": 3,
+      "does": "Intent objects and a small engine over percepts and situation changes (design section 4 rule shape) with Ledger projections and restart survival; the routine miner (histograms, episode mining, person-conditioned preferences) producing a weekly digest of at most three suggestions; home_automation_create/enable/disable as human-class tools rendering HA YAML; competence per household task type into the Self Model.",
+      "unlocks": "Long-horizon household work and the first learning that compounds outside code; hard safety stays in HA.",
+      "risk": "Medium: needs ~4 weeks of HA history first (start collecting at stage 2); a rule engine that fires on noisy presence is the annoyance risk, so intents require situation facts with confidence thresholds."
+     },
+     {
+      "stage": "7. Interface split, cameras on Frigate, memory index, cleanup",
+      "weeks": 3,
+      "does": "Split interface into channels/ and admin/ with a declared command registry; bind HTTP to localhost with token by default; adopt Frigate/go2rtc for detection and streams, delete the ffmpeg HLS relay and bound workspace/cameras; switch memory to the real embedding index warmed at boot with per-person namespaces and a token budget; retire src/ and the remaining regex police whose incident classes are now impossible.",
+      "unlocks": "Two smaller, separately testable surfaces; camera events that name tracked objects; memory that does not vanish under load.",
+      "risk": "Low-medium: mostly moves; the Frigate adoption needs the HA box to have the compute (a Coral or CPU headroom)."
+     }
+    ],
+    "agi_honesty": "Plainly: this architecture is a harness around a frontier model, and its reasoning ceiling is that model's. It can become a highly competent, trustworthy, continuously improving household agent, and 'more general' has a concrete meaning here that is worth investing in: (1) it handles requests nobody wrote a feature for by composing a large, honest tool surface over one device hub with a world state it can actually read; (2) it treats a family as several people with their own memory, permissions and preferences rather than one user; (3) it acts on its own initiative with judgment about presence, time and interruption; (4) it learns the household's routines and installs them where they run without it; (5) it improves its own code against measured household handles with a gate and rollback. Those five compound: every new HA integration, every corrected identification, every accepted routine and every labelled turn makes the next request easier. What it cannot become: a self-contained general intelligence. There is no weight-level learning; 'self-improvement' is memory, skills, routines and audited code; perception is limited to microphones, cameras and hub state; embodiment is limited to what HA can actuate; and its judgment on novel situations is bounded by the cloud model's, filtered through a context this architecture assembles. The regex police, prompt prose and marker protocol do not compound and should not be mistaken for intelligence work. If 'AGI' is used at all for this project it should stay as the blueprint's own stance (01 section 2.1): a queryable competence and calibration per household task type in the Ledger, never a claim. A useful honest target for 2027 is 'the most trustworthy agent in this house': zero unapproved physical effects, sub-second first audio, presence and addressee accuracy the family stops noticing, and routines it learnt that still run when it is switched off.",
+    "biggest_risk_of_this_proposal": "That the house layer grows before the identity and physical-safety layers do. A presence-aware, proactive agent with today's identity model (three unjoined per-channel identities, no requester on proposals, Guardian trusting the proposer's reversibility label, one auto-approve knob covering doors and docstrings, speaker id that once filed the creator under Aran) is a safety problem, not a feature: a misidentified voice plus 'trusted' mode is a child unlocking the front door. So stage 0 and stage 1 are prerequisites, not options, and the whole program depends on Home Assistant actually being installed, which the design has said for nine days and nobody has done. The second risk is the same one the codebase has already met twelve times: designed slots with one side built (the home subsystem, the trigger engine, the HomeRule, the People model) left as unconnected wires because coding agents build the half that is easy to unit test. The mitigation is the project's own lesson: every stage ends with one watched live run of the primary interface (a spoken turn in the kitchen, a Telegram message from outside) and a number read from the Ledger, and a stage that cannot show its handle moving does not get blessed.",
+    "key": "embodied"
+   }
+  ]
+```
+
+## What the agent did (tool trail)
+
+| # | Tool | What | Result (first 160 chars) |
+|---|---|---|---|
+| 1 | Bash | List subsystem packages and size the required files | __init__.py __main__.py __pycache__ benchmark big.py bus cognition contracts curiosity execution guardian interface kernel learning ledger memory orchestration  |
+| 2 | Bash | Read the module map (first part) | # Simorgh — Module Map and System Blocks **What this is.** One picture of every major building block, what each one owns, and how they interact — written so a s |
+| 3 | Bash | Read the module map (second part) |  SPK --> SESS SESS --> ASK --> PLAN --> TTS --> PB --> OUT PB -.->\|"what was played"\| VAD classDef s fill:#e8f0fe,stroke:#4b6cb7,color:#111 class MIC,VAD,TURNS, |
+| 4 | Bash | Read the vision and principles blueprint | # 01 — Vision and Principles > Part of the Simorgh v2 blueprint. Read `00-README.md` first for how this > set fits together. This file states *what we are build |
+| 5 | Bash | Read the system architecture blueprint | <persisted-output> Output too large (32.5KB). Full output saved to: /Users/saeed/.claude/projects/-Users-saeed-ws-Simorgh/488b3cca-edac-4c83-98e1-f1e7db34bf14/t |
+| 6 | Bash | Skim architecture blueprint headings and the flows section | 11:## 1. The system in one picture 48:## 2. The sixteen subsystems 79:## 3. Structural safety: the action path 120:## 4. Package layout and module rules 188:##  |
+| 7 | Bash | Locate _run, _think, regex police and reground hooks in session.py | 8:artifact assembly, no delegation (fresh/fork), no steer injection, no 9:reground-every-N-steps restatement. See the package README. 168:def _transcript_echo(t |
+| 8 | Bash | Read orchestration/context.py in full | """ContextAssembler (16 section 5): gathers the memory block and the session transcript for one `cognition.think` call. The persona voice and the self summary a |
+| 9 | Bash | Read cognition/router.py in full | """Provider failover and selection (docs/blueprint/subsystems/04- cognition.md section 5). Ported from v1 `CognitionRouter`'s failover shape: try each candidate |
+| 10 | Bash | Read the marker parser header and locate the multi-arg hacks | """Output parsing: markers, edit blocks, non-answer detection (docs/ blueprint/subsystems/04-cognition.md section 5, "Output parsing"). Ported directly from v1  |
+| 11 | Bash | Read session._run (first half) |  async def _run(self, session: Session, *, user_text: str = "") -> Outcome: await self._append(session, topics.TASK_STARTED, {"task_id": session.task_id, "worke |
+| 12 | Bash | Read session._think and _tier |  async def _think(self, session: Session, user_text: str, *, last_step: bool, no_tools: bool = False) -> Message \| None: steps_left = session.budget.steps_left  |
+| 13 | Bash | Check orchestration config defaults for reground, delegation, escalation | 11:- `workers` -- genuinely applies in `single` mode. One *process* is not 12: one *Worker*: `Service.start()` loops `range(config.workers)` and 13: starts that |
+| 14 | Bash | Verify ProviderResponse.tool_calls and Tool protocol fields in contracts | 141:class ProviderResponse: 149: cached_input_tokens: int = 0 151: tool_calls: tuple[dict, ...] = () 195:class Tool(Protocol): 197: description: str 198: read_o |
+| 15 | Bash | Verify provider adapters ignore tools= and that tool_calls is never filled by providers | 117: self, messages: list[dict], *, tools: list[dict] \| None, max_tokens: int, timeout: float \| None = None, --- simorgh/cognition/providers/claude_code.py:76:  |
+| 16 | Bash | Verify tool.registered payload fields and per-line session minting | 16:also best-effort enriches the tool's `description` via a 19:"discoverable by description" half of the same roadmap item. A second, 107: produces = (topics.AC |
+| 17 | Bash | Verify Guardian does not recompute classify_call and Proposal has no requester field | --- guardian imports of classify_call above (empty = none) 20:class Proposal: 21- action_id: str 22- tool: str 23- args: dict 24- scope: dict 25- reversibility: |
+| 18 | Bash | Check whether tool.registered carries args_schema and how MCP schemas are flattened |  continue self._registry[tool.name] = tool await ctx.bus.publish(Message.new( topics.TOOL_REGISTERED, source="execution", payload={"name": tool.name, "version": |
+| 19 | Bash | Read memory/store.py retrieve and locate WorkingMemory and contradictions | 4:lexical+embedding similarity times confidence plus a recency term, 26:from .embed import cosine_similarity, embed_text 27:from .embedders import Embedder, com |
+| 20 | Bash | Check memory package layout, WorkingMemory consumers, recall index and embedder notes | __init__.py __pycache__ api.py config.py consolidation.py embed.py embedders.py recall.py service.py store.py --- (eval):1: no matches found: --include=*.py --- |
+| 21 | Bash | Read selfmodel.py top, and verify capabilities tools and compute_gaps claims | """The Self Model. Identity is real, loaded and hashed from `docs/SOUL.md`. As of Phase 4 Wave 2 the other sections (competence, limitations, change_history, ca |
+| 22 | Bash | Read Guardian rule pipeline, ReversibilityRule and the auto-approve switch | 220: # "reversible", and the guarded posture auto-allowed it. An observer 235:class PausedRule: 245:class ModeRule: 254: if ctx.posture.level == "locked" and pr |
+| 23 | Bash | Read learning/service.py, verify PatchPipeline unreachable, competence statistics and strategy.suggest callers | """`Service`: wires `OutcomeRecorder`, `CompetenceTable`, strategy suggestion, and the patch/skill pipeline runner into the real Bus/Ledger (spec section 5). Sc |
+| 24 | Bash | Read reflection/service.py top and check distillation.py | """Reflection as a `Subsystem` (Layer 3, registry.py). Observer only -- never emits `action.proposed`, never writes `self:model` directly (only `self.observatio |
+| 25 | Bash | Read curiosity/service.py top and check the gap-drive constant claim | """`Service`: wires drives, sampling, idea/project proposal, interests, and sharing into the real `Subsystem` protocol (spec section 5). One exploration tick at |
+| 26 | Bash | Read voice/session.py top and verify the room deque and regex claims | """The spoken conversation: microphone frames in, speech out, with the floor changing hands the way it does between people. frames -> FrameVad -> TurnManager -> |
+| 27 | Bash | Verify existence of ledger backends, contracts modules, design docs, tools, vision module, decomposer roots and user_model regexes | docs/plans/: agent-skills-design.md data-toolset-design.md domains handover-2026-09-09-domains.md home-automation-design.md long-run-context-design.md network-d |
+| 28 | Bash | Verify findings docs, benchmark noise claim, project-completion claim, revision loop, sim_command tool and skills format | 2026-09-15-benchmarks-long-runs-models-skills.md 2026-09-16-channels-and-the-expressive-engine.md 2026-09-16-voice-cameras-task-quality.md 2026-09-17-the-thresh |
+| 29 | Bash | Find where the Guardian auto-approve switch actually lives | simorgh/execution/security/tools.py:192: raw_env = (self._env.get("SIMORGH_GUARDIAN_AUTO_APPROVE") or "").strip() simorgh/execution/security/tools.py:195: env_o |
+| 30 | Bash | Check whether strategy.suggest and WorkingMemory have any callers | simorgh/learning/strategy.py:9:`CompetenceTable.suggest()` only ever ranks *per-strategy* stats simorgh/learning/strategy.py:32: scores = competence.suggest( -- |
+| 31 | Bash | Verify home policy docstring, camera Guardian note, home_call undo, and profile tool counts | 35:ALWAYS_HUMAN_SERVICES: frozenset[str] = frozenset({ 58:CLIMATE_HARD_LIMITS: tuple[float, float] = (10.0, 32.0) 65:def classify_call(service: str, entity_id:  |
+| 32 | Bash | List files in verification, orchestration, cognition, bus, kernel, learning, persona and voice engine packages | simorgh/bus/: __init__.py __pycache__ api.py backends client.py config.py enforcement.py factory.py metrics.py policy.py README.md router.py service.py trace.py |
+| 33 | Bash | Verify benchmark noise finding, reviewer finding, simloader gate and trace-per-message claims | 43:- **The answer reviewer was not a net gain on benchmarks.** It rejected 111 correct and 111 wrong answers, and for research profiles it cannot revise (`max_r |
+| 34 | Bash | Verify strong tier route, absence of streaming, assembler RPC timeouts and compaction layers | simorgh/cognition/config.py:48: # "together"` with a different `model` or `reasoning_effort` (a simorgh/cognition/config.py:51: reasoning_effort: str = "" simor |
+| 35 | Bash | Read resume.py, progress_note.py headers and the parallel-read offer | """What a Session inherits from the `task:<id>` stream before it runs. Two different situations look alike from here -- a task whose last worker died mid-run, a |
+| 36 | Bash | Read guardian/rules.py header and protected subjects | """The pipeline's rules, in the fixed order 09-guardian.md section 5.1 specifies. Each rule returns `Decision(kind=allow\|deny\|escalate\|abstain, ...)`; `abstain` |
+| 37 | Bash | Read the home-automation design header and check whether the designed home subsystem exists | # Sim as the brain of the house Design pass, 2026-09-09 (Fable). Implementation is handed to Opus; this document is written so that nothing below needs a design |
+| 38 | Bash | Check auto-approve config default and the live toml settings for orchestration, cognition, guardian and memory | # Defaults the Kernel applies to a section before the subsystem sees it # (`kernel/service.py`), so the probe compares against the baseline that # will really b |
+| 39 | Bash | Check what feeds WorkingMemory, strategy.suggest publishers, contradiction penalty and the untraceable check |  async def _on_store(self, message: Message) -> None: payload = message.payload if payload["kind"] == "working": # working memory is a session-scoped rolling wi |
+| 40 | Bash | Check the MCP client's shape in execution/mcp.py | """MCP (Model Context Protocol) client -- a human-configured, static list of external tool servers Execution can dispatch to, alongside its own builtin tools (0 |
+| 41 | Bash | Verify sqlite ledger CAS, trace retention and trace sampling | 1:"""SQLite backend (02-ledger section 4.3): one WAL-mode database, the 4:busy timeout instead of an advisory file lock, and the `(stream, seq)` 31: stream TEXT |
+| 42 | Bash | Verify percept topic breadth, world model facets and vision's in-Execution announce path | 48:PERCEPT_TEXT_RECEIVED = "percept.text.received" 49:PERCEPT_FILE_CHANGED = "percept.file.changed" 50:PERCEPT_WEB_FETCHED = "percept.web.fetched" 51:PERCEPT_TI |
+| 43 | Bash | Check how offered tools are rendered into the prompt (names vs descriptions) | 35:# `{kind, markers?}` dict (04 section 5's `OutputSpec`). "tool_calls" is the 37:# doubles as the marker set `_parse_markers` scans for. 38:def _expected_spec |
+| 44 | Bash | List benchmark and verification checks, read trajectory header, check retrospective section and project rollup | simorgh/benchmark/: __init__.py __pycache__ api.py config.py datasets.py README.md runner.py scoring.py service.py store.py swebench.py simorgh/verification/che |
+| 45 | Bash | Verify channel identity handling, scheduler durability, HTTP bind defaults and the addressed heuristic | 29:whoever finds the address. `contracts/channels.allowed()` gates every 30:inbound message and an empty allow-list admits nobody. A stranger is 31:ignored in s |
+| 46 | Bash | Check the 246 incident reference, worker leases, camera watchers, delegate profile and v1 size | simorgh/orchestration/session.py:1005: # edits its own source: it never has -- 246 tool runs, simorgh/orchestration/session.py:1582: # Sim had never once edited |
+| 47 | Bash | Inspect the live config sections and the switches the proposals say are off | -rw-r--r-- 1 saeed staff 670 Sep 18 15:04 /Users/saeed/.simorgh/simorgh.toml 1:[voice] 15:[interface] 18:[execution] 22:[cognition] 24:[cognition.providers] 26: |
+| 48 | Bash | Check whether the tools facet or the Self Model ever records registered tools, and who feeds working memory | 10:class ToolsFacet: 11- name = "tools" 12- 13- def __init__(self) -> None: --- selfmodel tools writer simorgh/worldmodel/service.py:97: "git_state": self._git_ |
+| 49 | Bash | Check voice timeouts, cognition defaults and model, BFCL presence, interface files and the memory embedder default | 137: tts_stall_timeout_s: float = 20.0 216: reply_timeout_s: float = 95.0 --- cognition request_timeout / model simorgh/cognition/config.py:40: model: str = ""  |
+| 50 | Bash | Read the retrospective's testing-strategy section | ## 4. The testing-strategy change (the real lesson) Three gaps let every finding above through a 2,200-test suite: 1. **No seam tests.** Nothing crosses Orchest |
+| 51 | Bash | Read the long-run context design's problem statement | # Long runs: context, delegation and model tiers The creator, 2026-09-15, after the first ten-copy benchmark wave: "what architecture changes do you suggest to  |
+
+## Structured reply
+
+### scores
+
+##### 1. harness
+
+- **key:** harness
+- **fit to reality:** 6
+- **technical soundness:** 8
+- **future alignment:** 9
+- **capability gain:** 9
+- **safety preserved:** 8
+- **best ideas to graft:**
+  - Per-provider capability flag (supports_tools/supports_streaming) with the marker dialect kept as the fallback, and a per-model BFCL + trial-suite gate before flipping the default -- verified: every adapter drops tools=, cognition/service.py passes tools=None, ProviderResponse.tool_calls is never filled, and the live primary is GLM-5.3-Flash whose tool-calling quality is unmeasured.
+  - ToolSpec on tool.registered -- with the correction that today the payload carries description/read_only/reversibility/schema_ref:'' and NOT args_schema, so this is a real wire change, not a rendering change; Tool.args_schema exists in-process on every tool (contracts/protocols.py:195-200) so the serialiser is cheap.
+  - session:<id> ledger stream of typed turns as the unit of persistence for chat, tasks and sub-agents; interface stops minting a uuid per typed line (interface/service.py:943).
+  - Token-pressure compaction with two layers: age old tool results into re-fetchable stubs (recall_result built-in) before the structured progress note; apply to chat too (today reground is non-chat only and off in the live config).
+  - One Stop hook ('final text claims an effect and this turn has no mutating tool_result') plus Verification's trajectory check, replacing the seven regex police -- but only on paths where native tool use is live (see disagreements).
+  - Fixed protected prefix order for prompt caching with per-turn material (memory recall, time, environment) inside the latest user turn.
+  - Task built-in generalising the existing in-process delegate (verified: delegate exists behind config.delegation=False and is never proposed to Guardian) so projects can await in-process children without the workers=1 queue deadlock.
+  - Contracts gain Turn/Block/ToolSpec/Plan/Fact schemas and an Llm protocol; Kernel injects the in-process object in single mode -- acceptable if the bus topic stays for other callers.
+- **weakest point:** Stage 4 (merge orchestration + cognition/{assembler,parser,compaction} into agent/ and llm/ with Kernel-injected in-process protocols) is the second rewrite the proposal itself warns about: the largest diff, the weakest test coverage (the suite asserts shape), a partial retreat from principle 4.2 (messages not calls) that local-multi mode has to re-adapt with bus-backed shims, and it is scheduled before memory, streaming and growth. Two smaller factual slips: it says args_schema already travels on tool.registered (it does not; schema_ref is empty), and it plans to delete the police family after stage 5 while the Claude Code CLI wrapper -- the live #2 failover that Together's day cap silently routes to -- stays a marker-only provider.
+
+##### 2. cognitive
+
+- **key:** cognitive
+- **fit to reality:** 8
+- **technical soundness:** 7
+- **future alignment:** 8
+- **capability gain:** 8
+- **safety preserved:** 8
+- **best ideas to graft:**
+  - Stage 1 'wire what exists' with zero contract changes: compute_gaps from CompetenceTable (verified: returns [] and Curiosity therefore sees the 0.6 constant), capabilities.tools from tool.registered (never written), reground_every_steps=3 with the model's note as the carried note, feed WorkingMemory per (person, channel) (verified: feed path exists in memory/service.py, nothing publishes to it, nothing retrieves kind='working'), purpose->tier map + escalate_from_attempt=1 (verified: _tier and the router order= parameter exist; no [cognition] routes in the live toml).
+  - Fact store with first-class supersession (subject, predicate, object, valid_to, superseded_by, source_refs) replacing memory/store.py::flag_contradictions' symmetric penalty and the 'later lines win' prose header; per-triple untraceable() check at extraction.
+  - Beta posteriors with exponential forgetting per task_type and (task_type, strategy); Thompson sampling replacing the softmax over a constant gap; self summary rendered from posteriors with sample counts.
+  - Checkpoint critic: Verification's trajectory scorer at every progress note against node acceptance criteria; two consecutive 'drifting' verdicts trigger re-planning.
+  - WAITING status with wake conditions (until | event | human) and event-driven project waits, never through the queue (the documented workers=1 deadlock).
+  - A continuity eval built from the ledger's own recorded failures (falcon/sparrow, the birthday correction) and a resume-after-kill trial, as the gate for every later stage.
+  - Speculative recall on percept (STT partial for voice) with a ~1 s budget once it is off the critical path.
+  - Embed at store time in a background thread and persist vectors; hashing as the cold floor.
+- **weakest point:** It schedules native tool use last (stage 6, 'dependent on the tool lens') while its own text concedes a critic cannot trust results that can be echoed as text; so the stage 4 checkpoint critic and the stage 5 policy loop are built on top of the marker protocol and will learn rules that compensate for marker failures. Its policy store lets learned task-type rules be rendered into scaffolds -- a prompt self-modification path -- with the constraint 'rules may only add guidance or restrictions' that nothing can enforce mechanically, gated by eval sets that do not exist yet.
+
+##### 3. systems
+
+- **key:** systems
+- **fit to reality:** 7
+- **technical soundness:** 7
+- **future alignment:** 8
+- **capability gain:** 7
+- **safety preserved:** 9
+- **best ideas to graft:**
+  - evals/ package (benchmark + tools/trial.py + trial_suite.py + observer_kit) as simloader's bless gate, with >=3 repeats and a bootstrap CI before any switch flips -- the 3/21 vs 9/25 identical-settings swing is recorded in docs/findings/2026-09-15.
+  - Explicit safety tiers 0-3 computed from reversibility x scope x origin x blast radius, with tier 3 (external, physical, financial) human-gated in every posture -- this restores the gate that the running irreversible_requires_human=False default (kernel/service.py) collapsed, and subsumes the embodied proposal's HomeRule/PersonRule.
+  - Every Guardian decision (rule, tier, posture) recorded as an attribute on the turn/span so approvals and denials per tier per day are a number, not a grep.
+  - Deadline in the envelope, shrunk per hop; per-stage voice budgets (STT final, first token, first audio) with breaches counted -- today every timeout is a local guard (voice reply_timeout_s=95, tts stall 20 s, chat max 90 s).
+  - (tokens, usd, wall) budgets per attempt instead of the step cap; checkpoint event after every irreversible action; kill-and-resume eval.
+  - ToolResult as summary + blob ref with progressive disclosure instead of the 8,000-char cut.
+  - Trace streams: one root per turn/task with children, sampled per root, and telemetry (metrics:history 114 MB, curiosity:ticks 43 MB, persona:state 17 MB) out of the decision log -- the diagnosis is right even if the sqlite cut-over should not be first.
+  - Competence computed from eval pass rates, not self-reported outcomes.
+- **weakest point:** It leads with a substrate migration (sqlite as the default decision-log backend plus new spans/samples tables) -- the highest blast-radius, least user-visible change in the plan -- before any eval gate exists, under the very suite it says asserts shape and missed every real blocker, on a 1.4 GB live ledger that boots the family's assistant. The record/replay FixtureProvider keyed by prompt hash breaks on every prompt edit, which is exactly what the rest of the plan does continuously.
+
+##### 4. embodied
+
+- **key:** embodied
+- **fit to reality:** 5
+- **technical soundness:** 7
+- **future alignment:** 7
+- **capability gain:** 7
+- **safety preserved:** 9
+- **best ideas to graft:**
+  - Stage 0, verbatim and first: a Guardian HomeRule that imports contracts/home/policy.classify_call and recomputes reversibility from the proposal's args (verified: nothing under simorgh/guardian/ imports it; ReversibilityRule trusts proposal.reversibility), a separate [guardian.physical] posture with auto_approve=false, requester{person_id, role, channel, verified} on action.proposed (verified: Proposal has proposed_by and origin only), and a kernel self-check drill that proposes lock.unlock labelled 'reversible' and asserts escalation.
+  - People model: one person_id joined across voice SpeakerBook, Telegram/WhatsApp allow-lists and CLI, with role tier, permission matrix and memory namespace; 'unknown' as the default and every link an owner action through Guardian.
+  - Initiative as the single path for unprompted speech (curiosity/sharing + persona/sharing + execution/vision.py's announce + reminders), scored against interruption cost, each delivery an action.proposed so 'too chatty' is a posture.
+  - Labelled ground-truth streams corrected from the phone (addressee, speaker, presence) so the household handles become precision/recall.
+  - Every percept carries confidence and source; the prompt renders the confidence, not the bare claim.
+  - Learned routines installed into Home Assistant as automations that run without Sim, through a human-class tool; hard safety never owned by Sim at runtime.
+  - Perception separated from Execution: vision.py today calls cognition.think with images and voice.speak.request from inside Execution (verified), so the hands are also the eyes.
+  - Streaming voice path: cognition partials -> sentence chunker -> the existing StreamingSynthesiser/StreamingPlayer; sherpa_stream.py as the primary STT with whisper rescoring.
+- **weakest point:** Everything downstream of stage 2 depends on Home Assistant being installed on a separate box, which the design has asked for since 2026-09-09 and nobody has done; on top of that it adds four new packages (perception, dialogue, initiative, people) and splits interface into channels/admin -- for one developer, and against the blueprint's own 'not embodiment' non-goal. Presence fusion likelihoods and decay are unspecified; step-up verification hangs on speaker scores that were unusable a week ago; and its reasoning and long-task programs are household-only, leaving the code/research horizons the benchmark unit measures untouched.
+
+
+**overall winner:** harness -- conditional: its stage 0 must absorb the cognitive proposal's stage 1 (config wires, zero contracts) and the embodied proposal's stage 0 (HomeRule recompute + physical posture + requester field), its stage 4 package consolidation is deferred until native tools, streaming and the eval gate have landed, and the regex police stay alive on every marker-only provider path.
+
+### cross cutting disagreements
+
+- WHAT GOES FIRST. Harness: promote the gate then ship schemas; cognitive: wire the existing switches; systems: sqlite + spans telemetry cut-over; embodied: physical safety + install HA. Resolution: week 1 is (a) embodied's safety half (HomeRule recomputing classify_call, [guardian.physical] auto_approve=false, requester on proposals, self-check drill) because it is a day of additive code and it is verified that Guardian never recomputes and the running default auto-approves; (b) cognitive's stage 1 because the live toml has no [orchestration] or [cognition] routes section, so reground/delegation/escalation/tiering are all off and cost only config plus two producer wires; (c) harness/systems stage 0 (trial suite + benchmark as the merge gate with repeats). Systems' substrate cut-over is NOT first: it is the highest-blast-radius, least-visible change and would land under a shape-asserting suite with no eval gate.
+- NATIVE TOOL USE: WHEN AND HOW FAR. Harness/systems put it at stage 1-2 for all providers; cognitive puts it last; embodied does it at stage 3 for VOICE_CHAT only. Harness/systems are right on timing: it is the root of the police family, the multi-arg truncations, the MCP single-property ceiling (mcp_single_arg_key returns None for >1 property) and the parse tax, and every other lens names it as a prerequisite. Cognitive is wrong to defer it behind a critic and a policy loop that need trustworthy tool results. But harness overreaches on deletion: the Claude Code CLI wrapper is text-only and is the live failover Together's day cap routes to, so the marker dialect and at least invented_markers/unhonoured_marker/_transcript_echo must stay on that path until a direct Anthropic API adapter (harness names it) or a tool-capable Ollama model replaces the CLI in the chain; systems' 'keep invented_markers on the fallback' is the right shape, extended to the echo check.
+- BUS RPC vs IN-PROCESS FOR THE LOOP'S BRAIN. Harness collapses orchestration + cognition's assembler/parser/compaction into agent/ with Kernel-injected in-process Llm/MemoryReader/SelfModelReader/PersonaReader protocols; cognitive, systems and embodied keep cognition.think as a bus request. Harness has the better diagnosis (verified: context.py drops the memory block on a 0.25 s timeout as 'the normal case', the assembler drops persona/self on a 2 s timeout, the whole prompt rides the bus as a payload, and a 300 s handler timeout was once the wall budget). But the full package move is the rewrite risk. Resolution: one ContextBuilder inside orchestration (absorbing cognition/assembler.py's block order and context.py's memory block) with an explicit token budget per section, and a contracts-defined Llm protocol injected in single mode exactly as bus/ledger clients are, while the cognition.think topic stays for Planning, Memory consolidation and Verification. No file moves of providers/router/budget until the eval gate exists.
+- MEMORY REBUILD ORDER. All four agree on the target (embedder warmed in a boot thread, persisted vectors, BM25 + dense with rank fusion, facts with supersession, hashing as the floor). Harness schedules it at stage 7, cognitive at stage 2. Cognitive is right: it sits behind unchanged memory.retrieve/store contracts, does not depend on the tool protocol, and it is what the family feels daily (the falcon/sparrow and birthday cases are recorded in context.py). Supersession by data structure replaces the MEMORY_BLOCK_HEADER prose and flag_contradictions' symmetric 0.5 penalty.
+- PERSISTENT CONVERSATION: WHERE THE TRANSCRIPT LIVES. Cognitive feeds the existing in-process WorkingMemory keyed by (person, channel); harness and systems put typed turns on a ledger session:<id>/thread stream; embodied keeps a per-(person, channel) conversation projection. Harness/systems are right for the destination: an in-process window dies on restart, which is exactly the observer's post-restart failure, and resume, replay, evals and compaction all need the same durable data. Cognitive's WorkingMemory wire is the correct one-week first increment and should not become the design.
+- UNIT OF SELF-IMPROVEMENT. All four merge learning + reflection + curiosity and delete the unreachable PatchPipeline (verified: learning/service.py reports UNREACHABLE; draft_candidate is not registered). Harness: skills first plus config/prompt PRs; systems: skills only, competence from evals; cognitive: four policy kinds with task-type rules rendered into scaffolds first; embodied: routines into HA. Systems/harness win: a skill is a file, diffable, Guardian-protectable and A/B-testable on the trial suite; a rule line injected into scaffolds is prompt self-modification whose 'only adds restrictions' promise cannot be checked mechanically, so it waits until per-task-type held-out sets exist and then lands as a committed file in the same protected directory as agent definitions. Cognitive's posteriors, Thompson sampling and compute_gaps wiring are grafted immediately regardless.
+- SAFETY POSTURE FOR PHYSICAL AND EXTERNAL EFFECTS. Systems (tiers 0-3, tier 3 human in every posture) and embodied (HomeRule/PersonRule/PresenceRule, separate physical posture) both restore the human gate; harness and cognitive leave the auto-approve default untouched. Systems/embodied are right and it is cheap: reversibility classes already exist on every tool, classify_call already exists as a pure function, and the exposure today is cam_siren and TV (HA unconfigured), so it must land before any HA token is configured. Systems' tier model is the general form; embodied's requester field is needed by both; harness's Guardian protection of agents/, hooks and the eval gate is the third piece and is compatible.
+- LEDGER COST AND TRACING. Systems: switch the decision log to sqlite and add spans/samples tables; harness and cognitive: per-turn appends, trace streams per session/task, batched fsync for telemetry, keep jsonl. Harness/cognitive first: the trace_id threading is half done (context.py already joins orchestration's requests to the task's stream; ~15 Cognition/Execution call sites remain), retention exists in ledger/compaction.py, and per-type sampling exists in bus/trace.py -- that removes most of the 88k trace streams without changing a backend. Systems' spans table is the right end state and the sqlite backend (verified: (stream, seq) PK, WAL, snapshots, blobs) makes it reachable, but a default-backend switch on a 1.4 GB live ledger is a migration with its own eval, not week 1.
+- STREAMING. Harness, systems and embodied all require provider streaming into Voice's existing StreamingSynthesiser/StreamingPlayer; cognitive omits it. The three are right: first audio is the family-felt latency (4-17 s full response), no provider streams today (verified), and it is independent of the tool protocol, so it belongs in the first quarter alongside native tools rather than after the growth merge.
+- INTERFACE. All agree dispatch.py (2,234 lines) must shrink and that the model should reach operator functions through schemas rather than the sim_command string tunnel; embodied's channels/admin package split and systems' by-domain split are moves that should wait until sessions are persistent and native tools exist, since both change the shape of what the TUI renders.
+- AGI FRAMING. No disagreement: all four say a harness around a frontier model does not become AGI by architecture, that generality is a measured coverage/horizon/continuity number in the ledger (blueprint 01 section 2.1 and section 3 already say this), and that the compounding investments are evals, the transcript/ledger, memory, skills and the safety chokepoint. The judge agrees; the only correction is that three of the four understate how much of the 'reasoning' program is simply choosing a stronger model tier per purpose, which is config today (routes['strong'] exists and is unset).
+

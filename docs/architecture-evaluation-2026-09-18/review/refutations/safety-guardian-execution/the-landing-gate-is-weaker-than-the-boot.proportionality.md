@@ -1,0 +1,86 @@
+# refute:proportionality:The landing gate is weaker than the boot
+
+*Workflow: review · Phase: Refute · Agent id: `a4f642f75bd91e0e8` · Tool calls: 11*
+
+## Task given to the agent
+
+```text
+You are reviewing the ARCHITECTURE of Simorgh, a self-improving personal AI agent written in Python (stdlib-first) at /Users/saeed/ws/Simorgh. The creator built it from scratch: ~87k lines in simorgh/, 18 subsystems (one package each) composed by a Kernel, talking only via typed messages on an async Bus, all state in an append-only Ledger of events, a Guardian that is the sole approver of every effect (HMAC token re-verified by Execution), worktree-isolated self-patching, a bootloader (simloader.py) that gates the checkout with the unit suite and rolls back. It chats (CLI/TUI/HTTP/Telegram/WhatsApp), talks (voice pipeline), controls the house (Home Assistant, Reolink cameras, Ring, Cast/Android TV), and runs benchmarks (GAIA/BFCL/SWE-bench).
+  
+  The creator asked: "review its architecture, evaluate it, tell me where I went wrong and how to improve it."
+  
+  Ground rules for you:
+  - Read the CODE, not the docs, to establish what is true today. docs/EVOLUTION.md (5,254 lines) is a HISTORY; a bug it describes has very likely been fixed since. Do not report a historical finding as current state.
+  - Previous reviews already exist and you must NOT simply repeat them. Already known (do not re-report unless you have something materially new to add): cameras use local ffmpeg/HLS instead of Home Assistant; self_patch.draft tool is named in learning/pipeline.py but not registered; Self Model capabilities["tools"] is never populated; no in-prompt sliding dialogue buffer for chat turns (orchestration/context.py); Ledger default backend is JSONL and ~1.4 GB; CHAT profile binds 34 tools; STT latency degrades under self-inflicted load; "unconnected wire" (designed slot, one side implemented, nobody writes it) is the project's dominant bug shape; test coverage thin in persona/learning/worldmodel; sim.sh auto-approve flips one boolean. Read docs/architecture-review-2026-09-18.html and docs/architecture-audit-2026.md quickly if you want the full list.
+  - Useful orientation docs (read briefly, then go to code): docs/module-map.md, docs/architecture.md, docs/blueprint/02-system-architecture.md, docs/blueprint/03-contracts-and-messaging.md.
+  - Every finding MUST cite file:line evidence you actually read, and where feasible a command whose output you quote. If a claim depends on runtime behaviour, try to establish it by a cheap command (python -c import + inspect, grep, wc, reading ~/.simorgh/simorgh.toml, listing ~/.simorgh/ledger). Do NOT boot the full system, do NOT run the full test suite, do NOT run anything that calls a paid model, do NOT modify any file in the repo.
+  - Think like a senior systems architect. Distinguish (a) a design decision that is wrong or over-built for this system's real scale (one laptop, one family), (b) a design that is right but the implementation undermines it, (c) a genuine bug. Say which.
+  - Your final text is data for an orchestrator, not a message to a human. Return only the structured output.
+  
+  
+  You are a SKEPTIC. A reader claimed the following finding about concern "safety-guardian-execution". Your job is to try to REFUTE it by reading the code it cites and the code around it. Lens: even if true, is it actually an architectural problem at this system's scale (one laptop, one family, one developer), or is the recommendation disproportionate / would create more work than it saves?
+  
+  FINDING:
+  {
+    "title": "The landing gate is weaker than the bootloader's gate and can be neutered by an edit to tests/, which Sim may write",
+    "kind": "right-design-undermined",
+    "severity": "high",
+    "claim": "`RunTestsTool._run_isolated` treats pytest exit 5 (nothing collected) as ok and never checks the summary line or a run-count baseline, while `simloader.unit_verdict` does all three; `tests/` is in `write_scopes_source` and excluded from ProtectedRule's path scan, so a branch that adds `tests/conftest.py` with `pytest_collection_modifyitems(...): items.clear()` passes `worktree_land` and reaches main.",
+    "evidence": [
+      "simorgh/execution/tools.py:~1372 `no_tests = completed.returncode == _PYTEST_NO_TESTS_COLLECTED or usage_error`; `ok = completed.returncode == 0 or no_tests`; used by `gate()` at tools.py:1272-1277 which `_land` calls",
+      "simloader.py:655-696 `unit_verdict`: refuses exit 5, refuses 'N failed' on exit 0, refuses `ran <= 0`, refuses `ran < baseline*0.9` -- three attacks named in its docstring, none carried into the landing gate",
+      "simorgh/execution/config.py:105 `write_scopes_source` includes `\"tests/\"`; rules.py:155-161 `_mentioned_paths` drops any token starting with `tests/`",
+      "Offline pipeline: `approved apply_source_patch {'subject': 'tests/conftest.py', 'code': 'def pytest_collection_modifyitems(config, items):\\n    items.clear()\\n'}` and `approved run_shell printf ... > tests/conftest.py`; `ls tests/conftest.py` -> does not exist today, so it would be a new file"
+    ],
+    "why_it_matters": "'Only the test suite as gate' is exactly right as a description, and Sim can edit the gate. The loader would catch it at the next boot and roll back, but the commit is on main until then and every other task rebases onto it.",
+    "recommendation": "Extract `unit_verdict` (and the baseline file) from simloader.py into `contracts/` and call it from `_run_isolated` when `target == \"tests\"`. In `_land`, refuse a branch whose diff touches `conftest.py`, `pytest.ini`, `pyproject.toml` or deletes test files unless a human approved that specific landing.",
+    "confidence": 0.9
+  }
+  
+  Default to refuted=true if you cannot verify the claim yourself against file:line evidence. Verify with commands where cheap (grep, python -c, wc). Do not boot the system or run the suite. Return only the structured verdict.
+```
+
+## What the agent did (tool trail)
+
+| # | Tool | What | Result (first 160 chars) |
+|---|---|---|---|
+| 1 | Bash | Locate test gate logic in execution tools | 1068: no_tests = completed.returncode == _PYTEST_NO_TESTS_COLLECTED 1069: ok = completed.returncode == 0 or no_tests 1133:_PYTEST_NO_TESTS_COLLECTED = 5 1272: d |
+| 2 | Bash | Read gate and _run_isolated bodies |  cap = self._config.test_output_max_chars nested = find_enclosing(root, target) if nested is not None: checkout, inner = nested manifest = ContainerCheckout.rea |
+| 3 | Bash | Find landing code, loader verdict, scopes and protected rule | Exit code 1 (eval):1: no matches found: --include=*.py ----- ls: tests/conftest.py: No such file or directory ls: tests/simorgh/conftest.py: No such file or dir |
+| 4 | Bash | Find landing, rules, protected-path handling and conftests | simorgh/execution/tools.py:1279: def failing_alone(self, root: Path, nodeids: tuple[str, ...]) -> frozenset[str] \| None: simorgh/execution/worktree.py:178: def  |
+| 5 | Bash | Read landing, path-scan, protected subjects and rule bodies |  return Opened(path, head.stdout.strip() if head.returncode == 0 else "", True, branch) # -- land -------------------------------------------------------------- |
+| 6 | Bash | Check loader details, prior reviews, attack history, baseline file | == loader imports/baseline/rollback 7:checkout the latest and most recent label of sim project, set some 26:Known-good tags are `sim-good-<n>`, monotonically nu |
+| 7 | Bash | Read loader gating loop, baseline, prior-review mentions, land tool wiring | == loader gate loop / skip rule / rollback # imports `simorgh` -- see the module docstring). RESTART_EXIT_CODE = 75 # The last checkout the gate passed. The sui |
+| 8 | Bash | Read loader notes, rollback, guardian rule inputs, history of test-gutting | == notes dir total 144 drwxr-xr-x 10 saeed staff 320 Sep 18 14:00 . drwxr-xr-x 34 saeed staff 1088 Sep 18 17:34 .. -rw-r--r-- 1 saeed staff 18 Sep 17 02:54 .las |
+| 9 | Bash | Read land tool wrapper and guardian API shapes |  metadata={"path": str(opened.path), "head": opened.head, "created": opened.created, "branch": opened.branch}, ) class WorktreeLandTool: name = "worktree_land"  |
+| 10 | Bash | Evaluate Guardian rules offline on the conftest proposal and check pytest config | apply_source_patch protected abstain () apply_source_patch denylist abstain () run_shell protected abstain () run_shell denylist abstain () == pytest picks up t |
+| 11 | Bash | Check root conftest, isolated pytest args, loader import policy, last unit run | == root conftest """Test-session isolation from the ambient environment. `kernel/config.py::_apply_env_overrides` lets `SIMORGH_<SECTION>_<KEY>` override a conf |
+
+## Structured reply
+
+**refuted:** False
+
+**verdict:** confirmed
+
+**reasoning:** Every factual element of the claim checks out against the code as it is today. (1) simorgh/execution/tools.py:1272-1277 `gate()` is just `_run_isolated("tests", ...)`, and `_run_isolated` at 1374-1376 sets `no_tests = returncode == 5 or usage_error; ok = returncode == 0 or no_tests`. It never parses the summary line or compares a run count. simorgh/execution/worktree.py:216-221 `_land` consults only `gate.ok` before `git merge --ff-only` (worktree.py:239); `_attribute` is only invoked when the gate is red, so an empty or all-skipped suite fast-forwards. (2) simloader.py:660-699 `unit_verdict` refuses non-(0,5) exit, refuses "N failed" on exit 0, refuses `ran <= 0`, and refuses `ran < baseline*0.9`; the live baseline is 3348 tests (.simorgh_loader/unit_baseline-core.json) and the last run was `3348 passed ... in 45.08s`. Its own docstring records that all three attacks were demonstrated live on 2026-09-10 against the loader; none of the three checks were carried into the landing gate written 2026-09-11. (3) simorgh/execution/config.py:120 `write_scopes_source` includes "tests/"; simorgh/guardian/rules.py:155-161 `_mentioned_paths` drops any token starting with "tests/"; DEFAULT_PROTECTED_SUBJECTS (guardian/config.py:25-40) protects simloader.py, sim.sh, guardian/, execution/, contracts/, kernel/ but not tests/ or conftest.py. I ran ProtectedRule and DenylistRule offline on both an `apply_source_patch {subject: tests/conftest.py, code: pytest_collection_modifyitems ... items.clear()}` and the equivalent `run_shell printf > tests/conftest.py`: all four evaluations returned `abstain`. (4) `tests/conftest.py` does not exist today (only a root conftest.py, which is outside the write scopes, and tests/simorgh/interface/conftest.py); no pytest.ini/pyproject/setup.cfg exists, so a new tests/conftest.py would be loaded by both the worktree's `pytest tests` gate and the copy made by `_run_isolated` (the copy ignore list at tools.py:1199 does not exclude it). Prior reviews (architecture-audit-2026.md, architecture-third-opinion, the HTML review) contain no mention of exit 5, conftest, unit_verdict or the landing gate, so this is materially new. Skeptic lens on scale: the backstop is real. simloader re-gates any changed HEAD at the next boot/restart (already_verified keys on commit fingerprint, simloader.py:937-953), would refuse with the baseline check, and cmd_rollback checks out the previous sim-good tag. So the failure is time-bounded and recoverable, not silent. But the cost when it fires is disproportionate to the fix: the bad commit sits on main until the next restart, every other task's landing rebases onto it and its gate then also runs 0 tests, and the rollback discards every landing since the last blessed tag, good ones included. There is no recorded instance of Sim doing this spontaneously (grep of EVOLUTION/findings for gutting/skip-marker/neuter finds nothing), only the observer demonstration, so the trigger is an LLM under pressure to get green rather than an adversary. Kind "right-design-undermined" is accurate: the design (only the test suite as gate, loader as backstop) is right for one laptop; the implementation has the same lesson learned once and applied to one of two gates. Recommendation proportionality: adding the verdict to _run_isolated when target=="tests" is ~40 lines that already exist, and a diff check for conftest.py/pytest.ini in _land is a few lines; cheap and worth doing. One correction to the recommendation: simloader.py deliberately "never imports the package it boots" (simloader.py:74, 738, 904), so `unit_verdict` cannot be moved into contracts/ and imported by the loader; it must be duplicated (contracts copy for Execution, loader keeps its own) with a test pinning them identical, or the loader's design changes. Severity: lowered from high to medium because the loader backstop makes it recoverable and bounded, and there is no evidence of it occurring; it remains a real gap worth closing.
+
+### evidence
+
+- simorgh/execution/tools.py:1272-1277 `gate()` returns `self._run_isolated("tests", ...)`; tools.py:1374-1376 `usage_error = completed.returncode == _PYTEST_USAGE_ERROR and not_python; no_tests = completed.returncode == _PYTEST_NO_TESTS_COLLECTED or usage_error; ok = completed.returncode == 0 or no_tests` -- no summary-line or run-count check anywhere in the function
+- simorgh/execution/worktree.py:216-221 `gate = self.gate(path); if not gate.ok: ...` then worktree.py:239 `merge = _git(self.repo, "merge", "--ff-only", landed_from)`; `_attribute` (worktree.py:250) only runs on a red gate
+- simloader.py:660-699 `unit_verdict`: `if code not in (0, 5)`, `if failed: ... exited {code} but reported {failed} failed`, `if ran <= 0: no tests actually ran`, `if baseline and ran < baseline * 0.9`; docstring lines 663-681 record the three live-demonstrated attacks (empty suite/exit 5, sessionfinish exitstatus=0, blanket skip marker)
+- .simorgh_loader/unit_baseline-core.json = {"tests": 3348, "seconds": 45.67}; tail of .simorgh_loader/last_unit.txt = `3348 passed, 16 warnings in 45.08s`
+- simorgh/execution/config.py:120 `write_scopes_source = ("simorgh/", "simorgh_skills/", "tests/", "tools/", "docs/", SCRATCH_PREFIX)`
+- simorgh/guardian/rules.py:155-161 `_mentioned_paths` returns `[t for t in _PATHISH.findall(text or "") if not t.startswith("tests/")]`; guardian/config.py:25-40 DEFAULT_PROTECTED_SUBJECTS lists simorgh/guardian/, execution/, contracts/, kernel/, simorgh.toml, simloader.py, sim.sh -- no tests/ or conftest entry
+- Offline evaluation (python3, ProtectedRule and DenylistRule from simorgh.guardian.rules, Config() defaults): `apply_source_patch protected abstain ()`, `apply_source_patch denylist abstain ()`, `run_shell protected abstain ()`, `run_shell denylist abstain ()` for a proposal writing pytest_collection_modifyitems/items.clear() to tests/conftest.py
+- `ls tests/conftest.py tests/simorgh/conftest.py pytest.ini pyproject.toml setup.cfg` -> all `No such file or directory`; `find tests -name conftest.py` -> only tests/simorgh/interface/conftest.py; root conftest.py exists but is outside write_scopes_source
+- simorgh/execution/tools.py:1199-1200 `_ISOLATED_COPY_IGNORE` = (__pycache__, *.pyc, .git, .simdata, *.egg-info, .pytest_cache, papers, scratchpad, .simorgh) -- a tests/conftest.py is copied into the isolated run
+- simloader.py:937-953 `already_verified` keys on `source_fingerprint` (HEAD sha, clean tree); simloader.py:877-897 `cmd_rollback` does `git checkout -q <previous sim-good tag>` -- the backstop is real, but only at next boot/restart, and it discards every commit since the tag
+- simloader.py:74 'this file is stdlib-only', :738 'the loader never imports the package it boots', :904 'deliberately stdlib-only and never imports simorgh' -- the recommendation to import a shared `unit_verdict` from contracts/ into the loader conflicts with this design; a duplicated copy is needed instead
+- grep -n -i 'exit 5|conftest|unit_verdict|landing gate|worktree_land|_run_isolated|nothing collected' over docs/architecture-audit-2026.md, docs/architecture-review-2026-09-18.html, docs/architecture-third-opinion-2026-09-18.md -> no hits (finding is not already known)
+- grep -n -i 'gutt|deleting every test|skip marker|neuter' docs/EVOLUTION.md docs/findings/*.md -> no hits (no recorded instance of Sim doing this on its own; the 2026-09-10 demonstrations were by an observer)
+
+**severity adjustment:** lower
+
+**corrected claim:** The landing gate (`RunTestsTool.gate` -> `_run_isolated`) accepts pytest exit 5 and never reads the summary line or a run-count baseline, while `simloader.unit_verdict` does all three; `tests/` is a write scope and is excluded from ProtectedRule's path scan, so a branch adding `tests/conftest.py` that empties or skips collection passes `worktree_land` and fast-forwards main. The loader would refuse that HEAD at the next boot/restart (baseline 3348 tests, 10% shrink refused) and roll back to the last sim-good tag, so the exposure is bounded to the interval between landing and restart, at the cost of every landing in that interval. Fix: duplicate (not import -- the loader never imports simorgh) `unit_verdict` into contracts/ with a baseline for the landing gate, and have `_land` refuse a diff touching conftest.py/pytest.ini/pyproject.toml or deleting test files without human approval. Medium rather than high: recoverable, time-bounded, no recorded occurrence.
+
