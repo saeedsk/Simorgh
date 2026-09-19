@@ -23,11 +23,23 @@ task = "stage 1 items 1,7,9 (worktree agents)"
 since = "2026-09-19T08:09:38+00:00"
 until = "2026-09-19T16:09:38+00:00"
 
+[locks.curiosity]
+by = "opus-main"
+task = "stage 1 items 3-5 (side branch)"
+since = "2026-09-19T08:52:32+00:00"
+until = "2026-09-19T16:52:32+00:00"
+
 [locks.execution]
 by = "opus-main"
 task = "apply_skill in a worktree loads from the worktree"
 since = "2026-09-19T08:07:55+00:00"
 until = "2026-09-19T16:07:55+00:00"
+
+[locks.guardian]
+by = "opus-main"
+task = "stage 1 items 3-5 (side branch)"
+since = "2026-09-19T08:52:32+00:00"
+until = "2026-09-19T16:52:32+00:00"
 
 [locks.kernel]
 by = "opus-main"
@@ -46,6 +58,12 @@ by = "opus-main"
 task = "stage 0 item 30: capped real-model gate"
 since = "2026-09-19T07:22:45+00:00"
 until = "2026-09-19T11:22:45+00:00"
+
+[locks.verification]
+by = "opus-main"
+task = "stage 1 items 3-5 (side branch)"
+since = "2026-09-19T08:52:32+00:00"
+until = "2026-09-19T16:52:32+00:00"
 
 [locks.voice]
 by = "opus-main"
