@@ -49,7 +49,7 @@ DEFAULT_RETENTION: dict[str, str] = {
     "metrics:history": "7d", "curiosity:ticks": "7d", "persona:state": "7d",
     "execution:inflight": "7d", "execution:tools": "30d", "cognition:budget:": "3d",
     "cognition:summaries:": "30d", "voice:turns": "30d",
-    "action:": "30d", "verify:": "90d", "reflect:": "90d",
+    "action:": "30d", "verify:": "90d", "reflect:": "90d", "reflection:alerts": "90d",
 }
 
 

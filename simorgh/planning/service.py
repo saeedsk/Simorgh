@@ -69,6 +69,9 @@ class Service:
         topics.SYSTEM_TICK_SECOND,
         topics.SYSTEM_TICK_IDLE,
         topics.SYSTEM_STATE_CHANGED,
+        # Subscribed through a handler table, missing from this manifest until 2026-09-19:
+        topics.TASK_CANCEL,
+        topics.TASK_CLEAR_REQUEST,
     )
     produces: tuple[str, ...] = (
         topics.TASK_CREATE_REPLY,

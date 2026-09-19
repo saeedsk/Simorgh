@@ -25,7 +25,7 @@ import pytest
 
 from simorgh.contracts import topics as T
 
-pytestmark = pytest.mark.contract
+pytestmark = [pytest.mark.contract, pytest.mark.integration]
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ("bus", "ledger", "cognition", "memory", "worldmodel", "planning", "guardian", "execution",
@@ -46,9 +46,47 @@ def _service(package: str):
     return getattr(module, "Service", None) or getattr(module, "VerificationService")
 
 
+_RUNTIME: dict[str, set[str]] | None = None
+
+
+def _runtime_subscriptions() -> dict[str, set[str]]:
+    """source -> topics it subscribed to, read from the bus of a booted
+    system. Catches subscriptions made through a handler table, which the
+    `subscribe(topics.X` regex cannot see (curiosity and benchmark both
+    subscribe from a dict)."""
+    global _RUNTIME
+    if _RUNTIME is None:
+        import asyncio
+        import tempfile
+
+        from simorgh.kernel.config import LoadedConfig
+        from simorgh.kernel.secrets import EnvSecretStore
+        from simorgh.kernel.service import Kernel
+
+        async def boot() -> dict[str, set[str]]:
+            with tempfile.TemporaryDirectory() as tmp:
+                kernel = Kernel(LoadedConfig({"runtime": {"data_dir": tmp},
+                                              "cognition": {"provider_order": ["floor"]}}, None),
+                                secrets=EnvSecretStore({}))
+                await kernel.boot()
+                try:
+                    out: dict[str, set[str]] = {}
+                    for r in kernel._bus_backend._registered:  # noqa: SLF001
+                        out.setdefault(r.spec.source.split("@", 1)[0], set()).add(r.spec.pattern)
+                    return out
+                finally:
+                    await kernel.shutdown()
+
+        _RUNTIME = asyncio.run(boot())
+    return _RUNTIME
+
+
 @pytest.mark.parametrize("package", PACKAGES)
 def test_every_subscription_is_declared(package):
-    subscribed = {_CONSTS[n] for text in _sources(package) for n in _SUBSCRIBE.findall(text) if n in _CONSTS}
+    static = {_CONSTS[n] for text in _sources(package) for n in _SUBSCRIBE.findall(text) if n in _CONSTS}
+    catalogue = set(_CONSTS.values())
+    runtime = {t for t in _runtime_subscriptions().get(package, set()) if t in catalogue}
+    subscribed = static | runtime
     declared = set(getattr(_service(package), "consumes", ()) or ())
     missing = sorted(subscribed - declared)
     assert not missing, f"simorgh/{package} subscribes to {missing} but its Service.consumes does not declare them"

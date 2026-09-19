@@ -54,7 +54,7 @@ ALLOWED_ONE_SIDED: dict[str, str] = {
     # subscribed, published only by an operator command or a test today
     T.MEMORY_FORGET: "operator-initiated (`memory forget`); no autonomous publisher by design",
     T.COGNITION_COMPACT_REQUEST: "published by the orchestration Compactor in stage 4",
-    T.REFLECT_REVIEW_REQUEST: "operator-initiated (`reflect`)",
+    T.REFLECT_REVIEW_REQUEST: "Reflection answers it; nothing asks yet (the `reflect` command was folded away in the 2026-09-06 consolidation). Stage 8 (growth) decides whether it stays",
     T.TASK_PROGRESS: "read from the ledger by resume.py; published by the progress note in stage 4",
     # declared for the roadmap, referenced nowhere yet: delete or connect by stage 4
     T.LEARN_STRATEGY_SUGGEST: "Learning answers it; the routing consumer arrives in stage 8",

@@ -8,7 +8,12 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Config:
-    repo_root: Path = Path(".")
+    # The repository this package lives in, not the process's cwd: the
+    # Kernel passes no default_repo_root, so Sim booted from anywhere else
+    # (the loader, a trial copy, a service manager) silently read no SOUL.md
+    # and fell back to "You are Simorgh." (found writing persona's contract,
+    # 2026-09-19; Reflection fixed the same thing with its own _repo_root).
+    repo_root: Path = Path(__file__).resolve().parents[2]
     soul_path: Path = Path("docs/SOUL.md")
     baseline_valence: float = 0.0
     baseline_arousal: float = 0.0
@@ -49,7 +54,7 @@ class Config:
     @classmethod
     def from_mapping(cls, data: dict | None, *, default_repo_root: Path | None = None) -> "Config":
         data = data or {}
-        root = Path(data.get("repo_root", default_repo_root or Path(".")))
+        root = Path(data.get("repo_root", default_repo_root or Path(__file__).resolve().parents[2]))
         baseline = data.get("baseline") or {}
         share = data.get("share") or {}
         user_model = data.get("user_model") or {}
