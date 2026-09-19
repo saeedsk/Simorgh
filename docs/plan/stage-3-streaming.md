@@ -1,6 +1,6 @@
 # Stage 3 -- Streaming end to end
 
-Status: not started · Depends on: stage 2 items 3-5 · Estimated: 2 weeks · Modules touched: cognition, orchestration, interface, voice, contracts
+Status: **in progress** (2026-09-19: items 1-3 done) · Depends on: stage 2 items 3-5 · Estimated: 2 weeks · Modules touched: cognition, orchestration, interface, voice, contracts
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation section 9.4 (full response 4 to 17 s; STT 1.8 to 6.8 s the largest st
 Record first-audio and full-response p50/p95 over 50 real turns from `voice:turns` (or the 50 recorded turns in `workspace/voice/samples` through `tools/voice_live_trial.py`). Read `cognition/providers/together.py` (no streaming), `voice/tts/` (`synthesise_stream`, `StreamingSynthesiser`, `StreamingPlayer`), `voice/stt/sherpa_stream.py`, `voice/session.py::_ask_and_speak`, `interface/render.py`.
 
 ## Action items
+
+Done 2026-09-19: item 1 (Together and Gemini `stream()`; Ollama not yet), item 2 (`session.delta` with a marker gate that retracts a reply turning into a tool call), item 3 (the TUI shows the reply being written above the prompt). Live: a typed turn's first text on the bus at 0.78 s of 1.2 s. Next: item 4.
 
 1. **`Provider.stream()`.** *Lock `cognition`.* `AsyncIterator[Delta]` with `Delta = text | tool_use_start | tool_use_input_json | stop`; `complete()` derived from `stream()`; Together (SSE), Anthropic, Gemini, Ollama adapters; tool-call input buffered until `stop`. Acceptance: fixture tests per adapter; a malformed partial JSON tool call yields an error delta, not an exception.
 2. **`session.delta` on the bus, bus-only.** *Lock `contracts`, `orchestration`.* A new topic `session.delta{session_id, seq, text}` published as deltas arrive, excluded from the ledger and from tracing (sampling 0); the completed turn is what reaches the ledger; a cancelled stream records a truncated turn honestly. Acceptance: topic has both sides (interface, voice subscribe); the both-sides test's allow-list shrinks.
