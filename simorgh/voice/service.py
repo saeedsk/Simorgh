@@ -41,7 +41,7 @@ _CONSUMES = (
     topics.VOICE_MODELS_REQUEST, topics.VOICE_BENCH_REQUEST,
     topics.TURN_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
     # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
-    topics.PERSONA_STATE_CHANGED, topics.TV_STATE,
+    topics.PERSONA_STATE_CHANGED, topics.TV_STATE, topics.SESSION_DELTA,
 )
 _PRODUCES = (
     topics.PERCEPT_TEXT_RECEIVED, topics.VOICE_LISTENING, topics.VOICE_TRANSCRIPT, topics.VOICE_SPOKEN,
