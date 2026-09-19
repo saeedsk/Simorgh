@@ -52,7 +52,7 @@ from simorgh.planning.config import Config as PlanningConfig
 from simorgh.planning.service import Service as PlanningService
 from simorgh.verification.service import VerificationService
 
-STEPS_TEXT = "1. src/orchestrator/retry.py :: add exponential backoff with jitter\n"
+STEPS_TEXT = "1. simorgh/orchestration/retry.py :: add exponential backoff with jitter\n"
 
 
 def _patched_build_factories(planning_config: PlanningConfig):

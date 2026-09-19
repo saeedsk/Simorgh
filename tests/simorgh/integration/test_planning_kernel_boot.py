@@ -202,7 +202,7 @@ class TestPlanningBootsAsARealKernelService(unittest.IsolatedAsyncioTestCase):
 
         steps_text = (
             "1. RESEARCH :: is the current retry backoff strategy adequate\n"
-            "2. src/orchestrator/retry.py :: implement exponential backoff with jitter\n"
+            "2. simorgh/orchestration/retry.py :: implement exponential backoff with jitter\n"
         )
         blob_ref = await ledger.put_blob(
             json.dumps({"steps_text": steps_text}).encode("utf-8"), content_type="application/json",
@@ -309,7 +309,7 @@ class TestPlanningBootsAsARealKernelService(unittest.IsolatedAsyncioTestCase):
         ))
         project_id = create_reply.payload["task_id"]
         blob_ref = await ledger.put_blob(
-            json.dumps({"steps_text": "1. src/orchestrator/boot.py :: lazy-import heavy deps\n"}).encode("utf-8"),
+            json.dumps({"steps_text": "1. simorgh/kernel/boot.py :: lazy-import heavy deps\n"}).encode("utf-8"),
             content_type="application/json",
         )
         await bus.publish(Message.new(

@@ -141,14 +141,14 @@ class TestSelfModelCompleteness(unittest.IsolatedAsyncioTestCase):
     async def test_self_patch_applied_reaches_change_history_and_mitigates_a_matching_limitation(self) -> None:
         await self.bus.publish(Message.new(
             topics.SELF_OBSERVATION, source="reflection",
-            payload={"kind": "limitation", "detail": "src/orchestrator/retry.py has flaky retries under load"},
+            payload={"kind": "limitation", "detail": "simorgh/orchestration/retry.py has flaky retries under load"},
         ))
         await _pump(10)
         self.assertIn("open", self._self_md())
 
         await self.bus.publish(Message.new(
             topics.LEARN_SELF_PATCH_APPLIED, source="learning",
-            payload={"subject": "src/orchestrator/retry.py", "commit": "abc1234",
+            payload={"subject": "simorgh/orchestration/retry.py", "commit": "abc1234",
                      "tests": {"baseline": 820, "patched": 820}, "reason": "added jitter to the retry loop"},
         ))
         await _pump(10)
@@ -161,7 +161,7 @@ class TestSelfModelCompleteness(unittest.IsolatedAsyncioTestCase):
     async def test_skill_acquired_reaches_capabilities_and_change_history(self) -> None:
         await self.bus.publish(Message.new(
             topics.LEARN_SKILL_ACQUIRED, source="learning",
-            payload={"name": "github_skill", "path": "src/agents/skills/github_skill.py", "tests": 4},
+            payload={"name": "github_skill", "path": "simorgh_skills/github_skill.py", "tests": 4},
         ))
         await _pump(10)
         md = self._self_md()

@@ -107,13 +107,13 @@ class TestAddLimitation(unittest.TestCase):
 
 class TestMitigateLimitations(unittest.TestCase):
     def test_open_limitation_naming_the_subject_becomes_mitigated(self):
-        model = add_limitation(_model(), text="src/orchestrator/retry.py has flaky retries", evidence=[], since=1.0, updated_at=1.0)
-        model = mitigate_limitations(model, subject="src/orchestrator/retry.py", updated_at=2.0)
+        model = add_limitation(_model(), text="simorgh/orchestration/retry.py has flaky retries", evidence=[], since=1.0, updated_at=1.0)
+        model = mitigate_limitations(model, subject="simorgh/orchestration/retry.py", updated_at=2.0)
         self.assertEqual(model.limitations[0]["status"], "mitigated")
 
     def test_limitation_not_naming_the_subject_is_untouched(self):
         model = add_limitation(_model(), text="review verdicts sometimes narrate", evidence=[], since=1.0, updated_at=1.0)
-        model = mitigate_limitations(model, subject="src/orchestrator/retry.py", updated_at=2.0)
+        model = mitigate_limitations(model, subject="simorgh/orchestration/retry.py", updated_at=2.0)
         self.assertEqual(model.limitations[0]["status"], "open")
 
     def test_empty_subject_is_a_no_op(self):

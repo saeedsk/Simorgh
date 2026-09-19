@@ -11,9 +11,9 @@ from typing import Protocol
 
 from .model import Step
 
-# The live source tree first. `src/` is v1 -- retired but not deleted --
-# and is kept only so a step naming it is not silently dropped.
-DEFAULT_SOURCE_ROOTS: tuple[str, ...] = ("simorgh/", "src/")
+# The live source tree. (v1's `src/` was deleted on 2026-09-19; a step
+# naming a path outside these roots is dropped.)
+DEFAULT_SOURCE_ROOTS: tuple[str, ...] = ("simorgh/",)
 
 _PATCH_LINE = re.compile(r"^\s*\d+[.):]\s*(\S+)\s*::\s*(.+)$")
 _RESEARCH_LINE = re.compile(r"^\s*\d+[.):]\s*RESEARCH\s*::\s*(.+)$", re.IGNORECASE)
@@ -71,7 +71,7 @@ def parse_steps(text: str, expected: int, roots: tuple[str, ...] = DEFAULT_SOURC
         # with the prompt below (which also said "under src/") the
         # decomposer was aimed squarely at retired code. Not one project
         # in the creator's ledger had ever produced a child step.
-        if path.startswith(roots) and "src/agents/skills/" not in path and description:
+        if path.startswith(roots) and description:
             # Default edge (spec 5.4 step 4): a research step is a
             # dependency of every later patch step, per the prompt's own
             # ordering instruction.

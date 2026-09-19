@@ -8,10 +8,10 @@ from simorgh.planning.model import Step
 
 class TestParseSteps(unittest.TestCase):
     def test_parses_a_patch_line(self):
-        steps = parse_steps("1. src/orchestrator/foo.py :: fix the thing", 1)
+        steps = parse_steps("1. simorgh/orchestration/foo.py :: fix the thing", 1)
         self.assertEqual(len(steps), 1)
         self.assertEqual(steps[0].kind, "patch")
-        self.assertEqual(steps[0].subject, "src/orchestrator/foo.py")
+        self.assertEqual(steps[0].subject, "simorgh/orchestration/foo.py")
         self.assertEqual(steps[0].description, "fix the thing")
 
     def test_parses_a_research_line(self):
@@ -25,22 +25,22 @@ class TestParseSteps(unittest.TestCase):
         self.assertEqual(steps[0].kind, "research")
 
     def test_later_patch_depends_on_earlier_research(self):
-        text = "1. RESEARCH :: figure out the approach\n2. src/memory/long_term.py :: implement it\n"
+        text = "1. RESEARCH :: figure out the approach\n2. simorgh/memory/store.py :: implement it\n"
         steps = parse_steps(text, 2)
         research_id = steps[0].step_id
         self.assertEqual(steps[1].depends_on, (research_id,))
 
     def test_skills_dir_targets_excluded(self):
-        steps = parse_steps("1. src/agents/skills/rocketry.py :: add a skill", 1)
+        steps = parse_steps("1. simorgh_skills/rocketry.py :: add a skill", 1)
         self.assertEqual(steps, [])
 
     def test_non_matching_lines_ignored(self):
-        text = "Sure, here's my plan:\n1. src/orchestrator/foo.py :: do it\nHope that helps!"
+        text = "Sure, here's my plan:\n1. simorgh/orchestration/foo.py :: do it\nHope that helps!"
         steps = parse_steps(text, 1)
         self.assertEqual(len(steps), 1)
 
     def test_truncates_to_expected(self):
-        text = "\n".join(f"{i}. src/a.py :: idea {i}" for i in range(1, 6))
+        text = "\n".join(f"{i}. simorgh/a.py :: idea {i}" for i in range(1, 6))
         self.assertEqual(len(parse_steps(text, 3)), 3)
 
 

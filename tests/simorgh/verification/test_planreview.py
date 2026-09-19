@@ -38,14 +38,14 @@ class TestReviewPlanMechanical(unittest.IsolatedAsyncioTestCase):
         self.assertIn("10 steps", result.feedback)
 
     async def test_protected_target_is_reject(self):
-        steps = [{"step_id": "s1", "depends_on": [], "kind": "patch", "description": "d", "subject": "src/main.py"}]
+        steps = [{"step_id": "s1", "depends_on": [], "kind": "patch", "description": "d", "subject": "simorgh/kernel/service.py"}]
 
         async def review(subject, code, kind):
             return ReviewReply(approved=False, reasons=("protected target",), layers_run=("protected",))
 
         result = await review_plan(_approve_think, review, _plan(steps), max_steps=8)
         self.assertEqual(result.verdict, "reject")
-        self.assertIn("src/main.py", result.feedback)
+        self.assertIn("simorgh/kernel/service.py", result.feedback)
 
     async def test_clean_plan_with_goal_coverage_yes_is_approve(self):
         steps = [{"step_id": "s1", "depends_on": [], "kind": "task", "description": "d", "why": "ties to goal"}]

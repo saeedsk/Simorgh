@@ -30,11 +30,11 @@ class TestParseStepsAcceptsTheLiveTree(unittest.TestCase):
         steps = parse_steps("1. simorgh/kernel/cli.py :: add a --version flag\n", 4)
         self.assertEqual([(s.kind, s.subject) for s in steps], [("patch", "simorgh/kernel/cli.py")])
 
-    def test_a_step_naming_the_retired_v1_tree_is_still_kept(self):
-        """`src/` is retired but not deleted; a step naming it should be
-        visible rather than vanishing without trace."""
+    def test_a_step_naming_a_path_outside_the_live_tree_is_dropped(self):
+        """Only `simorgh/` is a source root since v1's `src/` was deleted
+        (2026-09-19); a step aimed anywhere else is not a patch step."""
         steps = parse_steps("1. src/memory/store.py :: tidy the exports\n", 4)
-        self.assertEqual([s.subject for s in steps], ["src/memory/store.py"])
+        self.assertEqual(steps, [])
 
     def test_a_research_step_needs_no_path(self):
         steps = parse_steps("1. RESEARCH :: where does the version string live\n", 4)

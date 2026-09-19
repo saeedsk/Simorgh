@@ -29,10 +29,9 @@ class Config:
     continuation_delay_seconds: float = 10.0
     dedupe_similarity_threshold: float = 0.45
     project_step_count: int = 4
-    # Path prefixes a decomposed patch step may target. `simorgh/` is
-    # the live tree; `src/` is v1, retired but not deleted, and kept
-    # here only so a step naming it is not silently dropped.
-    source_roots: tuple[str, ...] = ("simorgh/", "src/")
+    # Path prefixes a decomposed patch step may target: the live tree.
+    # (v1's `src/` was deleted on 2026-09-19.)
+    source_roots: tuple[str, ...] = ("simorgh/",)
     max_plan_revisions: int = 2
     auto_approve_max_risk: str = "medium"
     human_approval_timeout_seconds: float = 3600.0

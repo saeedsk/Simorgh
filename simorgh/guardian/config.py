@@ -14,16 +14,12 @@ import os
 from dataclasses import dataclass, field
 from typing import Mapping
 
-# v1 PROTECTED_SUBJECTS (src/orchestrator/audit.py), extended with the
-# v2 substrate per 09-guardian.md section 3.5 -- the system can evolve
-# every cognitive subsystem but never the parts that decide what it may
-# do (AGI-04 section 9, corrigibility).
+# The system can evolve every cognitive subsystem but never the parts
+# that decide what it may do (corrigibility): the constitution, the
+# approval path, the hands, the contracts, the composition root and the
+# boot/rollback mechanism.
 DEFAULT_PROTECTED_SUBJECTS: tuple[str, ...] = (
     "docs/SOUL.md",
-    "src/orchestrator/soul.py",
-    "src/orchestrator/audit.py",
-    "src/orchestrator/apply.py",
-    "src/orchestrator/self_patch.py",
     "simorgh/guardian/",
     "simorgh/execution/",
     "simorgh/contracts/",

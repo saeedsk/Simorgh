@@ -47,3 +47,7 @@ workspace/*
 
 # Local high-res wallpapers for the TV dashboard (large; kept out of git)
 images/wallpapers/
+
+# editor and R leftovers
+.Rhistory
+.obsidian/

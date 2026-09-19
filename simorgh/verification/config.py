@@ -26,7 +26,6 @@ _DEFAULT_RIGOR_BY_REVERSIBILITY = {
     "irreversible": "FULL",
 }
 _DEFAULT_INVARIANTS = {
-    "src/main.py": ["AuditGate(", "audit_gate.review(", "apply_proposal("],
     "simorgh/execution/": ["verifier.verify("],
     "simorgh/guardian/": ["Pipeline("],
 }

@@ -18,7 +18,7 @@ from tests.simorgh.orchestration.harness import run
 
 def _child(created_at: float = 0.0) -> Task:
     return Task(
-        id="c1", kind="patch", description="add retry jitter", subject="src/orchestrator/retry.py",
+        id="c1", kind="patch", description="add retry jitter", subject="simorgh/orchestration/retry.py",
         parent_id="p1", created_at=created_at, updated_at=created_at,
     )
 

@@ -1,0 +1,33 @@
+[project]
+name = "simorgh"
+version = "2.0.0"
+description = "Simorgh (Sim): a self-improving personal agent for one household"
+requires-python = ">=3.11"
+# Runtime is stdlib-only; optional engines and providers are listed in
+# requirements.txt with the reason each one is optional.
+
+[tool.pytest.ini_options]
+# Day to day: `python tools/modtest.py <module>` (module tier) or
+# `--changed`.  The boot gate runs simloader's core selection; the full
+# suite runs before a bless and nightly.  See docs/testing.md.
+testpaths = ["tests/simorgh", "tests/tools"]
+python_files = ["test_*.py"]
+markers = [
+    "live: needs a real network service, Docker, a browser or this machine's tools",
+    "slow: takes more than about two seconds on its own (real sleeps, subprocesses, large fixtures); excluded from the module tier",
+    "integration: boots a Kernel or drives several real subsystems together",
+    "contract: pins a module's interface (topics, schemas, streams, config, invariants); every module's CONTRACT.md names its contract tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:pytest_asyncio",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["workspace", "results", "games", "papers", "images"]
+
+[tool.ruff.lint]
+# Start narrow: real errors and unused code only.  Style rules can come
+# once the tree is clean, one module at a time behind its lock.
+select = ["E9", "F"]

@@ -1,0 +1,5 @@
+# Module locks for parallel agents.  See docs/AGENTS.md.
+#
+# Claim = add your entry here and COMMIT IT FIRST; release = remove it.
+# `python tools/modlock.py claim|release|check|status` edits and reads this.
+# A lock past `until` is stale and may be taken over.

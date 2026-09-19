@@ -43,7 +43,7 @@ from simorgh.planning.service import Service as PlanningService
 
 STEPS_TEXT = (
     "1. RESEARCH :: is the current retry backoff strategy adequate\n"
-    "2. src/orchestrator/retry.py :: implement exponential backoff with jitter\n"
+    "2. simorgh/orchestration/retry.py :: implement exponential backoff with jitter\n"
 )
 
 
