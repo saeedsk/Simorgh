@@ -113,7 +113,8 @@ class Service:
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None,
                  connectors: list | None = None) -> None:
-        self._vision = None  # built in start(); stop() may run without it (a failed or skipped start)
+        self._vision = None
+        self._skill_load_locks: dict[str, asyncio.Lock] = {}  # built in start(); stop() may run without it (a failed or skipped start)
         self._config = config or Config()
         self._extra_tools = extra_tools or []
         # Account-backed integrations (contracts/connector.py). Each one
@@ -636,6 +637,14 @@ class Service:
         circuited, so a genuinely repeated acquisition does not spam a
         second `tool.registered`/ledger entry (see
         `test_a_second_acquisition_of_the_same_name_does_not_re_register`)."""
+        # One load per name at a time. Two acquisitions of the same skill
+        # arriving together both used to find nothing registered, both
+        # await the Memory lookup, and both register and announce it
+        # (found 2026-09-19 as a "flaky" test under load; it was a race).
+        async with self._skill_load_locks.setdefault(name, asyncio.Lock()):
+            return await self._load_skill_locked(name, path=path)
+
+    async def _load_skill_locked(self, name: str, *, path: str) -> object | None:
         existing = self._registry.get(f"skill:{name}")
         # `safe_read_file` caps at `_MAX_READ_CHARS` and appends a
         # human-readable "...[truncated at N of M chars; read the rest

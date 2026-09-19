@@ -269,16 +269,15 @@ class TestSkillAcquiredRegistersOnDemand(_ExecutionServiceTestCase):
                 seen.append(message)
 
         sub = await self.bus.subscribe(topics.TOOL_REGISTERED, _on_registered)
-        for _ in range(2):
-            await self.bus.publish(Message.new(
-                topics.LEARN_SKILL_ACQUIRED, source="learning",
-                payload={"name": "twice", "path": "simorgh_skills/twice.py", "tests": 1},
-            ))
-            # Each `_load_skill` awaits a real (timeout-bounded) `memory.
-            # retrieve` request with no responder here -- a zero-length
-            # `asyncio.sleep(0)` never lets that real-time timeout elapse,
-            # so give it actual wall-clock room instead.
-            await asyncio.sleep(0.1)
+        # Both at once: each load awaits a real (timeout-bounded)
+        # `memory.retrieve` with no responder, and two overlapping loads
+        # of one name used to both register it. Then wall-clock room well
+        # past both timeouts, so a second registration would be seen.
+        await asyncio.gather(*(self.bus.publish(Message.new(
+            topics.LEARN_SKILL_ACQUIRED, source="learning",
+            payload={"name": "twice", "path": "simorgh_skills/twice.py", "tests": 1},
+        )) for _ in range(2)))
+        await asyncio.sleep(0.5)
         await sub.unsubscribe()
 
         self.assertEqual(len(seen), 1)
