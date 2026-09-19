@@ -52,3 +52,24 @@ class PronounceIsACommand(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BenchmarkStart(unittest.TestCase):
+    """The creator, 2026-09-19: "/benchmark start" starts testing GAIA level 1."""
+
+    def test_start_fills_in_the_defaults(self):
+        from simorgh.interface.benchmarkview import parse_run, with_defaults
+
+        self.assertEqual(parse_run(with_defaults(""))[0], {"suite": "gaia-l1", "limit": 5})
+        self.assertEqual(parse_run(with_defaults("10"))[0], {"suite": "gaia-l1", "limit": 10})
+        self.assertEqual(parse_run(with_defaults("bfcl"))[0], {"suite": "bfcl", "limit": 5})
+
+    def test_start_sends_a_run(self):
+        seen = {}
+
+        async def fake(bus, topic, payload, **kw):
+            seen.update(payload)
+
+        with mock.patch.object(dispatch, "_request", fake):
+            asyncio.run(dispatch._benchmark(None, "start"))
+        self.assertEqual(seen, {"suite": "gaia-l1", "limit": 5})

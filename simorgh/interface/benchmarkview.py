@@ -18,6 +18,19 @@ _LEVEL = re.compile(r"(?:^|\s)level=([^\s]+)", re.I)
 _COUNT = re.compile(r"(?:^|\s)(\d{1,4})(?=\s|$)")
 
 
+#: What `benchmark start` runs when nothing is named.
+DEFAULT_SUITE = "gaia-l1"
+DEFAULT_COUNT = 5
+
+
+def with_defaults(rest: str) -> str:
+    """`benchmark start [suite] [n]`: the default suite and size filled in."""
+    words = (rest or "").split()
+    has_suite = any(not w.isdigit() and "=" not in w and w.lower() != "refresh" for w in words)
+    has_count = any(w.isdigit() for w in words)
+    return " ".join(([] if has_suite else [DEFAULT_SUITE]) + words + ([] if has_count else [str(DEFAULT_COUNT)]))
+
+
 def parse_run(rest: str) -> tuple[dict, str]:
     """`<suite> [n] [level=L] [refresh]` -> (payload, problem)."""
     text = " " + (rest or "").strip()

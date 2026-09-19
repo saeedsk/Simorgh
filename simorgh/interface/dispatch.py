@@ -446,6 +446,7 @@ def _with_steps(payload: dict, steps: int | None) -> dict:
 # (2026-09-08).
 BENCHMARK_VERBS: tuple[tuple[str, str, str], ...] = (
     ("", "", "the latest result for each suite"),
+    ("start", "[suite] [n]", "the quick way: GAIA level 1, 5 cases, unless you name others"),
     ("suites", "", "what can be run, and what is cached"),
     ("load", "<suite> [refresh]", "download its cases, without running them"),
     ("run", "<suite> [n] [level=L] [refresh]", "run it, and record the result"),
@@ -598,6 +599,10 @@ async def _benchmark(bus: BusClient, args: str) -> Outcome:
         return await _request(bus, topics.BENCHMARK_LOAD_REQUEST, {
             "suite": words[0], "refresh": "refresh" in words[1:],
         }, timeout=180.0, render=benchmarkview.loaded)
+    if verb in ("start", "go", "begin"):
+        # The easy way in (the creator, 2026-09-19: "saying /benchmark start
+        # starts testing gaia1"): the default suite and size unless named.
+        verb, rest = "run", benchmarkview.with_defaults(rest)
     if verb == "run":
         payload, problem = benchmarkview.parse_run(rest)
         if problem:
