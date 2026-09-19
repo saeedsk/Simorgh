@@ -46,6 +46,8 @@ WRITERS: dict[str, frozenset[str]] = {
     # Execution the run; Planning owns the task, Orchestration its steps.
     "action:": frozenset({"guardian", "execution"}),
     "task:": frozenset({"planning", "orchestration"}),
+    # Typed transcripts (stage 4): Orchestration runs every session.
+    "session:": frozenset({"orchestration"}),
     "project:": frozenset({"planning"}),
     "plan:": frozenset({"planning"}),
     "planning:": frozenset({"planning"}),
