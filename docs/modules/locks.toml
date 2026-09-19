@@ -47,6 +47,12 @@ task = "stage 1 items 1,7,9 (worktree agents)"
 since = "2026-09-19T08:09:38+00:00"
 until = "2026-09-19T16:09:38+00:00"
 
+[locks.ledger]
+by = "opus-main"
+task = "stage 1 item 8 (side branch)"
+since = "2026-09-19T09:20:42+00:00"
+until = "2026-09-19T17:20:42+00:00"
+
 [locks.orchestration]
 by = "opus-main"
 task = "stage0 item 32 dead-code list (worktree agents)"
