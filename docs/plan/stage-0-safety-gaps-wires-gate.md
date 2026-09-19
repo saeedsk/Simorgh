@@ -1,6 +1,6 @@
 # Stage 0 -- Close the safety gaps, wire what exists, promote the gate
 
-Status: **in progress** (started 2026-09-18 evening; items 1-16 done, 17-30 open) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, learning, worldmodel, curiosity, ledger, interface, memory, orchestration, contracts, kernel, cognition, reflection, voice, simloader, tools, shared, docs
+Status: **in progress** (started 2026-09-18 evening; items 1-24 and 27 done, 28 partly, 25-26 and 29-31 open) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, learning, worldmodel, curiosity, ledger, interface, memory, orchestration, contracts, kernel, cognition, reflection, voice, simloader, tools, shared, docs
 
 ## Outcome
 
@@ -36,6 +36,19 @@ Each item is one commit. **Done** items record the commit so a reader can diff t
 14. **Docs.** Old blueprint, plans, evolution log, knowledge base, module map removed; `docs/README.md`, `ARCHITECTURE.md`, `plan/README.md`; reviews under `docs/reviews/2026-09-18/`. Commit `docs: one map, the reviews in one place`.
 15. **CONTRACT.md drafts** for every module from `tools/contract_skeleton.py` (tables filled, prose TODO). Same commit.
 16. **Boot gate green** after all of the above: `python tools/modtest.py --tier core` 3,348 tests in 42 s.
+
+### Done (2026-09-19, second session)
+
+17. **Machine paths protected.** `.simorgh/secrets.toml`, `.simorgh/vault`, `.simorgh/ledger`, `.git/hooks`, `.ssh`, `.aws`, `.gnupg` are Guardian protected subjects; `run_shell` refuses to read them or dump the keychain. Commit `19f69ce`. (S2)
+18. **The landing gate uses the loader's verdict.** `RunTestsTool.gate` re-judges a green run with `simloader.unit_verdict` from the main checkout; whole-suite baseline 5,762 recorded. Commit `c009699`. (S5)
+19. **Installing a skill always asks.** `HumanOnlyRule` with `[guardian] human_only_tools = ["apply_skill"]`, every posture; `apply_skill` relabelled irreversible. Commit `8fb3d21`. Not done: scanning a skill call's arguments (they are data for the skill, and the denylist would misfire on them). (S4)
+20. **Immunity remembers shell commands.** Same commit. (S9)
+21. **Critiques are procedural memory**; task sessions recall them, chat does not. Commit `aa05475`. (C7)
+22. **Cognition's two bugs**: the no-real-provider clock starts at the first floor; the rolling budget reads its stream once. Same commit. (C12, C13)
+23. **Ctrl-C under the loader is orderly.** Commit `fd27fc7`. (B16)
+24. **Blob sweep off the event loop**; `blobs_swept` in the compaction record. Commit `aa05475`. (B1, B9)
+27. **Persona announces decay on real change** (`decay_announce_delta` 0.02 from the last announced state). Commit `aa05475`. (V6)
+28. *Partly:* V1 fixed (a superseded quiet turn no longer drops the newer answer, commit `1f68f37`); V11 fixed (kept recordings bounded to 7 days / 500 MB, commit `eb207dc`). Open: V8 (three per-turn facts on the session), V7 (wire or delete the echo canceller).
 
 ### Open
 
