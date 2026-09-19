@@ -574,3 +574,15 @@ class TestThePanelToolbar(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(BREATH_COLOURS), panel.BREATH_SHADES)
 
     async def _noop_line(self, line: str) -> None: ...
+
+
+class HelpAndQuestionMarkCompleteCommandNames(unittest.TestCase):
+    """2026-09-19: `? ta<Tab>` should complete like `help ta<Tab>`."""
+
+    def test_it(self):
+        from simorgh.interface.tui import _next_words
+
+        for prefix in ("? ", "help ", "/help "):
+            names = [w for w, _ in _next_words(prefix)]
+            self.assertIn("tasks", names, prefix)
+            self.assertIn("interests", names, prefix)

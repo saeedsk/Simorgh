@@ -1679,6 +1679,11 @@ class SessionRunner:
         )
 
     async def _propose_and_await(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
+        if call.get("error"):
+            # A native call whose arguments were not a JSON object (stage 2):
+            # nothing to propose; the model is told and can send it again.
+            text = f"{call.get('tool')}: {call['error']} -- send the call again with its arguments as a JSON object"
+            return False, text, text
         refused = unplaced_voice_refusal(session, str(call.get("tool") or ""))
         if refused:
             return False, refused, refused

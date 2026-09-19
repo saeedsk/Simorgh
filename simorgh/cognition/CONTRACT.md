@@ -164,3 +164,5 @@ Lock it first (`python tools/modlock.py claim cognition --by <you> --task "..."`
 - A single-line marker argument also ends where another UPPERCASE known marker starts on the same line (`first_line_argument(text, markers)`); live 2026-09-19 `READ_FILE: a.pyREAD_FILE: a.py` reached read_file whole.
 
 - Default `provider_order` (2026-09-19): together, gemini, claude_code_cli, floor. Gemini was behind the Claude Code CLI, so a Together timeout cost a 30 s CLI turn and Claude quota while Gemini was unused.
+
+- Native switch (stage 2 item 9, 2026-09-19): `[cognition.providers.<name>] tool_dialect = "native"` (default `markers`) hands that provider the offered tools' specs (`_offered_specs`, from `tool.registered`) when its API has native tools; the Router gives specs only to native providers. A native reply's typed calls replace parsed markers in `cognition.think.reply` as `{tool, args, id[, error]}`. No provider is native by default: flipping one waits for a BFCL/trial win.

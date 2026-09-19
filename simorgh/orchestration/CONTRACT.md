@@ -185,3 +185,5 @@ Lock it first (`python tools/modlock.py claim orchestration --by <you> --task ".
 - A chat turn (`scaffold == "chat"`) writes only under `workspace/`: `replace_in_file`/`apply_source_patch` on any other path is refused in the session before it is proposed (`chat_outside_workspace_refusal`), pointing to `start_task`. Live 2026-09-19: a typo became a chat turn that edited `simorgh/learning/` in the live checkout.
 
 - A single-valued marker argument is cut to one value in `to_action_payload` (`_one_value`): a `url` to its first whitespace-separated token, a `path`/`target` to its first line. Live 2026-09-19: a URL carrying the model's next sentence failed three fetches.
+
+- A native tool call carrying `error` (arguments that were not a JSON object) is not proposed; the step fails with a message asking the model to resend it.

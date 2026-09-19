@@ -169,6 +169,10 @@ def _next_words(before: str) -> list[tuple[str, str]]:
     if not words:
         return []
     command = words[0].lstrip("/")
+    if command in ("help", "?") and len(words) == 1:
+        # `help ta<Tab>` and `? ta<Tab>` complete a command's name, the way
+        # the first word does (the creator, 2026-09-19).
+        return [(name, desc) for name, desc in COMMANDS]
     if len(words) == 1:
         return [(w, f"{command} {w}") for w in subcommands(command)]
     if command == "voice" and words[1] == "set" and len(words) == 2:

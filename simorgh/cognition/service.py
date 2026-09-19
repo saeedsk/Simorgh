@@ -17,7 +17,7 @@ from simorgh.contracts.envelope import Event, Message, time_left
 from simorgh.contracts.protocols import Context, Health, ProviderResponse, NULL_TELEMETRY
 from simorgh.contracts.registry import error_reply_payload
 
-from .api import Budget, BudgetExceeded, ContextTooLarge, NoRealProvider, Paused, Purpose
+from .api import capabilities_of, Budget, BudgetExceeded, ContextTooLarge, NoRealProvider, Paused, Purpose
 from .assembler import PromptAssembler
 from .budget import RollingWindowBudget
 from .compaction import Compactor
@@ -260,6 +260,9 @@ class Service:
             logger=ctx.logger,
             purpose_filter={name: set(cfg.only_purposes) for name, cfg in self._config.providers.items()
                             if getattr(cfg, "only_purposes", ())},
+            native={p.name for p in real_providers
+                    if getattr(self._config.providers.get(p.name), "tool_dialect", "markers") == "native"
+                    and capabilities_of(p).supports_tools},
         )
         self._assembler = PromptAssembler(
             ctx.bus, ctx.source, request_timeout=self._config.assembly_request_timeout, logger=ctx.logger,
@@ -316,6 +319,16 @@ class Service:
         return Health.ok()
 
     # -- handlers ---------------------------------------------------------------------
+    def _offered_specs(self, payload: dict) -> list[dict] | None:
+        """The offered tools as specs for a native provider; None when the
+        caller expects no tool calls. The Router hands them only to a
+        provider set to `tool_dialect = "native"`."""
+        if payload.get("expected") != "tool_calls":
+            return None
+        names = [n for n in payload.get("tools") or () if n]
+        return [self._tool_specs.get(n) or {"name": n, "description": "", "input_schema": {"type": "object"}}
+                for n in names] or None
+
     async def _on_tool_registered(self, message: Message) -> None:
         p = message.payload
         if p.get("name"):
@@ -439,7 +452,7 @@ class Service:
             async with telemetry.span("cognition.provider_call", trace_id=message.trace_id, parent_id=message.id,
                                       attrs={"purpose": purpose.value}) as span:
                 response, floor = await self._router.complete(
-                    purpose, think_messages, tools=None,
+                    purpose, think_messages, tools=self._offered_specs(payload),
                     budget=budget, timeout=budget.max_seconds, order=order, images=images or None,
                 )
                 span.set("provider", response.provider)
@@ -460,6 +473,12 @@ class Service:
 
         self._note_reply(floor=floor)
         parsed = self._parser.parse(response.text, _expected_spec(payload))
+        if response.tool_calls and payload.get("expected") == "tool_calls":
+            # A native provider answered with typed calls (stage 2 item 9):
+            # those are the calls, whatever marker-looking text came with them.
+            parsed = dataclasses.replace(parsed, kind="tool_calls", tool_calls=tuple(
+                {"tool": c["tool"], "args": c.get("args") or {}, "id": c.get("id", ""),
+                 **({"error": c["error"]} if c.get("error") else {})} for c in response.tool_calls))
         await self._append_call_record(purpose, response, floor, compacted)
         # Not for a call that carried pictures: only one provider can see,
         # so a camera event always "changes" the provider and then changes

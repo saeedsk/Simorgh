@@ -51,8 +51,11 @@ class Router:
         self, providers: list[Provider], budgets: dict[str, RollingWindowBudget],
         floor: FloorProvider, *, order: tuple[str, ...], clock: Clock, logger: Logger | None = None,
         cooldown_s: float = 30.0, transient_backoff_s: float = 2.0,
-        purpose_filter: dict[str, set[str]] | None = None,
+        purpose_filter: dict[str, set[str]] | None = None, native: set[str] | frozenset[str] = frozenset(),
     ) -> None:
+        # Providers that are handed the tool specs (`tool_dialect = "native"`);
+        # every other one is called with `tools=None` and reads the markers.
+        self._native = frozenset(native)
         # name -> the purposes that provider may answer (absent: all).
         self._purpose_filter = {k: set(v) for k, v in (purpose_filter or {}).items() if v}
         # One retry after this wait for a transient failure (HTTP 429/5xx, a
@@ -278,6 +281,7 @@ class Router:
         one tight review into a canned "no real reviewer" for every call
         during the cooldown (benchmark wave, 2026-09-14)."""
         started = self._clock.now()
+        tools = tools if name in self._native else None
         # Only the providers that declared `supports_images` ever reach here
         # with pictures, so the keyword is never passed to one that would
         # not know what to do with it.

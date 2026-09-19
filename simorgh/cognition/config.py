@@ -62,6 +62,11 @@ class ProviderConfig:
     # a screenshot). The text model above cannot see one; without this, Sim
     # cannot look at anything and says so.
     vision_model: str = ""
+    # "markers" (the default): tools are described in the prompt and called
+    # with NAME: argument lines. "native": the provider is handed the tool
+    # specs and returns typed calls (stage 2 item 9); only honoured for a
+    # provider whose API has native tools (`Capabilities.supports_tools`).
+    tool_dialect: str = "markers"
 
 
 @dataclass(frozen=True)
