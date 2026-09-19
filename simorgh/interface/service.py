@@ -197,6 +197,9 @@ class Service:
         self._prompt_timeouts: dict[str, asyncio.Task] = {}  # prompt_id -> its own timeout watchdog
         # When the last "-- 17:29 --" line was printed (`_out`).
         self._last_time_marker = 0.0
+        # Voice replies printed at `turn.completed` whose `voice.spoken` has
+        # not arrived yet (it comes when playback ends).
+        self._voice_replies_shown = 0
         self._color = render_mod.color_enabled(self.config.color)
         self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
         # True only while `_repl_main`'s thread is genuinely blocked
@@ -1144,6 +1147,7 @@ class Service:
             self._out(render_mod.style(f"  ⏹ {what} -- you said so", "dim", enabled=self._color))
             return
         if message.payload.get("dropped"):
+            self._voice_replies_shown = max(0, self._voice_replies_shown - 1)
             reason = str(message.payload.get("reason") or "you had moved on")
             self._out(render_mod.style(f"  🔇 that answer came too late and was not spoken ({reason})", "dim",
                                        enabled=self._color))
@@ -1154,6 +1158,12 @@ class Service:
                 # The "Aha." / "Let me check." said the moment a turn ends
                 # -- a beat, not a reply.
                 self._out(render_mod.style(f"  🔊 {text}", "dim", enabled=self._color))
+                return
+            if self._voice_replies_shown > 0:
+                # Already on screen from `turn.completed`.
+                self._voice_replies_shown -= 1
+                if tail:
+                    self._out(render_mod.style("  ⏹ interrupted", "dim", enabled=self._color))
                 return
             self._out(render_mod.style(f"🔊 sim: {text}{tail}", "green", enabled=self._color))
 
@@ -1512,6 +1522,16 @@ class Service:
 
     async def _on_turn_completed(self, message: Message) -> None:
         p = message.payload
+        text = str(p.get("text") or "").strip()
+        if p.get("channel") == "voice" and text and not p.get("cancelled"):
+            # A spoken reply is on screen as soon as it exists, while Sim is
+            # still saying it. It used to wait for `voice.spoken`, which is
+            # published when playback ENDS -- the creator, 2026-09-19: "the
+            # transcript appears only after sim has finished saying the
+            # whole message". `_on_voice_spoken` then only notes an
+            # interruption.
+            self._out(render_mod.style(f"🔊 sim: {text}", "green", enabled=self._color))
+            self._voice_replies_shown += 1
         fut = self._pending_turns.get(p.get("session_id", ""))
         if fut is not None and not fut.done():
             fut.set_result(p.get("text", ""))

@@ -216,3 +216,5 @@ Lock it first (`python tools/modlock.py claim interface --by <you> --task "..."`
 - `help` lists one line per command, with `· help <name>: N ways` where a command has several; `help all` is the full manual with every word (the default until 2026-09-19, when it had grown to 120 lines).
 
 - `capabilities` and `skills list` render as panels (`render.capabilities_panel`, `render.skills_panel`): a count, sections (Ready / Not available; Installed / Written by Sim), one aligned row each with a coloured dot, cut to the terminal at a word.
+
+- A voice turn's reply is printed at `turn.completed` (channel `voice`), while it is still being spoken; the later `voice.spoken` adds only an interruption note. It used to appear only when playback ended.

@@ -155,6 +155,29 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sim: Kitchen lights are on.", text)
         self.assertEqual(text.count("listening"), 1, "the idle transition is not a line of its own")
 
+    async def test_a_spoken_reply_is_on_screen_before_it_is_said(self):
+        """The creator, 2026-09-19: the transcript appeared only after Sim
+        had finished saying it. It is printed at `turn.completed`; the
+        later `voice.spoken` adds nothing but an interruption note."""
+        import contextlib
+        import io
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": "v1", "task_id": "v1", "text": "Kitchen lights are on.", "channel": "voice",
+                "kind": "chat", "floor": False, "tool_steps": 0}))
+            await self._pump()
+            before_speech = out.getvalue()
+            await self.other.publish(self.other.new(topics.VOICE_SPOKEN, {
+                "text": "Kitchen lights are on.", "seconds": 1.4, "engine": "kokoro", "device": "laptop",
+                "interrupted": True}))
+            await self._pump()
+        self.assertIn("sim: Kitchen lights are on.", before_speech)
+        text = out.getvalue()
+        self.assertEqual(text.count("Kitchen lights are on."), 1)
+        self.assertIn("interrupted", text)
+
     async def test_debug_level_notices_never_reach_the_human(self):
         """Live-caught: planning's own dedup bookkeeping ("duplicate
         candidate, matches task ...", `planning/service.py::_notice`)
