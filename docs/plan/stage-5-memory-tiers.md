@@ -1,0 +1,48 @@
+# Stage 5 -- Memory tiers
+
+Status: not started · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
+
+## Outcome
+
+Four real tiers: working (the session transcript, owned by Orchestration), episodic (turn records with real dense embeddings persisted at store time), semantic (a fact store with first-class supersession and provenance), procedural (skills and adopted policies). Hybrid retrieval (BM25 + dense with reciprocal rank fusion, reranked by recency, person and confidence) answers in tens of milliseconds because nothing is embedded or scanned on the hot path. A correction wins by data structure, not by the model noticing which line is later. Every channel's turns carry a person namespace. Recall is also a tool the model can call.
+
+## Why
+
+Evaluation C10 (hashed bag-of-words embeddings, paraphrases score 0.000, a full scan per recall, the block vanishes under load), section 8.1 memory row, section 9.4. This is what the family feels daily: the machine-names and birthday cases.
+
+## Before you start
+
+The 30-turn household recall scenario (stage 0 item 30) is the gate: record recall@k for facts and the exact-answer rate for corrections before. Read `memory/store.py` (`MemoryEngine.retrieve` scores every record; `flag_contradictions` penalises both sides), `memory/recall.py` (the inverted index), `memory/embed.py`, `memory/embedders.py` (the sentence-transformers adapter exists; 24.9 s cold), `memory/consolidation.py`, `persona/user_model.py` (two regexes to replace).
+
+## Action items
+
+1. **The embedder warms in a boot thread; vectors persist.** *Lock `memory`.* `[memory] embedder = "local"` loads the sentence-transformers model in `asyncio.to_thread` at start; each record is embedded at store time and the vector persisted as a projection keyed by ref (`array('f')` blob in the record's stream or a `memory:vectors` snapshot); each record stores which embedder produced its vector; hashing remains the floor until warm and forever when the dependency is absent. Recall never waits on embedding. Acceptance: a recall issued 0.1 s after boot answers (from hashing) and one issued after warm-up uses dense vectors; no per-recall embedding of stored records.
+2. **Index and fusion.** *Lock `memory`.* A numpy float32 matrix per kind with brute-force cosine (sub-10 ms to ~100k records; ANN only past ~200k); BM25 by extending the inverted index with tf and doc length (stdlib); reciprocal rank fusion of the two; rerank by recency half-life, person tag, confidence; optional cheap-model rerank of the top 20 for chat. Acceptance: `tests/simorgh/memory/test_hybrid_recall.py` on a fixture of 500 records: a paraphrase query finds its record in the top 3.
+3. **The fact store.** *Lock `memory`, `contracts`.* `memory:facts` with `Fact{id, person_scope, subject, predicate, object, valid_from, valid_to, superseded_by, confidence, source_refs}`; extraction at consolidation by a cheap purpose returning JSON triples each with the quoted span it came from (the existing `untraceable()` check per triple); supersession by key `(person_scope, subject, predicate)` so a correction wins by structure and recall renders "X (was Y until <date>)"; `flag_contradictions` retired (stream kept read-only). Topics `memory.fact.stored`, `memory.fact.superseded`; a `facts` field on `memory.retrieve.reply`. Acceptance: the birthday correction case passes by construction; both-sides test updated.
+4. **Entity-linked facts block and per-person digest.** *Lock `memory`, `orchestration`, `persona`.* Names of known people, devices and places in the query pull their current facts into a small block rendered before the episodic block; a ~150-token per-person digest regenerated at sleep from facts, delivered as a protected block when that person speaks; `persona/user_model.py`'s regex extraction is retired. Acceptance: a fact told to one family member does not surface to another (the scenario's cross-person case).
+5. **Speculative recall on percept.** *Lock `orchestration`, `voice`.* Memory and world-now lookups are issued on `percept.text.received` (on the STT partial for voice) in parallel with session setup; the recall budget becomes ~1 s once off the critical path; the "memory could not be consulted" note stays. Acceptance: recall latency no longer on the voice critical path (span tree shows overlap).
+6. **`memory_search` built-in.** *Lock `orchestration`, `execution`.* An effect-free tool `memory_search{query, kinds, person, since}` for agentic recall; bypasses Guardian like `delegate` (it has no effect). Acceptance: offered in CHAT and RESEARCH agents; a test that it returns facts and episodes.
+7. **Person namespace on every channel.** *Lock `interface`, `memory`.* Telegram and WhatsApp resolve the sender and put `speaker` on the percept (they already know it for the allow-list); typed CLI turns are the owner. Acceptance: a Telegram turn's episodic record carries `person:<name>`.
+8. **Forgetting.** *Lock `memory`.* Retention by a score (age, access count, confidence), never facts with live links; `memory forget` stays operator-initiated. Acceptance: a test that a linked fact survives a sweep.
+9. **Findings entry** with recall@k, correction-wins rate, recall p50 latency, warm-up time.
+
+## Measurements after
+
+| Number | Before | Target |
+|---|---|---|
+| Recall scenario: facts recalled at turn 14/19 | fails | passes |
+| Correction wins (birthday) | fails | passes by structure |
+| Paraphrase recall (fixture) | 0.000 similarity | top-3 |
+| Recall p50 latency, warm | 155 ms hashing / 47 ms dense (scan) | under 20 ms |
+| Memory block dropped for timeout | "the normal case" under load | 0 per day |
+
+## Risks and mitigations
+
+- Ranking changes silently: the labelled scenario is the gate; hashing stays the floor.
+- A wrong extracted fact: every fact carries `source_refs`, so it can be traced and tombstoned; extraction only records triples with a quoted span.
+- The optional dependency: strictly optional; the system boots and recalls without it.
+
+## Definition of done
+
+- [ ] Items 1-8 with tests; memory's CONTRACT.md rewritten for the four tiers.
+- [ ] Findings entry with the table.

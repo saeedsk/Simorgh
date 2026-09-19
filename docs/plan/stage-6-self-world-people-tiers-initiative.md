@@ -1,0 +1,47 @@
+# Stage 6 -- Self and world projections, People, safety tiers, Initiative
+
+Status: not started · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
+
+## Outcome
+
+The Self Model is a durable fold of ledger streams (Beta posteriors per task type with forgetting, calibration, per-tool reliability, per-provider quality) that survives a restart and is consumed by routing, planning risk and exploration. `world:home` is a projection of entity state, per-(person, area) presence belief with decay, and situation facts rendered with staleness, built from events already on the bus (camera, TV, speaker id, calendar, home/media/pim results) without waiting for Home Assistant. A People model gives one `person_id` across kitchen, Telegram, WhatsApp and CLI with a role tier, permissions and a memory namespace. Guardian has tiers 0 to 3 with tier 3 always human. Unprompted speech has exactly one path, scored against interruption cost.
+
+## Why
+
+Evaluation C6 (Self Model volatile), V3 (four session models, no identity contract), S8 (one axis for physical and code), section 8.1 rows worldmodel, guardian, initiative; section 9.3 and 9.4. Unlocks: "what can you do" and "what are you bad at" from data; household questions answered from state; per-person permissions; Sim proactive without being a nuisance.
+
+## Before you start
+
+Read `worldmodel/selfmodel.py`, `worldmodel/service.py` (`_apply`), `learning/competence.py`, `contracts/household.py`, `contracts/places.py`, `contracts/home/policy.py`, `voice/speakers.py` (the speaker book), `voice/session.py` (`_room`, bystander), `curiosity/sharing.py`, `persona/sharing.py`, `execution/vision.py` (the announce step), `kernel/scheduler.py` (reminders). Decide with the creator whether a phone channel (Telegram) is the owner's "ask" path for tier 3; default yes.
+
+## Action items
+
+1. **`self:model` as a fold.** *Lock `worldmodel`, `contracts`.* At boot the Self Model is rebuilt from `learn:outcomes`, `self:changes`, `tool.registered` replay, the skills catalog and `system.started`; `Beta(alpha, beta)` per task type and per (task type, strategy) with exponential forgetting (half-life config); calibration as expected calibration error; per-tool p(ok) and latency quantiles from `action.result`; per-provider quality per purpose from `verify.result`; snapshots every N events; the summary renders posteriors with sample counts ("patch:memory 62% over 13, overconfident"). `self.estimate.request/reply` topic for consumers. Acceptance: a restart reproduces the same model version and competence table; the 44 historical landings appear in change history when the archived ledger is replayed.
+2. **Consumers of the estimate.** *Lock `orchestration`, `planning`, `curiosity`.* Routing escalates to the strong tier when the task type's posterior mean is below a threshold; Planning runs a low-posterior node in plan mode with a human gate; Curiosity's gap drive reads `self.gaps` (now real). Acceptance: a test per consumer with a seeded posterior.
+3. **`world:home`.** *Lock `worldmodel`, `contracts`.* Facets `home.py` (entity state table folded from `camera.event`, `tv.state`, voice speaker id, calendar reads, `action.result` of home/media/pim tools; `percept.home.state_changed` when HA is bridged) and `presence.py` (per-(person, area) belief updated by evidence likelihoods with exponential decay, reported as a distribution with `unknown`); situation facts as pure rules (quiet_hours, someone_asleep, nobody_home, tv_playing, child_alone); staleness = age / learned typical change rate; a "world now" block (~200 tokens) for the ContextBuilder that renders only fresh entities and names stale ones unknown; the room transcript ring per area replaces `voice/session.py`'s `_room` deque. Topics `world.entity.observed`, `world.home.situation_changed`. Acceptance: a scripted evening (TV on, a child's voice in the living room, a camera event at the door) yields the expected situation facts and an `unknown` for an area with no evidence.
+4. **People.** *Lock `contracts`, `worldmodel`, `interface`, `voice`, `execution`.* `contracts/people.py`: `Person{person_id, linked identities (voice embedding set, telegram id, whatsapp number, HA person, cli=owner), role owner|adult|child|guest|unknown, permission matrix, memory namespace, preferences}`; the store in worldmodel; identity resolution at every channel edge before a percept is published (`unknown` default); `people_*` tools (link, unlink, set role) through Guardian as tier 3; the speaker book, `contracts/household.py`, the Telegram/WhatsApp allow-lists and `persona/user_model.py` fold into it. Acceptance: the same person in the kitchen and on Telegram shares one memory namespace; a stranger's voice is `unknown` and gets no family facts.
+5. **Safety tiers 0 to 3.** *Lock `guardian`, `contracts`.* `guardian/tiers.py`: tier = f(reversibility, scope, origin, blast radius) from the ToolSpec plus a per-tool override table; 0 read-only (allow, log); 1 reversible in scope (allow in guarded, deny in locked); 2 irreversible but local and bounded (commit/land, sandboxed shell, package install, device actions with undo: allow if an undo is declared or posture is trusted, else escalate; rate-limited); 3 external, physical-`human`, financial (notify a third party, `run_remote`, sirens, mail send, purchases, publishing, unlock, disarm: human in every posture). `PhysicalRule` folds into the tier computation; `PersonRule` (the requester's role against the permission matrix: allow | ask(owner) | deny); `PresenceRule` (a human-class approval by voice requires the approving person present with belief > 0.8 and speaker-verified, else the phone path); `requester{person_id, role, channel, verified}` on every proposal; tier and rule recorded on every decision and as span attrs. Acceptance: the stage-0 drill plus: a child asking to unlock is denied by `PersonRule`; a tier-3 action reaching Execution without a human is 0 in a booted-Kernel drill.
+6. **`initiative/`.** *Lock new `initiative`, `curiosity`, `persona`, `execution`, `kernel`, `voice`.* Merge `curiosity/sharing.py`, `persona/sharing.py`, the announce step in `execution/vision.py`, reminder delivery and backchannel greetings into one module: utility = urgency(class) × relevance(person) − interruption cost(activity, time, channel) from `world:home`; classes safety_alert (always, all channels), event_fyi (only when someone is present and awake, else the owner's phone), reminder (to its person wherever they are), growth/news (digest, or idle with an adult present); presence-aware routing; per-person do-not-disturb; per-class cooldowns; a daily cap; every delivery an `action.proposed{tool: speak|notify}`; a HOLD state in the turn manager so a proactive utterance waits for the floor; `initiative.suppressed{why}` recorded. Acceptance: a camera event at 02:00 with a child asleep in the living room goes to the owner's phone, not the speaker.
+7. **Environment events into sessions.** *Lock `orchestration`.* A `world.home.situation_changed` relevant to an open session is appended as an environment turn so the agent can act on it under the same gate. Acceptance: a test where a TV-off event mid-task reaches the model.
+8. **Findings entry** with presence accuracy against a family-corrected diary (two weeks), unprompted utterances per day per person and the fraction marked unwanted, tier-3 without-human count.
+
+## Measurements after
+
+| Number | Target |
+|---|---|
+| Self Model after restart | identical competence table and version |
+| "What can you do / what are you bad at" | answered from data with sample counts |
+| Presence accuracy vs diary | recorded; reported as distributions |
+| Tier-3 effects without a human | 0 (drilled at boot) |
+| Unwanted unprompted utterances | under 10% of deliveries |
+
+## Risks and mitigations
+
+- Presence fusion over-claims if likelihoods are guessed: ship it reporting distributions; no rule depends on it until measured.
+- Identity linking is a new failure class: `unknown` by default; every link an owner action.
+- The Initiative merge changes when existing shares arrive: measure the unwanted rate for two weeks before raising any threshold.
+
+## Definition of done
+
+- [ ] Items 1-7 with tests; new package in LAYERS, AGENTS.md and the boundary test; CONTRACT.md for every touched module.
+- [ ] Findings entry.
