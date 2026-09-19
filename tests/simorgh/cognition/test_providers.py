@@ -12,7 +12,7 @@ import unittest
 from simorgh.cognition.api import ProviderUnavailable, Purpose
 from simorgh.cognition.providers.base import TEMPLATES, FloorProvider
 from simorgh.cognition.providers.claude_code import ClaudeCodeProvider
-from simorgh.cognition.providers.gemini import GeminiProvider
+from simorgh.cognition.providers.gemini import THINKING_RESERVE_TOKENS, GeminiProvider
 
 
 def _fake_completed(stdout: str, returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess:
@@ -254,7 +254,7 @@ class TestGeminiProvider(unittest.IsolatedAsyncioTestCase):
         await provider.complete(
             [{"role": "user", "content": "hi"}], tools=None, max_tokens=250, timeout=12.0,
         )
-        self.assertEqual(seen["config"]["max_output_tokens"], 250)
+        self.assertEqual(seen["config"]["max_output_tokens"], 250 + THINKING_RESERVE_TOKENS)
         self.assertEqual(seen["config"]["http_options"], {"timeout": 12_000})
 
     async def test_an_sdk_without_the_config_keyword_still_answers(self):
@@ -278,6 +278,42 @@ class TestGeminiProvider(unittest.IsolatedAsyncioTestCase):
             [{"role": "user", "content": "hi"}], tools=None, max_tokens=250, timeout=12.0,
         )
         self.assertEqual(response.text, "ok")
+
+    async def test_thought_tokens_are_billed_and_an_empty_capped_answer_fails_over(self):
+        """Measured 2026-09-19: thinking spends the output cap, and the
+        thought tokens are billed but were not counted."""
+
+        class _Usage:
+            prompt_token_count = 8
+            candidates_token_count = 1
+            thoughts_token_count = 97
+
+        class _Reason:
+            name = "MAX_TOKENS"
+
+        class _Candidate:
+            finish_reason = _Reason()
+
+        class _Response:
+            def __init__(self, text):
+                self.text = text
+                self.usage_metadata = _Usage()
+                self.candidates = [_Candidate()]
+
+        replies = ["ready", None]
+
+        class _Models:
+            def generate_content(self, *, model, contents, config=None):
+                return _Response(replies.pop(0))
+
+        class _Client:
+            models = _Models()
+
+        provider = GeminiProvider(api_key="fake-key", client=_Client())
+        response = await provider.complete([{"role": "user", "content": "hi"}], tools=None, max_tokens=20)
+        self.assertEqual(response.output_tokens, 98)
+        with self.assertRaises(ProviderUnavailable):
+            await provider.complete([{"role": "user", "content": "hi"}], tools=None, max_tokens=20)
 
     async def test_sdk_failure_degrades_to_provider_unavailable(self):
         class _Models:

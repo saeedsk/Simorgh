@@ -15,6 +15,8 @@ from simorgh.contracts.protocols import ProviderResponse
 from ..api import ProviderUnavailable
 
 DEFAULT_MODEL = "gemini-3.8-flash"
+# Output room for thought, on top of the caller's max_tokens (see _complete_sync).
+THINKING_RESERVE_TOKENS = 2048
 
 
 class GeminiProvider:
@@ -54,7 +56,12 @@ class GeminiProvider:
         # provider was never actually asked to respect.
         config: dict = {}
         if max_tokens:
-            config["max_output_tokens"] = int(max_tokens)
+            # Gemini's thinking models spend `max_output_tokens` on thought
+            # before the answer. Measured 2026-09-19 on gemini-3.8-flash: a
+            # one-word reply with a cap of 20 came back empty (17 thought
+            # tokens, finish MAX_TOKENS); with 400 it answered after 97. The
+            # caller's number is the ANSWER's room, so thought gets its own.
+            config["max_output_tokens"] = int(max_tokens) + THINKING_RESERVE_TOKENS
         if timeout:
             config["http_options"] = {"timeout": int(timeout * 1000)}  # the SDK counts in milliseconds
         try:
@@ -73,9 +80,18 @@ class GeminiProvider:
 
         usage = getattr(response, "usage_metadata", None)
         input_tokens = (getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
-        output_tokens = (getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
+        # Thought tokens are billed as output; leaving them out made the
+        # budget under-count every call.
+        output_tokens = ((getattr(usage, "candidates_token_count", 0) or 0)
+                         + (getattr(usage, "thoughts_token_count", 0) or 0)) if usage else 0
+        text = getattr(response, "text", None) or ""
+        if not text and _finished_on_max_tokens(response):
+            # An empty answer is not an answer: fail over rather than hand
+            # the caller "" as if the model had chosen to say nothing.
+            raise ProviderUnavailable(
+                f"Gemini spent its {config.get('max_output_tokens')} output tokens thinking and returned no text")
         return ProviderResponse(
-            text=getattr(response, "text", None) or "", provider=self.name,
+            text=text, provider=self.name,
             input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=None,
         )
 
@@ -93,4 +109,12 @@ class GeminiProvider:
         return self._client
 
 
-__all__ = ["GeminiProvider", "DEFAULT_MODEL"]
+def _finished_on_max_tokens(response: Any) -> bool:
+    for candidate in getattr(response, "candidates", None) or ():
+        reason = getattr(candidate, "finish_reason", None)
+        if reason is not None and "MAX_TOKENS" in str(getattr(reason, "name", reason)):
+            return True
+    return False
+
+
+__all__ = ["GeminiProvider", "DEFAULT_MODEL", "THINKING_RESERVE_TOKENS"]
