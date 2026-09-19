@@ -12,12 +12,8 @@ from .api import DEFAULT_CONFIDENCE_HALF_LIFE_SECONDS
 @dataclass(frozen=True)
 class Config:
     half_life_seconds: float = DEFAULT_CONFIDENCE_HALF_LIFE_SECONDS
-    # `WorkingMemory`'s bounds (`store.py`) -- consumed at construction,
-    # but there is no real producer yet: nothing publishes
-    # `memory.store{kind:"working"}` outside tests, so these bounds
-    # currently have no traffic to bound. See `store.py`'s
-    # `WorkingMemory` docstring for why that gap is left open rather
-    # than force-wired.
+    # `WorkingMemory`'s bounds (`store.py`): the per-(channel, person)
+    # conversation window that every chat `turn.completed` feeds.
     working_max_turns: int = 20
     working_max_chars: int = 8_000
     # Unreachable by design (2026-09-08 observer audit): `service.py`'s
