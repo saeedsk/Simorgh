@@ -12,6 +12,11 @@ requires-python = ">=3.11"
 # suite runs before a bless and nightly.  See docs/testing.md.
 testpaths = ["tests/simorgh", "tests/tools"]
 python_files = ["test_*.py"]
+# Unset, pytest-asyncio printed a deprecation warning per xdist worker on
+# every run -- and Sim's run_tests output, which the model reads and pays
+# for, was mostly that warning; the real failure text was cut off
+# (2026-09-19).
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "live: needs a real network service, Docker, a browser or this machine's tools",
     "slow: takes more than about two seconds on its own (real sleeps, subprocesses, large fixtures); excluded from the module tier",

@@ -206,7 +206,11 @@ class TestAPatchLandsThroughAWorktree(unittest.IsolatedAsyncioTestCase):
         kernel, ctx, repo, root = await self._boot(name_the_repo=False)
         try:
             live = Path(__file__).resolve().parents[3]
-            stray_before = _git(live, "branch", "--list", "sim/task-*")
+            # Only this test's own branch: a live Sim sharing the repository
+            # makes and removes its own sim/task-* branches while the suite
+            # runs from one of its task worktrees, and comparing them all
+            # failed there on every run (2026-09-19).
+            stray_before = _git(live, "branch", "--list", "sim/task-t-land")
             done = asyncio.ensure_future(_wait_for(
                 ctx, (topics.TASK_COMPLETED, topics.TASK_BLOCKED, topics.TASK_FAILED), task_id="t-land", timeout=120))
             await asyncio.sleep(0)
@@ -227,7 +231,7 @@ class TestAPatchLandsThroughAWorktree(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(outcome.type, topics.TASK_COMPLETED)
             steps = [e.payload for e in await ctx.ledger.read("task:t-land") if e.type == topics.TASK_STEP]
             self.assertNotIn("worktree_open", [s.get("tool") for s in steps])
-            self.assertEqual(_git(live, "branch", "--list", "sim/task-*"), stray_before)
+            self.assertEqual(_git(live, "branch", "--list", "sim/task-t-land"), stray_before)
             self.assertFalse((root / "data" / "execution" / "worktrees").exists())
         finally:
             await kernel.shutdown()
