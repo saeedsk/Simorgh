@@ -183,3 +183,5 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - `ContextFactory.build` gives each subsystem a `BoundLedger` for its name (stage 1 item 8); the Kernel's own client is unbound.
 
 - Logging (2026-09-19): when stderr is a terminal, the root log goes to `<data_dir>/logs/sim.log` (rotating, 5 MB x 3), never under the TUI; without a terminal it stays on stderr (`cli._log_handler`).
+
+- Config check (2026-09-19): a section is reported only when it holds a key nothing reads, found by perturbing each key (`configcheck.unread_keys`); the warning names the keys. A correct key set to its default is no longer reported as a typo.

@@ -233,8 +233,62 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
     }
 
 
+def _perturbed(value):
+    """A different value of the same kind, or None when there is none to try."""
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value + 1
+    if isinstance(value, str):
+        return value + "_x"
+    if isinstance(value, (list, tuple)):
+        return [*value, "_x"]
+    return None
+
+
+def _leaves(section: dict, prefix: str = ""):
+    for key, value in section.items():
+        path = f"{prefix}{key}"
+        if isinstance(value, dict):
+            yield from _leaves(value, path + ".")
+        else:
+            yield path, value
+
+
+def _with(section: dict, path: str, value) -> dict:
+    head, _, rest = path.partition(".")
+    out = dict(section)
+    out[head] = _with(dict(section.get(head) or {}), rest, value) if rest else value
+    return out
+
+
+def unread_keys(cls, section: dict, baseline: dict | None = None) -> list[str]:
+    """The keys of `section` nothing reads: changing the value of each
+    changes nothing in the parsed config. A key merely set to its default
+    is read -- `[guardian.physical] auto_approve = false` was reported as a
+    section that "changed nothing -- check the key names" on every boot
+    (2026-09-19) though the key was right."""
+    baseline = dict(baseline or {})
+    written = baseline | dict(section)
+    try:
+        parsed = cls.from_mapping(written)
+    except Exception:  # noqa: BLE001 -- a section that cannot parse is the subsystem's to report
+        return []
+    unread = []
+    for path, value in _leaves(dict(section)):
+        other = _perturbed(value)
+        if other is None:
+            continue
+        try:
+            if cls.from_mapping(_with(written, path, other)) == parsed:
+                unread.append(path)
+        except Exception:  # noqa: BLE001 -- a value the parser rejects was read
+            continue
+    return unread
+
+
 def dead_sections(config, *, names: Iterable[str] | None = None) -> list[str]:
-    """Section names that were written and had no effect.
+    """Section names holding at least one key nothing reads.
 
     `config` is a `LoadedConfig`; only its `section(name)` is used, so a
     test can pass anything with that method.
@@ -248,13 +302,8 @@ def dead_sections(config, *, names: Iterable[str] | None = None) -> list[str]:
         section = config.section(name)
         if not section:
             continue
-        baseline = dict(EFFECTIVE_DEFAULTS.get(name, {}))
-        written = baseline | dict(section)
-        try:
-            if cls.from_mapping(written) == cls.from_mapping(baseline):
-                dead.append(name)
-        except Exception:  # noqa: BLE001 -- a section that cannot parse is the subsystem's to report
-            continue
+        if unread_keys(cls, dict(section), EFFECTIVE_DEFAULTS.get(name, {})):
+            dead.append(name)
     return dead
 
 
@@ -325,11 +374,13 @@ def report(config, logger) -> list[str]:
     the caller and for tests -- the same contract as before this
     function also checked fields."""
     dead = dead_sections(config)
+    classes = _config_classes()
     for name in dead:
+        keys = unread_keys(classes[name], dict(config.section(name)), EFFECTIVE_DEFAULTS.get(name, {}))
         logger.warning(
-            "config.section_had_no_effect", section=name,
-            detail=f"[{name}] in simorgh.toml changed nothing -- check the key names against "
-                   f"simorgh/{name}/config.py",
+            "config.section_had_no_effect", section=name, keys=keys,
+            detail=f"[{name}] {', '.join(keys)} in simorgh.toml: nothing reads "
+                   f"{'it' if len(keys) == 1 else 'them'} -- check the names against simorgh/{name}/config.py",
         )
     for name, field in dead_fields(config):
         logger.warning(
@@ -340,4 +391,4 @@ def report(config, logger) -> list[str]:
     return dead
 
 
-__all__ = ["dead_sections", "dead_fields", "report"]
+__all__ = ["dead_sections", "dead_fields", "report", "unread_keys"]

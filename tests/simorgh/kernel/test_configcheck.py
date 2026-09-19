@@ -267,3 +267,20 @@ class TestTheWarning(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ARestatedDefaultIsNotATypo(unittest.TestCase):
+    """2026-09-19, every boot: "[guardian] in simorgh.toml changed nothing
+    -- check the key names" for `[guardian.physical] auto_approve = false`,
+    a correct key set to its default."""
+
+    def test_a_correct_key_at_its_default_is_quiet(self) -> None:
+        self.assertEqual(dead_sections(_Config({"guardian": {"physical": {"auto_approve": False}}})), [])
+
+    def test_a_misspelt_nested_key_is_named(self) -> None:
+        from simorgh.guardian.config import Config as GuardianConfig
+        from simorgh.kernel.configcheck import unread_keys
+
+        self.assertEqual(dead_sections(_Config({"guardian": {"physical": {"auto_aprove": False}}})), ["guardian"])
+        self.assertEqual(unread_keys(GuardianConfig, {"physical": {"auto_aprove": False}, "mode": "guarded"}),
+                         ["physical.auto_aprove"])
