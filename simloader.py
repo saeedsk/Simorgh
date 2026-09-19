@@ -1050,11 +1050,47 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
         return returncode
 
 
-def launch_sim(repo: Path, notes: Path, sim_args: list[str]) -> int:
+#: How long Sim gets to stop on its own after a Ctrl-C before the loader
+#: kills it. Sim's own watchdog hard-exits at stop_grace_s + 10 (25 s by
+#: default), so this is only the backstop behind it.
+STOP_GRACE_S = 30.0
+
+
+def launch_sim(repo: Path, notes: Path, sim_args: list[str], *, argv: list[str] | None = None,
+               grace_s: float | None = None) -> int:
     """Run Sim in the foreground until it exits. Its own function so a
-    test can stand in for it without also standing in for git."""
+    test can stand in for it without also standing in for git.
+
+    Not `subprocess.run`: on KeyboardInterrupt it waits 0.25 s and then
+    SIGKILLs the child, so a terminal Ctrl-C -- which reaches Sim too,
+    through the process group -- killed Sim a quarter of a second into
+    its orderly shutdown: no final state, no ledger flush, stop_grace_s
+    and Sim's own Stopper never mattered (2026-09-18 evaluation, B16).
+    Now: a first Ctrl-C waits up to `grace_s` for Sim to exit on its
+    own; a second one, or the grace running out, kills it. SIGTERM to
+    the loader is forwarded to Sim."""
     env = dict(os.environ, SIMORGH_LOADER_NOTES=str(notes))
-    return subprocess.run([sys.executable, "-m", "simorgh", "run", *sim_args], cwd=repo, env=env).returncode
+    cmd = argv if argv is not None else [sys.executable, "-m", "simorgh", "run", *sim_args]
+    grace = STOP_GRACE_S if grace_s is None else grace_s
+    proc = subprocess.Popen(cmd, cwd=repo, env=env)
+    import signal
+
+    try:
+        previous = signal.signal(signal.SIGTERM, lambda signum, frame: proc.send_signal(signal.SIGTERM))
+    except ValueError:  # not the main thread (a test harness): no forwarding
+        previous = None
+    try:
+        try:
+            return proc.wait()
+        except KeyboardInterrupt:
+            try:
+                return proc.wait(timeout=grace)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                proc.kill()
+                return proc.wait()
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -813,3 +813,31 @@ class ABrokenTagIsNotAKnownGoodImageTestCase(LoaderTestCase):
 
 
 _real_git = simloader.git
+
+
+class CtrlCGivesSimTimeToStop(unittest.TestCase):
+    """A Ctrl-C to the loader waits for Sim's orderly shutdown instead of
+    SIGKILLing it 0.25 s in (2026-09-18 evaluation, B16)."""
+
+    def test_the_child_finishes_its_shutdown_after_the_loader_gets_sigint(self):
+        import os
+        import signal
+        import subprocess
+        import sys
+        import tempfile
+        import time
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "clean-exit"
+            child = (f"import time; time.sleep(1.2); open({str(marker)!r}, 'w').write('ok')")
+            driver = (
+                "import sys; sys.path.insert(0, {repo!r}); import simloader; from pathlib import Path; "
+                "sys.exit(simloader.launch_sim(Path({tmp!r}), Path({tmp!r}), [], argv=[sys.executable, '-c', {child!r}], grace_s=10))"
+            ).format(repo=str(Path(__file__).resolve().parents[2]), tmp=tmp, child=child)
+            proc = subprocess.Popen([sys.executable, "-c", driver])
+            time.sleep(0.5)
+            os.kill(proc.pid, signal.SIGINT)  # the loader only; the child keeps shutting down
+            code = proc.wait(timeout=20)
+            self.assertTrue(marker.exists(), "the child was killed before it finished")
+            self.assertEqual(code, 0)
