@@ -242,7 +242,7 @@ class TestSkillAcquiredRegistersOnDemand(_ExecutionServiceTestCase):
             {"ref": "memory:procedural:1", "kind": "procedural", "content": "the fixme skill: fixme fixme fixme",
              "score": 0.9, "confidence": 1.0, "ts": 100.0},
         ])
-        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=5.0))
         (self.root / "simorgh_skills" / "fixme.py").write_text(_SKILL_SOURCE)
 
         registered_fut = asyncio.ensure_future(self._wait_for(

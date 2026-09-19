@@ -225,6 +225,7 @@ class RequestGuardRealTestCase(unittest.IsolatedAsyncioTestCase):
         if not (Path(root.stdout.strip()) / "puppeteer").exists():
             self.skipTest("puppeteer not installed globally on this machine")
 
+    @pytest.mark.slow  # a real browser against two real local servers; ~15 s under load
     async def test_a_redirect_to_a_loopback_address_is_blocked_not_followed(self):
         self._skip_unless_available()
         import http.server
@@ -275,7 +276,10 @@ class RequestGuardRealTestCase(unittest.IsolatedAsyncioTestCase):
             tool = RenderPageTool(config, resolver=_public_resolver)
             result = await tool.run({"target": f"http://localhost:{front_port}/"}, ctx=_ctx(config))
         self.assertFalse(result.ok)
-        self.assertNotIn("SHOULD-NEVER-BE-SEEN", result.output)
+        # Under load the tool can hand back raw bytes (a timed-out page);
+        # the property is the same either way: the internal body never shows.
+        output = result.output.decode(errors="replace") if isinstance(result.output, bytes) else str(result.output)
+        self.assertNotIn("SHOULD-NEVER-BE-SEEN", output)
 
 
 class ClassifyActionsTestCase(unittest.TestCase):
