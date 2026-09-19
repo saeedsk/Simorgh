@@ -4,3 +4,111 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.benchmark]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.bus]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.cognition]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.contracts]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.curiosity]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.execution]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.guardian]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.interface]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.kernel]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.learning]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.ledger]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.memory]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.orchestration]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.persona]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.planning]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.reflection]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
+
+[locks.worldmodel]
+by = "opus-main"
+task = "stage 0 item 31: CONTRACT.md prose (agents)"
+since = "2026-09-19T06:46:31+00:00"
+until = "2026-09-19T10:46:31+00:00"
