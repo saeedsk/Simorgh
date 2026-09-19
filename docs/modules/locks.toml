@@ -4,39 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.cognition]
-by = "opus-main"
-task = "stage 0 item 22"
-since = "2026-09-19T06:28:06+00:00"
-until = "2026-09-19T14:28:06+00:00"
-
-[locks.ledger]
-by = "opus-main"
-task = "stage 0 item 24: blob sweep off the loop"
-since = "2026-09-19T06:28:06+00:00"
-until = "2026-09-19T14:28:06+00:00"
-
-[locks.memory]
-by = "opus-main"
-task = "stage 0 item 21"
-since = "2026-09-19T06:28:06+00:00"
-until = "2026-09-19T14:28:06+00:00"
-
-[locks.orchestration]
-by = "opus-main"
-task = "stage 0 item 21: task recall reads procedural"
-since = "2026-09-19T06:28:44+00:00"
-until = "2026-09-19T14:28:44+00:00"
-
-[locks.persona]
-by = "opus-main"
-task = "stage 0 item 27"
-since = "2026-09-19T06:28:06+00:00"
-until = "2026-09-19T14:28:06+00:00"
-
-[locks.reflection]
-by = "opus-main"
-task = "stage 0 item 21"
-since = "2026-09-19T06:28:06+00:00"
-until = "2026-09-19T14:28:06+00:00"
