@@ -598,7 +598,13 @@ class JsonlBackend:
         filters on the *unescaped* name before touching a size, instead of
         globbing 192k Paths and stat-ing every one of them (0.9s of the
         creator's boot). `escape` is not prefix-preserving in general, so
-        the name still has to be unescaped before the prefix test."""
+        the name still has to be unescaped before the prefix test. The walk
+        runs on a worker thread: compaction lists every stream (`""`), and
+        a `stat` per file on the event loop stalled it the way the blob
+        sweep did (B1)."""
+        return await asyncio.to_thread(self._streams_sync, prefix)
+
+    def _streams_sync(self, prefix: str) -> list[str]:
         out = []
         try:
             with os.scandir(self.root / "streams") as it:

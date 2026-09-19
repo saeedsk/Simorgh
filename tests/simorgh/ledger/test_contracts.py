@@ -24,24 +24,11 @@ class TestEventRoundTrip(unittest.TestCase):
 
 
 class TestLedgerProducedMessagesValidate(unittest.TestCase):
-    """The two message types the Ledger Service publishes (system.health,
-    system.metrics) must accept exactly the payload shape service.py
-    sends -- checked directly against the real catalog, not a copy of it.
+    """The message type the Ledger Service publishes (system.metrics) must
+    accept exactly the payload shape service.py sends -- checked directly
+    against the real catalog, not a copy of it. (`system.health` for the
+    ledger is published by the Kernel's health ticker, not by this package.)
     """
-
-    def test_system_health_payload_validates(self) -> None:
-        spec = get_spec(topics.SYSTEM_HEALTH)
-
-        problems = spec.validate({"subsystem": "ledger", "status": "ok"})
-
-        self.assertEqual(problems, [])
-
-    def test_system_health_with_detail_validates(self) -> None:
-        spec = get_spec(topics.SYSTEM_HEALTH)
-
-        problems = spec.validate({"subsystem": "ledger", "status": "down", "detail": "ENOSPC"})
-
-        self.assertEqual(problems, [])
 
     def test_system_metrics_payload_validates(self) -> None:
         spec = get_spec(topics.SYSTEM_METRICS)

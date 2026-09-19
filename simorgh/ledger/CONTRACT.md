@@ -39,7 +39,6 @@ The ledger is the append-only record of everything that happened: named streams 
 | Topic | Schema | Where | When |
 |---|---|---|---|
 | `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/ledger/service.py:169 | after every compaction pass (sleep tick or the start pass): backend `stat()`, client counters, last report |
-| `system.health` | `messages/system.py::SystemHealth` | simorgh/ledger/service.py:171 | declared; `publish_health()` exists but nothing calls it (see Known issues). Health reaches the Kernel by polling `health()` |
 
 ## Ledger streams
 
@@ -88,7 +87,7 @@ Env overrides: `SIMORGH_LEDGER_BACKEND`, `SIMORGH_LEDGER_DIR` (`config.py:48-53`
 
 ## Public Python surface
 
-- `simorgh.ledger.Service` (`service.py`): `name="ledger"`, `consumes=(system.tick.sleep,)`, `produces=(system.health, system.metrics)`, `__init__(client, config=None)`; reads `ctx.config` at `start` when no config was passed. Health: `down` before start or after a `LedgerUnavailable`; `degraded` under 5% free disk.
+- `simorgh.ledger.Service` (`service.py`): `name="ledger"`, `consumes=(system.tick.sleep,)`, `produces=(system.metrics,)`, `__init__(client, config=None)`; reads `ctx.config` at `start` when no config was passed. Health: `down` before start or after a `LedgerUnavailable`; `degraded` under 5% free disk.
 - `simorgh.ledger.client.LedgerClient`: the only ledger module other packages may import; implements `contracts.protocols.Ledger`: `append(stream, event, *, expected_seq)`, `head`, `read`, `streams(prefix)`, `delete_stream`, `tail(stream_or_prefix, handler)`, `snapshot`, `load_snapshot`, `rebuild`, `materialize`, `put_blob`, `get_blob`, `compact`; attributes `counters`, `last_error`, `started`, `backend`.
 - Kernel-only: `make_ledger`, `make_backend`, `Config`.
 - Exceptions: `ConflictError` (CAS lost), `ValidationError`, `LedgerUnavailable`, `BackendUnavailable`, `BlobNotFound`, all subclasses of `LedgerError` (`api.py`).
@@ -106,7 +105,9 @@ Env overrides: `SIMORGH_LEDGER_BACKEND`, `SIMORGH_LEDGER_DIR` (`config.py:48-53`
 - Blob refs are content-addressed (`blob:<64 hex>`); `get_blob` verifies the digest; `put_blob` of identical bytes returns the same ref.
 - `tail` never delivers the same `(stream, seq)` twice to one subscriber, and a subscriber's exception never fails the append.
 - Compaction never touches `ledger:*`; a forever stream without a snapshot is never truncated.
-- The blob sweep runs off the event loop (`asyncio.to_thread`, `jsonl.py:726`) and its count is in the compaction record as `blobs_swept`.
+- The blob sweep runs off the event loop (`asyncio.to_thread`, `JsonlBackend.sweep_unreferenced_blobs`) and its count is in the compaction record as `blobs_swept`.
+- `JsonlBackend.streams(prefix)` (the `scandir` + `stat` walk that `run_compaction` starts every pass with) also runs on a worker thread (`_streams_sync`). Pinned in `tests/simorgh/ledger/test_blob_sweep_off_the_loop.py`.
+- The ledger does not publish `system.health`; the Kernel polls `health()` and publishes a status change (kernel's health ticker).
 - `ledger:compaction` gets an event only when a pass deleted or truncated something; `system.metrics` is published after every pass.
 
 ## Contract tests
@@ -135,7 +136,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 Found while writing this contract, fixed 2026-09-19 (commit `6ce1c78`): retention on a long-lived stream whose name contains `:` (`metrics:history`, `voice:turns`, `curiosity:ticks`, ...) did nothing while it was written, because compaction treated every such name as per-id and delete-only. Pinned in `tests/simorgh/ledger/test_retention_truncates_live_streams.py`.
 
-Also not in the catalogue: `Service.publish_health()` (`service.py:171`) has no caller anywhere, so the declared `system.health` is never published by the ledger; and `run_compaction` itself still does a synchronous `scandir` + `stat` of every stream file (`jsonl.py:604-613`) and a synchronous snapshot read per forever stream on the event loop, the same stall shape as B1 at smaller cost.
+Also not in the catalogue, fixed 2026-09-19: `Service.publish_health()` had no caller, so the declared `system.health` was never published by the ledger; the method was deleted and `system.health` dropped from `produces` (the Kernel publishes health for every supervised service). `run_compaction`'s synchronous `scandir` + `stat` of every stream file now runs on a worker thread (`JsonlBackend._streams_sync`). Still open: `read_snapshot` is a synchronous file read per forever stream on the event loop, the same stall shape as B1 at smaller cost.
 
 ## Planned changes (roadmap)
 

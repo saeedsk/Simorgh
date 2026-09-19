@@ -40,3 +40,32 @@ class TheSweepRunsOffTheLoop(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(removed, 0)
             self.assertIsNot(seen["thread"], loop_thread)
             self.assertGreater(ticks, 5, "the event loop kept running during the sweep")
+
+
+class TheStreamListingRunsOffTheLoop(unittest.IsolatedAsyncioTestCase):
+    """`run_compaction` lists every stream (`streams("")`): a `scandir` plus
+    a `stat` per file. That walk runs on a worker thread too."""
+
+    async def test_streams_walks_the_directory_on_a_worker_thread(self):
+        import os
+
+        from simorgh.contracts.envelope import Event
+
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = JsonlBackend(Path(tmp), fsync=False)
+            await backend.start()
+            await backend.append(Event(stream="task:a", type="t", ts=1.0, trace_id="",
+                                       causation_id=None, payload={}), expected_seq=None)
+            loop_thread = threading.current_thread()
+            seen = []
+            real_scandir = os.scandir
+
+            def recording(path):
+                seen.append(threading.current_thread())
+                return real_scandir(path)
+
+            with mock.patch("simorgh.ledger.backends.jsonl.os.scandir", side_effect=recording):
+                names = await backend.streams("")
+            self.assertEqual(names, ["task:a"])
+            self.assertTrue(seen)
+            self.assertTrue(all(t is not loop_thread for t in seen))

@@ -29,7 +29,10 @@ class Service:
     name = NAME
     version = VERSION
     consumes: tuple[str, ...] = (topics.SYSTEM_TICK_SLEEP,)
-    produces: tuple[str, ...] = (topics.SYSTEM_HEALTH, topics.SYSTEM_METRICS)
+    # No `system.health`: the Kernel polls `health()` and publishes a
+    # status change itself (kernel/service.py health ticker). A
+    # `publish_health()` here had no caller and was removed 2026-09-19.
+    produces: tuple[str, ...] = (topics.SYSTEM_METRICS,)
 
     def __init__(self, client: LedgerClient, config: Config | None = None) -> None:
         self.client = client
@@ -167,16 +170,6 @@ class Service:
         routing = {"trace_id": cause.trace_id, "causation_id": cause.id} if cause is not None else {}
         message = Message.new(topics.SYSTEM_METRICS, source=NAME, payload=payload, clock=self._ctx.clock.now, **routing)
         await self._ctx.bus.publish(validate(message))
-
-    async def publish_health(self) -> None:
-        if self._ctx is None:
-            return
-        health = await self.health()
-        payload = {"subsystem": NAME, "status": health.status}
-        if health.detail:
-            payload["detail"] = health.detail
-        await self._ctx.bus.publish(validate(Message.new(topics.SYSTEM_HEALTH, source=NAME, payload=payload,
-                                                         clock=self._ctx.clock.now)))
 
 
 __all__ = ["NAME", "Service", "VERSION"]
