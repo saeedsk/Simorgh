@@ -197,7 +197,10 @@ class TestANestedFieldThatParsesButNoOneReads(unittest.TestCase):
         self.assertEqual(dead_sections(config), ["persona"])
         self.assertEqual(dead_fields(config), [])
 
-    def test_verification_trajectory_and_review_fields_are_flagged(self) -> None:
+    def test_verification_trajectory_field_is_flagged_and_review_is_not(self) -> None:
+        """`review.require_real_provider` is read since 2026-09-19
+        (`verification/service.py::_think` sends it), so only the
+        trajectory field is still dead."""
         self.assertEqual(
             dead_fields(_Config({
                 "verification": {
@@ -205,10 +208,7 @@ class TestANestedFieldThatParsesButNoOneReads(unittest.TestCase):
                     "review": {"require_real_provider": False},
                 },
             })),
-            [
-                ("verification", "review.require_real_provider"),
-                ("verification", "trajectory.wasted_step_ratio_warn"),
-            ],
+            [("verification", "trajectory.wasted_step_ratio_warn")],
         )
 
     def test_worldmodel_git_refresh_seconds_is_flagged(self) -> None:

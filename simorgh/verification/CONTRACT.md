@@ -69,7 +69,7 @@ Deleted rows: `denied:`, `error:`, `no:cacheprovider`, `run_shell:git`, `run_she
 
 ## Config
 
-`[verification]` in simorgh.toml; dataclass in `simorgh/verification/config.py`. `from_mapping` reads nested tables (`[verification.rigor] by_kind`, `[verification.checklist] max_items`, ...), not the flat field names; the env var `SIMORGH_VERIFICATION_RIGOR` sets `forced_rigor`.
+`[verification]` in simorgh.toml; dataclass in `simorgh/verification/config.py`. `from_mapping` reads nested tables (`[verification.rigor] by_kind`, `[verification.checklist] max_items`, `[verification.review] require_real_provider`, ...) for most fields; four fields are flat top-level keys under their own names (`action_timeout_seconds`, `think_timeout_seconds`, `isolated_suite_timeout_seconds`, `max_denied_actions`, settable since 2026-09-19); the env var `SIMORGH_VERIFICATION_RIGOR` sets `forced_rigor`.
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -83,12 +83,12 @@ Deleted rows: `denied:`, `error:`, `no:cacheprovider`, `run_shell:git`, `run_she
 | `test_suite_require_count_not_below_baseline` | `True` | yes |
 | `sandbox_smoke_kinds` | `('skill',)` | yes |
 | `trajectory_wasted_step_ratio_warn` | `0.5` | NO (declared, never read) |
-| `review_require_real_provider` | `True` | NO (declared, never read; `_think` hardcodes `require_real_provider: False`, `service.py:274`) |
+| `review_require_real_provider` | `True` | yes (`service.py::_think` sends it as `require_real_provider` on every `cognition.think`; with it on, Cognition answers an error rather than a floor reply, which every caller already treats as no answer) |
 | `plan_review_max_steps` | `8` | yes |
-| `action_timeout_seconds` | `5.0` | yes; not settable from simorgh.toml (`from_mapping` has no branch for it) |
-| `think_timeout_seconds` | `200.0` | yes; not settable from simorgh.toml |
-| `isolated_suite_timeout_seconds` | `120.0` | yes; not settable from simorgh.toml |
-| `max_denied_actions` | `2` | yes; not settable from simorgh.toml |
+| `action_timeout_seconds` | `5.0` | yes (flat key) |
+| `think_timeout_seconds` | `200.0` | yes (flat key) |
+| `isolated_suite_timeout_seconds` | `120.0` | yes (flat key) |
+| `max_denied_actions` | `2` | yes (flat key) |
 | `forced_rigor` | `None` | yes; set only by `SIMORGH_VERIFICATION_RIGOR` |
 
 ## Public Python surface
@@ -120,6 +120,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/verification/test_full_suite_ran.py` -- the whole-suite requirement on a code change.
 - `tests/simorgh/verification/test_red_suite_attribution.py` -- the base-revision and quiet-rerun excuse rules.
 - `tests/simorgh/verification/test_planreview.py` -- `plan.reviewed` verdicts: ordering, step count, protected target.
+- `tests/simorgh/verification/test_config_reaches_the_code.py` -- `review.require_real_provider` reaches `cognition.think`; the four flat keys are settable.
 
 ## Known issues (2026-09-18 evaluation)
 

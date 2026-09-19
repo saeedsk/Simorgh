@@ -180,11 +180,9 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
 #     ratio or compared against this field anywhere in `verdict.py`
 #     (whose `combine()` checks only `trajectory.denied_actions` against
 #     `max_denied_actions`) or `service.py`.
-#   verification.review.require_real_provider (-> VerificationConfig.
-#     review_require_real_provider) -- `service.py`'s `_think` helper
-#     (used by both the plan-review and checklist call sites) hardcodes
-#     a literal `"require_real_provider": False` in its `cognition.think`
-#     request payload; this field never reaches it.
+#   (verification.review.require_real_provider was listed here until
+#     2026-09-19, when `verification/service.py::_think` started sending
+#     it on every `cognition.think`.)
 #   worldmodel.git.refresh_seconds (-> Config.git_refresh_seconds) -- no
 #     file under `simorgh/worldmodel/` reads it outside `config.py`;
 #     there is no periodic git-refresh loop anywhere in the package
@@ -193,7 +191,6 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
 KNOWN_DEAD_NESTED_FIELDS: dict[str, dict[str, str]] = {
     "verification": {
         "trajectory.wasted_step_ratio_warn": "trajectory_wasted_step_ratio_warn",
-        "review.require_real_provider": "review_require_real_provider",
     },
     "worldmodel": {"git.refresh_seconds": "git_refresh_seconds"},
 }

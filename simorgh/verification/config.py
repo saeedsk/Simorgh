@@ -104,6 +104,13 @@ class VerificationConfig:
             kwargs["review_require_real_provider"] = bool(data["review"]["require_real_provider"])
         if "plan_review" in data and "max_steps" in data["plan_review"]:
             kwargs["plan_review_max_steps"] = int(data["plan_review"]["max_steps"])
+        # Flat top-level keys: these four had no `from_mapping` branch, so
+        # simorgh.toml could not set them (found writing CONTRACT.md,
+        # 2026-09-19).
+        for key, cast in (("action_timeout_seconds", float), ("think_timeout_seconds", float),
+                          ("isolated_suite_timeout_seconds", float), ("max_denied_actions", int)):
+            if key in data:
+                kwargs[key] = cast(data[key])
         env_rigor = os.environ.get("SIMORGH_VERIFICATION_RIGOR")
         if env_rigor:
             kwargs["forced_rigor"] = _rigor(env_rigor)

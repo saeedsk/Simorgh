@@ -281,7 +281,12 @@ class VerificationService:
         request = ctx.bus.new(
             topics.COGNITION_THINK,
             {"purpose": purpose, "messages": [{"role": "user", "content": prompt}],
-             "budget": {"max_tokens": 512, "max_cost_usd": 0.05}, "require_real_provider": False},
+             "budget": {"max_tokens": 512, "max_cost_usd": 0.05},
+             # `[verification.review] require_real_provider` (default true):
+             # a floor reply is no review, so Cognition answers with an error
+             # instead. Every caller already treats `floor` and `not ok` the
+             # same (checklist.py, planreview.py, denylist_immunity.py).
+             "require_real_provider": self._config.review_require_real_provider},
         )
         # request_or_error: a timeout (Cognition not built yet, or genuinely
         # down) comes back as the section-9 {ok:false, error:...} shape
