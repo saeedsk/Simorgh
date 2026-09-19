@@ -271,7 +271,7 @@ class LoadVerbTestCase(unittest.TestCase):
         from simorgh.interface.dispatch import BENCHMARK_VERBS
 
         advertised = {verb for verb, _args, _what in BENCHMARK_VERBS if verb}
-        self.assertEqual(advertised, {"suites", "load", "run", "stop", "history", "show"})
+        self.assertEqual(advertised, {"start", "suites", "load", "run", "stop", "history", "show"})
         for verb in advertised:
             self.assertIn(f'verb == "{verb}"', _dispatch_source(), f"{verb} is advertised but not handled")
         self.assertIn("benchmark load <suite>", _BENCHMARK_USAGE)

@@ -599,7 +599,7 @@ async def _benchmark(bus: BusClient, args: str) -> Outcome:
         return await _request(bus, topics.BENCHMARK_LOAD_REQUEST, {
             "suite": words[0], "refresh": "refresh" in words[1:],
         }, timeout=180.0, render=benchmarkview.loaded)
-    if verb in ("start", "go", "begin"):
+    if verb == "start" or verb in ("go", "begin"):
         # The easy way in (the creator, 2026-09-19: "saying /benchmark start
         # starts testing gaia1"): the default suite and size unless named.
         verb, rest = "run", benchmarkview.with_defaults(rest)
