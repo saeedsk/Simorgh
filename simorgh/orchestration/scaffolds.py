@@ -408,7 +408,7 @@ answer, and you do not route around it."""
 # "voice"`). The spoken-response planner (voice/planner.py) strips what
 # a screen needs anyway; this is the model writing for the ear in the
 # first place, which no amount of stripping can do afterwards.
-def who_is_here(speaker: str, relation: str, room: str, before: str = "") -> str:
+def who_is_here(speaker: str, relation: str, room: str, before: str = "", *, doubt: str = "") -> str:
     """The lines that tell the model who it is talking to and what it
     overheard (voice/speakers.py, voice/session.py). `before` is who Sim
     answered last: the creator, 2026-09-13, "I'd like sim to mention
@@ -431,12 +431,19 @@ def who_is_here(speaker: str, relation: str, room: str, before: str = "") -> str
             lines.append(where)
         relation = relation or describe(speaker)
         who = f"{speaker} ({relation})" if relation else speaker
-        lines.append(f"You are speaking with {who}. You know their voice. Use their name the way a person would -- "
-                     "now and then, not every sentence -- and when you do, it is THIS name: the words may mention "
-                     "other people, but the one talking to you is {speaker}. What you remember with them is in your "
-                     "memory, labelled with their name; what others told you stays theirs.".replace("{speaker}", speaker))
-        lines.append(_turned_to(speaker, before))
         known = member(speaker)
+        if doubt:
+            # Live 2026-09-19: Ira and Iris were answered as "Soodeh", who
+            # was not in the room, at scores the book itself called unsure.
+            lines.append(f"This is PROBABLY {who}, but you are not sure ({doubt}). Do not call them by any name "
+                         "in this reply, and do not assume it is their memory being asked about; if who it is "
+                         "matters to the answer, ask.")
+        else:
+            lines.append(f"You are speaking with {who}. You know their voice. Use their name the way a person would -- "
+                         "now and then, not every sentence -- and when you do, it is THIS name: the words may mention "
+                         "other people, but the one talking to you is {speaker}. What you remember with them is in your "
+                         "memory, labelled with their name; what others told you stays theirs.".replace("{speaker}", speaker))
+            lines.append(_turned_to(speaker, before))
         if known is not None and is_child(speaker):
             lines.append(WITH_A_CHILD.format(name=known.name, age=known.age))
     else:
@@ -658,6 +665,7 @@ def when_line(now: float) -> str:
 
 def render(profile: Profile, *, subject: str | None = None, task: str | None = None,
            unavailable: str = "", channel: str = "", speaker: str = "", speaker_relation: str = "",
+           speaker_doubt: str = "",
            room: str = "", offered: tuple[str, ...] | None = None, speaker_before: str = "",
            skills: str = "", now: float = 0.0) -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
@@ -677,7 +685,7 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         # for nested bullets under a VOICE block that forbids them; the
         # prompt ran to 12k characters (observer, 2026-09-13). VOICE says
         # what brevity says, and more.
-        body = f"{who_is_here(speaker, speaker_relation, room, speaker_before)}\n\n{VOICE}"
+        body = f"{who_is_here(speaker, speaker_relation, room, speaker_before, doubt=speaker_doubt)}\n\n{VOICE}"
     elif profile.scaffold == "chat":
         body = f"{BREVITY}\n\n{body}" if body else BREVITY
     if task:

@@ -483,5 +483,31 @@ def seconds_of(pcm: Sequence[float], sample_rate: int) -> float:
     return len(pcm) / float(sample_rate or 16000)
 
 
-__all__ = ["DEFAULT_MARGIN", "DEFAULT_THRESHOLD", "Identification", "ENROLL_MIN_SECONDS", "MIN_SECONDS", "Person", "SPEAKER_MODEL",
+#: How far clear a name must be -- above the threshold and above the
+#: runner-up -- before Sim treats it as known rather than probable.
+SURE_GAP = 0.08
+
+
+def doubt_of(identification, *, threshold: float) -> str:
+    """Why this name is not certain, in words for the model; "" when it is.
+
+    The creator, 2026-09-19, with only himself, Ira and Iris in the room:
+    Sim answered the girls as "Soodeh" at 0.51 and at 0.57 with Iris at
+    0.54. TitaNet puts one voice near 0.87 and different voices near 0.31,
+    so a score at the threshold is weak evidence. The name is still given
+    (the creator wants the closest known voice leaned to), with the doubt
+    beside it, so the reply does not call anyone by a name it is guessing.
+    """
+    if identification is None or not identification.name:
+        return ""
+    if identification.probable:
+        return "the voice matched only weakly"
+    if identification.runner_up and identification.score - identification.runner_up_score < SURE_GAP:
+        return f"{identification.runner_up} sounds almost the same"
+    if identification.score < threshold + SURE_GAP:
+        return "the voice matched only weakly"
+    return ""
+
+
+__all__ = ["SURE_GAP", "doubt_of", "DEFAULT_MARGIN", "DEFAULT_THRESHOLD", "Identification", "ENROLL_MIN_SECONDS", "MIN_SECONDS", "Person", "SPEAKER_MODEL",
            "SherpaEmbedder", "SpeakerBook", "SpeakerEmbedder", "available", "cosine", "seconds_of"]

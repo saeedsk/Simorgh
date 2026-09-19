@@ -35,7 +35,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:32-41`, pinned by `tes
 | `task.available` | `messages/task.py::TaskAvailable` | worker.py:213 | Group `workers`, `max_inflight=1`: sends `task.claim`, builds a Session, runs it |
 | `task.cancel` | `messages/task.py::TaskCancel` | worker.py:218, 247 | Remembers the id; the loop stops at the next step boundary (requeue = no report) |
 | `system.state.changed` | `messages/system.py::SystemStateChanged` | worker.py:262 | `paused`/`stopping`/`stopped` makes sessions pause between steps |
-| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | service.py:266 | Runs an ephemeral chat session off the bus handler, keyed by the percept's `session_id` |
+| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | service.py:266 | Runs an ephemeral chat session off the bus handler, keyed by the percept's `session_id`; `speaker_doubt` makes the voice prompt say "probably <name>" and ask for no name (`scaffolds.who_is_here`) |
 | `tool.registered` | `messages/tool.py::ToolRegistered` | service.py:227 | Adds the tool to the known set and its reversibility to the policy table |
 | `tool.probed` | `messages/tool.py::ToolProbed` | service.py:118 | Records a tool as down/up so `task_rules` says so once |
 | `action.result` | `messages/action.py::ActionResult` | session.py (`_propose_and_await`) | Ends a proposal wait; side effects fill `uncommitted`/`created`/`wrote`. `error_kind` (stage 2 item 8) rides on the step detail as `session.Detail.kind` (`denied` for `action.denied`); `was_denied` reads that kind, and falls back to the `denied: ` prefix only for a plain string with no kind (an older record) |

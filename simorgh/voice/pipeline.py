@@ -372,7 +372,7 @@ class Pipeline:
 
     async def ask(self, text: str, *, session_id: str | None = None, speaker_name: str = "",
                   confidence: float = 1.0, speaker_relation: str = "", room: str = "",
-                  speaker_before: str = "", trace_id: str = "") -> str:
+                  speaker_before: str = "", speaker_doubt: str = "", trace_id: str = "") -> str:
         """Hand the words to Sim exactly as the REPL would, and wait."""
         session_id = session_id or str(uuid.uuid4())
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
@@ -386,6 +386,8 @@ class Pipeline:
                 payload["speaker_relation"] = speaker_relation
             if speaker_before:
                 payload["speaker_before"] = speaker_before
+            if speaker_doubt:
+                payload["speaker_doubt"] = speaker_doubt
         if room:
             payload["room"] = room[:2000]
         await self._bus.publish(self._bus.new(topics.PERCEPT_TEXT_RECEIVED, payload, trace_id=trace_id or None))

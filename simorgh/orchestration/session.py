@@ -1228,6 +1228,7 @@ class SessionRunner:
                     task=None if session.profile.scaffold == "chat" else session.user_text,
                     unavailable=scaffolds.unavailable_note(offered), channel=session.channel,
                     speaker=session.speaker, speaker_relation=session.speaker_relation, room=session.room,
+                    speaker_doubt=session.speaker_doubt,
                     speaker_before=getattr(session, "speaker_before", ""),
                     offered=() if no_tools else offered,
                     skills=catalog,

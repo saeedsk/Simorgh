@@ -281,7 +281,8 @@ class Service:
         # `turn.completed`, no failure, no notice: the human's prompt just
         # never came back. Found by a watched chat trial 2026-09-07.
         channel = str(message.payload.get("channel") or "")
-        who = {k: str(message.payload.get(k) or "") for k in ("speaker", "speaker_relation", "room", "speaker_before")}
+        who = {k: str(message.payload.get(k) or "") for k in ("speaker", "speaker_relation", "room", "speaker_before",
+                                                                  "speaker_doubt")}
         task = asyncio.create_task(
             worker.run_percept_chat(session_id, text, channel=channel, trace_id=message.trace_id, **who),
             name=f"chat-{session_id[:8]}",

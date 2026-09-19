@@ -197,6 +197,9 @@ class Session:
     # Who Sim answered last, so the prompt can ask for the name when the
     # voice changes and not when it does not.
     speaker_before: str = ""
+    # Why the speaker's name is not certain (voice/speakers.py::doubt_of);
+    # "" when it is. The prompt then asks for no name.
+    speaker_doubt: str = ""
     # The trace this session's messages carry. A task's trace is its task
     # id; a chat turn's is the percept's own trace, so one spoken or typed
     # turn is one trace from percept to turn.completed (stage 1 item 2).

@@ -65,7 +65,7 @@ The publish direction is not pinned by the manifest test; `session.py` publishes
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | pipeline.py:367 | Every spoken turn addressed to Sim: `channel="voice"`, `session_id`, `confidence`, `device`, and `speaker`, `speaker_relation`, `speaker_before`, `room` when known |
+| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | pipeline.py:367 | Every spoken turn addressed to Sim: `channel="voice"`, `session_id`, `confidence`, `device`, and `speaker`, `speaker_relation`, `speaker_before`, `room` when known; `speaker_doubt` when the name is not certain (`speakers.doubt_of`: a probable match, a runner-up within `SURE_GAP` 0.08, or a score under threshold + 0.08) |
 | `voice.transcript` | `messages/voice.py::VoiceTranscript` | pipeline.py:306; session.py (partials, finals, asides) | Partial and final transcripts, echoes and not-for-Sim lines |
 | `voice.spoken` | `messages/voice.py::VoiceSpoken` | pipeline.py:418; session.py (many) | After each reply, aside, command or quiet outcome |
 | `voice.listening` | `messages/voice.py::VoiceListening` | pipeline.py:563; session.py:366 | Each floor-state change |

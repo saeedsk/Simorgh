@@ -1233,9 +1233,14 @@ class VoiceSession:
             early = asyncio.create_task(_speak_when_started())
         try:
             clock.trace_id = clock.trace_id or uuid.uuid4().hex
+            from .speakers import doubt_of
+
+            ident = self.last_identification
+            doubt = doubt_of(ident, threshold=self._config.speaker_threshold) \
+                if ident is not None and ident.name == speaker else ""
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
                                              speaker_name=speaker, speaker_relation=relation, room=room,
-                                             speaker_before=before, trace_id=clock.trace_id)
+                                             speaker_before=before, speaker_doubt=doubt, trace_id=clock.trace_id)
         finally:
             self._outstanding.pop(turn_id, None)
             self._pipeline.delta_sinks.pop(session_id, None)

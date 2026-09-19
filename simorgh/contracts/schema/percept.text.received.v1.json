@@ -49,6 +49,18 @@
         "null"
       ]
     },
+    "speaker_before": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "speaker_doubt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "speaker_relation": {
       "type": [
         "string",

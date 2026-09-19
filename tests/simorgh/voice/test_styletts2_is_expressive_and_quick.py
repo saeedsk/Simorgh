@@ -185,12 +185,12 @@ class AWordOrTwoTestCase(unittest.IsolatedAsyncioTestCase):
     before every reply. A word or two goes to Kokoro in the same voice."""
 
     async def test_short_text_goes_to_the_short_engine_and_long_text_does_not(self):
-        from types import SimpleNamespace
-
         from simorgh.voice.api import Audio
         from simorgh.voice.config import Config
 
-        engine = styletts2.StyleTTS2Synthesiser(Config())
+        # Built without its venv: this checks the routing, not the engine.
+        engine = styletts2.StyleTTS2Synthesiser.__new__(styletts2.StyleTTS2Synthesiser)
+        engine._config = Config()  # noqa: SLF001
         said = []
 
         class _Kokoro:
@@ -210,7 +210,6 @@ class AWordOrTwoTestCase(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             # Long text goes to StyleTTS 2 itself; with no server here it fails
             # rather than quietly taking the short path.
-            engine._python = SimpleNamespace()  # noqa: SLF001
             await engine.synthesise("Sure thing, one moment please.")
         self.assertEqual(len(said), 2)
 
