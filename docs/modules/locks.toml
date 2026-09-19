@@ -23,6 +23,12 @@ task = "chat write tools, provider notice, search scope, TUI noise"
 since = "2026-09-19T12:29:46+00:00"
 until = "2026-09-19T20:29:46+00:00"
 
+[locks.kernel]
+by = "opus-main"
+task = "logging to a file under the TUI"
+since = "2026-09-19T12:34:17+00:00"
+until = "2026-09-19T20:34:17+00:00"
+
 [locks.orchestration]
 by = "opus-main"
 task = "chat write tools, provider notice, search scope, TUI noise"

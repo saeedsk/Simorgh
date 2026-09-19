@@ -380,14 +380,45 @@ def footer_rows(book: TaskBook, *, now: float, auto: str, posture: str = "", mod
     return rows
 
 
+def fit_row(row: list[tuple[str, str]], width: int) -> list[tuple[str, str]]:
+    """One row cut to `width` display columns across ALL its fragments.
+
+    Each fragment used to be fitted to the whole terminal on its own, so a
+    running row -- spark, breathing word, then a topic cut to the full
+    width -- came out 10-15 columns too wide and wrapped. The bottom area
+    then had one more line on screen than prompt_toolkit had drawn, and
+    every redraw left a trail: frozen "Thinking… [45s]" rows in the
+    scrollback, timer digits inside the rule, the spark overwriting
+    letters ("Merctdes") (the creator's screen, 2026-09-19)."""
+    from .render import display_width, fit
+
+    out: list[tuple[str, str]] = []
+    used = 0
+    for style, text in row:
+        room = width - used
+        if room <= 0:
+            break
+        cut = fit(text, room)
+        out.append((style, cut))
+        used += display_width(cut)
+        if cut != text:
+            break
+    return out
+
+
 def flatten(rows: list[list[tuple[str, str]]]) -> list[tuple[str, str]]:
     """Rows -> one formatted-text list with newlines between rows, the
-    shape `prompt_toolkit`'s toolbar wants."""
+    shape `prompt_toolkit`'s toolbar wants. Every row is fitted to one
+    column less than the terminal: a row that fills the last column puts
+    some terminals in their wrap state, which is the same trail again."""
+    from .render import terminal_width
+
+    width = max(20, terminal_width() - 1)
     out: list[tuple[str, str]] = []
     for i, row in enumerate(rows):
         if i:
             out.append(("", "\n"))
-        out.extend(row)
+        out.extend(fit_row(row, width))
     return out
 
 

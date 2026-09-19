@@ -348,3 +348,5 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - `tool.registered` carries `input_schema = input_schema_of(tool)` (the declared `args_schema`, normalised to an object schema; `{"type": "object"}` for a skill announced from disk before it loads), stage 2 item 1.
 
 - `search_code` never descends into `site-packages`, `node_modules`, `venvs`, `.venv`, `venv`, `dist-packages` (`_NOT_SEARCHED`), and decodes ripgrep output with `errors="replace"` (a non-UTF-8 byte used to fail the search).
+
+- Camera pushes: `camera.event` is published for every channel as before, but a `ui.notice` only for more than bare motion (a person, a vehicle, an animal), at most once per camera per `NOTICE_EVERY_S` (120 s).

@@ -81,6 +81,23 @@ def _ring_camera_named(wanted: str) -> str:
     return ""
 
 
+#: How often one camera may put a line on the screen.
+NOTICE_EVERY_S = 120.0
+
+
+def _worth_a_line(camera: str, kinds, now: float, said: dict) -> bool:
+    """Bare motion is not news: seven cameras printed seven "motion" lines
+    at once on the creator's screen (2026-09-19), and the vision watcher
+    already says what it actually saw. A person, a vehicle or an animal
+    is worth a line -- at most one per camera per `NOTICE_EVERY_S`."""
+    if not [k for k in kinds if k != "motion"]:
+        return False
+    if now - said.get(camera, -NOTICE_EVERY_S) < NOTICE_EVERY_S:
+        return False
+    said[camera] = now
+    return True
+
+
 @dataclass
 class Camera:
     channel: int
@@ -824,6 +841,8 @@ class CamWatchTool(_CameraTool):
     async def _watch(self, bus, nvr, names: dict) -> None:
         """Handle the NVR's pushes (`ui.hook.received` name=reolink) and
         keep the subscription alive."""
+        said: dict[str, float] = {}
+
         async def _on_hook(message) -> None:
             if str(message.payload.get("name")) != "reolink":
                 return
@@ -847,8 +866,9 @@ class CamWatchTool(_CameraTool):
                 camera = names.get(ch, f"channel {ch + 1}")
                 await bus.publish(Message.new(topics.CAMERA_EVENT, source="execution",
                                               payload={"channel": ch, "camera": camera, "kinds": kinds}))
-                await bus.publish(Message.new(topics.UI_NOTICE, source="execution", payload={
-                    "level": "info", "source": "cameras", "text": f"📷 {camera}: {', '.join(kinds)}"}))
+                if _worth_a_line(camera, kinds, time.monotonic(), said):
+                    await bus.publish(Message.new(topics.UI_NOTICE, source="execution", payload={
+                        "level": "info", "source": "cameras", "text": f"📷 {camera}: {', '.join(kinds)}"}))
 
         sub = await bus.subscribe(topics.UI_HOOK_RECEIVED, _on_hook)
         try:

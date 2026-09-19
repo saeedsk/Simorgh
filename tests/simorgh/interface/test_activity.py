@@ -207,7 +207,10 @@ class TestTheServiceNarratesAutonomousWork(unittest.IsolatedAsyncioTestCase):
         self.assertIn("curiosity", out)
         self.assertIn("What does src/memory export?", out)
 
-    async def test_its_steps_are_narrated(self):
+    async def test_its_steps_are_narrated_when_asked_for(self):
+        import dataclasses
+
+        self.service.config = dataclasses.replace(self.service.config, narrate_steps=True)
         await self._emit(topics.TASK_CREATED, {
             **_created("auto-2"), "depends_on": [], "mode": "execute", "risk": "low",
         })
@@ -217,6 +220,19 @@ class TestTheServiceNarratesAutonomousWork(unittest.IsolatedAsyncioTestCase):
             "summary": "simorgh/memory", "tool": "search_code", "ok": True,
         })
         self.assertIn("search_code", self._out())
+
+    async def test_by_default_its_steps_stay_in_the_live_rows(self):
+        # 2026-09-19: "too many automated fast messages on screen".
+        await self._emit(topics.TASK_CREATED, {
+            **_created("auto-4"), "depends_on": [], "mode": "execute", "risk": "low",
+        })
+        await self._emit(topics.TASK_STARTED, {"task_id": "auto-4", "worker_id": "w1"})
+        before = self._out()
+        await self._emit(topics.TASK_STEP, {
+            "task_id": "auto-4", "step_no": 1, "phase": "act",
+            "summary": "simorgh/memory", "tool": "search_code", "ok": True,
+        })
+        self.assertEqual(self._out(), before)
 
     async def test_its_outcome_is_narrated(self):
         await self._emit(topics.TASK_CREATED, {

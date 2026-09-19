@@ -37,8 +37,12 @@ class Config:
     # the screen shows what it was read as. The creator, 2026-09-12.
     tidy_input: bool = True
     # Print a line per step for autonomous work too, not just the
-    # start and the outcome. "verbose as hell", their words.
-    narrate_steps: bool = True
+    # start and the outcome. "verbose as hell", their words, on 2026-09-07;
+    # on 2026-09-19 the same screen was "lots of noise and too many
+    # automated fast messages". Off: background work gets its start and
+    # its outcome in the transcript, and its steps breathe in the live
+    # rows above the prompt. `narrate_steps = true` brings the lines back.
+    narrate_steps: bool = False
     narrate_heartbeat_s: float = 10.0
     # A dim "-- 17:29 --" line, printed before the first line of a stretch of
     # talk and again after this many minutes of quiet. The creator, 2026-09-15:

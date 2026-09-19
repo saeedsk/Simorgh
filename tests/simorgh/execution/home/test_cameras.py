@@ -305,3 +305,17 @@ class EveryCameraAtOnce(unittest.TestCase):
         result = asyncio.run(self.tools["cam_light"].run({"camera": "Office", "on": True}, ctx=self.ctx))
         self.assertTrue(result.ok, result.error)
         self.assertEqual([c for c in self.nvr.calls if c[0] == "light"], [("light", 7, True)])
+
+
+class BareMotionIsNotNews(unittest.TestCase):
+    """2026-09-19: seven cameras printed seven "motion" lines at once."""
+
+    def test_only_something_seen_and_not_twice_in_two_minutes(self):
+        from simorgh.execution.home.cameras import NOTICE_EVERY_S, _worth_a_line
+
+        said: dict = {}
+        self.assertFalse(_worth_a_line("Pool", ["motion"], 0.0, said))
+        self.assertTrue(_worth_a_line("Pool", ["motion", "people"], 0.0, said))
+        self.assertFalse(_worth_a_line("Pool", ["people"], NOTICE_EVERY_S - 1, said))
+        self.assertTrue(_worth_a_line("Office", ["people"], 1.0, said))
+        self.assertTrue(_worth_a_line("Pool", ["vehicle"], NOTICE_EVERY_S + 1, said))

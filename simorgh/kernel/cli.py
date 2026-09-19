@@ -185,10 +185,35 @@ def _configure_logging(config) -> None:
     level = getattr(logging, level_name.upper(), logging.INFO)
     root = logging.getLogger()
     if not root.handlers:
-        handler = logging.StreamHandler(sys.stderr)
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s", "%H:%M:%S"))
-        root.addHandler(handler)
+        root.addHandler(_log_handler(config))
     root.setLevel(level)
+
+
+def _log_handler(config):
+    """Where the log lines go. At a terminal, a file: every subsystem's
+    INFO line written raw to stderr landed underneath prompt_toolkit's
+    redraw, glued itself to the breathing line and to what the person was
+    typing, and turned the screen into noise (the creator, 2026-09-19:
+    "characters I type and sim messages get scrambled together"). What the
+    person should see arrives as `ui.notice`; the log is for diagnosis:
+    `<data_dir>/logs/sim.log`, rotated. Without a terminal (sim.sh under a
+    service manager, tests) stderr stays the sink."""
+    import logging
+    import logging.handlers
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s", "%H:%M:%S")
+    if sys.stderr.isatty():
+        try:
+            folder = Path(config.runtime.data_dir) / "logs"
+            folder.mkdir(parents=True, exist_ok=True)
+            handler = logging.handlers.RotatingFileHandler(folder / "sim.log", maxBytes=5_000_000, backupCount=3)
+            handler.setFormatter(formatter)
+            return handler
+        except Exception:  # noqa: BLE001 -- an unwritable data dir must not stop the boot
+            pass
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(formatter)
+    return handler
 
 
 async def _cmd_run(config_path: str | None) -> int:

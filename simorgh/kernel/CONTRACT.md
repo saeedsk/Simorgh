@@ -181,3 +181,5 @@ Lock it first (`python tools/modlock.py claim kernel --by <you> --task "..."`), 
 This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run agent may, with the lock, because a person is accountable for the commit.
 
 - `ContextFactory.build` gives each subsystem a `BoundLedger` for its name (stage 1 item 8); the Kernel's own client is unbound.
+
+- Logging (2026-09-19): when stderr is a terminal, the root log goes to `<data_dir>/logs/sim.log` (rotating, 5 MB x 3), never under the TUI; without a terminal it stays on stderr (`cli._log_handler`).
