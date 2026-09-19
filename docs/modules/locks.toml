@@ -4,3 +4,51 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.contracts]
+by = "fable-main"
+task = "stage 0 wires (C1 C2 C9 C4 W7 F H)"
+since = "2026-09-19T04:13:12+00:00"
+until = "2026-09-19T12:13:12+00:00"
+
+[locks.curiosity]
+by = "fable-main"
+task = "stage 0 wires (C1 C2 C9 C4 W7 F H)"
+since = "2026-09-19T04:13:12+00:00"
+until = "2026-09-19T12:13:12+00:00"
+
+[locks.interface]
+by = "fable-main"
+task = "stage 0 wires (C1 C2 C9 C4 W7 F H)"
+since = "2026-09-19T04:13:12+00:00"
+until = "2026-09-19T12:13:12+00:00"
+
+[locks.learning]
+by = "fable-main"
+task = "stage 0 wires (C1 C2 C9 C4 W7 F H)"
+since = "2026-09-19T04:13:12+00:00"
+until = "2026-09-19T12:13:12+00:00"
+
+[locks.ledger]
+by = "fable-main"
+task = "stage 0 wires (C1 C2 C9 C4 W7 F H)"
+since = "2026-09-19T04:13:12+00:00"
+until = "2026-09-19T12:13:12+00:00"
+
+[locks.memory]
+by = "fable-main"
+task = "stage 0 wires (C1 C2 C9 C4 W7 F H)"
+since = "2026-09-19T04:13:12+00:00"
+until = "2026-09-19T12:13:12+00:00"
+
+[locks.orchestration]
+by = "fable-main"
+task = "stage 0 wires (C1 C2 C9 C4 W7 F H)"
+since = "2026-09-19T04:13:12+00:00"
+until = "2026-09-19T12:13:12+00:00"
+
+[locks.worldmodel]
+by = "fable-main"
+task = "stage 0 wires (C1 C2 C9 C4 W7 F H)"
+since = "2026-09-19T04:13:12+00:00"
+until = "2026-09-19T12:13:12+00:00"
