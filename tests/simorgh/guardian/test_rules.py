@@ -682,3 +682,26 @@ class TestReversibilityRule(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestProtectedCoversTheMachine(unittest.IsolatedAsyncioTestCase):
+    """The machine's secrets, the audit trail and the git hooks are
+    protected, not only the repository (2026-09-18 evaluation, S2)."""
+
+    async def test_writes_to_the_vault_ledger_hooks_and_credentials_are_denied(self):
+        for tool, args in (
+            ("run_shell", {"command": "echo x > ~/.simorgh/secrets.toml"}),
+            ("run_shell", {"command": "printf k >> /Users/someone/.ssh/authorized_keys"}),
+            ("run_shell", {"command": "cp payload .git/hooks/pre-commit"}),
+            ("run_shell", {"command": "rm -rf ~/.simorgh/ledger/streams"}),
+            ("write_file", {"path": "/Users/someone/.aws/credentials", "content": "x"}),
+        ):
+            decision = await _evaluate(ProtectedRule(), _proposal(tool=tool, args=args, reversibility="reversible"),
+                                       _ctx(tool=ToolInfo(tool, False, "reversible")))
+            self.assertEqual(decision.kind, "deny", args)
+
+    async def test_ordinary_workspace_writes_still_pass(self):
+        decision = await _evaluate(ProtectedRule(), _proposal(tool="run_shell", args={"command": "echo hi > workspace/a.txt"},
+                                                              reversibility="reversible"),
+                                   _ctx(tool=ToolInfo("run_shell", False, "reversible")))
+        self.assertEqual(decision.kind, "abstain")

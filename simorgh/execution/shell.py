@@ -114,6 +114,16 @@ DEFAULT_SHELL_REFUSALS: dict[str, str] = {
     r"\bgit\b[^|;&]*\breset\s+--hard\b": "throws away commits or edits; use git_discard for one file",
     r"\bgit\s+-C\s+\S*Simorgh\b(?!/\S)": "acts on the main checkout from a worktree; land work with worktree_land",
     r":\(\)\s*\{.*\|.*&\s*\}\s*;": "is a fork bomb",
+    # Reading a credential is as bad as writing one: the output comes
+    # back into the model's context and from there anywhere. The file
+    # tools already refuse these directories (pathsafety); the shell did
+    # not (2026-09-18 evaluation, S2). Any mention of the path is
+    # refused, whatever the verb -- cat, cp, base64, python -c open().
+    r"\.simorgh/(secrets\.toml|vault)": "touches Sim's secret store; the creator manages it",
+    r"(^|[\s'\"=/])(~|\$HOME|\$\{HOME\}|/Users/[^/\s]+|/home/[^/\s]+)?/?\.(ssh|aws|gnupg)(/|\s|$|['\"])":
+        "touches the creator's credentials (.ssh, .aws, .gnupg)",
+    r"\bsecurity\s+(find|dump)-(generic|internet)-password\b|\bsecurity\s+dump-keychain\b":
+        "reads the macOS keychain",
 }
 
 # What a command may print back. Enough to be useful, bounded so one

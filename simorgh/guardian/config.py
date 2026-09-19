@@ -34,6 +34,20 @@ DEFAULT_PROTECTED_SUBJECTS: tuple[str, ...] = (
     # means the undo mechanism is not the system's to edit.
     "simloader.py",
     "sim.sh",
+    # The machine, not only the repository (2026-09-18 evaluation, S2).
+    # Substrings, matched case-folded like everything above, so the
+    # absolute (`/Users/x/.simorgh/secrets.toml`), home-relative
+    # (`~/.simorgh/...`) and `$HOME` forms all match. The vault holds
+    # every provider token; the ledger is the audit trail Guardian's
+    # decisions are recorded in; a git hook runs on the creator's next
+    # commit; `.ssh`/`.aws`/`.gnupg` are the creator's credentials.
+    ".simorgh/secrets.toml",
+    ".simorgh/vault",
+    ".simorgh/ledger",
+    ".git/hooks",
+    "/.ssh/",
+    "/.aws/",
+    "/.gnupg/",
 )
 
 # Ported verbatim from src/orchestrator/audit.py's _DENYLIST_PATTERNS --
