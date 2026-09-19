@@ -6,5 +6,7 @@ Design documents live in `docs/plans/`; benchmark analyses in `docs/benchmark-an
 
 | Date | File | Covers |
 |---|---|---|
+| 2026-09-19 | [2026-09-19-stage-0.md](2026-09-19-stage-0.md) | The cleanup and the rebirth: v1 and the old docs removed, test tiers and module locks, stage 0 items 1-16 with before/after numbers (suite 16:40 -> 1:34) |
 | 2026-09-16 | [2026-09-16-voice-cameras-task-quality.md](2026-09-16-voice-cameras-task-quality.md) | A write-only console and the answer it invented, camera baselines learnt from one motion frame, the speech lock, tone tags in any script, recognition flicker, invented task subjects defeating dedupe, two dead wires in Planning, overheard speech built twice and reachable neither time |
+| 2026-09-14 | [2026-09-14-benchmark-analysis.md](2026-09-14-benchmark-analysis.md) | Benchmark analysis |
 | 2026-09-14/15 | [2026-09-15-benchmarks-long-runs-models-skills.md](2026-09-15-benchmarks-long-runs-models-skills.md) | Benchmark waves and their harness bugs, comparison arms, long-run changes A-H, model tiers and Together, Ollama fallback, Agent Skills trust, parallel lookups, web search spacing, voice/TV fixes |

@@ -62,7 +62,7 @@ Speed and confidence are traded through the tiers, not by skipping tests:
 
 ## 5. Cleanup done on 2026-09-19
 
-- Deleted `tests/test_*.py` (41 files, 881 tests, 11.5k lines) with the v1 tree they tested. The suite dropped from 6,652 to 5,771 tests and from 16:40 to under 5 minutes.
+- Deleted `tests/test_*.py` (41 files, 881 tests, 11.5k lines) with the v1 tree they tested. The suite dropped from 6,652 to 5,762 tests and from 16:40 to 1:34.
 - `tests/simorgh/execution/media/test_cast.py` hit an unpatched 30 s constant (`cast.py:674`); patched in the test.
 - `tests/simorgh/voice/test_session.py::TestTenTurns::test_ten_consecutive_turns_flow_and_are_measured` is timing-flaky (it failed the baseline run and passes alone); marked `slow` pending a fake-clock rewrite under the `voice` lock.
 - `pyproject.toml` now declares the markers and `testpaths`; `pytest-timeout` is recommended (`pip install pytest-timeout`, then `--timeout=120` in the full tier) so a hang is a failure, not a stall.
