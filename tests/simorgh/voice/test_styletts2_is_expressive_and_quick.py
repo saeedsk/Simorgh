@@ -180,5 +180,40 @@ class TheServerTestCase(unittest.TestCase):
         self.assertEqual(server._speed_of(9), 2.0)
 
 
+class AWordOrTwoTestCase(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-19: StyleTTS 2 made "Yes." into 2.2 s of noise, heard
+    before every reply. A word or two goes to Kokoro in the same voice."""
+
+    async def test_short_text_goes_to_the_short_engine_and_long_text_does_not(self):
+        from types import SimpleNamespace
+
+        from simorgh.voice.api import Audio
+        from simorgh.voice.config import Config
+
+        engine = styletts2.StyleTTS2Synthesiser(Config())
+        said = []
+
+        class _Kokoro:
+            def voices(self):
+                return ["af_bella"]
+
+            async def synthesise(self, text, *, voice="", speed=1.0):
+                said.append((text, voice, speed))
+                return Audio(b"\x00\x00" * 100)
+
+        engine._short = _Kokoro()  # noqa: SLF001
+        audio = await engine.synthesise("Yes.", voice="af_bella", speed=1.3)
+        self.assertEqual(said, [("Yes.", "af_bella", 1.3)])
+        self.assertEqual(len(audio.pcm), 200)
+        await engine.synthesise("Hang on.", voice="someone_else")
+        self.assertEqual(said[-1][1], "", "an unknown voice is Kokoro's default, not an error")
+        with self.assertRaises(Exception):
+            # Long text goes to StyleTTS 2 itself; with no server here it fails
+            # rather than quietly taking the short path.
+            engine._python = SimpleNamespace()  # noqa: SLF001
+            await engine.synthesise("Sure thing, one moment please.")
+        self.assertEqual(len(said), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

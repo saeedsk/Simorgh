@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..api import Audio
 from .subproc import DEFAULT_VENV_DIR, SubprocessSynthesiser, create_venv, engine_available
 
 #: Installed first; torch is pinned afterwards, because resolution picks
@@ -99,8 +100,35 @@ class StyleTTS2Synthesiser(SubprocessSynthesiser):
         super().__init__(config, venv_dir=getattr(config, "venv_dir", DEFAULT_VENV_DIR),
                          reference=str(getattr(config, "styletts2_reference", "") or ""),
                          timeout_s=float(getattr(config, "expressive_timeout_s", 180.0)))
+        self._config = config
         self._scale = float(getattr(config, "styletts2_embedding_scale", 0.0) or 0.0)
         self._references = Path(getattr(config, "references_dir", "workspace/voice/references")).expanduser()
+
+    #: StyleTTS 2 cannot say a word or two. Measured 2026-09-19: "Yes." came
+    #: back 2.2 s of steady loud sound at speed 1.0 and a murmur at 1.3, while
+    #: "Sure thing." and longer were clean -- the creator heard it as white
+    #: noise before every reply, where the aside "Yes." played. Text this
+    #: short goes to Kokoro in the voice of the same name (the reference
+    #: clips were made from Kokoro's af_* voices).
+    SHORT_WORDS = 2
+
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
+        if len((text or "").split()) <= self.SHORT_WORDS:
+            short = self._short_engine()
+            if short is not None:
+                names = set(short.voices())
+                return await short.synthesise(text, voice=voice if voice in names else "", speed=speed)
+        return await super().synthesise(text, voice=voice, speed=speed, tone=tone)
+
+    def _short_engine(self):
+        if not hasattr(self, "_short"):
+            try:
+                from .kokoro import KokoroSynthesiser
+
+                self._short = KokoroSynthesiser(self._config)
+            except Exception:  # noqa: BLE001 -- no Kokoro: StyleTTS 2 says it as best it can
+                self._short = None
+        return self._short
 
     def voices(self) -> list[str]:
         names = ["default"]
