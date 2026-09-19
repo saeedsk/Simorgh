@@ -5,8 +5,8 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.simloader]
+[locks.voice]
 by = "opus-main"
-task = "stage 0 item 23: orderly SIGINT"
-since = "2026-09-19T06:32:05+00:00"
-until = "2026-09-19T14:32:05+00:00"
+task = "stage 0 item 28: V1 stay_quiet, V8 per-turn facts"
+since = "2026-09-19T06:32:40+00:00"
+until = "2026-09-19T14:32:40+00:00"
