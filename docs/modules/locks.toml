@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.execution]
+by = "opus-main"
+task = "apply_skill in a worktree loads from the worktree"
+since = "2026-09-19T08:07:55+00:00"
+until = "2026-09-19T16:07:55+00:00"
+
 [locks.orchestration]
 by = "opus-main"
 task = "stage0 item 32 dead-code list (worktree agents)"

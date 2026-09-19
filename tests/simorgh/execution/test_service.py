@@ -583,3 +583,36 @@ class TestRingWatchStartsByItself(_ExecutionServiceTestCase):
         self.service._config = dataclasses.replace(self.service._config, tv_show_on_start=False)  # noqa: SLF001
         self.assertFalse(await self.service._autostart_tv_show(delay_s=0))  # noqa: SLF001
         self.assertEqual(len(calls), 1, "switched off in config: left alone")
+
+
+class TestASkillAppliedInAWorktreeLoadsFromIt(_ExecutionServiceTestCase):
+    """write-a-skill trial, 2026-09-19: apply_skill wrote the skill into
+    the task's worktree, and loading read the live tree, refused it as
+    "not a file", and the skill never registered."""
+
+    async def test_the_worktree_copy_is_loaded(self):
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        tree = self.root / "wt-task"
+        (tree / "simorgh_skills").mkdir(parents=True)
+        (tree / "simorgh_skills" / "fresh.py").write_text(_SKILL_SOURCE)
+        self.assertFalse((self.root / "simorgh_skills" / "fresh.py").exists())
+        tool = await self.service._load_skill("fresh", path="simorgh_skills/fresh.py", root=tree)  # noqa: SLF001
+        self.assertIsNotNone(tool)
+        self.assertIn("skill:fresh", self.service._registry)  # noqa: SLF001
+
+    async def test_its_own_announcement_is_not_reloaded_from_the_live_tree(self):
+        await self._start(config=ExecutionConfig(repo_root=self.root, skill_lookup_timeout_s=0.05))
+        calls = []
+        original = self.service._load_skill  # noqa: SLF001
+
+        async def _spy(name, *, path, root=None):
+            calls.append(name)
+            return await original(name, path=path, root=root)
+
+        self.service._load_skill = _spy  # noqa: SLF001
+        await self.bus.publish(Message.new(
+            topics.LEARN_SKILL_ACQUIRED, source="execution",
+            payload={"name": "mine", "path": "simorgh_skills/mine.py", "tests": 0},
+        ))
+        await asyncio.sleep(0.1)
+        self.assertEqual(calls, [])

@@ -581,6 +581,8 @@ class Service:
         self._ctx.logger.info("charts_autoplay", ok=result.ok, detail=(result.output or result.error or "")[:160])
 
     async def _on_skill_acquired(self, message: Message) -> None:
+        if message.source == "execution":
+            return  # our own announcement after apply_skill; that call already loaded it, from the right tree
         name, path = message.payload.get("name", ""), message.payload.get("path", "")
         if name and path:
             await self._load_skill(name, path=path)
@@ -625,7 +627,7 @@ class Service:
         ))
         return announced
 
-    async def _load_skill(self, name: str, *, path: str) -> object | None:
+    async def _load_skill(self, name: str, *, path: str, root: Path | None = None) -> object | None:
         """Register the one named skill as a `skill:<name>` tool, reading
         its source from `path` (readable-roots bounded) and its
         description from Memory's procedural record if one answers in
@@ -652,9 +654,9 @@ class Service:
         # await the Memory lookup, and both register and announce it
         # (found 2026-09-19 as a "flaky" test under load; it was a race).
         async with self._skill_load_locks.setdefault(name, asyncio.Lock()):
-            return await self._load_skill_locked(name, path=path)
+            return await self._load_skill_locked(name, path=path, root=root)
 
-    async def _load_skill_locked(self, name: str, *, path: str) -> object | None:
+    async def _load_skill_locked(self, name: str, *, path: str, root: Path | None = None) -> object | None:
         existing = self._registry.get(f"skill:{name}")
         # `safe_read_file` caps at `_MAX_READ_CHARS` and appends a
         # human-readable "...[truncated at N of M chars; read the rest
@@ -667,7 +669,11 @@ class Service:
         # truncation notice the moment it ran). `read_source` returns the
         # file's real, uncapped content -- capping belongs to the
         # tool-output path, not to what actually gets executed.
-        source, refusal = pathsafety.read_source(self._config.repo_root, path,
+        # `root`: the task's worktree when apply_skill ran in one. The file
+        # exists only there until the task lands; reading the live tree
+        # refused it as "not a file" and the skill never registered
+        # (write-a-skill trial, 2026-09-19).
+        source, refusal = pathsafety.read_source(root or self._config.repo_root, path,
                                                  readable_roots=self._config.readable_roots,
                                                  root_files=self._config.readable_root_files)
         if refusal:
@@ -902,7 +908,7 @@ class Service:
                 subject = str((args or {}).get("subject") or "")
                 if subject.endswith(".py"):
                     name = Path(subject).stem
-                    await self._load_skill(name, path=subject)
+                    await self._load_skill(name, path=subject, root=root)
                     await self._ctx.bus.publish(Message.new(
                         # The contract (`contracts/messages/learn.py`)
                         # names this field `tests`, not `tests_passed`.
