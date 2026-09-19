@@ -12,6 +12,10 @@ from __future__ import annotations
 from .api import DecisionContext, Proposal, Rule, Verdict
 
 
+
+#: Escalations only a person may settle; no classifier ALLOW overrides them.
+_PERSON_ONLY_LAYERS = frozenset({"human_only", "physical"})
+
 class Pipeline:
     def __init__(self, rules: tuple[Rule, ...]) -> None:
         self.rules = rules
@@ -37,7 +41,10 @@ class Pipeline:
 
         if escalation is not None:
             layer, reasons = escalation
-            if ctx.config.classifier_enabled and ctx.classify is not None:
+            # A classifier may settle an ordinary escalation, never one a
+            # rule raised precisely because it must reach a person in every
+            # posture (HumanOnlyRule, PhysicalRule).
+            if ctx.config.classifier_enabled and ctx.classify is not None and layer not in _PERSON_ONLY_LAYERS:
                 verdict = await ctx.classify(proposal)
                 if verdict == "ALLOW":
                     return Verdict("approved", layer, notes=tuple(notes))

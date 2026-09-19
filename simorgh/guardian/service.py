@@ -167,6 +167,7 @@ class Service:
         self.charter_text = load_charter()
 
         await self._rebuild_rejected_index()
+        await self._restore_posture()
 
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_PROPOSED, self._on_proposed, group="guardian"))
         # `guardian.review` had a caller and no listener: Verification
@@ -200,6 +201,24 @@ class Service:
         return Health.ok(f"posture={self._posture.level}")
 
     # -- projections ---------------------------------------------------
+
+    async def _restore_posture(self) -> None:
+        """Replay `guardian:trust`, so a restart is not a way to loosen.
+
+        Posture was rebuilt at baseline on every start while `apply_event`
+        had no caller, and Execution may publish `system.restart` -- so Sim
+        could shed a lock or a guarded tightening by restarting itself
+        (found writing guardian's CONTRACT.md, 2026-09-19). A lock that is
+        still in force gets its expiry re-armed from now: the circuit
+        breaker still resets on its own, just not early."""
+        try:
+            events = await self._ctx.ledger.read(TRUST_STREAM)
+        except Exception:  # noqa: BLE001 -- a missing stream is a fresh posture
+            return
+        for event in events:
+            self._posture.apply_event(event.type, dict(event.payload))
+        if self._posture.level == "locked" and self._config.lock_ttl_s > 0:
+            self._arm_lock_expiry()
 
     async def _rebuild_rejected_index(self) -> None:
         events = await self._ctx.ledger.read(REJECTED_STREAM)
