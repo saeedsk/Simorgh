@@ -160,3 +160,5 @@ Lock it first (`python tools/modlock.py claim cognition --by <you> --task "..."`
 - Tool listing (stage 2 item 2, 2026-09-19): Cognition consumes `tool.registered` and keeps each tool's description and `input_schema`; the marker instruction block lists every offered tool on one line, `- NAME: <description, <=90 chars> (argument: x | arguments: a, b?)`. Cost measured on the real registry: CHAT's 72 tools 323 -> 2,340 tokens, PATCH's 25 tools 166 -> 824. Trial suite after: 6/7 (quiet baseline rounds 5/7 and 6/7); the one failure is `already-done`, as before.
 
 - The "thinking moved" notice compares the provider that answered with the last one that answered the SAME route (`_last_by_route`), so a deliberate route (drafts on the strong tier, chat on the default) is not announced; only a failover within a route is.
+
+- A single-line marker argument also ends where another UPPERCASE known marker starts on the same line (`first_line_argument(text, markers)`); live 2026-09-19 `READ_FILE: a.pyREAD_FILE: a.py` reached read_file whole.

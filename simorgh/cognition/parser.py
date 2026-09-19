@@ -136,12 +136,24 @@ def preview(text: str, limit: int = _DEFAULT_PREVIEW_LIMIT) -> str:
     return collapsed
 
 
-def first_line_argument(text: str) -> str:
+def first_line_argument(text: str, markers: tuple[str, ...] = ()) -> str:
     """The first non-empty line, stripped -- for an argument that's
     always exactly one bare token (a path, a name), never free-form
-    prose the model may have kept generating past the marker."""
+    prose the model may have kept generating past the marker.
+
+    With `markers`, the line also ends where another marker begins on it.
+    Live 2026-09-19: the model wrote "READ_FILE: simorgh/bus/trace.py
+    READ_FILE: simorgh/bus/trace.py" with no line break between, and
+    read_file was asked for "simorgh/bus/trace.pyREAD_FILE: …". UPPERCASE
+    only, as in `cut_at_next_marker`, so a word in a path is left alone."""
     stripped = text.strip()
-    return stripped.splitlines()[0].strip() if stripped else ""
+    line = stripped.splitlines()[0].strip() if stripped else ""
+    cut = len(line)
+    for marker in markers:
+        index = line.find(f"{marker.upper()}:", 1)
+        if 0 < index < cut:
+            cut = index
+    return line[:cut].strip()
 
 
 # A model's own tool-call syntax, leaking through the marker convention.
@@ -197,7 +209,7 @@ def further_calls(text: str, markers: tuple[str, ...]) -> tuple[dict, ...]:
         end = found[n + 1][0] if n + 1 < len(found) else len(lines)
         first = lines[index].strip()[len(marker) + 1:].strip()
         body = "\n".join([first, *lines[index + 1:end]]).strip()
-        arg = body if marker.upper() in _CODE_BEARING_MARKERS else first_line_argument(body)
+        arg = body if marker.upper() in _CODE_BEARING_MARKERS else first_line_argument(body, markers)
         calls.append({"tool": marker.lower(), "args": {"argument": arg}})
     return tuple(calls)
 
@@ -358,7 +370,7 @@ class OutputParser:
         if marker.upper() in _CODE_BEARING_MARKERS:
             arg, cut = cut_at_next_marker(payload, markers)
         else:
-            arg = first_line_argument(payload)
+            arg = first_line_argument(payload, markers)
         # One action per step is deliberate (16 section 7), but the extra
         # markers used to vanish without trace: a reply carrying
         # SEARCH_CODE + WEB_SEARCH ran only the first, so a whole half of

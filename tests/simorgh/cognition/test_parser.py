@@ -306,3 +306,19 @@ class ACodeBearingPayloadEndsAtTheNextMarkerTestCase(unittest.TestCase):
         cut, was_cut = cut_at_next_marker("NOTIFY: subject\nbody text", self.MARKERS)
         self.assertFalse(was_cut)
         self.assertEqual(cut, "NOTIFY: subject\nbody text")
+
+
+class TwoMarkersOnOneLine(unittest.TestCase):
+    """Live 2026-09-19: "READ_FILE: a.pyREAD_FILE: a.py" reached read_file whole."""
+
+    def test_the_argument_ends_where_the_next_marker_starts(self):
+        from simorgh.cognition.parser import OutputParser
+
+        calls = OutputParser()._parse_markers("READ_FILE: simorgh/bus/trace.pyREAD_FILE: simorgh/bus/trace.py",  # noqa: SLF001
+                                              ("read_file",)).tool_calls
+        self.assertEqual(calls[0]["args"]["argument"], "simorgh/bus/trace.py")
+
+    def test_a_lowercase_word_in_a_path_is_not_a_marker(self):
+        from simorgh.cognition.parser import first_line_argument
+
+        self.assertEqual(first_line_argument("docs/read_file:notes.md", ("read_file",)), "docs/read_file:notes.md")
