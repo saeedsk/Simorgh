@@ -251,6 +251,23 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 #: disagreed about this would build calls the tool cannot read.
 _MARKER_ARG_KEY = MARKER_ARG_KEY
 
+
+def _one_value(key: str, raw) -> object:
+    """A single-valued marker argument, without the prose the model wrote
+    after it. Live 2026-09-19, GAIA: `WEB_FETCH: https://…/wiki/Moon`
+    followed on the next line by "There is no tool result yet…" reached
+    web_fetch as one URL with a newline in it, and the fetch failed three
+    times ("URL can't contain control characters"). A URL is its first
+    whitespace-separated token; a path or target is its first line."""
+    if not isinstance(raw, str):
+        return raw
+    text = raw.strip()
+    if key == "url":
+        return text.split()[0] if text else text
+    if key in ("path", "target"):
+        return text.splitlines()[0].strip() if text else text
+    return raw
+
 # Live-caught (the creator, real use): told to use `propose_mcp_server`,
 # the model wrote `PROPOSE_MCP_SERVER: {"name": "...", "description":
 # "...", "reason": "..."}` -- valid-looking JSON, wrong field
@@ -689,7 +706,8 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
         elif tool in _MARKER_NO_ARGS:
             args = {}
         elif tool in _MARKER_ARG_KEY:
-            args = {_MARKER_ARG_KEY[tool]: raw}
+            key = _MARKER_ARG_KEY[tool]
+            args = {key: _one_value(key, raw)}
     reversibility, network = _TOOL_POLICY.get(tool, ("irreversible", False))
     if tool == "home_call" and isinstance(args, dict):
         # Per-call safety (home-automation-design.md section 7). The
