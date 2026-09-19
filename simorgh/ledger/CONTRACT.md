@@ -151,3 +151,5 @@ Also not in the catalogue, fixed 2026-09-19: `Service.publish_health()` had no c
 Lock it first (`python tools/modlock.py claim ledger --by <you> --task "..."`), commit the lock, edit only `simorgh/ledger/`, `tests/simorgh/ledger/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py ledger` before committing; commit subject `ledger: <what changed>`.
 
 - Writers (stage 1 item 8, 2026-09-19): `ledger.bound.BoundLedger(inner, source)` wraps the shared client per subsystem; `append`/`snapshot`/`compact`/`delete_stream` on a stream whose prefix is in `contracts.streamnames.WRITERS` raise `WriterViolation` unless the source (instance suffix stripped) is listed; reads pass through; unlisted streams are open. `SIMORGH_LEDGER_WRITER_AUDIT=<file>` records every write as `source<TAB>stream` (how the table was measured: 23,140 writes over the whole test tree). `streams.KNOWN_PREFIXES` stays informational.
+
+- Retention adds `session:` 30d (stage 4 item 2).

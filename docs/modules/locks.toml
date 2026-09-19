@@ -53,6 +53,12 @@ task = "logging to a file under the TUI"
 since = "2026-09-19T12:34:17+00:00"
 until = "2026-09-19T20:34:17+00:00"
 
+[locks.ledger]
+by = "opus-main"
+task = "stage 4 item 2: session stream retention"
+since = "2026-09-19T16:08:43+00:00"
+until = "2026-09-20T00:08:43+00:00"
+
 [locks.memory]
 by = "opus-main"
 task = "multi-agent wave 1"

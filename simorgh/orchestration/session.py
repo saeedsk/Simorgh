@@ -737,6 +737,10 @@ class SessionRunner:
         self._worker_id = worker_id
         self._assembler = Assembler(bus, clock=clock, timeout_s=assemble_timeout_s)
         self._waiter = _EventWaiter(bus)
+        # Each session's messages, durably, as `session:<id>` (stage 4 item 2).
+        from .transcript import TranscriptWriter
+
+        self._transcripts = TranscriptWriter(ledger, clock)
         self._is_paused = is_paused or (lambda: False)
         self._is_cancelled = is_cancelled or (lambda task_id: False)
         self._think_timeout_s = think_timeout_s
@@ -769,7 +773,10 @@ class SessionRunner:
             # caused from one that was already red without a tree to
             # compare against, and this commit is that tree.
             session.base_ref = _git_head()
-        outcome = await self._run(session, user_text=user_text)
+        try:
+            outcome = await self._run(session, user_text=user_text)
+        finally:
+            await self._persist_transcript(session)
         if outcome.kind == "completed":
             # `_transcript_echo` catches a fabrication written in our own
             # bracket syntax. Plain prose walked straight past it: "I've
@@ -1335,7 +1342,22 @@ class SessionRunner:
             return ""   # a marker on its own line is a tool request, not an answer (observer, 2026-09-13)
         return text
 
+    async def _persist_transcript(self, session: Session) -> None:
+        try:
+            await self._transcripts.persist(session.task_id, session.messages)
+        except Exception as exc:  # noqa: BLE001 -- a transcript that could not be written must not stop the work
+            self._log_transcript_failure(session, exc)
+
+    @staticmethod
+    def _log_transcript_failure(session: Session, exc: Exception) -> None:
+        import logging
+
+        logging.getLogger("simorgh.orchestration").warning(
+            "session transcript not written for %s: %r", session.task_id, exc)
+
     async def _think(self, session: Session, user_text: str, *, last_step: bool, no_tools: bool = False) -> Message | None:
+        # Everything up to this call is durable before the model is asked.
+        await self._persist_transcript(session)
         steps_left = session.budget.steps_left
         # `offered_tools(())` means "every registered tool" (skills arrive
         # that way); the wrap-up call wants none at all.

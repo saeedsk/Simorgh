@@ -44,7 +44,7 @@ _UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 # `task:` (resume, outcome typing), `learn:outcomes` (the competence
 # fold), `memory:*`, `guardian:rejected` (immunity), `self:*`.
 DEFAULT_RETENTION: dict[str, str] = {
-    "trace:": "2d", "dead:": "30d", "activity": "90d",
+    "trace:": "2d", "session:": "30d", "dead:": "30d", "activity": "90d",
     "metrics:history": "7d", "curiosity:ticks": "7d", "persona:state": "7d",
     "execution:inflight": "7d", "execution:tools": "30d", "cognition:budget:": "3d",
     "cognition:summaries:": "30d", "cognition:calls": "14d", "voice:turns": "30d",

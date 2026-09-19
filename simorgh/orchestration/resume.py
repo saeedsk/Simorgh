@@ -132,12 +132,26 @@ async def restore_session(session: Session, ledger) -> int:
             ))
         session.budget.steps_used = len(last["steps"])
         session.resumed_from_step = len(last["steps"])
+        # The dead worker's own transcript (stage 4 item 2): the messages it
+        # had shown the model, not only its step count (evaluation L5).
+        from simorgh.contracts.session import stream_name
+
+        from .transcript import fold
+
+        try:
+            messages = fold(await ledger.read(stream_name(session.task_id)))
+        except Exception:  # noqa: BLE001 -- a missing or unreadable transcript: resume as before
+            messages = []
         if last.get("note"):
             # The dead worker had re-grounded: continue from its note rather
             # than from an empty transcript.
             session.progress = last["note"]
             session.reground_at = last.get("note_at", 0)
             session.messages = [{"role": "user", "content": f"{NOTE_HEADER}\n\n{last['note']}"}]
+        if messages:
+            # Its transcript, when it left one, is what it was really
+            # looking at -- note included, if it had re-grounded.
+            session.messages = messages
         if len(attempts) > 1:
             session.carried = carried_note(attempts[:-1])
             # The edits the DEAD attempt inherited are still in the tree.
