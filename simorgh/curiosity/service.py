@@ -606,6 +606,13 @@ class Service:
             # The first skip for a reason is recorded; repeats are not.
             return
         self._last_tick_record = payload
+        # A tick's breakdown is a measurement, not a decision: a sample in
+        # the telemetry store (stage 1 item 3). The ledger stream is used
+        # only when the Context has no store (hand-built in tests).
+        telemetry = getattr(self._ctx, "telemetry", None)
+        if telemetry is not None and hasattr(telemetry, "series"):
+            telemetry.sample("curiosity.tick", payload)
+            return
         await self._append(_TICKS_STREAM, "tick", payload)
 
     async def _think(self, purpose: str, prompt: str, *, expected: str | None = None):

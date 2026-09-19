@@ -74,7 +74,7 @@ Exact subscription list: `_CONSUMES` (`service.py:31-38`), plus `system.tick.sec
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `curiosity:ticks` | simorgh/curiosity/service.py | - (named in ledger/compaction.py for retention) | 7d |
+| `curiosity:ticks` | simorgh/curiosity/service.py, only when `ctx.telemetry` is not a real store; otherwise each tick is the telemetry sample series `curiosity.tick` (stage 1 item 3) | - | 7d |
 | `curiosity:candidates` | simorgh/curiosity/service.py | - | forever (no `DEFAULT_RETENTION` entry) |
 | `curiosity:interests` | simorgh/curiosity/service.py | simorgh/ledger/migrate_v1.py (writes v1 interests into it) | forever |
 | `curiosity:projects` | simorgh/curiosity/service.py | - | forever |

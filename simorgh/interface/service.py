@@ -289,7 +289,7 @@ class Service:
                 clock=ctx.clock.now if hasattr(ctx.clock, "now") else None,
                 status_timeout_s=self.config.http_status_timeout_s,
                 chat_timeout_s=self.config.http_chat_timeout_s,
-                history_stream=self.config.history_stream,
+                history_stream=self.config.history_stream, telemetry=getattr(ctx, "telemetry", None),
                 history_default_minutes=self.config.history_default_minutes,
                 history_max_points=self.config.history_max_points,
                 logs_default_limit=self.config.logs_default_limit,

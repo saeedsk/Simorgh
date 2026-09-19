@@ -328,7 +328,7 @@ class Kernel:
         await self._process_metrics.start()
         self._metrics_history = MetricsHistoryWriter(
             ledger=self.ledger, clock=self._clock, metrics=self._metrics_table,
-            interval_s=self.runtime.metrics_every_s,
+            interval_s=self.runtime.metrics_every_s, telemetry=self.telemetry,
         )
         await self._metrics_history.start()
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_PAUSE, self._on_pause))

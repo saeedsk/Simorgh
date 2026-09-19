@@ -208,3 +208,5 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim interface --by <you> --task "..."`), commit the lock, edit only `simorgh/interface/`, `tests/simorgh/interface/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py interface` before committing; commit subject `interface: <what changed>`.
+
+- Stage 1 item 3 (2026-09-19): `/api/history` reads the telemetry series `metrics.history` from `ctx.telemetry` and falls back to the `metrics:history` ledger stream (older data, or telemetry off). `HttpApi(telemetry=...)`.
