@@ -3,10 +3,13 @@
 actually approved -- this only tags the request with the reversibility/
 scope Guardian's policy reads (03 section 4.6).
 
-v1's full 14-marker conversational set (PROPOSE/PATCH/BATCH/PLAN/EVOLVE/
-USE/NEWS/GROWTH/FETCH/RUN/READ/LIST/RECALL/REMIND) is NOT implemented
-this session -- only the plain tool_calls -> action.proposed path is.
-See 16 section 12 Q4/Q5 and this package's README "Not done this session".
+The marker dialect (`NAME: argument` lines) is FROZEN as of 2026-09-19,
+stage 2 item 10 (docs/plan/stage-2-native-tool-use.md): no new markers, no
+new `_CODE_BEARING_MARKERS`, no new `_MARKER_ARG_KEY` hints. A new tool gets
+its argument schema (`args_schema`) and reaches native providers through
+`tool.registered`; the marker path stays as the fallback for providers
+without native tools, and shrinks as providers move to `tool_dialect =
+"native"`.
 """
 
 from __future__ import annotations
