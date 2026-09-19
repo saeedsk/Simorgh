@@ -1,9 +1,10 @@
-"""Simorgh v2 -- the message-driven re-architecture designed in
-docs/blueprint/. Sixteen subsystems, one package each, sharing exactly
-one dependency: `simorgh.contracts`. See docs/blueprint/00-README.md.
+"""Simorgh ("Sim"): a self-improving personal agent for one household.
 
-v1 (`src/`) remains the running system until the migration in
-docs/blueprint/06-migration-from-v1.md completes.
+Nineteen packages, one per subsystem, composed by the Kernel and sharing
+exactly one dependency, `simorgh.contracts`; they talk only through typed
+messages on the Bus, and every effect passes Guardian. Start at
+docs/ARCHITECTURE.md; each package's CONTRACT.md says what it consumes,
+produces, owns and promises.
 """
 
 from __future__ import annotations

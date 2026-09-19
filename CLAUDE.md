@@ -12,8 +12,11 @@ messages on a Bus, with every effect gated by Guardian. Stdlib-only at the core.
 `docs/reviews/2026-09-18/architecture-evaluation.md` for known issues (catalogue
 ids like S1, L2, C1), then `docs/plan/` for what changes next and in what order.
 `docs/findings/` holds dated measurements. There is no other design record:
-the old blueprint, evolution log and plans were removed on 2026-09-19 and live
-only in git history (tag `pre-cleanup-2026-09-18`).
+the old blueprint, evolution log, plans and package READMEs were removed on
+2026-09-19 and live only in git history (tag `pre-cleanup-2026-09-18`). Many code
+comments still cite `docs/blueprint/...` sections: that is the original design, not
+current truth; read one with `git show pre-cleanup-2026-09-18:docs/blueprint/<file>`
+if you need the intent, and trust the code and CONTRACT.md where they differ.
 
 **Rules that are not negotiable**
 1. Lock before you edit: `python tools/modlock.py claim <module> --by <you> --task "..."`,

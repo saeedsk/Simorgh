@@ -1,7 +1,7 @@
 """Execution configuration (08-execution.md section 3.5) -- a working
 subset: the knobs the tools built this phase actually read. Shell,
 relaunch, hot_swap, and isolated_test_suite (and their config keys) are
-still deferred -- see simorgh/execution/README.md. Skill tools
+still deferred -- see simorgh/execution/CONTRACT.md. Skill tools
 (`apply_skill`, `SkillTool`, on-demand `learn.skill.acquired`
 loading -- Phase 4 roadmap item 4.7) and `web_fetch` are built this pass.
 """
