@@ -345,6 +345,8 @@ class Service:
             out["warmup_s"] = round(session.stats.warmup_seconds, 3)
             out["last_interruption_s"] = session.stats.last_interruption_s
             out["partial"] = session.partial
+            if session.stats.breaches:
+                out["breaches"] = {day: dict(counts) for day, counts in session.stats.breaches.items()}
             if self.config.diagnostics and session.stats.last_metrics:
                 out["metrics"] = dict(session.stats.last_metrics)
         return out

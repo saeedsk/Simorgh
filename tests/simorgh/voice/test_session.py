@@ -1000,3 +1000,30 @@ class TestAStreamedReplyIsSpokenBeforeItIsFinished(unittest.IsolatedAsyncioTestC
         spoken = " ".join(e[len("synth: "):] for e in events if e.startswith("synth"))
         self.assertIn("The sun is still up.", spoken)
         self.assertEqual(spoken.count("three o'clock"), 1, events)
+
+
+class TestASlowStageIsABreach(unittest.TestCase):
+    """Stage 3 item 8: a slow transcript is one counted breach and one event."""
+
+    def test_a_slow_stt_is_counted_and_recorded(self):
+        from simorgh.voice.session import TurnClock
+
+        class _Telemetry:
+            def __init__(self):
+                self.events = []
+
+            def event(self, name, **kw):
+                self.events.append((name, kw))
+
+        script = _Script((False, 10_000))
+        session, *_ = _session(_config(), script, _Replies(["ok"]))
+        telemetry = _Telemetry()
+        session._pipeline.telemetry = telemetry  # noqa: SLF001
+        clock = TurnClock(turn_id=1, speech_end=100.0, final_at=103.5, first_audio_at=104.0, trace_id="t1")
+        # A 3.5 s transcript also puts first audio past its 2.5 s budget.
+        self.assertEqual(session._check_budgets(clock), ["stt", "response"])  # noqa: SLF001
+        self.assertEqual(sum(c.get("stt", 0) for c in session.stats.breaches.values()), 1)
+        breach = [kw for name, kw in telemetry.events if name == "voice.budget_breach"]
+        self.assertEqual(breach[0]["attrs"]["stage"], "stt")
+        fast = TurnClock(turn_id=2, speech_end=100.0, final_at=100.5, first_audio_at=101.0, trace_id="t2")
+        self.assertEqual(session._check_budgets(fast), [])  # noqa: SLF001

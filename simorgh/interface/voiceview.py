@@ -22,6 +22,9 @@ def status(payload: dict) -> str:
     if payload.get("state") and not payload.get("muted"):
         state = str(payload["state"]).replace("_", " ")
     lines = [f"voice {state} · {_engines(payload)} · {payload.get('turns', 0)} turn(s) this session"]
+    for day, counts in sorted((payload.get("breaches") or {}).items(), reverse=True)[:2]:
+        # Stage 3 item 8: turns that ran over their budget (stt 2 s, first audio 2.5 s).
+        lines.append("  over budget " + day + ": " + ", ".join(f"{stage} {n}" for stage, n in sorted(counts.items())))
     if payload.get("partial"):
         lines.append(f"  hearing: {payload['partial']} ...")
     if payload.get("last_heard"):

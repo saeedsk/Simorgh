@@ -106,6 +106,14 @@ class SessionStats:
     last_metrics: dict = field(default_factory=dict)
     warmup_seconds: float = 0.0
     last_interruption_s: float = -1.0
+    # Stage-budget breaches per day, "YYYY-MM-DD" -> {stage: count}
+    # (stage 3 item 8); `voice status` shows today's and yesterday's.
+    breaches: dict = field(default_factory=dict)
+
+
+#: The time a spoken turn may spend per stage (stage 3 item 8): the final
+#: transcript after the person stops, and the first audio after they stop.
+STAGE_BUDGETS_S = {"stt": 2.0, "response": 2.5}
 
 
 _QUESTION_WORDS = re.compile(r"^\s*(?:what|when|where|who|whom|whose|why|how|which|is|are|am|was|were|can|could|do|does|did|"
@@ -361,10 +369,35 @@ class VoiceSession:
     def _now(self) -> float:
         return time.monotonic()
 
+    def _check_budgets(self, clock: "TurnClock") -> list[str]:
+        """Count the stages of this turn that ran over `STAGE_BUDGETS_S`,
+        and record each as a telemetry event in the turn's trace."""
+        took = {"stt": clock.final_at - clock.speech_end if clock.speech_end and clock.final_at else None,
+                "response": clock.first_audio_at - clock.speech_end if clock.speech_end and clock.first_audio_at else None}
+        over = [stage for stage, seconds in took.items()
+                if seconds is not None and seconds > STAGE_BUDGETS_S[stage]]
+        if not over:
+            return []
+        day = time.strftime("%Y-%m-%d")
+        counts = self.stats.breaches.setdefault(day, {})
+        for stage in over:
+            counts[stage] = counts.get(stage, 0) + 1
+        for old in sorted(self.stats.breaches)[:-2]:
+            self.stats.breaches.pop(old, None)
+        telemetry = getattr(self._pipeline, "telemetry", None)
+        if telemetry is not None and clock.trace_id:
+            with contextlib.suppress(Exception):
+                for stage in over:
+                    telemetry.event("voice.budget_breach", trace_id=clock.trace_id, span_id=uuid.uuid4().hex,
+                                    attrs={"stage": stage, "seconds": round(took[stage], 3),
+                                           "budget_s": STAGE_BUDGETS_S[stage], "turn": clock.turn_id})
+        return over
+
     def _record_stage_spans(self, clock: "TurnClock", report) -> None:
         """The turn's stages as timed spans in its trace (stage 1 item 4):
         stt, think (the wait for Sim), synth to first audio, and playback.
         The clock is monotonic; the store keeps wall time."""
+        self._check_budgets(clock)
         telemetry = getattr(self._pipeline, "telemetry", None)
         if telemetry is None or not clock.trace_id:
             return
