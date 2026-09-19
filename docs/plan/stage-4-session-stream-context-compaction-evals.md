@@ -1,6 +1,6 @@
 # Stage 4 -- Session stream, ContextBuilder, compaction, evals package
 
-Status: not started · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
+Status: **in progress** (2026-09-19: items 1-3 done) · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation L3 (no cacheable prefix), L5 (crash-resume restores steps but not con
 Stage 0 item 30's gate must exist and have before-numbers. Read `orchestration/session.py` (`_run`, `_think`, `_reground`, `_wrap_up`), `orchestration/context.py`, `orchestration/resume.py`, `orchestration/profiles.py`, `orchestration/scaffolds.py`, `cognition/assembler.py`, `cognition/compaction.py`, `interface/service.py:943` (the per-line uuid), `tools/trial.py`, `tools/trial_suite.py`, `tools/observer_kit.py`, `simorgh/benchmark/`.
 
 ## Action items
+
+Done 2026-09-19: item 1 (`contracts/session.py`), item 2 (`orchestration/transcript.py`; a resumed session gets its messages back), item 3 (a conversation per (channel, person) on `session:conv:...`; recall scenario 2/3 -> 3/3). The reply-correlation id stays per line, so Interface and Voice did not change; the plan's wording (stop minting a uuid per line) is met by the conversation id instead.
 
 1. **Turn and Block contracts.** *Lock `contracts`.* `Session{id, agent, channel, person_id, parent_id, depth, budget{turns, tokens, usd, wall_s}, state}`, `Turn{seq, role, blocks[], ts, meta{provider, model, in/out tokens, cached_input_tokens, cost}}`, `Block = Text | ToolUse{id, name, input} | ToolResult{tool_use_id, content, is_error, ref, bytes_total} | Image{ref}`; stream events `session.turn.appended`, `session.compacted{summary, dropped_seq_range}`, `session.snapshot`; stream name `session:<id>` in `streamnames.py`. Acceptance: schema tests; both-sides test updated.
 2. **The session stream.** *Lock `orchestration`, `ledger`.* `SessionRunner` appends one event per turn (not per block); a snapshot every 50 turns; `resume.py` folds the stream into `session.messages` (fixes L5: a resumed session has its context). Acceptance: kill a task mid-step in a booted-Kernel test and resume with the same messages.

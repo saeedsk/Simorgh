@@ -67,3 +67,35 @@ class TheTranscriptStream(unittest.IsolatedAsyncioTestCase):
         spent = await restore_session(session, self.ledger)
         self.assertEqual(spent, 1)
         self.assertEqual(session.messages, MESSAGES)
+
+
+class AConversationIsOnePersistentSession(unittest.IsolatedAsyncioTestCase):
+    """Stage 4 item 3: one session per (channel, person), durable."""
+
+    async def test_exchanges_are_appended_and_read_back_in_order(self):
+        from simorgh.orchestration.transcript import append_exchange, conversation_id, recent_lines
+
+        ledger = make_ledger({"backend": "memory"})
+        await ledger.start()
+        conv = conversation_id("voice", "Ira")
+        self.assertEqual(conv, "conv:voice:ira")
+        await append_exchange(ledger, conv, user_text="my laptop is called Falcon", answer="Noted.", who="Ira")
+        await append_exchange(ledger, conv, user_text="what is it called?", answer="Falcon.", who="Ira")
+        lines = await recent_lines(ledger, conv, 10)
+        self.assertEqual(lines, ["Ira: my laptop is called Falcon", "Sim: Noted.",
+                                 "Ira: what is it called?", "Sim: Falcon."])
+
+    async def test_the_block_survives_a_restart(self):
+        """A fresh Assembler over the same ledger -- a new process -- still
+        sees the conversation; Memory's window was process memory."""
+        from simorgh.orchestration.context import Assembler
+        from simorgh.orchestration.transcript import append_exchange, conversation_id
+
+        ledger = make_ledger({"backend": "memory"})
+        await ledger.start()
+        await append_exchange(ledger, conversation_id("cli", ""), user_text="the desktop is Orca",
+                              answer="Got it.", who="User")
+        session = Session(task_id="line-2", kind="chat", mode="execute", profile=profiles.CHAT, channel="cli")
+        block = await Assembler(bus=None, ledger=ledger)._working_block(session)  # noqa: SLF001
+        self.assertIn("User: the desktop is Orca", block)
+        self.assertIn("Sim: Got it.", block)

@@ -420,6 +420,25 @@ class Worker:
         except Exception as exc:  # noqa: BLE001 -- same: never let a turn vanish
             outcome = Outcome("failed", reason=f"the turn crashed: {exc!r}\n{traceback.format_exc()}")
         await self._report(session, outcome)
+        await self._remember_exchange(session, text, outcome)
+
+    async def _remember_exchange(self, session: Session, text: str, outcome: Outcome) -> None:
+        """The turn into its conversation's session stream (stage 4 item
+        3): one persistent session per (channel, person), durable across
+        a restart, where the recent-conversation block is read from."""
+        from simorgh.contracts.tone import strip_tone
+
+        from .transcript import append_exchange, conversation_id
+
+        answer = strip_tone(str(outcome.result_summary or "")).strip() if outcome.kind == "completed" else ""
+        if not answer and not text:
+            return
+        try:
+            await append_exchange(self._ledger, conversation_id(session.channel, session.speaker),
+                                  user_text=text, answer=answer, who=session.speaker or "User",
+                                  ts=self._clock.now() if hasattr(self._clock, "now") else float(self._clock()))
+        except Exception:  # noqa: BLE001 -- a conversation line that could not be written must not lose the turn
+            pass
 
     async def _artifacts_for(self, session: Session, outcome: Outcome) -> list[str]:
         """A plan session's whole product is the plan text, and Planning

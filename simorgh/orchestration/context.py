@@ -72,6 +72,13 @@ _MEMORY_PERSON_K = 5
 #: the wrong instrument for "what we were just saying" and this is the
 #: right one.
 _WORKING_K = 6
+#: The conversation from its session stream (stage 4 item 3): up to this
+#: many exchanges, within this many characters. It is durable and ordered,
+#: so it can hold far more than Memory's six-turn window: the recall
+#: scenario's machine names, told at turn 1 and asked at turn 14, were out
+#: of a six-turn window and reached the prompt only by similarity search.
+_CONVERSATION_K = 30
+_CONVERSATION_CHARS = 6000
 
 WORKING_BLOCK_HEADER = (
     "The conversation so far with this person, oldest first (the memory below is older than this):\n"
@@ -136,10 +143,12 @@ def _why_not(error: dict) -> str:
 
 
 class Assembler:
-    def __init__(self, bus, *, clock=None, timeout_s: float = DEFAULT_TIMEOUT_S) -> None:
+    def __init__(self, bus, *, clock=None, timeout_s: float = DEFAULT_TIMEOUT_S, ledger=None) -> None:
         self._bus = bus
         self._clock = clock
         self._timeout_s = timeout_s
+        # Where the conversation's session stream is read (stage 4 item 3).
+        self._ledger = ledger
 
     async def assemble(self, session: Session, purpose: str, user_text: str = "") -> list[dict]:
         """The messages for one `cognition.think`.
@@ -352,6 +361,27 @@ class Assembler:
         conversation, from Memory's working window, oldest first."""
         from simorgh.contracts.settings import conversation_key
 
+        if self._ledger is not None:
+            # The conversation's own session stream first (stage 4 item 3):
+            # durable, where Memory's window lives in process memory.
+            from .transcript import conversation_id, recent_lines
+
+            try:
+                lines = await recent_lines(self._ledger, conversation_id(getattr(session, "channel", ""),
+                                                                         getattr(session, "speaker", "")),
+                                           _CONVERSATION_K)
+            except Exception:  # noqa: BLE001 -- fall back to Memory's window
+                lines = []
+            if lines:
+                # Newest first into the budget, then back in order: a long
+                # conversation keeps its latest turns whole.
+                kept, used = [], 0
+                for line in reversed(lines):
+                    if used + len(line) > _CONVERSATION_CHARS and kept:
+                        break
+                    kept.append(line)
+                    used += len(line) + 1
+                return WORKING_BLOCK_HEADER + "\n".join(reversed(kept))
         key = conversation_key(getattr(session, "channel", ""), getattr(session, "speaker", ""))
         reply, _why = await self._request_with_reason(
             topics.MEMORY_RETRIEVE,

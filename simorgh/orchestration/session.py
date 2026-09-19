@@ -735,7 +735,7 @@ class SessionRunner:
         self._ledger = ledger
         self._clock = clock
         self._worker_id = worker_id
-        self._assembler = Assembler(bus, clock=clock, timeout_s=assemble_timeout_s)
+        self._assembler = Assembler(bus, clock=clock, timeout_s=assemble_timeout_s, ledger=ledger)
         self._waiter = _EventWaiter(bus)
         # Each session's messages, durably, as `session:<id>` (stage 4 item 2).
         from .transcript import TranscriptWriter
@@ -1343,6 +1343,11 @@ class SessionRunner:
         return text
 
     async def _persist_transcript(self, session: Session) -> None:
+        if session.profile.scaffold == "chat":
+            # A chat turn's record is its conversation's session stream
+            # (worker `_remember_exchange`, stage 4 item 3); a stream per
+            # typed line would be one more file per line.
+            return
         try:
             await self._transcripts.persist(session.task_id, session.messages)
         except Exception as exc:  # noqa: BLE001 -- a transcript that could not be written must not stop the work

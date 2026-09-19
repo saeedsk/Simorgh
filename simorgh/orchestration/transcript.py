@@ -100,4 +100,49 @@ def fold(events) -> list[dict]:
     return messages
 
 
-__all__ = ["SNAPSHOT_EVERY", "TranscriptWriter", "fold", "to_message", "to_turn"]
+def conversation_id(channel: str | None, speaker: str | None) -> str:
+    """The persistent session of one (channel, person) conversation (stage
+    4 item 3): `conv:<channel>:<person>`, on the same key Memory's working
+    window used, so the two agree."""
+    from simorgh.contracts.settings import conversation_key
+
+    return "conv:" + conversation_key(channel, speaker)
+
+
+async def append_exchange(ledger, conversation: str, *, user_text: str, answer: str, who: str,
+                          ts: float = 0.0) -> None:
+    """One chat turn into its conversation: what the person said and what
+    Sim answered, as two turns. The tool calls in between are the turn's
+    own business; the conversation keeps what was said."""
+    stream = s.stream_name(conversation)
+    head = await ledger.head(stream) if hasattr(ledger, "head") else 0
+    seq = int(head or 0)
+    for role, text in (("user", f"{who}: {user_text}" if user_text else ""), ("assistant", answer)):
+        if not text:
+            continue
+        turn = s.Turn(seq=seq, role=role, blocks=(s.Text(text),), ts=ts)
+        await ledger.append(stream, Event(stream=stream, type=s.TURN_APPENDED, ts=ts, trace_id=stream,
+                                          causation_id=None, payload=s.turn_to_dict(turn)))
+        seq += 1
+
+
+async def recent_lines(ledger, conversation: str, k: int) -> list[str]:
+    """The last `k` exchanges of a conversation as `who: said` lines,
+    oldest first. Durable: a restart keeps them, where Memory's working
+    window (process memory) did not."""
+    stream = s.stream_name(conversation)
+    head = await ledger.head(stream) if hasattr(ledger, "head") else 0
+    if not head:
+        return []
+    events = await ledger.read(stream, from_seq=max(0, int(head) - 2 * k - 4))
+    lines = []
+    for message in fold(events)[-2 * k:]:
+        text = str(message.get("content") or "").strip()
+        if not text:
+            continue
+        lines.append(text if message.get("role") == "user" else f"Sim: {text}")
+    return lines
+
+
+__all__ = ["SNAPSHOT_EVERY", "TranscriptWriter", "append_exchange", "conversation_id", "fold", "recent_lines",
+           "to_message", "to_turn"]
