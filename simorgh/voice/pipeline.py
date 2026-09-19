@@ -159,8 +159,10 @@ def spoken_form(text: str) -> str:
 
 class Pipeline:
     def __init__(self, *, bus, clock, logger, ledger, config: Config, microphone, speaker, recogniser,
-                 synthesiser, detector_factory, repo_root: Path | None = None) -> None:
+                 synthesiser, detector_factory, repo_root: Path | None = None, telemetry=None) -> None:
         self._bus = bus
+        # Where a turn's stage spans go (stage 1 item 4); None records nothing.
+        self.telemetry = telemetry
         self._clock = clock
         self._logger = logger
         self._ledger = ledger
@@ -348,7 +350,7 @@ class Pipeline:
 
     async def ask(self, text: str, *, session_id: str | None = None, speaker_name: str = "",
                   confidence: float = 1.0, speaker_relation: str = "", room: str = "",
-                  speaker_before: str = "") -> str:
+                  speaker_before: str = "", trace_id: str = "") -> str:
         """Hand the words to Sim exactly as the REPL would, and wait."""
         session_id = session_id or str(uuid.uuid4())
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
@@ -364,7 +366,7 @@ class Pipeline:
                 payload["speaker_before"] = speaker_before
         if room:
             payload["room"] = room[:2000]
-        await self._publish(topics.PERCEPT_TEXT_RECEIVED, payload)
+        await self._bus.publish(self._bus.new(topics.PERCEPT_TEXT_RECEIVED, payload, trace_id=trace_id or None))
         try:
             return await asyncio.wait_for(fut, timeout=self._config.reply_timeout_s)
         except asyncio.CancelledError:

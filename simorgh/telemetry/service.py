@@ -154,12 +154,13 @@ class TelemetryService:
                                         self._now(), status, encode(span.attrs)))
 
     def event(self, name: str, *, trace_id: str, span_id: str, parent_id: str | None = None,
-              ts: float | None = None, attrs: Mapping[str, Any] | None = None) -> None:
+              ts: float | None = None, attrs: Mapping[str, Any] | None = None, end: float | None = None) -> None:
         """A finished zero-length span with the caller's id (a bus
         message: its id, its causation id as parent). Never raises."""
         at = float(self._now() if ts is None else ts)
+        until = at if end is None else max(at, float(end))
         self.counters["spans"] += 1
-        self._enqueue(self._spans, (trace_id, span_id, parent_id, name, at, at, "ok", encode(dict(attrs or {}))))
+        self._enqueue(self._spans, (trace_id, span_id, parent_id, name, at, until, "ok", encode(dict(attrs or {}))))
 
     def sample(self, series: str, value: Any, ts: float | None = None) -> None:
         self.counters["samples"] += 1

@@ -931,3 +931,38 @@ class PerTurnFactsBelongToTheirTurn(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session._facts(2)["pcm"], b"\x02\x00" * 1600)  # noqa: SLF001
         self.assertEqual(session._facts(1)["skip"], "no_model")  # noqa: SLF001
         self.assertEqual(session._facts(99)["pcm"], b"", "a turn that never ran has empty facts")  # noqa: SLF001
+
+
+class TestATurnIsTimedInItsTrace(unittest.IsolatedAsyncioTestCase):
+    """Stage 1 items 2 and 4: a spoken turn's trace is minted at the ask,
+    carried on the percept, and its stages are timed spans in it."""
+
+    async def test_the_stages_are_spans_under_the_trace_sim_was_asked_with(self) -> None:
+        class _Telemetry:
+            def __init__(self):
+                self.events = []
+
+            def event(self, name, **kw):
+                self.events.append((name, kw))
+
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["It is three o'clock."])
+        asked_traces = []
+        original = replies.ask
+
+        async def _ask(text, **kw):
+            asked_traces.append(kw.get("trace_id"))
+            return await original(text, **kw)
+
+        session, bus, speaker, tts = _session(_config(diagnostics=True), script, replies)
+        session._pipeline.ask = _ask  # noqa: SLF001
+        telemetry = _Telemetry()
+        session._pipeline.telemetry = telemetry  # noqa: SLF001
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=10.0)
+        self.assertEqual(len(asked_traces), 1)
+        self.assertTrue(asked_traces[0])
+        names = [n for n, _ in telemetry.events]
+        for stage in ("voice.stt", "voice.think", "voice.first_audio", "voice.playback"):
+            self.assertIn(stage, names)
+        self.assertEqual({kw["trace_id"] for _, kw in telemetry.events}, {asked_traces[0]})
+        self.assertTrue(all(kw["end"] >= kw["ts"] for _, kw in telemetry.events))

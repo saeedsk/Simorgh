@@ -272,7 +272,7 @@ class Service:
         self._pipeline = Pipeline(
             bus=self._ctx.bus, clock=self._ctx.clock, logger=self._ctx.logger, ledger=self._ctx.ledger,
             config=cfg, microphone=mic, speaker=spk, recogniser=stt, synthesiser=tts,
-            detector_factory=detector_factory, repo_root=repo_root,
+            detector_factory=detector_factory, repo_root=repo_root, telemetry=getattr(self._ctx, "telemetry", None),
         )
         await self._pipeline.start()
         return self._pipeline, ""

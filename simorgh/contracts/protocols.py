@@ -114,7 +114,8 @@ class Telemetry(Protocol):
     - `event(name, trace_id=..., span_id=..., parent_id=None, ts=None,
       attrs=None)` records a finished zero-length span with a caller-
       chosen id: a bus message, whose id is its span id and whose
-      causation id is its parent (stage 1 item 3).
+      causation id is its parent (stage 1 item 3). With `end`, a timed
+      span measured elsewhere (voice's stages, stage 1 item 4).
     - `query(trace_id)` returns every span of the trace, oldest start
       first, as dicts with the table's columns (`attrs` decoded); rows
       still buffered are included.
@@ -128,7 +129,7 @@ class Telemetry(Protocol):
     def sample(self, series: str, value: Any, ts: float | None = None) -> None: ...
 
     def event(self, name: str, *, trace_id: str, span_id: str, parent_id: str | None = None,
-              ts: float | None = None, attrs: Mapping[str, Any] | None = None) -> None: ...
+              ts: float | None = None, attrs: Mapping[str, Any] | None = None, end: float | None = None) -> None: ...
 
     async def query(self, trace_id: str) -> list[dict]: ...
 
@@ -163,7 +164,7 @@ class NullTelemetry:
         return None
 
     def event(self, name: str, *, trace_id: str, span_id: str, parent_id: str | None = None,
-              ts: float | None = None, attrs: Mapping[str, Any] | None = None) -> None:
+              ts: float | None = None, attrs: Mapping[str, Any] | None = None, end: float | None = None) -> None:
         return None
 
     async def query(self, trace_id: str) -> list[dict]:
