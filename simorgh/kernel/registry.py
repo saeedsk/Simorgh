@@ -62,6 +62,12 @@ NEEDS_HMAC_SECRET: frozenset[str] = frozenset({"guardian", "execution"})
 # (platform-connectors-design.md section 4). Absent, the dashboard
 # behaves exactly as it always has -- local and unauthenticated.
 DEFAULT_SECRETS: dict[str, frozenset[str]] = {
+    # The provider keys Cognition's own code names. Until 2026-09-19 a key
+    # kept in secrets.toml (rather than the shell environment) never
+    # reached the provider unless `[cognition] secrets = [...]` also listed
+    # it; the creator added GEMINI_API_KEY there and it would have been
+    # silently ignored.
+    "cognition": frozenset({"TOGETHER_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"}),
     # `SIM_TELEGRAM_TOKEN` is the bot token for interface/telegram.py.
     # Absent, the channel is simply off and says so; a person who sets
     # it should not also have to remember a `secrets = [...]` line.

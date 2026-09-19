@@ -183,7 +183,10 @@ class Service:
             )
             gemini_cfg = self._config.providers.get("gemini")
             if gemini_cfg is not None:
-                real_providers.append(GeminiProvider(model=gemini_cfg.model or "gemini-3.8-flash"))
+                real_providers.append(GeminiProvider(
+                    api_key=ctx.secrets.get("GEMINI_API_KEY") or ctx.secrets.get("GOOGLE_API_KEY"),
+                    model=gemini_cfg.model or "gemini-3.8-flash",
+                ))
             ollama_cfg = self._config.providers.get("ollama")
             if ollama_cfg is not None and ollama_cfg.model:
                 # The local last resort: after every cloud provider, before the floor.

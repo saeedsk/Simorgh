@@ -140,6 +140,7 @@ class Result:
     attempts: list[str] = field(default_factory=list)  # one task_id per task.started seen
     note: str = ""  # the task record's own `note`, e.g. why it was blocked
     verifications: list[dict] = field(default_factory=list)  # every verify.result payload seen
+    cost_usd: float = 0.0
 
     @property
     def ok(self) -> bool:
@@ -201,6 +202,15 @@ async def run_one(trial: Trial, root: str, timeout_s: float) -> Result:
             # trial in its own process rather than in this one.
             "execution": {"repo_root": repo},
             "curiosity": {"autonomy_on_boot": False},
+            # Spend is capped and the providers are named: by default the
+            # library order puts the Claude Code CLI behind Together with no
+            # price and no cap (evaluation C3). `--providers` / `--max-usd`
+            # set these for the parent and every child process.
+            "cognition": {
+                "provider_order": [p for p in os.environ.get("SIMORGH_TRIAL_PROVIDERS", "together,floor").split(",") if p],
+                "providers": {"together": {"max_spend_usd": float(os.environ.get("SIMORGH_TRIAL_MAX_USD", "1.0")),
+                                           "window_seconds": 86400.0}},
+            },
         }, None),
         secrets=EnvSecretStore({}),
     )
@@ -238,6 +248,7 @@ async def run_one(trial: Trial, root: str, timeout_s: float) -> Result:
         ):
             break
     record = await planning._store.get(task_id)  # noqa: SLF001
+    result.cost_usd = await _spent(kernel)
     result.seconds = time.monotonic() - started
     result.status = record.status if record else "timed out"
     result.note = record.note if record else ""
@@ -245,6 +256,18 @@ async def run_one(trial: Trial, root: str, timeout_s: float) -> Result:
 
     _judge(result, repo)
     return result
+
+
+async def _spent(kernel) -> float:
+    """What this trial cost: the sum over every provider's budget stream."""
+    total = 0.0
+    try:
+        for stream in await kernel.ledger.streams("cognition:budget:"):
+            for event in await kernel.ledger.read(stream):
+                total += float(event.payload.get("cost_usd") or 0.0)
+    except Exception:  # noqa: BLE001 -- a cost we cannot read is reported as 0, not a crash
+        pass
+    return round(total, 4)
 
 
 def _mechanical_check_failed(verifications: list[dict], name: str) -> bool:
@@ -335,14 +358,14 @@ _RESULT_MARK = "RESULT_JSON:"
 
 def _report(result: Result) -> None:
     mark = "PASS" if result.ok else "FAIL"
-    print(f"  {mark}  {result.trial.name:24s} {result.status:10s} {result.seconds:5.0f}s", flush=True)
+    print(f"  {mark}  {result.trial.name:24s} {result.status:10s} {result.seconds:5.0f}s  ${result.cost_usd:.3f}", flush=True)
     for problem in result.problems:
         print(f"        - {problem}", flush=True)
 
 
 def _summary(results: list[Result]) -> int:
     failed = [r for r in results if not r.ok]
-    print(f"\n{len(results) - len(failed)}/{len(results)} clean")
+    print(f"\n{len(results) - len(failed)}/{len(results)} clean, ${sum(r.cost_usd for r in results):.3f} spent")
     return 1 if failed else 0
 
 
@@ -382,7 +405,8 @@ async def _run_in_subprocess(trial: Trial, timeout_s: float, gate: asyncio.Semap
     for line in reversed(text.splitlines()):
         if line.startswith(_RESULT_MARK):
             data = json.loads(line[len(_RESULT_MARK):])
-            result = Result(trial=trial, status=data["status"], seconds=data["seconds"], problems=data["problems"])
+            result = Result(trial=trial, status=data["status"], seconds=data["seconds"], problems=data["problems"],
+                            cost_usd=float(data.get("cost_usd") or 0.0))
             return result
     result = Result(trial=trial, status="crashed")
     tail = " | ".join(text.strip().splitlines()[-3:])[:200]
@@ -403,13 +427,17 @@ async def main(names: list[str], timeout_s: float, *, parallel: int = 1, as_json
         _report(result)
         print(_RESULT_MARK + json.dumps({
             "name": result.trial.name, "status": result.status,
-            "seconds": result.seconds, "problems": result.problems,
+            "seconds": result.seconds, "problems": result.problems, "cost_usd": result.cost_usd,
         }), flush=True)
         return 0 if result.ok else 1
 
+    cap = float(os.environ.get("SIMORGH_TRIAL_TOTAL_USD", "0") or 0)
     if parallel <= 1:
         results: list[Result] = []
         for trial in chosen:
+            if cap and sum(r.cost_usd for r in results) >= cap:
+                print(f"  stopped: ${sum(r.cost_usd for r in results):.2f} reached the ${cap:.2f} cap", flush=True)
+                break
             results.append(await _run_in_process(trial, timeout_s))
             _report(results[-1])
         return _summary(results)
@@ -441,5 +469,14 @@ if __name__ == "__main__":
                         help="run this many trials at once, each in its own process (default: 1, "
                              "serial -- the loader gate keeps that; 3 is a good number for a dev run)")
     parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)  # child mode of --parallel
+    parser.add_argument("--providers", default=None, help="comma-separated provider order (default: together,floor)")
+    parser.add_argument("--max-usd", type=float, default=None, help="spend cap per trial for together (default 1.0)")
+    parser.add_argument("--total-usd", type=float, default=None, help="stop starting trials once this much is spent")
     args = parser.parse_args()
+    if args.providers is not None:
+        os.environ["SIMORGH_TRIAL_PROVIDERS"] = args.providers
+    if args.max_usd is not None:
+        os.environ["SIMORGH_TRIAL_MAX_USD"] = str(args.max_usd)
+    if args.total_usd is not None:
+        os.environ["SIMORGH_TRIAL_TOTAL_USD"] = str(args.total_usd)
     sys.exit(asyncio.run(main(args.names, args.timeout, parallel=args.parallel, as_json=args.json)))
