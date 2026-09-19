@@ -230,5 +230,19 @@ def persist(path: Path, key: str, value: object, *, section: str = "voice") -> N
     tmp.replace(path)
 
 
-__all__ = ["QUIET_REPLY", "VOICE_SAFE_KEYS", "is_quiet_reply", "config_path", "handoff_path", "persist", "read_handoff", "settings_home",
-           "write_handoff"]
+def conversation_key(channel: str | None, speaker: str | None) -> str:
+    """One conversation per (channel, person): the key Memory's working
+    window is fed under (`memory/service.py::_on_turn_completed`) and
+    Orchestration recalls it by (`orchestration/context.py`). A typed
+    turn has no speaker and is `typed`; a spoken one is its speaker, or
+    `unknown` when the voice was not recognised. Defined once, here, so
+    the two sides cannot drift (2026-09-19; evaluation C8)."""
+    ch = (channel or "cli").strip().lower() or "cli"
+    who = (speaker or "").strip().lower()
+    if not who:
+        who = "unknown" if ch == "voice" else "typed"
+    return f"{ch}:{who}"
+
+
+__all__ = ["QUIET_REPLY", "VOICE_SAFE_KEYS", "conversation_key", "is_quiet_reply", "config_path", "handoff_path", "persist",
+           "read_handoff", "settings_home", "write_handoff"]

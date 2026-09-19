@@ -66,6 +66,16 @@ _MEMORY_MATCHED_K = 8
 _MEMORY_RECENT_K = 6
 #: what Sim remembers with the person who is speaking (tag person:<name>)
 _MEMORY_PERSON_K = 5
+#: How many recent turns of THIS conversation (channel + person) travel
+#: with a chat turn, rendered before the memory block. Fed by Memory
+#: from `turn.completed` (2026-09-19); the similarity recall below is
+#: the wrong instrument for "what we were just saying" and this is the
+#: right one.
+_WORKING_K = 6
+
+WORKING_BLOCK_HEADER = (
+    "The conversation so far with this person, oldest first (the memory below is older than this):\n"
+)
 
 #: The memory block's own header. It says two things the bare "Relevant
 #: memory:" could not: what order the lines are in, and what to do when
@@ -93,6 +103,10 @@ MEMORY_UNAVAILABLE_NOTE = (
 #: prompt. It is our own text, not a user's, but a prompt is no place
 #: for an unbounded string.
 _REASON_MAX_CHARS = 120
+
+
+async def _nothing() -> str:
+    return ""
 
 
 def _why_not(error: dict) -> str:
@@ -143,7 +157,12 @@ class Assembler:
         blocks: list[dict] = []
 
         task = session.user_text or user_text
-        mem, unavailable = await self._memory_block(task or session.task_id, session)
+        (mem, unavailable), working = await asyncio.gather(
+            self._memory_block(task or session.task_id, session),
+            self._working_block(session) if getattr(session.profile, "scaffold", "") == "chat" else _nothing(),
+        )
+        if working:
+            blocks.append({"role": "system", "content": working})
         if mem:
             blocks.append({"role": "system", "content": MEMORY_BLOCK_HEADER + mem})
         elif unavailable:
@@ -321,6 +340,24 @@ class Assembler:
         # correction beat the thing it corrects. See MEMORY_BLOCK_HEADER.
         kept.sort(key=lambda i: float(i.get("ts") or 0.0))
         return "\n".join(f"- {i['content']}" for i in kept), ""
+
+    async def _working_block(self, session: Session) -> str:
+        """The last `_WORKING_K` turns of this (channel, person)
+        conversation, from Memory's working window, oldest first."""
+        from simorgh.contracts.settings import conversation_key
+
+        key = conversation_key(getattr(session, "channel", ""), getattr(session, "speaker", ""))
+        reply, _why = await self._request_with_reason(
+            topics.MEMORY_RETRIEVE,
+            {"query": "", "kinds": ["working"], "k": _WORKING_K, "filters": {"session_id": key}},
+            trace_id=session.task_id,
+        )
+        if reply is None:
+            return ""
+        items = sorted(reply.payload.get("items", []), key=lambda i: float(i.get("ts") or 0.0))
+        lines = [str(i.get("content", "")).strip() for i in items[-_WORKING_K:]]
+        lines = [line for line in lines if line]
+        return WORKING_BLOCK_HEADER + "\n".join(lines) if lines else ""
 
     async def world_facet(self, what: str, args: dict | None = None, *, trace_id: str | None = None) -> dict | None:
         reply = await self._request(topics.WORLD_ENV_QUERY, {"what": what, "args": args or {}}, trace_id=trace_id)

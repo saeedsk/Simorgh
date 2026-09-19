@@ -30,13 +30,15 @@
         "baseline",
         "patched"
       ],
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     }
   },
   "required": [
     "subject",
-    "commit",
-    "tests"
+    "commit"
   ],
   "title": "learn.self_patch.reverted",
   "type": "object"

@@ -165,6 +165,7 @@ class Session:
     # that edits the live tree: chat and research tasks, and any code
     # task whose Execution has no worktree tools.
     worktree: str = ""
+    landed_commit: str = ""  # set by record_side_effects from `worktree_land:<sha>`
     # Where the person is: "cli" for the typed prompt, "voice" for a
     # spoken turn. A spoken reply is written for listening
     # (`scaffolds.VOICE`), a typed one for reading.

@@ -53,7 +53,10 @@ LearnSkillAcquired = define(t.LEARN_SKILL_ACQUIRED, [
 _SELF_PATCH = [
     F("subject", Str),
     F("commit", Str),
-    F("tests", Obj(F("baseline", Int), F("patched", Int))),
+    # Optional since 2026-09-19: the landing path (orchestration/session.py
+    # `_land`) knows the commit but not the test counts; the retired
+    # PatchPipeline was the only publisher that did.
+    O("tests", Obj(F("baseline", Int), F("patched", Int))),
     O("reason", Str),
 ]
 LearnSelfPatchApplied = define(t.LEARN_SELF_PATCH_APPLIED, _SELF_PATCH)

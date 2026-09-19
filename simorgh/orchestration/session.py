@@ -80,6 +80,9 @@ def record_side_effects(session, effects) -> None:
         kind, _, path = str(effect).partition(":")
         if not path:
             continue
+        if kind == "worktree_land":
+            session.landed_commit = path
+            continue
         if kind in ("file_write", "file_create"):
             session.wrote.add(path)
             # Scratch is written, never "uncommitted". A file under
@@ -798,6 +801,16 @@ class SessionRunner:
         if ok:
             # The manager removed the worktree as part of landing.
             session.worktree = ""
+            # Tell Learning, the Self Model, Reflection, Curiosity and
+            # Planning that Sim changed its own code. Four of them had
+            # subscribed to this topic since Phase 0 and nothing on the
+            # real landing path ever published it: the self-improvement
+            # loop was open (2026-09-18 evaluation, C1).
+            await self._publish(session, topics.LEARN_SELF_PATCH_APPLIED, {
+                "subject": session.subject or ", ".join(sorted(session.wrote)[:8]) or session.profile.name,
+                "commit": session.landed_commit,
+                "reason": f"landed by a {session.profile.name} task ({session.task_id})",
+            })
             first = next((line.strip() for line in (summary or "").splitlines() if line.strip()), "landed")
             return Outcome(
                 "completed", result_summary=f"{outcome.result_summary}\n\n[{first}]".strip(),

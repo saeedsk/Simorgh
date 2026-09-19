@@ -54,15 +54,19 @@ class _Memory:
     the real one does: `query=""` is recency-ordered, anything else is
     ranked by similarity."""
 
-    def __init__(self, *, matched: list[dict], recent: list[dict]) -> None:
+    def __init__(self, *, matched: list[dict], recent: list[dict], working: list[dict] | None = None) -> None:
         self.matched = matched
         self.recent = recent
+        self.working = working or []   # the conversation window (kinds=["working"]), fed per (channel, person)
         self.queries: list[str] = []
 
     async def respond(self, bus, message) -> None:
         query = message.payload.get("query", "")
-        self.queries.append(query)
-        items = self.recent if query == "" else self.matched
+        if message.payload.get("kinds") == ["working"]:
+            items = self.working
+        else:
+            self.queries.append(query)
+            items = self.recent if query == "" else self.matched
         k = int(message.payload.get("k", 8))
         await bus.reply(message, type=topics.MEMORY_RETRIEVE_REPLY,
                         payload={"items": items[:k], "truncated": False})

@@ -225,6 +225,18 @@ class Service:
         speaker = str(payload.get("speaker") or "").strip()
         reply_text = strip_tone(reply_text)
         who = speaker or "User"
+        from simorgh.contracts.settings import conversation_key
+
+        # The conversation window: what was just said, per (channel,
+        # person). `WorkingMemory` had both halves built and no producer
+        # since 2026-09-08; Orchestration renders it before the memory
+        # block, so "what did I just say" no longer depends on a
+        # similarity search (2026-09-18 evaluation, C8).
+        self.engine.working.add(
+            conversation_key(payload.get("channel"), speaker),
+            f"{who}: {user_text}" if user_text else "", f"Sim: {reply_text}" if reply_text else "",
+            ts=self._ctx.clock.now(),
+        )
         # A turn two people spoke arrives already as "Saeed: ... / Soodeh: ..."
         # (voice/diarize.py); a prefix on top of that named one of them twice.
         # (voice/diarize.py writes `someone:` for a voice nobody matched, so
