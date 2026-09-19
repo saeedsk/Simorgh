@@ -344,7 +344,7 @@ class Service:
             purpose_filter={name: set(cfg.only_purposes) for name, cfg in self._config.providers.items()
                             if getattr(cfg, "only_purposes", ())},
             native={p.name for p in real_providers
-                    if getattr(self._config.providers.get(p.name), "tool_dialect", "markers") == "native"
+                    if p.name in self._config.providers and self._config.providers[p.name].tool_dialect == "native"
                     and capabilities_of(p).supports_tools},
         )
         self._assembler = PromptAssembler(

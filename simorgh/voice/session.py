@@ -1210,7 +1210,7 @@ class VoiceSession:
         self._last_ask_addressed = bool(speaker) or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)
         live = None
         early: asyncio.Task | None = None
-        if getattr(self._config, "stream_replies", False):
+        if self._config.stream_replies:
             # Stage 3 item 4: speak the first sentence while the model
             # writes the rest. The same Context the finished reply would get,
             # less what is only known at the end.
