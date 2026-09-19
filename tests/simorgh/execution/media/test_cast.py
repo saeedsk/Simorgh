@@ -497,6 +497,38 @@ class AndroidTvToolsTestCase(unittest.IsolatedAsyncioTestCase):
             t.cancel()
 
 
+    async def test_a_slow_first_download_does_not_play_over_a_later_request(self):
+        # Found as a load flake, 2026-09-19: the generation was taken at play
+        # time, after the download, so video A finishing its fetch after B
+        # was asked for started A over B.
+        import threading
+        release_a = threading.Event()
+
+        def fetch(video, directory):
+            if video == "aaaaaaaaaaa":
+                release_a.wait(5)
+            path = Path(directory) / f"{video}.mp4"
+            path.write_bytes(b"x")
+            return path, ""
+
+        tools, cast, bus = self._tools(fetch=fetch)
+        cast.states = ["PLAYING"]
+        await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=aaaaaaaaaaa", "mode": "full"}, ctx=_ctx(bus))
+        await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=bbbbbbbbbbb", "mode": "full"}, ctx=_ctx(bus))
+        for _ in range(100):
+            if [c for c in cast.calls if c[0] == "play"]:
+                break
+            await asyncio.sleep(0.01)
+        release_a.set()
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+        played = [str(c) for c in cast.calls if c[0] == "play"]
+        self.assertEqual(len(played), 1, played)
+        self.assertIn("bbbbbbbbbbb", played[0])
+        for t in list(tools["cast_play"]._fetches):  # noqa: SLF001
+            t.cancel()
+
+
 class ChartsTestCase(unittest.IsolatedAsyncioTestCase):
     """tv_charts (the creator, 2026-09-13): a chart plays on the TV top to
     bottom, and the Charts view auto-plays."""

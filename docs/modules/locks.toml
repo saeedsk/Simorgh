@@ -34,3 +34,9 @@ by = "opus-main"
 task = "stage 0 item 30: capped real-model gate"
 since = "2026-09-19T07:22:45+00:00"
 until = "2026-09-19T11:22:45+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "TenTurns: the scripted person waits for Sim"
+since = "2026-09-19T08:29:44+00:00"
+until = "2026-09-19T16:29:44+00:00"

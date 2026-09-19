@@ -47,6 +47,13 @@ class _Script:
     def __init__(self, *runs: tuple[bool, int]) -> None:
         self.runs = list(runs)
         self.rms_value = 900.0
+        # `hold()`: while True, a speech run does not start yet -- a
+        # person who waits for Sim to finish before speaking again.
+        # Without it the script assumed Sim always answers within the
+        # silence run, and under load the next line landed mid-answer as
+        # a barge-in (TenTurns stuck at 9 turns, 2026-09-19).
+        self.hold = None
+        self._started = False
 
     def add(self, *runs: tuple[bool, int]) -> None:
         self.runs.extend(runs)
@@ -54,9 +61,14 @@ class _Script:
     def is_speech(self, frame: bytes) -> bool:
         while self.runs and self.runs[0][1] <= 0:
             self.runs.pop(0)
+            self._started = False
         if not self.runs:
             return False
         speech, left = self.runs[0]
+        if speech and not self._started:
+            if self.hold is not None and self.hold():
+                return False
+            self._started = True
         self.runs[0] = (speech, left - 1)
         return speech
 
@@ -127,8 +139,8 @@ class TestTenTurns(unittest.IsolatedAsyncioTestCase):
         script = _Script(*[(True, 20), (False, 15)] * 10 + [(False, 10_000)])
         replies = _Replies(["I'll check that now.", "It is three o'clock.", "Yes, that is right."])
         session, bus, speaker, tts = _session(_config(), script, replies)
+        script.hold = lambda: session.state != LISTENING   # speaks only once Sim is listening again
         # The run takes under a second; the deadline only bounds a hang.
-        # 8 s failed once under the old 16-minute suite's load (2026-09-18).
         await _run_until(session, lambda: session.stats.turns >= 10, timeout=30.0)
         self.assertEqual(session.stats.turns, 10)
         self.assertEqual(len(replies.asked), 10)

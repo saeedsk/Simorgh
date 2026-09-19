@@ -601,7 +601,7 @@ class _CastTool:
         return f"{parts.scheme}://{parts.netloc}/tv/media/{name}"
 
     async def _fetch_for_tv(self, ctx: ToolContext, video: str, url: str, title: str, *, mode: str = "frame",
-                            device: str = "", backend=None) -> None:
+                            device: str = "", backend=None, generation: int | None = None) -> None:
         """Fetch the YouTube video as a file (tvmedia); then either tell
         the page where it is (frame) or cast the file to the TV's plain
         media player (full). Or say why not. Runs after `cast_play` has
@@ -609,10 +609,19 @@ class _CastTool:
         from . import tvmedia
 
         fetch = self._fetch or tvmedia.fetch
+        # The request's place in line is taken when it is made, not when its
+        # download finishes: a slow first video used to bump the generation
+        # only at play time, so it started over a second video asked for
+        # after it (and its watcher put the dashboard back over that one).
+        # Found as a "flaky" test under load, 2026-09-19.
+        if generation is None:
+            generation = self._bump()
         try:
             path, problem = await asyncio.to_thread(fetch, video, self._media_dir)
         except Exception as exc:  # noqa: BLE001
             path, problem = None, f"the fetch failed: {exc}"
+        if self._prefs.generation != generation:
+            return  # somebody drove the TV while this was downloading; theirs wins
         if path is None:
             await self._publish_state(ctx, mode, url=url, title=title, problem=problem)
             return
@@ -632,7 +641,6 @@ class _CastTool:
             # on the TV a framed video is full screen, and the dashboard
             # comes back when it ends.
             mode = "full"
-        generation = self._bump()
         try:
             await asyncio.to_thread(backend.play, device, self._media_url(path.name), content_type="video/mp4",
                                     title=title)
@@ -842,7 +850,7 @@ class CastPlayTool(_CastTool):
                 # Cast receiver (the creator's TV, 2026-09-13): the page
                 # gets the video as a file instead, fetched now.
                 await self._publish_state(ctx, "frame", url=url, title=title, fetching=True)
-                task = asyncio.create_task(self._fetch_for_tv(ctx, video, url, title))
+                task = asyncio.create_task(self._fetch_for_tv(ctx, video, url, title, generation=self._bump()))
                 self._fetches.add(task)
                 task.add_done_callback(self._fetches.discard)
                 return ToolResult(ok=True, output=(f"playing on the TV: {title or url} -- fetching the video first; it "
@@ -870,7 +878,7 @@ class CastPlayTool(_CastTool):
             # player instead -- the same fetch the framed page uses.
             await self._publish_state(ctx, "full", url=url, title=title, fetching=True)
             task = asyncio.create_task(self._fetch_for_tv(ctx, video, url, title, mode="full", device=name,
-                                                          backend=backend))
+                                                          backend=backend, generation=self._bump()))
             self._fetches.add(task)
             task.add_done_callback(self._fetches.discard)
             return ToolResult(ok=True, output=(f"playing full screen on {name}: {title or url} -- fetching the video "
