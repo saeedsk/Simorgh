@@ -73,7 +73,7 @@ The Kernel is the composition root and the process's owner: it loads `simorgh.to
 | `schedule` | simorgh/kernel/scheduler.py:33 (`schedule.added/cancelled/fired`) | the Scheduler at start (`materialize`) | forever |
 | `config:effective` | simorgh/kernel/service.py:473 | simorgh/interface/dispatch.py (`config` command) | forever |
 | `metrics:history` | simorgh/kernel/metrics.py:45 (a `MetricsTable` snapshot every `metrics_every_s`) | simorgh/interface/httpapi.py, simorgh/execution/tools.py, `simorgh status` offline (`statusread.py`, last sample only) | 7d in DEFAULT_RETENTION, but not applied while written (see ledger/CONTRACT.md) |
-| `trace:<id>` | read only, simorgh/kernel/cli.py:271 (`simorgh trace`) | written by bus/trace.py | 2d |
+| `trace:<id>` | read only, `simorgh trace`, after the telemetry store (`telemetry.store.read_trace`) finds nothing | written by bus/trace.py only with `[bus] trace_backend = "ledger"` | 2d |
 
 Not a ledger stream: the Kernel opens `<data_dir>/telemetry.sqlite` (spans and samples, `simorgh/telemetry/CONTRACT.md`) at boot, after the ledger, and closes it at shutdown after the subsystems stop and before the bus backend and ledger.
 

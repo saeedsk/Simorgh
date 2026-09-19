@@ -68,6 +68,7 @@ class BusClient:
         trace: TraceWriter | None = None,
         metrics: Metrics | None = None,
         logger: Logger | None = None,
+        telemetry: Any | None = None,
     ) -> None:
         self._backend = backend
         self._source = source
@@ -77,7 +78,7 @@ class BusClient:
         self._metrics = metrics if metrics is not None else Metrics()
         self._trace = trace if trace is not None else TraceWriter(
             ledger, sample=self._config.trace_sample, blob_threshold=self._config.trace_blob_threshold_bytes,
-            enabled=self._config.trace_enabled,
+            enabled=self._config.trace_enabled, telemetry=telemetry, backend=self._config.trace_backend,
         )
         self._ledger = ledger
         self._logger = logger or (lambda event, fields: None)

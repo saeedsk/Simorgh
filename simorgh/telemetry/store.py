@@ -170,3 +170,28 @@ class TelemetryStore:
 
 
 __all__ = ["SCHEMA", "SampleRow", "SpanRow", "TelemetryStore", "encode"]
+
+
+def read_trace(path: str | Path, trace_id: str) -> list[dict]:
+    """Every span of `trace_id` from a telemetry file, opened read-only so a
+    reader (`simorgh trace`) never writes beside a running instance. Empty
+    when the file does not exist."""
+    path = Path(path)
+    if not path.exists():
+        return []
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5.0)
+    try:
+        rows = conn.execute(
+            'SELECT trace_id, span_id, parent_id, name, start, "end", status, attrs_json'
+            " FROM spans WHERE trace_id=? ORDER BY start, rowid", (trace_id,)).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for trace, span, parent, name, start, end, status, attrs in rows:
+        try:
+            decoded = json.loads(attrs) if attrs else {}
+        except ValueError:
+            decoded = {"raw": attrs}
+        out.append({"trace_id": trace, "span_id": span, "parent_id": parent, "name": name, "start": start,
+                    "end": end, "status": status, "attrs": decoded})
+    return out

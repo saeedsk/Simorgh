@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+from pathlib import Path
 
 from simorgh.contracts import topics
 from simorgh.kernel.config import LoadedConfig
@@ -55,6 +56,21 @@ class OneTurnIsOneTrace(unittest.IsolatedAsyncioTestCase):
                 self.assertNotEqual(traces[0], traces[1])
                 for sub in subs:
                     await sub.unsubscribe()
+                # Stage 1 item 3: the turn's messages are spans in the
+                # telemetry store, parented by causation, and the ledger
+                # holds no `trace:` stream at all.
+                spans = await kernel.telemetry.query(traces[1])
+                names = {s["name"] for s in spans}
+                self.assertIn(topics.PERCEPT_TEXT_RECEIVED, names)
+                self.assertIn(topics.TURN_COMPLETED, names)
+                ids = {s["span_id"] for s in spans}
+                self.assertTrue(any(s["parent_id"] in ids for s in spans), spans)
+                streams = Path(tmp) / "ledger" / "streams"
+                self.assertEqual([p.name for p in streams.glob("trace%3A*")], [])
+                # And a reader outside the process sees them (`simorgh trace`).
+                await kernel.telemetry.flush()
+                from simorgh.telemetry.store import read_trace
+                self.assertEqual({s["span_id"] for s in read_trace(Path(tmp) / "telemetry.sqlite", traces[1])}, ids)
             finally:
                 await kernel.shutdown()
 
