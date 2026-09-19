@@ -5,8 +5,62 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.benchmark]
+by = "opus-main"
+task = "stage 0 item 25: manifests match the code"
+since = "2026-09-19T06:39:54+00:00"
+until = "2026-09-19T14:39:54+00:00"
+
+[locks.curiosity]
+by = "opus-main"
+task = "stage 0 item 25: manifests match the code"
+since = "2026-09-19T06:39:54+00:00"
+until = "2026-09-19T14:39:54+00:00"
+
+[locks.execution]
+by = "opus-main"
+task = "stage 0 item 25: manifests match the code"
+since = "2026-09-19T06:39:54+00:00"
+until = "2026-09-19T14:39:54+00:00"
+
+[locks.interface]
+by = "opus-main"
+task = "stage 0 item 25: manifests match the code"
+since = "2026-09-19T06:39:54+00:00"
+until = "2026-09-19T14:39:54+00:00"
+
+[locks.memory]
+by = "opus-main"
+task = "stage 0 item 25: manifests match the code"
+since = "2026-09-19T06:39:54+00:00"
+until = "2026-09-19T14:39:54+00:00"
+
+[locks.orchestration]
+by = "opus-main"
+task = "stage 0 item 25: manifests match the code"
+since = "2026-09-19T06:39:54+00:00"
+until = "2026-09-19T14:39:54+00:00"
+
+[locks.planning]
+by = "opus-main"
+task = "stage 0 item 25: manifests match the code"
+since = "2026-09-19T06:39:54+00:00"
+until = "2026-09-19T14:39:54+00:00"
+
+[locks.shared]
+by = "opus-main"
+task = "stage 0 item 25: manifests match the code"
+since = "2026-09-19T06:39:54+00:00"
+until = "2026-09-19T14:39:54+00:00"
+
 [locks.tools]
 by = "opus-main"
 task = "stage 0 item 30: recall scenario"
 since = "2026-09-19T06:37:03+00:00"
 until = "2026-09-19T14:37:03+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "stage 0 item 25: manifests match the code"
+since = "2026-09-19T06:39:54+00:00"
+until = "2026-09-19T14:39:54+00:00"
