@@ -295,10 +295,10 @@ class Service:
 
     async def _on_share_proposed(self, message: Message) -> None:
         """Proactive-sharing plumbing (ported pacing from
-        `src/orchestrator/socializing.py`). Nothing publishes
-        `curiosity.share.proposed` yet this phase -- this subscriber and
-        its cooldown/quiet-period/hourly-cap logic exist and are tested,
-        ready for Curiosity to drive once it lands."""
+        `src/orchestrator/socializing.py`). Curiosity publishes
+        `curiosity.share.proposed` (`curiosity/service.py`); this
+        subscriber decides, by cooldown, quiet period and hourly cap,
+        whether to say it now as a `ui.notice`."""
         kind = message.payload.get("kind", "growth")
         content_ref = message.payload.get("content_ref", "")
         now = self._ctx.clock.now()

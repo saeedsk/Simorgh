@@ -171,16 +171,9 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
 # Confirmed dead by the same grep-the-whole-repo method as everything
 # in `KNOWN_DEAD_FIELDS` (2026-09-08, re-verified against every fix
 # committed earlier the same day -- none of them wired these up):
-#   persona.user_model.min_confidence_to_use (-> Config.
-#     user_model_min_confidence) -- `persona/user_model.py`'s
-#     `UserModel.register(self, *, min_confidence: float = 0.5)` is the
-#     only place this would apply, and `register` is never called
-#     anywhere in the codebase. `cognition/assembler.py` even names this
-#     exact field in its own docstring ("mirrors `persona.config.Config.
-#     user_model_min_confidence`'s default (0.5)") but restates the 0.5
-#     as its own hardcoded `_MIN_FACET_CONFIDENCE` module constant
-#     rather than reading the config value -- by the module's own
-#     admission, Cognition "does not import Persona's config".
+#   (persona.user_model.min_confidence_to_use was listed here until
+#     2026-09-19, when the field and its dead reader were removed from
+#     `persona/config.py`; the key is now simply unknown.)
 #   verification.trajectory.wasted_step_ratio_warn (-> VerificationConfig.
 #     trajectory_wasted_step_ratio_warn) -- `TrajectoryMetrics.wasted`
 #     (`verification/trajectory.py`) is counted but never turned into a
@@ -198,7 +191,6 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
 #     (`facets/git_state.py` runs `git` synchronously on demand, not on
 #     an interval) for it to throttle.
 KNOWN_DEAD_NESTED_FIELDS: dict[str, dict[str, str]] = {
-    "persona": {"user_model.min_confidence_to_use": "user_model_min_confidence"},
     "verification": {
         "trajectory.wasted_step_ratio_warn": "trajectory_wasted_step_ratio_warn",
         "review.require_real_provider": "review_require_real_provider",

@@ -56,7 +56,7 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 
 ## Config
 
-`[persona]` in simorgh.toml; dataclass in `simorgh/persona/config.py`. Several keys are nested in the TOML: `[persona.baseline] valence/arousal`, `[persona.outcome_nudge] success/failure/blocked`, `[persona.share] growth_cooldown_s/news_cooldown_s/quiet_when_active_s/max_per_hour`, `[persona.user_model] min_confidence_to_use`, `[persona.voice] max_chars` (`config.py:50-77`). An explicitly constructed `Config` wins over `ctx.config`.
+`[persona]` in simorgh.toml; dataclass in `simorgh/persona/config.py`. Several keys are nested in the TOML: `[persona.baseline] valence/arousal`, `[persona.outcome_nudge] success/failure/blocked`, `[persona.share] growth_cooldown_s/news_cooldown_s/quiet_when_active_s/max_per_hour`, `[persona.voice] max_chars` (`config.py:50-77`). An explicitly constructed `Config` wins over `ctx.config`. `[persona.user_model] min_confidence_to_use` (field `user_model_min_confidence`) was removed 2026-09-19: nothing read it (its only reader, `UserModel.register`, had no caller and was removed too); a `[persona]` section holding only that key is now reported by the Kernel's config check as changing nothing. The confidence floor for user facets in prompts is Cognition's own constant (`cognition/assembler.py::_MIN_FACET_CONFIDENCE`).
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -77,7 +77,6 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 | `news_cooldown_s` | `1800.0` | yes |
 | `quiet_when_active_s` | `20.0` | yes |
 | `max_shares_per_hour` | `4` | yes |
-| `user_model_min_confidence` | `0.5` | NO (parsed, never passed on; `UserModel.register(min_confidence=)` has no caller) |
 | `voice_max_chars` | `600` | yes |
 
 ## Public Python surface
@@ -111,7 +110,6 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Known issues (2026-09-18 evaluation)
 
 - V6 -- mood decay was announced on 93% of 5 s ticks (44,444 of 47,784 `persona:state` events); fixed 2026-09-18 (`aa05475`, `decay_announce_delta`) and `persona:state` given 7d retention (`62318d3`). The other half of V6, a 2 s-timeout bus round trip on every prompt for one sentence (`cognition/assembler.py:54`), is open.
-- `_on_share_proposed`'s docstring (`service.py:297-301`) still says nothing publishes `curiosity.share.proposed`; Curiosity does.
 
 ## Planned changes (roadmap)
 

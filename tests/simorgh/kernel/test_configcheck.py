@@ -189,11 +189,13 @@ class TestANestedFieldThatParsesButNoOneReads(unittest.TestCase):
     `known & set(section)` check can never see a key that isn't at the
     section's top level."""
 
-    def test_persona_user_model_min_confidence_to_use_is_flagged(self) -> None:
-        self.assertEqual(
-            dead_fields(_Config({"persona": {"user_model": {"min_confidence_to_use": 0.9}}})),
-            [("persona", "user_model.min_confidence_to_use")],
-        )
+    def test_persona_user_model_min_confidence_to_use_is_now_an_unknown_key(self) -> None:
+        """The field was removed from `persona/config.py` (2026-09-19):
+        nothing read it. Written alone, the section now changes nothing
+        and is reported whole, rather than as a known-dead field."""
+        config = _Config({"persona": {"user_model": {"min_confidence_to_use": 0.9}}})
+        self.assertEqual(dead_sections(config), ["persona"])
+        self.assertEqual(dead_fields(config), [])
 
     def test_verification_trajectory_and_review_fields_are_flagged(self) -> None:
         self.assertEqual(

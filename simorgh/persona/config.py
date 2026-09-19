@@ -45,7 +45,6 @@ class Config:
     news_cooldown_s: float = 1800.0
     quiet_when_active_s: float = 20.0
     max_shares_per_hour: int = 4
-    user_model_min_confidence: float = 0.5
     voice_max_chars: int = 600
 
     def resolved_soul_path(self) -> Path:
@@ -57,7 +56,6 @@ class Config:
         root = Path(data.get("repo_root", default_repo_root or Path(__file__).resolve().parents[2]))
         baseline = data.get("baseline") or {}
         share = data.get("share") or {}
-        user_model = data.get("user_model") or {}
         voice = data.get("voice") or {}
         return cls(
             repo_root=root,
@@ -77,6 +75,5 @@ class Config:
             news_cooldown_s=float(share.get("news_cooldown_s", 1800.0)),
             quiet_when_active_s=float(share.get("quiet_when_active_s", 20.0)),
             max_shares_per_hour=int(share.get("max_per_hour", 4)),
-            user_model_min_confidence=float(user_model.get("min_confidence_to_use", 0.5)),
             voice_max_chars=int(voice.get("max_chars", 600)),
         )

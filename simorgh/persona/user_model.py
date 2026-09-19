@@ -75,12 +75,6 @@ class UserModel:
         self._facets[facet] = record
         return record
 
-    def register(self, *, min_confidence: float = 0.5) -> str:
-        f = self._facets.get("register")
-        if f is not None and f.confidence >= min_confidence:
-            return f.value
-        return "neutral"
-
     def extract_from_text(self, text: str, *, ts: float, source_ref: str) -> list[tuple[str, object]]:
         """Returns [(facet, value)] pairs found by simple pattern
         matching -- honest and narrow by design (see module docstring)."""
