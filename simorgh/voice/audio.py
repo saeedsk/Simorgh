@@ -240,8 +240,28 @@ def noise_report(audio: Audio) -> str:
     return ""
 
 
+#: The last few pieces played, kept so that "you just played noise" can be
+#: checked against what really went to the speaker (the guard above only
+#: refuses white-noise-like audio; a garbled render can pass it).
+PLAYED_DIR = Path("workspace/voice/played")
+PLAYED_KEEP = 8
+_played_seq = 0
+
+
+def _keep_played(audio: Audio) -> None:
+    global _played_seq
+    try:
+        PLAYED_DIR.mkdir(parents=True, exist_ok=True)
+        _played_seq = (_played_seq + 1) % PLAYED_KEEP
+        write_wav(PLAYED_DIR / f"last-{_played_seq}.wav", audio)
+        (PLAYED_DIR / "latest.txt").write_text(f"last-{_played_seq}.wav\n")
+    except OSError:
+        pass
+
+
 def _refuse_noise(audio: Audio) -> bool:
     """True (and logged, and kept for inspection) when `audio` is noise."""
+    _keep_played(audio)
     why = noise_report(audio)
     if not why:
         return False
