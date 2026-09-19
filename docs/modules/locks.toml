@@ -76,3 +76,9 @@ by = "opus-main"
 task = "TenTurns: the scripted person waits for Sim"
 since = "2026-09-19T08:29:44+00:00"
 until = "2026-09-19T16:29:44+00:00"
+
+[locks.worldmodel]
+by = "opus-main"
+task = "stage 2 item 1"
+since = "2026-09-19T10:35:01+00:00"
+until = "2026-09-19T18:35:01+00:00"
