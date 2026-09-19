@@ -98,6 +98,39 @@ class Config:
     budget_pressure_tighten_at: float = 0.9
     irreversible_requires_human: bool = True
     reversible_auto_in_guarded: bool = True
+    # -- physical actions (rules.py::PhysicalRule; `[guardian.physical]`).
+    # A door lock and a docstring edit used to share one boolean: the
+    # `irreversible_requires_human` above, which the Kernel defaults to
+    # False so that Sim can land its own code unattended. A physical
+    # action with class `human` (unlock, disarm, siren, a thermostat
+    # outside the safe range, anything while the alarm is armed; see
+    # contracts/home/policy.py::classify_call) is escalated to a person
+    # in EVERY posture, whatever that boolean says -- unless
+    # `physical.auto_approve` is set, which is the one switch that
+    # loosens the house, and is never set by sim.sh. The class is
+    # recomputed here from the proposal's arguments; the label the
+    # proposer supplied is never trusted for a physical tool
+    # (2026-09-18 evaluation, S1/S6/S8).
+    physical_auto_approve: bool = False
+    # Tools whose name starts with one of these act on the house or its
+    # screens. Everything else is code, files, web or memory.
+    physical_tool_prefixes: tuple[str, ...] = (
+        "cam_", "ring_", "cast_", "tv_", "home_", "media_", "music_", "energy_",
+    )
+    # Physical tools that only observe (list, state, snapshot, a stream
+    # to look at). They change nothing in the world and are left to the
+    # ordinary rules.
+    physical_observe_tools: tuple[str, ...] = (
+        "cam_list", "cam_state", "cam_snapshot", "cam_recordings", "cam_stream", "cam_watch",
+        "ring_list", "ring_events", "ring_snapshot", "ring_live", "ring_watch",
+        "cast_devices", "home_state", "home_find", "home_describe",
+        "media_now", "music_now", "energy_report", "energy_status", "energy_tariff",
+    )
+    # Physical tools that are `human` by name: sirens, and the setup or
+    # pairing steps that store a credential or bind a device.
+    physical_always_human_tools: tuple[str, ...] = (
+        "cam_siren", "ring_siren", "cam_setup", "ring_setup", "cast_setup", "tv_pair",
+    )
     classifier_enabled: bool = False  # cognition doesn't exist yet this phase (see README)
     classifier_timeout_s: float = 3.0
     human_prompt_timeout_s: float = 1800.0
@@ -148,6 +181,20 @@ class Config:
             kwargs["protected_subjects"] = tuple(kwargs["protected_subjects"])
         if "autonomous_origins" in kwargs:
             kwargs["autonomous_origins"] = tuple(kwargs["autonomous_origins"])
+        for key in ("physical_tool_prefixes", "physical_observe_tools", "physical_always_human_tools"):
+            if key in kwargs:
+                kwargs[key] = tuple(kwargs[key])
+        # `[guardian.physical]` is its own table so the house has its own
+        # switch: `auto_approve = true` is the only way to let a `human`
+        # class physical action through unattended. Deliberately not
+        # covered by SIMORGH_GUARDIAN_AUTO_APPROVE.
+        physical = (data or {}).get("physical")
+        if isinstance(physical, Mapping):
+            if "auto_approve" in physical:
+                kwargs["physical_auto_approve"] = bool(physical["auto_approve"])
+            for key in ("tool_prefixes", "observe_tools", "always_human_tools"):
+                if key in physical:
+                    kwargs[f"physical_{key}"] = tuple(physical[key])
         env_auto_approve = os.environ.get("SIMORGH_GUARDIAN_AUTO_APPROVE")
         if env_auto_approve is not None:
             kwargs["irreversible_requires_human"] = env_auto_approve.strip().lower() not in ("1", "true", "yes", "on")

@@ -717,6 +717,57 @@ class BudgetRule:
         return Decision("abstain", self.layer)
 
 
+class PhysicalRule:
+    """The house has its own gate (2026-09-18 evaluation, S1/S6/S8).
+
+    For a tool that acts on the house or its screens (`config.physical_tool_prefixes`),
+    the class of the action is recomputed HERE from the proposal's arguments
+    -- `contracts/home/policy.classify_call` for `home_call`, a by-name table
+    for the rest -- and never read from the label the proposer supplied.
+    A `human` class action escalates to a person in every posture, whatever
+    `irreversible_requires_human` says; `[guardian.physical] auto_approve`
+    is the only switch that changes that, and `sim.sh` never sets it. An
+    observe-only tool (list, state, snapshot, stream) abstains; a reversible
+    physical action (a light, the TV) abstains too and is left to the
+    ordinary rules, which allow it in `guarded` and deny it in `locked`.
+    """
+
+    name = "physical"
+    layer = "physical"
+
+    async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
+        cfg = ctx.config
+        tool = proposal.tool
+        if not tool.startswith(tuple(cfg.physical_tool_prefixes)):
+            return Decision("abstain", self.layer)
+        if tool in cfg.physical_observe_tools:
+            return Decision("abstain", self.layer)
+        locked = ctx.posture.level == "locked" or cfg.mode == "locked"
+        if locked:
+            return Decision("deny", self.layer, ("locked: physical actions are denied",))
+        klass, what = self._classify(proposal, cfg)
+        if klass != "human":
+            return Decision("abstain", self.layer)
+        if cfg.physical_auto_approve:
+            return Decision("abstain", self.layer, (f"physical action auto-approved by [guardian.physical]: {what}",))
+        return Decision("escalate", self.layer, (f"physical action needs a person: {what}",))
+
+    @staticmethod
+    def _classify(proposal: Proposal, cfg) -> tuple[str, str]:
+        """`(class, what)`; class is `human` | `reversible` | `unattended`."""
+        args = proposal.args if isinstance(proposal.args, dict) else {}
+        if proposal.tool in cfg.physical_always_human_tools:
+            return "human", proposal.tool
+        if proposal.tool == "home_call":
+            from simorgh.contracts.home.policy import classify_call
+
+            service = str(args.get("service") or "")
+            target = str(args.get("target") or "")
+            data = args.get("data") if isinstance(args.get("data"), dict) else {}
+            return classify_call(service, target, data=data), f"home_call {service} {target}".strip()
+        return "reversible", proposal.tool
+
+
 class ReversibilityRule:
     name = "reversibility"
     layer = "reversibility"
@@ -752,5 +803,6 @@ DEFAULT_PIPELINE: tuple = (
     GrantRule(),
     ImmunityRule(),
     BudgetRule(),
+    PhysicalRule(),
     ReversibilityRule(),
 )
