@@ -42,7 +42,7 @@ Verification owns the verdict on finished work: for each `verify.requested` it r
 | `verify.requested` | `messages/verify.py::VerifyRequested` | simorgh/verification/service.py | runs one verification (consumer group `verification`); a redelivery re-emits the recorded verdict |
 | `plan.proposed` | `messages/plan.py::PlanProposed` | simorgh/verification/service.py | reviews the plan and publishes `plan.reviewed` |
 | `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/verification/service.py | `stopping` makes new requests answer `insufficient_evidence`; `paused` is recorded but never read |
-| `action.result` | `messages/action.py::ActionResult` | simorgh/verification/service.py | resolves the future of a check's own proposed action by `action_id` |
+| `action.result` | `messages/action.py::ActionResult` | simorgh/verification/service.py | resolves the future of a check's own proposed action by `action_id`; `error_kind` becomes `api.ActionResult.error_kind` (stage 2 item 8), and `render` / `js_syntax` skip on `unconfigured`, keeping their text markers only for a result with no kind |
 | `cognition.think` reply | `messages/cognition.py::CognitionThink` | simorgh/verification/service.py | reply to its own `bus.request_or_error` (not a subscription) |
 | `guardian.review` reply | `messages/guardian.py::GuardianReview` | simorgh/verification/service.py | reply to its own `bus.request_or_error` (not a subscription) |
 
@@ -135,7 +135,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Planned changes (roadmap)
 
 - Stage 1 item 4 (`docs/plan/stage-1-telemetry-out-of-the-decision-log.md`): a `verify` span on the daily path.
-- Stage 2 item 8 (`docs/plan/stage-2-native-tool-use.md`): `ToolResult.error_kind` replaces the error-text sniffing in `render.py`.
+- Stage 2 item 8 (`docs/plan/stage-2-native-tool-use.md`): `ToolResult.error_kind` replaces the error-text sniffing in `render.py` and `js_syntax.py`. Done 2026-09-19 (text markers kept as the fallback when no kind arrives). Still text: `error == "timeout"` in `render`, `js_syntax`, `isolated_suite`, `sandbox_smoke` (verification's own `act` timeout writes that string).
 - Stage 4 item 8 (`docs/plan/stage-4-session-stream-context-compaction-evals.md`): one Stop hook plus a Verification trajectory check over the session stream replace `claimed_to_commit`, `claimed_tv_act` and the other claim guards in `session.py`.
 - Stage 7 item 6 (`docs/plan/stage-7-long-horizon.md`): the checkpoint critic, `verify.checkpoint.request/reply`, scoring a trajectory against a node's acceptance criteria (`on_track | drifting | blocked`); two `drifting` verdicts re-plan the subtree. Stage 7 item 2 adds `agents/verify.md`.
 

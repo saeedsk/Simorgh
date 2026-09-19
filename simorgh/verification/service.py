@@ -271,11 +271,11 @@ class VerificationService:
             result = await asyncio.wait_for(fut, timeout=timeout or self._config.action_timeout_seconds)
         except asyncio.TimeoutError:
             self._pending_actions.pop(action_id, None)
-            return ActionResult(ok=False, error="timeout")
+            return ActionResult(ok=False, error="timeout", error_kind="transient")
         return ActionResult(
             ok=result.get("ok", False), output=result.get("stdout_preview", ""),
             output_ref=result.get("output_ref", ""), error=result.get("error"),
-            metadata=result.get("metadata", {}),
+            metadata=result.get("metadata", {}), error_kind=str(result.get("error_kind") or ""),
         )
 
     async def _think(self, *, purpose: str, prompt: str) -> ThinkReply:

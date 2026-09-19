@@ -47,7 +47,11 @@ class RenderCheck:
         for path in paths:
             result = await ctx.act("render_page", {"target": path})
             error = result.error or ""
-            if any(marker in error for marker in _UNAVAILABLE):
+            # The kind says it (stage 2 item 8); the text markers are the
+            # fallback for a result that carried no kind.
+            kind = getattr(result, "error_kind", "")
+            unavailable = kind == "unconfigured" if kind else any(marker in error for marker in _UNAVAILABLE)
+            if unavailable:
                 return CheckResult(status="skipped", detail=f"no headless browser available: {error}")
             if error == "timeout":
                 return CheckResult(status="insufficient", detail="the render did not answer in time")

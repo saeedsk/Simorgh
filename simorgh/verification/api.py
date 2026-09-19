@@ -51,6 +51,9 @@ class ActionResult:
     output_ref: str = ""
     error: str | None = None
     metadata: dict = field(default_factory=dict)
+    # `action.result.error_kind` (refused | unconfigured | transient |
+    # failed); "" when ok or when the result carried none.
+    error_kind: str = ""
 
 
 @dataclass(frozen=True)

@@ -166,7 +166,11 @@ class JsSyntaxCheck:
             if result.ok:
                 continue
             detail = f"{result.error or ''} {(result.metadata or {}).get('stderr', '')}".strip()
-            if _NO_NODE in detail or _NO_NODE in (result.error or ""):
+            # The kind says it (stage 2 item 8); the text marker is the
+            # fallback for a result that carried no kind.
+            kind = getattr(result, "error_kind", "")
+            no_node = kind == "unconfigured" if kind else (_NO_NODE in detail or _NO_NODE in (result.error or ""))
+            if no_node:
                 return CheckResult(status="skipped", detail="node is not available to check JavaScript")
             if result.error == "timeout":
                 return CheckResult(status="insufficient", detail="the JavaScript syntax check did not answer in time")

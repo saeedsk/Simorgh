@@ -36,7 +36,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:32-41`, pinned by `tes
 | `percept.text.received` | `messages/percept.py::PerceptTextReceived` | service.py:266 | Runs an ephemeral chat session off the bus handler, keyed by the percept's `session_id` |
 | `tool.registered` | `messages/tool.py::ToolRegistered` | service.py:227 | Adds the tool to the known set and its reversibility to the policy table |
 | `tool.probed` | `messages/tool.py::ToolProbed` | service.py:118 | Records a tool as down/up so `task_rules` says so once |
-| `action.result` | `messages/action.py::ActionResult` | session.py:1656 | Ends a proposal wait; side effects fill `uncommitted`/`created`/`wrote` |
+| `action.result` | `messages/action.py::ActionResult` | session.py (`_propose_and_await`) | Ends a proposal wait; side effects fill `uncommitted`/`created`/`wrote`. `error_kind` (stage 2 item 8) rides on the step detail as `session.Detail.kind` (`denied` for `action.denied`); `was_denied` reads that kind, and falls back to the `denied: ` prefix only for a plain string with no kind (an older record) |
 | `action.denied` | `messages/action.py::ActionDenied` | session.py:1719 | Ends a proposal wait as `denied: <reasons>`; step marked `denied` |
 | `action.needs_human` | `messages/action.py::ActionNeedsHuman` | session.py:1656 | Ends a proposal wait as `needs human: <question>` |
 | `verify.result` | `messages/verify.py::VerifyResult` | session.py:1760 | Verdict for this attempt's `verification_id`; fail spends a revision |

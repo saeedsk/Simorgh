@@ -281,6 +281,23 @@ class TestRenderCheck(_RepoFixture):
         result = await RenderCheck().run(_req([path]), _ctx(act))
         self.assertEqual(result.status, "skipped")
 
+    async def test_the_error_kind_decides_not_the_words(self):
+        # Stage 2 item 8: an unconfigured result skips whatever it says;
+        # a refused one worded like a missing browser is a real failure.
+        path = self.write("docs/games/x.html", GOOD_PAGE)
+
+        def acting(error, kind):
+            async def _act(tool, args):
+                result = _Result(ok=False, error=error)
+                result.error_kind = kind
+                return result
+            return _act
+
+        skipped = await RenderCheck().run(_req([path]), _ctx(acting("Chromium is not installed", "unconfigured")))
+        self.assertEqual(skipped.status, "skipped")
+        failed = await RenderCheck().run(_req([path]), _ctx(acting("no `node` executable in the page", "refused")))
+        self.assertEqual(failed.status, "failed")
+
     async def test_console_error_calls_fail(self):
         path = self.write("docs/games/x.html", GOOD_PAGE)
         act = self._acting(metadata={"console_messages": ["error: canvas missing", "log: fine"]})

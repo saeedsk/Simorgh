@@ -38,9 +38,33 @@ from .tools import is_read_only, known_tools, marker_hint, offered_tools, to_act
 # `denied` flag is set from it, and Verification reads the flag rather
 # than this string, so the prefix may change without the checks noticing.
 DENIED_PREFIX = "denied: "
+#: The outcome kind `_propose_and_await` gives a Guardian `action.denied`.
+#: The other kinds are `action.result.error_kind` (refused | unconfigured
+#: | transient | failed), or "" for a result that was ok.
+DENIED_KIND = "denied"
+
+
+class Detail(str):
+    """A step's detail text that also carries its outcome kind, so a
+    reader never has to work the kind out of the words (stage 2 item 8).
+    It is still a `str` everywhere it goes -- a Step's summary, the
+    Ledger -- and the kind rides only as far as this process."""
+
+    kind: str
+
+    def __new__(cls, text: str, kind: str = "") -> "Detail":
+        made = super().__new__(cls, text)
+        made.kind = kind
+        return made
 
 
 def was_denied(detail: str) -> bool:
+    """Whether the Guardian refused this call before it ran. Read from
+    the outcome kind; a plain string with no kind (a step read back from
+    an older record) falls back to the text prefix this module writes."""
+    kind = getattr(detail, "kind", None)
+    if kind is not None:
+        return kind == DENIED_KIND
     return (detail or "").startswith(DENIED_PREFIX)
 
 ACTION_TIMEOUT_S = 30.0
@@ -1750,7 +1774,7 @@ class SessionRunner:
             return False, text, text
         refused = unplaced_voice_refusal(session, str(call.get("tool") or ""))
         if refused:
-            return False, refused, refused
+            return False, refused, Detail(refused, "refused")
         action_id = uuid.uuid4().hex[:12]
         payload = to_action_payload(
             action_id=action_id, task_id=session.task_id, call=call,
@@ -1759,7 +1783,7 @@ class SessionRunner:
         )
         refused = chat_outside_workspace_refusal(session, str(call.get("tool") or ""), payload.get("args") or {})
         if refused:
-            return False, refused, refused
+            return False, refused, Detail(refused, "refused")
         # How long this session waits for the result, on the wire (stage 1
         # item 5): the approval carries it to Execution, which never runs
         # the tool past it. A person's later yes is caused by their answer,
@@ -1806,7 +1830,7 @@ class SessionRunner:
                 text = f"{tool_name}: cancelled while waiting for a response"
             else:
                 text = f"{tool_name}: no response (timed out)"
-            return False, text, text
+            return False, text, Detail(text, "transient")
         if result.type == topics.ACTION_RESULT:
             ok = result.payload.get("ok", False)
             if ok:
@@ -1858,13 +1882,16 @@ class SessionRunner:
                 # `full_suite_ran` would have been blind again, with no
                 # sign that anything had been lost.
                 full = f"[ran target={target!r}]\n{hoist_marker(full)}"
-            return ok, self._bound_for_model(full), full[: self._DETAIL_CHARS]
+            # The kind as Execution sent it; a result with none (an older
+            # producer) is "failed" -- never guessed from its words.
+            kind = "" if ok else str(result.payload.get("error_kind") or "failed")
+            return ok, self._bound_for_model(full), Detail(full[: self._DETAIL_CHARS], kind)
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
             text = f"{DENIED_PREFIX}{reasons}"
-            return False, text, text
+            return False, text, Detail(text, DENIED_KIND)
         text = f"needs human: {result.payload.get('question', '')}"
-        return False, text, text
+        return False, text, Detail(text, "refused")
 
     async def _verify_then_finish(self, session: Session, text: str, *, floor: bool) -> Outcome:
         while True:
