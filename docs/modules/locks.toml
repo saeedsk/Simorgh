@@ -5,6 +5,18 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.bus]
+by = "opus-main"
+task = "stage 1 item 3: trace spans to telemetry"
+since = "2026-09-19T08:40:56+00:00"
+until = "2026-09-19T16:40:56+00:00"
+
+[locks.cognition]
+by = "opus-main"
+task = "stage 1 item 2: trace per turn"
+since = "2026-09-19T08:40:56+00:00"
+until = "2026-09-19T16:40:56+00:00"
+
 [locks.contracts]
 by = "opus-main"
 task = "stage 1 items 1,7,9 (worktree agents)"
