@@ -1,6 +1,6 @@
 # Stage 1 -- Telemetry out of the decision log
 
-Status: **in progress** (2026-09-19: items 1, 7, 9 done; 2-6, 8, 10 open) · Depends on: stage 0 items 1-16 · Estimated: 2 weeks · Modules touched: bus, ledger, kernel, contracts, execution, interface, orchestration, cognition
+Status: **in progress** (2026-09-19: items 1-5, 7, 8, 9 done; 6 and 10 deferred with reasons below; 11 open) · Depends on: stage 0 items 1-16 · Estimated: 2 weeks · Modules touched: bus, ledger, kernel, contracts, execution, interface, orchestration, cognition
 
 ## Outcome
 
@@ -16,7 +16,20 @@ Measure and record in findings: `ls ~/.simorgh/ledger/streams | wc -l` after one
 
 ## Action items
 
-Done 2026-09-19: item 1 (`simorgh/telemetry/`, a Kernel-owned store on every `ctx.telemetry`; not in `LAYERS` because it is not supervised; nothing writes to it yet), item 7 (`execution/selfaction.py`: seven direct runs now propose through Guardian; an AST scan test keeps it so), item 9 (`kernel/statusread.py`: live `/api/status`, else the ledger read-only). Next: item 2 then 3, which make item 1 useful.
+Done 2026-09-19:
+- Item 1: `simorgh/telemetry/`, a Kernel-owned store on every `ctx.telemetry` (not in `LAYERS`: it is not supervised).
+- Item 2: one turn is one trace. `Session.trace` (the percept's trace for chat), the assembler's context requests carry the think's trace, voice mints the trace at the ask. A typed turn had 4 traces before, 1 after.
+- Item 3: a traced message is a span (`[bus] trace_backend = "ledger"` is the rollback); `metrics.history` and `curiosity.tick` are samples; `/api/history` and offline `simorgh status` read them. `persona:state` stays in the ledger on purpose (mood is restored from it, and it is written only on change). Found on the way: the Kernel's bus client ignored `[bus]` entirely.
+- Item 4: spans `cognition.provider_call`, `guardian.decide`, `execution.tool`, `verification.verify`, and voice's `voice.stt`/`voice.think`/`voice.first_audio`/`voice.playback`. Speaker id and a `/api/traces/<id>` page are not built.
+- Item 5: `Message.deadline`, stamped by `bus.request`, carried by `caused()`, honoured by Execution (`within_deadline`) and Cognition (not below the Router's 5 s minimum).
+- Item 7: `execution/selfaction.py`, seven direct runs propose through Guardian; an AST scan keeps it so.
+- Item 8: `ledger.bound.BoundLedger` per Context; `contracts.streamnames.WRITERS` measured from 23,140 recorded writes.
+- Item 9: `kernel/statusread.py`: live `/api/status`, else the ledger read-only.
+
+Deferred, with reasons:
+- Item 6 (Ring signalling off the approval path) conflicts with the creator's standing rule that Guardian sees every tool call, and stage 9 may move Ring to Home Assistant. **A decision for the creator**: allow a session token to cover keepalive/close, or keep one decision per keepalive until the HA move.
+- Item 10 (freeze the multi-process substrate): `WorkerKernel` lives in `kernel/service.py` and backs the working `local-multi` mode (its crash drill passes); the aws/dynamodb backends are small and their tests are fakes, so the promised full-tier saving is small. Revisit when the multi-process question is decided.
+
 
 1. **`telemetry/` package: spans and samples tables.** *Lock `contracts` (new protocol), then `telemetry` (new package; add to `kernel/registry.py` LAYERS layer 0 and `docs/AGENTS.md`).*
    - Files: `simorgh/telemetry/{__init__,service,store,spans,samples,config}.py`; `simorgh/contracts/protocols.py` gains `Telemetry` (`span(name, parent, attrs)` context manager, `sample(series, value, ts)`, `query(trace_id)`).
