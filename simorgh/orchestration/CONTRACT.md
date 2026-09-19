@@ -21,6 +21,7 @@ Orchestration owns the agent loop: it claims a task (or takes a conversational p
 | `simorgh/orchestration/resume.py` | Rebuilds a session from its `task:<id>` stream (crash vs retry) |
 | `simorgh/orchestration/scaffolds.py` | Renders the `task_rules` block per scaffold, channel and speaker; tool-down notes |
 | `simorgh/orchestration/service.py` | The `Service`: starts workers, chat hand-off, tool registry replay, metrics |
+| `simorgh/orchestration/stophook.py` | The Stop hook: one bounce per turn for a final answer that claims what no tool did (commit, promise, TV, pronunciation, any effect in chat) |
 | `simorgh/orchestration/session.py` | `SessionRunner`: the step loop, proposals, verify, worktree landing, honesty guards |
 | `simorgh/orchestration/tools.py` | Tool policy table and marker-call to `action.proposed` payload router |
 | `simorgh/orchestration/worker.py` | `Worker`: claim, lease heartbeat, cancel, terminal reporting, procedural memory |
@@ -153,7 +154,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - L5: crash-resume restores the step count but not the context (`resume.py:117-144`). Open; stage 4 item 2.
 - L6 / S10: a chat turn can edit the live checkout and orphan the edit (`profiles.py` CHAT carries `apply_source_patch`, `replace_in_file`, `run_script`, `install_package`). Open.
 - L7 / W8: CHAT is a 20-step, 72-tool profile without task semantics. Open; stage 4 item 7.
-- L8: domain and channel rules (TV, dashboard, pronunciation, voice refusal) live in `session.py`; four guards share one `claim_corrected` flag. Open; stage 4 item 8.
+- L8: domain and channel rules (TV, dashboard, pronunciation, voice refusal) lived in `session.py`. Partly closed 2026-09-19 (stage 4 item 8): the four claim guards are rules of one Stop hook (`stophook.check`), with a generic chat rule (`claimed_effect`: an effect claimed while no changing tool succeeded this turn, answered with the tools that could do it). Each bounce is an `orchestration.stop_hook` telemetry event with `rule` and `scaffold`, which is the counter a rule is retired by. Open: the Verification trajectory check over the session stream, and retiring rules on native paths.
 - L9: claim RPC, leases and heartbeats for one in-process worker. Open; stage 4 item 10.
 - L10: loop features off by default. Addressed in the live config 2026-09-18 (stage 0 item 12); code defaults unchanged.
 - L11: `session_id` never sent on `cognition.think`. Open.

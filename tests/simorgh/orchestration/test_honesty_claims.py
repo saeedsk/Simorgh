@@ -6,7 +6,7 @@ from __future__ import annotations
 import types
 import unittest
 
-from simorgh.orchestration.session import claimed_to_commit, promised_behaviour
+from simorgh.orchestration.stophook import claimed_to_commit, promised_behaviour
 
 
 def _session(*, tools=("git_commit",), ran=False):
