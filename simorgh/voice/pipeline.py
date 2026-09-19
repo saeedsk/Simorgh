@@ -163,6 +163,9 @@ class Pipeline:
         self._bus = bus
         # Where a turn's stage spans go (stage 1 item 4); None records nothing.
         self.telemetry = telemetry
+        # session id -> `SentenceStream.feed` for a reply being spoken as it
+        # is written (stage 3 item 4).
+        self.delta_sinks: dict = {}
         self._clock = clock
         self._logger = logger
         self._ledger = ledger
@@ -207,6 +210,8 @@ class Pipeline:
         # _on_turn_completed`). The task events are the fallback for a
         # turn that ends without one: a chat task's id is its session id.
         self._subs.append(await self._bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed))
+        # A reply as it is written, for the turn that asked (stage 3 item 4).
+        self._subs.append(await self._bus.subscribe(topics.SESSION_DELTA, self._on_session_delta))
         for topic in (topics.TASK_FAILED, topics.TASK_BLOCKED):
             self._subs.append(await self._bus.subscribe(topic, self._on_task_event))
         # What is on the TV, so the model knows what "next" and "pause"
@@ -347,6 +352,11 @@ class Pipeline:
             engine_tts=getattr(self._tts, "last_engine", None) or getattr(self._tts, "name", ""),
         ))
         return utterance, said
+
+    async def _on_session_delta(self, message) -> None:
+        sink = self.delta_sinks.get(str(message.payload.get("session_id") or ""))
+        if sink is not None:
+            sink(str(message.payload.get("text") or ""), reset=bool(message.payload.get("reset")))
 
     async def ask(self, text: str, *, session_id: str | None = None, speaker_name: str = "",
                   confidence: float = 1.0, speaker_relation: str = "", room: str = "",

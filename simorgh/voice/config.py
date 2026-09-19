@@ -134,6 +134,10 @@ class Config:
     stt_partial_every_ms: int = 1500
     connectors: bool = True            # the planner's rare "Okay," / "Yeah," lead-ins
     max_spoken_sentences: int = 3      # longer answers are cut here and say there is more on screen
+    # Speak a reply while it is still being written (stage 3 item 4): the
+    # first sentence starts as soon as it is complete. Off until measured on
+    # the creator's machine (first audio and the full reply, same turns).
+    stream_replies: bool = False
     tts_lookahead: int = 2             # pieces synthesised ahead of playback; more = slower to cancel
     #: Longest `play_stream` waits for one chunk, or for the speaker to
     #: finish one, before giving up and releasing `speech_lock`.

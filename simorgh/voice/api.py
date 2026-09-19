@@ -177,6 +177,10 @@ class TtsRequest:
     #: which engine speaks it when two are open (voice/tts/lanes.py):
     #: "fast" | "expressive" | "" for the engine's own choice
     lane: str = ""
+    #: A reply still being written (stage 3 item 4): an `asyncio.Queue` of
+    #: `(text, pause_ms)` pieces ending with `None`, read after `pieces`.
+    #: `None` here: `pieces` is the whole reply, as before.
+    live: object = None
 
 
 @dataclass(frozen=True)

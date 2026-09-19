@@ -966,3 +966,37 @@ class TestATurnIsTimedInItsTrace(unittest.IsolatedAsyncioTestCase):
             self.assertIn(stage, names)
         self.assertEqual({kw["trace_id"] for _, kw in telemetry.events}, {asked_traces[0]})
         self.assertTrue(all(kw["end"] >= kw["ts"] for _, kw in telemetry.events))
+
+
+class TestAStreamedReplyIsSpokenBeforeItIsFinished(unittest.IsolatedAsyncioTestCase):
+    """Stage 3 item 4: with `stream_replies`, the first sentence is being
+    said while the model still writes the rest."""
+
+    async def test_the_first_sentence_is_synthesised_before_the_reply_is_complete(self) -> None:
+        events: list[str] = []
+
+        class _Streaming(_Replies):
+            async def ask(self, text, *, session_id=None, **kw):
+                sink = session._pipeline.delta_sinks.get(session_id)  # noqa: SLF001
+                if sink is not None:
+                    sink("It is three o'clock in the afternoon. ", reset=False)
+                await asyncio.sleep(0.3)
+                events.append("reply complete")
+                return "It is three o'clock in the afternoon. The sun is still up."
+
+        class _Tts(FakeSynthesiser):
+            async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0) -> Audio:
+                events.append(f"synth: {text}")
+                return await super().synthesise(text, voice=voice, speed=speed)
+
+        script = _Script((True, 20), (False, 15), (False, 10_000))
+        replies = _Streaming(["unused"])
+        session, bus, speaker, tts = _session(_config(stream_replies=True), script, replies)
+        from simorgh.voice.tts.streaming import StreamingSynthesiser
+        session._tts = StreamingSynthesiser(_Tts(), lookahead=1)  # noqa: SLF001
+        await _run_until(session, lambda: session.stats.turns >= 1, timeout=10.0)
+        first_sentence = next(i for i, e in enumerate(events) if e.startswith("synth") and "three" in e)
+        self.assertLess(first_sentence, events.index("reply complete"), events)
+        spoken = " ".join(e[len("synth: "):] for e in events if e.startswith("synth"))
+        self.assertIn("The sun is still up.", spoken)
+        self.assertEqual(spoken.count("three o'clock"), 1, events)

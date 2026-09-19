@@ -290,10 +290,16 @@ class StreamingSynthesiser:
         async def _produce() -> None:
             cancelled = False
             try:
-                total = len(request.pieces)
-                for seq, (text, pause_ms) in enumerate(request.pieces):
+                async for seq, text, pause_ms, last in _pieces_of(request):
                     if request.request_id in self._cancelled:
                         break
+                    if not text and last:
+                        # The end of a live reply: nothing more to say.
+                        rate = getattr(self._inner, "sample_rate", 24_000) or 24_000
+                        await queue.put(AudioChunk(pcm=silence(20, rate), sample_rate=rate,
+                                                   request_id=request.request_id, seq=seq, final=True, text="",
+                                                   pause_ms=0))
+                        continue
                     audio = await self._synthesise_or_fall_back(text, request)
                     if audio is None:
                         break
@@ -306,10 +312,10 @@ class StreamingSynthesiser:
                         from ..delivery import apply_gain
 
                         pcm = apply_gain(pcm, request.gain)
-                    if pause_ms > 0 and seq < total - 1:
+                    if pause_ms > 0 and not last:
                         pcm += silence(pause_ms, audio.sample_rate)
                     await queue.put(AudioChunk(pcm=pcm, sample_rate=audio.sample_rate, request_id=request.request_id,
-                                               seq=seq, final=seq == total - 1, text=text, pause_ms=pause_ms))
+                                               seq=seq, final=last, text=text, pause_ms=pause_ms))
             except asyncio.CancelledError:
                 cancelled = True
                 raise
@@ -371,3 +377,29 @@ class StreamingSynthesiser:
 
 
 __all__ = ["CHARS_PER_SECOND", "EDGE_MS", "MAX_HOLD_S", "StreamingSynthesiser", "TARGET_RMS", "edged", "levelled", "silence"]
+
+
+async def _pieces_of(request):
+    """`(seq, text, pause_ms, last)` for every piece of a request: its
+    fixed `pieces`, then -- for a reply still being written -- each piece
+    from `request.live` as it arrives. A live piece goes at once (holding it
+    to learn whether it is the last would hold the first sentence until the
+    second exists, which is the delay streaming is for); the end of a live
+    reply is marked by an empty final piece, played as a moment of silence."""
+    pieces = list(request.pieces)
+    live = getattr(request, "live", None)
+    if live is None:
+        for seq, (text, pause_ms) in enumerate(pieces):
+            yield seq, text, pause_ms, seq == len(pieces) - 1
+        return
+    seq = 0
+    for text, pause_ms in pieces:
+        yield seq, text, pause_ms, False
+        seq += 1
+    while True:
+        item = await live.get()
+        if item is None:
+            yield seq, "", 0, True
+            return
+        yield seq, item[0], item[1], False
+        seq += 1

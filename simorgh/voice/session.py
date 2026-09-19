@@ -1175,6 +1175,29 @@ class VoiceSession:
         self._room.append((speaker or "someone", text, self._now(), "asked"))
         before, self._last_asked_speaker = self._last_asked_speaker, speaker or ""
         self._last_ask_addressed = bool(speaker) or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)
+        live = None
+        early: asyncio.Task | None = None
+        if getattr(self._config, "stream_replies", False):
+            # Stage 3 item 4: speak the first sentence while the model
+            # writes the rest. The same Context the finished reply would get,
+            # less what is only known at the end.
+            from .streamreply import SentenceStream
+
+            live = SentenceStream(max_sentences=self._config.max_spoken_sentences,
+                                  on_sentence=self._pipeline.recent_said.append, language=language,
+                                  transform=self._planner.pronounced)
+            self._pipeline.delta_sinks[session_id] = live.feed
+            early_context = Context(user_text=text, language=language, turns=self.stats.turns,
+                                    turns_since_connector=self._turns_since_connector,
+                                    previous_connector=self._previous_connector)
+
+            async def _speak_when_started() -> None:
+                await live.started.wait()
+                still.cancel()
+                clock.reply_at = clock.reply_at or self._now()
+                await self._speak_reply(turn_id, "", clock, early_context, live=live)
+
+            early = asyncio.create_task(_speak_when_started())
         try:
             clock.trace_id = clock.trace_id or uuid.uuid4().hex
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
@@ -1182,9 +1205,24 @@ class VoiceSession:
                                              speaker_before=before, trace_id=clock.trace_id)
         finally:
             self._outstanding.pop(turn_id, None)
+            self._pipeline.delta_sinks.pop(session_id, None)
             still.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await still
+        if live is not None and early is not None:
+            from simorgh.contracts.tone import strip_tone as _strip
+
+            if live.started.is_set():
+                # Speaking began: the rest of the reply joins the same
+                # utterance, and this turn is done when it has been said.
+                live.finish(reply if _strip(reply).strip() and not is_quiet(_strip(reply)) else "")
+                self._answered.add(turn_id)
+                with contextlib.suppress(asyncio.CancelledError):
+                    await early
+                return
+            early.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await early
         clock.reply_at = self._now()
         self._answered.add(turn_id)
         from simorgh.contracts.tone import strip_tone as _strip_tone
@@ -1829,7 +1867,59 @@ class VoiceSession:
             "register": delivery.register})
         return True
 
-    async def _speak_reply(self, turn_id: int, reply: str, clock: TurnClock, context: Context) -> None:
+    async def _speak_live(self, turn_id: int, speak, live, first: str, clock: TurnClock, context: Context) -> None:
+        """`_speak_reply` for a reply being written (stage 3 item 4): the
+        request reads its pieces from `live.queue`; what was said is known
+        only when the stream ends."""
+        response_id = str(speak.response_id)
+        self._answered.discard(turn_id)
+        delivery = self._delivery_for(context.user_text, first, is_error=False, tone=live.tone)
+        lane = self._lane_for(first, spoken_turn=True)
+        request = TtsRequest(request_id=response_id, pieces=(), live=live.queue, voice=self._config.tts_voice,
+                             speed=delivery.speed, gain=delivery.gain,
+                             tone=live.tone or (delivery.register if delivery.register in ("warm", "bright") else ""),
+                             lane=lane)
+        self._pipeline.speaking = True
+
+        def _first_audio(seconds: float) -> None:
+            clock.first_audio_at = self._now()
+
+        try:
+            clock.lock_wait_at = self._now()
+            async with self._pipeline.speech_lock:
+                clock.lock_got_at = self._now()
+                report = await self._play(self._tts.synthesise_stream(request), request_id=response_id,
+                                          on_first_audio=_first_audio)
+        except Exception as exc:  # noqa: BLE001 -- a reply that could not be spoken is logged, not fatal
+            self._log("warning", "voice.reply_not_spoken", error=repr(exc))
+            self.turns.handle_playback_state(PlaybackState("finished", response_id))
+            if self.turns.state == THINKING:
+                self.turns.state = LISTENING
+                await self._announce(self.turns.state)
+            self._pipeline.speaking = False
+            live.close()
+            return
+        live.close()
+        self._pipeline.speaking = False
+        self._sim_spoke_at = self._now()
+        await self._report_synthesis(report)
+        said = live.said
+        self._pipeline.last_said = said
+        self.stats.turns += 1
+        metrics = clock.metrics(report)
+        metrics["streamed"] = True
+        metrics["lane"] = lane
+        self.stats.last_metrics = metrics
+        self._record_stage_spans(clock, report)
+        engine = getattr(self._tts, "last_engine", "") or self._tts.name
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": said, "seconds": report.seconds, "engine": engine, "device": self._config.device,
+            "interrupted": report.interrupted, "turn": turn_id, "response": speak.response_id,
+            **({"metrics": metrics} if self._config.diagnostics else {}),
+        })
+
+    async def _speak_reply(self, turn_id: int, reply: str, clock: TurnClock, context: Context,
+                           live=None) -> None:
         actions = self.turns.reply_ready(turn_id)
         while any(a.kind == Actions.HOLD_REPLY for a in actions):
             # The person may be starting to talk: wait for that to settle
@@ -1875,6 +1965,13 @@ class VoiceSession:
             reply = strip_lead(reply)
         from simorgh.contracts.tone import split_tone
 
+        if live is not None:
+            # A reply still being written: the sentences come from the
+            # stream, which already applies the spoken-length cap; delivery
+            # is chosen from the first of them.
+            first = live.spoken[0] if live.spoken else ""
+            await self._speak_live(turn_id, speak, live, first, clock, context)
+            return
         tone, reply = split_tone(reply)
         plan = self._planner.plan(reply, context)
         if plan.connector:
