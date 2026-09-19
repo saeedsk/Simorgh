@@ -31,7 +31,15 @@ from .api import Entity, ServiceResult
 class HomeUnavailable(RuntimeError):
     """Home Assistant could not be reached or refused. The message is
     for a person and never carries the token -- a URL with a token in
-    it ends up in a ToolResult and then in the Ledger."""
+    it ends up in a ToolResult and then in the Ledger.
+
+    `error_kind` (`protocols.ERROR_KINDS`) says what sort of failure it
+    is, so a tool that catches it reports a typed kind rather than one
+    its caller has to read out of the message."""
+
+    def __init__(self, message: str, *, error_kind: str = "failed") -> None:
+        super().__init__(message)
+        self.error_kind = error_kind
 
 
 class HomeAssistantClient:
@@ -137,7 +145,7 @@ class HomeAssistantClient:
 
         domain, _, name = service.partition(".")
         if not domain or not name:
-            raise HomeUnavailable(f"{service!r} is not a domain.service name")
+            raise HomeUnavailable(f"{service!r} is not a domain.service name", error_kind="refused")
 
         before = {}
         for entity_id in entity_ids:
@@ -179,7 +187,8 @@ class HomeAssistantClient:
 
         if not self.configured:
             raise HomeUnavailable(
-                "Home Assistant is not configured: set " + " and ".join(self.missing()))
+                "Home Assistant is not configured: set " + " and ".join(self.missing()),
+                error_kind="unconfigured")
         url = f"{self.url}{path}"
         headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
 
@@ -194,17 +203,20 @@ class HomeAssistantClient:
                 if exc.code in (401, 403):
                     raise HomeUnavailable(
                         "Home Assistant refused the token. Generate a long-lived access token "
-                        "on your HA profile page and set HOME_ASSISTANT_TOKEN.") from None
+                        "on your HA profile page and set HOME_ASSISTANT_TOKEN.",
+                        error_kind="unconfigured") from None
                 if exc.code == 404:
-                    raise HomeUnavailable(f"Home Assistant has no {path}") from None
-                raise HomeUnavailable(f"Home Assistant answered {exc.code}") from None
+                    raise HomeUnavailable(f"Home Assistant has no {path}", error_kind="refused") from None
+                raise HomeUnavailable(f"Home Assistant answered {exc.code}",
+                                      error_kind="transient" if exc.code >= 500 else "failed") from None
             except urllib.error.URLError as exc:
                 # `exc.reason`, never the URL: it is the one string here
                 # that could carry a token.
-                raise HomeUnavailable(f"could not reach Home Assistant ({exc.reason})") from None
+                raise HomeUnavailable(f"could not reach Home Assistant ({exc.reason})",
+                                      error_kind="transient") from None
             except (socket.timeout, TimeoutError):
                 raise HomeUnavailable(
-                    f"Home Assistant did not answer in {self._timeout:.0f}s") from None
+                    f"Home Assistant did not answer in {self._timeout:.0f}s", error_kind="transient") from None
             if not raw:
                 return None
             try:

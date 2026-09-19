@@ -48,7 +48,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/messages/world.py` | `world.*` (4) |
 | `simorgh/contracts/overheard.py` | the store of speech not addressed to Sim, grouped into conversations (file IO under a lock) |
 | `simorgh/contracts/places.py` | house name and known networks, read from and written to `simorgh.toml` (IO) |
-| `simorgh/contracts/protocols.py` | `Bus`, `Ledger`, `Clock`, `Logger`, `Span`, `Telemetry` (and the no-op `NullTelemetry`/`NULL_TELEMETRY`), `Health`, `Context`, `Subsystem`, `Provider`, `ProviderResponse`, `Tool`, `ToolContext`, `ToolResult` |
+| `simorgh/contracts/protocols.py` | `Bus`, `Ledger`, `Clock`, `Logger`, `Span`, `Telemetry` (and the no-op `NullTelemetry`/`NULL_TELEMETRY`), `Health`, `Context`, `Subsystem`, `Provider`, `ProviderResponse`, `Tool`, `ToolContext`, `ToolResult` (with `error_kind` and the helpers `refused/unconfigured/transient/failed/from_exception`), `ERROR_KINDS`, `ToolUnconfigured`, `error_kind_of` |
 | `simorgh/contracts/pytestfailures.py` | a failed-test marker that survives output truncation |
 | `simorgh/contracts/registry.py` | `define()`, `MessageSpec`, `get_spec`, `all_specs`, `error_reply_payload`, `ContractError` |
 | `simorgh/contracts/schemagen.py` | generates and checks `schema/*.v1.json` from the registry |
@@ -86,7 +86,7 @@ No `[contracts]` section and no config dataclass. `settings.py::config_path()` r
 - Catalogue: every topic constant in `topics.py`, `CATALOG`, `DOMAINS`, `SUBSYSTEMS`, `matches`, `reply_type_for`, `is_reply`, `may_subscribe`, `may_publish`, `source_name`, `PREEMPT_PRIORITY`, `PREEMPTING_TYPES`.
 - Registry: `define`, `get_spec`, `all_specs`, `MessageSpec` (`validate(payload)`, dataclass, schema), `error_reply_payload`.
 - Telemetry (stage 1 item 1): `Telemetry` with `span(name, *, trace_id, parent_id=None, attrs=None)` (async context manager yielding a `Span`: `trace_id`, `span_id`, `parent_id`, `name`, `set(key, value)`; status `ok`/`error`/`cancelled`, the exception re-raised; a nested span of the same trace defaults its parent to the enclosing span), `sample(series, value, ts=None)`, `event(name, *, trace_id, span_id, parent_id=None, ts=None, attrs=None)` (a finished point span with a caller-chosen id; a bus message), `async query(trace_id) -> list[dict]`. `NullTelemetry` records nothing; `NULL_TELEMETRY` is the default of `Context.telemetry`, so a hand-built Context needs no store. The implementation is `simorgh/telemetry/`, owned by the Kernel.
-- Protocols (structural; subsystems import these, never a concrete Bus or Ledger): `Bus`, `Subscription`, `Ledger`, `Clock`, `Logger`, `Health`, `Context` (fields incl. `telemetry`), `Subsystem`, `Provider`, `ProviderResponse` (has `tool_calls`, never filled by any provider, L1), `Tool`, `ToolContext`, `ToolResult` (`ok` plus free-text `error`, T9).
+- Protocols (structural; subsystems import these, never a concrete Bus or Ledger): `Bus`, `Subscription`, `Ledger`, `Clock`, `Logger`, `Health`, `Context` (fields incl. `telemetry`), `Subsystem`, `Provider`, `ProviderResponse` (has `tool_calls`, never filled by any provider, L1), `Tool`, `ToolContext`, `ToolResult` (`ok`, free-text `error` for the model, and `error_kind`: one of `ERROR_KINDS` = `refused | unconfigured | transient | failed` when not ok, `""` when ok; build a failure with `ToolResult.refused(msg)` / `.unconfigured` / `.transient` / `.failed` / `.from_exception(exc, msg, default=...)`). `ToolUnconfigured(RuntimeError)` is raised inside a tool for a capability that is not set up; `error_kind_of(exc, default)` reads an exception's `error_kind` attribute, which `ToolUnconfigured`, `home.client.HomeUnavailable` (per raise: unconfigured, refused, transient, failed) and `connector.BudgetExhausted` (refused) carry.
 - Security: `approval_token`, `verify_approval_token`, `canonical_args_sha256`, `ReplayGuard`, `new_run_secret`, `subsystem_token`, `verify_subsystem_token`.
 - Module-level mutable singletons (risks): `registry._REGISTRY` (filled by importing `messages`; a type defined twice or late changes validation for the whole process), `compat._TRANSLATORS` (`clear()` exists for tests), `overheard._lock` (a `threading.Lock` around a file), `console._since_check` (a counter mutated on every printed line from the event loop). These are the four module-level singletons of B20.
 
@@ -128,7 +128,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - B2 (medium): `Message.new` mints a fresh `trace_id` for every uncaused publish (`envelope.py:98`), which is one trace stream per root. Open; stage 1 item 2.
 - L1 / C5 (critical / high): `ProviderResponse.tool_calls` (`protocols.py:151`) exists and no provider fills it. Open; stage 2.
 - T2 (high): `tool.registered` carries no description or input schema. Open; stage 2 item 1.
-- T9 (low): `ToolResult` has `ok` and free-text `error` (`protocols.py:185-191`); consumers sniff `refused:` text. Open; stage 2 item 8.
+- T9 (low): `ToolResult` had `ok` and free-text `error`; consumers sniffed `refused:` text. Fixed 2026-09-19 (stage 2 item 8): `ToolResult.error_kind` and `action.result.error_kind`; `tests/simorgh/execution/test_error_kinds.py` fails on a new text sniff.
 - V3 / V10 (medium / low): the percept has `speaker`/`speaker_relation` but only Voice fills them, and no `language` field (`messages/percept.py`). Open; stage 6 item 4.
 - B8 / B14 (low): `compat.py` and the subsystem-identity tokens serve multi-process modes that never run. Open; stage 1 item 10.
 
@@ -141,7 +141,7 @@ Found while writing this contract (not in the catalogue): `settings.config_path(
 - Stage 1 item 8: a writer table in `streamnames.py` says which source may append to which prefix.
 - Stage 1 item 10: `compat.py` moves under `simorgh/_frozen/`.
 - Stage 2 item 1: `tool.registered` gains `name, description, input_schema, reversibility, read_only, network, cost_class, source, tags` (optional fields in `messages/tool.py`); `test_tool_registered_carries_schema.py`.
-- Stage 2 item 8: `ToolResult.error_kind` (`refused | unconfigured | transient | failed`).
+- Stage 2 item 8: done 2026-09-19 -- `ToolResult.error_kind` (`refused | unconfigured | transient | failed`), optional `action.result.error_kind` (enum; absent on older records).
 - Stage 3 item 2: a `session.delta` topic, bus-only.
 - Stage 4 items 1 and 4: `Session`, `Turn`, `Block` contracts, `session.turn.appended/compacted/snapshot` events, `session:<id>` in `streamnames.py`; reader protocols for persona, self and memory.
 - Stage 5 item 3: `Fact`, `memory.fact.stored/superseded`, a `facts` field on `memory.retrieve.reply`.
@@ -162,3 +162,5 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - `Telemetry.event` takes an optional `end` (a timed span measured by the caller).
 
 - `tool.registered` gains optional `input_schema` (an object schema), stage 2 item 1. Consumers: worldmodel (ToolsFacet keeps it with the description), orchestration (item 2 will render it).
+
+- `action.result` gains optional `error_kind` (`refused | unconfigured | transient | failed`), and `ToolResult` gains `error_kind` with its helpers, stage 2 item 8 (2026-09-19). Execution sets it on every result with `ok=false`; a record from before has none, and readers fall back as their own contract says. Consumers: orchestration (`session.was_denied` reads the kind, a Guardian denial is kind `denied` there), verification (`ActionResult.error_kind`; `render`/`js_syntax` skip on `unconfigured`), execution (`selfaction.SelfActions` hands it back on its `ToolResult`). `home/client.HomeUnavailable(message, *, error_kind=...)` and `connector.BudgetExhausted.error_kind = "refused"` carry a kind for `error_kind_of`.

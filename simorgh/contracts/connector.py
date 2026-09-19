@@ -127,6 +127,9 @@ class BudgetExhausted(RuntimeError):
     next call is allowed -- a refusal that names its own end is one a
     caller can schedule around; a bare 429 is one it retries against."""
 
+    #: `protocols.ERROR_KINDS`: a spent budget is a limit, not a fault.
+    error_kind = "refused"
+
     def __init__(self, name: str, *, limit: int, window_s: float, retry_after_s: float) -> None:
         self.name, self.limit, self.window_s, self.retry_after_s = name, limit, window_s, retry_after_s
         super().__init__(

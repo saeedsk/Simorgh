@@ -16,6 +16,22 @@
         "null"
       ]
     },
+    "error_kind": {
+      "anyOf": [
+        {
+          "enum": [
+            "refused",
+            "unconfigured",
+            "transient",
+            "failed"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "metadata_ref": {
       "type": [
         "string",

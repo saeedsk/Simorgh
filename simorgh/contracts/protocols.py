@@ -278,6 +278,34 @@ class ToolContext:
     root: Path | None = None
 
 
+#: What kind of failure a tool result is (stage 2 item 8, T9). Consumers
+#: read this instead of sniffing the error text for "refused:".
+#:   refused       -- the tool declined this call: a bad or unsafe argument,
+#:                    a limit or budget, a name that matches nothing. Asking
+#:                    again the same way will be refused the same way.
+#:   unconfigured  -- the capability is not set up here: a missing binary,
+#:                    package, credential, config key or bus.
+#:   transient     -- a timeout or a network/device that did not answer;
+#:                    the same call may work later.
+#:   failed        -- anything else: the tool tried and it did not work.
+ERROR_KINDS = ("refused", "unconfigured", "transient", "failed")
+
+
+class ToolUnconfigured(RuntimeError):
+    """Raised inside a tool when its capability is not set up (a missing
+    package, credential or device setup), so a catch-all around the call
+    can still report `error_kind="unconfigured"` via `error_kind_of`."""
+
+    error_kind = "unconfigured"
+
+
+def error_kind_of(exc: BaseException, default: str = "failed") -> str:
+    """The error kind an exception carries (an `error_kind` attribute, as
+    `ToolUnconfigured` and the connector exceptions set), else `default`."""
+    kind = getattr(exc, "error_kind", None)
+    return kind if kind in ERROR_KINDS else default
+
+
 @dataclass(frozen=True)
 class ToolResult:
     ok: bool
@@ -286,6 +314,30 @@ class ToolResult:
     error: str | None = None
     side_effects: tuple[str, ...] = ()
     metadata: dict = field(default_factory=dict)
+    # One of ERROR_KINDS when ok is False; "" when ok. A failed result
+    # that leaves it empty is reported as "failed" by Execution.
+    error_kind: str = ""
+
+    @classmethod
+    def refused(cls, error: str, **kw: Any) -> "ToolResult":
+        return cls(ok=False, error=error, error_kind="refused", **kw)
+
+    @classmethod
+    def unconfigured(cls, error: str, **kw: Any) -> "ToolResult":
+        return cls(ok=False, error=error, error_kind="unconfigured", **kw)
+
+    @classmethod
+    def transient(cls, error: str, **kw: Any) -> "ToolResult":
+        return cls(ok=False, error=error, error_kind="transient", **kw)
+
+    @classmethod
+    def failed(cls, error: str, **kw: Any) -> "ToolResult":
+        return cls(ok=False, error=error, error_kind="failed", **kw)
+
+    @classmethod
+    def from_exception(cls, exc: BaseException, error: str, *, default: str = "failed", **kw: Any) -> "ToolResult":
+        """A failed result whose kind comes from the exception (`error_kind_of`)."""
+        return cls(ok=False, error=error, error_kind=error_kind_of(exc, default), **kw)
 
 
 @runtime_checkable
@@ -300,7 +352,8 @@ class Tool(Protocol):
 
 
 __all__ = [
-    "Bus", "Clock", "Context", "EventHandler", "Handler", "Health", "Ledger", "Logger",
+    "Bus", "Clock", "Context", "ERROR_KINDS", "EventHandler", "Handler", "Health", "Ledger", "Logger",
     "NULL_TELEMETRY", "NullSpan", "NullTelemetry", "Provider", "ProviderResponse", "Span",
-    "Subscription", "Subsystem", "Telemetry", "Tool", "ToolContext", "ToolResult",
+    "Subscription", "Subsystem", "Telemetry", "Tool", "ToolContext", "ToolResult", "ToolUnconfigured",
+    "error_kind_of",
 ]

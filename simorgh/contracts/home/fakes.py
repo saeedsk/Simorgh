@@ -130,7 +130,7 @@ class FakeHomeAssistant:
         self._require()
         domain, _, name = service.partition(".")
         if name not in self._services.get(domain, set()):
-            raise HomeUnavailable(f"Home Assistant has no service {service!r}")
+            raise HomeUnavailable(f"Home Assistant has no service {service!r}", error_kind="refused")
         self.calls.append((service, tuple(entity_ids), dict(data or {})))
         before = {e: self._entities[e] for e in entity_ids if e in self._entities}
         if self.dry_run:
@@ -154,7 +154,7 @@ class FakeHomeAssistant:
     def _require(self) -> None:
         if not self._configured:
             raise HomeUnavailable("Home Assistant is not configured: set HOME_ASSISTANT_URL "
-                                  "and HOME_ASSISTANT_TOKEN")
+                                  "and HOME_ASSISTANT_TOKEN", error_kind="unconfigured")
 
 
 def _apply(entity: Entity, service: str, data: dict) -> Entity:

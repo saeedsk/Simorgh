@@ -9,6 +9,7 @@ from ..registry import define
 from .. import topics as t
 
 REVERSIBILITY = Enum("read_only", "reversible", "irreversible")
+ERROR_KIND = Enum("refused", "unconfigured", "transient", "failed")
 DENY_LAYER = Enum("policy", "denylist", "immunity", "budget", "paused", "scope", "classifier", "token")
 
 ActionProposed = define(t.ACTION_PROPOSED, [
@@ -68,4 +69,9 @@ ActionResult = define(t.ACTION_RESULT, [
     # that -- so a consumer such as the dashboard's activity feed could
     # not tell a camera's WebRTC signalling from a real step.
     O("tool", Str),
+    # What kind of failure `error` is (`protocols.ERROR_KINDS`), so a
+    # consumer never has to sniff the text for "refused:" (stage 2 item
+    # 8). Set by Execution on every result with ok=false since
+    # 2026-09-19; absent on older records and on ok results.
+    O("error_kind", ERROR_KIND),
 ])
