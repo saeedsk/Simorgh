@@ -4,118 +4,90 @@ One-line status: layer 5 · 11,279 lines · 45 test files · lock: `voice` in do
 
 ## Purpose
 
-TODO: 3-6 sentences: what this module owns, what it must never do, the one design decision that shapes it.
+Voice owns the spoken channel on this laptop: microphone frames, endpointing and turn-taking, speech-to-text, who is speaking (the speaker book, diarization, enrolment), the spoken-response planner, text-to-speech engines and interruptible playback. It decides nothing about content: a spoken turn becomes `percept.text.received{channel: "voice"}` and rides the same Orchestration and Cognition path as typed text, and the answer comes back as `turn.completed` keyed by the percept's `session_id` (`pipeline.py:348-367`). It must never call the model or a tool itself, never publish `system.restart` (a spoken restart goes through Interface as `ui.command.request`, `session.py` `_restart`), and never fail boot for want of audio: every engine is optional, probed at boot, opened on first use and refused by name when missing (`service.py` docstring). The shaping decision: `VoiceSession` (`session.py`) is a streaming state machine whose floor changes are decided only in `turns.py`, and turns may overlap by design, so any fact about one turn belongs on that turn's record (the `TurnClock`, the per-turn facts dict), never in a session-wide attribute read across an await.
 
 ## Files
 
 | File | For |
 |---|---|
-| `simorgh/voice/__init__.py` | TODO |
-| `simorgh/voice/aec.py` | TODO |
-| `simorgh/voice/api.py` | TODO |
-| `simorgh/voice/audio.py` | TODO |
-| `simorgh/voice/backchannel.py` | TODO |
-| `simorgh/voice/bench.py` | TODO |
-| `simorgh/voice/commands.py` | TODO |
-| `simorgh/voice/config.py` | TODO |
-| `simorgh/voice/delivery.py` | TODO |
-| `simorgh/voice/diarize.py` | TODO |
-| `simorgh/voice/fakes.py` | TODO |
-| `simorgh/voice/health.py` | TODO |
-| `simorgh/voice/introduce.py` | TODO |
-| `simorgh/voice/lang.py` | TODO |
-| `simorgh/voice/pipeline.py` | TODO |
-| `simorgh/voice/planner.py` | TODO |
-| `simorgh/voice/playback.py` | TODO |
-| `simorgh/voice/pronounce.py` | TODO |
-| `simorgh/voice/repeat.py` | TODO |
-| `simorgh/voice/resample.py` | TODO |
-| `simorgh/voice/service.py` | TODO |
-| `simorgh/voice/session.py` | TODO |
-| `simorgh/voice/settings.py` | TODO |
-| `simorgh/voice/speakers.py` | TODO |
-| `simorgh/voice/stt/__init__.py` | TODO |
-| `simorgh/voice/stt/faster_whisper.py` | TODO |
-| `simorgh/voice/stt/sherpa_stream.py` | TODO |
-| `simorgh/voice/stt/streaming.py` | TODO |
-| `simorgh/voice/stt/whisper_cli.py` | TODO |
-| `simorgh/voice/stt/whisper_server.py` | TODO |
-| `simorgh/voice/tts/__init__.py` | TODO |
-| `simorgh/voice/tts/chatterbox.py` | TODO |
-| `simorgh/voice/tts/kokoro.py` | TODO |
-| `simorgh/voice/tts/lanes.py` | TODO |
-| `simorgh/voice/tts/miso.py` | TODO |
-| `simorgh/voice/tts/piper.py` | TODO |
-| `simorgh/voice/tts/say.py` | TODO |
-| `simorgh/voice/tts/servers/__init__.py` | TODO |
-| `simorgh/voice/tts/servers/chatterbox_server.py` | TODO |
-| `simorgh/voice/tts/servers/miso_server.py` | TODO |
-| `simorgh/voice/tts/servers/styletts2_server.py` | TODO |
-| `simorgh/voice/tts/streaming.py` | TODO |
-| `simorgh/voice/tts/styletts2.py` | TODO |
-| `simorgh/voice/tts/subproc.py` | TODO |
-| `simorgh/voice/turns.py` | TODO |
-| `simorgh/voice/vad.py` | TODO |
+| `simorgh/voice/__init__.py` | Package docstring; exports nothing but `Service` via the Kernel |
+| `simorgh/voice/service.py` | The `Service`: bus request handlers, engine opening, on/off, probes, `speak_replies` |
+| `simorgh/voice/session.py` | `VoiceSession`: the live streaming conversation loop, per-turn clocks, speaker id, kept-audio pruning |
+| `simorgh/voice/turns.py` | `TurnManager`: who has the floor (idle, listening, user_speaking, thinking, agent_speaking) |
+| `simorgh/voice/pipeline.py` | Older capture-then-answer loop; still the bus seam (`ask`, `_publish`, `voice:turns` record) the session reuses |
+| `simorgh/voice/api.py` | Data shapes (`Audio`, `Utterance`, `VoiceTurn`, `VoiceState`, ...) and engine protocols |
+| `simorgh/voice/config.py` | `[voice]` dataclass and `wants_listening` |
+| `simorgh/voice/settings.py` | `voice set`: the safe subset of keys, validated and persisted |
+| `simorgh/voice/vad.py` | Endpointing, frame VAD, echo tracker, barge-in level gate |
+| `simorgh/voice/aec.py` | NLMS echo canceller (constructed only on the `Pipeline` path, V7) |
+| `simorgh/voice/audio.py` | Microphone and speaker backends (sounddevice, ffmpeg, afplay), WAV helpers |
+| `simorgh/voice/playback.py` | `StreamingPlayer`: interruptible chunked playback under one speech lock |
+| `simorgh/voice/planner.py` | Spoken-response planner: speakable text, chunking, connectors, leaked-marker removal |
+| `simorgh/voice/delivery.py` | Pace, loudness and pauses chosen from the situation and mood |
+| `simorgh/voice/backchannel.py` | "aha"/"let me check" sounds; addressed-to-Sim and quiet-reply detection |
+| `simorgh/voice/commands.py` | "stop", "be quiet", "voice off", "restart" handled without the model |
+| `simorgh/voice/speakers.py` | Speaker embeddings and the household voice book (identify, enrol, refine) |
+| `simorgh/voice/diarize.py` | Who said which words within one turn |
+| `simorgh/voice/introduce.py` | The meet-a-new-voice conversation and "learn X's voice" |
+| `simorgh/voice/pronounce.py` | Name pronunciations (IPA or respelling) per engine |
+| `simorgh/voice/repeat.py` | Detects the same question asked again |
+| `simorgh/voice/lang.py` | Reply language from script, for engine routing |
+| `simorgh/voice/resample.py` | Resampling for the echo reference |
+| `simorgh/voice/health.py` | Machine notes (battery, throttling) for `voice status` |
+| `simorgh/voice/bench.py` | `voice bench` measurements |
+| `simorgh/voice/fakes.py` | Deterministic fake engines and devices for tests and `stt = "fake"` |
+| `simorgh/voice/stt/` (`__init__`, `faster_whisper`, `whisper_cli`, `whisper_server`, `sherpa_stream`, `streaming`) | Speech-to-text engines, `open_recogniser`, and incremental partials over a whole-utterance recogniser |
+| `simorgh/voice/tts/` (`__init__`, `kokoro`, `piper`, `say`, `chatterbox`, `miso`, `styletts2`, `lanes`, `streaming`, `subproc`) | Text-to-speech engines, per-language `open_synthesiser`, quick/expressive lanes, streaming synthesis, subprocess engine protocol |
+| `simorgh/voice/tts/servers/` (`chatterbox_server`, `miso_server`, `styletts2_server`) | Standalone line servers run in each engine's own venv; no simorgh imports |
 
 ## Consumes
 
+Subscriptions are exactly `Service.consumes` (`service.py:38-45`, pinned by `tests/simorgh/test_manifests_match_the_code.py`).
+
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | simorgh/voice/service.py | TODO |
-| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/voice/pipeline.py | TODO |
-| `task.failed` | `messages/task.py::TaskFailed` | simorgh/voice/pipeline.py | TODO |
-| `turn.completed` | `messages/task.py::TurnCompleted` | simorgh/voice/pipeline.py, simorgh/voice/service.py | TODO |
-| `ui.tv.state` | `messages/ui.py::TvState` | simorgh/voice/pipeline.py | TODO |
-| `voice.bench.reply` | `messages/voice.py::VoiceBenchReply` | simorgh/voice/service.py | TODO |
-| `voice.bench.request` | `messages/voice.py::VoiceBenchRequest` | simorgh/voice/service.py | TODO |
-| `voice.control.request` | `messages/voice.py::VoiceControlRequest` | simorgh/voice/service.py | TODO |
-| `voice.devices.reply` | `messages/voice.py::VoiceDevicesReply` | simorgh/voice/service.py | TODO |
-| `voice.devices.request` | `messages/voice.py::VoiceDevicesRequest` | simorgh/voice/service.py | TODO |
-| `voice.listen.reply` | `messages/voice.py::VoiceListenReply` | simorgh/voice/service.py | TODO |
-| `voice.listen.request` | `messages/voice.py::VoiceListenRequest` | simorgh/voice/service.py | TODO |
-| `voice.models.request` | `messages/voice.py::VoiceModelsRequest` | simorgh/voice/service.py | TODO |
-| `voice.speak.reply` | `messages/voice.py::VoiceSpeakReply` | simorgh/voice/service.py | TODO |
-| `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | simorgh/voice/service.py | TODO |
-| `voice.status.reply` | `messages/voice.py::VoiceStatusReply` | simorgh/voice/service.py | TODO |
-| `voice.status.request` | `messages/voice.py::VoiceStatusRequest` | simorgh/voice/service.py | TODO |
-| `voice.voices.reply` | `messages/voice.py::VoiceVoicesReply` | simorgh/voice/service.py | TODO |
-| `voice.voices.request` | `messages/voice.py::VoiceVoicesRequest` | simorgh/voice/service.py | TODO |
+| `voice.status.request` | `messages/voice.py::VoiceStatusRequest` | service.py:358 | Replies with `VoiceState` plus session state and metrics |
+| `voice.control.request` | `messages/voice.py::VoiceControlRequest` | service.py:361 | on/off/mute, `voice set`, enrol and people actions; refusals as error replies |
+| `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | service.py:618 | `voice test` / speak a text now |
+| `voice.listen.request` | `messages/voice.py::VoiceListenRequest` | service.py:649 | One transcription without asking Sim |
+| `voice.voices.request` | `messages/voice.py::VoiceVoicesRequest` | service.py:669 | Lists the synthesiser's voices |
+| `voice.devices.request` | `messages/voice.py::VoiceDevicesRequest` | service.py:682 | Lists audio devices |
+| `voice.models.request` | `messages/voice.py::VoiceModelsRequest` | service.py:740 | Locates or fetches a whisper model |
+| `voice.bench.request` | `messages/voice.py::VoiceBenchRequest` | service.py:600 | Runs `voice bench` |
+| `turn.completed` | `messages/task.py::TurnCompleted` | pipeline.py:229; service.py:696 | Resolves the pending spoken ask by `session_id`; with `speak_replies`, speaks replies to typed (`channel == "cli"`) turns |
+| `task.failed`, `task.blocked` | `messages/task.py` | pipeline.py:260 | Resolves a pending ask whose task id is its session id; a cancelled one is dropped silently |
+| `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | service.py:689 | Mood (valence, arousal) colours delivery |
+| `ui.tv.state` | `messages/ui.py::TvState` | pipeline.py:217 | Keeps what the TV is playing for the prompt's room line |
 
 ## Produces
 
+The publish direction is not pinned by the manifest test; `session.py` publishes through `Pipeline._publish`.
+
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | simorgh/voice/pipeline.py | TODO |
-| `task.cancel` | `messages/task.py::TaskCancel` | simorgh/voice/session.py | TODO |
-| `ui.command.request` | `messages/ui.py::UiCommandRequest` | simorgh/voice/session.py | TODO |
-| `ui.notice` | `messages/ui.py::UiNotice` | simorgh/voice/session.py | TODO |
-| `ui.tv.speech` | `messages/ui.py::TvSpeech` | simorgh/voice/session.py | TODO |
-| `voice.bench.reply` | `messages/voice.py::VoiceBenchReply` | simorgh/voice/service.py | TODO |
-| `voice.control.reply` | `messages/voice.py::VoiceControlReply` | simorgh/voice/service.py | TODO |
-| `voice.control.request` | `messages/voice.py::VoiceControlRequest` | simorgh/voice/session.py | TODO |
-| `voice.devices.reply` | `messages/voice.py::VoiceDevicesReply` | simorgh/voice/service.py | TODO |
-| `voice.listen.reply` | `messages/voice.py::VoiceListenReply` | simorgh/voice/service.py | TODO |
-| `voice.listening` | `messages/voice.py::VoiceListening` | simorgh/voice/pipeline.py, simorgh/voice/session.py | TODO |
-| `voice.models.reply` | `messages/voice.py::VoiceModelsReply` | simorgh/voice/service.py | TODO |
-| `voice.speak.reply` | `messages/voice.py::VoiceSpeakReply` | simorgh/voice/service.py | TODO |
-| `voice.spoken` | `messages/voice.py::VoiceSpoken` | simorgh/voice/pipeline.py, simorgh/voice/session.py | TODO |
-| `voice.status.reply` | `messages/voice.py::VoiceStatusReply` | simorgh/voice/service.py | TODO |
-| `voice.transcript` | `messages/voice.py::VoiceTranscript` | simorgh/voice/pipeline.py, simorgh/voice/session.py | TODO |
-| `voice.voices.reply` | `messages/voice.py::VoiceVoicesReply` | simorgh/voice/service.py | TODO |
+| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | pipeline.py:367 | Every spoken turn addressed to Sim: `channel="voice"`, `session_id`, `confidence`, `device`, and `speaker`, `speaker_relation`, `speaker_before`, `room` when known |
+| `voice.transcript` | `messages/voice.py::VoiceTranscript` | pipeline.py:306; session.py (partials, finals, asides) | Partial and final transcripts, echoes and not-for-Sim lines |
+| `voice.spoken` | `messages/voice.py::VoiceSpoken` | pipeline.py:418; session.py (many) | After each reply, aside, command or quiet outcome |
+| `voice.listening` | `messages/voice.py::VoiceListening` | pipeline.py:563; session.py:366 | Each floor-state change |
+| `task.cancel` | `messages/task.py::TaskCancel` | session.py:639 | A newer turn supersedes an older ask still thinking |
+| `ui.command.request` | `messages/ui.py::UiCommandRequest` | session.py `_restart` | "restart" said by a known voice under the loader |
+| `ui.notice` | `messages/ui.py::UiNotice` | session.py `_report_synthesis` | A voice fell back or a reply could not be synthesised |
+| `ui.tv.speech` | `messages/ui.py::TvSpeech` | session.py (end of file) | `output = "tv"`: each synthesised piece as a blob ref for the TV page |
+| `voice.control.request` | `messages/voice.py::VoiceControlRequest` | session.py (commands) | "voice off" / "mute" said aloud, handed to the Service |
+| `voice.*.reply` (status, control, speak, listen, voices, devices, models, bench) | `messages/voice.py` | service.py `_reply` | Reply to each request above, only when it has `reply_to` |
 
 ## Ledger streams
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `faster_whisper:{config.stt_model}` | simorgh/voice/stt/faster_whisper.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `voice:turns` | simorgh/voice/pipeline.py | simorgh/ledger/compaction.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `whisper_cli:{tag}` | simorgh/voice/stt/whisper_cli.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `whisper_server:{tag}` | simorgh/voice/stt/whisper_server.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `you:` | simorgh/voice/pipeline.py | simorgh/orchestration/scaffolds.py | see ledger/compaction.py DEFAULT_RETENTION |
+| `voice:turns` | pipeline.py:31 `TURNS_STREAM` (append in `_record`, when `keep_transcripts`) | ledger compaction; tools and findings read it for latency | 30d |
+| `capabilities` | service.py:36 (presence probes at boot) | orchestration (replay), execution | forever |
+
+Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the speaker book (`speakers_dir`), kept audio and transcripts (`audio_dir`, pruned by `keep_audio_days`/`keep_audio_max_mb`), the overheard store (`overheard_dir`, via `contracts/overheard.py`). The generated `faster_whisper:`, `whisper_cli:`, `whisper_server:` and `you:` rows were engine labels and prompt text, not streams.
 
 ## Config
 
-`[voice]` in simorgh.toml; dataclass in `simorgh/voice/config.py`.
+`[voice]` in simorgh.toml; dataclass in `simorgh/voice/config.py`. `voice set` persists the safe subset (`settings.py`); `_ENGINE_KEYS` reopen engines and `_SESSION_KEYS` rebuild the session (`service.py:67-70`).
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -143,10 +115,10 @@ TODO: 3-6 sentences: what this module owns, what it must never do, the one desig
 | `barge_in_calibrate_ms` | `1200` | yes |
 | `barge_in_ratio` | `2.8` | yes |
 | `barge_in_known_voice` | `False` | yes |
-| `aec` | `True` | yes |
-| `aec_taps` | `1024` | yes |
-| `aec_mu` | `0.3` | yes |
-| `aec_residual_threshold` | `0.02` | yes |
+| `aec` | `True` | yes (only by `Pipeline`'s capture path, which the live `VoiceSession` never runs: V7) |
+| `aec_taps` | `1024` | yes (Pipeline path only, V7) |
+| `aec_mu` | `0.3` | yes (Pipeline path only, V7) |
+| `aec_residual_threshold` | `0.02` | yes (Pipeline path only, V7) |
 | `volume` | `1.0` | yes |
 | `output` | `'laptop'` | yes |
 | `tv_audio_lag_s` | `2.5` | yes |
@@ -210,7 +182,9 @@ TODO: 3-6 sentences: what this module owns, what it must never do, the one desig
 | `expressive_warm_delay_s` | `90.0` | yes |
 | `expressive_lane` | `'auto'` | yes |
 | `expressive_min_chars` | `0` | yes |
-| `keep_audio` | `False` | yes |
+| `keep_audio` | `False` | yes (live config sets it true) |
+| `keep_audio_days` | `7.0` | yes (session.py `prune_kept_audio`; 0 disables) |
+| `keep_audio_max_mb` | `500.0` | yes (same) |
 | `audio_dir` | `'workspace/voice/audio'` | yes |
 | `keep_transcripts` | `True` | yes |
 | `device` | `'laptop'` | yes |
@@ -219,73 +193,62 @@ TODO: 3-6 sentences: what this module owns, what it must never do, the one desig
 | `speaker` | `'auto'` | yes |
 | `fake_transcript` | `'hello sim'` | yes |
 | `overheard_dir` | `'workspace/voice/overheard'` | yes |
-| `overheard_hours` | `48.0` | NO (declared, never read) |
+| `overheard_hours` | `48.0` | NO (declared, never read; only a comment in session.py names it, so the overheard store is not pruned by it) |
 
 ## Public Python surface
 
-TODO: the `Service` class; any `api.py` types other packages import via contracts; module-level singletons (risks).
+- `simorgh.voice.service.Service` (`service.py:135`): the Subsystem, built only by the Kernel (`kernel/registry.py:136`). Constructor takes an optional `Config` and injected `microphone`, `speaker`, `recogniser`, `synthesiser` (tests use `fakes.py`). No other package imports anything from `simorgh.voice`.
+- `api.py` types and protocols are internal to the package; the wire shapes are `simorgh/contracts/messages/voice.py`, `percept.py` and `task.py`.
+- From `simorgh.contracts` it uses `topics`, `envelope.Event`, `protocols.Context/Health`, `household.HOUSEHOLD` (names and relations), `overheard` (the room-text store Execution reads), `tone`, `tidy`, and `settings` for persisting `voice set`.
+- Module-level mutable state (risks): `health._cache` (a 60 s cache of `pmset` output, harmless). The real shared state is per-instance but process-wide in effect: one `Pipeline` and one `VoiceSession` per Service, holding the speech lock, `_pending` asks and the speaker book; `service.py` reaches into `Pipeline` private attributes (`_mic`, `_stt`, `_tts`, `_pending`), and `session.py` calls `Pipeline._publish` ~40 times (V7).
 
 ## Invariants
 
-TODO: the rules that must hold, as testable sentences; include contracts/topics.py policy entries naming this module.
+1. A spoken turn reaches Sim only as `percept.text.received` with `channel == "voice"`; Voice never publishes `cognition.think` or `action.proposed`.
+2. A reply is matched to its ask by `session_id` on `turn.completed` (or `task_id` on `task.failed|blocked`); a reply whose `channel` is not `cli` is never spoken by `speak_replies`, and nothing is spoken after `voice off` (`service.py:696-726`).
+3. Voice never publishes `system.pause|stop|resume|restart|reload` (`PUBLISH_ONLY_BY`, `contracts/topics.py:293-303`); a spoken restart is `ui.command.request{"line": "restart"}` and only for a recognised voice under the loader (`session.py` `_restart`).
+4. Per-turn facts live on the turn's own record, never on the session: the `TurnClock` for timings and text, and the per-turn facts dict keyed by turn id for speech seconds, skip reason and PCM (`session.py` `_facts`/`_identify`); a value set for turn N is never read for turn N+1 after an await (V8, the 2026-09-18 lesson).
+5. A superseded quiet turn does not move the floor: `_stay_quiet` returns to LISTENING only when the quiet turn is `TurnManager.asked_turn` (V1, commit 1f68f37).
+6. Only one voice speaks at a time: every playback takes the one speech lock, and the echo tracker is told when Sim is speaking (`session.py` `say`).
+7. Spoken commands (stop, quiet, voice off, restart) are handled locally and never sent to the model (`commands.py`).
+8. Boot never fails for want of audio; a missing engine is reported by name with what to install, and presence probes are appended to `capabilities` at boot.
+9. Kept audio is bounded: after each kept turn, files older than `keep_audio_days` or beyond `keep_audio_max_mb` are deleted with their transcripts (`session.py` `prune_kept_audio`).
+10. With the defaults, an unknown voice is never asked for its name unprompted (`introduce_after_turns = 0`), and a voice Sim cannot place is not answered unless it says Sim's name or answers what Sim just asked (`unplaced_needs_name`, `config.py:172-178`).
 
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract voice`.
 
-- `tests/simorgh/voice/test_a_pause_in_a_conversation_is_not_quiet.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_a_setting_that_rebuilds_the_engines.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_a_slow_engine_is_waited_for.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_a_voice_is_enrolled_once.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_aec.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_an_engine_is_asked_about_itself.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_an_engine_may_speak_before_it_hands_over.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_an_engine_starts_clean.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_backchannel.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_barge_in.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_commands.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_delivery.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_diarize.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_echo_ring.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_farsi.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_health.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_introduce.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_lanes.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_leaked_marker.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_misheard_name.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_planner.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_playback_stall.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_pronounce.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_refine_bar.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_repeat.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_session.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_settings.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_settings_overview.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_sherpa_stream.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_speakable_paths.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_speaker_session.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_speakers.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_speech_lane.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_spoken_restart.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_streaming_tts.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_styletts2_is_expressive_and_quick.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_subproc_tts.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_the_engine_choice_survives_a_restart.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_the_tokenizer_is_not_gated.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_turns.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_two_voices_in_one_turn.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_unplaced_conversation.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_voice.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_whisper_models.py` -- TODO: what it pins
-- `tests/simorgh/voice/test_whisper_server.py` -- TODO: what it pins
+- `tests/simorgh/voice/test_voice.py` -- the Service on fakes over the bus: status when off, a spoken turn becomes a percept and its answer is spoken, `speak_replies` only for typed turns, probes reach `capabilities`.
+- `tests/simorgh/voice/test_session.py` -- the live `VoiceSession` end to end: consecutive turns, barge-in, stale replies dropped, self-echo ignored, the superseded quiet turn (V1).
+- `tests/simorgh/voice/test_turns.py` -- `TurnManager` transitions from events alone, end of turn, barge-in, monotonic turn ids.
+- `tests/simorgh/voice/test_speaker_session.py` -- the speaker name rides on the transcript and into the ask.
+- `tests/simorgh/voice/test_spoken_restart.py` -- restart is published as `ui.command.request`, only for a known voice.
+- `tests/simorgh/voice/test_speech_lane.py` -- one voice at a time through the speech lock.
+- `tests/simorgh/voice/test_settings.py` -- `voice set` accepts only safe keys and checked values and persists them.
+- `tests/simorgh/voice/test_kept_audio_retention.py` -- kept recordings are pruned by age and size (V11).
 
 ## Known issues (2026-09-18 evaluation)
 
-TODO: catalogue ids from docs/reviews/2026-09-18/architecture-evaluation.md section 13 that name this module.
+- V1: a superseded quiet turn dropped the newer turn's answer. Fixed 2026-09-18 (commit 1f68f37).
+- V3: four session models and no identity contract; only Voice fills `speaker` on the percept. Open (Interface side; stage 4 item 3, stage 6 item 4).
+- V7: `VoiceSession` reaches into the legacy `Pipeline` ~50 times; the NLMS echo canceller is built only on `Pipeline`'s path, so `aec` is dead in the live loop; barge-in is off in the live config. Open (stage 0 item 28).
+- V8: `_last_speech_s`, `_last_pcm`, `_last_skip` were session singletons read across awaits. Fixed 2026-09-19 (`68e5ea4`): a per-turn facts dict keyed by turn id; `test_session.py::PerTurnFactsBelongToTheirTurn`.
+- V10: the language a turn was heard in is recorded on the turn and `voice:turns` but absent from the percept contract. Open.
+- V11: kept family audio had no retention (6.4 GB). Fixed 2026-09-18 (commit eb207dc).
+- B15: `getattr(config, ...)` with fallbacks at `session.py` (e.g. `overheard_dir`). Open (stage 0 item 26).
+- P6: no regression number on voice latency is compared run to run, although `voice:turns` carries per-turn metrics. Open (stage 1, stage 4 evals).
+- `overheard_hours` is declared and never read (see Config).
 
 ## Planned changes (roadmap)
 
-TODO: stage numbers from docs/plan/ and what changes here.
+- Stage 0 item 28 (rest): the echo canceller wired into `VoiceSession` or deleted (V7). Item 26's ratchet: replace `getattr(config, ...)` reads with attribute reads when touching a file.
+- Stage 1: trace ids per spoken turn; spans around STT, speaker id, TTS synthesis and playback.
+- Stage 3 (streaming): speak sentence by sentence from `session.delta` into `StreamingSynthesiser`; a spoken filler on slow tools; streaming STT (`stt/sherpa_stream.py`) primary with whisper rescoring; per-stage latency budgets with breach spans.
+- Stage 4: one persistent session per speaker instead of a uuid per ask.
+- Stage 5: speculative recall issued on the STT partial.
+- Stage 6: the People model (`contracts/people.py`) replaces the speaker book's identity role; an `initiative/` module absorbs backchannel greetings and announcements.
+- Stage 9: engines out of process only if stage-3 spans show an engine stalling the loop.
 
 ## Working on this module
 

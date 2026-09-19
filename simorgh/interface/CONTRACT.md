@@ -4,153 +4,106 @@ One-line status: layer 5 · 10,788 lines · 31 test files · lock: `interface` i
 
 ## Purpose
 
-TODO: 3-6 sentences: what this module owns, what it must never do, the one design decision that shapes it.
+Interface owns every typed or remote surface a person uses: the terminal REPL/TUI and its rendering, the operator command grammar and dispatch (`status`, `tasks`, `tool`, `voice ...`, `mcp`, `skills`, `restart`, ...), the local HTTP server (chat, dashboard, TV page, phone remote, webhooks), and the Telegram and WhatsApp channels. A conversational line becomes `percept.text.received` and the reply comes back as `turn.completed` keyed by `session_id`; Interface never calls a model and never runs a tool except by publishing `action.proposed` for Guardian to decide (`dispatch.py::_run_tool`). It is one of the few publishers allowed to pause, stop, resume, restart and reload the system (`PUBLISH_ONLY_BY`), so everything that reaches `dispatch` from outside a person's keyboard (the model's `sim_command` via `ui.command.request`, the HTTP routes, the channels) is a trust boundary. The shaping decision: one `dispatch()` function serves every surface, so a command is implemented once and reached from the REPL, `sim_command`, the dashboard and voice alike (S13 is the cost of that reach).
 
 ## Files
 
 | File | For |
 |---|---|
-| `simorgh/interface/__init__.py` | TODO |
-| `simorgh/interface/activity.py` | TODO |
-| `simorgh/interface/api.py` | TODO |
-| `simorgh/interface/benchmarkchart.py` | TODO |
-| `simorgh/interface/benchmarkview.py` | TODO |
-| `simorgh/interface/config.py` | TODO |
-| `simorgh/interface/dashfeeds.py` | TODO |
-| `simorgh/interface/dispatch.py` | TODO |
-| `simorgh/interface/httpapi.py` | TODO |
-| `simorgh/interface/live_status.py` | TODO |
-| `simorgh/interface/panel.py` | TODO |
-| `simorgh/interface/parser.py` | TODO |
-| `simorgh/interface/render.py` | TODO |
-| `simorgh/interface/service.py` | TODO |
-| `simorgh/interface/splash_art.py` | TODO |
-| `simorgh/interface/telegram.py` | TODO |
-| `simorgh/interface/tui.py` | TODO |
-| `simorgh/interface/vitals.py` | TODO |
-| `simorgh/interface/voiceview.py` | TODO |
-| `simorgh/interface/whatsapp.py` | TODO |
+| `simorgh/interface/__init__.py` | Empty package marker |
+| `simorgh/interface/api.py` | Re-exports `Command`, `parse`, `VitalsCache`, `VitalsSnapshot` |
+| `simorgh/interface/service.py` | The `Service`: subscriptions, REPL/TUI loop, chat turns, prompts, narration, HTTP and channel startup, `ui.command.request` |
+| `simorgh/interface/dispatch.py` | Every operator command: task, system, benchmark, voice, tool, mcp, skills, schedule, config, alerts |
+| `simorgh/interface/parser.py` | Command grammar, the one command table, autocorrect |
+| `simorgh/interface/httpapi.py` | Stdlib HTTP server: routes, token boundary, chat, TV and dashboard APIs, webhooks, camera media |
+| `simorgh/interface/dashfeeds.py` | Dashboard collector: polls weather, markets, news and other web feeds; lists camera stills and relays |
+| `simorgh/interface/telegram.py` | Telegram long-poll channel with an allow-list |
+| `simorgh/interface/whatsapp.py` | WhatsApp Cloud API webhook channel: signature check and allow-list |
+| `simorgh/interface/tui.py` | prompt_toolkit prompt, completion, key bindings |
+| `simorgh/interface/panel.py` | The Claude-Code-shaped screen layout (footer, live line, status rows) |
+| `simorgh/interface/render.py` | Console styling, width-aware lines, status and domain panels |
+| `simorgh/interface/live_status.py` | Redraw-in-place status line |
+| `simorgh/interface/activity.py` | Task book and activity feed built from task events |
+| `simorgh/interface/vitals.py` | Local projection of mood and metrics for the footer |
+| `simorgh/interface/voiceview.py` | Rendering of `voice ...` replies |
+| `simorgh/interface/benchmarkview.py` | `benchmark` command parsing and rendering |
+| `simorgh/interface/benchmarkchart.py` | Unicode benchmark charts |
+| `simorgh/interface/splash_art.py` | Generated splash screens (do not edit by hand) |
+| `simorgh/interface/config.py` | `[interface]` dataclass |
+| `simorgh/interface/static/` | `dashboard.html`, `dash.html`, `tv.html`, `remote.html`, logo |
 
 ## Consumes
 
+Subscriptions are exactly `Service.consumes` (`service.py:111-131`, pinned by `tests/simorgh/test_manifests_match_the_code.py`), except where noted.
+
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `action.denied` | `messages/action.py::ActionDenied` | simorgh/interface/dispatch.py, simorgh/interface/httpapi.py, simorgh/interface/service.py | TODO |
-| `action.needs_human` | `messages/action.py::ActionNeedsHuman` | simorgh/interface/service.py | TODO |
-| `action.proposed` | `messages/action.py::ActionProposed` | simorgh/interface/dispatch.py | TODO |
-| `action.result` | `messages/action.py::ActionResult` | simorgh/interface/dispatch.py, simorgh/interface/httpapi.py | TODO |
-| `benchmark.progress` | `messages/benchmark.py::BenchmarkProgress` | simorgh/interface/service.py | TODO |
-| `cognition.provider.status` | `messages/cognition.py::CognitionProviderStatus` | simorgh/interface/service.py | TODO |
-| `guardian.posture.changed` | `messages/guardian.py::GuardianPostureChanged` | simorgh/interface/service.py | TODO |
-| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | simorgh/interface/httpapi.py | TODO |
-| `percept.time.scheduled` | `messages/percept.py::PerceptTimeScheduled` | simorgh/interface/service.py | TODO |
-| `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | simorgh/interface/service.py | TODO |
-| `system.health` | `messages/system.py::SystemHealth` | simorgh/interface/service.py | TODO |
-| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/interface/service.py | TODO |
-| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/interface/service.py | TODO |
-| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/interface/httpapi.py, simorgh/interface/service.py | TODO |
-| `task.cleared` | `messages/task.py::TaskCleared` | simorgh/interface/service.py | TODO |
-| `task.completed` | `messages/task.py::TaskCompleted` | simorgh/interface/httpapi.py, simorgh/interface/service.py | TODO |
-| `task.created` | `messages/task.py::TaskCreated` | simorgh/interface/service.py | TODO |
-| `task.failed` | `messages/task.py::TaskFailed` | simorgh/interface/httpapi.py, simorgh/interface/service.py | TODO |
-| `task.started` | `messages/task.py::TaskStarted` | simorgh/interface/httpapi.py, simorgh/interface/service.py | TODO |
-| `task.step` | `messages/task.py::TaskStep` | simorgh/interface/httpapi.py, simorgh/interface/service.py | TODO |
-| `turn.completed` | `messages/task.py::TurnCompleted` | simorgh/interface/httpapi.py, simorgh/interface/service.py, simorgh/interface/telegram.py, simorgh/interface/whatsapp.py | TODO |
-| `ui.command.request` | `messages/ui.py::UiCommandRequest` | simorgh/interface/service.py | TODO |
-| `ui.dash.key` | `messages/ui.py::UiDashKey` | simorgh/interface/httpapi.py | TODO |
-| `ui.dash.state` | `messages/ui.py::DashState` | simorgh/interface/httpapi.py | TODO |
-| `ui.notice` | `messages/ui.py::UiNotice` | simorgh/interface/service.py | TODO |
-| `ui.prompt` | `messages/ui.py::UiPrompt` | simorgh/interface/service.py | TODO |
-| `ui.tv.speech` | `messages/ui.py::TvSpeech` | simorgh/interface/httpapi.py | TODO |
-| `ui.tv.state` | `messages/ui.py::TvState` | simorgh/interface/httpapi.py | TODO |
-| `voice.listening` | `messages/voice.py::VoiceListening` | simorgh/interface/service.py | TODO |
-| `voice.spoken` | `messages/voice.py::VoiceSpoken` | simorgh/interface/service.py | TODO |
-| `voice.transcript` | `messages/voice.py::VoiceTranscript` | simorgh/interface/service.py | TODO |
+| `turn.completed` | `messages/task.py::TurnCompleted` | service.py:1511; httpapi.py:680; telegram.py:117; whatsapp.py:116 | Resolves the pending REPL, HTTP, Telegram or WhatsApp turn by `session_id`; feeds the activity view |
+| `task.created`, `task.started`, `task.step`, `task.completed`, `task.failed`, `task.blocked` | `messages/task.py` | service.py:1294; httpapi.py:695 | Narration, task book, footer; the dashboard's activity feed |
+| `task.cleared` | `messages/task.py::TaskCleared` | service.py:1026 | Drops cleared tasks from the book |
+| `ui.notice` | `messages/ui.py::UiNotice` | service.py:1165 | Prints a notice |
+| `ui.prompt` | `messages/ui.py::UiPrompt` | service.py:1195 | Shows a question; a typed matching option answers it; a watchdog answers the default at `timeout_s` |
+| `ui.command.request` | `messages/ui.py::UiCommandRequest` | service.py:780 | Runs one operator command for Sim (`sim_command`, spoken restart) through `parse` + `dispatch`; refuses `!` |
+| `action.needs_human` | `messages/action.py::ActionNeedsHuman` | service.py:1236 | Prints the escalation |
+| `action.denied`, `action.result` | `messages/action.py` | service.py:1246; httpapi.py:695; dispatch.py:1330 | Prints denials; dashboard activity; transient wait for a `tool` command's own action |
+| `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | service.py:1250 | Mood into vitals |
+| `system.state.changed` | `messages/system.py::SystemStateChanged` | service.py:1253 | Tracks paused/stopping so chat is refused instead of hanging |
+| `system.metrics` | `messages/system.py::SystemMetrics` | service.py:1269 | Vitals |
+| `system.health` | `messages/system.py::SystemHealth` | declared only | Nothing subscribes (see Known issues) |
+| `guardian.posture.changed` | `messages/guardian.py::GuardianPostureChanged` | service.py:1272 | Posture in the footer |
+| `cognition.provider.status` | `messages/cognition.py::CognitionProviderStatus` | service.py:1263 | Provider line |
+| `percept.time.scheduled` | `messages/percept.py::PerceptTimeScheduled` | service.py:1184 | Prints a fired reminder |
+| `benchmark.progress` | `messages/benchmark.py::BenchmarkProgress` | service.py:1178 | Narrates scored cases |
+| `voice.transcript`, `voice.spoken`, `voice.listening` | `messages/voice.py` | service.py:1038, 1135, 1158 | Shows what was heard (one line rewritten in place), said, and the floor state |
+| `ui.tv.state`, `ui.tv.speech` | `messages/ui.py` | httpapi.py:681-682 | Serves the TV page's state and speech queue |
+| `ui.dash.state`, `ui.dash.key` | `messages/ui.py` | httpapi.py:683-684 | Dashboard state and remote keys for the page |
+| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | httpapi.py:695-698 | Dashboard activity feed. Subscribed in a loop, so the manifest test cannot see it; missing from `Service.consumes` |
+
+Replies received by request/reply: `task.list.reply`, `task.create.reply`, `system.status.reply`, `guardian.posture.reply`, `benchmark.*.reply`, `voice.*.reply`, `world.env.query.reply`, `curiosity.interest.list.reply`.
 
 ## Produces
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `action.proposed` | `messages/action.py::ActionProposed` | simorgh/interface/dispatch.py | TODO |
-| `benchmark.history.request` | `messages/benchmark.py::BenchmarkHistoryRequest` | simorgh/interface/dispatch.py, simorgh/interface/httpapi.py, simorgh/interface/service.py | TODO |
-| `benchmark.load.request` | `messages/benchmark.py::BenchmarkLoadRequest` | simorgh/interface/dispatch.py, simorgh/interface/service.py | TODO |
-| `benchmark.progress` | `messages/benchmark.py::BenchmarkProgress` | simorgh/interface/service.py | TODO |
-| `benchmark.run.request` | `messages/benchmark.py::BenchmarkRunRequest` | simorgh/interface/dispatch.py, simorgh/interface/service.py | TODO |
-| `benchmark.stop.request` | `messages/benchmark.py::BenchmarkStopRequest` | simorgh/interface/dispatch.py, simorgh/interface/service.py | TODO |
-| `benchmark.suites.request` | `messages/benchmark.py::BenchmarkSuitesRequest` | simorgh/interface/dispatch.py, simorgh/interface/service.py | TODO |
-| `curiosity.interest.add` | `messages/curiosity.py::CuriosityInterestAdd` | simorgh/interface/dispatch.py | TODO |
-| `curiosity.interest.list.request` | `messages/curiosity.py::CuriosityInterestListRequest` | simorgh/interface/dispatch.py | TODO |
-| `guardian.posture.request` | `messages/guardian.py::GuardianPostureRequest` | simorgh/interface/service.py | TODO |
-| `intent.goal.stated` | `messages/intent.py::IntentGoalStated` | simorgh/interface/service.py | TODO |
-| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | simorgh/interface/httpapi.py, simorgh/interface/service.py, simorgh/interface/telegram.py, simorgh/interface/whatsapp.py | TODO |
-| `percept.time.scheduled` | `messages/percept.py::PerceptTimeScheduled` | simorgh/interface/service.py | TODO |
-| `system.health` | `messages/system.py::SystemHealth` | simorgh/interface/service.py | TODO |
-| `system.pause` | `messages/system.py::SystemPause` | simorgh/interface/dispatch.py, simorgh/interface/service.py | TODO |
-| `system.restart` | `messages/system.py::SystemRestart` | simorgh/interface/dispatch.py, simorgh/interface/service.py | TODO |
-| `system.resume` | `messages/system.py::SystemResume` | simorgh/interface/dispatch.py, simorgh/interface/service.py | TODO |
-| `system.schedule.add` | `messages/system.py::SystemScheduleAdd` | simorgh/interface/dispatch.py | TODO |
-| `system.schedule.cancel` | `messages/system.py::SystemScheduleCancel` | simorgh/interface/dispatch.py | TODO |
-| `system.status.request` | `messages/system.py::SystemStatusRequest` | simorgh/interface/dispatch.py, simorgh/interface/httpapi.py | TODO |
-| `system.stop` | `messages/system.py::SystemStop` | simorgh/interface/dispatch.py, simorgh/interface/service.py | TODO |
-| `system.tick.idle` | `messages/system.py::SystemTickIdle` | simorgh/interface/dispatch.py | TODO |
-| `task.cancel` | `messages/task.py::TaskCancel` | simorgh/interface/dispatch.py | TODO |
-| `task.clear.request` | `messages/task.py::TaskClearRequest` | simorgh/interface/dispatch.py | TODO |
-| `task.create` | `messages/task.py::TaskCreate` | simorgh/interface/dispatch.py | TODO |
-| `task.list.request` | `messages/task.py::TaskListRequest` | simorgh/interface/dispatch.py, simorgh/interface/service.py | TODO |
-| `task.work_next.request` | `messages/task.py::TaskWorkNextRequest` | simorgh/interface/dispatch.py | TODO |
-| `ui.command.reply` | `messages/ui.py::UiCommandReply` | simorgh/interface/service.py | TODO |
-| `ui.dash.state` | `messages/ui.py::DashState` | simorgh/interface/httpapi.py | TODO |
-| `ui.hook.received` | `messages/ui.py::UiHookReceived` | simorgh/interface/httpapi.py | TODO |
-| `ui.prompt.answered` | `messages/ui.py::UiPromptAnswered` | simorgh/interface/service.py | TODO |
-| `voice.bench.request` | `messages/voice.py::VoiceBenchRequest` | simorgh/interface/dispatch.py | TODO |
-| `voice.control.request` | `messages/voice.py::VoiceControlRequest` | simorgh/interface/dispatch.py | TODO |
-| `voice.devices.request` | `messages/voice.py::VoiceDevicesRequest` | simorgh/interface/dispatch.py | TODO |
-| `voice.listen.request` | `messages/voice.py::VoiceListenRequest` | simorgh/interface/dispatch.py | TODO |
-| `voice.models.request` | `messages/voice.py::VoiceModelsRequest` | simorgh/interface/dispatch.py | TODO |
-| `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | simorgh/interface/dispatch.py | TODO |
-| `voice.status.request` | `messages/voice.py::VoiceStatusRequest` | simorgh/interface/dispatch.py | TODO |
-| `voice.voices.request` | `messages/voice.py::VoiceVoicesRequest` | simorgh/interface/dispatch.py | TODO |
-| `world.env.query` | `messages/world.py::WorldEnvQuery` | simorgh/interface/dispatch.py | TODO |
+| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | service.py:967; httpapi.py:1153; telegram.py:207; whatsapp.py:203 | A chat line: `channel` `cli`, `http`, `telegram` or `whatsapp`; a fresh uuid per CLI line, client-chosen over HTTP, one per chat in memory for Telegram and WhatsApp |
+| `system.pause`, `system.stop`, `system.resume`, `system.restart` | `messages/system.py` | dispatch.py:193-235, 345-349; service.py:669-695 | Operator commands, Ctrl-C (pause), REPL exit (stop), `restart` (typed, `sim_command` or spoken) |
+| `action.proposed` | `messages/action.py::ActionProposed` | dispatch.py:1333 | The `tool` command and dashboard page actions (`cam_stream`, `cast_play`, `ring_live`) via `_run_tool`; `proposed_by = interface:<session>` |
+| `task.create`, `task.cancel`, `task.list.request`, `task.clear.request`, `task.work_next.request` | `messages/task.py` | dispatch.py | Task commands (`research`, `patch`, `plan`, `cancel`, `tasks`, `clear`, `next`) |
+| `ui.command.reply` | `messages/ui.py::UiCommandReply` | service.py:799-803 | Reply to every `ui.command.request` |
+| `ui.prompt.answered` | `messages/ui.py::UiPromptAnswered` | service.py:1231 | A prompt answered by the person or by the watchdog default |
+| `ui.dash.state` | `messages/ui.py::DashState` | httpapi.py:341 | `POST /api/dash/state` (phone remote) |
+| `ui.hook.received` | `messages/ui.py::UiHookReceived` | httpapi.py:504 | `POST /api/hooks/<name>` |
+| `guardian.posture.request` | `messages/guardian.py` | service.py:1288 | Seeding the footer at start |
+| `system.status.request` | `messages/system.py` | dispatch.py; httpapi.py:1028 | `status` and `/api/status` |
+| `system.schedule.add`, `system.schedule.cancel`, `system.tick.idle` | `messages/system.py` | dispatch.py:749, 814, 353 | `schedule`, `remind`, `idle` commands |
+| `benchmark.run.request`, `.history`, `.suites`, `.load`, `.stop` | `messages/benchmark.py` | dispatch.py; httpapi.py:1013 | `benchmark` command and `/api/benchmarks` |
+| `voice.status|control|speak|listen|voices|devices|models|bench.request` | `messages/voice.py` | dispatch.py | `voice ...` commands |
+| `curiosity.interest.add`, `curiosity.interest.list.request` | `messages/curiosity.py` | dispatch.py:366-368 | `interest` command |
+| `world.env.query` | `messages/world.py::WorldEnvQuery` | dispatch.py:664, 1652 | `status` and tool listing |
 
 ## Ledger streams
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `budget:` | simorgh/interface/render.py | simorgh/cognition/budget.py, simorgh/cognition/router.py, simorgh/execution/config.py, simorgh/execution/pim/connectors/caldav.py, simorgh/execution/pim/connectors/imap.py, simorgh/guardian/service.py, simorgh/ledger/compaction.py, simorgh/orchestration/api.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `caldav:` | simorgh/interface/dispatch.py | simorgh/execution/domainstatus.py, simorgh/execution/pim/connectors/caldav.py, simorgh/execution/pim/connectors/fakes.py, simorgh/kernel/cli.py, simorgh/kernel/secrets.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:exiting` | simorgh/interface/tui.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.breath.{shade}` | simorgh/interface/panel.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.command` | simorgh/interface/tui.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.flag` | simorgh/interface/tui.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.footer` | simorgh/interface/panel.py, simorgh/interface/tui.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.live` | simorgh/interface/panel.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.path` | simorgh/interface/tui.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.prompt` | simorgh/interface/tui.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.rule` | simorgh/interface/tui.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.status` | simorgh/interface/panel.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `class:sim.string` | simorgh/interface/tui.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `cli:{session_id}` | simorgh/interface/dispatch.py | simorgh/voice/config.py, simorgh/voice/stt/whisper_cli.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `config:effective` | simorgh/interface/dispatch.py | simorgh/kernel/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `connector:` | simorgh/interface/dispatch.py | simorgh/contracts/connector.py, simorgh/execution/capabilities.py, simorgh/voice/planner.py, simorgh/voice/session.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `execution:tools` | simorgh/interface/dispatch.py | simorgh/execution/service.py, simorgh/ledger/compaction.py, simorgh/orchestration/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `hearing:` | simorgh/interface/service.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `im:image` | simorgh/interface/dashfeeds.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `im:name` | simorgh/interface/dashfeeds.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `imap:` | simorgh/interface/dispatch.py | simorgh/execution/domainstatus.py, simorgh/execution/pim/api.py, simorgh/execution/pim/connectors/imap.py, simorgh/kernel/cli.py, simorgh/kernel/registry.py, simorgh/kernel/secrets.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `interface:{session_id}` | simorgh/interface/dispatch.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `mcp:proposals` | simorgh/interface/dispatch.py | simorgh/execution/tools.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `metrics:history` | simorgh/interface/config.py, simorgh/interface/httpapi.py | simorgh/execution/tools.py, simorgh/kernel/metrics.py, simorgh/ledger/compaction.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `reflection:alerts` | simorgh/interface/dispatch.py | simorgh/reflection/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `skills:installs` | simorgh/interface/dispatch.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `task:{client_session_id}` | simorgh/interface/httpapi.py | simorgh/benchmark/runner.py, simorgh/benchmark/service.py, simorgh/bus/backends/aws.py, simorgh/bus/backends/memory.py, simorgh/bus/trace.py, simorgh/contracts/toolargs.py, simorgh/execution/home/ring.py, simorgh/execution/service.py, simorgh/execution/tools.py, simorgh/execution/worktree.py, simorgh/kernel/api.py, simorgh/kernel/metrics.py, simorgh/kernel/supervisor.py, simorgh/learning/outcomes.py, simorgh/ledger/client.py, simorgh/ledger/compaction.py, simorgh/ledger/migrate_v1.py, simorgh/ledger/streams.py, simorgh/orchestration/context.py, simorgh/orchestration/profiles.py, simorgh/orchestration/progress.py, simorgh/orchestration/resume.py, simorgh/orchestration/scaffolds.py, simorgh/orchestration/service.py, simorgh/orchestration/session.py, simorgh/orchestration/tools.py, simorgh/orchestration/worker.py, simorgh/planning/api.py, simorgh/planning/dag.py, simorgh/planning/intake.py, simorgh/planning/scheduler.py, simorgh/planning/service.py, simorgh/planning/store.py, simorgh/reflection/service.py, simorgh/verification/checklist.py, simorgh/verification/checks/fullsuiteran.py, simorgh/verification/service.py, simorgh/verification/trajectory.py, simorgh/voice/service.py, simorgh/voice/session.py | see ledger/compaction.py DEFAULT_RETENTION |
+| `mcp:proposals` | dispatch.py:57 (read, append on approve/reject) | execution (writes proposals) | forever |
+| `skills:installs` | dispatch.py:60 (append) | - | forever |
+| `capabilities` | dispatch.py:63 (read) | execution, voice write it | forever |
+| `schedule` | dispatch.py:65 (read) | kernel scheduler writes it | forever |
+| `execution:tools` | dispatch.py:68 (read for `tool`) | execution writes it | 30d |
+| `reflection:alerts` | dispatch.py:69 (read for `alerts`) | reflection writes it | forever |
+| `config:effective` | dispatch.py:71 (read for `config`) | kernel writes it | forever |
+| `metrics:history` | config.py `history_stream`; httpapi `/api/history` (read) | kernel writes it | 7d |
+| any stream | httpapi `/api/logs`, `/api/streams` (read, token-gated) | - | per stream |
+
+The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `connector:`, `hearing:`, `im:*` and `task:{client_session_id}` rows were style classes, prompt text, secret names and validation strings, not streams. Files: camera stills and HLS under `workspace/cameras` (read only), the readline history under `data_dir/cli_history`, and `~/.simorgh/skills` (written by `skills install`).
 
 ## Config
 
-`[interface]` in simorgh.toml; dataclass in `simorgh/interface/config.py`.
+`[interface]` in simorgh.toml; dataclass in `simorgh/interface/config.py`. Secrets read from `ctx.secrets`, not config: `SIM_API_TOKEN`, `SIM_TELEGRAM_TOKEN`, `SIM_WHATSAPP_TOKEN`, `SIM_WHATSAPP_PHONE_ID`, `SIM_WHATSAPP_VERIFY_TOKEN`, `SIM_WHATSAPP_APP_SECRET` (service.py:295-370). `kernel/configcheck.py:127-136` lists four of the unread keys below as known; `shell_timeout_s` is not on that list.
 
 | Key | Default | Read in the package |
 |---|---|---|
-| `history_path` | `None` | NO (declared, never read) |
+| `history_path` | `None` | yes (via `resolved_history_path`, service.py:517) |
 | `history_length` | `1000` | yes |
 | `color` | `'auto'` | yes |
 | `unicode` | `'auto'` | yes |
@@ -168,9 +121,9 @@ TODO: 3-6 sentences: what this module owns, what it must never do, the one desig
 | `vitals_idle_reprint_s` | `3.0` | NO (declared, never read) |
 | `vitals_interval_s` | `15.0` | NO (declared, never read) |
 | `notice_queue_max` | `200` | NO (declared, never read) |
-| `shell_timeout_s` | `120.0` | NO (declared, never read) |
+| `shell_timeout_s` | `120.0` | NO (declared, never read; `[execution] shell_timeout_s` is the one used) |
 | `chat_reply_timeout_s` | `420.0` | yes |
-| `http_host` | `'127.0.0.1'` | yes |
+| `http_host` | `'127.0.0.1'` | yes (live config: `0.0.0.0`) |
 | `http_port` | `8765` | yes |
 | `http_status_timeout_s` | `3.0` | yes |
 | `http_chat_timeout_s` | `130.0` | yes |
@@ -194,55 +147,62 @@ TODO: 3-6 sentences: what this module owns, what it must never do, the one desig
 
 ## Public Python surface
 
-TODO: the `Service` class; any `api.py` types other packages import via contracts; module-level singletons (risks).
+- `simorgh.interface.service.Service` (`service.py:108`): the Subsystem, built by the Kernel. Constructor flags `run_repl`, `http_enabled`, `wait_for_boot` let tests run it headless.
+- `simorgh.interface.api`: `Command`, `parse`, `VitalsCache`, `VitalsSnapshot`, used by the Kernel CLI and tests. `dispatch.dispatch`, `dispatch.Outcome` and `httpapi.HttpApi` are imported by tests; nothing in another package imports this one except the Kernel (the module-boundary test forbids it).
+- `HttpApi.register_route(method, path, handler, auth=True, max_body, rate)` is the only way to add a route; `auth=False` is reviewed per route.
+- Types from `simorgh.contracts`: `topics`, `envelope.Message/Event`, `protocols.Context/Health`, `registry.error_reply_payload`, `settings.config_path` (for `mcp approve`), `channels` (channel names), stream-name validation.
+- Module-level mutable state: none beyond constants. Per-instance state that matters: `Service._pending_turns` and `_pending_prompts` (futures keyed by session and prompt id), `TelegramChannel._sessions/_chats` and the WhatsApp equivalents (in memory only, lost on restart), `HttpApi` rate-limit deques and the single in-flight chat.
 
 ## Invariants
 
-TODO: the rules that must hold, as testable sentences; include contracts/topics.py policy entries naming this module.
+1. HTTP token boundary: with `SIM_API_TOKEN` set, every route except the reviewed open list (`_OPEN_ROUTES`: `/`, `/api/status`, `/tv`, `/dash`, `/remote`, `/api/wallpapers`, `/api/dash/data`, `/api/dash/state` GET, `/api/dash/keys`, `/api/dash/banner`, logo, favicon; prefix `/wallpapers/`) needs `Authorization: Bearer <token>` or `?token=`, compared in constant time (`httpapi.py:84-87, 604-620`).
+2. Camera routes are never open: `/api/dash/streams`, `/cameras/snap/` and `/tv/hls/` (and `/tv/media/`) require the token like any gated route (`httpapi.py:482, 548-589`).
+3. With no token configured, a gated route is served only on a loopback bind; a non-loopback bind serves only the open routes, and the Service logs `http_api_unauthenticated` at start (`httpapi.py:610-616`; `service.py:305-316`).
+4. The WhatsApp webhook is `auth=False` because Meta cannot send the bearer token; every POST must carry a valid `X-Hub-Signature-256`, and the allow-list decides who is answered. Telegram starts only with `SIM_TELEGRAM_TOKEN` and WhatsApp only with its token, phone id and verify token plus the HTTP server; both answer only senders on their allow-list (`contracts/channels.allowed()`), and ignore everyone else in silence.
+5. Only Interface, the Kernel (and for restart/reload, Execution) may publish `system.pause|stop|resume|restart|reload` (`contracts/topics.py:293-303`); Voice's spoken restart and the model's `sim_command` reach them only through `ui.command.request`.
+6. `ui.command.request` refuses a `!` shell line; shell belongs to `run_shell`, which Guardian gates (`service.py:780-833`).
+7. Interface never runs a tool directly: the `tool` command and the dashboard's page actions publish `action.proposed` and wait for `action.result|denied` (`dispatch.py:1301-1350`); secret-looking arguments are refused before they reach the ledger.
+8. A chat turn is resolved by the `turn.completed` with its own `session_id`; each CLI line gets a fresh id so concurrent turns cannot cross-wire (`service.py:955-969`); a paused or stopping system refuses a chat line instead of waiting `chat_reply_timeout_s`.
+9. A pending `ui.prompt` is answered by a typed matching option before any command parsing or chat, and always resolves (the watchdog answers the default at `timeout_s`).
+10. `mcp approve` appends to the config the Kernel reads (`contracts.settings.config_path()`), never to a cwd-relative `simorgh.toml` (B11).
 
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract interface`.
 
-- `tests/simorgh/interface/test_activity.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_an_approval_shows_what_it_grants.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_benchmarkchart.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_capabilities_command.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_cartoon_splash.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_command_request.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_command_table.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_dashfeeds.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_dispatch.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_domains_panel.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_httpapi.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_httpapi_token_boundary.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_line_widths.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_live_status.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_panel.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_parser.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_render.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_schedule_command.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_service.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_skills_command.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_speaker_score_on_screen.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_status_panel.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_telegram_channel.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_the_approval_still_hid_what_it_grants.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_the_sentence_builds_in_place.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_time_marker.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_tool_command.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_tui.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_visibility_commands.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_vitals.py` -- TODO: what it pins
-- `tests/simorgh/interface/test_whatsapp_channel.py` -- TODO: what it pins
+- `tests/simorgh/interface/test_httpapi_token_boundary.py` -- cameras need the token; a non-loopback bind without a token serves only open routes.
+- `tests/simorgh/interface/test_httpapi.py` -- the HTTP server over real sockets: routes, auth, body caps, `/api/chat` and its `turn.completed` wait.
+- `tests/simorgh/interface/test_service.py` -- the Service over a real memory bus: subscriptions, chat percept and reply, prompts, narration.
+- `tests/simorgh/interface/test_command_request.py` -- `ui.command.request` runs a command and replies; `!` and unknown commands are refused.
+- `tests/simorgh/interface/test_tool_command.py` -- the `tool` command goes through `action.proposed` and Guardian.
+- `tests/simorgh/interface/test_telegram_channel.py` -- Telegram: allow-list, one session per chat, replies routed back.
+- `tests/simorgh/interface/test_whatsapp_channel.py` -- WhatsApp: signature gate, allow-list, replies routed back.
+- `tests/simorgh/interface/test_command_table.py` -- one command table feeds the parser, completion and the splash.
 
 ## Known issues (2026-09-18 evaluation)
 
-TODO: catalogue ids from docs/reviews/2026-09-18/architecture-evaluation.md section 13 that name this module.
+- S15 / V2: camera stills and live HLS served without the token on a `0.0.0.0` bind. Fixed 2026-09-18 for `/api/dash/streams`, `/cameras/snap/`, `/tv/hls|media/` (commit 62318d3); still open for `/api/dash/data`, which is in `_OPEN_ROUTES` and returns every camera, relay stream, Ring camera and Ring event (`httpapi.py:84, 312-317`; `dashfeeds.py:1100-1103`).
+- S13 / V9: `sim_command` lets the model run any parsed CLI verb; Guardian sees only the wrapper; `skills install/update/approve/remove` mutate `~/.simorgh/skills` and `git clone` outside the action path. Open (stage 9 item 3). `apply_skill` itself always asks since 2026-09-18 (8fb3d21, Guardian side).
+- S14 / V5: `dashfeeds.py` fetches ~14 web endpoints from its own threads, outside Execution and Guardian. Open.
+- V3: four session models (CLI uuid per line, HTTP client-chosen, Telegram/WhatsApp in-memory per chat); Telegram and WhatsApp drop the sender after the allow-list. Open (stage 4 item 3, stage 5 item 7).
+- V4: manifest disagreed with the code. Fixed 2026-09-18 (b5c2671); two residues remain, see below.
+- C8: no conversation across CLI turns. Partly fixed 2026-09-18 (1e486f1): Memory's working window per `conversation_key`; a persistent session is stage 4.
+- L7 / W8: the synchronous 420 s chat wait (`chat_reply_timeout_s`) over a 72-tool CHAT profile. Open (Orchestration side).
+- T1: the `tool` command labels every proposal `reversible` on the stated assumption that Guardian recomputes the class (`dispatch.py:1336-1338`); per S6 Guardian trusts the label. Open.
+- T4 / W3: dashboard WebRTC signalling (`/api/dash/ring/live`) is a Guardian action per keepalive: 85% of action streams. Open (stage 1 item 6).
+- B11: `mcp approve` wrote a cwd-relative `simorgh.toml`. Fixed 2026-09-18 (3beb2a5).
+- B18: the REPL `!` and `skills` git clone run `subprocess.run` on the loop thread (`dispatch.py:187, 1837-1849`). Open.
+- P6: per-turn chat timings exist (`service.py:946-968`) and are never compared run to run. Open.
+- Residue of V4: `system.health` is in both `consumes` and `produces` (`service.py:114, 134`) and is neither subscribed nor published; `percept.text.received` is subscribed in `httpapi.py:695-698` and not declared.
 
 ## Planned changes (roadmap)
 
-TODO: stage numbers from docs/plan/ and what changes here.
+- Stage 1: trace ids kept from the percept through the turn; Ring signalling off the approval path (one `ring_live offer` proposal mints a session token, keepalive and close become HTTP handlers); `simorgh status` reads `/api/status` instead of booting.
+- Stage 3: the TUI and `/api/chat` render `session.delta` as it arrives.
+- Stage 4: one persistent session per (channel, person); the reply-correlation key stays per message.
+- Stage 5: Telegram and WhatsApp resolve the sender and put `speaker` on the percept; typed CLI turns are the owner.
+- Stage 6: the People model resolves identity at every edge.
+- Stage 9: `cli`, `tui`, `render`, `telegram`, `whatsapp` and the chat/TV routes of `httpapi` move to `channels/`; `dispatch.py` shrinks to an operator-only `admin/` with a declared command registry; commands the model needs become tools with schemas and `sim_command` is limited to restart/pause/mode; camera live view moves to go2rtc.
 
 ## Working on this module
 

@@ -4,133 +4,168 @@ One-line status: layer 0 · 4,140 lines · 20 test files · lock: `kernel` in do
 
 ## Purpose
 
-TODO: 3-6 sentences: what this module owns, what it must never do, the one design decision that shapes it.
+The Kernel is the composition root and the process's owner: it loads `simorgh.toml`, builds the one Ledger client and the one bus backend, installs the reserved-topology policy, builds each subsystem's `Context` (its own `BusClient`, its config section, scoped secrets, a data directory), boots the subsystems in `registry.LAYERS` order waiting on each layer's health, and then runs the state machine, the tick scheduler, the status server, the health ticker and the signal handling. It holds no policy about work: ticks are unconditional (`scheduler.py` docstring) and it never decides whether to act on one. `registry.py` is the only module in the codebase allowed to import another subsystem's `Service`; everything else here depends only on contracts, the bus client and the ledger client. The shaping decision: every subsystem, the bus and the ledger included, is a `Subsystem` with `start(ctx)/stop()/health()` started by one `Supervisor`, so restart, pause-on-Guardian-down and ordered shutdown are one mechanism. It must never boot with an invalid `[runtime]` (a bad `mode` is a `ConfigError`, not a fallback) and never let a stuck thread keep the process alive after a stop (`cli.py` hard exit).
 
 ## Files
 
 | File | For |
 |---|---|
-| `simorgh/kernel/__init__.py` | TODO |
-| `simorgh/kernel/api.py` | TODO |
-| `simorgh/kernel/bootprogress.py` | TODO |
-| `simorgh/kernel/cli.py` | TODO |
-| `simorgh/kernel/config.py` | TODO |
-| `simorgh/kernel/configcheck.py` | TODO |
-| `simorgh/kernel/context.py` | TODO |
-| `simorgh/kernel/metrics.py` | TODO |
-| `simorgh/kernel/migrate_v1.py` | TODO |
-| `simorgh/kernel/registry.py` | TODO |
-| `simorgh/kernel/scheduler.py` | TODO |
-| `simorgh/kernel/secrets.py` | TODO |
-| `simorgh/kernel/selfcheck.py` | TODO |
-| `simorgh/kernel/service.py` | TODO |
-| `simorgh/kernel/state.py` | TODO |
-| `simorgh/kernel/supervisor.py` | TODO |
-| `simorgh/kernel/vault.py` | TODO |
+| `simorgh/kernel/__init__.py` | exports `Kernel`, `KernelBootError`, `VERSION` |
+| `simorgh/kernel/api.py` | `RuntimeConfig`, `Supervised`, `SecretStore` protocol, `MissingSecret` |
+| `simorgh/kernel/bootprogress.py` | boot stage progress bar on an interactive TTY |
+| `simorgh/kernel/cli.py` | `python -m simorgh` subcommands, logging setup, signal `Stopper` and hard exit |
+| `simorgh/kernel/config.py` | config file search, `[runtime]` parsing, `SIMORGH_RUNTIME_*` overrides, `LoadedConfig` |
+| `simorgh/kernel/configcheck.py` | boot warnings for config sections and keys that change nothing; known dead fields |
+| `simorgh/kernel/context.py` | `ContextFactory` (one `Context` per subsystem) and the stdlib logger |
+| `simorgh/kernel/metrics.py` | `MetricsTable`, `StatusServer`, process gauges, `MetricsHistoryWriter` |
+| `simorgh/kernel/migrate_v1.py` | `simorgh migrate-v1`: replays v1 records into the Ledger |
+| `simorgh/kernel/registry.py` | `LAYERS`, `build_factories`, `NEEDS_HMAC_SECRET`, `DEFAULT_SECRETS` |
+| `simorgh/kernel/scheduler.py` | second/idle/sleep ticks, activity clock, durable schedules |
+| `simorgh/kernel/secrets.py` | env and file secret stores, per-subsystem scoping |
+| `simorgh/kernel/selfcheck.py` | `--self-check`: proves the action path with stub Guardian/Execution on a private bus |
+| `simorgh/kernel/service.py` | `Kernel` (boot, handlers, shutdown) and `WorkerKernel` (local-multi worker process) |
+| `simorgh/kernel/state.py` | the system state machine |
+| `simorgh/kernel/supervisor.py` | start by layer, health polling, restart with backoff, pause on safety-critical down |
+| `simorgh/kernel/vault.py` | encrypted multi-field credential vault and `vault:` lookups |
 
 ## Consumes
 
+`Kernel.consumes` (`service.py:111-116`) is authoritative. Subscriptions are spread over the Kernel and the objects it owns:
+
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `action.approved` | `messages/action.py::ActionApproved` | simorgh/kernel/selfcheck.py | TODO |
-| `action.denied` | `messages/action.py::ActionDenied` | simorgh/kernel/selfcheck.py | TODO |
-| `action.proposed` | `messages/action.py::ActionProposed` | simorgh/kernel/selfcheck.py | TODO |
-| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | simorgh/kernel/scheduler.py, simorgh/kernel/service.py | TODO |
-| `system.health` | `messages/system.py::SystemHealth` | simorgh/kernel/metrics.py, simorgh/kernel/service.py | TODO |
-| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/kernel/metrics.py, simorgh/kernel/service.py | TODO |
-| `system.pause` | `messages/system.py::SystemPause` | simorgh/kernel/selfcheck.py, simorgh/kernel/service.py | TODO |
-| `system.restart` | `messages/system.py::SystemRestart` | simorgh/kernel/service.py | TODO |
-| `system.resume` | `messages/system.py::SystemResume` | simorgh/kernel/selfcheck.py, simorgh/kernel/service.py | TODO |
-| `system.schedule.add` | `messages/system.py::SystemScheduleAdd` | simorgh/kernel/scheduler.py, simorgh/kernel/service.py | TODO |
-| `system.schedule.cancel` | `messages/system.py::SystemScheduleCancel` | simorgh/kernel/scheduler.py, simorgh/kernel/service.py | TODO |
-| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/kernel/service.py | TODO |
-| `system.status.reply` | `messages/system.py::SystemStatusReply` | simorgh/kernel/metrics.py | TODO |
-| `system.status.request` | `messages/system.py::SystemStatusRequest` | simorgh/kernel/metrics.py, simorgh/kernel/service.py | TODO |
-| `system.stop` | `messages/system.py::SystemStop` | simorgh/kernel/service.py | TODO |
+| `system.pause` | `messages/system.py::SystemPause` | simorgh/kernel/service.py:294 | state machine to `paused` (or scoped autonomous pause), `system` stream, `system.state.changed` |
+| `system.resume` | `messages/system.py::SystemResume` | simorgh/kernel/service.py:295 | the reverse of pause |
+| `system.stop` | `messages/system.py::SystemStop` | simorgh/kernel/service.py:296 | to `stopping`; releases `wait_for_stop` |
+| `system.restart` | `messages/system.py::SystemRestart` | simorgh/kernel/service.py:297 | as stop, and sets `restart_requested` so the CLI exits 75 for the loader to relaunch |
+| `system.status.request` | `messages/system.py::SystemStatusRequest` | simorgh/kernel/metrics.py (`StatusServer`) | replies with state, subsystems, health and metrics from memory |
+| `system.health` | `messages/system.py::SystemHealth` | simorgh/kernel/metrics.py (`StatusServer`) | records per-subsystem health for status |
+| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/kernel/metrics.py (`StatusServer`) | records per-subsystem gauges for status and `metrics:history` |
+| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | simorgh/kernel/scheduler.py:189 | marks human activity (resets the idle clock) |
+| `system.schedule.add` | `messages/system.py::SystemScheduleAdd` | simorgh/kernel/scheduler.py:190 | records a durable schedule and arms it |
+| `system.schedule.cancel` | `messages/system.py::SystemScheduleCancel` | simorgh/kernel/scheduler.py:191 | records the cancel and disarms it |
+
+`selfcheck.py` subscribes to `action.proposed`, `action.approved`, `system.pause`, `system.resume` and publishes `action.*`/`system.pause|resume`, but only on its own private in-memory bus with stub `guardian`/`execution` sources during `--self-check`; nothing it does reaches the live bus.
 
 ## Produces
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `action.approved` | `messages/action.py::ActionApproved` | simorgh/kernel/selfcheck.py | TODO |
-| `action.denied` | `messages/action.py::ActionDenied` | simorgh/kernel/selfcheck.py | TODO |
-| `action.proposed` | `messages/action.py::ActionProposed` | simorgh/kernel/selfcheck.py | TODO |
-| `action.result` | `messages/action.py::ActionResult` | simorgh/kernel/selfcheck.py | TODO |
-| `percept.time.scheduled` | `messages/percept.py::PerceptTimeScheduled` | simorgh/kernel/scheduler.py, simorgh/kernel/service.py | TODO |
-| `system.health` | `messages/system.py::SystemHealth` | simorgh/kernel/service.py | TODO |
-| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/kernel/metrics.py, simorgh/kernel/service.py | TODO |
-| `system.pause` | `messages/system.py::SystemPause` | simorgh/kernel/selfcheck.py | TODO |
-| `system.resume` | `messages/system.py::SystemResume` | simorgh/kernel/selfcheck.py | TODO |
-| `system.schedule.added` | `messages/system.py::SystemScheduleAdded` | simorgh/kernel/scheduler.py, simorgh/kernel/service.py | TODO |
-| `system.started` | `messages/system.py::SystemStarted` | simorgh/kernel/service.py | TODO |
-| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/kernel/service.py | TODO |
-| `system.status.reply` | `messages/system.py::SystemStatusReply` | simorgh/kernel/metrics.py, simorgh/kernel/service.py | TODO |
-| `system.stop` | `messages/system.py::SystemStop` | simorgh/kernel/cli.py | TODO |
-| `system.tick.idle` | `messages/system.py::SystemTickIdle` | simorgh/kernel/scheduler.py, simorgh/kernel/service.py | TODO |
-| `system.tick.second` | `messages/system.py::SystemTickSecond` | simorgh/kernel/scheduler.py, simorgh/kernel/service.py | TODO |
-| `system.tick.sleep` | `messages/system.py::SystemTickSleep` | simorgh/kernel/scheduler.py, simorgh/kernel/service.py | TODO |
+| `system.started` | `messages/system.py::SystemStarted` | simorgh/kernel/service.py:311 | once, after every layer is up and the scheduler started |
+| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/kernel/service.py | after boot (with `autonomous_paused` only when true), on pause, resume, stop, restart |
+| `system.tick.second` | `messages/system.py::SystemTickSecond` | simorgh/kernel/scheduler.py | every second, also while paused |
+| `system.tick.idle` | `messages/system.py::SystemTickIdle` | simorgh/kernel/scheduler.py | while running, when no percept for `idle_threshold_s`, at most every `idle_tick_cooldown_s` |
+| `system.tick.sleep` | `messages/system.py::SystemTickSleep` | simorgh/kernel/scheduler.py | every `sleep_every_s` (6 h) while running; the first one 6 h after boot |
+| `percept.time.scheduled` | `messages/percept.py::PerceptTimeScheduled` | simorgh/kernel/scheduler.py:279 | a durable schedule fires |
+| `system.schedule.added` | `messages/system.py::SystemScheduleAdded` | simorgh/kernel/scheduler.py | a valid `system.schedule.add` was recorded |
+| `system.health` | `messages/system.py::SystemHealth` | simorgh/kernel/service.py:464, 538 | a supervised service's status changed (health ticker), or a safety-critical service went down and the system paused |
+| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/kernel/metrics.py (`ProcessMetricsPublisher`) | every `metrics_every_s`: process memory/CPU/threads |
+| `system.status.reply` | `messages/system.py::SystemStatusReply` | simorgh/kernel/metrics.py | reply to `system.status.request` |
+| `system.stop` | `messages/system.py::SystemStop` | simorgh/kernel/cli.py:168 | first SIGINT/SIGTERM (priority 9) |
 
 ## Ledger streams
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `bw:` | simorgh/kernel/vault.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `config:effective` | simorgh/kernel/service.py | simorgh/interface/dispatch.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `env:` | simorgh/kernel/vault.py | simorgh/cognition/providers/claude_code.py, simorgh/contracts/settings.py, simorgh/execution/mcp.py, simorgh/execution/security/tools.py, simorgh/execution/tools.py, simorgh/ledger/config.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `metrics:history` | simorgh/kernel/metrics.py | simorgh/execution/tools.py, simorgh/interface/config.py, simorgh/interface/httpapi.py, simorgh/ledger/compaction.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `ssm:` | simorgh/kernel/vault.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `trace:{trace_id}` | simorgh/kernel/cli.py | simorgh/bus/client.py, simorgh/bus/factory.py, simorgh/bus/service.py, simorgh/bus/trace.py, simorgh/cognition/parser.py, simorgh/ledger/backends/jsonl.py, simorgh/ledger/compaction.py, simorgh/ledger/service.py, simorgh/ledger/streams.py, simorgh/orchestration/context.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `v1:<id>` | simorgh/kernel/migrate_v1.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `vault:` | simorgh/kernel/vault.py | simorgh/execution/home/cameras.py, simorgh/execution/home/ring.py, simorgh/execution/home/tools.py, simorgh/execution/media/cast.py, simorgh/execution/pim/accounts.py, simorgh/execution/security/selfcheck.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `vault:<cred_id>:<field>` | simorgh/kernel/vault.py | simorgh/execution/home/cameras.py, simorgh/execution/home/ring.py, simorgh/execution/home/tools.py, simorgh/execution/media/cast.py, simorgh/execution/pim/accounts.py, simorgh/execution/security/selfcheck.py | see ledger/compaction.py DEFAULT_RETENTION |
+| `system` | simorgh/kernel/service.py:400 (`system.state` events) | the Kernel at boot (`_restore_autonomous_pause`) | forever |
+| `schedule` | simorgh/kernel/scheduler.py:33 (`schedule.added/cancelled/fired`) | the Scheduler at start (`materialize`) | forever |
+| `config:effective` | simorgh/kernel/service.py:473 | simorgh/interface/dispatch.py (`config` command) | forever |
+| `metrics:history` | simorgh/kernel/metrics.py:45 (a `MetricsTable` snapshot every `metrics_every_s`) | simorgh/interface/httpapi.py, simorgh/execution/tools.py | 7d in DEFAULT_RETENTION, but not applied while written (see ledger/CONTRACT.md) |
+| `trace:<id>` | read only, simorgh/kernel/cli.py:271 (`simorgh trace`) | written by bus/trace.py | 2d |
+
+The Kernel also appends v1 records through `migrate_v1.py` (routes in ledger/migrate_v1.py). The `vault:`, `env:`, `bw:`, `ssm:` strings in `vault.py` are credential-reference prefixes, not ledger streams; the vault is an encrypted file (`vault.py::default_vault_path`).
 
 ## Config
 
-`[kernel]` in simorgh.toml; dataclass in `simorgh/kernel/config.py`.
+`[runtime]` in simorgh.toml; dataclass `RuntimeConfig` in `simorgh/kernel/api.py`, parsed by `kernel/config.py::load_runtime_config`. Every key is overridable by `SIMORGH_RUNTIME_<KEY>`. The Kernel also passes `[bus]`, `[ledger]`, `[execution]` and `[guardian]` to those packages, and every other section to its subsystem's `Context.config`.
 
 | Key | Default | Read in the package |
 |---|---|---|
+| `mode` | `'single'` | yes (`single`, `local-multi`, `aws`; anything else is a `ConfigError`) |
+| `data_dir` | `'~/.simorgh'` | yes |
+| `deployment` | `'local'` | NO (declared, never read) |
+| `subsystems` | `('all',)` | NO (declared, never read; every subsystem in `LAYERS` always boots) |
+| `disabled` | `()` | NO (declared, never read) |
+| `idle_threshold_s` | `10.0` | yes |
+| `idle_tick_cooldown_s` | `3.0` | yes |
+| `sleep_every_s` | `21600` | yes |
+| `metrics_every_s` | `10.0` | yes |
+| `health_every_s` | `5.0` | yes (since 2026-09-18, `service.py:302`) |
+| `supervisor_backoff_s` | `(1, 2, 4, 8, 16, 32, 60)` | yes |
+| `supervisor_max_restarts_per_10m` | `5` | yes |
+| `stop_grace_s` | `15.0` | yes |
+| `allow_backend_fallback` | `False` | yes (ledger fallback) |
+| `log_level` | `'info'` | yes (`cli.py::_configure_logging`, from the raw section) |
+| `log_to_ledger` | `True` | NO (declared, never read) |
+| `schedules.max_duration_s` | `86400.0` | yes |
+| `schedules.persist` | `True` | NO (declared, never read; schedules always persist) |
+
+Other environment the package reads: `SIMORGH_CONFIG`, `SIMORGH_RUNTIME_DATA_DIR`, `SIMORGH_EXECUTION_REPO_ROOT` (via `_with_env_overrides`, service.py:32), `SIMORGH_VAULT_PATH`, `SIMORGH_VAULT_NO_KEYRING`. Config search order (`config.py:38-51`): `--config`, `$SIMORGH_CONFIG`, `./simorgh.toml`, `${data_dir}/simorgh.toml`.
 
 ## Public Python surface
 
-TODO: the `Service` class; any `api.py` types other packages import via contracts; module-level singletons (risks).
+- `simorgh.kernel.Kernel` (`service.py:108`): implements `Subsystem` with `name="kernel"`; `Kernel(config: LoadedConfig, *, secrets=None, clock=None, interactive=False)`, `boot()`, `wait_for_stop()`, `shutdown()`, `health()`, `status_snapshot()`, attributes `bus`, `ledger`, `state`, `run_id`, `restart_requested`. `KernelBootError` when a layer fails or times out.
+- `WorkerKernel` (`service.py:595`): one orchestration Worker per process in `local-multi` mode; unused live.
+- `kernel.config.load_config`, `LoadedConfig`, `ConfigError`; `kernel.api.RuntimeConfig`.
+- `kernel.registry.LAYERS`, `build_factories`, `known_layers`.
+- `kernel.selfcheck.run()` (the `--self-check` proof) and `kernel.vault.Vault`.
+- Other packages see the Kernel only through `simorgh.contracts.protocols` (`Context`, `Subsystem`, `Health`, `Clock`, `Logger`) and the topics above.
+- Module-level mutable state: `registry.DEFAULT_SECRETS` (a dict; mutating it changes every later boot in the process), `cli._HARD_EXIT` (patched by tests), `configcheck.KNOWN_DEAD_FIELDS`/`EFFECTIVE_DEFAULTS` (dicts read as tables). Process-wide side effect: `cli._configure_logging` installs a root logging handler.
 
 ## Invariants
 
-TODO: the rules that must hold, as testable sentences; include contracts/topics.py policy entries naming this module.
+- The Kernel is the only non-`guardian` publisher allowed for `action.approved` and one of the allowed publishers of `system.pause`, `system.resume`, `system.stop`, `system.restart`, `system.reload` (`contracts/topics.py` `PUBLISH_ONLY_BY`); the policy that enforces the whole table (`bus.enforcement.ReservedTopologyPolicy`) is installed by the Kernel on every client it builds.
+- Layers start in `LAYERS` order and a layer starts only after the previous layer is healthy; a boot failure records `failed` on the `system` stream and raises `KernelBootError`.
+- Shutdown appends `stopped` to the `system` stream before any layer is stopped, then stops layers in reverse order, then the bus backend, then the ledger.
+- Every state transition is appended to the `system` stream before `system.state.changed` is published.
+- A scoped autonomous pause survives a restart: it is read back from the `system` stream before the boot `system.state.changed`, and the boot event asserts `autonomous_paused` only when true.
+- If `guardian` or `execution` is still `down` after its restart budget is spent, the system pauses (`supervisor.SAFETY_CRITICAL`, `supervisor.py:109`).
+- A service reporting `down` is stopped and started again with a fresh `Context`, with backoff, up to `supervisor_max_restarts_per_10m`.
+- Each subsystem's `Context.bus` is its own `BusClient` with a fixed `source`; `Context.secrets` returns only names the subsystem declared or `DEFAULT_SECRETS` grants; only `guardian` and `execution` get the per-run HMAC secret.
+- Idle and sleep ticks are not published while paused; the second tick is.
+- The first signal publishes `system.stop`; a second signal, or a shutdown that overruns `stop_grace_s + 10` s, exits the process with `os._exit`.
+- A `[runtime] mode = "local-multi"` with a `memory` bus or ledger backend is refused at boot.
+- The test suite never inherits `SIMORGH_*` from the operator's environment (`conftest.py`).
 
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract kernel`.
 
-- `tests/simorgh/kernel/test_bootprogress.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_cli.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_config.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_configcheck.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_context.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_effective_config_record.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_metrics.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_migrate_v1.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_registry.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_scheduler.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_secrets.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_selfcheck.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_service.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_state.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_stop_leaves.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_supervisor.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_supervisor_restarts.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_the_suite_cannot_see_the_operators_env.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_vault.py` -- TODO: what it pins
-- `tests/simorgh/kernel/test_vault_cli.py` -- TODO: what it pins
+- `tests/simorgh/kernel/test_service.py` -- boot order, pause/resume/stop/restart handling, state events, `system.started`, shutdown order.
+- `tests/simorgh/kernel/test_registry.py` -- `LAYERS`, the factories, secret scoping tables.
+- `tests/simorgh/kernel/test_config.py` -- search order, `[runtime]` parsing, env overrides, `ConfigError` on bad values.
+- `tests/simorgh/kernel/test_context.py` -- one client per subsystem with its own source, scoped secrets, data dirs, shared metrics.
+- `tests/simorgh/kernel/test_scheduler.py` -- tick cadence and conditions, activity clock, durable schedules replayed at start.
+- `tests/simorgh/kernel/test_state.py` -- legal transitions, idempotent pause/resume, scoped autonomous pause.
+- `tests/simorgh/kernel/test_supervisor_restarts.py` -- a `down` service is restarted with a fresh Context; the ticker drives it (B10).
+- `tests/simorgh/kernel/test_selfcheck.py` -- the self-check proves approval with a verified token, rejects a forged one, and enforces the reserved topics.
 
 ## Known issues (2026-09-18 evaluation)
 
-TODO: catalogue ids from docs/reviews/2026-09-18/architecture-evaluation.md section 13 that name this module.
+- S1 (critical): `service.py:203` still defaults `[guardian] irreversible_requires_human` to false. The physical half was fixed 2026-09-18 (stage 0 item 2, `PhysicalRule` and `[guardian.physical]`, commit `8916e82`, in guardian); non-physical irreversible actions are still auto-approved by this default.
+- B10 (high): the Supervisor never supervised. Fixed 2026-09-18, commit `3beb2a5` (`Supervisor.run_ticker`, a restart that restarts, `system.health` on change).
+- B21 (low): logging was never configured. Fixed 2026-09-18, commit `3beb2a5` (`cli._configure_logging`). `log_to_ledger` is still inert.
+- B11 (high): a cwd-relative `simorgh.toml` could shadow the real config. The writer side was fixed 2026-09-18 in commit `3beb2a5` (`mcp approve` writes `contracts.settings.config_path()`); the Kernel still prefers `./simorgh.toml` over `${data_dir}/simorgh.toml` (`config.py:45`).
+- B15 (medium): four config mechanisms; the documented `SIMORGH_<SECTION>_<KEY>` override exists for `[runtime]` and `[execution]` only. Open; stage 0 item 26.
+- B19 (low): `MetricsHistoryWriter` appends a ~2.3 KB snapshot every 10 s. A 7d retention entry was added 2026-09-18 but does not truncate a stream that is still written (ledger/CONTRACT.md). Open; stage 1 item 3 makes it a telemetry sample.
+- B7 (medium): one unbound `LedgerClient` handed to every Context (`context.py:141`). Open; stage 1 item 8.
+- B14 (low): three deployment modes, `WorkerKernel`, the identity registry and `--self-check` cover a topology that has never run. Open; stage 1 item 10.
+- B17 (low): `simorgh status` boots a second Kernel against the live data dir and appends to its ledger. Open; stage 1 item 9.
+- B18 (low): no registry or cancellation of blocking work; `os._exit` in `cli.py` is the backstop. Open.
+- B16 (medium): the loader killed Sim 250 ms after SIGINT. Fixed 2026-09-18 in `simloader.py` (commit `fd27fc7`); the Kernel side (`Stopper`) was already correct.
+
+Found while writing this contract (not in the catalogue): `[runtime] subsystems` and `disabled` are parsed and never applied, so no subsystem can be switched off by config; `scheduler.py:305-308` sets `_last_idle_tick = now` before computing `since_last_idle_tick`, so that payload field is always 0; and the Scheduler docstring says schedule firing stops while paused, but `_fire_after` (`scheduler.py:268`) never checks `is_running`.
 
 ## Planned changes (roadmap)
 
-TODO: stage numbers from docs/plan/ and what changes here.
+- Stage 1 item 1: the Kernel injects a `Telemetry` implementation into every `Context` beside `bus` and `ledger`; `telemetry` joins `LAYERS` layer 0.
+- Stage 1 item 3: `MetricsHistoryWriter` writes telemetry samples instead of `metrics:history`.
+- Stage 1 item 8: `ContextFactory` builds a `LedgerClient` bound to each subsystem's `source`.
+- Stage 1 item 9: `simorgh status` reads `/api/status` or the last `system` event and never boots.
+- Stage 1 item 10: `WorkerKernel` (plan calls it `kernel/worker.py`; it lives in `service.py`) and the identity registry move under `simorgh/_frozen/`.
+- Stage 4 item 4: the Kernel injects in-process reader interfaces (persona, self, memory) for the ContextBuilder.
+- Stage 6 item 6 and stage 7 item 5: reminder delivery moves to `initiative/`; the scheduler publishes `task.wake` at a waiting task's `until` or matching event.
+- Stage 8 items 1 and 8: `LAYERS` layer 4 becomes `("growth",)`; the nightly loop runs on `system.tick.sleep`.
 
 ## Working on this module
 

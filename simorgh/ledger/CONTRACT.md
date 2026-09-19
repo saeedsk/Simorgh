@@ -4,86 +4,66 @@ One-line status: layer 0 · 2,798 lines · 14 test files · lock: `ledger` in do
 
 ## Purpose
 
-TODO: 3-6 sentences: what this module owns, what it must never do, the one design decision that shapes it.
+The ledger is the append-only record of everything that happened: named streams of immutable `Event`s with a per-stream monotonic `seq`, compare-and-swap appends (`expected_seq`), idempotency keys, snapshots for projections, content-addressed blobs for anything over the inline threshold, and retention. It owns storage semantics only; it does not decide who may write which stream (`streams.KNOWN_PREFIXES` is informational, `streams.py:16-18`) and does not interpret payloads. It must never renumber, reorder or silently drop an event (a corrupt line is a gap, not the end of the stream), never let a stream's head go backwards, and never accept a payload string over `blob_inline_threshold` that is not a `blob:` ref. The shaping decision: one `LedgerClient` layers validation, idempotency, tail delivery and counters over small mechanical backends (`memory`, `jsonl`, `sqlite`, `dynamodb`) behind `api.LedgerBackend`, and the Kernel hands the same client to every subsystem as `Context.ledger`. The live backend is `jsonl`: one file per stream plus sidecars.
 
 ## Files
 
 | File | For |
 |---|---|
-| `simorgh/ledger/__init__.py` | TODO |
-| `simorgh/ledger/api.py` | TODO |
-| `simorgh/ledger/backends/__init__.py` | TODO |
-| `simorgh/ledger/backends/dynamodb.py` | TODO |
-| `simorgh/ledger/backends/jsonl.py` | TODO |
-| `simorgh/ledger/backends/memory.py` | TODO |
-| `simorgh/ledger/backends/sqlite.py` | TODO |
-| `simorgh/ledger/blobs.py` | TODO |
-| `simorgh/ledger/client.py` | TODO |
-| `simorgh/ledger/compaction.py` | TODO |
-| `simorgh/ledger/config.py` | TODO |
-| `simorgh/ledger/factory.py` | TODO |
-| `simorgh/ledger/idempotency.py` | TODO |
-| `simorgh/ledger/migrate_v1.py` | TODO |
-| `simorgh/ledger/projection.py` | TODO |
-| `simorgh/ledger/service.py` | TODO |
-| `simorgh/ledger/streams.py` | TODO |
+| `simorgh/ledger/__init__.py` | re-exports client, config, errors, factory, `Service` |
+| `simorgh/ledger/api.py` | `LedgerBackend` protocol, `Projection` base, error types |
+| `simorgh/ledger/backends/__init__.py` | package docstring naming the four engines |
+| `simorgh/ledger/backends/dynamodb.py` | DynamoDB + S3 engine behind adapter protocols; unused live |
+| `simorgh/ledger/backends/jsonl.py` | live default: one JSONL file per stream, head marks, idempotency sidecars, blob dir, blob sweep |
+| `simorgh/ledger/backends/memory.py` | reference semantics for tests |
+| `simorgh/ledger/backends/sqlite.py` | WAL SQLite engine, CAS on `(stream, seq)`; unused live |
+| `simorgh/ledger/blobs.py` | `blob:<sha256>` refs and the on-disk blob store |
+| `simorgh/ledger/client.py` | `LedgerClient`: validation, idempotency, CAS, `tail`, snapshots, blobs, counters |
+| `simorgh/ledger/compaction.py` | `DEFAULT_RETENTION`, `RetentionPolicy`, `run_compaction` |
+| `simorgh/ledger/config.py` | `[ledger]` dataclass and `SIMORGH_LEDGER_*` env overrides |
+| `simorgh/ledger/factory.py` | `make_backend`/`make_ledger`, optional jsonl fallback |
+| `simorgh/ledger/idempotency.py` | per-stream idempotency-key index (jsonl cache) |
+| `simorgh/ledger/migrate_v1.py` | maps v1 `memory.jsonl` records to v2 streams |
+| `simorgh/ledger/projection.py` | `rebuild`/`materialize`: snapshot then replay |
+| `simorgh/ledger/service.py` | the ledger's `Service`: compaction on sleep tick and after start, metrics, health |
+| `simorgh/ledger/streams.py` | stream-name grammar, filename escaping, `KNOWN_PREFIXES`, `COMPACTION_STREAM` |
 
 ## Consumes
 
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `system.health` | `messages/system.py::SystemHealth` | simorgh/ledger/service.py | TODO |
-| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/ledger/service.py | TODO |
-| `system.tick.sleep` | `messages/system.py::SystemTickSleep` | simorgh/ledger/service.py | TODO |
+| `system.tick.sleep` | `messages/system.py::SystemTickSleep` | simorgh/ledger/service.py:63 | validates the payload, then runs one retention pass and the blob sweep |
 
 ## Produces
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `system.health` | `messages/system.py::SystemHealth` | simorgh/ledger/service.py | TODO |
-| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/ledger/service.py | TODO |
-| `system.tick.sleep` | `messages/system.py::SystemTickSleep` | simorgh/ledger/service.py | TODO |
+| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/ledger/service.py:169 | after every compaction pass (sleep tick or the start pass): backend `stat()`, client counters, last report |
+| `system.health` | `messages/system.py::SystemHealth` | simorgh/ledger/service.py:171 | declared; `publish_health()` exists but nothing calls it (see Known issues). Health reaches the Kernel by polling `health()` |
 
 ## Ledger streams
 
+The ledger writes one stream of its own; every other stream is written by its owning module through `Context.ledger`.
+
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `action:` | simorgh/ledger/compaction.py, simorgh/ledger/streams.py | simorgh/cognition/compaction.py, simorgh/cognition/config.py, simorgh/execution/render.py, simorgh/execution/service.py, simorgh/execution/verifier.py, simorgh/guardian/service.py, simorgh/interface/benchmarkchart.py, simorgh/verification/config.py, simorgh/verification/service.py, simorgh/verification/verdict.py, simorgh/voice/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `blob:{digest}` | simorgh/ledger/backends/dynamodb.py, simorgh/ledger/backends/sqlite.py, simorgh/ledger/blobs.py | simorgh/execution/knowledge/index.py, simorgh/execution/service.py, simorgh/kernel/migrate_v1.py, simorgh/kernel/vault.py, simorgh/orchestration/worker.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `cognition:` | simorgh/ledger/streams.py | simorgh/cognition/budget.py, simorgh/cognition/compaction.py, simorgh/cognition/router.py, simorgh/cognition/service.py, simorgh/planning/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `cognition:budget` | simorgh/ledger/migrate_v1.py | simorgh/cognition/budget.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `cognition:budget:` | simorgh/ledger/compaction.py | simorgh/cognition/budget.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `cognition:summaries:` | simorgh/ledger/compaction.py | simorgh/cognition/compaction.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `curiosity:` | simorgh/ledger/streams.py | simorgh/curiosity/interests.py, simorgh/curiosity/sampler.py, simorgh/curiosity/service.py, simorgh/planning/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `curiosity:interests` | simorgh/ledger/migrate_v1.py | simorgh/curiosity/interests.py, simorgh/curiosity/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `curiosity:ticks` | simorgh/ledger/compaction.py | simorgh/curiosity/sampler.py, simorgh/curiosity/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `dead:` | simorgh/ledger/compaction.py, simorgh/ledger/streams.py | simorgh/bus/backends/aws.py, simorgh/bus/client.py, simorgh/bus/config.py, simorgh/bus/service.py, simorgh/execution/media/cast.py, simorgh/kernel/configcheck.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `execution:inflight` | simorgh/ledger/compaction.py | simorgh/execution/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `execution:tools` | simorgh/ledger/compaction.py | simorgh/execution/service.py, simorgh/interface/dispatch.py, simorgh/orchestration/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `guardian:` | simorgh/ledger/streams.py | simorgh/guardian/posture.py, simorgh/guardian/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `guardian:rejected` | simorgh/ledger/migrate_v1.py | simorgh/guardian/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `learn:` | simorgh/ledger/streams.py | simorgh/learning/competence.py, simorgh/learning/outcomes.py, simorgh/learning/service.py, simorgh/learning/strategy.py, simorgh/voice/vad.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `learn:patches` | simorgh/ledger/migrate_v1.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `learn:skills` | simorgh/ledger/migrate_v1.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `ledger:` | simorgh/ledger/compaction.py, simorgh/ledger/streams.py | simorgh/bus/client.py, simorgh/bus/factory.py, simorgh/bus/trace.py, simorgh/cognition/budget.py, simorgh/cognition/compaction.py, simorgh/contracts/protocols.py, simorgh/interface/dispatch.py, simorgh/kernel/api.py, simorgh/kernel/context.py, simorgh/kernel/metrics.py, simorgh/kernel/migrate_v1.py, simorgh/kernel/scheduler.py, simorgh/learning/outcomes.py, simorgh/memory/recall.py, simorgh/memory/store.py, simorgh/orchestration/context.py, simorgh/planning/store.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `ledger:compaction` | simorgh/ledger/streams.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `memory:` | simorgh/ledger/streams.py | simorgh/execution/knowledge/index.py, simorgh/execution/vision.py, simorgh/memory/consolidation.py, simorgh/memory/recall.py, simorgh/memory/store.py, simorgh/orchestration/context.py, simorgh/orchestration/scaffolds.py, simorgh/orchestration/worker.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `memory:episodic` | simorgh/ledger/migrate_v1.py | simorgh/memory/store.py, simorgh/orchestration/context.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `memory:semantic` | simorgh/ledger/migrate_v1.py | simorgh/memory/consolidation.py, simorgh/memory/store.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `metrics:history` | simorgh/ledger/compaction.py | simorgh/execution/tools.py, simorgh/interface/config.py, simorgh/interface/httpapi.py, simorgh/kernel/metrics.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `persona:` | simorgh/ledger/streams.py | simorgh/persona/mood.py, simorgh/persona/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `persona:state` | simorgh/ledger/compaction.py | simorgh/persona/mood.py, simorgh/persona/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `plan:` | simorgh/ledger/streams.py | simorgh/contracts/messages/plan.py, simorgh/planning/planmode.py, simorgh/planning/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `project:` | simorgh/ledger/streams.py | simorgh/curiosity/service.py, simorgh/execution/security/selfcheck.py, simorgh/interface/render.py, simorgh/planning/intake.py, simorgh/planning/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `reflect:` | simorgh/ledger/compaction.py, simorgh/ledger/streams.py | simorgh/reflection/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `self:` | simorgh/ledger/streams.py | simorgh/cognition/router.py, simorgh/contracts/messages/self_.py, simorgh/execution/home/ring.py, simorgh/execution/security/api.py, simorgh/execution/tools.py, simorgh/execution/vision.py, simorgh/interface/dispatch.py, simorgh/interface/httpapi.py, simorgh/orchestration/scaffolds.py, simorgh/planning/service.py, simorgh/reflection/service.py, simorgh/worldmodel/selfmodel.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `task:` | simorgh/ledger/streams.py | simorgh/benchmark/runner.py, simorgh/benchmark/service.py, simorgh/bus/backends/aws.py, simorgh/bus/backends/memory.py, simorgh/bus/trace.py, simorgh/contracts/toolargs.py, simorgh/execution/home/ring.py, simorgh/execution/service.py, simorgh/execution/tools.py, simorgh/execution/worktree.py, simorgh/interface/dashfeeds.py, simorgh/interface/httpapi.py, simorgh/interface/panel.py, simorgh/interface/render.py, simorgh/interface/service.py, simorgh/interface/telegram.py, simorgh/kernel/api.py, simorgh/kernel/metrics.py, simorgh/kernel/supervisor.py, simorgh/learning/outcomes.py, simorgh/orchestration/context.py, simorgh/orchestration/profiles.py, simorgh/orchestration/progress.py, simorgh/orchestration/resume.py, simorgh/orchestration/scaffolds.py, simorgh/orchestration/service.py, simorgh/orchestration/session.py, simorgh/orchestration/tools.py, simorgh/orchestration/worker.py, simorgh/planning/api.py, simorgh/planning/dag.py, simorgh/planning/intake.py, simorgh/planning/scheduler.py, simorgh/planning/service.py, simorgh/planning/store.py, simorgh/reflection/service.py, simorgh/verification/checklist.py, simorgh/verification/checks/fullsuiteran.py, simorgh/verification/service.py, simorgh/verification/trajectory.py, simorgh/voice/service.py, simorgh/voice/session.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `trace:` | simorgh/ledger/compaction.py, simorgh/ledger/streams.py | simorgh/bus/client.py, simorgh/bus/factory.py, simorgh/bus/service.py, simorgh/bus/trace.py, simorgh/cognition/parser.py, simorgh/kernel/cli.py, simorgh/kernel/context.py, simorgh/kernel/metrics.py, simorgh/orchestration/context.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `v1:<id>` | simorgh/ledger/migrate_v1.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `v1:{record_id}` | simorgh/ledger/migrate_v1.py | - | see ledger/compaction.py DEFAULT_RETENTION |
-| `verify:` | simorgh/ledger/compaction.py, simorgh/ledger/streams.py | simorgh/orchestration/api.py, simorgh/orchestration/profiles.py, simorgh/orchestration/session.py, simorgh/verification/service.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `voice:turns` | simorgh/ledger/compaction.py | simorgh/voice/api.py, simorgh/voice/config.py, simorgh/voice/pipeline.py, simorgh/voice/session.py, simorgh/voice/tts/lanes.py | see ledger/compaction.py DEFAULT_RETENTION |
-| `world:` | simorgh/ledger/streams.py | simorgh/reflection/service.py, simorgh/worldmodel/facets/capability_map.py | see ledger/compaction.py DEFAULT_RETENTION |
+| `ledger:compaction` | simorgh/ledger/streams.py:42 (`COMPACTION_STREAM`), appended in service.py:151 only when a pass removed something | - | never compacted (`ledger:` is the protected prefix, compaction.py:104) |
+| `v1:<id>` idempotency keys onto `task:*`, `learn:patches`, `learn:skills`, `cognition:budget`, `curiosity:interests`, `memory:semantic`, `memory:episodic`, `activity`, `guardian:rejected` | simorgh/ledger/migrate_v1.py:30-46 (`route_v1`) | simorgh/kernel/migrate_v1.py (performs the appends) | per the target stream |
+
+Retention for every stream is decided here, in `compaction.py:47-53` `DEFAULT_RETENTION`, merged with `[ledger.retention]`; the longest matching prefix wins and no match means forever:
+
+| Prefix | Window |
+|---|---|
+| `trace:` | 2d |
+| `dead:` | 30d |
+| `activity` | 90d |
+| `metrics:history`, `curiosity:ticks`, `persona:state`, `execution:inflight` | 7d |
+| `execution:tools`, `cognition:summaries:`, `voice:turns`, `action:` | 30d |
+| `cognition:budget:` | 3d |
+| `verify:`, `reflect:` | 90d |
+| everything else | forever (truncated to snapshot minus `keep_tail` only if a snapshot exists) |
+
+How a window applies depends on the name (`compaction.py:124`): a name containing `:` is treated as per-id and is deleted whole once its last event is older than the window; a name without `:` (`activity`) is truncated to the window.
 
 ## Config
 
@@ -92,9 +72,9 @@ TODO: 3-6 sentences: what this module owns, what it must never do, the one desig
 | Key | Default | Read in the package |
 |---|---|---|
 | `backend` | `'jsonl'` | yes |
-| `data_dir` | `'~/.simorgh/ledger'` | NO (declared, never read) |
+| `data_dir` | `'~/.simorgh/ledger'` | yes (via `Config.data_path`, factory.py) |
 | `fsync` | `True` | yes |
-| `snapshot_every` | `200` | yes |
+| `snapshot_every` | `200` | NO (declared, never read; `Projection.snapshot_every` has its own default, api.py:105) |
 | `blob_inline_threshold` | `4096` | yes |
 | `tail_poll_ms` | `100` | yes |
 | `keep_tail` | `50` | yes |
@@ -104,40 +84,66 @@ TODO: 3-6 sentences: what this module owns, what it must never do, the one desig
 | `dynamodb_table` | `''` | yes |
 | `dynamodb_bucket` | `''` | yes |
 
+Env overrides: `SIMORGH_LEDGER_BACKEND`, `SIMORGH_LEDGER_DIR` (`config.py:48-53`). `[ledger.dynamodb] table/bucket` and `[ledger.retention] keep_tail` are nested tables.
+
 ## Public Python surface
 
-TODO: the `Service` class; any `api.py` types other packages import via contracts; module-level singletons (risks).
+- `simorgh.ledger.Service` (`service.py`): `name="ledger"`, `consumes=(system.tick.sleep,)`, `produces=(system.health, system.metrics)`, `__init__(client, config=None)`; reads `ctx.config` at `start` when no config was passed. Health: `down` before start or after a `LedgerUnavailable`; `degraded` under 5% free disk.
+- `simorgh.ledger.client.LedgerClient`: the only ledger module other packages may import; implements `contracts.protocols.Ledger`: `append(stream, event, *, expected_seq)`, `head`, `read`, `streams(prefix)`, `delete_stream`, `tail(stream_or_prefix, handler)`, `snapshot`, `load_snapshot`, `rebuild`, `materialize`, `put_blob`, `get_blob`, `compact`; attributes `counters`, `last_error`, `started`, `backend`.
+- Kernel-only: `make_ledger`, `make_backend`, `Config`.
+- Exceptions: `ConflictError` (CAS lost), `ValidationError`, `LedgerUnavailable`, `BackendUnavailable`, `BlobNotFound`, all subclasses of `LedgerError` (`api.py`).
+- Through `simorgh.contracts`: `Event` (`contracts/envelope.py`), the `Ledger` protocol (`contracts/protocols.py`), the stream-name grammar `is_valid_stream`/`MAX_STREAM_NAME` (`contracts/streamnames.py`).
+- Module-level singletons: none in the package. Risk: the Kernel shares one unbound `LedgerClient` across all subsystems (`kernel/context.py:141`); `source="ledger"` on the client is never used to check writers (B7).
 
 ## Invariants
 
-TODO: the rules that must hold, as testable sentences; include contracts/topics.py policy entries naming this module.
+- `append` rejects an invalid stream name, a non-object payload, NaN/Infinity, non-string keys, non-JSON values, an empty `type`, and any string longer than `blob_inline_threshold` that is not a `blob:` ref; nothing is written on rejection.
+- An append whose `idempotency_key` is already recorded on that stream returns the existing `seq` and writes nothing.
+- `append(..., expected_seq=n)` succeeds only if the stream head is `n`; otherwise it raises `ConflictError`. Every backend behaves the same (parity tests).
+- `seq` starts at 1, increases by one per append, and the head of a stream never goes backwards, including after truncation, restart, or a lost index.
+- An unparseable JSONL line is reported as a gap; events after it are still read with their own `seq`; compaction refuses to rewrite a stream with a corrupt line.
+- A crash mid-write loses at most the record being written; start truncates a trailing partial line.
+- Blob refs are content-addressed (`blob:<64 hex>`); `get_blob` verifies the digest; `put_blob` of identical bytes returns the same ref.
+- `tail` never delivers the same `(stream, seq)` twice to one subscriber, and a subscriber's exception never fails the append.
+- Compaction never touches `ledger:*`; a forever stream without a snapshot is never truncated.
+- The blob sweep runs off the event loop (`asyncio.to_thread`, `jsonl.py:726`) and its count is in the compaction record as `blobs_swept`.
+- `ledger:compaction` gets an event only when a pass deleted or truncated something; `system.metrics` is published after every pass.
 
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract ledger`.
 
-- `tests/simorgh/ledger/test_a_corrupt_line_is_a_gap_not_an_ending.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_backends.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_blobs.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_compaction.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_config_and_factory.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_contracts.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_head_never_regresses.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_idempotency.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_jsonl_crash_safety.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_jsonl_start_is_incremental.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_migrate_v1.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_projection.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_service.py` -- TODO: what it pins
-- `tests/simorgh/ledger/test_streams.py` -- TODO: what it pins
+- `tests/simorgh/ledger/test_backends.py` -- the backend-parity invariants (append, CAS, idempotency, read, snapshots, blobs) across memory, jsonl, sqlite and dynamodb fakes.
+- `tests/simorgh/ledger/test_head_never_regresses.py` -- the head never goes backwards in any backend, from any handed state.
+- `tests/simorgh/ledger/test_a_corrupt_line_is_a_gap_not_an_ending.py` -- a bad line never hides, deletes or renumbers the rest.
+- `tests/simorgh/ledger/test_compaction.py` -- `DEFAULT_RETENTION`, duration parsing, longest-prefix rule, per-id vs singleton handling, protected prefix.
+- `tests/simorgh/ledger/test_streams.py` -- the stream-name grammar and filename escaping.
+- `tests/simorgh/ledger/test_blobs.py` -- ref grammar, content addressing, digest check on read.
+- `tests/simorgh/ledger/test_config_and_factory.py` -- `[ledger]` keys, env overrides, backend selection, the fallback rule.
+- `tests/simorgh/ledger/test_service.py` -- the sleep tick runs compaction and publishes metrics; the start pass; health states.
 
 ## Known issues (2026-09-18 evaluation)
 
-TODO: catalogue ids from docs/reviews/2026-09-18/architecture-evaluation.md section 13 that name this module.
+- B1 (high): the blob sweep read every stream file on the event loop. Fixed 2026-09-18, commit `aa05475` (stage 0 item 24): `to_thread`. The "skip when nothing was removed" half of the recommendation is not done; the sweep still runs on every pass.
+- B9 (low): the compaction record omitted `blobs_swept`. Fixed 2026-09-18, commit `aa05475`.
+- B3 (high): retention only ever deleted trace streams; "forever" streams grow. Partly fixed 2026-09-18 (stage 0 item 6, commit `62318d3`: more prefixes in `DEFAULT_RETENTION`). Still open for forever streams without a snapshot, and see the per-id problem below.
+- B19 (low): `metrics:history` had no retention. A 7d entry was added 2026-09-18 (item 6), but it has no effect while the stream is written: see the per-id problem below.
+- B7 (medium): the ledger is an untyped, unguarded second channel; one unbound client for everyone; stream names duplicated as strings. Open; stage 1 item 8.
+- B8 (low): the `sqlite` and `dynamodb` backends and cross-process `tail` polling serve modes nothing selects. Open; stage 1 item 10 freezes dynamodb.
+- B2 / W4 (medium / high): one file plus an idempotency sidecar per trace id makes the jsonl ledger mostly trace files. Open; stage 1 item 3 (the bus stops writing `trace:` streams).
+- L4 (medium): ~20 fsync'd appends per tool call and read-back of the action stream. Open.
+
+Found while writing this contract (not in the catalogue): every retention entry whose name contains `:` but is really one long-lived stream (`metrics:history`, `voice:turns`, `curiosity:ticks`, `persona:state`, `execution:tools`, `execution:inflight`, `cognition:budget:<provider>`) is handled as per-id (`compaction.py:124`, `streams.py:60`) and is only deleted whole once idle past its window; while in use it is never truncated. Measured: 20 days of daily `metrics:history` events with the default 7d policy, `run_compaction` removed 0 events.
+
+Also not in the catalogue: `Service.publish_health()` (`service.py:171`) has no caller anywhere, so the declared `system.health` is never published by the ledger; and `run_compaction` itself still does a synchronous `scandir` + `stat` of every stream file (`jsonl.py:604-613`) and a synchronous snapshot read per forever stream on the event loop, the same stall shape as B1 at smaller cost.
 
 ## Planned changes (roadmap)
 
-TODO: stage numbers from docs/plan/ and what changes here.
+- Stage 1 item 3: `trace:` streams stop being written (spans go to the telemetry store); `metrics:history`, `curiosity:ticks`, `persona:state` become telemetry samples. Target: under 500 stream files per day.
+- Stage 1 item 8: `LedgerClient` takes a `source`; a writer table in `contracts/streamnames.py` says which source may append to which prefix; a violation is refused.
+- Stage 1 item 10: `backends/dynamodb.py` moves under `simorgh/_frozen/`; the protocol and the sqlite backend stay.
+- Stage 4 item 2: `session:<id>` streams, one append per turn, a snapshot every 50 turns; retention on `session:` of 90d.
+- Stage 9 item 5: `[ledger] backend = "sqlite"` becomes the default after its own eval, with a JSONL export/import migration; JSONL stays available.
 
 ## Working on this module
 
