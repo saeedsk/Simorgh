@@ -140,8 +140,6 @@ class Config:
         "cast_devices", "home_state", "home_find", "home_describe",
         "media_now", "music_now", "energy_report", "energy_status", "energy_tariff",
     )
-    # Physical tools that are `human` by name: sirens, and the setup or
-    # pairing steps that store a credential or bind a device.
     # Tools a person approves in EVERY posture, whatever the code switch
     # says (rules.py::HumanOnlyRule). `apply_skill` installs persistent
     # code that later runs outside any worktree or test gate -- unlike a
@@ -149,6 +147,12 @@ class Config:
     # S4). The forerunner of stage 6's tier 3; `[guardian] human_only_tools
     # = []` returns to the old behaviour.
     human_only_tools: tuple[str, ...] = ("apply_skill",)
+    # Physical tools that are `human` by name (rules.py::PhysicalRule.
+    # _classify), whatever their arguments: sirens, and the setup or
+    # pairing steps that store a credential or bind a device. Like every
+    # `human` physical action they are escalated to a person in every
+    # posture unless `physical_auto_approve` is set, and denied when
+    # locked.
     physical_always_human_tools: tuple[str, ...] = (
         "cam_siren", "ring_siren", "cam_setup", "ring_setup", "cast_setup", "tv_pair",
     )
