@@ -1,0 +1,30 @@
+{
+  "$id": "https://simorgh.local/schema/session.delta.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "A piece of a reply while it is still being written (stage 3 item 2). `text` is appended to what came before for `session_id`; `reset` means drop what was shown so far (the model turned out to be calling a tool, or a failover started the reply again). The completed turn is `turn.completed`.",
+  "properties": {
+    "reset": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "seq": {
+      "type": "integer"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "seq",
+    "text"
+  ],
+  "title": "session.delta",
+  "type": "object"
+}

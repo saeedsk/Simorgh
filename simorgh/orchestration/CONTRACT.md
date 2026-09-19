@@ -189,3 +189,5 @@ Lock it first (`python tools/modlock.py claim orchestration --by <you> --task ".
 - A native tool call carrying `error` (arguments that were not a JSON object) is not proposed; the step fails with a message asking the model to resend it.
 
 - Native calls (stage 2 items 5-6, 2026-09-19): when every call in a reply carries an `id`, all of them run (at most `MAX_NATIVE_CALLS` = 8): read-only ones together, `parallel_read_tools` at a time; changes alone and in order, the first failure stopping the rest of the changes. Each is its own step. The transcript keeps typed turns: an assistant message with `tool_calls` `{id, tool, args}`, one `{role: tool, tool_call_id, name, content}` per call, then a short user nudge. Marker replies are unchanged.
+
+- A chat-scaffold session (typed or spoken) asks Cognition to stream its reply: `stream: true, stream_to: <session task id>` on `cognition.think` (stage 3 item 2).

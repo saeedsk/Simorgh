@@ -15,6 +15,9 @@ CognitionThink = define(t.COGNITION_THINK, [
     F("require_real_provider", Bool),
     O("session_id", Str),
     O("tools", List(Str)),
+    # Stream the reply as `session.delta` to this id while it is written
+    # (stage 3 item 2); the reply itself still comes back whole.
+    O("stream", Bool), O("stream_to", Str),
     O("task_rules", Str),  # protected prompt block: how this profile finishes its work
     O("expected", Enum("text", "tool_calls", "edit_blocks", "verdict")),
     # Pictures to look at, as absolute paths Cognition can read (a camera

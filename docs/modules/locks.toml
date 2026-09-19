@@ -11,6 +11,12 @@ task = "multi-agent wave 1"
 since = "2026-09-19T13:05:46+00:00"
 until = "2026-09-19T21:05:46+00:00"
 
+[locks.bus]
+by = "opus-main"
+task = "stage 3 item 2: session.delta sampling"
+since = "2026-09-19T13:46:10+00:00"
+until = "2026-09-19T21:46:10+00:00"
+
 [locks.cognition]
 by = "opus-main"
 task = "chat write tools, provider notice, search scope, TUI noise"

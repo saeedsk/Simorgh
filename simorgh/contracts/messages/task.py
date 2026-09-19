@@ -117,6 +117,14 @@ TurnCompleted = define(t.TURN_COMPLETED, [
        "so older producers/consumers built against v1 of this catalog "
        "entry still validate; Memory's episodic write (milestone 104) is "
        "the one consumer that actually needs it.")
+SessionDelta = define(t.SESSION_DELTA, [
+    F("session_id", Str),
+    F("seq", Int),
+    F("text", Str),
+    O("reset", Bool),
+], doc="A piece of a reply while it is still being written (stage 3 item 2). `text` is appended to what "
+       "came before for `session_id`; `reset` means drop what was shown so far (the model turned out to "
+       "be calling a tool, or a failover started the reply again). The completed turn is `turn.completed`.")
 TaskFailed = define(t.TASK_FAILED, [
     F("task_id", Str),
     F("reason", Str),

@@ -112,6 +112,7 @@ class Router:
         self, purpose: Purpose, messages: list[dict], *, tools: list[dict] | None,
         budget: Budget, timeout: float, order: tuple[str, ...] | None = None,
         images: list[str] | None = None, native_messages: list[dict] | None = None,
+        on_delta=None,
     ) -> tuple[ProviderResponse, bool]:
         """Returns (response, floor). Raises `NoRealProvider` if every
         real candidate failed/was exhausted and `budget.require_real`;
@@ -204,7 +205,7 @@ class Router:
                 typed = bool(native_messages) and name in self._native
                 response = await self._dial(
                     name, provider, native_messages if typed else messages, tools, budget.max_tokens_out, share,
-                    provider_budget, purpose, images,
+                    provider_budget, purpose, images, on_delta=on_delta,
                 )
             except Exception as exc:  # noqa: BLE001 -- ProviderUnavailable or anything else: try the next candidate
                 last_error = exc
@@ -271,8 +272,29 @@ class Router:
             raise NoRealProvider("no real provider available")
         return self._floor.respond_for_purpose(purpose), True
 
+    @staticmethod
+    async def _streamed(provider, messages, tools, max_tokens, share, on_delta) -> ProviderResponse:
+        from .providers.streaming import ERROR, STOP, TEXT, TOOL_INPUT
+
+        text: list[str] = []
+        calls: list[dict] = []
+        usage: dict = {}
+        async for delta in provider.stream(messages, tools=tools, max_tokens=max_tokens, timeout=share):
+            if delta.kind == TEXT:
+                text.append(delta.text)
+                await on_delta(delta.text)
+            elif delta.kind == TOOL_INPUT:
+                calls.append({"id": delta.tool_id, "tool": delta.tool, "args": delta.args})
+            elif delta.kind == ERROR and delta.tool:
+                calls.append({"id": delta.tool_id, "tool": delta.tool, "args": {}, "error": delta.text})
+            elif delta.kind == STOP:
+                usage = delta.usage
+        return ProviderResponse(text="".join(text), provider=provider.name, tool_calls=tuple(calls),
+                                input_tokens=int(usage.get("input_tokens") or 0),
+                                output_tokens=int(usage.get("output_tokens") or 0), cost_usd=usage.get("cost_usd"))
+
     async def _dial(self, name, provider, messages, tools, max_tokens, share, provider_budget, purpose,
-                    images=None):
+                    images=None, on_delta=None):
         """One candidate's call, retried once with twice the output room
         when the reply was cut off by `max_tokens`.
 
@@ -283,6 +305,17 @@ class Router:
         during the cooldown (benchmark wave, 2026-09-14)."""
         started = self._clock.now()
         tools = tools if name in self._native else None
+        if on_delta is not None and not images and hasattr(provider, "stream"):
+            # Stage 3 item 2: stream this candidate's reply to the caller as
+            # it is written. A failover starts a new attempt, which the
+            # caller is told so it can drop what the last one showed.
+            await on_delta(None)
+            try:
+                return await asyncio.wait_for(self._streamed(provider, messages, tools, max_tokens, share, on_delta),
+                                              timeout=share + _OVERRUN_GRACE_SECONDS)
+            except (asyncio.TimeoutError, TimeoutError) as exc:
+                raise ProviderUnavailable(
+                    f"{name} timed out after {share + _OVERRUN_GRACE_SECONDS:.0f}s, its slice of this call") from exc
         # Only the providers that declared `supports_images` ever reach here
         # with pictures, so the keyword is never passed to one that would
         # not know what to do with it.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import re
 import os
 
 from simorgh.contracts import topics
@@ -124,6 +125,65 @@ def _tool_instruction_block(payload: dict, specs: dict | None = None) -> str | N
 
 
 
+_MAYBE_MARKER = re.compile(r"^\s*[A-Z][A-Z0-9_:]*$")
+_MARKER_HEAD = re.compile(r"^\s*([A-Z][A-Z0-9_]*(?::[A-Z0-9_]+)*):")
+
+
+class DeltaGate:
+    """What of a streamed reply may be shown as it is written (stage 3
+    item 2). A marker-dialect reply can turn out to be a tool call
+    (`READ_FILE: …`), which is not an answer and must not be shown or
+    spoken as one. Each line is held only while its start could still be
+    a marker for an offered tool; once it is clearly prose the rest of it
+    streams straight through. A marker line retracts what was shown
+    (`reset`) and silences the rest of the attempt."""
+
+    def __init__(self, publish, *, tools=()) -> None:
+        self._publish = publish
+        self._markers = {t.lower() for t in tools}
+        self._reset_state()
+        self.seq = 0
+
+    def _reset_state(self) -> None:
+        self._line = ""
+        self._line_is_prose = False
+        self._silenced = False
+        self._shown = False
+
+    async def _send(self, text: str, *, reset: bool = False) -> None:
+        self.seq += 1
+        await self._publish(text, self.seq, reset)
+        if not reset:
+            self._shown = True
+
+    async def feed(self, text: str | None) -> None:
+        if text is None:                      # a new attempt (first, or after a failover)
+            if self._shown:
+                await self._send("", reset=True)
+            self._reset_state()
+            return
+        if self._silenced:
+            return
+        for piece in text.splitlines(keepends=True):
+            if self._line_is_prose:
+                await self._send(piece)
+            else:
+                self._line += piece
+                head = _MARKER_HEAD.match(self._line)
+                if head and head.group(1).lower() in self._markers:
+                    self._silenced = True
+                    if self._shown:
+                        await self._send("", reset=True)
+                        self._shown = False
+                    return
+                if not _MAYBE_MARKER.match(self._line.rstrip("\n")) or self._line.endswith("\n"):
+                    self._line_is_prose = True
+                    out, self._line = self._line, ""
+                    await self._send(out)
+            if piece.endswith("\n"):
+                self._line, self._line_is_prose = "", False
+
+
 def _typed_transcript(protected_text: str, messages: list[dict], compacted) -> list[dict] | None:
     """The caller's transcript with its typed tool turns kept (an assistant
     message carrying `tool_calls`, `tool` messages keyed by `tool_call_id`),
@@ -173,7 +233,7 @@ class Service:
     produces: tuple[str, ...] = (
         topics.COGNITION_THINK_REPLY, topics.COGNITION_COMPACT_REPLY,
         topics.COGNITION_COMPACT_PRE, topics.COGNITION_COMPACT_DONE,
-        topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_METRICS, topics.UI_NOTICE,
+        topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_METRICS, topics.UI_NOTICE, topics.SESSION_DELTA,
         topics.PERSONA_VOICE, topics.SELF_SUMMARY, topics.WORLD_ENV_QUERY,
     )
 
@@ -342,6 +402,21 @@ class Service:
         return Health.ok()
 
     # -- handlers ---------------------------------------------------------------------
+    def _delta_gate(self, message: Message, payload: dict):
+        """`feed` of a `DeltaGate` publishing `session.delta`, when the caller
+        asked for a streamed reply (`stream: true` and `stream_to`, the id
+        the turn is shown under)."""
+        session_id = str(payload.get("stream_to") or "")
+        if not payload.get("stream") or not session_id:
+            return None
+
+        async def _publish(text: str, seq: int, reset: bool) -> None:
+            await self._ctx.bus.publish(Message.new(
+                topics.SESSION_DELTA, source=self._ctx.source, trace_id=message.trace_id,
+                payload={"session_id": session_id, "seq": seq, "text": text, **({"reset": True} if reset else {})}))
+
+        return DeltaGate(_publish, tools=[t for t in payload.get("tools") or () if t]).feed
+
     def _offered_specs(self, payload: dict) -> list[dict] | None:
         """The offered tools as specs for a native provider; None when the
         caller expects no tool calls. The Router hands them only to a
@@ -477,6 +552,7 @@ class Service:
                                       attrs={"purpose": purpose.value}) as span:
                 response, floor = await self._router.complete(
                     purpose, think_messages, tools=self._offered_specs(payload), native_messages=native_messages,
+                    on_delta=self._delta_gate(message, payload),
                     budget=budget, timeout=budget.max_seconds, order=order, images=images or None,
                 )
                 span.set("provider", response.provider)

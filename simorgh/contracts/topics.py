@@ -15,7 +15,7 @@ from __future__ import annotations
 # catalog but are their own first segment on the wire, so they are
 # domains here; owners: orchestration and planning respectively.
 DOMAINS: tuple[str, ...] = (
-    "system", "percept", "intent", "plan", "project", "task", "turn", "action",
+    "system", "percept", "intent", "plan", "project", "task", "turn", "session", "action",
     "guardian", "tool", "verify", "memory", "world", "self", "learn", "reflect",
     "curiosity", "persona", "ui", "cognition", "research", "benchmark", "voice",
 )
@@ -73,6 +73,9 @@ TASK_STEP = "task.step"
 TASK_PAUSED = "task.paused"
 TASK_COMPLETED = "task.completed"
 TURN_COMPLETED = "turn.completed"
+# A reply as it is written (stage 3 item 2): bus-only, never traced; the
+# completed turn is what reaches the ledger.
+SESSION_DELTA = "session.delta"
 TASK_FAILED = "task.failed"
 TASK_BLOCKED = "task.blocked"
 # Ask a running task to stop. Nothing could, before 2026-09-08: a task

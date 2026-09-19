@@ -119,6 +119,18 @@
         "null"
       ]
     },
+    "stream": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "stream_to": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "task_rules": {
       "type": [
         "string",

@@ -111,7 +111,7 @@ class Service:
     consumes: tuple[str, ...] = (
         topics.UI_NOTICE, topics.UI_PROMPT, topics.ACTION_NEEDS_HUMAN, topics.ACTION_DENIED,
         topics.PERSONA_STATE_CHANGED, topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_METRICS,
-        topics.PERCEPT_TEXT_RECEIVED, topics.GUARDIAN_POSTURE_CHANGED, topics.TURN_COMPLETED,
+        topics.PERCEPT_TEXT_RECEIVED, topics.GUARDIAN_POSTURE_CHANGED, topics.TURN_COMPLETED, topics.SESSION_DELTA,
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_COMPLETED, topics.COGNITION_PROVIDER_STATUS,
         topics.PERCEPT_TIME_SCHEDULED, topics.UI_COMMAND_REQUEST,
         # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
@@ -200,6 +200,8 @@ class Service:
         # Voice replies printed at `turn.completed` whose `voice.spoken` has
         # not arrived yet (it comes when playback ends).
         self._voice_replies_shown = 0
+        # A reply still being written, per session id (`session.delta`).
+        self._streaming: dict[str, str] = {}
         self._color = render_mod.color_enabled(self.config.color)
         self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
         # True only while `_repl_main`'s thread is genuinely blocked
@@ -229,6 +231,8 @@ class Service:
             self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
         self._subs = [
             await ctx.bus.subscribe(topics.UI_NOTICE, self._on_notice),
+            # A reply as it is written (stage 3 items 2-3).
+            await ctx.bus.subscribe(topics.SESSION_DELTA, self._on_session_delta),
             # `benchmark run` prints "progress is narrated as it goes",
             # and the benchmark service does publish a message per
             # scored case -- to nobody, until 2026-09-10. Observer
@@ -636,6 +640,38 @@ class Service:
         )
         return panel_mod.flatten(rows)
 
+    async def _on_session_delta(self, message: Message) -> None:
+        p = message.payload
+        session_id = str(p.get("session_id") or "")
+        if not session_id:
+            return
+        if p.get("reset"):
+            self._streaming.pop(session_id, None)
+        else:
+            self._streaming[session_id] = (self._streaming.get(session_id, "") + str(p.get("text") or ""))[-4000:]
+        self._invalidate()
+
+    def _streaming_rows(self) -> list[list[tuple[str, str]]]:
+        """The newest reply being written, its last four lines, above the
+        live rows. It lives here, not in the transcript, because the
+        transcript cannot be edited: a reply that turns out to be a tool
+        call is taken back (`reset`), and the finished turn prints whole."""
+        if not self._streaming:
+            return []
+        text = list(self._streaming.values())[-1]
+        width = max(20, render_mod.terminal_width() - 3)
+        lines: list[str] = []
+        for paragraph in text.split("\n"):
+            while len(paragraph) > width:
+                cut = paragraph.rfind(" ", 0, width)
+                cut = cut if cut > 0 else width
+                lines.append(paragraph[:cut])
+                paragraph = paragraph[cut:].lstrip()
+            lines.append(paragraph)
+        lines = [ln for ln in lines if ln.strip()][-4:]
+        glyph = "\u25cf " if render_mod.unicode_mode(self.config.unicode) != "off" else "* "
+        return [[("class:sim.live", (glyph if i == 0 else "  ") + ln)] for i, ln in enumerate(lines)]
+
     def _live_text(self) -> list[tuple[str, str]]:
         """The live section above the prompt (`panel.live_rows`): the call
         in flight, drawn in place, and the breathing line; the one-line
@@ -644,7 +680,7 @@ class Service:
         unicode = render_mod.unicode_mode(self.config.unicode) != "off"
         rows = panel_mod.live_rows(self._book, now=time.monotonic(), footer_text=self._footer,
                                    last_done=self._last_done, unicode=unicode)
-        return panel_mod.flatten(rows)
+        return panel_mod.flatten(self._streaming_rows() + rows)
 
     async def _await_boot(self) -> None:
         deadline = time.monotonic() + self.config.boot_wait_s
@@ -1522,6 +1558,7 @@ class Service:
 
     async def _on_turn_completed(self, message: Message) -> None:
         p = message.payload
+        self._streaming.pop(str(p.get("session_id") or ""), None)
         text = str(p.get("text") or "").strip()
         if p.get("channel") == "voice" and text and not p.get("cancelled"):
             # A spoken reply is on screen as soon as it exists, while Sim is

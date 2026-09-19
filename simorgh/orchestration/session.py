@@ -1353,6 +1353,10 @@ class SessionRunner:
             payload={
                 "purpose": "chat" if is_chat else "draft",
                 "messages": messages, "tools": list(offered),
+                # A reply the person is waiting for is streamed as it is
+                # written (`session.delta`, stage 3 item 2), to the id the
+                # Interface and Voice already key the turn by.
+                **({"stream": True, "stream_to": session.task_id} if session.profile.scaffold == "chat" else {}),
                 # `Profile.scaffold` reached `assemble()` and was dropped;
                 # Cognition's protected `task_rules` block (04 section 5.4)
                 # was implemented and never filled by anyone. So a patch

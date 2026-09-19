@@ -178,6 +178,23 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text.count("Kitchen lights are on."), 1)
         self.assertIn("interrupted", text)
 
+    async def test_a_reply_being_written_shows_in_the_live_rows_and_goes_when_done(self):
+        """Stage 3 item 3: deltas grow one line above the prompt; a reset
+        takes it back; the finished turn clears it."""
+        for text in ("It is ", "three o'clock."):
+            await self.other.publish(self.other.new(topics.SESSION_DELTA, {"session_id": "c1", "seq": 1, "text": text}))
+        await self._pump()
+        rows = "".join(t for row in self.service._streaming_rows() for _s, t in row)  # noqa: SLF001
+        self.assertIn("It is three o'clock.", rows)
+        await self.other.publish(self.other.new(topics.SESSION_DELTA, {"session_id": "c1", "seq": 3, "text": "", "reset": True}))
+        await self._pump()
+        self.assertEqual(self.service._streaming_rows(), [])  # noqa: SLF001
+        await self.other.publish(self.other.new(topics.SESSION_DELTA, {"session_id": "c1", "seq": 4, "text": "Done."}))
+        await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+            "session_id": "c1", "task_id": "c1", "text": "Done.", "floor": False, "tool_steps": 0}))
+        await self._pump()
+        self.assertEqual(self.service._streaming_rows(), [])  # noqa: SLF001
+
     async def test_debug_level_notices_never_reach_the_human(self):
         """Live-caught: planning's own dedup bookkeeping ("duplicate
         candidate, matches task ...", `planning/service.py::_notice`)

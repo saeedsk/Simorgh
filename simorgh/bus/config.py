@@ -67,6 +67,9 @@ class Config:
         "system.tick.second": 0.0, "system.tick.idle": 0.0, "system.tick.sleep": 0.0,
         "system.metrics": 0.0, "system.health": 0.0, "cognition.provider.status": 0.0,
         "_inbox.#": 0.0,
+        # A streamed reply is dozens of messages a turn; its completed turn
+        # is traced (stage 3 item 2).
+        "session.delta": 0.0,
     })
     trace_blob_threshold_bytes: int = 4096
     dedupe_window: int = 5000
