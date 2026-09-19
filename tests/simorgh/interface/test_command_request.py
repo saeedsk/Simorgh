@@ -8,6 +8,7 @@ from unittest import mock
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
+from simorgh.interface.config import Config
 from simorgh.interface.dispatch import Outcome
 from simorgh.interface.service import Service
 
@@ -23,6 +24,7 @@ class _Bus:
 def _service(bus):
     service = Service.__new__(Service)
     service._ctx = types.SimpleNamespace(bus=bus, clock=types.SimpleNamespace(now=lambda: 0.0), ledger=None)
+    service.config = Config()
     service.session_id = "s1"
     service.vitals = None
     service._watched_tasks = set()

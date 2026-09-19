@@ -99,7 +99,7 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 
 ## Config
 
-`[interface]` in simorgh.toml; dataclass in `simorgh/interface/config.py`. Secrets read from `ctx.secrets`, not config: `SIM_API_TOKEN`, `SIM_TELEGRAM_TOKEN`, `SIM_WHATSAPP_TOKEN`, `SIM_WHATSAPP_PHONE_ID`, `SIM_WHATSAPP_VERIFY_TOKEN`, `SIM_WHATSAPP_APP_SECRET` (service.py:295-370). `kernel/configcheck.py:127-136` lists four of the unread keys below as known; `shell_timeout_s` is not on that list.
+`[interface]` in simorgh.toml; dataclass in `simorgh/interface/config.py`. Secrets read from `ctx.secrets`, not config: `SIM_API_TOKEN`, `SIM_TELEGRAM_TOKEN`, `SIM_WHATSAPP_TOKEN`, `SIM_WHATSAPP_PHONE_ID`, `SIM_WHATSAPP_VERIFY_TOKEN`, `SIM_WHATSAPP_APP_SECRET` (service.py:295-370). `kernel/configcheck.py` `KNOWN_DEAD_FIELDS` lists the four unread keys below (`prompt_timeout_s`, `vitals_idle_reprint_s`, `vitals_interval_s`, `notice_queue_max`).
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -121,7 +121,7 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 | `vitals_idle_reprint_s` | `3.0` | NO (declared, never read) |
 | `vitals_interval_s` | `15.0` | NO (declared, never read) |
 | `notice_queue_max` | `200` | NO (declared, never read) |
-| `shell_timeout_s` | `120.0` | NO (declared, never read; `[execution] shell_timeout_s` is the one used) |
+| `shell_timeout_s` | `120.0` | yes (bounds a typed `!<command>`; `service.py` passes it to `dispatch`. `[execution] shell_timeout_s` is the model's `run_shell`, a different path) |
 | `chat_reply_timeout_s` | `420.0` | yes |
 | `http_host` | `'127.0.0.1'` | yes (live config: `0.0.0.0`) |
 | `http_port` | `8765` | yes |

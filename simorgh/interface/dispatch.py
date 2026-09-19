@@ -182,12 +182,13 @@ async def run_shell(command: str, *, timeout: float) -> str:
 
 
 async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, vitals: VitalsCache,
-                    ledger: LedgerClient) -> Outcome:
+                    ledger: LedgerClient, shell_timeout_s: float = 120.0) -> Outcome:
+    """`shell_timeout_s` bounds a `!<command>` (`[interface] shell_timeout_s`)."""
     name, args = command.name, command.args
     now = clock.now()
 
     if name == "!":
-        return Outcome(await run_shell(args, timeout=120.0))
+        return Outcome(await run_shell(args, timeout=shell_timeout_s))
 
     if name == "exit":
         await bus.publish(bus.new(topics.SYSTEM_STOP, {

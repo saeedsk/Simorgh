@@ -763,7 +763,8 @@ class Service:
                 return
 
             outcome = await dispatch(command, bus=self._ctx.bus, clock=self._ctx.clock,
-                                      session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger)
+                                      session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger,
+                                      shell_timeout_s=self.config.shell_timeout_s)
             if outcome.text:
                 self._out(outcome.text)
             if outcome.task_id:
@@ -815,7 +816,8 @@ class Service:
         self._out(f"[{asked_by} ran: {line}]")
         try:
             outcome = await dispatch(command, bus=self._ctx.bus, clock=self._ctx.clock,
-                                      session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger)
+                                      session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger,
+                                      shell_timeout_s=self.config.shell_timeout_s)
         except Exception as exc:  # noqa: BLE001 -- a failed command is a result, not a crashed handler
             await _refused(f"{command.name} failed: {exc!r}", code="command_failed")
             return
