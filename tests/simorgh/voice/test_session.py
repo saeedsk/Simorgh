@@ -898,3 +898,22 @@ class ASupersededQuietTurnLeavesTheNewerTurnsAnswer(unittest.IsolatedAsyncioTest
         self.assertEqual(len(replies.asked), 2, replies.asked)
         self.assertIn("Twelve.", tts.spoken)
         self.assertNotIn("QUIET", tts.spoken)
+
+
+class PerTurnFactsBelongToTheirTurn(unittest.IsolatedAsyncioTestCase):
+    """A second turn identified before the first turn's readers ran must
+    not overwrite the first turn's audio and length (2026-09-18 evaluation,
+    V8: they were session attributes read after later awaits)."""
+
+    async def test_two_overlapping_turns_keep_their_own_facts(self) -> None:
+        script = _Script((False, 10_000))
+        session, bus, speaker, tts = _session(_config(), script, _Replies(["x"]))
+        session._embedder = None  # noqa: SLF001 -- no model: _identify records the audio and returns
+        session._audio[1] = b"\x01\x00" * 800  # noqa: SLF001
+        session._audio[2] = b"\x02\x00" * 1600  # noqa: SLF001
+        await session._identify(1)  # noqa: SLF001
+        await session._identify(2)  # noqa: SLF001
+        self.assertEqual(session._facts(1)["pcm"], b"\x01\x00" * 800)  # noqa: SLF001
+        self.assertEqual(session._facts(2)["pcm"], b"\x02\x00" * 1600)  # noqa: SLF001
+        self.assertEqual(session._facts(1)["skip"], "no_model")  # noqa: SLF001
+        self.assertEqual(session._facts(99)["pcm"], b"", "a turn that never ran has empty facts")  # noqa: SLF001

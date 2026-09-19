@@ -252,8 +252,13 @@ class VoiceSession:
         self._last_asked_speaker = ""
         self.last_speaker = ""
         self.last_identification = None
-        self._last_skip = ""              # why the last turn was never compared
-        self._last_pcm = b""              # the turn's own audio, for an enrolment take
+        # Per-turn facts from `_identify`, keyed by turn id: the speech
+        # length, why the turn was never compared, and its audio for an
+        # enrolment take. They were session attributes read after later
+        # awaits, so an overlapping turn could overwrite them before the
+        # first turn's reader got there (2026-09-18 evaluation, V8; the
+        # per-turn-facts-in-session-state bug shape).
+        self._turn_facts: dict[int, dict] = {}
         self._scored: dict[int, dict] = {}   # turn_id -> what the book concluded
         self._named: dict[int, str] = {}     # turn_id -> who the book said it was
         self._mic = microphone
@@ -751,35 +756,40 @@ class VoiceSession:
                   closest=getattr(who, "runner_up", "") or getattr(who, "name", ""))
         return replace(event, kind="silence")
 
+    def _facts(self, turn_id: int) -> dict:
+        """This turn's facts from `_identify` (empty ones if it never ran)."""
+        return self._turn_facts.get(turn_id) or {"speech_s": 0.0, "skip": "", "pcm": b""}
+
     async def _identify(self, turn_id: int):
         """Who spoke turn `turn_id`, from its audio: an Identification, or
         None when there is nothing to judge with. The audio is dropped
         here either way -- it is kept for this and nothing else."""
         pcm = self._audio.pop(turn_id, None)
-        self._last_speech_s = 0.0
-        self._last_skip = ""
         # Kept for the enrolment paths: they run after this and are handed
         # only the embedding, and the frames are dropped here.
-        self._last_pcm = bytes(pcm) if pcm else b""
+        facts = {"speech_s": 0.0, "skip": "", "pcm": bytes(pcm) if pcm else b""}
+        self._turn_facts[turn_id] = facts
+        for stale in [t for t in self._turn_facts if t < turn_id - 32]:
+            self._turn_facts.pop(stale, None)
         if pcm is None or self._embedder is None or self._speakers is None:
-            self._last_skip = "no_audio" if pcm is None else "no_model"
+            facts["skip"] = "no_audio" if pcm is None else "no_model"
             return None, None
         from .speakers import MIN_SECONDS, seconds_of
 
         if len(pcm) % 2:
             pcm = pcm[:-1]
         samples = [x / 32768.0 for x in memoryview(bytes(pcm)).cast("h")]
-        self._last_speech_s = seconds_of(samples, 16000)
-        if self._last_speech_s < MIN_SECONDS:
+        facts["speech_s"] = seconds_of(samples, 16000)
+        if facts["speech_s"] < MIN_SECONDS:
             # The commonest reason a turn carries no name: it was never
             # compared at all. No threshold can recover these.
-            self._last_skip = "too_short"
+            facts["skip"] = "too_short"
             return None, None
         try:
             vector = await asyncio.to_thread(self._embedder.embed, samples, 16000)
         except Exception as exc:  # noqa: BLE001 -- a failed embedding is an unknown speaker, not a failed turn
             self._log("warning", "voice.speaker_embed_failed", error=repr(exc))
-            self._last_skip = "embed_failed"
+            facts["skip"] = "embed_failed"
             return None, None
         return self._speakers.identify(vector), vector
 
@@ -789,10 +799,11 @@ class VoiceSession:
         and thrown away: 1,275 turns, 70% of them nameless, and not one of
         them said whether it had scored 0.49 or had never been compared --
         so the threshold could only ever be argued about, never read off."""
-        note: dict = {"speech_s": round(float(self._last_speech_s), 2)}
+        facts = self._facts(turn_id)
+        note: dict = {"speech_s": round(float(facts["speech_s"]), 2)}
         if identification is None:
             note["speaker_scored"] = False
-            note["speaker_skipped"] = self._last_skip or "unknown"
+            note["speaker_skipped"] = facts["skip"] or "unknown"
         else:
             note["speaker_scored"] = True
             note["speaker_score"] = round(float(identification.score), 3)
@@ -871,7 +882,8 @@ class VoiceSession:
             return
         from .speakers import ENROLL_MIN_SECONDS
 
-        if vector is None or getattr(self, "_last_speech_s", 0.0) < ENROLL_MIN_SECONDS:
+        facts = self._facts(turn_id)
+        if vector is None or facts["speech_s"] < ENROLL_MIN_SECONDS:
             await self._say_aside(f"say-{turn_id}", "That was short. A whole sentence, please.")
             return
         try:
@@ -889,8 +901,8 @@ class VoiceSession:
             who = note.split("sounds like ", 1)[1].split(" (")[0] if "sounds like " in note else "someone else"
             await self._say_aside(f"say-{turn_id}", f"That sounded like {who}. Once more, {job['name']}?")
             return
-        self._speakers.keep_take(job["name"], self._last_pcm, text=text,
-                                 seconds=getattr(self, "_last_speech_s", 0.0), source="enroll")
+        self._speakers.keep_take(job["name"], facts["pcm"], text=text,
+                                 seconds=facts["speech_s"], source="enroll")
         job["done"] += 1
         if job["done"] >= job["takes"]:
             self._enrolling = None
@@ -987,7 +999,7 @@ class VoiceSession:
             from .speakers import MIN_SECONDS
 
             if (may_refine(segments=segments, probable=identification.probable,
-                           refine_on=self._config.speaker_refine, seconds=self._last_speech_s,
+                           refine_on=self._config.speaker_refine, seconds=self._facts(turn_id)["speech_s"],
                            min_seconds=MIN_SECONDS, has_vector=vector is not None)
                     and self._speakers.refine(speaker, vector)):
                 self._log("debug", "voice.speaker_refined", speaker=speaker, score=round(identification.score, 3))
@@ -1462,8 +1474,9 @@ class VoiceSession:
         # Takes gathered by meeting someone are takes all the same; filing
         # only `voice enroll` would lose every one of these.
         if vector is not None and intro.name:
-            self._speakers.keep_take(intro.name, self._last_pcm, text=text,
-                                     seconds=getattr(self, "_last_speech_s", 0.0), source="introduce")
+            facts = self._facts(turn_id)
+            self._speakers.keep_take(intro.name, facts["pcm"], text=text,
+                                     seconds=facts["speech_s"], source="introduce")
         await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
             "text": text, "confidence": 1.0, "seconds": 0.0, "engine": "", "device": self._config.device,
             "turn": turn_id, "enrolling": intro.name or "?", "speaker_note": step.say})

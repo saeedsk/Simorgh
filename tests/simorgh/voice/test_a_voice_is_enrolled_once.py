@@ -67,7 +67,7 @@ class TheTurnsAudioSurvivesIdentification(unittest.TestCase):
 
         from simorgh.voice.session import VoiceSession
 
-        self.assertIn("_last_pcm = bytes(pcm)", inspect.getsource(VoiceSession._identify))
+        self.assertIn("\"pcm\": bytes(pcm)", inspect.getsource(VoiceSession._identify))
         for path in (VoiceSession._enroll_take, VoiceSession._introduce_step):
             self.assertIn("keep_take", inspect.getsource(path),
                           f"{path.__name__} files the take it just accepted")
