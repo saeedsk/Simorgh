@@ -586,6 +586,31 @@ def _git_head() -> str:
 _NAMES_SIM = re.compile(r"\b(?:sim|sima|simorgh|sam|seem|seam|seym|syme)\b", re.IGNORECASE)
 
 
+# The file each live-tree write tool changes, by its argument.
+_CHAT_WRITE_TARGET = {"replace_in_file": "path", "apply_source_patch": "subject"}
+
+
+def chat_outside_workspace_refusal(session: Session, tool: str, args: dict) -> str:
+    """Why a chat turn may not write this file, or "" when it may.
+
+    Chat can write files, by the creator's choice (2026-09-09: a deck, a
+    game, a document -- in `workspace/`). It could also write anywhere
+    else: on 2026-09-19 a typo ("?/tas") became a chat turn that saw a
+    queued patch task in `list_tasks` and did that task itself, editing
+    `simorgh/learning/` in the live checkout Sim runs from, with no
+    worktree, no tests before landing and no verification; three tests
+    broke. A change to anything outside `workspace/` is a task's job.
+    """
+    if getattr(session.profile, "scaffold", "") != "chat" or tool not in _CHAT_WRITE_TARGET:
+        return ""
+    target = str(args.get(_CHAT_WRITE_TARGET[tool]) or "")
+    if is_scratch(target):
+        return ""
+    return (f"refused: a chat turn writes only under workspace/, and {target or 'this file'} is outside it. "
+            "To change it, start a task with start_task: a task works in its own worktree, runs the tests and "
+            "is verified before its change lands. Do not edit it from chat.")
+
+
 def unplaced_voice_refusal(session: Session, tool: str) -> str:
     """Why a spoken turn may not run `tool`, or "" when it may.
 
@@ -1663,6 +1688,9 @@ class SessionRunner:
             rationale=f"step {step_no} of {session.profile.name} session",
             proposed_by=self._bus.source, kind=session.kind,
         )
+        refused = chat_outside_workspace_refusal(session, str(call.get("tool") or ""), payload.get("args") or {})
+        if refused:
+            return False, refused, refused
         # How long this session waits for the result, on the wire (stage 1
         # item 5): the approval carries it to Execution, which never runs
         # the tool past it. A person's later yes is caused by their answer,

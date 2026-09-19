@@ -265,6 +265,7 @@ class Service:
             ctx.bus, ctx.source, request_timeout=self._config.assembly_request_timeout, logger=ctx.logger,
         )
         self._last_provider: str | None = None
+        self._last_by_route: dict[str, str] = {}
         self._compactor = Compactor(
             self._config, ctx.ledger, bus=ctx.bus, source=ctx.source, clock=ctx.clock,
             summarize=self._summarize_for_compaction,
@@ -466,7 +467,7 @@ class Service:
         # "thinking moved from together to ollama" twice a minute while
         # thinking had not moved at all.
         if not images:
-            await self._notice_if_provider_changed(response.provider)
+            await self._notice_if_provider_changed(response.provider, route_key=",".join(order) if order else "")
 
         await self._ctx.bus.reply(message, type=topics.COGNITION_THINK_REPLY, payload={
             "text": parsed.text,
@@ -595,7 +596,7 @@ class Service:
             },
         ))
 
-    async def _notice_if_provider_changed(self, provider: str) -> None:
+    async def _notice_if_provider_changed(self, provider: str, route_key: str = "") -> None:
         """Say on screen when thinking moves to another provider, and
         why. The failover is silent by design at the router; the person
         must not be. 2026-09-11: Together's day of calls ran out at
@@ -603,7 +604,14 @@ class Service:
         it went to the Claude Code CLI, and the creator's report was
         "sim became less responsive" -- five seconds a turn instead of
         one, and nothing on screen said so."""
-        previous, self._last_provider = self._last_provider, provider
+        # Per route, not across all calls: with `escalate_from_attempt = 1`
+        # a task's drafts are routed to `together_strong` while chat uses
+        # `together`, and comparing consecutive calls announced "thinking
+        # moved" on nearly every call (the creator's screen, 2026-09-19).
+        # A move is a different provider answering the SAME route: failover.
+        previous = self._last_by_route.get(route_key)
+        self._last_by_route[route_key] = provider
+        self._last_provider = provider
         if previous is None or previous == provider or self._ctx is None:
             return
         why = ""

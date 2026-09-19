@@ -346,3 +346,5 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - Deadline (stage 1 item 5, 2026-09-19): a tool's timeout is `within_deadline(timeout_for(...), approved, now)`, so a run never outlasts the proposer's wait. An approval Guardian publishes for a person's answer is caused by the answer, carries no deadline, and is not cut short.
 
 - `tool.registered` carries `input_schema = input_schema_of(tool)` (the declared `args_schema`, normalised to an object schema; `{"type": "object"}` for a skill announced from disk before it loads), stage 2 item 1.
+
+- `search_code` never descends into `site-packages`, `node_modules`, `venvs`, `.venv`, `venv`, `dist-packages` (`_NOT_SEARCHED`), and decodes ripgrep output with `errors="replace"` (a non-UTF-8 byte used to fail the search).

@@ -544,3 +544,32 @@ class APurposeTimeCapApplies(CognitionServiceTestCase):
         }), timeout=5.0)
         self.assertTrue(provider.timeouts)
         self.assertLessEqual(max(t for t in provider.timeouts if t is not None), 90.0)
+
+
+class ADeliberateRouteIsNotAMove(CognitionServiceTestCase):
+    async def test_alternating_routes_say_nothing_but_a_failover_within_one_does(self):
+        # Live 2026-09-19: drafts routed to the strong tier, chat to the default,
+        # and "thinking moved" was announced on nearly every call.
+        strong, default = _FakeProvider("strong"), _FakeProvider("default")
+        config = CognitionConfig(
+            provider_order=("default", "floor"), assembly_request_timeout=0.05,
+            routes={"draft": ("strong",)},
+            providers={"strong": ProviderConfig(max_calls=100, window_seconds=3600.0),
+                       "default": ProviderConfig(max_calls=100, window_seconds=3600.0)},
+        )
+        await self._make(providers=[strong, default], config=config)
+        notices: list[dict] = []
+
+        async def _on_notice(message):
+            notices.append(message.payload)
+
+        await self.bus.subscribe(topics.UI_NOTICE, _on_notice)
+        for purpose in ("draft", "chat", "draft", "chat"):
+            await self.bus.request(Message.new(topics.COGNITION_THINK, source="test", payload={
+                "purpose": purpose, "messages": [{"role": "user", "content": "hi"}],
+                "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False,
+            }), timeout=5.0)
+        await asyncio.sleep(0.05)
+        self.assertEqual(strong.calls, 2)
+        self.assertEqual(default.calls, 2)
+        self.assertEqual(notices, [])

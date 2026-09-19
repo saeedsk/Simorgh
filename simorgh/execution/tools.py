@@ -372,6 +372,11 @@ def _rg_display(line: str) -> str:
     return f"{path}:{rest}" if rest else path
 
 
+#: Directories a code search never descends into: installed packages and
+#: environments, anywhere under the readable roots.
+_NOT_SEARCHED = frozenset({"site-packages", "node_modules", "venvs", ".venv", "venv", "dist-packages"})
+
+
 class SearchCodeTool:
     """Regex text search across `readable_roots` (the same path-safety
     boundary `read_file`/`list_dir` already enforce) -- the one gap
@@ -439,12 +444,19 @@ class SearchCodeTool:
             self._rg, "--line-number", "--no-heading", "--with-filename", "--no-ignore",
             "--null",
             f"--max-filesize={self._config.search_max_file_bytes}",
+            # Installed packages are not Sim's code: a search for `from .models
+            # import` returned aiohttp inside workspace/voice/venvs (live
+            # 2026-09-19) before anything of Sim's.
+            *(arg for part in _NOT_SEARCHED for arg in ("--glob", f"!**/{part}/**")),
             "-e", query, *roots,
         ]
         try:
+            # `errors="replace"`: one non-UTF-8 byte in a matching line raised
+            # UnicodeDecodeError out of the tool (a file under skills/, live
+            # 2026-09-19), failing the whole search.
             completed = subprocess.run(
-                cmd, capture_output=True, text=True, cwd=root, timeout=self._config.sandbox_timeout_s,
-                stdin=subprocess.DEVNULL,
+                cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=root,
+                timeout=self._config.sandbox_timeout_s, stdin=subprocess.DEVNULL,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             # Never leaves the model with nothing -- degrade to the
@@ -476,7 +488,7 @@ class SearchCodeTool:
             if not base_path.is_dir():
                 continue
             for path in sorted(base_path.rglob("*")):
-                if "__pycache__" in path.parts or not path.is_file():
+                if "__pycache__" in path.parts or not path.is_file() or _NOT_SEARCHED.intersection(path.parts):
                     continue
                 if pathsafety.hides_a_credential(root, path,
                                                  readable_roots=self._config.readable_roots,
