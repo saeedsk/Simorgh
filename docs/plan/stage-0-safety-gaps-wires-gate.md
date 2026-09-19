@@ -89,8 +89,8 @@ Each item is one commit. **Done** items record the commit so a reader can diff t
 ## Definition of done
 
 - [x] Items 1-16.
-- [ ] Items 17-28 committed, each with its test.
-- [ ] Item 29: full tier under 5 minutes; every module's contract tier named.
+- [ ] Items 17-28 committed, each with its test (all but 28 V7, the echo canceller, which needs the creator at the microphone).
+- [x] Item 29: full tier under 5 minutes; every module's contract tier named (2026-09-19; the four timing flakes resolved, two of them real races).
 - [ ] Item 30: `docs/findings/2026-09-19-stage-0.md` with the table above filled in.
-- [ ] Item 31: no `TODO` left in any `CONTRACT.md`.
+- [x] Item 31: no `TODO` left in any `CONTRACT.md`.
 - [ ] `python tools/modtest.py --tier full` green; `python simloader.py bless`.

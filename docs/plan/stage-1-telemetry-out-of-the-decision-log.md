@@ -1,6 +1,6 @@
 # Stage 1 -- Telemetry out of the decision log
 
-Status: not started · Depends on: stage 0 items 1-16 · Estimated: 2 weeks · Modules touched: bus, ledger, kernel, contracts, execution, interface, orchestration, cognition
+Status: **in progress** (2026-09-19: items 1, 7, 9 done; 2-6, 8, 10 open) · Depends on: stage 0 items 1-16 · Estimated: 2 weeks · Modules touched: bus, ledger, kernel, contracts, execution, interface, orchestration, cognition
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation B2 (88,356 per-message trace streams, 76% single-event), B4/B5 (idle 
 Measure and record in findings: `ls ~/.simorgh/ledger/streams | wc -l` after one day of use; `du -sh ~/.simorgh/ledger`; count of `action:*` streams whose tool is `ring_live`; the wall time of one spoken turn from `voice:turns` (STT, LLM, first audio). Read `simorgh/bus/trace.py`, `simorgh/ledger/backends/sqlite.py` (exists, 275 lines, CAS on `(stream, seq)`), `simorgh/kernel/metrics.py`, `simorgh/interface/dashfeeds.py` (the read side), `simorgh/execution/home/ring.py:698-703`.
 
 ## Action items
+
+Done 2026-09-19: item 1 (`simorgh/telemetry/`, a Kernel-owned store on every `ctx.telemetry`; not in `LAYERS` because it is not supervised; nothing writes to it yet), item 7 (`execution/selfaction.py`: seven direct runs now propose through Guardian; an AST scan test keeps it so), item 9 (`kernel/statusread.py`: live `/api/status`, else the ledger read-only). Next: item 2 then 3, which make item 1 useful.
 
 1. **`telemetry/` package: spans and samples tables.** *Lock `contracts` (new protocol), then `telemetry` (new package; add to `kernel/registry.py` LAYERS layer 0 and `docs/AGENTS.md`).*
    - Files: `simorgh/telemetry/{__init__,service,store,spans,samples,config}.py`; `simorgh/contracts/protocols.py` gains `Telemetry` (`span(name, parent, attrs)` context manager, `sample(series, value, ts)`, `query(trace_id)`).
