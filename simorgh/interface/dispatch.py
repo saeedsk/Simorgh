@@ -396,6 +396,8 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 
     if name == "tv":
         return await _tv(args, bus=bus, ledger=ledger, session_id=session_id)
+    if name == "pronounce":
+        return await _voice(bus, f"pronounce {args}")
     if name in ("next", "skip"):
         # Sim says "say next"; the person types it (2026-09-13). The TV key, without the model.
         return await _tv("next", bus=bus, ledger=ledger, session_id=session_id)
@@ -500,8 +502,10 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
                               timeout=30.0, render=voiceview.controlled)
     if verb in ("pronounce", "say-as"):
         words = rest.strip().split()
+        if len(words) >= 3 and words[1].lower() == "as":
+            words = [words[0]] + words[2:]      # `pronounce Ira as Eye-raa`
         if len(words) < 2:
-            return Outcome("usage: voice pronounce <name> <how to say it>   (voice pronounce Ira Ay-raa)")
+            return Outcome("usage: voice pronounce <name> <how to say it>   (voice pronounce Saoirse Seer-sha)")
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "pronounce", "name": words[0], "value": " ".join(words[1:])},
                               timeout=10.0, render=voiceview.controlled)
     if verb == "forget":

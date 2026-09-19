@@ -46,6 +46,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),
     ("pause", "", "hold everything"),
     ("resume", "", "let it continue"),
+    ("pronounce", "<name> [as] <how>", "how Sim says a name aloud: `pronounce Ira as Eye-raa` (also `voice pronounce`)"),
     ("next", "", "skip the track playing on the TV (also: skip; `tv pause` / `tv play` for the rest)"),
     ("help", "[command]", "list everything, or one command's words: help voice"),
     ("exit", "", "leave (Ctrl-D also detaches)"),
@@ -84,7 +85,7 @@ SPLASH_COMMANDS = 8
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Look around", ("status", "domains", "capabilities", "config", "alerts", "tool")),
     ("Work", ("tasks", "cancel", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
-    ("Voice, screen and cameras", ("voice", "tv", "next", "cameras", "ring")),
+    ("Voice, screen and cameras", ("voice", "pronounce", "tv", "next", "cameras", "ring")),
     ("Control", ("auto", "schedule", "mcp", "skills", "pause", "resume")),
     ("Session", ("help", "exit", "restart")),
 )
@@ -107,7 +108,7 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
               ("enroll <name> [as <relation>]", "learn a person's voice from three sentences; Sim then knows who is speaking"),
               ("people", "who Sim knows by voice (also `voice family`)"), ("whois", "say something; Sim tells who it sounded like, with scores"),
               ("forget <name>", "drop a person's voice"),
-              ("pronounce <name> <as>", "how Sim says a name aloud (voice pronounce Ira Ay-raa); the screen keeps the spelling"),
+              ("pronounce <name> <as>", "how Sim says a name aloud (voice pronounce Saoirse Seer-sha); the screen keeps the spelling"),
               ("models chatterbox|miso", "install an expressive engine in its own environment; then `voice set tts chatterbox`"),
               ("voices", "the voices the engine has"), ("devices", "microphone, speaker, engines"),
               ("models [name]", "recogniser models on disk, or fetch one"),
@@ -307,6 +308,14 @@ def _swallows_a_sentence(name: str, rest: str) -> bool:
         if words and words[0].lower() in ("me", "us", "him", "her", "them", "with", "please"):
             return True
         return len(words) > 1 and words[0].lower().lstrip("/") not in COMMAND_NAMES
+    if name == "pronounce":
+        # `pronounce Ira as Eye-raa` or `pronounce Ira Eye-raa` is the
+        # command (the creator typed exactly that twice, 2026-09-19, and
+        # the model only answered "EYE-ra."); anything longer is a person
+        # talking about pronunciation, which the model should hear.
+        words = rest.split()
+        is_command = len(words) == 2 or (3 <= len(words) <= 4 and words[1].lower() == "as")
+        return not is_command
     return bool(rest.strip()) and name in NO_ARGUMENT_COMMANDS
 
 

@@ -159,10 +159,22 @@ def claimed_tv_act(text: str, session) -> str:
 
 #: "I've noted it", said of a name's pronunciation, with nothing written.
 _NOTED_PRONUNCIATION = re.compile(
-    r"\b(?:noted|noting|saved|stored|recorded|written it down|writing it down|made a note|keep saying|"
+    # "Ira's pronunciation is set to EYE-ra", "is now pronounced": live
+    # 2026-09-19, said after a tool that only LISTED voices had run.
+    r"\b(?:pronunciation|pronounced)\b[^.!?]{0,40}\b(?:is|was|has been)\s+(?:now\s+)?(?:set|saved|stored|updated)\b"
+    r"|\b(?:is|are)\s+now\s+pronounced\b"
+    r"|\b(?:noted|noting|saved|stored|recorded|written it down|writing it down|made a note|keep saying|"
     r"i'?ll say it|i'?ll pronounce)\b[^.!?]{0,80}\b(?:name|pronunciation|pronounce|say it)\b"
     r"|\b(?:pronunciation|how to say (?:your|his|her|their) name)\b[^.!?]{0,80}\b"
     r"(?:noted|saved|stored|recorded|written down)\b", re.IGNORECASE)
+
+
+def _stored_a_pronunciation(step) -> bool:
+    """Only a step that wrote one backs the claim. Any tool used to count,
+    so listing the voices (live 2026-09-19) let "Ira's pronunciation is set
+    to EYE-ra" through with nothing written."""
+    summary = str(getattr(step, "summary", "") or "")
+    return bool(getattr(step, "tool", None) and getattr(step, "ok", False) and " is said " in summary)
 
 
 def claimed_to_note_a_pronunciation(text: str, session) -> str:
@@ -175,7 +187,7 @@ def claimed_to_note_a_pronunciation(text: str, session) -> str:
     `contracts/household.py` all along. `voice pronounce <name> <how>` is
     what stores it, and until `sim_command` there was no way for the model
     to reach it at all."""
-    if not text or any(step.tool for step in session.steps):
+    if not text or any(_stored_a_pronunciation(step) for step in session.steps):
         return ""
     match = _NOTED_PRONUNCIATION.search(text)
     return match.group(0).strip() if match else ""
@@ -228,7 +240,7 @@ def check(text: str, session) -> Bounce | None:
     noted = claimed_to_note_a_pronunciation(text, session)
     if noted:
         how = ("Write it for real with SIM_COMMAND: voice pronounce <name> <how to say it> "
-               "-- IPA or a respelling, e.g. voice pronounce Ira Ay-raa."
+               "-- IPA or a respelling, e.g. voice pronounce Saoirse Seer-sha."
                if "sim_command" in offered_tools(session.profile.tools)
                else "You have no tool that can store it, so say plainly that they should type "
                     "`voice pronounce <name> <how to say it>`.")

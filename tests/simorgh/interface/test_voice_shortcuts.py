@@ -34,5 +34,21 @@ class VoiceShortcuts(unittest.TestCase):
         self.assertIn("now: af_bella", text)
 
 
+class PronounceIsACommand(unittest.TestCase):
+    """The creator typed `pronounce IRa as EYE-ra` twice and the model only
+    said "EYE-ra." back (2026-09-19)."""
+
+    def test_the_short_forms_are_the_command(self):
+        from simorgh.interface.parser import parse
+
+        self.assertEqual(parse("pronounce IRa as EYE-ra").name, "pronounce")
+        self.assertEqual(parse("pronounce Ira Eye-raa").name, "pronounce")
+        self.assertIsNone(parse("pronounce it slowly for me please").name)
+
+    def test_as_is_dropped(self):
+        seen = VoiceShortcuts._sent(self, "pronounce Ira as Eye-raa")
+        self.assertEqual(seen, {"action": "pronounce", "name": "Ira", "value": "Eye-raa"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -440,7 +440,7 @@ class Service:
         if action == "pronounce":
             say_as = str(payload.get("value") or "").strip()
             if not name or not say_as:
-                return False, "usage: voice pronounce <name> <how to say it>   (voice pronounce Ira Ay-raa)"
+                return False, "usage: voice pronounce <name> <how to say it>   (voice pronounce Saoirse Seer-sha)"
             from .pronounce import is_ipa, normalise, respell
 
             say_as = normalise(say_as)
