@@ -118,7 +118,7 @@ class Service:
     produces: tuple[str, ...] = (
         topics.REFLECT_HEALTH_FINDING, topics.REFLECT_PATTERNS_FOUND, topics.REFLECT_CALIBRATION_UPDATED,
         topics.REFLECT_DRIFT_DETECTED, topics.SELF_OBSERVATION, topics.MEMORY_STORE,
-        topics.COGNITION_THINK, topics.REFLECT_REVIEW_REPLY, topics.SYSTEM_HEALTH,
+        topics.COGNITION_THINK, topics.REFLECT_REVIEW_REPLY,
         topics.TASK_CREATE,
         topics.REFLECT_ALERT_RAISED, topics.REFLECT_ALERT_CLEARED, topics.ACTION_PROPOSED,
     )

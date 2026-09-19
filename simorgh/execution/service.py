@@ -103,7 +103,11 @@ class Service:
     name = "execution"
     version = "0.1.0"
     consumes = (topics.ACTION_APPROVED, topics.SYSTEM_STATE_CHANGED, topics.LEARN_SKILL_ACQUIRED,
-                topics.CAMERA_EVENT)
+                topics.CAMERA_EVENT,
+    # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
+    topics.DASH_STATE,
+    topics.UI_HOOK_RECEIVED,
+)
     produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS, topics.TOOL_PROBED, topics.TOOL_UNAVAILABLE,
                 topics.UI_NOTICE, topics.COGNITION_THINK, topics.VOICE_SPEAK_REQUEST,)
 

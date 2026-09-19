@@ -87,7 +87,6 @@ class Service:
         topics.PROJECT_FAILED,
         topics.UI_PROMPT,
         topics.UI_NOTICE,
-        topics.SYSTEM_HEALTH,
         topics.SYSTEM_METRICS,
 )
 

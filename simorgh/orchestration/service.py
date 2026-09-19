@@ -34,6 +34,9 @@ class Service:
         topics.TASK_AVAILABLE, topics.SYSTEM_STATE_CHANGED,
         topics.ACTION_RESULT, topics.ACTION_DENIED, topics.ACTION_NEEDS_HUMAN, topics.VERIFY_RESULT,
         topics.PERCEPT_TEXT_RECEIVED, topics.TOOL_REGISTERED,
+        # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
+        topics.TASK_CANCEL,
+        topics.TOOL_PROBED,
     )
     produces: tuple[str, ...] = (
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_PAUSED, topics.TASK_COMPLETED,

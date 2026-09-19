@@ -103,7 +103,7 @@ class Service:
     produces: tuple[str, ...] = (
         topics.COGNITION_THINK_REPLY, topics.COGNITION_COMPACT_REPLY,
         topics.COGNITION_COMPACT_PRE, topics.COGNITION_COMPACT_DONE,
-        topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_HEALTH, topics.SYSTEM_METRICS,
+        topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_METRICS,
     )
 
     def __init__(self, *, config: Config | None = None, providers: list | None = None) -> None:

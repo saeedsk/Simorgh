@@ -52,8 +52,7 @@ class Service:
         topics.TASK_CREATED, topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
     )
     produces: tuple[str, ...] = (
-        topics.WORLD_ENV_QUERY_REPLY, topics.SELF_SUMMARY_REPLY, topics.SELF_GAPS_REPLY,
-        topics.WORLD_ENV_OBSERVED, topics.SELF_MODEL_UPDATED, topics.SYSTEM_HEALTH,
+        topics.WORLD_ENV_QUERY_REPLY, topics.SELF_SUMMARY_REPLY, topics.SELF_GAPS_REPLY, topics.SELF_MODEL_UPDATED,
     )
 
     def __init__(self, config: Config | None = None) -> None:

@@ -33,6 +33,12 @@ _CONSUMES = (
     topics.BENCHMARK_RUN_REQUEST, topics.BENCHMARK_HISTORY_REQUEST,
     topics.BENCHMARK_SUITES_REQUEST, topics.BENCHMARK_LOAD_REQUEST, topics.BENCHMARK_STOP_REQUEST,
     topics.COGNITION_PROVIDER_STATUS,
+    # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
+    topics.TASK_BLOCKED,
+    topics.TASK_COMPLETED,
+    topics.TASK_FAILED,
+    topics.TASK_STARTED,
+    topics.TASK_STEP,
 )
 _PRODUCES = (
     topics.BENCHMARK_RUN_REPLY, topics.BENCHMARK_HISTORY_REPLY, topics.BENCHMARK_SUITES_REPLY,

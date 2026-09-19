@@ -25,6 +25,8 @@ class Service:
     consumes: tuple[str, ...] = (
         topics.MEMORY_RETRIEVE, topics.MEMORY_STORE, topics.SYSTEM_TICK_SLEEP, topics.TURN_COMPLETED,
         topics.SYSTEM_TICK_SECOND,
+        # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
+        topics.MEMORY_FORGET,
     )
     produces: tuple[str, ...] = (
         topics.MEMORY_RETRIEVE_REPLY, topics.MEMORY_STORED, topics.MEMORY_CONTRADICTION_FLAGGED,
