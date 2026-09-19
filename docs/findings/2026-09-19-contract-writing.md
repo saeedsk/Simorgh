@@ -30,31 +30,33 @@ Five general-purpose agents, 19 modules split by layer. Each edited only its own
 
 ## Open, by what they risk
 
-**Safety and correctness (do first)**
+Updated 2026-09-19 (later the same night): everything below was fixed or deliberately closed except the first item.
 
-- `verification/service.py:108`: `_paused` is written and never read; verifications run while the system is paused. Left open on purpose: deferring one would run into Orchestration's 300 s verification wait and risk accepting a task unverified, which is worse. Decide together with stage 4's budgets.
-- `planning/planmode.py:1-8`: plans under review or waiting for a person are held in memory only; the `plan:<id>` stream the docstring describes is never written, so a restart loses them.
-- `contracts/settings.py:161-171` vs `kernel/config.py:157`: `config_path()` and the Kernel can resolve different `simorgh.toml` files when the data dir is not the default (the B11 shape).
-- `kernel/config.py`: `[runtime] subsystems` and `disabled` are parsed and never applied, so no subsystem can be switched off by config.
+**Safety and correctness**
 
-**Dead or misleading code (cheap, per module)**
+- Still open on purpose: `verification/service.py` `_paused` is written and never read, so verifications run while paused. Deferring one would run into Orchestration's 300 s verification wait and risk accepting a task unverified. Decide with stage 4's budgets.
+- Fixed: Planning's plans under review survive a restart (`planning:plans` stream).
+- Fixed: `config_path()` and the Kernel resolve the same `simorgh.toml` (`SIMORGH_RUNTIME_DATA_DIR`).
+- Fixed: `[runtime] subsystems` and `disabled` choose what boots; `bus`, `ledger`, `guardian` always do.
 
-- ledger: `Service.publish_health()` has no caller; `run_compaction`'s `scandir`+`stat` of every stream still runs on the event loop (smaller B1).
-- cognition: `Service.produces` omits `ui.notice` and the assembler's three requests; `availability_poll_seconds` unread.
-- kernel: `since_last_idle_tick` is always 0 (`scheduler.py:305-308`).
-- bus: a traced message is sampled twice (`client.py:189`, `trace.py:87`), harmless while rates are 0 or 1.
-- reflection: `register_monitor` and `raise_alert` have no callers, so the alert and digest path runs only in tests; docstring says it never proposes actions (it proposes `notify`); `SELF_STREAM` never written; a duplicated tool-recording block (`service.py:256-261`).
-- curiosity: `_BudgetState.any_free` is dead since the C9 fix; `novelty_score` is always 1.0; the follow-up request computes an unused value and always answers `items_found: 0`.
-- persona: `user_model_min_confidence` is parsed and has no effect; a docstring says nothing publishes `curiosity.share.proposed` (Curiosity does).
-- verification: `review_require_real_provider` has no effect (`_think` hardcodes False); four keys cannot be set from `simorgh.toml`.
-- learning: six config keys belonged to the retired pipeline.
-- execution: `Service.produces` omits most of what its tools publish; `pathsafety.py:58` hardcodes `ROOT_FILES` instead of reading `readable_root_files`.
-- orchestration: `lease_seconds` is never read; two docstrings drift from the code.
-- voice: `overheard_hours` does nothing; the four `aec*` keys matter only on the unused `Pipeline` path (V7).
-- interface: `shell_timeout_s` is unread and `configcheck` does not know it.
-- benchmark: `concurrency` is declared and never read.
-- memory, guardian: a few stale comments (WorkingMemory "has no producer"; the split `physical_always_human_tools` comment).
-- tests: `tests/simorgh/cognition/test_tidy.py` tests `contracts/tidy.py` and runs in the wrong module tier.
+**Dead or misleading code** (all fixed in one sweep, one commit per module; three agents in worktrees, merged by the coordinator)
+
+- ledger: `publish_health()` deleted (the Kernel publishes health); the stream listing runs off the event loop. `read_snapshot` is still a synchronous read.
+- cognition: `produces` exact; `availability_poll_seconds` now drives the status tick.
+- kernel: `since_last_idle_tick` reports the gap.
+- bus: a traced message is sampled once.
+- reflection: docstring honest, `SELF_STREAM` gone, duplicate tool recording gone. `register_monitor`/`raise_alert` still have no live caller; CONTRACT.md says so.
+- curiosity: `any_free` gone; `novelty_score` measured against recent candidates. The follow-up reply still says `items_found: 0` because nothing has been read at reply time; the real count arrives on `curiosity.interest.updated`.
+- persona: `user_model_min_confidence` removed with its uncalled reader; docstring fixed.
+- verification: `review_require_real_provider` honoured; four keys settable from `simorgh.toml`.
+- learning: six retired PatchPipeline keys removed.
+- execution: `produces` exact (a local `topics as _topics` alias hid seven requests from every scan, which also hid `memory.forget`'s producer); `readable_root_files` reaches `pathsafety`.
+- orchestration: `lease_seconds` removed (the lease is Planning's); two docstrings fixed.
+- voice: `overheard_hours` removed (retention is fixed in `contracts/overheard.py`); the `aec*` keys are documented as Pipeline-only (V7).
+- interface: `shell_timeout_s` bounds a typed `!command`.
+- benchmark: `concurrency` removed (cases run one at a time by design).
+- memory, guardian: comments corrected.
+- tests: `test_tidy.py` moved to the contracts tier.
 
 ## What this says about the method
 
