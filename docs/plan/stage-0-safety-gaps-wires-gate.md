@@ -1,6 +1,6 @@
 # Stage 0 -- Close the safety gaps, wire what exists, promote the gate
 
-Status: **in progress** (started 2026-09-18 evening; items 1-24 and 27 done, 28 partly, 25-26 and 29-31 open) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, learning, worldmodel, curiosity, ledger, interface, memory, orchestration, contracts, kernel, cognition, reflection, voice, simloader, tools, shared, docs
+Status: **in progress** (started 2026-09-18 evening; items 1-25 and 27 done, 28 and 30 partly, 26, 29, 31 open) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, learning, worldmodel, curiosity, ledger, interface, memory, orchestration, contracts, kernel, cognition, reflection, voice, simloader, tools, shared, docs
 
 ## Outcome
 
@@ -50,13 +50,15 @@ Each item is one commit. **Done** items record the commit so a reader can diff t
 27. **Persona announces decay on real change** (`decay_announce_delta` 0.02 from the last announced state). Commit `aa05475`. (V6)
 28. *Partly:* V1 fixed (a superseded quiet turn no longer drops the newer answer, commit `1f68f37`); V11 fixed (kept recordings bounded to 7 days / 500 MB, commit `eb207dc`). Open: V8 (three per-turn facts on the session), V7 (wire or delete the echo canceller).
 
+25. **Manifests match the code; the both-sides test reads the running bus.** 28 manifest discrepancies fixed; `tests/simorgh/test_manifests_match_the_code.py`; the both-sides test now reads subscriptions from a booted system. Commit `b5c2671`. (V4, W7)
+30. *Partly:* `tools/recall_scenario.py` (18 turns, floor provider, 1.5 s, deterministic) with baseline **2 of 3** (the fact asked about in different words 13 turns later is not seen); pinned in `tests/tools/test_recall_scenario.py`. Commit `96e328d`. Open: the kill-and-resume trial and a trial-suite + GAIA run, both of which need a real model.
+
 ### Open
 
-25. **Interface's manifest is generated and tested.** *Lock `interface`, `shared`.* (V4) A test that `Service.consumes`/`produces` equal the topics the package actually subscribes/publishes (reuse `tools/contract_skeleton.py::scan`); fix the tuples. Then generalise the test to every module.
 26. **`getattr(config, ...)` is forbidden.** *Lock `shared`, `execution`, `voice`.* (B15) `tests/simorgh/test_config_is_read_typed.py` fails on `getattr(<config>, "x", default)` outside an allow-list; replace the 123 sites with attribute reads, module by module under each lock.
 28. **Voice hygiene, the rest.** *Lock `voice`.* (V8, V7) `_last_speech_s`, `_last_pcm`, `_last_skip` move onto the turn record (they are set per turn in `_identify` and read after awaits by `_ask_and_speak`, `_enroll_take`, `_introduce_step`); the NLMS echo canceller is either wired into `VoiceSession` or deleted (measure echo false-positives with it on first; record in findings). V1 and V11 are done (above).
 29. **Test-suite consolidation, one directory at a time.** *Parallel per module; lock the module.* Using `docs/testing.md` section 3 and the per-directory analysis in `docs/reviews/2026-09-18/tests/` when it exists: mark `slow`, `integration`, `contract`; merge duplicate shape tests; delete tests that test a mock or a constant; name the contract tier in the module's `CONTRACT.md`. Target: full tier under 5 minutes; module tier under 60 s for every module. Acceptance: `python tools/modtest.py --tier full` time recorded in findings.
-30. **The gate, and the findings entry.** *Lock `tools`, `docs`.* Run `tools/trial_suite.py` (3 repeats), one GAIA slice via the benchmark unit, and write the two new scenarios: a 30-turn household recall script built from the machine-names and birthday failures (`tools/recall_scenario.py`, driving `_handle_line` the way `test_cli_end_to_end.py` does, with a fake provider that echoes facts), and a kill-and-resume trial (`tools/trial.py --kill-at-step N`). Record before/after for items 8 and 12 in `docs/findings/2026-09-19-stage-0.md` with the suite time, ledger file count and the escalation count from the physical drill.
+30. **The rest of the gate.** *Lock `tools`, `docs`.* A kill-and-resume trial (`tools/trial.py --kill-at-step N`: kill -9 mid-task in a repo copy; the resumed task must not redo a step or repeat an irreversible action) and a trial-suite run (3 repeats) plus one GAIA slice through the benchmark unit, all with the real model; record the numbers with the recall scenario's in `docs/findings/`.
 31. **CONTRACT.md prose.** *Parallel per module; lock the module.* Fill Purpose, the Files "For" column, the Consumes/Produces "Does/When" columns, Invariants, the contract-test list with what each pins, Known issues (catalogue ids) and Planned changes (stage numbers). The tables are generated; correct any over-match (a topic listed under Consumes that the module only publishes).
 
 ## Measurements after
