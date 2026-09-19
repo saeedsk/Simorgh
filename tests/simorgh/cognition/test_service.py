@@ -492,6 +492,29 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(providers[0]["max_calls"], 100)
         self.assertFalse(providers[0]["exhausted"])
 
+    async def test_availability_poll_seconds_sets_the_status_period(self):
+        """`availability_poll_seconds` was declared and never read; the
+        status tick used a literal 30 (found 2026-09-19)."""
+        config = CognitionConfig(
+            provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05,
+            providers={"fake_llm": ProviderConfig(max_calls=100, window_seconds=3600.0)},
+            availability_poll_seconds=5.0,
+        )
+        await self._make(providers=[_FakeProvider()], config=config)
+        seen = []
+
+        async def _on_status(message: Message) -> None:
+            seen.append(message)
+
+        sub = await self.bus.subscribe(topics.COGNITION_PROVIDER_STATUS, _on_status)
+        for i in range(10):
+            await self.bus.publish(Message.new(topics.SYSTEM_TICK_SECOND, source="test", payload={"n": i}))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        await sub.unsubscribe()
+
+        self.assertEqual(len(seen), 2)  # ticks 5 and 10, one provider each
+
 
 if __name__ == "__main__":
     unittest.main()

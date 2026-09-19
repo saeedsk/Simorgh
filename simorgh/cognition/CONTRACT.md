@@ -47,14 +47,14 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 | `cognition.compact.reply` | `messages/cognition.py::CognitionCompactReply` | simorgh/cognition/service.py:442 | every compact request |
 | `cognition.compact.pre` | `messages/cognition.py::CognitionCompactPre` | simorgh/cognition/compaction.py:359 | before a layer-5 summary |
 | `cognition.compact.done` | `messages/cognition.py::CognitionCompactDone` | simorgh/cognition/compaction.py:375 | after a layer-5 summary |
-| `cognition.provider.status` | `messages/cognition.py::CognitionProviderStatus` | simorgh/cognition/service.py:463, 512 | per provider at start, at `system.started`, and every 30 s |
-| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/cognition/service.py:482 | every 30 s: calls and spend per provider |
+| `cognition.provider.status` | `messages/cognition.py::CognitionProviderStatus` | simorgh/cognition/service.py:463, 512 | per provider at start, at `system.started`, and every `availability_poll_seconds` (30 s) |
+| `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/cognition/service.py:482 | every `availability_poll_seconds` (30 s): calls and spend per provider |
 | `ui.notice` | `messages/ui.py::UiNotice` | simorgh/cognition/service.py:548 | the answering provider changed (not for image calls) |
 | `persona.voice` (request) | `messages/persona.py::PersonaVoice` | simorgh/cognition/assembler.py:54 | every think, `assembly_request_timeout` (2 s); omitted on timeout |
 | `self.summary` (request) | `messages/self_.py::SelfSummary` | simorgh/cognition/assembler.py:58 | every think, same timeout |
 | `world.env.query` (request) | `messages/world.py::WorldEnvQuery` | simorgh/cognition/assembler.py:99 | chat purpose only: the `user_profile` facet |
 
-`Service.produces` omits `ui.notice` and the three assembler requests; the manifest test checks subscriptions only.
+`Service.produces` lists every row above, the three assembler requests included (fixed 2026-09-19; it used to omit `ui.notice` and the requests).
 
 ## Ledger streams
 
@@ -81,7 +81,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 | `microcompact_trigger_fraction` | `0.95` | yes |
 | `collapse_keep_full_segments` | `4` | yes |
 | `collapse_trigger_fraction` | `0.45` | yes |
-| `availability_poll_seconds` | `30.0` | NO (declared, never read; no availability loop exists, `kernel/configcheck.py:102`) |
+| `availability_poll_seconds` | `30.0` | yes: the period, in `system.tick.second` ticks (rounded, at least 1), of the `cognition.provider.status` + `system.metrics` broadcast (`Service._on_tick`). Wired 2026-09-19; it was a literal 30 |
 | `assembly_request_timeout` | `2.0` | yes |
 | `problems` | `()` | yes (not a key: what `from_mapping` ignored, logged at start) |
 

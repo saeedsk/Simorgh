@@ -131,11 +131,9 @@ class TestTheWholeConfigAudit(unittest.TestCase):
     def test_bus_backend_a_live_field_is_not_flagged(self) -> None:
         self.assertEqual(dead_fields(_Config({"bus": {"backend": "sqlite"}})), [])
 
-    def test_cognition_availability_poll_seconds_is_flagged(self) -> None:
-        self.assertEqual(
-            dead_fields(_Config({"cognition": {"availability_poll_seconds": 5.0}})),
-            [("cognition", "availability_poll_seconds")],
-        )
+    def test_cognition_availability_poll_seconds_is_live_since_it_was_wired(self) -> None:
+        # Read by cognition's provider-status tick since 2026-09-19.
+        self.assertEqual(dead_fields(_Config({"cognition": {"availability_poll_seconds": 5.0}})), [])
 
     def test_execution_approval_max_age_s_and_readable_root_files_are_flagged(self) -> None:
         self.assertEqual(

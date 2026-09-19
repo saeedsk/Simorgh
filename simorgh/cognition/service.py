@@ -2,8 +2,9 @@
 cognition.md section 5, 9): wires `cognition.think`/`.compact.request`,
 provider-status ticks, and pause/stop into the pieces built in this
 package. `start()` discovers providers, builds one `RollingWindowBudget`
-per provider replayed from the Ledger, and subscribes; `stop()` cancels
-the availability loop."""
+per provider replayed from the Ledger, and subscribes; `stop()`
+unsubscribes. Provider availability is re-broadcast every
+`availability_poll_seconds` of `system.tick.second` ticks."""
 
 from __future__ import annotations
 
@@ -100,10 +101,13 @@ class Service:
         topics.COGNITION_THINK, topics.COGNITION_COMPACT_REQUEST,
         topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_TICK_SECOND, topics.SYSTEM_STARTED,
     )
+    # Requests count as produced: the assembler sends persona.voice,
+    # self.summary and world.env.query and waits for their replies.
     produces: tuple[str, ...] = (
         topics.COGNITION_THINK_REPLY, topics.COGNITION_COMPACT_REPLY,
         topics.COGNITION_COMPACT_PRE, topics.COGNITION_COMPACT_DONE,
-        topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_METRICS,
+        topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_METRICS, topics.UI_NOTICE,
+        topics.PERSONA_VOICE, topics.SELF_SUMMARY, topics.WORLD_ENV_QUERY,
     )
 
     def __init__(self, *, config: Config | None = None, providers: list | None = None) -> None:
@@ -462,7 +466,11 @@ class Service:
 
     async def _on_tick(self, message: Message) -> None:
         self._tick_seconds += 1
-        if self._tick_seconds % 30 != 0:  # 03 section 4.1: refresh every ~30s, not every second tick
+        # 03 section 4.1: refresh every ~30s, not every second tick. The
+        # period is `availability_poll_seconds` (it was a literal 30 while
+        # the config key sat unread, found writing CONTRACT.md 2026-09-19).
+        every = max(1, round(float(self._config.availability_poll_seconds)))
+        if self._tick_seconds % every != 0:
             return
         statuses = [await b.status() for b in self._budgets.values()]
         selected = self._router.selected_name() if self._router is not None else None

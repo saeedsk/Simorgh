@@ -92,14 +92,6 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
     # passed, so the config value that feeds `Config.metrics_interval_
     # seconds` never reaches the loop it is named for.
     "bus": frozenset({"drain_seconds", "metrics_interval_seconds"}),
-    # `cognition/service.py`'s own module docstring says `stop()`
-    # "cancels the availability loop", but no such loop exists anywhere
-    # in `simorgh/cognition/`: there is no `asyncio.sleep`/`create_task`
-    # in the whole package that would poll provider availability on this
-    # cadence. The field parses into a real float and even has a
-    # matching mention in the docstring, but the loop it would configure
-    # was never built.
-    "cognition": frozenset({"availability_poll_seconds"}),
     # `execution/verifier.py`'s `ApprovalVerifier.verify` checks
     # `now > float(expires_at)` using the `expires_at` Guardian put on
     # the approval message (governed by `guardian.Config.approval_ttl_s`)
