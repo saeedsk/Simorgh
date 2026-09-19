@@ -3,3 +3,10 @@
 # Claim = add your entry here and COMMIT IT FIRST; release = remove it.
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
+
+
+[locks.guardian]
+by = "fable-main"
+task = "stage 0: PhysicalRule + [guardian.physical] posture (S1, S8)"
+since = "2026-09-19T04:07:03+00:00"
+until = "2026-09-19T12:07:03+00:00"
