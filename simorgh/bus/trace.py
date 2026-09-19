@@ -83,8 +83,12 @@ class TraceWriter:
         fails the same way as no tracing at all, just quieter: nothing
         raises, the queue simply grows and nothing ever reaches the
         ledger. `start()`/`stop()` remain the explicit lifecycle the
-        Service uses; this is the fallback for anything that forgets."""
-        if not self.should_trace(message):
+        Service uses; this is the fallback for anything that forgets.
+
+        Does not sample: the caller already decided with `should_trace`
+        (`BusClient.publish`). Sampling here too kept `r**2` of messages
+        at a fractional rate `r` (found writing CONTRACT.md, 2026-09-19)."""
+        if not self._enabled:
             return
         if self._enabled and self._task is None:
             self._task = asyncio.create_task(self._drain(), name="bus-trace-writer")

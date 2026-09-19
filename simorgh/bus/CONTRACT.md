@@ -95,6 +95,7 @@ Env overrides: `SIMORGH_BUS_BACKEND`, `SIMORGH_BUS_SQLITE_PATH` (`config.py:73-8
 - Per-partition order holds within a lane: two messages with the same `partition_key` are never in flight together on one lane.
 - A handler subscribed with `max_handler_seconds=UNBOUNDED` is never cut off by the bus.
 - Tracing never blocks or fails delivery: a full queue drops with a counter; a ledger outage buffers and replays.
+- A published message is sampled for tracing once, in `BusClient.publish` (`TraceWriter.should_trace`); `TraceWriter.write` does not sample again, so a rate `r` keeps about `r` of messages (`tests/simorgh/bus/test_trace.py::TestATracedMessageIsSampledOnce`).
 
 ## Contract tests
 
@@ -122,7 +123,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 None of these was fixed on 2026-09-18/19.
 
-Found while writing this contract (not in the catalogue): a traced message is sampled twice, once in `BusClient.publish` (`client.py:189`) and again inside `TraceWriter.write` (`trace.py:87`), so a fractional rate `r` keeps `r²` of messages. Harmless while every configured rate is 0 or 1.
+Found while writing this contract (not in the catalogue), fixed 2026-09-19: a traced message was sampled twice, once in `BusClient.publish` and again inside `TraceWriter.write`, so a fractional rate `r` kept `r²` of messages. `write` no longer samples.
 
 ## Planned changes (roadmap)
 

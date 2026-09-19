@@ -71,5 +71,30 @@ class TestTraceWriter(unittest.TestCase):
         self.assertEqual(tw.dropped, 3)
 
 
+class TestATracedMessageIsSampledOnce(unittest.TestCase):
+    """`BusClient.publish` sampled with `should_trace` and `TraceWriter.write`
+    sampled again, so a rate of 0.5 kept a quarter (2026-09-19)."""
+
+    @run
+    async def test_a_rate_of_one_half_traces_about_half(self):
+        import random
+
+        from simorgh.bus.config import Config
+        from simorgh.bus.factory import make_backend, make_client
+
+        ledger = FakeLedger()
+        tw = TraceWriter(ledger, sample={"task.*": 0.5}, rng=random.Random(7).random)
+        client = make_client(make_backend(Config(backend="memory")), source="test", trace=tw)
+        await client.start()
+        n = 2000
+        for _ in range(n):
+            await client.publish(make_message(topics.TASK_STEP))
+        await tw.flush()
+        await client.stop()
+        traced = sum(len(v) for k, v in ledger.streams.items() if k.startswith("trace:"))
+        self.assertGreater(traced, 0.4 * n)
+        self.assertLess(traced, 0.6 * n)
+
+
 if __name__ == "__main__":
     unittest.main()
