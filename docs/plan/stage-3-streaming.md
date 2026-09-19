@@ -1,6 +1,6 @@
 # Stage 3 -- Streaming end to end
 
-Status: **in progress** (2026-09-19: items 1-3 done) · Depends on: stage 2 items 3-5 · Estimated: 2 weeks · Modules touched: cognition, orchestration, interface, voice, contracts
+Status: **in progress** (2026-09-19: items 1-4 and 8 done; 5-7 and 9 open) · Depends on: stage 2 items 3-5 · Estimated: 2 weeks · Modules touched: cognition, orchestration, interface, voice, contracts
 
 ## Outcome
 
@@ -16,7 +16,9 @@ Record first-audio and full-response p50/p95 over 50 real turns from `voice:turn
 
 ## Action items
 
-Done 2026-09-19: item 1 (Together and Gemini `stream()`; Ollama not yet), item 2 (`session.delta` with a marker gate that retracts a reply turning into a tool call), item 3 (the TUI shows the reply being written above the prompt). Live: a typed turn's first text on the bus at 0.78 s of 1.2 s. Next: item 4.
+Done 2026-09-19: item 1 (Together and Gemini `stream()`; Ollama not yet), item 2 (`session.delta` with a marker gate that retracts a reply turning into a tool call), item 3 (the TUI shows the reply being written above the prompt). Live: a typed turn's first text on the bus at 0.78 s of 1.2 s. Item 4: Voice speaks the first sentence while the rest is written, behind `[voice] stream_replies` (default off until the creator measures first audio on real turns). Item 8: stt 2 s and first-audio 2.5 s budgets, breaches counted per day in `voice status`.
+
+Open: item 5 (a spoken filler on a slow tool; Voice already says "Okay." at once and has a still-thinking filler, so this may reduce to tying the filler to a slow tool), item 6 (streaming STT primary: needs the 50 recorded turns for WER, i.e. the creator's voice), item 7 (fast-lane bridge), item 9 (findings: first audio p50/p95 on real turns, before and after `stream_replies`).
 
 1. **`Provider.stream()`.** *Lock `cognition`.* `AsyncIterator[Delta]` with `Delta = text | tool_use_start | tool_use_input_json | stop`; `complete()` derived from `stream()`; Together (SSE), Anthropic, Gemini, Ollama adapters; tool-call input buffered until `stop`. Acceptance: fixture tests per adapter; a malformed partial JSON tool call yields an error delta, not an exception.
 2. **`session.delta` on the bus, bus-only.** *Lock `contracts`, `orchestration`.* A new topic `session.delta{session_id, seq, text}` published as deltas arrive, excluded from the ledger and from tracing (sampling 0); the completed turn is what reaches the ledger; a cancelled stream records a truncated turn honestly. Acceptance: topic has both sides (interface, voice subscribe); the both-sides test's allow-list shrinks.
