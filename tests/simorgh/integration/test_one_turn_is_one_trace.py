@@ -63,6 +63,14 @@ class OneTurnIsOneTrace(unittest.IsolatedAsyncioTestCase):
                 names = {s["name"] for s in spans}
                 self.assertIn(topics.PERCEPT_TEXT_RECEIVED, names)
                 self.assertIn(topics.TURN_COMPLETED, names)
+                # Stage 1 item 4: the provider call is a timed span under
+                # the think message that asked for it.
+                calls = [s for s in spans if s["name"] == "cognition.provider_call"]
+                self.assertEqual(len(calls), 1, spans)
+                think = [s for s in spans if s["name"] == topics.COGNITION_THINK]
+                self.assertEqual(calls[0]["parent_id"], think[0]["span_id"])
+                self.assertEqual(calls[0]["attrs"]["purpose"], "chat")
+                self.assertGreaterEqual(calls[0]["end"], calls[0]["start"])
                 ids = {s["span_id"] for s in spans}
                 self.assertTrue(any(s["parent_id"] in ids for s in spans), spans)
                 streams = Path(tmp) / "ledger" / "streams"
@@ -77,3 +85,43 @@ class OneTurnIsOneTrace(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnActionIsTimedInItsTrace(unittest.IsolatedAsyncioTestCase):
+    async def test_decide_and_run_are_spans_under_the_proposal(self):
+        from simorgh.contracts.envelope import Message
+        from simorgh.orchestration.tools import to_action_payload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "docs").mkdir()
+            (Path(tmp) / "docs" / "note.txt").write_text("hello")
+            kernel = Kernel(LoadedConfig({"runtime": {"data_dir": tmp}, "execution": {"repo_root": tmp}}, None),
+                            secrets=EnvSecretStore({}))
+            await kernel.boot()
+            try:
+                done = asyncio.get_running_loop().create_future()
+
+                async def _on_result(message):
+                    if not done.done():
+                        done.set_result(message)
+
+                sub = await kernel.bus.subscribe(topics.ACTION_RESULT, _on_result)
+                payload = to_action_payload(action_id="a1", task_id="t-trace", call={"tool": "read_file",
+                                            "args": {"path": "docs/note.txt"}}, rationale="test", proposed_by="orchestration",
+                                            kind="chat")
+                proposal = Message.new(topics.ACTION_PROPOSED, source="orchestration", payload=payload,
+                                       trace_id="trace-action-1")
+                await kernel.bus.publish(proposal)
+                result = await asyncio.wait_for(done, timeout=20)
+                self.assertTrue(result.payload.get("ok"), result.payload)
+                await sub.unsubscribe()
+                spans = await kernel.telemetry.query("trace-action-1")
+                by_name = {s["name"]: s for s in spans}
+                self.assertIn("guardian.decide", by_name, spans)
+                self.assertIn("execution.tool", by_name, spans)
+                self.assertEqual(by_name["guardian.decide"]["parent_id"], proposal.id)
+                self.assertEqual(by_name["guardian.decide"]["attrs"]["verdict"], "approved")
+                self.assertEqual(by_name["execution.tool"]["attrs"]["tool"], "read_file")
+                self.assertTrue(by_name["execution.tool"]["attrs"]["ok"])
+            finally:
+                await kernel.shutdown()

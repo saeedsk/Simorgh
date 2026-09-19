@@ -14,7 +14,7 @@ import os
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
-from simorgh.contracts.protocols import Context, Health, ProviderResponse
+from simorgh.contracts.protocols import Context, Health, ProviderResponse, NULL_TELEMETRY
 from simorgh.contracts.registry import error_reply_payload
 
 from .api import Budget, BudgetExceeded, ContextTooLarge, NoRealProvider, Paused, Purpose
@@ -377,10 +377,16 @@ class Service:
             # dialled for these, so nothing describes a photograph it was
             # never shown.
             images = [str(p) for p in (payload.get("images") or []) if str(p).strip()]
-            response, floor = await self._router.complete(
-                purpose, think_messages, tools=None,
-                budget=budget, timeout=budget.max_seconds, order=order, images=images or None,
-            )
+            telemetry = getattr(self._ctx, "telemetry", None) or NULL_TELEMETRY
+            async with telemetry.span("cognition.provider_call", trace_id=message.trace_id, parent_id=message.id,
+                                      attrs={"purpose": purpose.value}) as span:
+                response, floor = await self._router.complete(
+                    purpose, think_messages, tools=None,
+                    budget=budget, timeout=budget.max_seconds, order=order, images=images or None,
+                )
+                span.set("provider", response.provider)
+                span.set("tokens_in", response.input_tokens)
+                span.set("tokens_out", response.output_tokens)
         except NoRealProvider as exc:
             await self._error_reply(message, "no_real_provider", str(exc), retryable=True)
             return

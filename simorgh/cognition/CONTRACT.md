@@ -148,3 +148,5 @@ Found while writing this contract (not in the catalogue): `_on_think` builds its
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim cognition --by <you> --task "..."`), commit the lock, edit only `simorgh/cognition/`, `tests/simorgh/cognition/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py cognition` before committing; commit subject `cognition: <what changed>`.
+
+- Telemetry (stage 1 item 4, 2026-09-19): each provider call is a span `cognition.provider_call` (attrs `purpose`, `provider`, `tokens_in`, `tokens_out`), parented to the `cognition.think` message.

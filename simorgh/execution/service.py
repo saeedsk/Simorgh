@@ -37,7 +37,7 @@ from pathlib import Path
 from simorgh.bus.client import UNBOUNDED
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
-from simorgh.contracts.protocols import Health, ToolContext
+from simorgh.contracts.protocols import Health, ToolContext, NULL_TELEMETRY
 
 from . import pathsafety
 from .config import Config
@@ -830,8 +830,12 @@ class Service:
                 data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
                 ledger=self._ctx.ledger, bus=self._ctx.bus, root=root,
             )
+            telemetry = getattr(self._ctx, "telemetry", None) or NULL_TELEMETRY
             try:
-                result = await asyncio.wait_for(tool.run(args or {}, ctx=ctx), timeout=timeout)
+                async with telemetry.span("execution.tool", trace_id=message.trace_id, parent_id=message.id,
+                                          attrs={"tool": tool.name}) as span:
+                    result = await asyncio.wait_for(tool.run(args or {}, ctx=ctx), timeout=timeout)
+                    span.set("ok", bool(result.ok))
             except asyncio.TimeoutError:
                 await self._finish(action_id)
                 await self._publish_result(message, action_id, ok=False, error="timeout",

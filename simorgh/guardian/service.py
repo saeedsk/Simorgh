@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
-from simorgh.contracts.protocols import Health
+from simorgh.contracts.protocols import Health, NULL_TELEMETRY
 
 from . import rules as rule_defs
 from .api import BudgetStatus, DecisionContext, Proposal, ToolInfo
@@ -574,7 +574,12 @@ class Service:
                 source="guardian",
             ))
             return
-        verdict = await self._pipeline.decide(proposal, ctx)
+        telemetry = getattr(self._ctx, "telemetry", None) or NULL_TELEMETRY
+        async with telemetry.span("guardian.decide", trace_id=message.trace_id, parent_id=message.id,
+                                  attrs={"tool": proposal.tool, "mode": self._config.mode}) as span:
+            verdict = await self._pipeline.decide(proposal, ctx)
+            span.set("verdict", verdict.kind)
+            span.set("layer", verdict.layer)
         # NOT answered here. This line used to read "answered from here
         # on: every branch below publishes something," and several
         # things below it raise BEFORE anything is published: the

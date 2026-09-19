@@ -29,7 +29,7 @@ from typing import Any
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
-from simorgh.contracts.protocols import Context, Health
+from simorgh.contracts.protocols import Context, Health, NULL_TELEMETRY
 
 from .api import ActionResult, CheckContext, CheckResult, ReviewReply, ThinkReply, VerifyRequest
 from .checklist import evaluate_checklist, generate_checklist
@@ -118,7 +118,10 @@ class VerificationService:
         task = asyncio.ensure_future(self._run_verification(message))
         self._inflight.add(task)
         task.add_done_callback(self._inflight.discard)
-        await task
+        telemetry = getattr(self._ctx, "telemetry", None) or NULL_TELEMETRY
+        async with telemetry.span("verification.verify", trace_id=message.trace_id, parent_id=message.id,
+                                  attrs={"kind": str(message.payload.get("kind") or "")}):
+            await task
 
     async def _on_plan_proposed(self, message: Message) -> None:
         ctx = self._ctx
