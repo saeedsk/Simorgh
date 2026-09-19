@@ -16,3 +16,9 @@ by = "opus-main"
 task = "stage 0 item 17/19/20: machine paths, skills tier, shell immunity"
 since = "2026-09-19T06:19:30+00:00"
 until = "2026-09-19T14:19:30+00:00"
+
+[locks.orchestration]
+by = "opus-main"
+task = "stage 0 item 19: apply_skill label"
+since = "2026-09-19T06:26:15+00:00"
+until = "2026-09-19T14:26:15+00:00"
