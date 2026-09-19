@@ -72,7 +72,6 @@ Exact subscription list: `_CONSUMES` (`service.py:32-42`). The five `task.*` sub
 | `case_timeout_s` | `600.0` | yes |
 | `case_claim_timeout_s` | `1800.0` | yes |
 | `case_max_steps` | `30` | yes |
-| `concurrency` | `1` | NO (declared, never read; cases always run one at a time) |
 | `floor_retries` | `3` | yes |
 | `floor_retry_wait_s` | `60.0` | yes |
 | `fetch_timeout_s` | `30.0` | yes |
@@ -126,7 +125,7 @@ No catalogue id names this package directly. Related:
 
 - P6 -- there is no regression benchmark for the daily path (chat/voice latency, prompt size, memory block); this package measures task suites only (open, stage 4 evals).
 - T6 -- the evaluation's nine-day ledger window is dominated by dashboard and benchmark traffic, which skews "tool never called" counts.
-- `concurrency` is a declared key nothing reads.
+- `concurrency` was a declared key nothing read; removed 2026-09-19 (cases run one at a time by design; a `concurrency` key in simorgh.toml is ignored like any unknown key).
 
 ## Planned changes (roadmap)
 

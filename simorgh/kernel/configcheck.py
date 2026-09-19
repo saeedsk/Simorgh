@@ -70,13 +70,6 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
     # own package). Each entry below cites the specific place the field
     # should have been read and confirms nothing reads it there.
     #
-    # `benchmark/runner.py`'s own module docstring says "Cases run one
-    # at a time (`[benchmark] concurrency`)" -- but `Runner` never reads
-    # `self._config.concurrency` anywhere; cases are simply run
-    # sequentially in a `for` loop with no concurrency knob wired in at
-    # all. The field parses (`int`) and the docstring even points at it,
-    # but no code path acts on it.
-    "benchmark": frozenset({"concurrency"}),
     # `bus.stop()` (`bus/client.py`) takes its own `drain_seconds`
     # keyword (default `None`) that nothing in its body actually uses,
     # and every real caller (`kernel/service.py`, `kernel/supervisor.py`,
@@ -210,7 +203,7 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
     # doesn't consume `[benchmark]` at all, and it consumes `[bus]` only
     # to build the transport, not on the subsystem's behalf) but each
     # has a genuine `Config.from_mapping` a 2026-09-08 audit found a dead
-    # field in (`benchmark.concurrency`, `bus.drain_seconds`,
+    # field in (`benchmark.concurrency`, removed 2026-09-19; `bus.drain_seconds`,
     # `bus.metrics_interval_seconds`) -- without listing the classes
     # here, adding those names to `KNOWN_DEAD_FIELDS` below would be
     # inert: `dead_fields` looks up `classes.get(name)` and silently

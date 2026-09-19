@@ -116,11 +116,9 @@ class TestTheWholeConfigAudit(unittest.TestCase):
     real, non-default value but has no reader; see `KNOWN_DEAD_FIELDS`
     in `simorgh/kernel/configcheck.py` for the specific evidence."""
 
-    def test_benchmark_concurrency_is_flagged(self) -> None:
-        self.assertEqual(
-            dead_fields(_Config({"benchmark": {"concurrency": 4}})),
-            [("benchmark", "concurrency")],
-        )
+    def test_benchmark_concurrency_is_gone_not_flagged(self) -> None:
+        # The field was removed 2026-09-19; a leftover key is ignored.
+        self.assertEqual(dead_fields(_Config({"benchmark": {"concurrency": 4}})), [])
 
     def test_bus_drain_seconds_and_metrics_interval_are_flagged(self) -> None:
         self.assertEqual(

@@ -7,7 +7,8 @@ whole reason to have this is that the model is not the part that has
 been failing. Guardian, Planning, the tool loop and the step budget are
 all in the measurement, which is the point.
 
-Cases run one at a time (`[benchmark] concurrency`), each with its own
+Cases run one at a time (the system under test has one worker and a
+shared budget; parallel cases would measure contention), each with its own
 step cap, and the run is recorded whether it finishes or is interrupted.
 """
 

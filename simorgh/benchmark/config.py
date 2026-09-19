@@ -28,10 +28,6 @@ class Config:
     # Above the patch profile's own 20 because a benchmark question is
     # research with tools, and the point is to measure the ceiling.
     case_max_steps: int = 30
-    # One case at a time. The system under test has one worker and a
-    # shared budget; running cases in parallel would measure contention
-    # rather than capability.
-    concurrency: int = 1
     # A case the offline floor answered is not a measurement: it waits for
     # the model and runs again, up to this many times, the wait doubling
     # from `floor_retry_wait_s`. One Together 503 used to burn the rest of a
