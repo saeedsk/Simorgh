@@ -22,7 +22,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from .api import LedgerBackend
-from .streams import is_per_id
 
 _DURATION = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhd])\s*$")
 _UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
@@ -121,14 +120,23 @@ async def run_compaction(backend: LedgerBackend, policy: RetentionPolicy, *, now
                     report.details.append((stream, "truncate_below_snapshot", removed))
             continue
         oldest_allowed = now - window
-        if is_per_id(stream):
-            last = await backend.last_ts(stream)
-            if last is not None and last < oldest_allowed:
-                await backend.delete_stream(stream)
-                report.streams_deleted += 1
-                report.details.append((stream, "delete", 1))
+        # Idle past its window: delete it whole (a finished `trace:`/`action:`
+        # stream). Still being written: truncate what is older than the
+        # window. The choice used to be made by the NAME (`":" in name` meant
+        # per-id, delete-only), so `metrics:history`, `curiosity:ticks`,
+        # `persona:state`, `voice:turns` and the other long-lived streams with
+        # a colon were never truncated while alive, and the retention windows
+        # added for them on 2026-09-18 did nothing (found writing ledger's
+        # CONTRACT.md: 20 daily events under 7d, 0 removed).
+        last = await backend.last_ts(stream)
+        if last is not None and last < oldest_allowed:
+            await backend.delete_stream(stream)
+            report.streams_deleted += 1
+            report.details.append((stream, "delete", 1))
             continue
-        # singleton stream: keep only events inside the window
+        head_events = await backend.read(stream, from_seq=1, limit=1)
+        if not head_events or head_events[0].ts >= oldest_allowed:
+            continue  # nothing old enough to drop: skip the full read
         first_kept: int | None = None
         for event in await backend.read(stream, from_seq=1, limit=None):
             if event.ts >= oldest_allowed:
