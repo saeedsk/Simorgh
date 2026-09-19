@@ -27,6 +27,11 @@ import time
 import unittest
 from pathlib import Path
 
+import pytest
+
+# Spawns and SIGKILLs real worker processes: the full tier, not the module tier.
+pytestmark = [pytest.mark.slow, pytest.mark.integration]
+
 from simorgh.bus.enforcement import IdentityRegistry, ReservedTopologyPolicy
 from simorgh.bus.factory import make_backend as make_bus_backend, make_client as make_bus_client
 from simorgh.contracts import topics
@@ -35,7 +40,8 @@ from simorgh.kernel.config import load_config
 from simorgh.kernel.service import _bus_config_for, _ledger_mapping_for  # noqa: SLF001 -- shared test-only reuse
 from simorgh.ledger.factory import make_ledger
 
-CLAIM_TIMEOUT_S = 25.0
+# Two real worker processes under xdist load: 25 s failed once (2026-09-18).
+CLAIM_TIMEOUT_S = 60.0
 POLL_S = 0.05
 
 

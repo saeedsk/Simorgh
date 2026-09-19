@@ -28,3 +28,9 @@ by = "opus-main"
 task = "stage 0 item 30: capped real-model gate"
 since = "2026-09-19T07:22:45+00:00"
 until = "2026-09-19T11:22:45+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "stage0 item 29: flaky ten-turn deadline"
+since = "2026-09-19T07:41:09+00:00"
+until = "2026-09-19T15:41:09+00:00"

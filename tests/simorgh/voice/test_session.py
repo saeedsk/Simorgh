@@ -127,7 +127,9 @@ class TestTenTurns(unittest.IsolatedAsyncioTestCase):
         script = _Script(*[(True, 20), (False, 15)] * 10 + [(False, 10_000)])
         replies = _Replies(["I'll check that now.", "It is three o'clock.", "Yes, that is right."])
         session, bus, speaker, tts = _session(_config(), script, replies)
-        await _run_until(session, lambda: session.stats.turns >= 10, timeout=8.0)
+        # The run takes under a second; the deadline only bounds a hang.
+        # 8 s failed once under the old 16-minute suite's load (2026-09-18).
+        await _run_until(session, lambda: session.stats.turns >= 10, timeout=30.0)
         self.assertEqual(session.stats.turns, 10)
         self.assertEqual(len(replies.asked), 10)
         self.assertEqual(session.turns.turn_id, 10)

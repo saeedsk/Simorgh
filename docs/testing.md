@@ -63,7 +63,7 @@ Speed and confidence are traded through the tiers, not by skipping tests:
 ## 5. Cleanup done on 2026-09-19
 
 - Deleted `tests/test_*.py` (41 files, 881 tests, 11.5k lines) with the v1 tree they tested. The suite dropped from 6,652 to 5,762 tests and from 16:40 to 1:34.
-- Still open (stage 0 item 29): `tests/simorgh/execution/media/test_cast.py` hits an unpatched 30 s constant (`cast.py:674`); `tests/simorgh/voice/test_session.py::TestTenTurns`, `tests/simorgh/integration/test_local_multi_worker_crash_resume.py` and `tests/simorgh/execution/test_service.py::TestSkillAcquiredRegistersOnDemand::test_a_second_acquisition_of_the_same_name_does_not_re_register` (a 0.05 s real timeout) are timing-flaky under xdist (each failed once in a full run and passed alone) and need the `slow` marker and a fake clock.
+- Flaky tests resolved 2026-09-19 (stage 0 item 29). The cast test's 30 s constant is patched (0.2 s). The skill double-registration test was a real race, now fixed in `execution/service.py` (loads serialised per name). `TestTenTurns` gets a 30 s hang bound instead of 8 s. The local-multi crash-resume drill is marked `slow` and `integration`, so it runs in the full tier only, with a 60 s claim deadline.
 - `pyproject.toml` now declares the markers and `testpaths`; `pytest-timeout` is recommended (`pip install pytest-timeout`, then `--timeout=120` in the full tier) so a hang is a failure, not a stall.
 
 The per-directory value analysis (what each directory covers, which files are the contract tier, which are shape tests to merge or delete, what is not covered at all) has not been written yet; producing it and executing it is stage 0 item 29 in `docs/plan/stage-0-safety-gaps-wires-gate.md`, one module at a time under that module's lock.
