@@ -178,6 +178,15 @@ class StallDetectionTestCase(unittest.IsolatedAsyncioTestCase):
         await self._idle_tick()
         self.assertEqual(len(self.drift), 1, "the stall check is not a monitor")
 
+    async def test_one_step_is_recorded_once(self) -> None:
+        # `_on_task_step` used to add the step's tool to `tools_used` in two
+        # places; one step is one tool entry and one `step_seen` row.
+        await self._create_task()
+        await self._step()
+        self.assertEqual(self.service._tasks["t1"].tools_used, {"read_source"})
+        rows = await self.ledger.read("reflect:drift:t1", from_seq=0)
+        self.assertEqual([r.type for r in rows].count("step_seen"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

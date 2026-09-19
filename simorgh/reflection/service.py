@@ -1,6 +1,9 @@
-"""Reflection as a `Subsystem` (Layer 3, registry.py). Observer only --
-never emits `action.proposed`, never writes `self:model` directly (only
-`self.observation`; World Model owns the projection).
+"""Reflection as a `Subsystem` (Layer 3, registry.py). An observer that
+proposes: it never calls a tool itself and never writes `self:model`
+directly (only `self.observation`; World Model owns the projection).
+Its one `action.proposed` is the alert and daily-digest `notify`
+(`_propose_notify`), sent through Guardian like any other irreversible
+action.
 
 Scope note (honest, not aspirational): drift review is evaluated once,
 at task-terminal time, over the whole accumulated step trajectory,
@@ -76,7 +79,6 @@ CRITIQUE_STREAM_PREFIX = "reflect:critique:"
 DISTILLATION_STREAM = "reflect:distillation"
 CALIBRATION_STREAM = "reflect:calibration"
 PATTERNS_STREAM = "reflect:patterns"
-SELF_STREAM = "reflect:self"
 
 _CRITIQUE_KINDS = frozenset({"patch", "skill", "research", "project"})
 
@@ -256,8 +258,6 @@ class Service:
             meta.tools_used.add(str(p["tool"]))
         if meta.tracker is None:
             return
-        if p.get("tool"):
-            meta.tools_used.add(str(p["tool"]))
         meta.last_step_ts = message.ts
         meta.stall_reported = False
         meta.tracker.observe_step(p.get("tool"), p.get("summary", ""))

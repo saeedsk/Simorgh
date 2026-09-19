@@ -4,7 +4,7 @@ One-line status: layer 4 · 2,157 lines · 10 test files · lock: `reflection` i
 
 ## Purpose
 
-Reflection watches what the system does and turns it into signals other subsystems act on: mood-health findings, task drift and stalls, failure patterns, confidence calibration, self-critiques, repeated Guardian denials, skill-distillation proposals, and monitor alerts with a daily digest. It is an observer that proposes: its outputs are bus messages (`reflect.*`, `self.observation`, `task.create`, `memory.store`) and, for alerts only, a `notify` routed through `action.proposed` so Guardian sees it like any other irreversible action (`service.py:806-817`). It must never call a tool directly, never write `self:model` (World Model folds `self.observation`), and never fabricate a verdict or critique when no model answers: drift stays `unknown` and a critique falls back to the mechanical floor (`drift.py`, `critique.py`). The shaping decision is that every judgement core (health, drift, patterns, calibration, denials, digest, distillation) is pure and synchronous with an injected clock; `service.py` is the only file that touches the bus, the ledger or the model. The module's top docstring (`service.py:1-3`) still says it "never emits `action.proposed`"; that is stale since the alert path was added.
+Reflection watches what the system does and turns it into signals other subsystems act on: mood-health findings, task drift and stalls, failure patterns, confidence calibration, self-critiques, repeated Guardian denials, skill-distillation proposals, and monitor alerts with a daily digest. It is an observer that proposes: its outputs are bus messages (`reflect.*`, `self.observation`, `task.create`, `memory.store`) and, for alerts only, a `notify` routed through `action.proposed` so Guardian sees it like any other irreversible action (`service.py:806-817`). It must never call a tool directly, never write `self:model` (World Model folds `self.observation`), and never fabricate a verdict or critique when no model answers: drift stays `unknown` and a critique falls back to the mechanical floor (`drift.py`, `critique.py`). The shaping decision is that every judgement core (health, drift, patterns, calibration, denials, digest, distillation) is pure and synchronous with an injected clock; `service.py` is the only file that touches the bus, the ledger or the model.
 
 ## Files
 
@@ -79,7 +79,7 @@ Exact subscription list: `Service.consumes` (`service.py:106-117`).
 | `reflect:calibration` | simorgh/reflection/service.py | - | 90d (`reflect:` prefix) |
 | `reflection:alerts` | simorgh/reflection/service.py | simorgh/interface/dispatch.py | forever (no `DEFAULT_RETENTION` entry; `reflection:` does not match `reflect:`) |
 
-`SELF_STREAM = "reflect:self"` (`service.py:79`) is declared and never written. Reflection reads no stream: all its state (task metas, miners, calibration, alert router) is in memory and starts empty on every boot.
+There is no `reflect:self` stream (a `SELF_STREAM` constant naming one was never written and was removed 2026-09-19); `self.observation` is a bus message only. Reflection reads no stream: all its state (task metas, miners, calibration, alert router) is in memory and starts empty on every boot.
 
 ## Config
 
@@ -121,7 +121,7 @@ Exact subscription list: `Service.consumes` (`service.py:106-117`).
 
 ## Public Python surface
 
-- `simorgh.reflection.service.Service` (`name = "reflection"`): the Subsystem (`start`, `stop`, `health` always `ok`). Two extra public methods, `register_monitor(monitor)` and `raise_alert(alert: digest.Alert)`, are the designed entry points for domains to add checks; nothing outside the package calls either today, so the monitor registry is always empty and the alert/digest path only fires in tests.
+- `simorgh.reflection.service.Service` (`name = "reflection"`): the Subsystem (`start`, `stop`, `health` always `ok`). Two extra public methods, `register_monitor(monitor)` and `raise_alert(alert: digest.Alert)`, are the designed entry points for domains to add checks. Nothing outside the package calls either, and the service registers no monitor of its own: in a running Sim the registry is empty, no `reflect.alert.*` is ever published, no alert `notify` is proposed, and the daily digest renders empty and is skipped. The alert and digest path runs only in `tests/simorgh/reflection/test_service_alerts.py`. There is no obvious caller to wire: a domain cannot import `simorgh.reflection` (`tests/simorgh/test_module_boundaries.py`), so a live caller needs a bus-level entry point (a topic) first, which is a contracts change.
 - `Config` (`config.py`), read by the Kernel's config check.
 - Nothing is exported through `simorgh.contracts`; other packages see Reflection only through the topics above.
 - No module-level mutable singletons. Module constants: stream names, `_CRITIQUE_KINDS`. `_repo_root()` duplicates `execution/config.py::find_repo_root` (`service.py:44-69`) to resolve `skill_dir`.
