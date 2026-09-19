@@ -45,6 +45,68 @@ class GeminiProvider:
         prompt = "\n\n".join(m.get("content", "") for m in messages if m.get("content"))
         return await asyncio.to_thread(self._complete_sync, prompt, max_tokens, timeout, tools)
 
+    async def stream(self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int,
+                     timeout: float | None = None):
+        """Stage 3 item 1: Gemini's `generate_content_stream`, read on a
+        thread. Function calls come whole in Gemini's stream, so a call is
+        announced and completed together."""
+        from .streaming import ERROR, STOP, TEXT, TOOL_INPUT, TOOL_START, Delta
+
+        if not self._api_key:
+            raise ProviderUnavailable("no Gemini API key configured (GEMINI_API_KEY)")
+        prompt = "\n\n".join(m.get("content", "") for m in messages if m.get("content"))
+        config: dict = {}
+        if max_tokens:
+            config["max_output_tokens"] = int(max_tokens) + THINKING_RESERVE_TOKENS
+        if timeout:
+            config["http_options"] = {"timeout": int(timeout * 1000)}
+        if tools:
+            config["tools"] = native.gemini_declarations(tools)
+            config["automatic_function_calling"] = {"disable": True}
+        back = native.names_back(tools)
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        done = object()
+
+        def _read() -> None:
+            try:
+                for chunk in self._get_client().models.generate_content_stream(
+                        model=self._model, contents=prompt, config=config or None):
+                    loop.call_soon_threadsafe(queue.put_nowait, chunk)
+            except Exception as exc:  # noqa: BLE001 -- handed to the consumer
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
+            loop.call_soon_threadsafe(queue.put_nowait, done)
+
+        loop.run_in_executor(None, _read)
+        usage: dict = {}
+        index = 0
+        while True:
+            chunk = await queue.get()
+            if chunk is done:
+                break
+            if isinstance(chunk, Exception):
+                raise ProviderUnavailable(f"Gemini stream failed: {chunk!r}") from chunk
+            try:
+                text = getattr(chunk, "text", None) or ""
+            except Exception:  # noqa: BLE001 -- `.text` raises on a function-call-only chunk
+                text = ""
+            if text:
+                yield Delta(TEXT, text=text)
+            for call in native.gemini_calls(chunk, back):
+                call_id = call.get("id") or f"call_{index}"
+                index += 1
+                yield Delta(TOOL_START, tool_id=call_id, tool=call["tool"])
+                if call.get("error"):
+                    yield Delta(ERROR, tool_id=call_id, tool=call["tool"], text=call["error"])
+                else:
+                    yield Delta(TOOL_INPUT, tool_id=call_id, tool=call["tool"], args=call["args"])
+            meta = getattr(chunk, "usage_metadata", None)
+            if meta is not None:
+                usage = {"input_tokens": getattr(meta, "prompt_token_count", 0) or 0,
+                         "output_tokens": (getattr(meta, "candidates_token_count", 0) or 0)
+                         + (getattr(meta, "thoughts_token_count", 0) or 0)}
+        yield Delta(STOP, usage=usage)
+
     def _complete_sync(
         self, prompt: str, max_tokens: int = 0, timeout: float | None = None, tools: list[dict] | None = None,
     ) -> ProviderResponse:

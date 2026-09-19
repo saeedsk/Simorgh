@@ -90,7 +90,7 @@ class TogetherProvider:
         base_url: str = DEFAULT_BASE_URL, timeout_seconds: float = 180.0,
         reasoning_effort: str = DEFAULT_REASONING_EFFORT, transport: Any | None = None,
         name: str = "together", price_in: float = PRICE_IN, price_out: float = PRICE_OUT,
-        price_cached_in: float = PRICE_CACHED_IN,
+        price_cached_in: float = PRICE_CACHED_IN, stream_transport: Any | None = None,
     ) -> None:
         # A second instance -- a stronger model or more effort for escalated
         # work -- is a separate provider to the Router, with its own name,
@@ -111,6 +111,9 @@ class TogetherProvider:
         # Test seam: a callable(url, headers, body_bytes, timeout) -> str.
         # Nothing in the suite may make a real network call.
         self._transport = transport
+        # Streaming seam: a callable(url, headers, body_bytes, timeout) ->
+        # an iterable of SSE lines (str).
+        self._stream_transport = stream_transport
 
     @property
     def model(self) -> str:
@@ -149,6 +152,96 @@ class TogetherProvider:
         except json.JSONDecodeError as exc:
             raise ProviderUnavailable(f"Together returned a non-JSON body: {raw[:200]!r}") from exc
         return self._to_response(data, native.names_back(tools))
+
+    async def stream(self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int,
+                     timeout: float | None = None):
+        """Stage 3 item 1: the reply as it is generated (see streaming.py).
+        The HTTP read runs on a thread and hands lines over a queue, so the
+        event loop never blocks on the network."""
+        from .streaming import ERROR, STOP, TEXT, Delta, ToolCallBuffer
+
+        if not self._api_key:
+            raise ProviderUnavailable("no Together API key configured (TOGETHER_API_KEY)")
+        body = {"model": self._model, "messages": native.openai_messages(messages), "stream": True,
+                "stream_options": {"include_usage": True}}
+        if tools:
+            body["tools"] = native.openai_tools(tools)
+            body["tool_choice"] = "auto"
+        if max_tokens:
+            body["max_tokens"] = self._room_to_answer(int(max_tokens))
+        if self._reasoning_effort:
+            body["reasoning_effort"] = self._reasoning_effort
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        done = object()
+        url = f"{self._base_url}/chat/completions"
+        wait = timeout if timeout is not None else self._timeout_seconds
+
+        def _read() -> None:
+            try:
+                for line in self._stream_lines(url, body, timeout=wait):
+                    loop.call_soon_threadsafe(queue.put_nowait, line)
+            except Exception as exc:  # noqa: BLE001 -- handed to the consumer
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
+            loop.call_soon_threadsafe(queue.put_nowait, done)
+
+        # A thread cannot be cancelled: if the consumer stops early the read
+        # runs to its end and is dropped, as an abandoned `complete()` is.
+        loop.run_in_executor(None, _read)
+        calls = ToolCallBuffer(native.names_back(tools))
+        usage: dict = {}
+        while True:
+            item = await queue.get()
+            if item is done:
+                break
+            if isinstance(item, Exception):
+                raise item if isinstance(item, ProviderUnavailable) else ProviderUnavailable(
+                    f"Together stream failed: {item!r}") from item
+            line = item.strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                continue
+            try:
+                chunk = json.loads(data)
+            except ValueError:
+                yield Delta(ERROR, text=f"unreadable stream chunk: {data[:120]!r}")
+                continue
+            if chunk.get("usage"):
+                u = chunk["usage"]
+                cached = self._cached_tokens(u)
+                uncached = max(0, int(u.get("prompt_tokens") or 0) - cached)
+                out_tokens = int(u.get("completion_tokens") or 0)
+                usage = {"input_tokens": uncached, "output_tokens": out_tokens,
+                         "cost_usd": self._bill(uncached, out_tokens, cached)}
+            for choice in chunk.get("choices") or ():
+                delta = choice.get("delta") or {}
+                if delta.get("content"):
+                    yield Delta(TEXT, text=delta["content"])
+                for fragment in delta.get("tool_calls") or ():
+                    started = calls.feed(fragment)
+                    if started is not None:
+                        yield started
+        for finished in calls.finish():
+            yield finished
+        yield Delta(STOP, usage=usage)
+
+    def _stream_lines(self, url: str, body: dict, *, timeout: float):
+        payload = json.dumps(body).encode()
+        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json",
+                   "User-Agent": USER_AGENT, "Accept": "text/event-stream"}
+        if self._stream_transport is not None:
+            yield from self._stream_transport(url, headers, payload, timeout)
+            return
+        request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- fixed https endpoint
+                for raw in response:
+                    yield raw.decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:300]
+            raise ProviderUnavailable(f"Together HTTP {exc.code}: {detail}") from exc
 
     def _post(self, url: str, body: dict, *, timeout: float) -> str:
         payload = json.dumps(body).encode()
