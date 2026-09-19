@@ -5,11 +5,47 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.benchmark]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.bus]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
 [locks.cognition]
 by = "opus-main"
 task = "Gemini key from secrets.toml"
 since = "2026-09-19T07:32:15+00:00"
 until = "2026-09-19T09:32:15+00:00"
+
+[locks.curiosity]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.execution]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.guardian]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.interface]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
 
 [locks.kernel]
 by = "opus-main"
@@ -17,8 +53,56 @@ task = "Gemini key from secrets.toml"
 since = "2026-09-19T07:32:15+00:00"
 until = "2026-09-19T09:32:15+00:00"
 
+[locks.learning]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.ledger]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.memory]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.orchestration]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.persona]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.reflection]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
 [locks.tools]
 by = "opus-main"
 task = "stage 0 item 30: capped real-model gate"
 since = "2026-09-19T07:22:45+00:00"
 until = "2026-09-19T11:22:45+00:00"
+
+[locks.verification]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "stage0 item 32 dead-code list (worktree agents)"
+since = "2026-09-19T07:44:31+00:00"
+until = "2026-09-19T15:44:31+00:00"
