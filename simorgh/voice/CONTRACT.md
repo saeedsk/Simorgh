@@ -101,7 +101,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the s
 | `stt_compute` | `'auto'` | yes |
 | `tts` | `'auto'` | yes |
 | `tts_voice` | `'af_jessica'` | yes |
-| `tts_speed` | `1.1` | yes (Kokoro natively; StyleTTS2 by dividing the model's phoneme durations since 2026-09-19) |
+| `tts_speed` | `1.3` | yes (Kokoro natively; StyleTTS2 by dividing the model's phoneme durations since 2026-09-19) |
 | `tts_by_language` | `True` | yes |
 | `tts_farsi_voice` | `'fa_IR-amir-medium'` | yes |
 | `vad` | `'auto'` | yes |

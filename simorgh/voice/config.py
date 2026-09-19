@@ -41,7 +41,7 @@ class Config:
     stt_compute: str = "auto"          # faster_whisper: int8 | float16 | auto
     tts: str = "auto"                  # auto | kokoro | piper | say | chatterbox | miso | fake
     tts_voice: str = "af_jessica"      # Kokoro voice id (the creator's pick); a `say -v` name for `say`
-    tts_speed: float = 1.1     # the creator, 2026-09-13: "you speak too slow, speak fast" -- playful's pace, always
+    tts_speed: float = 1.3     # the creator: "you speak too slow, speak fast" (2026-09-13); 1.3 chosen by ear on StyleTTS2 (2026-09-19)
     # A reply is spoken by the engine for ITS language (voice/lang.py):
     # Kokoro has no Persian and read Farsi as English gibberish
     # (2026-09-11). Off = the one engine above speaks everything.

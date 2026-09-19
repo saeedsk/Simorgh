@@ -396,7 +396,7 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("quiet")][0]
         self.assertEqual(spoken["metrics"]["tone"], "sorry"); self.assertEqual(spoken["metrics"]["register"], "sorry")
         self.assertNotIn("[sorry]", spoken["text"])
-        self.assertLess(tts.speeds[-1], 1.0, "sorry is slower than plain")
+        self.assertLess(tts.speeds[-1], session._config.tts_speed, "sorry is slower than plain")  # noqa: SLF001
         self.assertEqual(tts.tones[-1], "sorry", "the engine is told the feeling")
 
     async def test_without_an_engine_enrolment_says_what_is_missing(self):

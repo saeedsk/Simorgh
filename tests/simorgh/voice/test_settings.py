@@ -29,7 +29,7 @@ class TestParse(unittest.TestCase):
     def test_apply_returns_a_new_config(self) -> None:
         config = settings.apply(Config(), "tts_speed", 1.2)
         self.assertEqual(config.tts_speed, 1.2)
-        self.assertEqual(Config().tts_speed, 1.1)   # the default pace since 2026-09-13
+        self.assertEqual(Config().tts_speed, 1.3)   # chosen by ear on StyleTTS2, 2026-09-19
 
 
 class TestPersist(unittest.TestCase):
