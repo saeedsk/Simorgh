@@ -321,6 +321,11 @@ def settings_paths(home: Path | None = None) -> tuple[Path, Path]:
 
 
 class _CastTool:
+    #: How long a cast with no PLAYING state yet may sit IDLE before the
+    #: watcher decides it is over. A class attribute so a test can shorten
+    #: it (it was an inline 30.0 that made one test take 30 s).
+    IDLE_GRACE_S = 30.0
+
     read_only = False
     reversibility = "reversible"
     #: seconds between waking the TV and casting to it
@@ -671,7 +676,7 @@ class _CastTool:
                 continue
             if state == "STOPPED":
                 return False
-            if state in ("IDLE", "UNKNOWN") and (seen_playing or time.monotonic() - started > 30.0):
+            if state in ("IDLE", "UNKNOWN") and (seen_playing or time.monotonic() - started > self.IDLE_GRACE_S):
                 return self._prefs.generation == generation
         return False
 

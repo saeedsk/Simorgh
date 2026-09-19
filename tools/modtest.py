@@ -200,8 +200,14 @@ def main(argv: list[str]) -> int:
         return 0
 
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
-    if "-m" not in sel and not args.live:
-        cmd += ["-m", "not live"]
+    if "-m" not in sel:
+        # The contract and module tiers skip `slow` too (docs/testing.md);
+        # core and full run everything but `live`.
+        markers = [] if args.live else ["not live"]
+        if args.tier in ("contract", "module"):
+            markers.append("not slow")
+        if markers:
+            cmd += ["-m", " and ".join(markers)]
     try:
         import xdist  # noqa: F401
         parallel = not args.serial and (args.tier in ("core", "full") or len(sel) >= 6 or any(not p.endswith(".py") for p in sel))

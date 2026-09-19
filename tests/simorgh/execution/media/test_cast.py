@@ -468,6 +468,8 @@ class AndroidTvToolsTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_unpaired_the_file_path_is_used_and_the_tools_say_how_to_pair(self):
         tools, cast, bus = self._tools()
+        for tool in tools.values():
+            tool.IDLE_GRACE_S = 0.2   # the watcher's real 30 s idle grace, shortened
         r = await tools["cast_play"].run({"url": "https://www.youtube.com/watch?v=RqfZ3UTC14c", "mode": "full"}, ctx=_ctx(bus))
         self.assertTrue(r.ok, r.error); self.assertIn("fetching", r.output); self.assertNotIn("native", r.metadata)
         await asyncio.gather(*tools["cast_play"]._fetches)  # noqa: SLF001
