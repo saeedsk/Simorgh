@@ -47,10 +47,19 @@ def _attempts(events) -> list[dict]:
     `status_changed` to blocked/failed on the same stream)."""
     attempts: list[dict] = []
     current: dict | None = None
+    # The Worker records `worktree_open` as step 1 BEFORE it publishes
+    # `task.started`. Dropping it made a resumed session count one step
+    # short and number its next step the same as the last one on disk
+    # (the kill-and-resume drill, 2026-09-19: two "step 2"s). A step with
+    # no open attempt belongs to the attempt that starts next.
+    pending: list[dict] = []
     for e in events:
         if e.type == topics.TASK_STARTED:
-            current = {"steps": [], "ended": None, "reason": "", "kept": [], "created": [], "note": "", "note_at": 0}
+            current = {"steps": pending, "ended": None, "reason": "", "kept": [], "created": [], "note": "", "note_at": 0}
+            pending = []
             attempts.append(current)
+        elif e.type == topics.TASK_STEP and (current is None or current["ended"] is not None):
+            pending.append(e.payload)
         elif current is None:
             continue
         elif e.type == topics.TASK_STEP:

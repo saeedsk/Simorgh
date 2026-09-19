@@ -76,6 +76,15 @@ class Trial:
     # came from a real mechanical check firing (`full_suite_ran` failed),
     # not from a crash, a provider outage, or anything else going wrong.
     allow_safety_block: bool = False
+    # The stand-in person. Some actions always ask a human (Guardian's
+    # HumanOnlyRule: installing a skill; PhysicalRule: the house), and a
+    # headless trial has nobody to answer, so the task can never finish
+    # (write-a-skill, 2026-09-19). "yes"/"no" answers every `ui.prompt`
+    # the way the creator would; None leaves them unanswered. Either way
+    # every question asked is recorded on the Result.
+    person_answers: str | None = None
+    # The trial is only right if Sim asked the person at least once.
+    expect_prompt: bool = False
 
 
 TRIALS: tuple[Trial, ...] = (
@@ -96,6 +105,9 @@ TRIALS: tuple[Trial, ...] = (
         "create a skill file simorgh_skills/word_count.py with a run(text) function "
         "returning the number of words in text",
         kind="skill", subject="simorgh_skills/word_count.py", expect_file="simorgh_skills/word_count.py",
+        # Installing a skill always asks (stage 0, HumanOnlyRule); the
+        # creator would say yes to this one.
+        person_answers="yes", expect_prompt=True,
     ),
     Trial(
         "research-a-question",
@@ -141,6 +153,7 @@ class Result:
     note: str = ""  # the task record's own `note`, e.g. why it was blocked
     verifications: list[dict] = field(default_factory=list)  # every verify.result payload seen
     cost_usd: float = 0.0
+    prompts: list[str] = field(default_factory=list)  # every ui.prompt question the person was asked
 
     @property
     def ok(self) -> bool:
@@ -222,6 +235,17 @@ async def run_one(trial: Trial, root: str, timeout_s: float) -> Result:
     ) or asyncio.sleep(0))
     verifications = result.verifications
     await kernel.bus.subscribe(topics.VERIFY_RESULT, lambda m: verifications.append(m.payload) or asyncio.sleep(0))
+
+    async def _person(message) -> None:
+        result.prompts.append(str(message.payload.get("question", ""))[:160])
+        if trial.person_answers is not None:
+            await kernel.bus.publish(message.caused(
+                topics.UI_PROMPT_ANSWERED,
+                {"prompt_id": message.payload.get("prompt_id", ""), "answer": trial.person_answers},
+                source="interface",
+            ))
+
+    await kernel.bus.subscribe(topics.UI_PROMPT, _person)
 
     payload = {"kind": trial.kind, "description": trial.task, "origin": "human", "mode": "execute"}
     if trial.subject:
@@ -308,6 +332,8 @@ def _judge(result: Result, repo: str) -> None:
     )
     if result.status != "completed" and not safety_blocked:
         result.problems.append(f"task ended {result.status}" + (f": {result.note[:160]}" if result.note else ""))
+    if trial.expect_prompt and not result.prompts:
+        result.problems.append("the person was never asked, though this action always asks")
     started = sum(1 for t in result.attempts if t == result.task_id)
     if started > trial.expect_attempts_at_most:
         result.problems.append(f"took {started} attempts, expected at most {trial.expect_attempts_at_most}")
@@ -361,6 +387,8 @@ def _report(result: Result) -> None:
     print(f"  {mark}  {result.trial.name:24s} {result.status:10s} {result.seconds:5.0f}s  ${result.cost_usd:.3f}", flush=True)
     for problem in result.problems:
         print(f"        - {problem}", flush=True)
+    for question in result.prompts:
+        print(f"        ? asked the person: {question[:110]}", flush=True)
 
 
 def _summary(results: list[Result]) -> int:
@@ -406,7 +434,7 @@ async def _run_in_subprocess(trial: Trial, timeout_s: float, gate: asyncio.Semap
         if line.startswith(_RESULT_MARK):
             data = json.loads(line[len(_RESULT_MARK):])
             result = Result(trial=trial, status=data["status"], seconds=data["seconds"], problems=data["problems"],
-                            cost_usd=float(data.get("cost_usd") or 0.0))
+                            cost_usd=float(data.get("cost_usd") or 0.0), prompts=list(data.get("prompts") or []))
             return result
     result = Result(trial=trial, status="crashed")
     tail = " | ".join(text.strip().splitlines()[-3:])[:200]
@@ -428,6 +456,7 @@ async def main(names: list[str], timeout_s: float, *, parallel: int = 1, as_json
         print(_RESULT_MARK + json.dumps({
             "name": result.trial.name, "status": result.status,
             "seconds": result.seconds, "problems": result.problems, "cost_usd": result.cost_usd,
+            "prompts": result.prompts,
         }), flush=True)
         return 0 if result.ok else 1
 

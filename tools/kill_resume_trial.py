@@ -48,7 +48,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TOOLS = Path(__file__).resolve().parent
 
 DEFAULT_TASK = (
-    "Create a new file workspace/kill_resume/notes.py containing a function add(a, b) that returns a + b, "
+    "Create a new file tools/kill_resume_notes.py containing a function add(a, b) that returns a + b, "
     "with a one-line docstring. Then add a second function mul(a, b) that returns a * b in the same file. "
     "Run the tests for that file if there are any, then commit the file with a short message."
 )

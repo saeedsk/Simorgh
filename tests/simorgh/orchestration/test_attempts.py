@@ -364,3 +364,21 @@ class TestALastStepPatchIsNotThrownAway(unittest.IsolatedAsyncioTestCase):
 
         reason = f"{CONTINUATION_REASON}; the edit is applied and waiting to be committed"
         self.assertIn("committed", reason)
+
+
+class AStepBeforeTaskStartedCountsTestCase(unittest.IsolatedAsyncioTestCase):
+    """The Worker records `worktree_open` before `task.started`. The
+    kill-and-resume drill (2026-09-19) resumed one step short and wrote
+    a second "step 2"."""
+
+    async def test_a_resumed_session_counts_the_pre_start_step(self):
+        events = [
+            _ev(topics.TASK_STEP, task_id="t1", step_no=1, phase="act", tool="worktree_open", summary="opened", ok=True),
+            _ev(topics.TASK_STARTED, task_id="t1", worker_id="w1"),
+            _ev(topics.TASK_STEP, task_id="t1", step_no=2, phase="act", tool="apply_source_patch", summary="wrote x", ok=True),
+        ]
+        session = Session(task_id="t1", kind="patch", mode="execute", profile=profiles.PATCH)
+        session.budget.max_steps = 20
+        spent = await restore_session(session, _Ledger(events))
+        self.assertEqual(spent, 2)
+        self.assertEqual([s.no for s in session.steps], [1, 2])
