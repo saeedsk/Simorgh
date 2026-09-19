@@ -392,6 +392,28 @@ class _CastTool:
         await asyncio.sleep(self._WAKE_SETTLE_S)  # let the screensaver close before the page loads over it
         return True
 
+    #: Google TV's ambient screen ("Glance" rides on it). A cast loads
+    #: BEHIND it: measured 2026-09-19, the dashboard app launched and the
+    #: remote still reported this in front 3, 6 and 9 s later, and neither
+    #: WAKEUP, HOME nor BACK changed it.
+    AMBIENT_APPS = ("com.google.android.backdrop",)
+
+    async def _still_ambient(self, backend, name: str) -> str:
+        """The ambient app's name when the TV is still showing it after a
+        cast, else "". Unknown (unpaired, unreachable) is ""."""
+        host = await asyncio.to_thread(self._host_of, backend, name)
+        if not host:
+            return ""
+        try:
+            tv = self._androidtv(host)
+            if not tv.paired():
+                return ""
+            await asyncio.sleep(1.5)
+            app = await asyncio.wait_for(tv.current_app(), timeout=8.0)
+        except Exception:  # noqa: BLE001
+            return ""
+        return app if app in self.AMBIENT_APPS else ""
+
     def _host_of(self, backend, name: str) -> str:
         try:
             for device in backend.devices():
@@ -804,6 +826,14 @@ class CastShowTool(_CastTool):
         except Exception as exc:  # noqa: BLE001
             return ToolResult.transient(f"refused: {name} would not show the page ({exc})")
         await self._publish_state(ctx, "none")
+        ambient = await self._still_ambient(backend, name)
+        if ambient:
+            # Honest, not "is on the TV": the creator looked at Glance while
+            # Sim said "Dashboard's up on the TV" (2026-09-19).
+            return ToolResult.transient(
+                f"refused: the page was sent to {name}, but the TV is still showing its ambient screen "
+                f"({ambient}, e.g. Glance) and the dashboard is behind it. A press on the TV remote, or "
+                f"turning off the ambient mode in the TV's settings, brings it forward")
         bus = getattr(ctx, "bus", None)
         if view and page == "dash" and bus is not None:
             await bus.publish(Message.new(topics.DASH_STATE, source="execution", payload={"view": view}))
@@ -1123,6 +1153,10 @@ async def _dashboard_up_impl(tool, ctx: ToolContext) -> str:
     except Exception as exc:  # noqa: BLE001
         return f"the dashboard is NOT on the TV: {name} would not show it ({exc})"
     await tool._publish_state(ctx, "none")
+    ambient = await tool._still_ambient(backend, name)
+    if ambient:
+        return (f"the dashboard is NOT visible: sent to {name}, but the TV is still on its ambient screen "
+                f"({ambient}); a press on the TV remote brings it forward")
     return f"cast the dashboard to {name}" + (" (woke the TV)" if woke else "")
 
 

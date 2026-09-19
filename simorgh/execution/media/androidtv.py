@@ -89,6 +89,46 @@ def app_link(name_or_url: str) -> str:
     return APPS.get(low, "")
 
 
+class _SafeTextFormat:
+    """`text_format` for androidtvremote2's own debug lines, which it
+    builds eagerly for every message whether or not debug logging is on.
+
+    On this machine protobuf 7 runs beside a stale C extension left by an
+    older install (`google/protobuf/pyext/_message...so`), and
+    `MessageToString` raises `'FieldDescriptor' object has no attribute
+    'is_repeated'` on every message the TV sends. The exception escaped the
+    library's `data_received` and closed the connection, so every wake key,
+    app launch and `current_app` read failed -- the dashboard was cast behind
+    Google TV's ambient screen (com.google.android.backdrop, "Glance") and
+    reported up (the creator, 2026-09-19). A debug line that cannot be
+    formatted is not worth the connection."""
+
+    def __init__(self, real) -> None:
+        self._real = real
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def MessageToString(self, message, *args, **kwargs):  # noqa: N802 -- the library's own name
+        try:
+            return self._real.MessageToString(message, *args, **kwargs)
+        except Exception:  # noqa: BLE001 -- see the class docstring
+            return f"<{type(message).__name__}>"
+
+
+def _survive_debug_formatting() -> None:
+    import importlib
+
+    for name in ("androidtvremote2.remote", "androidtvremote2.pairing", "androidtvremote2.base"):
+        try:
+            module = importlib.import_module(name)
+        except ImportError:
+            continue
+        real = getattr(module, "text_format", None)
+        if real is not None and not isinstance(real, _SafeTextFormat):
+            module.text_format = _SafeTextFormat(real)
+
+
 def key_code(name: str) -> str:
     text = (name or "").strip()
     return KEYS.get(text.lower(), text.upper().replace(" ", "_") if text else "")
@@ -126,6 +166,7 @@ class AndroidTv:
                 from androidtvremote2 import AndroidTVRemote
             except ImportError as exc:
                 raise RuntimeError("needs androidtvremote2 (pip install androidtvremote2)") from exc
+            _survive_debug_formatting()
             cls = AndroidTVRemote
         self._certs.mkdir(parents=True, exist_ok=True)
         return cls(self._client_name, str(self.certfile), str(self.keyfile), self.host)
@@ -213,8 +254,14 @@ class AndroidTv:
     async def current_app(self) -> str:
         found: dict = {}
 
-        def _read(remote):
-            found["app"] = str(getattr(remote, "current_app", "") or "")
+        async def _read(remote):
+            # The TV says which app is in front in a message shortly after
+            # the connection opens; read at once, it is still empty.
+            for _ in range(20):
+                found["app"] = str(getattr(remote, "current_app", "") or "")
+                if found["app"]:
+                    break
+                await asyncio.sleep(0.1)
             return ""
         problem = await self._with(_read)
         return problem or found.get("app", "")

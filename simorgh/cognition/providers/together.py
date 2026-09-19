@@ -67,7 +67,7 @@ DEFAULT_REASONING_EFFORT = "low"
 MIN_REASONING_MAX_TOKENS = 4_000
 #: Longest a stream may go without sending a line before it counts as
 #: stalled and the Router fails over (see `stream`).
-STREAM_SILENCE_S = 12.0
+STREAM_SILENCE_S = 6.0
 USER_AGENT = "Simorgh/2.0 (+https://github.com/saeedsk/Simorgh)"
 
 # Per 1M tokens (Together's published GLM-5.3-Flash pricing). Mirrored in
