@@ -1200,6 +1200,31 @@ _ISOLATED_COPY_IGNORE = ("__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info
                          "papers", "scratchpad", ".simorgh")
 
 
+def _loader_verdict(repo_root: Path, output: str) -> tuple[bool, str, int] | None:
+    """`simloader.unit_verdict` over a gate's pytest output, with the
+    loader's own baseline for a whole-suite run. None when the loader
+    cannot be loaded (no opinion: the caller keeps the isolated run's
+    verdict, as before). The isolated run marks exit 5 in its output
+    rather than returning the code, so the code is reconstructed."""
+    path = Path(repo_root).resolve() / "simloader.py"
+    if not path.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("_simloader_for_gate", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        notes = Path(repo_root).resolve() / module.NOTES_DIRNAME
+        # The whole-suite baseline, and never less than the core gate's:
+        # a whole-suite run that saw fewer tests than the core subset
+        # did has certainly lost some.
+        baselines = [b for b in (module.read_baseline(notes, "all"), module.read_baseline(notes, "core")) if b]
+        baseline = max(baselines) if baselines else None
+        code = 5 if "[no tests cover this target yet" in output else 0
+        return module.unit_verdict(code, output, baseline=baseline)
+    except Exception:  # noqa: BLE001 -- a broken loader is the loader's problem; do not wedge landing on it
+        return None
+
+
 class RunTestsTool:
     """The `isolated_test_suite` gap `execution/README.md`'s "Deliberate
     scope cuts" names as deferred -- built here as the standalone
@@ -1272,9 +1297,30 @@ class RunTestsTool:
     def gate(self, root: Path) -> ToolResult:
         """The whole suite against `root`, for `worktree_land`: the same
         isolated run the model gets, on the tree about to become main.
-        Blocking; the caller threads it."""
-        return self._run_isolated("tests", timeout=self._config.test_timeout_s, start=time.monotonic(),
-                                  root=Path(root).resolve())
+        Blocking; the caller threads it.
+
+        A green run is judged a second time by the bootloader's own
+        `unit_verdict` (simloader.py), loaded from the MAIN checkout --
+        which Guardian protects -- not from the tree being judged. The
+        isolated run treats pytest exit 5 ("no tests collected") as ok,
+        which is right for the model's own call on a new file and wrong
+        for a gate: until 2026-09-19 a branch that deleted the tests it
+        was gated by landed on exit 5, while the loader had refused
+        exactly that since 2026-09-10 (evaluation S5). Now the gate
+        requires exit 0, no failure in the summary, tests that ran, and
+        a count within a tenth of the loader's last green run."""
+        result = self._run_isolated("tests", timeout=self._config.test_timeout_s, start=time.monotonic(),
+                                    root=Path(root).resolve())
+        if not result.ok:
+            return result
+        judged = _loader_verdict(self._config.repo_root, result.output or "")
+        if judged is None:
+            return result
+        ok, why, _ran = judged
+        if ok:
+            return result
+        return ToolResult(ok=False, output=result.output, error=f"the landing gate refused: {why}",
+                          metadata=result.metadata)
 
     def failing_alone(self, root: Path, nodeids: tuple[str, ...]) -> frozenset[str] | None:
         """Which of `nodeids` still fail when run again, alone, on a copy
