@@ -91,7 +91,7 @@ Environment: `SIMORGH_COGNITION_PROVIDER_ORDER` (the test session sets it to `fl
 
 - `simorgh.cognition.Service` (`service.py:96`): `name="cognition"`, `Service(*, config=None, providers=None)`; `providers=[...]` is the test seam that replaces every real provider. Health: `degraded` once only the floor has answered for more than 300 s, counted from the first floor reply.
 - Other packages talk to Cognition only over the bus (`cognition.think`, `cognition.compact.request`). Wire types live in `contracts/messages/cognition.py`; `Provider` and `ProviderResponse` in `contracts/protocols.py`.
-- Nothing outside the package imports `cognition.api`, `router`, `budget` or the providers (boundary rule); `contracts/tidy.py` is tested from this package (`tests/simorgh/cognition/test_tidy.py`) though it lives in contracts.
+- Nothing outside the package imports `cognition.api`, `router`, `budget` or the providers (boundary rule); `contracts/tidy.py` is tested in the contracts tier (`tests/simorgh/contracts/test_tidy.py`, moved there 2026-09-19).
 - Module-level mutable state: `config.DEFAULT_PURPOSE_BUDGETS` (a dict of frozen `Budget`s; `Config` copies it, so mutation affects only later configs) and `parser._CODE_BEARING_MARKERS` (a set). No singletons hold runtime state.
 
 ## Invariants

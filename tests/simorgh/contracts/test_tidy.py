@@ -1,4 +1,4 @@
-"""Reading through typos and mishearings (cognition/tidy.py)."""
+"""Reading through typos and mishearings (contracts/tidy.py)."""
 
 from __future__ import annotations
 
