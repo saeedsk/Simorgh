@@ -360,7 +360,8 @@ class Service:
             await self._store.transition(task_id, IN_PROGRESS)
 
     async def _on_task_step(self, message: Message) -> None:
-        await self._store.refresh_lease(message.payload["task_id"], self.config.lease_seconds)
+        await self._store.refresh_lease(message.payload["task_id"], self.config.lease_seconds,
+                                        durable=self._leases_durable())
 
     # Same renewal, fired mid-step by `Worker`'s heartbeat loop rather
     # than on step completion -- see `topics.TASK_LEASE_HEARTBEAT`.
@@ -1270,6 +1271,11 @@ class Service:
                 causation_id=None, payload=record,
             ))
             self._persisted_plans[plan_id] = fingerprint
+
+    def _leases_durable(self) -> bool:
+        """Lease renewals are written to the ledger only when another
+        process could need them (`local-multi`, `aws`)."""
+        return getattr(self._ctx, "mode", "single") != "single"
 
     async def _release_dead_leases(self, ctx: Context) -> int:
         """In `single` mode every worker lives in this process, and

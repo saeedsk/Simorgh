@@ -352,12 +352,20 @@ class TaskStore:
             return
         self.index.apply(stream, replace(event, seq=seq))
 
-    async def refresh_lease(self, task_id: str, lease_seconds: float) -> None:
+    async def refresh_lease(self, task_id: str, lease_seconds: float, *, durable: bool = True) -> None:
         task = self.index.tasks.get(task_id)
         if task is None or task.lease is None:
             return
         stream = f"task:{task_id}"
         now = self._clock.now()
+        if not durable:
+            # Single mode (stage 4 item 10): the lease guards against a dead
+            # worker in THIS process, and a restart releases every lease it
+            # finds (`Service._release_dead_leases`), so the renewal need not
+            # be written down. `lease_refreshed` was most of every task's
+            # stream -- one per step and one per 30 s heartbeat.
+            self.index.tasks[task_id] = replace(task, lease=replace(task.lease, until=now + lease_seconds))
+            return
         event = Event(
             stream=stream, type="lease_refreshed", ts=now, trace_id=task_id, causation_id=None,
             payload={"until": now + lease_seconds},

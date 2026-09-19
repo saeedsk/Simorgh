@@ -1,6 +1,6 @@
 # Stage 4 -- Session stream, ContextBuilder, compaction, evals package
 
-Status: **in progress** (2026-09-19: items 1-3 done) · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
+Status: **in progress** (2026-09-19: items 1-3 and 10 done) · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
 
 ## Outcome
 

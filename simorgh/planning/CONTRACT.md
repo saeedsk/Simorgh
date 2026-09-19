@@ -184,3 +184,5 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim planning --by <you> --task "..."`), commit the lock, edit only `simorgh/planning/`, `tests/simorgh/planning/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py planning` before committing; commit subject `planning: <what changed>`.
+
+- Leases in single mode (stage 4 item 10, 2026-09-19): a renewal on `task.step` or `task.lease_heartbeat` updates the in-memory lease only (`TaskStore.refresh_lease(durable=False)`); no `lease_refreshed` event is written, because a restart releases every lease it finds. `local-multi`/`aws` still write them. Claims still happen: they are how a task changes hands.

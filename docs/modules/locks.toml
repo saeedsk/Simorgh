@@ -71,6 +71,12 @@ task = "chat write tools, provider notice, search scope, TUI noise"
 since = "2026-09-19T12:29:45+00:00"
 until = "2026-09-19T20:29:45+00:00"
 
+[locks.planning]
+by = "opus-main"
+task = "stage 4 item 10: no lease events in single mode"
+since = "2026-09-19T16:15:50+00:00"
+until = "2026-09-20T00:15:50+00:00"
+
 [locks.simloader]
 by = "opus-main"
 task = "multi-agent wave 1"
