@@ -496,6 +496,10 @@ _CANCEL_POLL_INTERVAL_S = 0.2
 _HUMAN_ANSWER_WAIT_S = 1860.0
 
 
+#: The most calls one native reply may run; the rest are reported as not run.
+MAX_NATIVE_CALLS = 8
+
+
 class _EventWaiter:
     """Waits for the first event of any of `types` whose payload[`key`]
     equals `value` -- the action.proposed -> {result|denied|needs_human}
@@ -1043,6 +1047,29 @@ class SessionRunner:
                     return Outcome("completed", result_summary=text, floor=False)
                 return await self._verify_then_finish(session, text, floor=False)
 
+            if tool_calls and not is_last and all(c.get("id") for c in tool_calls):
+                # A native provider's typed calls (stage 2 items 5-6): every
+                # call in the reply runs -- reads together, changes in order,
+                # stopping at the first that fails -- and the turn is kept
+                # typed: the assistant's calls, then one tool result per id.
+                calls = tool_calls[:MAX_NATIVE_CALLS]
+                summaries = await self._run_native_calls(session, calls, step_no)
+                session.messages.append({
+                    "role": "assistant", "content": think_reply.payload.get("text") or "",
+                    "tool_calls": [{"id": c["id"], "tool": c.get("tool"), "args": c.get("args") or {}} for c in calls],
+                })
+                for call, summary in zip(calls, summaries):
+                    session.messages.append({"role": "tool", "tool_call_id": call["id"],
+                                             "name": call.get("tool"), "content": summary})
+                dropped = len(tool_calls) - len(calls)
+                session.messages.append({"role": "user", "content": (
+                    (f"{dropped} further call(s) were not run: at most {MAX_NATIVE_CALLS} per reply. " if dropped else "")
+                    + "If the task is now finished, reply with your final answer in plain text. "
+                      "Otherwise take the next step.")})
+                if self._paused():
+                    return await self._pause(session)
+                continue
+
             if tool_calls and not is_last:
                 call = tool_calls[0]  # one action per step (section 7)
                 # ...unless it and the calls straight after it are all
@@ -1493,6 +1520,43 @@ class SessionRunner:
             return (f"only read-only lookups run together, up to {self._parallel_reads}, "
                     "and nothing after a tool that changes something.")
         return "one tool call per message."
+
+    async def _run_native_calls(self, session: Session, calls: list, step_no: int) -> list[str]:
+        """Every call of one native reply, results in the calls' order.
+        Read-only calls run together, `parallel_read_tools` at a time;
+        anything that can change something runs alone, in order, and the
+        first that fails stops the rest of the changes (a later write may
+        depend on it). Each call is its own recorded step."""
+        results: dict[int, tuple[bool, str, str]] = {}
+        reads = [i for i, c in enumerate(calls) if self._batchable(c)]
+        cap = max(1, self._parallel_reads)
+        for start in range(0, len(reads), cap):
+            chunk = reads[start:start + cap]
+            done = await asyncio.gather(*(self._run_one(session, calls[i], step_no + i) for i in chunk))
+            results.update(zip(chunk, done))
+        stopped = False
+        for i, call in enumerate(calls):
+            if i in results:
+                continue
+            if stopped:
+                text = f"{call.get('tool')}: not run -- an earlier change in this reply failed"
+                results[i] = (False, text, text)
+                continue
+            results[i] = await self._run_one(session, call, step_no + i)
+            stopped = not results[i][0]
+        for i, call in enumerate(calls):
+            ok, _summary, detail = results[i]
+            step = Step(step_no + i, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
+            session.record(step)
+            await self._record_step(session, step)
+        return [results[i][1] for i in range(len(calls))]
+
+    async def _run_one(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
+        if call.get("tool") == "delegate":
+            return await self._delegate(session, call)
+        if call.get("tool") == "use_skill":
+            return await self._use_skill(session, call)
+        return await self._propose_and_await(session, call, step_no)
 
     async def _run_batch(self, session: Session, batch: list, step_no: int) -> str:
         """Run independent read-only calls at once. Each is proposed to

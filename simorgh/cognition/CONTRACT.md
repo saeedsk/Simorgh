@@ -166,3 +166,5 @@ Lock it first (`python tools/modlock.py claim cognition --by <you> --task "..."`
 - Default `provider_order` (2026-09-19): together, gemini, claude_code_cli, floor. Gemini was behind the Claude Code CLI, so a Together timeout cost a 30 s CLI turn and Claude quota while Gemini was unused.
 
 - Native switch (stage 2 item 9, 2026-09-19): `[cognition.providers.<name>] tool_dialect = "native"` (default `markers`) hands that provider the offered tools' specs (`_offered_specs`, from `tool.registered`) when its API has native tools; the Router gives specs only to native providers. A native reply's typed calls replace parsed markers in `cognition.think.reply` as `{tool, args, id[, error]}`. No provider is native by default: flipping one waits for a BFCL/trial win.
+
+- Typed transcript (stage 2 item 5): when the caller's messages hold typed tool turns and the transcript fits without compaction, a native provider receives them as turns (`_typed_transcript`; `Router.complete(native_messages=...)`); every other provider, and any over-budget transcript, gets the flattened compacted text as before.

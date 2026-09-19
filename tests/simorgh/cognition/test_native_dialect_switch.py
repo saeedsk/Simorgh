@@ -59,3 +59,25 @@ class TheNativeSwitch(CognitionServiceTestCase):
         self.assertIsNone(provider.seen_tools)
         self.assertEqual(payload["tool_calls"][0]["tool"], "read_file")
         self.assertEqual(payload["tool_calls"][0]["args"], {"argument": "docs/README.md"})
+
+
+class ANativeProviderGetsTheTypedTranscript(unittest.TestCase):
+    """Stage 2 item 5: assistant tool_calls and tool results reach a native
+    provider as turns, not flattened into one user message."""
+
+    def test_typed_turns_are_kept_when_nothing_was_compacted(self):
+        from types import SimpleNamespace
+
+        from simorgh.cognition.service import _typed_transcript
+
+        messages = [
+            {"role": "user", "content": "read a.py"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "tool": "read_file", "args": {"path": "a.py"}}]},
+            {"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": "print(1)"},
+            {"role": "user", "content": "next"},
+        ]
+        out = _typed_transcript("You are Sim.", messages, SimpleNamespace(layers_applied=[]))
+        self.assertEqual([m["role"] for m in out], ["system", "user", "assistant", "tool", "user"])
+        self.assertEqual(out[3]["tool_call_id"], "c1")
+        self.assertIsNone(_typed_transcript("x", messages, SimpleNamespace(layers_applied=["1"])))
+        self.assertIsNone(_typed_transcript("x", [{"role": "user", "content": "hi"}], SimpleNamespace(layers_applied=[])))

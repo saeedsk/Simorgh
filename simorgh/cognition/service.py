@@ -124,6 +124,29 @@ def _tool_instruction_block(payload: dict, specs: dict | None = None) -> str | N
 
 
 
+def _typed_transcript(protected_text: str, messages: list[dict], compacted) -> list[dict] | None:
+    """The caller's transcript with its typed tool turns kept (an assistant
+    message carrying `tool_calls`, `tool` messages keyed by `tool_call_id`),
+    for a native provider (stage 2 item 5). None -- the flattened text goes
+    to every provider -- when the session has no typed turns, or when the
+    transcript only fitted after compaction: the typed form is uncompacted,
+    and a budget is a budget."""
+    if not any(m.get("tool_calls") or m.get("role") == "tool" for m in messages):
+        return None
+    if compacted.layers_applied:
+        return None
+    out = [{"role": "system", "content": protected_text}] if protected_text else []
+    for m in messages:
+        role = m.get("role", "user")
+        if role == "tool":
+            out.append({"role": "tool", "tool_call_id": m.get("tool_call_id", ""), "content": str(m.get("content", ""))})
+        elif m.get("tool_calls"):
+            out.append({"role": "assistant", "content": m.get("content") or "", "tool_calls": list(m["tool_calls"])})
+        elif m.get("content"):
+            out.append({"role": "system" if role == "system" else role, "content": m["content"]})
+    return out
+
+
 def _within_deadline(max_seconds: float, message: Message, now: float) -> float:
     """The think's time cap, shrunk to what the caller will still wait
     (stage 1 item 5), less half a second so the reply beats its timeout --
@@ -434,6 +457,7 @@ class Service:
                 think_messages.append({"role": "user", "content": compacted.text})
             if not think_messages:
                 think_messages.append({"role": "user", "content": ""})  # never call complete() with zero messages
+            native_messages = _typed_transcript(protected_text, payload["messages"], compacted)
 
             # A per-purpose route, or the strong route when the caller escalates,
             # tried before the default order (design section 7).
@@ -452,7 +476,7 @@ class Service:
             async with telemetry.span("cognition.provider_call", trace_id=message.trace_id, parent_id=message.id,
                                       attrs={"purpose": purpose.value}) as span:
                 response, floor = await self._router.complete(
-                    purpose, think_messages, tools=self._offered_specs(payload),
+                    purpose, think_messages, tools=self._offered_specs(payload), native_messages=native_messages,
                     budget=budget, timeout=budget.max_seconds, order=order, images=images or None,
                 )
                 span.set("provider", response.provider)

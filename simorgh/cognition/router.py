@@ -111,7 +111,7 @@ class Router:
     async def complete(
         self, purpose: Purpose, messages: list[dict], *, tools: list[dict] | None,
         budget: Budget, timeout: float, order: tuple[str, ...] | None = None,
-        images: list[str] | None = None,
+        images: list[str] | None = None, native_messages: list[dict] | None = None,
     ) -> tuple[ProviderResponse, bool]:
         """Returns (response, floor). Raises `NoRealProvider` if every
         real candidate failed/was exhausted and `budget.require_real`;
@@ -201,9 +201,10 @@ class Router:
                 # A `to_thread` provider's thread is not killed by the
                 # cancellation -- it is abandoned, which is why providers
                 # are still passed a timeout of their own.
+                typed = bool(native_messages) and name in self._native
                 response = await self._dial(
-                    name, provider, messages, tools, budget.max_tokens_out, share, provider_budget, purpose,
-                    images,
+                    name, provider, native_messages if typed else messages, tools, budget.max_tokens_out, share,
+                    provider_budget, purpose, images,
                 )
             except Exception as exc:  # noqa: BLE001 -- ProviderUnavailable or anything else: try the next candidate
                 last_error = exc
