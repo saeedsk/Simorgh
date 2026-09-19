@@ -144,7 +144,19 @@ def echoes_recent(heard: str, recents, *, min_words: int = 4) -> bool:
     words = _spoken_words(heard)
     if len(words) < 2:
         return False
-    return any(_holds_run(_spoken_words(said), words) for said in texts)
+    if any(_holds_run(_spoken_words(said), words) for said in texts):
+        return True
+    # One stray word glued to the echo: "TV. Sure thing." was the tail of
+    # the person's sentence plus Sim's own "Sure thing." coming back (live
+    # 2026-09-19), and as a new turn it cancelled the request it followed.
+    # Two thirds of a short utterance being one run of Sim's words, two
+    # words or more, is the microphone.
+    for said in texts:
+        matcher = difflib.SequenceMatcher(None, words, _spoken_words(said), autojunk=False)
+        longest = max((b.size for b in matcher.get_matching_blocks()), default=0)
+        if longest >= 2 and longest / len(words) >= 2 / 3:
+            return True
+    return False
 
 
 def spoken_form(text: str) -> str:

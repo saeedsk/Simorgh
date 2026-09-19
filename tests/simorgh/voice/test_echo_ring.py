@@ -53,6 +53,13 @@ class RealSpeechSurvives(unittest.TestCase):
                       "yes please", "turn the lights off", "play 8 tracks", "no"):
             self.assertFalse(echoes_recent(heard, [REPLY, LATER]), heard)
 
+    def test_a_stray_word_glued_to_an_aside_is_still_the_echo(self):
+        """Live 2026-09-19: "TV. Sure thing." -- the tail of the person's
+        sentence plus Sim's own "Sure thing." -- became a turn and cancelled
+        the camera request it followed."""
+        self.assertTrue(echoes_recent("TV. Sure thing.", ["Sure thing.", "Hang on."]))
+        self.assertFalse(echoes_recent("sure, show it", ["Sure thing."]))
+
     def test_a_single_word_is_never_an_echo(self):
         self.assertFalse(echoes_recent("percent", [REPLY]), "one word is not evidence")
 
