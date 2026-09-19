@@ -42,7 +42,7 @@ from pathlib import Path
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
-from simorgh.contracts.protocols import ToolContext, ToolResult
+from simorgh.contracts.protocols import ToolContext, ToolResult, ToolUnconfigured
 
 SECRET_TOKEN, SECRET_USER = "RING_TOKEN", "RING_USERNAME"
 RING_DIR = Path("workspace/cameras/ring")
@@ -98,7 +98,7 @@ class RingCloud:
             from ring_doorbell import Auth
             from ring_doorbell.exceptions import AuthenticationError, Requires2FAError
         except ImportError as exc:
-            raise RuntimeError(available()[1]) from exc
+            raise ToolUnconfigured(available()[1]) from exc
 
         auth = Auth(USER_AGENT)
         try:
@@ -106,7 +106,7 @@ class RingCloud:
         except Requires2FAError as exc:
             raise RuntimeError("2fa") from exc
         except AuthenticationError as exc:
-            raise RuntimeError(f"Ring refused the login: {exc}") from exc
+            raise ToolUnconfigured(f"Ring refused the login: {exc}") from exc
         finally:
             try:
                 await auth.async_close()
@@ -120,7 +120,7 @@ class RingCloud:
         try:
             from ring_doorbell import Auth, Ring
         except ImportError as exc:
-            raise RuntimeError(available()[1]) from exc
+            raise ToolUnconfigured(available()[1]) from exc
 
         try:
             from ring_doorbell.webrtcstream import RingWebRtcStream
@@ -351,14 +351,14 @@ class _RingTool:
         if self._prefs.cloud is None:
             ok, why = available()
             if not ok:
-                raise RuntimeError(why)
+                raise ToolUnconfigured(why)
             raw = self._secret(SECRET_TOKEN)
             if not raw:
-                raise RuntimeError("Ring is not set up: `ring setup <email>` at the terminal (it asks for the password hidden, then the code Ring sends)")
+                raise ToolUnconfigured("Ring is not set up: `ring setup <email>` at the terminal (it asks for the password hidden, then the code Ring sends)")
             try:
                 token = json.loads(raw)
             except ValueError as exc:
-                raise RuntimeError("the saved Ring token is not readable; `ring setup` again") from exc
+                raise ToolUnconfigured("the saved Ring token is not readable; `ring setup` again") from exc
             self._prefs.cloud = RingCloud(token, on_token=lambda t: _save_secrets(self._settings_home, {SECRET_TOKEN: json.dumps(t)}))
         return self._prefs.cloud
 
@@ -495,14 +495,14 @@ class RingSetupTool(_RingTool):
         email, code = (str(args.get(k) or "").strip() for k in ("email", "code"))
         password = str(args.get("password") or "").strip() or read_handoff("ring", self._settings_home).get("password", "")
         if not email:
-            return ToolResult(ok=False, error="refused: the account's email is needed")
+            return ToolResult.refused("refused: the account's email is needed")
         if not password:
-            return ToolResult(ok=False, error="refused: no password was handed over; at the terminal, `ring setup <email>` "
+            return ToolResult.refused("refused: no password was handed over; at the terminal, `ring setup <email>` "
                                               "asks for it hidden (never put it on the command line)")
         if self._given is None:
             ok, why = available()
             if not ok:
-                return ToolResult(ok=False, error=f"refused: {why}")
+                return ToolResult.refused(f"refused: {why}")
         try:
             login = self._given.login if self._given is not None and hasattr(self._given, "login") else RingCloud.login
             token = await login(email, password, code or None)
@@ -510,13 +510,13 @@ class RingSetupTool(_RingTool):
             if str(exc) == "2fa":
                 return ToolResult(ok=False, error=("Ring sent a verification code to this account's phone or email. Run "
                                                    "`ring setup <email> <password> <code>` with it within a few minutes."))
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: Ring did not answer ({exc.__class__.__name__}: {exc})")
+            return ToolResult.transient(f"refused: Ring did not answer ({exc.__class__.__name__}: {exc})")
         try:
             secrets_path = _save_secrets(self._settings_home, {SECRET_TOKEN: json.dumps(token), SECRET_USER: email})
         except OSError as exc:
-            return ToolResult(ok=False, error=f"refused: could not write the token ({exc})")
+            return ToolResult.failed(f"refused: could not write the token ({exc})")
         self._prefs.cloud = None
         if self._given is None:
             self._prefs.cloud = RingCloud(token, on_token=lambda t: _save_secrets(self._settings_home, {SECRET_TOKEN: json.dumps(t)}))
@@ -551,7 +551,7 @@ class RingListTool(_RingTool):
         try:
             cams = await self._cameras(self._cloud(), self._folder(ctx))
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if not cams:
             return ToolResult(ok=True, output="this Ring account has no cameras", metadata={"cameras": []})
         return ToolResult(ok=True, output="\n".join([f"{len(cams)} Ring camera(s):"] + [_line(c) for c in cams]),
@@ -576,9 +576,9 @@ class RingSnapshotTool(_RingTool):
                 cam, problem = await self._camera(cloud, wanted)
                 cams = [cam] if cam else []
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         folder = self._folder(ctx)
         saved, misses = [], []
         for cam in cams:
@@ -614,7 +614,7 @@ class RingEventsTool(_RingTool):
             if wanted and wanted.lower() not in ("all", "*"):
                 cam, problem = await self._camera(cloud, wanted)
                 if problem:
-                    return ToolResult(ok=False, error=problem)
+                    return ToolResult.refused(problem)
                 cams = [cam]
             else:
                 cams = await self._cameras(cloud)
@@ -623,7 +623,7 @@ class RingEventsTool(_RingTool):
                 for e in await cloud.history(cam.id, limit=limit):
                     events.append({**e, "camera": cam.name})
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         events.sort(key=lambda e: e.get("at") or 0, reverse=True)
         self._write_events(self._folder(ctx), events, {c.id: c.name for c in cams})
         if not events:
@@ -651,12 +651,12 @@ class RingLightTool(_RingTool):
             cloud = self._cloud()
             cam, problem = await self._camera(cloud, wanted)
             if problem:
-                return ToolResult(ok=False, error=problem)
+                return ToolResult.refused(problem)
             if not cam.has_light:
-                return ToolResult(ok=False, error=f"refused: {cam.name} has no light")
+                return ToolResult.refused(f"refused: {cam.name} has no light")
             await cloud.light(cam.id, on)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         return ToolResult(ok=True, output=f"{cam.name}: light {'on' if on else 'off'}", side_effects=(f"ring_light:{cam.safe}",),
                           metadata={"camera": cam.name, "on": on})
 
@@ -678,12 +678,12 @@ class RingSirenTool(_RingTool):
             cloud = self._cloud()
             cam, problem = await self._camera(cloud, wanted)
             if problem:
-                return ToolResult(ok=False, error=problem)
+                return ToolResult.refused(problem)
             if not cam.has_siren:
-                return ToolResult(ok=False, error=f"refused: {cam.name} has no siren")
+                return ToolResult.refused(f"refused: {cam.name} has no siren")
             await cloud.siren(cam.id, seconds)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         return ToolResult(ok=True, output=f"{cam.name}: siren for {seconds}s", side_effects=(f"ring_siren:{cam.safe}",),
                           metadata={"camera": cam.name, "seconds": seconds})
 
@@ -708,20 +708,20 @@ class RingLiveTool(_RingTool):
             cloud = self._cloud()
             cam, problem = await self._camera(cloud, str(args.get("camera") or ""))
             if problem:
-                return ToolResult(ok=False, error=problem)
+                return ToolResult.refused(problem)
             if action == "offer":
                 sdp = str(args.get("sdp") or "")
                 if "v=0" not in sdp:
-                    return ToolResult(ok=False, error="refused: `sdp` must be the browser's SDP offer")
+                    return ToolResult.refused("refused: `sdp` must be the browser's SDP offer")
                 session = _sdp_session(sdp)
                 answer = await cloud.webrtc_offer(cam.id, sdp)
                 if not answer:
-                    return ToolResult(ok=False, error=f"refused: Ring gave no answer for {cam.name}")
+                    return ToolResult.transient(f"refused: Ring gave no answer for {cam.name}")
                 return ToolResult(ok=True, output=json.dumps({"sdp": answer, "session": session, "camera": cam.name}),
                                   side_effects=(f"ring_live:{cam.safe}",), metadata={"camera": cam.name, "session": session})
             session = str(args.get("session") or "").strip()
             if not session:
-                return ToolResult(ok=False, error="refused: `session` is needed")
+                return ToolResult.refused("refused: `session` is needed")
             if action == "keepalive":
                 await cloud.webrtc_keepalive(cam.id, session)
                 return ToolResult(ok=True, output=json.dumps({"ok": True}), metadata={"camera": cam.name, "session": session})
@@ -729,9 +729,9 @@ class RingLiveTool(_RingTool):
                 await cloud.webrtc_close(cam.id, session)
                 return ToolResult(ok=True, output=json.dumps({"ok": True}), side_effects=(f"ring_live:{cam.safe}:close",),
                                   metadata={"camera": cam.name, "session": session})
-            return ToolResult(ok=False, error="refused: `action` is offer, keepalive or close")
+            return ToolResult.refused("refused: `action` is offer, keepalive or close")
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc.__class__.__name__}: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc.__class__.__name__}: {exc}", default="transient")
 
 
 def _sdp_session(sdp: str) -> str:
@@ -760,7 +760,7 @@ class RingWatchTool(_RingTool):
             return ToolResult(ok=True, output="not watching Ring", side_effects=("ring_watch:off",))
         bus = getattr(ctx, "bus", None)
         if bus is None:
-            return ToolResult(ok=False, error="refused: no bus to deliver events on")
+            return ToolResult.unconfigured("refused: no bus to deliver events on")
         try:
             every = float(args.get("every_s") or getattr(self._config, "ring_poll_s", 120.0))
         except (TypeError, ValueError):
@@ -770,7 +770,7 @@ class RingWatchTool(_RingTool):
             cloud = self._cloud()
             cams = await self._cameras(cloud)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if task is not None and not task.done():
             task.cancel()
         folder = self._folder(ctx)

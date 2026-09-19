@@ -71,7 +71,13 @@ _TITLE_CHARS = 120
 
 
 class SearchUnavailable(RuntimeError):
-    """The search could not run, with the reason a human can act on."""
+    """The search could not run, with the reason a human can act on.
+    `error_kind`: unconfigured (a provider or key missing) unless the
+    raise says otherwise -- a throttle is transient, the budget refused."""
+
+    def __init__(self, message: str, *, error_kind: str = "unconfigured") -> None:
+        super().__init__(message)
+        self.error_kind = error_kind
 
 
 @dataclass(frozen=True)
@@ -240,7 +246,7 @@ class WebSearchTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         query = str(args.get("query") or "").strip()
         if not query:
-            return ToolResult(ok=False, error="refused: an empty search query")
+            return ToolResult.refused("refused: an empty search query")
         try:
             self._enforce_rate_limit(ctx)
         except SearchUnavailable as exc:
@@ -250,7 +256,7 @@ class WebSearchTool:
         try:
             results = await self._search(provider, query, limit)
         except SearchUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
         except Exception as exc:  # noqa: BLE001 -- a network failure is a result, never a crash
             return ToolResult(ok=False, error=f"search failed via {provider}: {exc!r}")
         low_confidence = provider == "duckduckgo" and results_look_unrelated(query, results)
@@ -283,7 +289,8 @@ class WebSearchTool:
                     self._last_call = time.monotonic() + self._config.web_search_min_interval_s
             raise SearchUnavailable(
                 f"{problem}. Set BRAVE_API_KEY, TAVILY_API_KEY or SERPER_API_KEY for a search API "
-                "with a real quota, or try again in a moment"
+                "with a real quota, or try again in a moment",
+                error_kind="transient",
             )
         if provider == "brave":
             key = self._require("BRAVE_API_KEY", provider)
@@ -365,7 +372,8 @@ class WebSearchTool:
                 f"refused: {self._config.web_search_max_calls} searches already in the last "
                 f"{self._config.web_search_window_s / 60:.0f} minutes. {wait_note(wait)} "
                 f"Searching again before then will be refused the same way -- work from the "
-                f"results you already have."
+                f"results you already have.",
+                error_kind="refused",
             )
         self._recent_calls.append(now)
 

@@ -44,7 +44,7 @@ class GeocodeTool:
 
         address = str(args.get("address") or "").strip()
         if not address:
-            return ToolResult(ok=False, error="refused: an empty address")
+            return ToolResult.refused("refused: an empty address")
         query = urllib.parse.quote(address)
         request = urllib.request.Request(
             f"{NOMINATIM_URL}?q={query}&format=json&limit=1",
@@ -55,7 +55,7 @@ class GeocodeTool:
                 asyncio.to_thread(self._fetch, request), timeout=self._config.geocode_timeout_s,
             )
         except asyncio.TimeoutError:
-            return ToolResult(ok=False, error="timeout")
+            return ToolResult.transient("timeout")
         except Exception as exc:  # noqa: BLE001 -- a network failure is a result, never a crash
             return ToolResult(ok=False, error=f"geocode failed: {exc!r}")
 

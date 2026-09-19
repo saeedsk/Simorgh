@@ -219,7 +219,19 @@ def resolve_safe_path(
 
 def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...],
                 root_files: Iterable[str] = ROOT_FILES) -> tuple[str, str]:
-    """`(text, refusal)` -- the file's WHOLE content, uncapped.
+    """`(text, refusal)` -- the file's WHOLE content, uncapped. A
+    document this cannot turn into text (`[problem]`) counts as a refusal
+    here; `read_checked` tells the two apart."""
+    text, refusal, _is_refusal = _read_source(repo_root, raw_path, readable_roots=readable_roots,
+                                              root_files=root_files)
+    return text, refusal
+
+
+def _read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...],
+                 root_files: Iterable[str] = ROOT_FILES) -> tuple[str, str, bool]:
+    """`(text, refusal, is_refusal)` -- the file's WHOLE content, uncapped.
+    `is_refusal` is False when `refusal` is a document's own problem (a
+    missing parser, an unreadable PDF), which `read_file` shows as output.
 
     The capping belongs to the caller, because how much to return
     depends on whether a line range was asked for. Slicing a
@@ -230,9 +242,9 @@ def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ..
     target, refusal = resolve_safe_path(repo_root, raw_path, readable_roots=readable_roots,
                                         root_files=root_files)
     if refusal is not None:
-        return "", f"[{refusal}]"
+        return "", f"[{refusal}]", True
     if not target.is_file():
-        return "", f"[refused: {raw_path!r} is not a file]"
+        return "", f"[refused: {raw_path!r} is not a file]", True
     try:
         size = target.stat().st_size
         if size > _MAX_FILE_BYTES:
@@ -240,7 +252,7 @@ def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ..
                 is_pdf = looks_like_pdf(handle.read(1024))
             cap = _MAX_PDF_BYTES if is_pdf else _MAX_FILE_BYTES
             if size > cap:
-                return "", f"[refused: {raw_path!r} is larger than {cap // 1_000_000} MB]"
+                return "", f"[refused: {raw_path!r} is larger than {cap // 1_000_000} MB]", True
         data = target.read_bytes()
         # The creator added `papers/` -- papers on self-learning AI, for
         # Sim to read -- and `read_file` returned binary noise for every
@@ -250,8 +262,8 @@ def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ..
         if looks_like_pdf(data):
             text, problem = pdf_to_text(data, source=raw_path)
             if problem and not text:
-                return "", f"[{problem}]"
-            return (f"[{problem}]\n\n{text}" if problem else text), ""
+                return "", f"[{problem}]", False
+            return (f"[{problem}]\n\n{text}" if problem else text), "", False
         # Same treatment for the other formats that are not plain text:
         # a spreadsheet of the very data a task is about, or a
         # screenshot in the repo, used to come back as binary noise
@@ -261,18 +273,28 @@ def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ..
         if handled is not None:
             text, problem = handled
             if problem and not text:
-                return "", f"[{problem}]"
-            return (f"[{problem}]\n\n{text}" if problem else text), ""
-        return data.decode(errors="replace"), ""
+                return "", f"[{problem}]", False
+            return (f"[{problem}]\n\n{text}" if problem else text), "", False
+        return data.decode(errors="replace"), "", False
     except OSError as exc:
-        return "", f"[refused: could not read {raw_path!r}: {exc!r}]"
+        return "", f"[refused: could not read {raw_path!r}: {exc!r}]", True
 
 
 def safe_read_file(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...],
                    root_files: Iterable[str] = ROOT_FILES) -> str:
-    content, refusal = read_source(repo_root, raw_path, readable_roots=readable_roots, root_files=root_files)
+    content, refusal = read_file_checked(repo_root, raw_path, readable_roots=readable_roots, root_files=root_files)
+    return refusal or content
+
+
+def read_file_checked(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...],
+                      root_files: Iterable[str] = ROOT_FILES) -> tuple[str, str]:
+    """`(content, refusal)`: exactly one is non-empty. `refusal` is a
+    path-safety or read refusal (`[refused: ...]`), kept apart so a tool
+    knows it failed without reading its own text back (stage 2 item 8)."""
+    content, refusal, is_refusal = _read_source(repo_root, raw_path, readable_roots=readable_roots,
+                                                root_files=root_files)
     if refusal:
-        return refusal
+        return ("", refusal) if is_refusal else (refusal, "")
     if len(content) > _MAX_READ_CHARS:
         # Say how much is left AND how to get it. The old marker gave a
         # char count with no way to act on it.
@@ -283,8 +305,8 @@ def safe_read_file(repo_root: Path, raw_path: str, *, readable_roots: tuple[str,
             f"\n...[truncated at {_MAX_READ_CHARS} of {len(content)} chars; "
             f"you have seen lines 1-{seen_lines} of {total_lines}. "
             f"Read the rest with {raw_path}:{seen_lines + 1}-{total_lines}]"
-        )
-    return content
+        ), ""
+    return content, ""
 
 
 def safe_read_lines(repo_root: Path, raw_path: str, *, start: int, end: int,
@@ -293,9 +315,18 @@ def safe_read_lines(repo_root: Path, raw_path: str, *, start: int, end: int,
 
     Reads the real file and slices BY LINE, so any part of any file is
     reachable and the reported total is the true one."""
-    content, refusal = read_source(repo_root, raw_path, readable_roots=readable_roots, root_files=root_files)
+    content, refusal = read_lines_checked(repo_root, raw_path, start=start, end=end,
+                                          readable_roots=readable_roots, root_files=root_files)
+    return refusal or content
+
+
+def read_lines_checked(repo_root: Path, raw_path: str, *, start: int, end: int,
+                       readable_roots: tuple[str, ...], root_files: Iterable[str] = ROOT_FILES) -> tuple[str, str]:
+    """`safe_read_lines` as `(content, refusal)`, like `read_file_checked`."""
+    content, refusal, is_refusal = _read_source(repo_root, raw_path, readable_roots=readable_roots,
+                                                root_files=root_files)
     if refusal:
-        return refusal
+        return ("", refusal) if is_refusal else (refusal, "")
     lines = content.splitlines()
     total = len(lines)
     if start > total:
@@ -309,7 +340,7 @@ def safe_read_lines(repo_root: Path, raw_path: str, *, start: int, end: int,
         first = total - len(tail) + 1
         numbered = "\n".join(f"{first + i:5d}| {line}" for i, line in enumerate(tail))
         return (f"[lines {start}-{end} are past the end; {raw_path} has {total} lines. "
-                f"Here are the last {len(tail)}:]\n{numbered}")
+                f"Here are the last {len(tail)}:]\n{numbered}"), ""
     chunk = lines[start - 1:end]
     numbered = "\n".join(f"{start + i:5d}| {line}" for i, line in enumerate(chunk))
     if len(numbered) > _MAX_READ_CHARS:
@@ -318,27 +349,34 @@ def safe_read_lines(repo_root: Path, raw_path: str, *, start: int, end: int,
         return (
             f"[lines {start}-{last} of {total} in {raw_path}, cut to fit]\n{kept}"
             f"\n...[ask for {raw_path}:{last + 1}-{end} to continue]"
-        )
-    return f"[lines {start}-{start + len(chunk) - 1} of {total} in {raw_path}]\n{numbered}"
+        ), ""
+    return f"[lines {start}-{start + len(chunk) - 1} of {total} in {raw_path}]\n{numbered}", ""
 
 
 def safe_list_dir(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...],
                   root_files: Iterable[str] = ROOT_FILES) -> str:
+    listing, refusal = list_dir_checked(repo_root, raw_path, readable_roots=readable_roots, root_files=root_files)
+    return refusal or listing
+
+
+def list_dir_checked(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...],
+                     root_files: Iterable[str] = ROOT_FILES) -> tuple[str, str]:
+    """`safe_list_dir` as `(listing, refusal)`, like `read_file_checked`."""
     if not raw_path or raw_path == ".":
-        return "\n".join(readable_roots)
+        return "\n".join(readable_roots), ""
     target, refusal = resolve_safe_path(repo_root, raw_path, readable_roots=readable_roots,
                                         root_files=root_files)
     if refusal is not None:
-        return f"[{refusal}]"
+        return "", f"[{refusal}]"
     if not target.is_dir():
-        return f"[refused: {raw_path!r} is not a directory]"
+        return "", f"[refused: {raw_path!r} is not a directory]"
     try:
         entries = sorted(p.name + ("/" if p.is_dir() else "") for p in target.iterdir())
     except OSError as exc:
-        return f"[refused: could not list {raw_path!r}: {exc!r}]"
+        return "", f"[refused: could not list {raw_path!r}: {exc!r}]"
     if len(entries) > _MAX_LIST_ENTRIES:
         entries = entries[:_MAX_LIST_ENTRIES] + [f"...({len(entries) - _MAX_LIST_ENTRIES} more)"]
-    return "\n".join(entries)
+    return "\n".join(entries), ""
 
 
 def in_write_scope(raw_path: str, *, write_scopes: tuple[str, ...]) -> bool:

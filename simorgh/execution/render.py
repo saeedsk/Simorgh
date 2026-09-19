@@ -200,9 +200,9 @@ class RenderPageTool:
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         if not self._node:
-            return ToolResult(ok=False, error="refused: no `node` executable found on this machine")
+            return ToolResult.unconfigured("refused: no `node` executable found on this machine")
         if not self._node_module_path:
-            return ToolResult(ok=False, error="refused: could not locate Puppeteer's global node_modules (is it installed?)")
+            return ToolResult.unconfigured("refused: could not locate Puppeteer's global node_modules (is it installed?)")
 
         target = str(args["target"]).strip()
         try:
@@ -437,13 +437,13 @@ class BrowsePageTool(RenderPageTool):
         import asyncio
 
         if not self._node:
-            return ToolResult(ok=False, error="refused: no `node` executable found on this machine")
+            return ToolResult.unconfigured("refused: no `node` executable found on this machine")
         if not self._node_module_path:
-            return ToolResult(ok=False, error="refused: could not locate Puppeteer's global node_modules (is it installed?)")
+            return ToolResult.unconfigured("refused: could not locate Puppeteer's global node_modules (is it installed?)")
         actions = args.get("actions") or []
         refusal = classify_actions(actions)
         if refusal:
-            return ToolResult(ok=False, error=refusal)
+            return ToolResult.refused(refusal)
         target = str(args["target"]).strip()
         try:
             url = self._resolve_target(target)

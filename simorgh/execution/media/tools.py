@@ -97,9 +97,9 @@ class MediaNowTool(_MediaTool):
         try:
             registry, entity_ids = await self._players(client, str(args.get("where") or ""))
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
         except (Ambiguous, NotFound) as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.refused(f"refused: {exc}")
 
         if not entity_ids:
             return ToolResult(ok=True, output="there are no media players in the house",
@@ -144,8 +144,7 @@ class MediaControlTool(_MediaTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         op = str(args.get("op") or "").strip().lower()
         if op not in _OPERATIONS:
-            return ToolResult(ok=False,
-                              error=f"refused: unknown op {op!r}; one of "
+            return ToolResult.refused(f"refused: unknown op {op!r}; one of "
                                     f"{', '.join(sorted(_OPERATIONS))}")
         client = self._client()
         if not client.configured:
@@ -153,26 +152,26 @@ class MediaControlTool(_MediaTool):
         try:
             registry, entity_ids = await self._players(client, str(args.get("where") or ""))
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
         except (Ambiguous, NotFound) as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.refused(f"refused: {exc}")
         if not entity_ids:
-            return ToolResult(ok=False, error="refused: no media player matched")
+            return ToolResult.refused("refused: no media player matched")
 
         data: dict = {}
         if op == "volume":
             raw = args.get("value")
             if raw is None:
-                return ToolResult(ok=False, error="refused: volume needs a value from 0 to 100")
+                return ToolResult.refused("refused: volume needs a value from 0 to 100")
             try:
                 volume = int(float(raw))
             except (TypeError, ValueError):
-                return ToolResult(ok=False, error=f"refused: {raw!r} is not a volume")
+                return ToolResult.refused(f"refused: {raw!r} is not a volume")
             if not 0 <= volume <= 100:
-                return ToolResult(ok=False, error=f"refused: {volume} is outside 0-100")
+                return ToolResult.refused(f"refused: {volume} is outside 0-100")
             verdict = self._volume_verdict(volume)
             if verdict:
-                return ToolResult(ok=False, error=f"refused: {verdict}")
+                return ToolResult.refused(f"refused: {verdict}")
             data["volume_level"] = volume / 100.0
         elif op in ("mute", "unmute"):
             data["is_volume_muted"] = op == "mute"
@@ -181,7 +180,7 @@ class MediaControlTool(_MediaTool):
             result = await client.call(_OPERATIONS[op], entity_ids=tuple(entity_ids), data=data,
                                        settle_s=float(getattr(self._config, "home_settle_s", 1.0)))
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
 
         body = f"{op} on {len(entity_ids)} player(s):\n{result.render()}"
         if result.unchanged and not result.changed:
@@ -212,28 +211,28 @@ class MediaPlayTool(_MediaTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         what = str(args.get("what") or "").strip()
         if not what:
-            return ToolResult(ok=False, error="refused: nothing to play")
+            return ToolResult.refused("refused: nothing to play")
         client = self._client()
         if not client.configured:
             return self._unconfigured(client)
         try:
             registry, entity_ids = await self._players(client, str(args.get("where") or ""))
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
         except (Ambiguous, NotFound) as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.refused(f"refused: {exc}")
         if not entity_ids:
-            return ToolResult(ok=False, error="refused: no media player matched")
+            return ToolResult.refused("refused: no media player matched")
 
         volume = args.get("volume")
         if volume is not None:
             try:
                 volume = int(float(volume))
             except (TypeError, ValueError):
-                return ToolResult(ok=False, error=f"refused: {volume!r} is not a volume")
+                return ToolResult.refused(f"refused: {volume!r} is not a volume")
             verdict = self._volume_verdict(volume)
             if verdict:
-                return ToolResult(ok=False, error=f"refused: {verdict}")
+                return ToolResult.refused(f"refused: {verdict}")
 
         content_type = str(args.get("content_type") or _guess_type(what))
         data = {"media_content_id": what, "media_content_type": content_type}
@@ -245,7 +244,7 @@ class MediaPlayTool(_MediaTool):
                                        data=data,
                                        settle_s=float(getattr(self._config, "home_settle_s", 1.0)))
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
 
         body = f"playing {what!r} on {len(entity_ids)} player(s):\n{result.render()}"
         if result.unchanged and not result.changed:

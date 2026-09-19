@@ -217,7 +217,7 @@ class CameraDescribeTool:
         if not camera:
             return ToolResult(ok=False, error="which camera? name one, e.g. `camera_describe Front Door`")
         if ctx.bus is None:
-            return ToolResult(ok=False, error="refused: no bus, so there is nothing to ask about the picture")
+            return ToolResult.unconfigured("refused: no bus, so there is nothing to ask about the picture")
         try:
             wanted = max(1, min(4, int(args.get("stills") or self._config.camera_vision_stills)))
         except (TypeError, ValueError):

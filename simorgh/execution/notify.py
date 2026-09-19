@@ -119,7 +119,12 @@ def _provider_ready(name: str) -> bool:
 
 
 class NotifyUnavailable(Exception):
-    """Nothing was sent, and this is why."""
+    """Nothing was sent, and this is why. Mostly a provider that is not
+    set up; the rate limit says `error_kind="refused"`."""
+
+    def __init__(self, message: str, *, error_kind: str = "unconfigured") -> None:
+        super().__init__(message)
+        self.error_kind = error_kind
 
 
 def configured_providers(env) -> list[str]:
@@ -341,13 +346,13 @@ class NotifyTool:
 
         body = str(args.get("body") or "").strip()
         if not body:
-            return ToolResult(ok=False, error="refused: an empty message")
+            return ToolResult.refused("refused: an empty message")
         subject = " ".join(str(args.get("subject") or "").split())[:200]
         try:
             self._enforce_rate_limit(ctx)
             provider = choose_provider(str(args.get("provider") or self._config.notify_provider), self._env)
         except NotifyUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
 
         body = body[: self._config.notify_max_chars]
         try:
@@ -357,14 +362,14 @@ class NotifyTool:
                 timeout=self._config.notify_timeout_s + 5.0,
             )
         except asyncio.TimeoutError:
-            return ToolResult(ok=False, error=f"timeout sending via {provider}")
+            return ToolResult.transient(f"timeout sending via {provider}")
         except FetchRefused as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.refused(f"refused: {exc}")
         except NotifyUnavailable as exc:
             # A provider that cannot run (a missing package, a URL set
             # it cannot parse) is a refusal that names the fix, not a
             # `repr()` of an exception.
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
         except Exception as exc:  # noqa: BLE001 -- a delivery failure is a result, never a crash
             return ToolResult(ok=False, error=f"sending via {provider} failed: {exc!r}")
 
@@ -389,6 +394,7 @@ class NotifyTool:
             raise NotifyUnavailable(
                 f"rate limit: {len(self._recent)}/{self._config.notify_max_calls} messages already sent "
                 f"in the last {self._config.notify_window_s:.0f}s -- a notifier that can spam is a notifier "
-                "nobody reads"
+                "nobody reads",
+                error_kind="refused",
             )
         self._recent.append(now)

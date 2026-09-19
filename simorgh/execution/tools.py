@@ -147,22 +147,25 @@ class ReadFileTool:
         # action. `doctext` now refuses the bomb itself; this makes the
         # timeout real for every other slow file.
         if span is None:
-            content = await asyncio.to_thread(
-                pathsafety.safe_read_file,
+            content, refusal = await asyncio.to_thread(
+                pathsafety.read_file_checked,
                 tool_root(self._config, ctx, path), path, readable_roots=self._config.readable_roots,
                 root_files=self._config.readable_root_files)
         else:
             # Slice the REAL file, never a pre-capped string: that was the
             # bug that made 61% of this very module unreachable.
-            content = await asyncio.to_thread(
-                pathsafety.safe_read_lines,
+            content, refusal = await asyncio.to_thread(
+                pathsafety.read_lines_checked,
                 tool_root(self._config, ctx, path), path, start=span[0], end=span[1],
                 readable_roots=self._config.readable_roots,
                 root_files=self._config.readable_root_files)
-        ok = not content.startswith("[refused:")
         # A refusal is an error, not output. It used to be BOTH, so the
-        # model was shown the same refusal twice in one result.
-        return ToolResult(ok=ok, output=content if ok else "", error=None if ok else content)
+        # model was shown the same refusal twice in one result. Told apart
+        # by pathsafety itself, not by reading "[refused:" back out of the
+        # text (stage 2 item 8).
+        if refusal:
+            return ToolResult.refused(refusal)
+        return ToolResult(ok=True, output=content)
 
 
 _LINE_RANGE = re.compile(r"^(.*?):(\d+)-(\d+)$")
@@ -197,12 +200,15 @@ class ListDirTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        content = pathsafety.safe_list_dir(
+        listing, refusal = pathsafety.list_dir_checked(
             tool_root(self._config, ctx, args.get("path", "")), args.get("path", ""),
             readable_roots=self._config.readable_roots,
             root_files=self._config.readable_root_files)
-        ok = not content.startswith("[refused:")
-        return ToolResult(ok=ok, output=content, error=None if ok else content)
+        if refusal:
+            # Output too, as before: a caller that reads only the output
+            # still sees why the listing is empty.
+            return ToolResult.refused(refusal, output=refusal)
+        return ToolResult(ok=True, output=listing)
 
 
 class SelfMapTool:
@@ -424,7 +430,7 @@ class SearchCodeTool:
         try:
             re.compile(query)
         except re.error as exc:
-            return ToolResult(ok=False, error=f"refused: {query!r} is not a valid regex: {exc!r}")
+            return ToolResult.refused(f"refused: {query!r} is not a valid regex: {exc!r}")
 
         root = tool_root(self._config, ctx).resolve()
         # Both in a worker thread: ripgrep is a subprocess and the pure
@@ -1118,7 +1124,7 @@ class RunJsSandboxedTool:
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         if not self._node:
-            return ToolResult(ok=False, error="refused: no `node` executable found on this machine")
+            return ToolResult.unconfigured("refused: no `node` executable found on this machine")
         code = args["code"]
         timeout = min(ctx.constraints.get("timeout_s", self._config.sandbox_timeout_s), self._config.sandbox_timeout_s)
         start = time.monotonic()
@@ -1285,7 +1291,7 @@ class RunTestsTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         target = (args.get("target") or "").strip() or "tests"
         if Path(target).is_absolute() or ".." in Path(target).parts:
-            return ToolResult(ok=False, error=f"refused: {target!r} is not a safe relative target")
+            return ToolResult.refused(f"refused: {target!r} is not a safe relative target")
 
         timeout = min(ctx.constraints.get("timeout_s", self._config.test_timeout_s), self._config.test_timeout_s)
         start = time.monotonic()
@@ -1388,7 +1394,7 @@ class RunTestsTool:
             except OSError as exc:
                 return ToolResult(ok=False, error=f"could not stage an isolated copy: {exc!r}")
             if not (dest / target).exists():
-                return ToolResult(ok=False, error=f"refused: {target!r} does not exist in the repo")
+                return ToolResult.refused(f"refused: {target!r} does not exist in the repo")
             preexec = _apply_rlimits(self._config.test_cpu_seconds, self._config.test_memory_mb * 1024 * 1024) if resource else None
             try:
                 # Off the event loop. This `subprocess.run` used to sit
@@ -1491,9 +1497,8 @@ class RunTestsTool:
         cap = self._config.test_output_max_chars
         docker = shutil.which("docker")
         if not docker:
-            return ToolResult(ok=False, error=(
-                f"refused: {inner!r} is inside a checkout whose tests run in a container, "
-                f"and Docker is not installed on this machine"))
+            return ToolResult.unconfigured(f"refused: {inner!r} is inside a checkout whose tests run in a container, "
+                f"and Docker is not installed on this machine")
         patch, problem = _checkout_patch(checkout, manifest.diff_base)
         if problem:
             return ToolResult(ok=False, error=f"could not read the checkout's changes: {problem}")
@@ -1533,7 +1538,7 @@ class RunTestsTool:
         test_run = out[marker_start:] if marker_start >= 0 else out
         where = container_run_line(inner, manifest.image)
         if code == 124:
-            return ToolResult(ok=False, output=test_run[-cap:], error="timeout",
+            return ToolResult.transient("timeout", output=test_run[-cap:],
                               metadata={"duration_s": duration, "container": manifest.image})
         if "SIMORGH_PATCH_FAILED" in out:
             return ToolResult(ok=False, error=(
@@ -1630,17 +1635,13 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
         # in the other direction -- believing only src/ and simorgh/
         # were writable, it routed a perfectly legal docs/ write through
         # run_shell, the broadest tool it has, rather than ask.
-        return ToolResult(
-            ok=False,
-            error=f"refused: {subject!r} is outside the writable scope ({', '.join(write_scopes)})")
+        return ToolResult.refused(f"refused: {subject!r} is outside the writable scope ({', '.join(write_scopes)})")
     base = (root or config.repo_root).resolve()
     target = (base / subject).resolve()
     scope_ok = any((base / s).resolve() in target.parents or (base / s).resolve() == target.parent
                     for s in write_scopes)
     if not scope_ok:
-        return ToolResult(
-            ok=False,
-            error=f"refused: {subject!r} resolves outside the writable scope ({', '.join(write_scopes)})")
+        return ToolResult.refused(f"refused: {subject!r} resolves outside the writable scope ({', '.join(write_scopes)})")
     problem = _python_syntax_problem(subject, code)
     if problem is not None:
         # Refusing beats writing a broken file, and the model gets a real
@@ -1653,14 +1654,12 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
         # "[test results: 42 passed]" and a stray "You are Simorgh,
         # continue." pasted into it. The function above them was perfect;
         # the file would not import.
-        return ToolResult(ok=False, error=f"refused: {subject} would not be valid Python -- {problem}")
+        return ToolResult.refused(f"refused: {subject} would not be valid Python -- {problem}")
     narration = _transcript_tail(code)
     if narration is not None:
-        return ToolResult(
-            ok=False,
-            error=(f"refused: the content for {subject} contains a line of this conversation "
+        return ToolResult.refused(f"refused: the content for {subject} contains a line of this conversation "
                    f"rather than file content -- {narration!r}. A marker's payload runs to the end "
-                   f"of your reply, so end the reply with the file and say nothing after it."))
+                   f"of your reply, so end the reply with the file and say nothing after it.")
     already_existed = target.exists()
     # Live-caught (the creator: "I'd like ... code diffs ... similar UI
     # experience as claude code cli" -- 07-post-cutover-review.md §3.11):
@@ -1686,8 +1685,7 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
             # caught it that time; this catches it before anything is
             # written. A rewrite that drops most of a file is almost never
             # the task, and when it is, saying so costs one more call.
-            return ToolResult(ok=False, error=(
-                f"refused: the new content for {subject} drops {lost} -- apply_source_patch "
+            return ToolResult.refused(f"refused: the new content for {subject} drops {lost} -- apply_source_patch "
                 f"replaces the whole file.\n"
                 # Naming the right tool, not just the wrong outcome. The
                 # refusal used to say "read it all and send it back
@@ -1701,8 +1699,7 @@ def _write_scoped_file(config: Config, subject: str, code: str, *, write_scopes:
                 f"  <<<<<<< SEARCH\n  (the exact lines to change)\n  =======\n"
                 f"  (what to put there)\n  >>>>>>> REPLACE\n"
                 "If you really do mean to replace the whole file with something much shorter, "
-                "say so and send it again."
-            ))
+                "say so and send it again.")
     target.parent.mkdir(parents=True, exist_ok=True)
     # A model's reply rarely ends in a newline, and writing it verbatim
     # left every patched file without its final one (observer,
@@ -1845,7 +1842,7 @@ class StartTaskTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         goal = " ".join(str(args.get("goal") or "").split())
         if not goal:
-            return ToolResult(ok=False, error="refused: say what the task is for")
+            return ToolResult.refused("refused: say what the task is for")
         # A chat turn is a session with a task id too (its percept's
         # session id). Its kind rides in the scope; a chat may start
         # work, a task may not. Before 2026-09-11 Execution passed no
@@ -1853,14 +1850,11 @@ class StartTaskTool:
         # passing one, this refused every chat.
         kind = str((ctx.scope or {}).get("kind") or "")
         if ctx.task_id and kind != "chat":
-            return ToolResult(
-                ok=False,
-                error=("refused: this is already a task, and a task that starts tasks is how a "
+            return ToolResult.refused("refused: this is already a task, and a task that starts tasks is how a "
                        "quiet afternoon becomes a fork bomb. Break the work down in this task, "
-                       "or let Planning decompose it."))
+                       "or let Planning decompose it.")
         if ctx.bus is None:
-            return ToolResult(ok=False,
-                              error="refused: starting a task needs the bus, which this session "
+            return ToolResult.unconfigured("refused: starting a task needs the bus, which this session "
                                     "has not got")
 
         try:
@@ -2035,9 +2029,9 @@ class SimCommandTool:
 
         line = str(args.get("command") or "").strip()
         if not line:
-            return ToolResult(ok=False, error="refused: no command given")
+            return ToolResult.refused("refused: no command given")
         if line.startswith("!"):
-            return ToolResult(ok=False, error="refused: `!` runs a shell command -- use run_shell instead")
+            return ToolResult.refused("refused: `!` runs a shell command -- use run_shell instead")
         if ctx.bus is None:
             return ToolResult(ok=False, error="running a command needs the bus, which this session has not got")
         try:
@@ -2050,7 +2044,7 @@ class SimCommandTool:
         error = payload.get("error") or {}
         if error or payload.get("ok") is False:
             detail = str(error.get("detail") or error.get("code") or payload.get("text") or "")
-            return ToolResult(ok=False, error=f"refused: {detail}" if detail else "the command was refused")
+            return ToolResult.refused(f"refused: {detail}" if detail else "the command was refused")
         text = str(payload.get("text") or "")
         return ToolResult(ok=True, output=text or f"{line} done",
                           metadata={"command": line, "task_id": payload.get("task_id", "")})
@@ -2092,7 +2086,7 @@ class MemoryForgetTool:
             days = float(args.get("days") or 0.0)
             minutes = float(args.get("minutes") or 0.0)
         except (TypeError, ValueError):
-            return ToolResult(ok=False, error="refused: `minutes` and `days` are numbers")
+            return ToolResult.refused("refused: `minutes` and `days` are numbers")
         if days > 0:
             minutes = max(0.1, min(days, _FORGET_MAX_DAYS)) * 24 * 60.0
         else:
@@ -2100,7 +2094,7 @@ class MemoryForgetTool:
         containing = str(args.get("containing") or "").strip()
         bus = getattr(ctx, "bus", None)
         if bus is None:
-            return ToolResult(ok=False, error="refused: no bus to reach memory")
+            return ToolResult.unconfigured("refused: no bus to reach memory")
         from simorgh.contracts.envelope import Message as _Message
 
         try:
@@ -2109,7 +2103,7 @@ class MemoryForgetTool:
                 "reason": f"asked to forget the last {minutes:g} min" + (f" about {containing!r}" if containing else "")}),
                 timeout=10.0)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: memory did not answer ({exc.__class__.__name__}: {exc})")
+            return ToolResult.transient(f"refused: memory did not answer ({exc.__class__.__name__}: {exc})")
         count = int((reply.payload or {}).get("forgotten") or 0)
         what = f"the last {minutes:g} minute{'s' if minutes != 1 else ''}" + (f" about \"{containing}\"" if containing else "")
         if not count:
@@ -2321,16 +2315,16 @@ class ReplaceInFileTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         subject = str(args.get("path") or "").strip().replace("\\", "/")
         if not subject:
-            return ToolResult(ok=False, error="refused: name the file to change")
+            return ToolResult.refused("refused: name the file to change")
         blocks, problem = parse_replace_blocks(str(args.get("code") or ""))
         if problem:
-            return ToolResult(ok=False, error=f"refused: {problem}")
+            return ToolResult.refused(f"refused: {problem}")
 
         root = tool_root(self._config, ctx, subject)
         content, refusal = pathsafety.read_source(root, subject, readable_roots=self._config.readable_roots,
                                                   root_files=self._config.readable_root_files)
         if refusal:
-            return ToolResult(ok=False, error=refusal)
+            return ToolResult.refused(refusal)
 
         updated = content
         applied = []
@@ -2345,17 +2339,13 @@ class ReplaceInFileTool:
             good = (f" Blocks 1-{index - 1} matched and can be sent again unchanged;"
                     f" only block {index} needs fixing." if index > 1 else "")
             if count == 0:
-                return ToolResult(
-                    ok=False,
-                    error=(f"refused: block {index}'s SEARCH text is not in {subject}. Nothing "
+                return ToolResult.refused(f"refused: block {index}'s SEARCH text is not in {subject}. Nothing "
                            f"was changed.{good} READ_FILE the part you mean to change and copy "
-                           f"the text exactly, including its indentation and any blank lines."))
+                           f"the text exactly, including its indentation and any blank lines.")
             if count > 1:
-                return ToolResult(
-                    ok=False,
-                    error=(f"refused: block {index}'s SEARCH text appears {count} times in "
+                return ToolResult.refused(f"refused: block {index}'s SEARCH text appears {count} times in "
                            f"{subject}, so which one you mean is a guess. Nothing was "
-                           f"changed.{good} Add a line or two either side to make it unique."))
+                           f"changed.{good} Add a line or two either side to make it unique.")
             updated = updated.replace(find, replace, 1)
             applied.append((find, replace))
 
@@ -2566,12 +2556,10 @@ class GitDiscardTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         subject = str(args.get("path", "")).strip().replace("\\", "/")
         if not subject:
-            return ToolResult(ok=False, error="refused: name the path to discard")
+            return ToolResult.refused("refused: name the path to discard")
         scopes = self._config.write_scopes_source + self._config.write_scopes_skills
         if ".." in Path(subject).parts or not pathsafety.in_write_scope(subject, write_scopes=scopes):
-            return ToolResult(
-                ok=False,
-                error=f"refused: {subject!r} is outside the writable scope ({', '.join(scopes)})")
+            return ToolResult.refused(f"refused: {subject!r} is outside the writable scope ({', '.join(scopes)})")
         root = tool_root(self._config, ctx, subject)
         nested = nested_git_root(root, subject)
         if nested is not None:
@@ -2599,10 +2587,7 @@ class GitDiscardTool:
             # An untracked file has no committed version to go back to.
             # Deleting it here would be a different, destructive act than
             # the one this tool advertises.
-            return ToolResult(
-                ok=False,
-                error=f"refused: {subject} is not tracked by git, so there is nothing to restore it to",
-            )
+            return ToolResult.refused(f"refused: {subject} is not tracked by git, so there is nothing to restore it to")
         result = await asyncio.to_thread(run, ["git", "checkout", "--", subject])
         if result.returncode != 0:
             return ToolResult(ok=False, error=(result.stderr or result.stdout).strip()[:400])

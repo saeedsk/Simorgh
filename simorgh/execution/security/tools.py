@@ -322,7 +322,7 @@ class SecShowTool(_SecurityTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         fingerprint = str(args.get("finding") or "").strip()
         if not fingerprint:
-            return ToolResult(ok=False, error="refused: no finding id given")
+            return ToolResult.refused("refused: no finding id given")
         store = self._open()
         try:
             row = store.get(fingerprint)
@@ -370,13 +370,12 @@ class SecAcceptTool(_SecurityTool):
         fingerprint = str(args.get("finding") or "").strip()
         reason = " ".join(str(args.get("reason") or "").split())
         if not fingerprint:
-            return ToolResult(ok=False, error="refused: no finding id given")
+            return ToolResult.refused("refused: no finding id given")
         if not reason:
             # An acceptance with no reason is indistinguishable from
             # forgetting about it, and it is the reason that lets the
             # next person judge whether it still holds.
-            return ToolResult(ok=False,
-                              error="refused: an accepted risk needs a reason -- it is what makes "
+            return ToolResult.refused("refused: an accepted risk needs a reason -- it is what makes "
                                     "the acceptance reviewable later")
         days = float(args.get("days") or 90.0)
         store = self._open()

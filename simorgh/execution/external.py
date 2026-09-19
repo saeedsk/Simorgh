@@ -147,7 +147,7 @@ class ExternalTool:
         try:
             result = await asyncio.wait_for(self._invoke(positional, call_kwargs), timeout=timeout)
         except asyncio.TimeoutError:
-            return ToolResult(ok=False, error="timeout", metadata={"duration_s": time.monotonic() - start})
+            return ToolResult.transient("timeout", metadata={"duration_s": time.monotonic() - start})
         except Exception as exc:  # noqa: BLE001 -- a third-party failure is a result, never a crash
             return ToolResult(ok=False, error=f"{type(exc).__name__}: {exc}", metadata={"duration_s": time.monotonic() - start})
         return ToolResult(ok=True, output=_render(result), metadata={"duration_s": time.monotonic() - start})

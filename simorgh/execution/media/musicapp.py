@@ -168,7 +168,7 @@ class _MusicAppTool(_MediaTool):
 
     def _refusal(self) -> ToolResult | None:
         ok, why = MusicApp.available()
-        return None if ok else ToolResult(ok=False, error=f"refused: {why}")
+        return None if ok else ToolResult.unconfigured(f"refused: {why}")
 
 
 class MusicNowTool(_MusicAppTool):
@@ -216,16 +216,16 @@ class MusicControlTool(_MusicAppTool):
             if op == "volume":
                 raw = args.get("value")
                 if raw is None:
-                    return ToolResult(ok=False, error="refused: volume needs a value from 0 to 100")
+                    return ToolResult.refused("refused: volume needs a value from 0 to 100")
                 try:
                     volume = int(float(raw))
                 except (TypeError, ValueError):
-                    return ToolResult(ok=False, error=f"refused: {raw!r} is not a volume")
+                    return ToolResult.refused(f"refused: {raw!r} is not a volume")
                 if not 0 <= volume <= 100:
-                    return ToolResult(ok=False, error=f"refused: {volume} is outside 0-100")
+                    return ToolResult.refused(f"refused: {volume} is outside 0-100")
                 verdict = self._volume_verdict(volume)
                 if verdict:
-                    return ToolResult(ok=False, error=f"refused: {verdict}")
+                    return ToolResult.refused(f"refused: {verdict}")
                 await self._app.set_volume(volume)
                 done = f"volume {volume}"
             elif op in ("mute", "unmute"):
@@ -235,7 +235,7 @@ class MusicControlTool(_MusicAppTool):
                 await self._app.control(op)
                 done = op
             else:
-                return ToolResult(ok=False, error=f"refused: unknown op {op!r}")
+                return ToolResult.refused(f"refused: unknown op {op!r}")
             state = await self._app.state()
         except Exception as exc:  # noqa: BLE001
             return ToolResult(ok=False, error=f"the Music app refused: {exc}")
@@ -260,7 +260,7 @@ class MusicPlayTool(_MusicAppTool):
         query = str(args.get("query") or "").strip()
         path = str(args.get("path") or "").strip()
         if not query and not path:
-            return ToolResult(ok=False, error="refused: say what to play -- a name, or a file or folder path")
+            return ToolResult.refused("refused: say what to play -- a name, or a file or folder path")
         # A marker call puts whatever the model wrote on the first line
         # into `query`; if that is a path that exists, it was a path.
         if query and not path and (query.startswith(("/", "~")) or query.startswith("./")):
@@ -272,7 +272,7 @@ class MusicPlayTool(_MusicAppTool):
             else:
                 played = await self._app.play_query(query)
         except FileNotFoundError as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.refused(f"refused: {exc}")
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             if "Can’t get" in msg or "Can't get" in msg or "-1728" in msg:

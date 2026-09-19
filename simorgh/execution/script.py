@@ -55,7 +55,7 @@ class RunScriptTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         code = args.get("code")
         if not isinstance(code, str) or not code.strip():
-            return ToolResult(ok=False, error="refused: no code given")
+            return ToolResult.refused("refused: no code given")
         directory = self._config.repo_root / self._config.script_dir
         try:
             directory.mkdir(parents=True, exist_ok=True)

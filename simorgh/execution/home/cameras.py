@@ -43,7 +43,7 @@ from pathlib import Path
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
-from simorgh.contracts.protocols import ToolContext, ToolResult
+from simorgh.contracts.protocols import ToolContext, ToolResult, ToolUnconfigured
 
 SECRET_HOST, SECRET_USER, SECRET_PASSWORD = "REOLINK_HOST", "REOLINK_USERNAME", "REOLINK_PASSWORD"
 HLS_DIR = Path("workspace/cameras/hls")
@@ -119,7 +119,7 @@ class ReolinkNvr:
             try:
                 from reolink_aio.api import Host
             except ImportError as exc:
-                raise RuntimeError("needs reolink_aio (pip install reolink-aio)") from exc
+                raise ToolUnconfigured("needs reolink_aio (pip install reolink-aio)") from exc
 
             host, user, password, port = self._args
             self._host = Host(host, user, password, port=port, stream="sub")
@@ -286,10 +286,10 @@ class _CameraTool:
         if self._prefs.nvr is None:
             ok, why = available()
             if not ok:
-                raise RuntimeError(why)
+                raise ToolUnconfigured(why)
             host, user, password = self._secret(SECRET_HOST), self._secret(SECRET_USER), self._secret(SECRET_PASSWORD)
             if not (host and user and password):
-                raise RuntimeError("the NVR is not set up: `cameras setup <host> <username>` at the terminal (it asks for the password hidden)")
+                raise ToolUnconfigured("the NVR is not set up: `cameras setup <host> <username>` at the terminal (it asks for the password hidden)")
             self._prefs.nvr = ReolinkNvr(host, user, password)
         return self._prefs.nvr
 
@@ -356,9 +356,9 @@ class CamSetupTool(_CameraTool):
         host, user = (str(args.get(k) or "").strip() for k in ("host", "username"))
         password = str(args.get("password") or "").strip() or read_handoff("reolink", self._settings_home).get("password", "")
         if not (host and user):
-            return ToolResult(ok=False, error="refused: host and username are both needed")
+            return ToolResult.refused("refused: host and username are both needed")
         if not password:
-            return ToolResult(ok=False, error="refused: no password was handed over; at the terminal, `cameras setup <host> "
+            return ToolResult.refused("refused: no password was handed over; at the terminal, `cameras setup <host> "
                                               "<username>` asks for it hidden (never put it on the command line)")
         from ..media.cast import settings_paths
         from simorgh.contracts.settings import persist
@@ -372,7 +372,7 @@ class CamSetupTool(_CameraTool):
                 with secrets_path.open("rb") as handle:
                     existing = tomllib.load(handle)
             except Exception as exc:  # noqa: BLE001
-                return ToolResult(ok=False, error=f"refused: {secrets_path} could not be read ({exc})")
+                return ToolResult.failed(f"refused: {secrets_path} could not be read ({exc})")
         existing.update({SECRET_HOST: host, SECRET_USER: user, SECRET_PASSWORD: password})
         try:
             secrets_path.parent.mkdir(parents=True, exist_ok=True)
@@ -384,7 +384,7 @@ class CamSetupTool(_CameraTool):
             scope = ["vault:*", "SIM_API_TOKEN", SECRET_HOST, SECRET_USER, SECRET_PASSWORD]
             persist(config_path, "secrets", scope, section="execution")
         except OSError as exc:
-            return ToolResult(ok=False, error=f"refused: could not write {secrets_path} ({exc})")
+            return ToolResult.failed(f"refused: could not write {secrets_path} ({exc})")
         self._prefs.nvr = None
         if self._given is None:
             ok, why = available()
@@ -416,7 +416,7 @@ class CamListTool(_CameraTool):
             nvr = self._nvr()
             cameras = await nvr.channels()
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if not cameras:
             return ToolResult(ok=True, output="the NVR lists no cameras")
         lines = [f"{c.channel + 1:2d}. {c.name}  {c.model}  {'online' if c.online else 'OFFLINE'}" for c in cameras]
@@ -439,7 +439,7 @@ class CamStateTool(_CameraTool):
             if wanted:
                 cam, problem = await self._camera(nvr, wanted)
                 if problem:
-                    return ToolResult(ok=False, error=problem)
+                    return ToolResult.refused(problem)
                 cameras = [cam]
             lines = []
             for cam in cameras:
@@ -449,7 +449,7 @@ class CamStateTool(_CameraTool):
                 lines.append(f"{cam.name}: " + (", ".join("animal" if k == "dog_cat" else k for k in seen) or "quiet")
                              + (f"  [{', '.join(on)}]" if on else ""))
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         return ToolResult(ok=True, output="\n".join(lines))
 
 
@@ -463,10 +463,10 @@ class CamSnapshotTool(_CameraTool):
             nvr = self._nvr()
             cam, problem = await self._camera(nvr, str(args.get("camera") or ""))
             if problem:
-                return ToolResult(ok=False, error=problem)
+                return ToolResult.refused(problem)
             data = await nvr.snapshot(cam.channel)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         root = Path(getattr(ctx, "root", None) or getattr(ctx, "data_dir", ".") or ".")
         folder = root / SNAPSHOT_DIR
         folder.mkdir(parents=True, exist_ok=True)
@@ -511,9 +511,9 @@ class CamStreamTool(_CameraTool):
                 try:
                     picked = await self._pick(self._nvr(), wanted)
                 except Exception as exc:  # noqa: BLE001
-                    return ToolResult(ok=False, error=f"refused: {exc}")
+                    return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
                 if isinstance(picked, str):
-                    return ToolResult(ok=False, error=picked)
+                    return ToolResult.refused(picked)
                 keys = [f"{c.channel}-main" for c in picked]
             stopped = sum(self._stop(k) for k in keys)
             return ToolResult(ok=True, output=f"stopped {stopped} full-resolution stream(s)",
@@ -524,18 +524,18 @@ class CamStreamTool(_CameraTool):
             return ToolResult(ok=True, output=f"stopped {stopped} live stream(s)", side_effects=("cam_stream:stop",))
         binary = self._binary()
         if not binary:
-            return ToolResult(ok=False, error="refused: ffmpeg is not installed (brew install ffmpeg)")
+            return ToolResult.unconfigured("refused: ffmpeg is not installed (brew install ffmpeg)")
         try:
             nvr = self._nvr()
             cameras = await self._pick(nvr, wanted)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if isinstance(cameras, str):
-            return ToolResult(ok=False, error=cameras)
+            return ToolResult.refused(cameras)
         if len(cameras) > 1 and mode == "frame":
             mode = "grid"
         if len(cameras) > 1 and mode == "full":
-            return ToolResult(ok=False, error="refused: full screen takes one camera; use grid for several")
+            return ToolResult.refused("refused: full screen takes one camera; use grid for several")
         if mode not in ("grid", "dash") and quality == "sub":
             self._stop(None)
         root = Path(getattr(ctx, "root", None) or getattr(ctx, "data_dir", ".") or ".")
@@ -555,7 +555,7 @@ class CamStreamTool(_CameraTool):
             else:
                 started.append(outcome)
         if not started:
-            return ToolResult(ok=False, error="refused: " + "; ".join(failures))
+            return ToolResult.transient("refused: " + "; ".join(failures))
         if mode == "full":
             from ..media.cast import CastPlayTool
 
@@ -669,10 +669,10 @@ class CamLightTool(_CameraTool):
                                   side_effects=tuple(f"cam_light:{c.channel}" for c in done))
             cam, problem = await self._camera(nvr, wanted)
             if problem:
-                return ToolResult(ok=False, error=problem)
+                return ToolResult.refused(problem)
             await nvr.light(cam.channel, on)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         return ToolResult(ok=True, output=f"{cam.name}: spotlight {'on' if on else 'off'}",
                           side_effects=(f"cam_light:{cam.channel}",))
 
@@ -689,10 +689,10 @@ class CamIrTool(_CameraTool):
             nvr = self._nvr()
             cam, problem = await self._camera(nvr, wanted)
             if problem:
-                return ToolResult(ok=False, error=problem)
+                return ToolResult.refused(problem)
             await nvr.ir(cam.channel, on)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         return ToolResult(ok=True, output=f"{cam.name}: infrared {'on' if on else 'auto'}",
                           side_effects=(f"cam_ir:{cam.channel}",))
 
@@ -717,10 +717,10 @@ class CamSirenTool(_CameraTool):
             nvr = self._nvr()
             cam, problem = await self._camera(nvr, " ".join(words))
             if problem:
-                return ToolResult(ok=False, error=problem)
+                return ToolResult.refused(problem)
             await nvr.siren(cam.channel, seconds)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         return ToolResult(ok=True, output=f"{cam.name}: siren for {seconds}s", side_effects=(f"cam_siren:{cam.channel}",))
 
 
@@ -742,16 +742,16 @@ class CamPtzTool(_CameraTool):
             elif words[-1].lower() in _PTZ:
                 command, words = words[-1].lower(), words[:-1]
         if command not in _PTZ:
-            return ToolResult(ok=False, error=f"refused: command is one of {', '.join(sorted(_PTZ))}")
+            return ToolResult.refused(f"refused: command is one of {', '.join(sorted(_PTZ))}")
         try:
             nvr = self._nvr()
             cam, problem = await self._camera(nvr, " ".join(words))
             if problem:
-                return ToolResult(ok=False, error=problem)
+                return ToolResult.refused(problem)
             await nvr.ptz(cam.channel, _PTZ[command], preset=int(preset) if preset is not None else None,
                           speed=int(args["speed"]) if args.get("speed") is not None else None)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         return ToolResult(ok=True, output=f"{cam.name}: {command}" + (f" {preset}" if preset is not None else ""),
                           side_effects=(f"cam_ptz:{cam.channel}",))
 
@@ -782,10 +782,10 @@ class CamRecordingsTool(_CameraTool):
             nvr = self._nvr()
             cam, problem = await self._camera(nvr, " ".join(words))
             if problem:
-                return ToolResult(ok=False, error=problem)
+                return ToolResult.refused(problem)
             clips = await nvr.recordings(cam.channel, start, end)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if not clips:
             return ToolResult(ok=True, output=f"{cam.name}: nothing recorded {period or 'today'}")
         lines = [f"{cam.name}: {len(clips)} clip(s) {period or 'today'}"]
@@ -819,7 +819,7 @@ class CamWatchTool(_CameraTool):
                 pass
             return ToolResult(ok=True, output="not watching the cameras", side_effects=("cam_watch:off",))
         if bus is None:
-            return ToolResult(ok=False, error="refused: no bus to deliver events on")
+            return ToolResult.unconfigured("refused: no bus to deliver events on")
         try:
             nvr = self._nvr()
             cameras = await nvr.channels()
@@ -829,7 +829,7 @@ class CamWatchTool(_CameraTool):
                 webhook += f"?token={token}"
             await nvr.subscribe(webhook)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: the NVR would not subscribe ({exc})")
+            return ToolResult.transient(f"refused: the NVR would not subscribe ({exc})")
         names = {c.channel: c.name for c in cameras}
         task = self._prefs.watcher
         if task is not None and not task.done():

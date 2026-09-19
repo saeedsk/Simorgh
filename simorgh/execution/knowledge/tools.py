@@ -108,7 +108,7 @@ class KbSearchTool(_KnowledgeTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         query = str(args.get("query") or "").strip()
         if not query:
-            return ToolResult(ok=False, error="refused: an empty query")
+            return ToolResult.refused("refused: an empty query")
         k = _clamp_int(args.get("k"), default=8, low=1,
                        high=int(getattr(self._config, "knowledge_max_results", 25)))
         since = _parse_since(args.get("since"))
@@ -168,7 +168,7 @@ class KbAskTool(_KnowledgeTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         question = str(args.get("question") or "").strip()
         if not question:
-            return ToolResult(ok=False, error="refused: an empty question")
+            return ToolResult.refused("refused: an empty question")
         k = _clamp_int(args.get("k"), default=8, low=1,
                        high=int(getattr(self._config, "knowledge_max_results", 25)))
 
@@ -239,7 +239,7 @@ class KbOpenTool(_KnowledgeTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         raw = str(args.get("citation") or "").strip().strip("[]")
         if not raw:
-            return ToolResult(ok=False, error="refused: no citation given")
+            return ToolResult.refused("refused: no citation given")
         doc_id, _, page_part = raw.partition(":")
         doc_id = doc_id.strip()
         around = _clamp_int(args.get("around"), default=2, low=0, high=10)
@@ -320,7 +320,7 @@ class KbSourcesTool(_KnowledgeTool):
                 return self._remove(index, args)
             if op == "scan":
                 return await self._scan(index, args)
-            return ToolResult(ok=False, error=f"refused: unknown op {op!r}; use list, add, remove or scan")
+            return ToolResult.refused(f"refused: unknown op {op!r}; use list, add, remove or scan")
         finally:
             index.close()
 
@@ -339,14 +339,13 @@ class KbSourcesTool(_KnowledgeTool):
     def _add(self, index: Index, args: dict) -> ToolResult:
         path = str(args.get("path") or "").strip()
         if not path:
-            return ToolResult(ok=False, error="refused: `path` is required to add a source")
+            return ToolResult.refused("refused: `path` is required to add a source")
         resolved = Path(path).expanduser()
         if not resolved.exists():
-            return ToolResult(ok=False, error=f"refused: {resolved} does not exist")
+            return ToolResult.refused(f"refused: {resolved} does not exist")
         privacy = str(args.get("privacy") or "personal").strip().lower()
         if privacy not in ("public", "personal", "sensitive"):
-            return ToolResult(ok=False,
-                              error=f"refused: privacy must be public, personal or sensitive, not {privacy!r}")
+            return ToolResult.refused(f"refused: privacy must be public, personal or sensitive, not {privacy!r}")
         spec = SourceSpec(
             kind=str(args.get("kind") or "files"), path=str(resolved), privacy=privacy,
             include=tuple(args.get("include") or ("**/*",)),
@@ -363,13 +362,12 @@ class KbSourcesTool(_KnowledgeTool):
     def _remove(self, index: Index, args: dict) -> ToolResult:
         name = str(args.get("name") or args.get("path") or "").strip()
         if not name:
-            return ToolResult(ok=False, error="refused: `name` is required (see kb_sources list)")
+            return ToolResult.refused("refused: `name` is required (see kb_sources list)")
         known = {spec.name: spec for spec in index.sources()}
         if name not in known:
             match = [n for n in known if n.endswith(name) or Path(n.split(":", 1)[-1]).name == name]
             if len(match) != 1:
-                return ToolResult(ok=False,
-                                  error=f"refused: no source {name!r}; known: {', '.join(sorted(known)) or 'none'}")
+                return ToolResult.refused(f"refused: no source {name!r}; known: {', '.join(sorted(known)) or 'none'}")
             name = match[0]
         removed = index.remove_source(name)
         return ToolResult(ok=True,
@@ -386,7 +384,7 @@ class KbSourcesTool(_KnowledgeTool):
         name = str(args.get("name") or "").strip()
         chosen = [s for s in specs if not name or s.name == name or s.path.endswith(name)]
         if not chosen:
-            return ToolResult(ok=False, error=f"refused: no source matching {name!r}")
+            return ToolResult.refused(f"refused: no source matching {name!r}")
 
         embedder = self._embedder()
         kwargs = dict(

@@ -345,7 +345,7 @@ class WorktreeOpenTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         task_id = _task_of(args, ctx)
         if not task_id:
-            return ToolResult(ok=False, error="refused: a worktree belongs to a task, and this call names none")
+            return ToolResult.refused("refused: a worktree belongs to a task, and this call names none")
         try:
             opened = await self._manager.open(task_id)
         except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
@@ -378,7 +378,7 @@ class WorktreeLandTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         task_id = _task_of(args, ctx)
         if not task_id:
-            return ToolResult(ok=False, error="refused: a worktree belongs to a task, and this call names none")
+            return ToolResult.refused("refused: a worktree belongs to a task, and this call names none")
         try:
             landed = await self._manager.land(task_id)
         except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
@@ -407,7 +407,7 @@ class WorktreeCloseTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         task_id = _task_of(args, ctx)
         if not task_id:
-            return ToolResult(ok=False, error="refused: a worktree belongs to a task, and this call names none")
+            return ToolResult.refused("refused: a worktree belongs to a task, and this call names none")
         try:
             detail = await self._manager.close(task_id)
         except (OSError, subprocess.SubprocessError) as exc:

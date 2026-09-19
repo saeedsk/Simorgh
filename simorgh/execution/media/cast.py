@@ -33,7 +33,7 @@ from pathlib import Path
 from simorgh.contracts import topics
 from simorgh.contracts.messages.ui import DASH_KEYS
 from simorgh.contracts.envelope import Message
-from simorgh.contracts.protocols import ToolContext, ToolResult
+from simorgh.contracts.protocols import ToolContext, ToolResult, ToolUnconfigured
 
 _DASHCAST_TIMEOUT_S = 15.0
 
@@ -100,7 +100,7 @@ class PyChromecast:
             import zeroconf
             from pychromecast.discovery import CastBrowser, SimpleCastListener
         except ImportError as exc:
-            raise RuntimeError("needs pychromecast (pip install pychromecast)") from exc
+            raise ToolUnconfigured("needs pychromecast (pip install pychromecast)") from exc
 
         import logging
 
@@ -128,7 +128,7 @@ class PyChromecast:
         try:
             import pychromecast
         except ImportError as exc:
-            raise RuntimeError("needs pychromecast (pip install pychromecast)") from exc
+            raise ToolUnconfigured("needs pychromecast (pip install pychromecast)") from exc
 
         self._start()
         cast = self._casts.get(name)
@@ -177,7 +177,7 @@ class PyChromecast:
             try:
                 from pychromecast.controllers.dashcast import DashCastController
             except ImportError as exc:
-                raise RuntimeError("needs pychromecast (pip install pychromecast)") from exc
+                raise ToolUnconfigured("needs pychromecast (pip install pychromecast)") from exc
 
             cast = self._cast(name)
             # The dashboard's receiver may still be "running" in the
@@ -252,7 +252,7 @@ class PyChromecast:
             try:
                 from pychromecast.controllers.youtube import YouTubeController
             except ImportError as exc:
-                raise RuntimeError("needs pychromecast (pip install pychromecast)") from exc
+                raise ToolUnconfigured("needs pychromecast (pip install pychromecast)") from exc
 
             cast = self._cast(name)
             controller = YouTubeController()
@@ -400,7 +400,7 @@ class _CastTool:
             return self._given
         ok, why = available()
         if not ok:
-            raise RuntimeError(why)
+            raise ToolUnconfigured(why)
         if self._prefs.backend is None:
             self._prefs.backend = PyChromecast(discovery_s=float(getattr(self._config, "cast_discovery_s", 5.0)))
         return self._prefs.backend
@@ -520,22 +520,22 @@ class _CastTool:
         The dashboard turns to the Charts view either way."""
         key = CHART_NAMES.get((chart or "kpop").strip().lower(), "")
         if not key:
-            return ToolResult(ok=False, error=f"refused: no chart called {chart!r}; the charts are kpop and uspop")
+            return ToolResult.refused(f"refused: no chart called {chart!r}; the charts are kpop and uspop")
         try:
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, device)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         try:
             charts = await asyncio.to_thread(self._charts)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: could not read the charts from the dashboard ({exc})")
+            return ToolResult.failed(f"refused: could not read the charts from the dashboard ({exc})")
         entry = charts.get(key) or {}
         songs = [s for s in (entry.get("songs") or []) if s.get("video")]
         if not songs:
-            return ToolResult(ok=False, error=f"refused: the {entry.get('label') or key} chart has not been fetched yet; "
+            return ToolResult.transient(f"refused: the {entry.get('label') or key} chart has not been fetched yet; "
                                               "the dashboard fills it within a few minutes of starting")
         label = str(entry.get("label") or key)
         bus = getattr(ctx, "bus", None)
@@ -709,7 +709,7 @@ class CastDevicesTool(_CastTool):
             backend = self._backend()
             devices = await asyncio.to_thread(backend.devices)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if not devices:
             return ToolResult(ok=True, output="no Cast device found on this network")
         default = self._prefs.device
@@ -782,22 +782,21 @@ class CastShowTool(_CastTool):
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         if not args.get("url"):
             why = await asyncio.to_thread(self._page_reachable, url)
             if why:
-                return ToolResult(ok=False, error=(
-                    f"refused: the TV could not fetch Sim's page at {url.split('?')[0]} ({why}). "
+                return ToolResult.unconfigured(f"refused: the TV could not fetch Sim's page at {url.split('?')[0]} ({why}). "
                     "Sim's API is probably bound to loopback: set [interface] http_host = \"0.0.0.0\" and a "
-                    "SIM_API_TOKEN, then restart."))
+                    "SIM_API_TOKEN, then restart.")
         woke = await self._wake(backend, name)
         self._bump()
         try:
             await asyncio.to_thread(backend.show_page, name, url)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {name} would not show the page ({exc})")
+            return ToolResult.transient(f"refused: {name} would not show the page ({exc})")
         await self._publish_state(ctx, "none")
         bus = getattr(ctx, "bus", None)
         if view and page == "dash" and bus is not None:
@@ -829,9 +828,8 @@ class CastPlayTool(_CastTool):
         if extra and not args.get("device"):
             args = {**args, "device": " ".join(extra)}
         if not url.lower().startswith(("http://", "https://")):
-            return ToolResult(ok=False, error=(
-                "refused: `url` must be a link -- a YouTube page URL (web_search '<topic> youtube' and take the "
-                "first youtube.com/watch result) or a direct video link. Do not look for an mp4 file."))
+            return ToolResult.refused("refused: `url` must be a link -- a YouTube page URL (web_search '<topic> youtube' and take the "
+                "first youtube.com/watch result) or a direct video link. Do not look for an mp4 file.")
         mode = str(args.get("mode") or "frame").strip().lower()
         title = str(args.get("title") or "")
         if mode == "frame":
@@ -864,9 +862,9 @@ class CastPlayTool(_CastTool):
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         video = youtube_id(url)
         if video:
             native = await self._native_youtube(ctx, backend, name, video, url, title)
@@ -888,7 +886,7 @@ class CastPlayTool(_CastTool):
         try:
             await asyncio.to_thread(backend.play, name, url, content_type=_content_type(url), title=title)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {name} would not play it ({exc})")
+            return ToolResult.transient(f"refused: {name} would not play it ({exc})")
         await self._publish_state(ctx, "full", url=url, title=title)
         return ToolResult(ok=True, output=f"playing full screen on {name}: {title or url}",
                           side_effects=(f"cast_play:{name}",), metadata={"mode": mode, "url": url, "device": name})
@@ -910,14 +908,14 @@ class CastStopTool(_CastTool):
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         try:
             self._bump()
             await asyncio.to_thread(backend.stop, name)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {name} would not stop ({exc})")
+            return ToolResult.transient(f"refused: {name} would not stop ({exc})")
         await self._publish_state(ctx, "none")
         return ToolResult(ok=True, output=f"{name} stopped", side_effects=(f"cast_stop:{name}",), metadata={"device": name})
 
@@ -936,25 +934,25 @@ class CastVolumeTool(_CastTool):
         try:
             level = int(float(str(raw).rstrip("%")))
         except (TypeError, ValueError):
-            return ToolResult(ok=False, error="refused: `level` is a number from 0 to 100")
+            return ToolResult.refused("refused: `level` is a number from 0 to 100")
         if level < 0 or level > 100:
-            return ToolResult(ok=False, error=f"refused: `level` is a number from 0 to 100, not {level}")
+            return ToolResult.refused(f"refused: `level` is a number from 0 to 100, not {level}")
         from .tools import _MediaTool
 
         verdict = _MediaTool(self._config, secrets=self._secrets, env=self._env, clock=self._clock)._volume_verdict(level)
         if verdict:
-            return ToolResult(ok=False, error=f"refused: {verdict}")
+            return ToolResult.refused(f"refused: {verdict}")
         try:
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         try:
             await asyncio.to_thread(backend.volume, name, level / 100.0)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {name} would not change volume ({exc})")
+            return ToolResult.transient(f"refused: {name} would not change volume ({exc})")
         return ToolResult(ok=True, output=f"{name} volume {level}", side_effects=(f"cast_volume:{name}",),
                           metadata={"device": name, "level": level})
 
@@ -1002,12 +1000,12 @@ class DashViewTool(_CastTool):
         payload: dict = {}
         if view:
             if view not in self.VIEWS:
-                return ToolResult(ok=False, error=f"refused: no view called {view!r}; the views are {', '.join(self.VIEWS)}")
+                return ToolResult.refused(f"refused: no view called {view!r}; the views are {', '.join(self.VIEWS)}")
             payload["view"] = view
         tf = str(args.get("timeframe") or "").strip().upper()
         if tf:
             if tf not in ("1D", "1W", "1M", "1Y"):
-                return ToolResult(ok=False, error="refused: `timeframe` is one of 1D, 1W, 1M, 1Y")
+                return ToolResult.refused("refused: `timeframe` is one of 1D, 1W, 1M, 1Y")
             payload["timeframe"] = tf
             payload.setdefault("view", "markets")
         if args.get("symbol"):
@@ -1017,37 +1015,37 @@ class DashViewTool(_CastTool):
             try:
                 payload["rotate_s"] = max(0, min(3600, int(float(args["rotate_s"]))))
             except (TypeError, ValueError):
-                return ToolResult(ok=False, error="refused: `rotate_s` is a number of seconds (0 stops)")
+                return ToolResult.refused("refused: `rotate_s` is a number of seconds (0 stops)")
         if "scale" in args and args["scale"] is not None:
             try:
                 payload["scale"] = max(0.0, min(4.0, float(args["scale"])))
             except (TypeError, ValueError):
-                return ToolResult(ok=False, error="refused: `scale` is a factor like 0.5, or 0 to fit the screen")
+                return ToolResult.refused("refused: `scale` is a factor like 0.5, or 0 to fit the screen")
         if "live_max" in args and args["live_max"] is not None:
             try:
                 payload["live_max"] = max(0, min(16, int(float(args["live_max"]))))
             except (TypeError, ValueError):
-                return ToolResult(ok=False, error="refused: `live_max` is a count, 0-16")
+                return ToolResult.refused("refused: `live_max` is a count, 0-16")
         if "live_step_s" in args and args["live_step_s"] is not None:
             try:
                 payload["live_step_s"] = max(0.5, min(600.0, float(args["live_step_s"])))
             except (TypeError, ValueError):
-                return ToolResult(ok=False, error="refused: `live_step_s` is seconds, 0.5-600")
+                return ToolResult.refused("refused: `live_step_s` is seconds, 0.5-600")
         quality = str(args.get("video_quality") or "").strip().lower()
         if quality:
             if quality not in ("light", "full"):
-                return ToolResult(ok=False, error="refused: `video_quality` is light or full")
+                return ToolResult.refused("refused: `video_quality` is light or full")
             payload["video_quality"] = quality
         if "video_sound" in args and args["video_sound"] is not None:
             raw = args["video_sound"]
             payload["video_sound"] = raw if isinstance(raw, bool) else str(raw).strip().lower() in ("1", "true", "on", "yes")
         if not payload:
-            return ToolResult(ok=False, error="refused: say a `view` (home, cameras, markets, charts, ambient), a "
+            return ToolResult.refused("refused: say a `view` (home, cameras, markets, charts, ambient), a "
                                               "`timeframe`, a `symbol`, `rotate_s`, `scale`, `live_max`, `live_step_s`, "
                                               "`video_quality` or `video_sound`")
         bus = getattr(ctx, "bus", None)
         if bus is None:
-            return ToolResult(ok=False, error="refused: no bus to reach the dashboard")
+            return ToolResult.unconfigured("refused: no bus to reach the dashboard")
         await bus.publish(Message.new(topics.DASH_STATE, source="execution", payload=payload))
         said = []
         if payload.get("view") == "charts" and len(payload) == 1:
@@ -1085,14 +1083,14 @@ class CastUseTool(_CastTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         wanted = str(args.get("device") or "").strip()
         if not wanted:
-            return ToolResult(ok=False, error="refused: say which device; cast_devices lists them")
+            return ToolResult.refused("refused: say which device; cast_devices lists them")
         try:
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, wanted)
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         self._prefs.device = name
         from simorgh.contracts.settings import persist
 
@@ -1124,7 +1122,7 @@ class CastSetupTool(_CastTool):
             persist(config_path, "secrets", ["vault:*", "SIM_API_TOKEN"], section="execution")
             changed.append("[execution] secrets includes SIM_API_TOKEN  (so the cast tools can put it in the page URL)")
         except OSError as exc:
-            return ToolResult(ok=False, error=f"refused: could not write {config_path} ({exc})")
+            return ToolResult.failed(f"refused: could not write {config_path} ({exc})")
         import tomllib
 
         existing: dict = {}
@@ -1133,7 +1131,7 @@ class CastSetupTool(_CastTool):
                 with secrets_path.open("rb") as handle:
                     existing = tomllib.load(handle)
             except Exception as exc:  # noqa: BLE001
-                return ToolResult(ok=False, error=f"refused: {secrets_path} could not be read ({exc})")
+                return ToolResult.failed(f"refused: {secrets_path} could not be read ({exc})")
         # The file, not the store: a token minted a moment ago is in the
         # file and not yet in the store this process was booted with.
         if not self._token() and not existing.get("SIM_API_TOKEN"):
@@ -1149,7 +1147,7 @@ class CastSetupTool(_CastTool):
                 tmp.replace(secrets_path)
                 secrets_path.chmod(0o600)
             except OSError as exc:
-                return ToolResult(ok=False, error=f"refused: could not write {secrets_path} ({exc})")
+                return ToolResult.failed(f"refused: could not write {secrets_path} ({exc})")
             changed.append(f"SIM_API_TOKEN minted in {secrets_path}  (mode 600; the page URL carries it)")
         else:
             changed.append("SIM_API_TOKEN already set; kept")
@@ -1198,12 +1196,12 @@ class TvPairTool(_CastTool):
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         host = self._host_of(backend, name)
         if not host:
-            return ToolResult(ok=False, error=f"refused: no address known for {name}")
+            return ToolResult.refused(f"refused: no address known for {name}")
         tv = self._androidtv(host)
         pin = str(args.get("pin") or "").strip()
         if not pin:
@@ -1216,12 +1214,12 @@ class TvPairTool(_CastTool):
                                   metadata={"device": name, "host": host, "paired": True})
             problem = await tv.pair_start()
             if problem:
-                return ToolResult(ok=False, error=f"refused: {problem}")
+                return ToolResult.failed(f"refused: {problem}")
             return ToolResult(ok=True, output=f"{name} is showing a code on its screen; type `tv pair <code>` to finish",
                               metadata={"device": name, "host": host, "paired": False})
         problem = await tv.pair_finish(pin)
         if problem:
-            return ToolResult(ok=False, error=f"refused: {problem}")
+            return ToolResult.failed(f"refused: {problem}")
         return ToolResult(ok=True, output=(f"paired with {name}: Sim can open its apps (\"play ... on YouTube\" now uses "
                                            "the TV's own app, at 4K) and press its keys"),
                           side_effects=(f"tv_pair:{name}",), metadata={"device": name, "host": host, "paired": True})
@@ -1241,19 +1239,19 @@ class TvAppTool(_CastTool):
         target = str(args.get("url") or args.get("app") or "").strip()
         link = app_link(target)
         if not link:
-            return ToolResult(ok=False, error=f"refused: no app called {target!r}; the apps are {', '.join(sorted(k for k in APPS if k != 'home'))}, or give a link")
+            return ToolResult.refused(f"refused: no app called {target!r}; the apps are {', '.join(sorted(k for k in APPS if k != 'home'))}, or give a link")
         try:
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         host = self._host_of(backend, name)
         tv = self._androidtv(host)
         problem = await tv.launch(link)
         if problem:
-            return ToolResult(ok=False, error=f"refused: {problem}")
+            return ToolResult.failed(f"refused: {problem}")
         self._bump()
         await self._publish_state(ctx, "full", url=link, title=target, native=target)
         return ToolResult(ok=True, output=f"opened on {name}: {target}. Say \"show your dashboard\" to come back",
@@ -1271,18 +1269,18 @@ class TvKeyTool(_CastTool):
 
         key = str(args.get("key") or "").strip()
         if not key_code(key):
-            return ToolResult(ok=False, error=f"refused: which key? one of {', '.join(sorted(KEYS))}")
+            return ToolResult.refused(f"refused: which key? one of {', '.join(sorted(KEYS))}")
         try:
             backend = self._backend()
             name, problem = await asyncio.to_thread(self._device, backend, str(args.get("device") or ""))
         except Exception as exc:  # noqa: BLE001
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
         if problem:
-            return ToolResult(ok=False, error=problem)
+            return ToolResult.refused(problem)
         tv = self._androidtv(self._host_of(backend, name))
         problem = await tv.key(key)
         if problem:
-            return ToolResult(ok=False, error=f"refused: {problem}")
+            return ToolResult.failed(f"refused: {problem}")
         return ToolResult(ok=True, output=f"pressed {key} on {name}", side_effects=(f"tv_key:{name}",),
                           metadata={"device": name, "key": key_code(key)})
 
@@ -1320,14 +1318,14 @@ class DashKeyTool(_CastTool):
         raw = str(args.get("key") or args.get("target") or "").strip().lower()
         key = self.ALIASES.get(raw, raw)
         if key not in DASH_KEYS:
-            return ToolResult(ok=False, error=f"refused: no dashboard key {raw!r}; the keys are {', '.join(DASH_KEYS)}")
+            return ToolResult.refused(f"refused: no dashboard key {raw!r}; the keys are {', '.join(DASH_KEYS)}")
         try:
             times = max(1, min(10, int(args.get("times") or 1)))
         except (TypeError, ValueError):
             times = 1
         bus = getattr(ctx, "bus", None)
         if bus is None:
-            return ToolResult(ok=False, error="refused: no bus to reach the dashboard on")
+            return ToolResult.unconfigured("refused: no bus to reach the dashboard on")
         for _ in range(times):
             await bus.publish(Message.new(topics.UI_DASH_KEY, source="execution", payload={"key": key}))
         return ToolResult(ok=True, output=f"pressed {key} on the dashboard" + (f" {times} times" if times > 1 else ""),

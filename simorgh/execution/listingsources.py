@@ -77,6 +77,8 @@ PROVIDERS: tuple[tuple[str, tuple[str, ...], str], ...] = (
 class NoSuchProvider(Exception):
     """The configured provider name is not one this module has."""
 
+    error_kind = "unconfigured"
+
 
 def _keys_for(provider: str) -> tuple[str, ...] | None:
     for name, keys, _ in PROVIDERS:

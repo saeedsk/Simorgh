@@ -86,11 +86,9 @@ class _PimTool:
                    '[[execution.pim_accounts]]\nname = "home"\nkind = "caldav"\n'
                    'url = "https://caldav.fastmail.com/dav/calendars/user/you/"\n'
                    'username = "you@example.com"')
-        return ToolResult(
-            ok=False,
-            error=(f"refused: no {kind} account is configured. Add one to simorgh.toml:\n{example}\n"
+        return ToolResult.unconfigured(f"refused: no {kind} account is configured. Add one to simorgh.toml:\n{example}\n"
                    f"then store the password with `vault add {kind}:<name> password` "
-                   f"(an app-specific password, not the account password)."))
+                   f"(an app-specific password, not the account password).")
 
 
 def _looks_like(connector, kind: str) -> bool:
@@ -119,7 +117,7 @@ class CalListTool(_PimTool):
         try:
             start, end = parse_range(str(args.get("range") or "today"), now=self._now())
         except Ambiguous as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.refused(f"refused: {exc}")
 
         wanted = str(args.get("calendar") or "").strip().lower()
         events, problems = [], []
@@ -177,8 +175,8 @@ class MailSearchTool(_PimTool):
             return self._nothing_configured("imap")
         wanted = str(args.get("account") or "").strip()
         if wanted and wanted not in connectors:
-            return ToolResult(ok=False, error=(f"refused: no mail account {wanted!r}; "
-                                                f"configured: {', '.join(sorted(connectors))}"))
+            return ToolResult.refused(f"refused: no mail account {wanted!r}; "
+                                                f"configured: {', '.join(sorted(connectors))}")
         chosen = {wanted: connectors[wanted]} if wanted else connectors
         limit = max(1, min(int(args.get("limit") or 20),
                            int(getattr(self._config, "pim_max_results", 50))))
@@ -187,7 +185,7 @@ class MailSearchTool(_PimTool):
             try:
                 since, _ = parse_range(str(args["since"]), now=self._now())
             except Ambiguous as exc:
-                return ToolResult(ok=False, error=f"refused: {exc}")
+                return ToolResult.refused(f"refused: {exc}")
 
         messages, problems = [], []
         for name, connector in chosen.items():
@@ -242,7 +240,7 @@ class MailReadTool(_PimTool):
             return self._nothing_configured("imap")
         reference = str(args.get("message") or "").strip().strip("[]")
         if not reference:
-            return ToolResult(ok=False, error="refused: no message given")
+            return ToolResult.refused("refused: no message given")
         parts = reference.split(":")
         if len(parts) == 3:
             account, folder, uid = parts
@@ -252,8 +250,8 @@ class MailReadTool(_PimTool):
             account, folder, uid = "", "INBOX", parts[0]
         account = account or next(iter(sorted(connectors)))
         if account not in connectors:
-            return ToolResult(ok=False, error=(f"refused: no mail account {account!r}; "
-                                                f"configured: {', '.join(sorted(connectors))}"))
+            return ToolResult.refused(f"refused: no mail account {account!r}; "
+                                                f"configured: {', '.join(sorted(connectors))}")
 
         # A body is `sensitive`. The gate is here rather than in the
         # caller because the caller is a model, and by the time it could
@@ -273,7 +271,7 @@ class MailReadTool(_PimTool):
                 uid, folder=folder,
                 max_chars=int(getattr(self._config, "pim_body_max_chars", 20_000)))
         except BudgetExhausted as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="refused")
         except Exception as exc:  # noqa: BLE001
             status = await _safe_probe(connectors[account])
             return ToolResult(ok=False, error=f"{account}: {status or _clean(exc)}")
@@ -308,7 +306,7 @@ class RemindTool(_PimTool):
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         text = " ".join(str(args.get("text") or "").split())
         if not text:
-            return ToolResult(ok=False, error="refused: a reminder with nothing to say")
+            return ToolResult.refused("refused: a reminder with nothing to say")
         when_text = str(args.get("when") or "").strip()
         now = self._now()
         try:
@@ -316,20 +314,17 @@ class RemindTool(_PimTool):
         except Ambiguous as exc:
             # Never a guess. A reminder that fires on the wrong day is
             # worse than one that was never set.
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.refused(f"refused: {exc}")
 
         delay = (fires_at - now).total_seconds()
         if delay <= 0:
-            return ToolResult(ok=False,
-                              error=f"refused: {fires_at:%a %d %b %H:%M} is in the past")
+            return ToolResult.refused(f"refused: {fires_at:%a %d %b %H:%M} is in the past")
         maximum = float(getattr(self._config, "pim_max_reminder_days", 365)) * 86400
         if delay > maximum:
-            return ToolResult(ok=False,
-                              error=(f"refused: {fires_at:%d %b %Y} is more than "
-                                     f"{int(maximum // 86400)} days away"))
+            return ToolResult.refused(f"refused: {fires_at:%d %b %Y} is more than "
+                                     f"{int(maximum // 86400)} days away")
         if ctx.bus is None:
-            return ToolResult(ok=False,
-                              error="refused: reminders need the bus, which this session has not got")
+            return ToolResult.unconfigured("refused: reminders need the bus, which this session has not got")
 
         schedule_id = uuid.uuid4().hex[:12]
         recurring = bool(args.get("every"))

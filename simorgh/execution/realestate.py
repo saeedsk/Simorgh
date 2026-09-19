@@ -189,7 +189,7 @@ class RealEstateListingsTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         location = str(args.get("location") or "").strip()
         if not location:
-            return ToolResult(ok=False, error="refused: an empty location")
+            return ToolResult.refused("refused: an empty location")
         # The two-part marker's second line is meant to be a JSON object
         # of filters, merged into `args` by the router. When it is not
         # JSON the router leaves it under `filters`, which nothing here
@@ -199,12 +199,9 @@ class RealEstateListingsTool:
         # (wave-21 observer W21-10).
         leftover = args.get("filters")
         if leftover:
-            return ToolResult(
-                ok=False,
-                error=("refused: the second line must be a JSON object of filters, e.g. "
+            return ToolResult.refused("refused: the second line must be a JSON object of filters, e.g. "
                        '{"zip_code": "95120", "max_price": 2500000} -- got '
-                       f"{str(leftover)[:80]!r}, which names no filter this tool has"),
-            )
+                       f"{str(leftover)[:80]!r}, which names no filter this tool has")
         try:
             self._enforce_rate_limit(ctx)
         except ListingsUnavailable as exc:
@@ -217,7 +214,7 @@ class RealEstateListingsTool:
         try:
             provider = listingsources.choose_provider(self._config.real_estate_provider, self._env)
         except listingsources.NoSuchProvider as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
 
         limit = max(self._config.real_estate_max_results * 10, 200)
         try:
@@ -236,7 +233,7 @@ class RealEstateListingsTool:
                     timeout=self._config.real_estate_timeout_s + 5.0,
                 )
         except asyncio.TimeoutError:
-            return ToolResult(ok=False, error="timeout")
+            return ToolResult.transient("timeout")
         except ListingsUnavailable as exc:
             return ToolResult(ok=False, error=str(exc))
         except Exception as exc:  # noqa: BLE001 -- a source failure is a result, never a crash

@@ -107,7 +107,7 @@ class HomeFindTool(_HomeTool):
         try:
             registry = await self._registry(client)
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
         found = registry.search(str(args.get("query") or ""))
         if not found:
             return ToolResult(ok=True, output=f"nothing in the house matches "
@@ -135,9 +135,9 @@ class HomeStateTool(_HomeTool):
             registry = await self._registry(client)
             entity_ids = registry.resolve(str(args.get("target") or ""))
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
         except (Ambiguous, NotFound) as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.refused(f"refused: {exc}")
 
         entities = [registry.by_id(entity_id) for entity_id in entity_ids]
         entities = [e for e in entities if e is not None]
@@ -172,7 +172,7 @@ class HomeDescribeTool(_HomeTool):
             registry = await self._registry(client)
             services = await client.services()
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
 
         counts = registry.domains()
         unavailable = [e.entity_id for e in registry.entities if not e.available]
@@ -216,10 +216,9 @@ class HomeCallTool(_HomeTool):
             try:
                 data = json.loads(data)
             except ValueError:
-                return ToolResult(ok=False, error=f"refused: `data` is not JSON: {data[:80]!r}")
+                return ToolResult.refused(f"refused: `data` is not JSON: {data[:80]!r}")
         if "." not in service:
-            return ToolResult(ok=False,
-                              error=f"refused: {service!r} is not a Home Assistant service. "
+            return ToolResult.refused(f"refused: {service!r} is not a Home Assistant service. "
                                     "They look like `light.turn_on` or `climate.set_temperature`.")
 
         client = self._client()
@@ -230,25 +229,22 @@ class HomeCallTool(_HomeTool):
             entity_ids = registry.resolve(target, domain=service.split(".", 1)[0])
             services = await client.services()
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
         except (Ambiguous, NotFound) as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.refused(f"refused: {exc}")
 
         domain, _, name = service.partition(".")
         known = services.get(domain, set())
         if known and name not in known:
             near = ", ".join(sorted(known)[:8])
-            return ToolResult(ok=False,
-                              error=f"refused: Home Assistant has no {service!r}. "
+            return ToolResult.refused(f"refused: Home Assistant has no {service!r}. "
                                     f"{domain} offers: {near}")
 
         limit = int(getattr(self._config, "home_max_entities_per_call", 20))
         if len(entity_ids) > limit and not args.get("all"):
-            return ToolResult(
-                ok=False,
-                error=(f"refused: {target!r} resolves to {len(entity_ids)} entities, over the "
+            return ToolResult.refused(f"refused: {target!r} resolves to {len(entity_ids)} entities, over the "
                        f"limit of {limit}. That is usually a name matching more than intended. "
-                       f"Pass \"all\": true if you really mean all of them."))
+                       f"Pass \"all\": true if you really mean all of them.")
 
         alarm = next((e.state for e in registry.entities
                       if e.domain == "alarm_control_panel"), "")
@@ -266,7 +262,7 @@ class HomeCallTool(_HomeTool):
             result = await client.call(service, entity_ids=tuple(entity_ids), data=data,
                                        settle_s=float(getattr(self._config, "home_settle_s", 1.0)))
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
 
         if result.dry_run:
             return ToolResult(
@@ -318,11 +314,9 @@ class HomeUndoTool(_HomeTool):
             except ValueError:
                 before = {}
         if not before:
-            return ToolResult(
-                ok=False,
-                error=("refused: nothing to undo. Pass the `before` map from the home_call "
+            return ToolResult.refused("refused: nothing to undo. Pass the `before` map from the home_call "
                        "result you want to reverse -- Sim does not keep a hidden last-action "
-                       "slot, because acting on one is how the wrong thing gets undone."))
+                       "slot, because acting on one is how the wrong thing gets undone.")
 
         client = self._client()
         if not client.configured:

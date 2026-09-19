@@ -74,7 +74,10 @@ _USER_RE = re.compile(r"^(?!-)[A-Za-z0-9._-]{1,64}$")
 
 
 class RemoteUnavailable(Exception):
-    """No command was run, and this is why."""
+    """No command was run, and this is why (the remote host is not set
+    up, or set up wrongly)."""
+
+    error_kind = "unconfigured"
 
 
 def settings(env) -> dict:
@@ -162,27 +165,24 @@ class RunRemoteTool:
 
         command = args.get("command")
         if not isinstance(command, str) or not command.strip():
-            return ToolResult(ok=False, error="refused: no command given")
+            return ToolResult.refused("refused: no command given")
         command = command.strip()
 
         why = refusal_for(command, self._config.shell_refusals)
         if why:
-            return ToolResult(ok=False, error=f"refused: {why} -- on a remote host, with nothing here able to undo it")
+            return ToolResult.refused(f"refused: {why} -- on a remote host, with nothing here able to undo it")
 
         try:
             found = settings(self.env)
         except RemoteUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
 
         if found["key"]:
             from pathlib import Path
 
             if not Path(found["key"]).expanduser().is_file():
                 # The path, never the contents.
-                return ToolResult(
-                    ok=False,
-                    error=f"refused: {KEY_ENV} points at no such file: {found['key']}",
-                )
+                return ToolResult.unconfigured(f"refused: {KEY_ENV} points at no such file: {found['key']}")
 
         argv = ssh_argv(command, self._config, found)
         timeout = min(ctx.constraints.get("timeout_s", self._config.remote_timeout_s),
@@ -197,10 +197,10 @@ class RunRemoteTool:
                 timeout=timeout + 10.0,
             )
         except (asyncio.TimeoutError, subprocess.TimeoutExpired):
-            return ToolResult(ok=False, error="timeout",
+            return ToolResult.transient("timeout",
                               metadata={"duration_s": time.monotonic() - start})
         except FileNotFoundError:
-            return ToolResult(ok=False, error="refused: no `ssh` executable on this machine")
+            return ToolResult.unconfigured("refused: no `ssh` executable on this machine")
         except OSError as exc:
             return ToolResult(ok=False, error=f"could not run ssh: {exc!r}")
 

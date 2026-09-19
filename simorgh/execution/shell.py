@@ -207,10 +207,10 @@ class RunShellTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         command = str(args.get("command", "")).strip()
         if not command:
-            return ToolResult(ok=False, error="refused: no command given")
+            return ToolResult.refused("refused: no command given")
         reason = refusal_for(command, dict(self._config.shell_refusals))
         if reason is not None:
-            return ToolResult(ok=False, error=f"refused: that command {reason}")
+            return ToolResult.refused(f"refused: that command {reason}")
 
         timeout = self._config.shell_timeout_s
         env = _child_env()

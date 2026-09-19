@@ -62,14 +62,12 @@ class _EnergyTool(_HomeTool):
 
     @staticmethod
     def _no_meters() -> ToolResult:
-        return ToolResult(
-            ok=False,
-            error=("refused: no energy meters are configured. Add the Home Assistant sensors "
+        return ToolResult.unconfigured("refused: no energy meters are configured. Add the Home Assistant sensors "
                    "that measure the house to simorgh.toml:\n"
                    "[execution.energy_meters]\n"
                    'grid_import = "sensor.grid_import"\n'
                    'solar = "sensor.solar_generation"\n'
-                   "Run HOME_FIND: energy to see what your Home Assistant already has."))
+                   "Run HOME_FIND: energy to see what your Home Assistant already has.")
 
 
 class EnergyStatusTool(_EnergyTool):
@@ -174,20 +172,18 @@ class EnergyReportTool(_EnergyTool):
 
         tariff = self._tariff()
         if tariff.name == "unset":
-            return ToolResult(ok=False,
-                              error=("refused: no tariff is set, so nothing can be priced. "
-                                     "ENERGY_TARIFF: set with your rates."))
+            return ToolResult.unconfigured("refused: no tariff is set, so nothing can be priced. "
+                                     "ENERGY_TARIFF: set with your rates.")
         hours = _hours_for(str(args.get("range") or "today"))
         if hours is None:
-            return ToolResult(ok=False,
-                              error=(f"refused: {args.get('range')!r} is not a range I can read. "
-                                     "Try today, yesterday, week, month, or a number of days."))
+            return ToolResult.refused(f"refused: {args.get('range')!r} is not a range I can read. "
+                                     "Try today, yesterday, week, month, or a number of days.")
         try:
             rows = await client.history(meters["grid_import"], hours=hours)
             export_rows = (await client.history(meters["grid_export"], hours=hours)
                            if meters.get("grid_export") else [])
         except HomeUnavailable as exc:
-            return ToolResult(ok=False, error=f"refused: {exc}")
+            return ToolResult.from_exception(exc, f"refused: {exc}")
 
         hourly = hourly_from_history(rows, cumulative=True)
         if not hourly:
@@ -281,17 +277,16 @@ class EnergyTariffTool(_EnergyTool):
                                         "currency": tariff.currency})
 
         if op != "set":
-            return ToolResult(ok=False, error=f"refused: unknown op {op!r}; use show or set")
+            return ToolResult.refused(f"refused: unknown op {op!r}; use show or set")
 
         spec = args.get("spec") or {k: v for k, v in args.items() if k != "op"}
         if isinstance(spec, str):
             try:
                 spec = json.loads(spec)
             except ValueError:
-                return ToolResult(ok=False, error="refused: the tariff is not JSON")
+                return ToolResult.refused("refused: the tariff is not JSON")
         if not spec.get("rates"):
-            return ToolResult(ok=False,
-                              error="refused: a tariff needs at least one rate with a price")
+            return ToolResult.refused("refused: a tariff needs at least one rate with a price")
         tariff = Tariff.from_dict(spec)
         path = self._tariff_path()
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -53,7 +53,7 @@ class SelfActions:
                   timeout: float | None = None) -> ToolResult:
         tool = self._registry.get(tool_name)
         if tool is None:
-            return ToolResult(ok=False, error=f"unknown tool {tool_name!r}")
+            return ToolResult.refused(f"unknown tool {tool_name!r}")
         action_id = f"execution-{tool_name}-{uuid.uuid4().hex[:12]}"
         if timeout is None:
             timeout = float(self._timeout_for(tool)) + GUARDIAN_MARGIN_S
@@ -85,7 +85,7 @@ class SelfActions:
             try:
                 message = await asyncio.wait_for(done, timeout=timeout)
             except asyncio.TimeoutError:
-                return ToolResult(ok=False, error=f"no answer to {tool_name} within {timeout:.0f}s "
+                return ToolResult.transient(f"no answer to {tool_name} within {timeout:.0f}s "
                                                   f"(action {action_id})",
                                   metadata={"action_id": action_id, "timed_out": True})
         except asyncio.CancelledError:
@@ -101,7 +101,7 @@ class SelfActions:
         payload = message.payload or {}
         if message.type == topics.ACTION_DENIED:
             reasons = ", ".join(payload.get("reasons") or ()) or "no reason given"
-            return ToolResult(ok=False, error=f"denied ({payload.get('layer', 'policy')}): {reasons}",
+            return ToolResult.refused(f"denied ({payload.get('layer', 'policy')}): {reasons}",
                               metadata={"action_id": action_id, "denied": True})
         return await self._as_tool_result(action_id, payload)
 
@@ -124,7 +124,8 @@ class SelfActions:
         ok = bool(payload.get("ok"))
         error = payload.get("error")
         return ToolResult(ok=ok, output=output, error=(str(error) if error is not None else None),
-                          side_effects=tuple(payload.get("side_effects") or ()), metadata=metadata)
+                          side_effects=tuple(payload.get("side_effects") or ()), metadata=metadata,
+                          error_kind="" if ok else str(payload.get("error_kind") or "failed"))
 
 
 __all__ = ["GUARDIAN_MARGIN_S", "PROPOSED_BY", "SelfActions"]

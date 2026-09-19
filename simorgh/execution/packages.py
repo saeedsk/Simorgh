@@ -192,10 +192,10 @@ class FindPackageTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         query = str(args.get("query") or "").strip()
         if not query:
-            return ToolResult(ok=False, error="refused: an empty package name")
+            return ToolResult.refused("refused: an empty package name")
         parsed = parse_spec(query)
         if parsed is None:
-            return ToolResult(ok=False, error=f"refused: {query!r} is not a plain package name")
+            return ToolResult.refused(f"refused: {query!r} is not a plain package name")
         name = parsed[0]
         manager = str(args.get("manager") or "any").strip().lower()
         hits, oversize = await asyncio.to_thread(self._lookup_detail, name, manager)
@@ -263,21 +263,18 @@ class InstallPackageTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         manager = str(args.get("manager") or "").strip().lower()
         if manager not in ("pip", "npm"):
-            return ToolResult(ok=False, error="refused: manager must be 'pip' or 'npm'")
+            return ToolResult.refused("refused: manager must be 'pip' or 'npm'")
         parsed = parse_spec(str(args.get("spec") or ""))
         if parsed is None:
-            return ToolResult(
-                ok=False,
-                error="refused: spec must be a plain package name (optionally pinned) -- "
-                      "no URL, path, VCS ref or local file",
-            )
+            return ToolResult.refused("refused: spec must be a plain package name (optionally pinned) -- "
+                      "no URL, path, VCS ref or local file")
         name, pin = parsed
         if any(re.search(pattern, name) for pattern in self._config.package_denylist):
-            return ToolResult(ok=False, error=f"refused: {name!r} is on the package denylist")
+            return ToolResult.refused(f"refused: {name!r} is on the package denylist")
 
         used, cap = self._installs_today(), self._config.max_installs_per_day
         if used >= cap:
-            return ToolResult(ok=False, error=f"refused: {used}/{cap} installs already today")
+            return ToolResult.refused(f"refused: {used}/{cap} installs already today")
 
         allow_new = bool(args.get("allow_new"))
         reason = " ".join(str(args.get("reason") or "").split())
@@ -290,20 +287,18 @@ class InstallPackageTool:
             # next call with no `reason` key at all, and the single
             # audit line read `reason=-` (2026-09-10). An override
             # nobody has to justify is not an override, it is a delay.
-            return ToolResult(
-                ok=False,
-                error=(f"refused: allow_new switches the typosquat check off, so it needs a "
+            return ToolResult.refused(f"refused: allow_new switches the typosquat check off, so it needs a "
                        f"reason saying why you are sure of {name!r} -- at least "
-                       f"{_MIN_OVERRIDE_REASON_CHARS} characters, and it goes into the install log"))
+                       f"{_MIN_OVERRIDE_REASON_CHARS} characters, and it goes into the install log")
         if not allow_new:
             refusal = await asyncio.to_thread(self._vet, name, manager)
             if refusal:
-                return ToolResult(ok=False, error=refusal)
+                return ToolResult.refused(refusal)
 
         spec = f"{name}{pin}"
         completed = await asyncio.to_thread(self._install, manager, spec)
         if completed is None:
-            return ToolResult(ok=False, error="timeout")
+            return ToolResult.transient("timeout")
         cap_chars = self._config.test_output_max_chars
         if completed.returncode != 0:
             return ToolResult(

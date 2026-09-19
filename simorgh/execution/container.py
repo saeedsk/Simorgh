@@ -109,35 +109,29 @@ class RunContainerTool:
         import asyncio
 
         if not self._docker:
-            return ToolResult(ok=False, error="refused: no `docker` on this machine")
+            return ToolResult.unconfigured("refused: no `docker` on this machine")
         image = str(args.get("image") or "").strip()
         if not image or not any(image.startswith(p) for p in self._config.container_image_prefixes):
-            return ToolResult(
-                ok=False,
-                error=(f"refused: {image!r} is not an allowed image -- it must start with one of "
-                       f"{', '.join(self._config.container_image_prefixes)}"),
-            )
+            return ToolResult.refused(f"refused: {image!r} is not an allowed image -- it must start with one of "
+                       f"{', '.join(self._config.container_image_prefixes)}")
         if _names_a_registry_host(image):
-            return ToolResult(
-                ok=False,
-                error=(f"refused: {image!r} names a registry host before the first `/` -- "
-                       "only plain docker.io images (no custom registry) are allowed"),
-            )
+            return ToolResult.refused(f"refused: {image!r} names a registry host before the first `/` -- "
+                       "only plain docker.io images (no custom registry) are allowed")
         command = args.get("command")
         if isinstance(command, str):
             command = shlex.split(command)
         if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
-            return ToolResult(ok=False, error="refused: command must be a non-empty list of strings")
+            return ToolResult.refused("refused: command must be a non-empty list of strings")
 
         if not await asyncio.to_thread(self._daemon_available):
-            return ToolResult(ok=False, error="refused: the Docker daemon is not running")
+            return ToolResult.unconfigured("refused: the Docker daemon is not running")
 
         workdir = Path(self._config.repo_root) / self._config.container_scratch_dir / ctx.action_id
         try:
             workdir.mkdir(parents=True, exist_ok=True)
             refusal = self._stage_inputs(args.get("input_files") or [], workdir)
             if refusal:
-                return ToolResult(ok=False, error=refusal)
+                return ToolResult.refused(refusal)
         except OSError as exc:
             return ToolResult(ok=False, error=f"could not prepare the workspace: {exc!r}")
 
@@ -164,7 +158,7 @@ class RunContainerTool:
             # this, the work keeps running with nobody watching. Same
             # lesson as the hung MCP server (mcp.py, 2026-09-08).
             await asyncio.to_thread(self._kill, name)
-            return ToolResult(ok=False, error="timeout",
+            return ToolResult.transient("timeout",
                               metadata={"duration_s": time.monotonic() - start, "container": name})
         except OSError as exc:
             return ToolResult(ok=False, error=f"could not run docker: {exc!r}")

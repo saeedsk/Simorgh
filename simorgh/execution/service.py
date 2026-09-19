@@ -37,7 +37,7 @@ from pathlib import Path
 from simorgh.bus.client import UNBOUNDED
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message, time_left
-from simorgh.contracts.protocols import Health, ToolContext, NULL_TELEMETRY
+from simorgh.contracts.protocols import ERROR_KINDS, Health, ToolContext, NULL_TELEMETRY, error_kind_of
 
 from . import pathsafety
 from .config import Config
@@ -80,6 +80,25 @@ def metadata_for_blob(metadata: dict) -> dict:
     if isinstance(rows, list):
         out["rows"] = f"<{len(rows)} rows -- see the results file named in the output>"
     return out
+
+
+def result_error_kind(result) -> str:
+    """The `error_kind` Execution reports for a tool's result: the tool's
+    own when it set one, else inferred. "" when the result is ok.
+
+    The inference is for tools that predate the field or live outside
+    this package and never set it -- a skill Sim wrote, an MCP proxy, an
+    external adapter: their "refused: ..." convention becomes `refused`,
+    anything else `failed`. This is the one place Execution reads a
+    tool's error text, and only to fill in a kind the tool left out; the
+    grep test (tests/simorgh/execution/test_error_kinds.py) allow-lists
+    it by name."""
+    if result.ok:
+        return ""
+    kind = getattr(result, "error_kind", "") or ""
+    if kind in ERROR_KINDS:
+        return kind
+    return "refused" if str(result.error or "").lstrip("[").startswith("refused") else "failed"
 
 
 def timeout_for(tool, constraints: dict, default_s: float) -> float:
@@ -757,7 +776,8 @@ class Service:
         tools = {e.payload["action_id"]: e.payload.get("tool") for e in events if e.type == "started"}
         for action_id in started - finished:
             payload = {"action_id": action_id, "ok": False, "output_ref": "", "stdout_preview": "",
-                       "duration_ms": 0, "side_effects": [], "error": "interrupted by restart"}
+                       "duration_ms": 0, "side_effects": [], "error": "interrupted by restart",
+                       "error_kind": "transient"}
             if tools.get(action_id):
                 payload["tool"] = tools[action_id]
             await self._ctx.bus.publish(Message.new(topics.ACTION_RESULT, source="execution", payload=payload))
@@ -821,7 +841,7 @@ class Service:
         self._degraded_detail = ""
 
         if self._paused:
-            await self._publish_result(message, action_id, ok=False, error="paused")
+            await self._publish_result(message, action_id, ok=False, error="paused", error_kind="refused")
             return
 
         tool = self._registry.get(approved["tool"])
@@ -835,7 +855,7 @@ class Service:
             skill_name = approved["tool"][len("skill:"):]
             tool = await self._load_skill(skill_name, path=f"{self._config.skill_dir}/{skill_name}.py")
         if tool is None:
-            await self._publish_result(message, action_id, ok=False, error="unknown tool")
+            await self._publish_result(message, action_id, ok=False, error="unknown tool", error_kind="refused")
             return
 
         async with self._semaphore:
@@ -860,12 +880,12 @@ class Service:
                     span.set("ok", bool(result.ok))
             except asyncio.TimeoutError:
                 await self._finish(action_id)
-                await self._publish_result(message, action_id, ok=False, error="timeout",
+                await self._publish_result(message, action_id, ok=False, error="timeout", error_kind="transient",
                                             duration_ms=int((time.monotonic() - start) * 1000))
                 return
             except Exception as exc:  # noqa: BLE001 -- a tool crash must become a result, never take Execution down
                 await self._finish(action_id)
-                await self._publish_result(message, action_id, ok=False, error=repr(exc),
+                await self._publish_result(message, action_id, ok=False, error=repr(exc), error_kind=error_kind_of(exc),
                                             duration_ms=int((time.monotonic() - start) * 1000))
                 return
 
@@ -903,7 +923,8 @@ class Service:
                     content_type="application/json",
                 )
             await self._publish_result(
-                message, action_id, ok=result.ok, error=result.error, output_ref=output_ref,
+                message, action_id, ok=result.ok, error=result.error, error_kind=result_error_kind(result),
+                output_ref=output_ref,
                 stdout_preview=preview[: self._config.max_output_bytes], duration_ms=duration_ms,
                 side_effects=list(result.side_effects),
                 stderr=str((result.metadata or {}).get("stderr") or ""),
@@ -1033,7 +1054,7 @@ class Service:
                 stale.unlink()
 
     async def _publish_result(self, message: Message, action_id: str, *, ok: bool, error: str | None = None,
-                               output_ref: str = "", stdout_preview: str = "", duration_ms: int = 0,
+                               error_kind: str = "", output_ref: str = "", stdout_preview: str = "", duration_ms: int = 0,
                                side_effects: list | None = None, stderr: str = "",
                                metadata_ref: str = "") -> None:
         payload = {
@@ -1052,6 +1073,11 @@ class Service:
             # recovered by luck, not by reading the traceback.
             tail = (stderr or "").strip()[-1500:]
             payload["error"] = f"{error}\n{tail}" if tail else error
+        if not ok:
+            # What kind of failure this is (stage 2 item 8), so no
+            # consumer has to read it out of `error`. Never absent on a
+            # failure: an unset kind is "failed".
+            payload["error_kind"] = error_kind if error_kind in ERROR_KINDS else "failed"
         await self._ctx.bus.publish(message.caused(topics.ACTION_RESULT, payload, source="execution"))
 
     def _event(self, stream: str, type: str, payload: dict) -> Event:
