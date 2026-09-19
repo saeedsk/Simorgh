@@ -58,6 +58,29 @@ from .state import PAUSED, RUNNING, STOPPED, STOPPING, SystemStateMachine
 VERSION = "0.1.0"
 
 
+# `[runtime] subsystems`/`disabled` never reach these: the Ledger and
+# Bus are the Kernel's own, and Guardian is the only thing that can
+# approve an action. Asking to turn one off is logged and ignored.
+ALWAYS_ON: frozenset[str] = frozenset({"bus", "ledger", "guardian"})
+
+
+def _wanted_subsystems(runtime, layers, logger) -> frozenset[str]:
+    """The names `[runtime] subsystems` and `disabled` select. Both were
+    parsed and then read by nothing until 2026-09-19 (stage 0 item 32):
+    `disabled = ["voice"]` changed nothing and said nothing."""
+    known = {name for layer in layers for name in layer}
+    chosen = set(runtime.subsystems)
+    wanted = set(known) if "all" in chosen else (chosen & known)
+    unknown = (chosen - {"all"} - known) | (set(runtime.disabled) - known)
+    if unknown:
+        logger.warning("runtime_subsystems_unknown", names=sorted(unknown), known=sorted(known))
+    wanted -= set(runtime.disabled)
+    kept = ALWAYS_ON & known - wanted
+    if kept:
+        logger.warning("runtime_subsystems_always_on", names=sorted(kept))
+    return frozenset(wanted | (ALWAYS_ON & known))
+
+
 class KernelBootError(RuntimeError):
     pass
 
@@ -364,7 +387,8 @@ class Kernel:
         layers = known_layers(factories)
         if self.runtime.mode == "local-multi":
             layers = tuple(tuple(name for name in layer if name != "orchestration") for layer in layers)
-        return layers
+        wanted = _wanted_subsystems(self.runtime, layers, make_logger("kernel"))
+        return tuple(tuple(name for name in layer if name in wanted) for layer in layers)
 
     def _bus_config(self):
         return _bus_config_for(self.config, self.runtime)

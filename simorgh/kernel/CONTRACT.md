@@ -84,8 +84,8 @@ The Kernel also appends v1 records through `migrate_v1.py` (routes in ledger/mig
 | `mode` | `'single'` | yes (`single`, `local-multi`, `aws`; anything else is a `ConfigError`) |
 | `data_dir` | `'~/.simorgh'` | yes |
 | `deployment` | `'local'` | NO (declared, never read) |
-| `subsystems` | `('all',)` | NO (declared, never read; every subsystem in `LAYERS` always boots) |
-| `disabled` | `()` | NO (declared, never read) |
+| `subsystems` | `('all',)` | yes (since 2026-09-19; `bus`, `ledger`, `guardian` always boot) |
+| `disabled` | `()` | yes (since 2026-09-19; unknown names are logged) |
 | `idle_threshold_s` | `10.0` | yes |
 | `idle_tick_cooldown_s` | `3.0` | yes |
 | `sleep_every_s` | `21600` | yes |
@@ -154,7 +154,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - B18 (low): no registry or cancellation of blocking work; `os._exit` in `cli.py` is the backstop. Open.
 - B16 (medium): the loader killed Sim 250 ms after SIGINT. Fixed 2026-09-18 in `simloader.py` (commit `fd27fc7`); the Kernel side (`Stopper`) was already correct.
 
-Found while writing this contract (not in the catalogue): `[runtime] subsystems` and `disabled` are parsed and never applied, so no subsystem can be switched off by config; `scheduler.py:305-308` sets `_last_idle_tick = now` before computing `since_last_idle_tick`, so that payload field is always 0; and the Scheduler docstring says schedule firing stops while paused, but `_fire_after` (`scheduler.py:268`) never checks `is_running`.
+Found while writing this contract (not in the catalogue): `[runtime] subsystems` and `disabled` were parsed and never applied (fixed 2026-09-19, `service._wanted_subsystems`); `scheduler.py:305-308` sets `_last_idle_tick = now` before computing `since_last_idle_tick`, so that payload field is always 0; and the Scheduler docstring says schedule firing stops while paused, but `_fire_after` (`scheduler.py:268`) never checks `is_running`.
 
 ## Planned changes (roadmap)
 
