@@ -491,6 +491,11 @@ VERIFY_TIMEOUT_S = 300.0
 _CANCEL_POLL_INTERVAL_S = 0.2
 
 
+# Guardian denies an unanswered prompt after `human_prompt_timeout_s`
+# (1800 s by default), so a task waiting on a person always hears back.
+_HUMAN_ANSWER_WAIT_S = 1860.0
+
+
 class _EventWaiter:
     """Waits for the first event of any of `types` whose payload[`key`]
     equals `value` -- the action.proposed -> {result|denied|needs_human}
@@ -505,15 +510,37 @@ class _EventWaiter:
     async def wait(
         self, types: tuple[str, ...], *, key: str, value: str, timeout: float,
         cancel_check=None, poll_interval: float = _CANCEL_POLL_INTERVAL_S,
+        through: tuple[str, ...] = (), through_timeout: float = 0.0,
     ) -> Message | None:
+        """`through`: events that do not end the wait but say it will be
+        long -- `action.needs_human` in a task, where the answer is the
+        person's. Seeing one stretches the deadline to `through_timeout`.
+        One subscription covers both phases, so an answer that arrives
+        the instant after the question cannot fall between two waits."""
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        loop = asyncio.get_running_loop()
+        deadline = [loop.time() + timeout]
 
         async def _on(message: Message) -> None:
-            if message.payload.get(key) == value and not fut.done():
-                fut.set_result(message)
+            if message.payload.get(key) != value or fut.done():
+                return
+            if message.type in through:
+                deadline[0] = max(deadline[0], loop.time() + through_timeout)
+                return
+            fut.set_result(message)
 
-        subs = [await self._bus.subscribe(t, _on) for t in types]
+        subs = [await self._bus.subscribe(t, _on) for t in (*types, *through)]
         try:
+            if through:
+                while True:
+                    left = deadline[0] - loop.time()
+                    if left <= 0:
+                        return None
+                    try:
+                        return await asyncio.wait_for(asyncio.shield(fut), timeout=min(poll_interval, left))
+                    except asyncio.TimeoutError:
+                        if cancel_check is not None and cancel_check():
+                            return None
             if cancel_check is None:
                 return await asyncio.wait_for(fut, timeout=timeout)
             # `asyncio.shield` keeps a per-poll `wait_for` timeout from
@@ -1655,11 +1682,21 @@ class SessionRunner:
         # `_run`'s own loop is ready to act on it the instant this
         # returns (live-measured, 2026-09-08).
         cancel_check = (lambda: self._is_cancelled(session.task_id)) if is_read_only(tool_name) else None
+        # A task waits for the person's answer; a chat turn does not (the
+        # person is right there, and a yes given later still runs it).
+        # Before 2026-09-19 a task recorded "needs human" as a failed step
+        # and moved on; the stand-in person's yes then ran apply_skill
+        # after the session had ended, and the landing was refused over
+        # the file it wrote (the write-a-skill trial).
+        waits_for_person = session.profile.scaffold != "chat"
         result = await self._waiter.wait(
-            (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.ACTION_NEEDS_HUMAN),
+            (topics.ACTION_RESULT, topics.ACTION_DENIED)
+            + (() if waits_for_person else (topics.ACTION_NEEDS_HUMAN,)),
             key="action_id", value=action_id,
             timeout=_ACTION_TIMEOUTS.get(tool_name, self._action_timeout_s),
             cancel_check=cancel_check,
+            through=(topics.ACTION_NEEDS_HUMAN,) if waits_for_person else (),
+            through_timeout=_HUMAN_ANSWER_WAIT_S + _ACTION_TIMEOUTS.get(tool_name, self._action_timeout_s),
         )
         if result is None:
             if cancel_check is not None and cancel_check():

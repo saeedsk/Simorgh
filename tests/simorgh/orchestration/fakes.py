@@ -47,9 +47,12 @@ class FakeGuardianExecution:
     which are built by a different track this same session.
     """
 
-    def __init__(self, bus, *, deny: bool = False) -> None:
+    def __init__(self, bus, *, deny: bool = False, ask_first: bool = False) -> None:
         self._bus = bus
         self._deny = deny
+        # Escalate first (`action.needs_human`), then act as if the person
+        # said yes -- the order a real Guardian produces for apply_skill.
+        self._ask_first = ask_first
         self.proposals: list[Message] = []
         self._sub = None
 
@@ -62,6 +65,11 @@ class FakeGuardianExecution:
 
     async def _on(self, message: Message) -> None:
         self.proposals.append(message)
+        if self._ask_first:
+            await self._bus.publish(message.caused(topics.ACTION_NEEDS_HUMAN, {
+                "action_id": message.payload["action_id"], "question": "Approve?", "options": ["yes", "no"],
+                "default": "no",
+            }, source="guardian"))
         if self._deny:
             reply = message.caused(topics.ACTION_DENIED, {
                 "action_id": message.payload["action_id"], "reasons": ["test denial"], "layer": "policy",
