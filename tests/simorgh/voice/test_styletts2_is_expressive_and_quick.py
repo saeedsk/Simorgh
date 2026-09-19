@@ -149,27 +149,35 @@ class TheServerTestCase(unittest.TestCase):
     def test_it_reports_the_rate_it_writes(self):
         self.assertIn("RATE = 24_000", self.source)
 
-    def test_it_honours_the_speed(self):
-        """`tts_speed` was sent and dropped (the creator, 2026-09-19: "I
-        don't think tts_speed works"). Measured after: 3.10 s at 1.0,
-        2.44 s at 1.3 for the same sentence."""
-        self.assertIn('wav = _at_speed(wav, req.get("speed", 1.0))', self.source)
+    def test_it_honours_the_speed_by_pacing_the_model(self):
+        """`tts_speed` was sent and dropped (the creator, 2026-09-19). A
+        phase-vocoder stretch of the finished audio sounded "robotic ...
+        self echoing"; the model's own phoneme durations are divided
+        instead. Measured: 3.10 s at 1.0, 2.67 s at 1.3, 4.15 s at 0.8."""
+        self.assertIn("tts.torch = paced", self.source)
+        self.assertIn('paced.speed = _speed_of(req.get("speed", 1.0))', self.source)
+        self.assertNotIn("time_stretch", self.source)
 
-    def test_the_stretch_changes_the_length_and_one_leaves_it(self):
-        try:
-            import librosa  # noqa: F401
-            import numpy as np
-        except ImportError:
-            self.skipTest("librosa lives in the engine's venv")
+    def test_the_pace_divides_only_sigmoid(self):
         import importlib.util
 
         spec = importlib.util.spec_from_file_location("styletts2_server", self.path)
         server = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(server)
-        samples = np.sin(np.linspace(0, 2000, 24000)).astype("float32")
-        self.assertIs(server._at_speed(samples, 1.0), samples)
-        self.assertLess(len(server._at_speed(samples, 1.3)), 24000)
-        self.assertGreater(len(server._at_speed(samples, 0.8)), 24000)
+
+        class _Torch:
+            @staticmethod
+            def sigmoid(x):
+                return x
+
+            no_grad = "kept"
+
+        paced = server._PacedTorch(_Torch())
+        paced.speed = 2.0
+        self.assertEqual(paced.sigmoid(4.0), 2.0)
+        self.assertEqual(paced.no_grad, "kept")
+        self.assertEqual(server._speed_of("1.01"), 1.0)
+        self.assertEqual(server._speed_of(9), 2.0)
 
 
 if __name__ == "__main__":

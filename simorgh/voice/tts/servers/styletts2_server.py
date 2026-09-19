@@ -62,30 +62,41 @@ def _write_pcm16(path: str, samples, rate: int) -> float:
     return frames / float(rate or RATE)
 
 
-def _at_speed(samples, speed: float):
-    """`samples` played `speed` times as fast, pitch kept.
+class _PacedTorch:
+    """`torch` as `styletts2.tts` sees it, with its durations divided by
+    the speed.
 
-    StyleTTS 2's `inference()` takes no speed, and `tts_speed` was sent
-    here and dropped: the creator changed it and heard no difference
-    (2026-09-19). librosa's phase-vocoder stretch ships in this venv; a
-    speed within 2% of 1, or no librosa, returns the audio untouched.
+    StyleTTS 2's `inference()` takes no speed. Its only `torch.sigmoid`
+    calls are the two duration lines (`duration =
+    torch.sigmoid(duration).sum(axis=-1)`, one per inference path), so
+    dividing there makes the model say every phoneme faster or slower --
+    the pace a speaker changes, pitch and timbre untouched.
+
+    The first fix (2026-09-19) time-stretched the finished audio with a
+    phase vocoder; the creator: "the voice became robotic, unnatural with
+    some self echoing vibe". Stretching a waveform smears it; asking the
+    model for shorter phonemes does not.
     """
+
+    def __init__(self, torch) -> None:
+        self._torch = torch
+        self.speed = 1.0
+
+    def __getattr__(self, name):
+        return getattr(self._torch, name)
+
+    def sigmoid(self, x, *args, **kwargs):
+        out = self._torch.sigmoid(x, *args, **kwargs)
+        return out / self.speed if self.speed != 1.0 else out
+
+
+def _speed_of(value) -> float:
     try:
-        speed = float(speed or 1.0)
+        speed = float(value or 1.0)
     except (TypeError, ValueError):
-        return samples
+        return 1.0
     speed = max(0.5, min(2.0, speed))
-    if abs(speed - 1.0) < 0.02:
-        return samples
-    try:
-        import librosa
-        import numpy as np
-    except ImportError:
-        return samples
-    data = np.asarray(samples, dtype=np.float32).reshape(-1)
-    if data.size < 2048:
-        return samples
-    return librosa.effects.time_stretch(data, rate=speed)
+    return 1.0 if abs(speed - 1.0) < 0.02 else speed
 
 
 def main() -> None:
@@ -120,6 +131,9 @@ def main() -> None:
         print(json.dumps({"ready": False, "error": f"could not load StyleTTS 2: {exc.__class__.__name__}: {exc}"}), flush=True)
         return
 
+    paced = _PacedTorch(torch)
+    tts.torch = paced       # only the duration lines call torch.sigmoid there
+
     print(json.dumps({"ready": True, "engine": "styletts2", "device": "cpu", "rate": RATE}), flush=True)
 
     for line in sys.stdin:
@@ -135,6 +149,7 @@ def main() -> None:
             params = dict(req.get("params") or {})
             reference = str(req.get("reference") or "") or None
             started = time.monotonic()
+            paced.speed = _speed_of(req.get("speed", 1.0))
             with contextlib.redirect_stdout(sys.stderr):
                 wav = model.inference(
                     str(req.get("text") or ""),
@@ -145,7 +160,6 @@ def main() -> None:
                     diffusion_steps=int(params.get("diffusion_steps", 5)),
                     embedding_scale=float(params.get("embedding_scale", 1.0)),
                 )
-            wav = _at_speed(wav, req.get("speed", 1.0))
             out = str(req.get("out") or f"/tmp/styletts2-{rid}.wav")
             seconds = _write_pcm16(out, wav, RATE)
             # An engine that returns no sound must say so, not succeed
