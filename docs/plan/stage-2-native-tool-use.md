@@ -1,6 +1,6 @@
 # Stage 2 -- Schemas to the model, then native tool use behind a capability flag
 
-Status: **in progress** (2026-09-19: items 1, 3, 4 done, none of which changes behaviour; baseline BFCL recorded) · Depends on: stage 0 item 30 (the gate) · Estimated: 3 weeks · Modules touched: contracts, execution, cognition, orchestration, guardian, benchmark
+Status: **in progress** (2026-09-19: items 1-4 done; item 2 is the first behaviour change, measured: trial suite 6/7, no regression) · Depends on: stage 0 item 30 (the gate) · Estimated: 3 weeks · Modules touched: contracts, execution, cognition, orchestration, guardian, benchmark
 
 ## Outcome
 
@@ -20,9 +20,10 @@ Done 2026-09-19:
 - Baseline (item 0): BFCL-parallel with markers, GLM-5.3-Flash via Together, 20 cases at offset 0: 17, 18 and 18 of 20 (mean 88%), 130-282 s and about $0.04 per run, no floor replies. See `docs/findings/2026-09-19-stage-0-gate.md`.
 - Item 1: `tool.registered` carries `input_schema`; WorldModel keeps it with the description.
 - Item 3: `cognition.api.Capabilities` on every provider.
+- Item 2: one line per offered tool with its description and arguments (CHAT 323 -> 2,340 tokens, PATCH 166 -> 824); trial suite after 6/7.
 - Item 4: `cognition/providers/native.py`; Together and Gemini send and parse native tool calls (fixtures, plus one live call each returning two parallel calls). Unused until item 9.
 
-Next, in order, each behind a trial-suite before/after: item 2 (render name, description and argument shape in the prompt), items 5-6 (typed turns and N calls per turn in `session.py`, native path only), then item 9 (flip VOICE_CHAT on the provider that wins BFCL).
+Next, in order, each behind a trial-suite before/after: items 5-6 (typed turns and N calls per turn in `session.py`, native path only), then item 9 (flip VOICE_CHAT on the provider that wins BFCL).
 
 1. **`ToolSpec` on the wire.** *Lock `contracts`, `execution`, `worldmodel`.* (T2)
    - What: `tool.registered` carries `name, description, input_schema, reversibility, read_only, network, cost_class, source, tags`.
