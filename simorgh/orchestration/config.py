@@ -92,6 +92,12 @@ class Config:
     # "" is the typed/CLI channel. Empty tuple: no catalog anywhere.
     skills_channels: tuple[str, ...] = ("", "cli", "http")
     heartbeat_s: int = 30
+    # An attempt's budget beside its steps (stage 4 item 6); 0 is no limit.
+    # Running out ends the attempt "budget exhausted: <which>", which --
+    # unlike the step cap -- is not retried with a fresh budget.
+    attempt_max_tokens: int = 0
+    attempt_max_usd: float = 0.0
+    attempt_max_wall_s: float = 0.0
     max_depth: int = 3
     max_children_concurrent: int = 4
     # Above Cognition's own `Budget.max_seconds` (180s), with room to

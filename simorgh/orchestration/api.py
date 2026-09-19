@@ -68,6 +68,21 @@ class Budget:
     steps_used: int = 0
     max_revisions: int = 2
     revisions_used: int = 0
+    # Stage 4 item 6: an attempt's allowance in what it really costs; 0 is
+    # no limit. Steps stay as a sanity bound.
+    max_tokens: int = 0
+    max_usd: float = 0.0
+    max_wall_s: float = 0.0
+
+    def over(self, *, tokens: int, usd: float, wall_s: float) -> str:
+        """Which of tokens, usd, wall is spent, or "" when none is."""
+        if self.max_tokens and tokens >= self.max_tokens:
+            return f"tokens ({tokens} of {self.max_tokens})"
+        if self.max_usd and usd >= self.max_usd:
+            return f"usd (${usd:.3f} of ${self.max_usd:.2f})"
+        if self.max_wall_s and wall_s >= self.max_wall_s:
+            return f"wall ({wall_s:.0f} s of {self.max_wall_s:.0f} s)"
+        return ""
 
     @property
     def steps_left(self) -> int:

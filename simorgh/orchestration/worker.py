@@ -140,8 +140,10 @@ class Worker:
         parallel_read_tools: int = 1, skills_enabled: bool = False,
         skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
         skills_channels: tuple[str, ...] = ("", "cli", "http"),
+        attempt_limits: tuple[int, float, float] = (0, 0.0, 0.0),
     ) -> None:
         self._review_benchmark = review_benchmark
+        self._attempt_limits = attempt_limits
         self._bus = bus
         self._ledger = ledger
         self._clock = clock
@@ -298,6 +300,7 @@ class Worker:
         )
         session.budget.max_steps = step_cap(task.get("max_steps"), profile.max_steps)
         session.budget.max_revisions = profile.max_revisions
+        (session.budget.max_tokens, session.budget.max_usd, session.budget.max_wall_s) = self._attempt_limits
 
         await restore_session(session, self._ledger)
 

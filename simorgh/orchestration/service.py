@@ -92,6 +92,8 @@ class Service:
                             delegate_max_steps=self.config.delegate_max_steps,
                             escalate_from_attempt=self.config.escalate_from_attempt, worktrees=self.config.worktrees,
                             parallel_read_tools=self.config.parallel_read_tools,
+                            attempt_limits=(self.config.attempt_max_tokens, self.config.attempt_max_usd,
+                                            self.config.attempt_max_wall_s),
                             skills_enabled=self.config.skills_enabled,
                             skills_catalog_max_chars=self.config.skills_catalog_max_chars,
                             skills_roots=tuple(self.config.skills_roots),

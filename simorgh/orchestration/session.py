@@ -19,6 +19,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import uuid
 
 from simorgh.contracts import topics
@@ -73,6 +74,8 @@ ACTION_TIMEOUT_S = 30.0
 # the task soon (`planning/service.py::CONTINUATION_REASON`, same text;
 # the packages may not import each other).
 CONTINUATION_REASON = "step budget exhausted"
+#: An attempt that spent its tokens, dollars or time (stage 4 item 6).
+BUDGET_REASON = "budget exhausted"
 #: what the model is told when its lookups have used a chat turn's budget
 WRAP_UP_TEXT = ("Your lookups are over -- no more tools this turn. Answer the person now, in one or two "
                 "sentences, from what you found; say plainly what you could not check.")
@@ -980,9 +983,19 @@ class SessionRunner:
         await self._publish(session, topics.TASK_STARTED, {"task_id": session.task_id, "worker_id": self._worker_id})
 
         pending_user_text = user_text
+        started = time.monotonic()
         while True:
             if self._paused():
                 return await self._pause(session)
+            spent = session.budget.over(tokens=session.spent_tokens, usd=session.spent_usd,
+                                        wall_s=time.monotonic() - started)
+            if spent:
+                # Stage 4 item 6. Not CONTINUATION_REASON: a retry with a fresh
+                # allowance would spend past the budget that just ended.
+                step = Step(session.next_step_no(), "act", f"{BUDGET_REASON}: {spent}", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                return Outcome("blocked", reason=f"{BUDGET_REASON}: {spent}")
             # Cooperative, and checked between steps rather than during
             # one: a cancel must not tear down a provider call or leave a
             # half-applied edit behind. The cleanup in `run` runs either
