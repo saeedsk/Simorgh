@@ -398,9 +398,33 @@ def render_full_markdown(model: SelfModel) -> str:
 
 
 def compute_gaps(model: SelfModel, k: int) -> tuple[list[dict], list[dict]]:
-    """No real competence/coverage data exists yet (both producers are
-    later phases) -- returns empty lists rather than fabricated gaps, so
-    a Curiosity caller (once it exists) gets an honest "nothing measured
-    yet" instead of noise.
+    """`(gaps, unexplored)`: the `k` task types of weakest measured
+    competence, and the `k` capability areas no task type has been
+    measured in.
+
+    A gap's `score` is the success rate minus a pessimism term that
+    shrinks with sample count (`1/sqrt(samples+1)`), so a type measured
+    twice at 100% ranks below one measured thirty times at 85%: it is
+    the least *known*, not only the least successful, that is worth
+    exploring. Until 2026-09-19 this returned two empty lists, so
+    Curiosity's gap drive saw a constant (2026-09-18 evaluation, C1/C2).
     """
-    return [], []
+    import math
+
+    gaps: list[dict] = []
+    for task_type, entry in (model.competence or {}).items():
+        rate = entry.get("success_rate") if isinstance(entry, dict) else None
+        samples = int((entry or {}).get("samples") or 0) if isinstance(entry, dict) else 0
+        if rate is None or samples <= 0:
+            continue
+        score = float(rate) - 1.0 / math.sqrt(samples + 1)
+        gaps.append({"competence": f"{float(rate):.0%} over {samples}", "task_type": task_type,
+                     "score": round(score, 4), "samples": samples})
+    gaps.sort(key=lambda g: (g["score"], g["task_type"]))
+    measured = {tt.split(":", 1)[1] for tt in (model.competence or {}) if ":" in tt}
+    unexplored: list[dict] = []
+    for area in model.capabilities.get("areas", []) or []:
+        name = area if isinstance(area, str) else (area.get("name") or area.get("area") or "")
+        if name and name not in measured:
+            unexplored.append({"area": name, "modules": [], "tasks_ever": 0})
+    return gaps[:k], unexplored[:k]

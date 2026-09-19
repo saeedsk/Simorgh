@@ -10,6 +10,8 @@ from pathlib import Path
 from simorgh.bus.factory import make_backend, make_client
 from simorgh.bus.config import Config as BusConfig
 from simorgh.contracts import topics
+import asyncio
+
 from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context
 from simorgh.ledger.factory import make_ledger
@@ -113,11 +115,22 @@ class WorldModelTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertLess(tiny.payload["tokens"], full.payload["tokens"])
         self.assertIn("[truncated:", tiny.payload["text"])
 
-    async def test_self_gaps_is_honestly_empty_this_phase(self):
-        reply = await self.requester.request(
-            self.requester.new(topics.SELF_GAPS, {"k": 5}), timeout=2,
-        )
+    async def test_self_gaps_rank_the_least_known_competence_first(self):
+        # Nothing measured: nothing to rank (an honest empty list, not noise).
+        reply = await self.requester.request(self.requester.new(topics.SELF_GAPS, {"k": 5}), timeout=2)
         self.assertEqual(reply.payload["gaps"], [])
+        # Two measured types: the one measured twice at 100% is less KNOWN
+        # than the one measured thirty times at 85%, so it is the gap.
+        for task_type, rate, samples in (("patch:memory", 1.0, 2), ("research", 0.85, 30)):
+            await self.bus.publish(Message.new(
+                topics.LEARN_COMPETENCE_UPDATED, source="learning",
+                payload={"task_type": task_type, "success_rate": rate, "samples": samples, "calibration": 0.0},
+            ))
+        await asyncio.sleep(0.05)
+        reply = await self.requester.request(self.requester.new(topics.SELF_GAPS, {"k": 5}), timeout=2)
+        gaps = reply.payload["gaps"]
+        self.assertEqual([g["task_type"] for g in gaps], ["patch:memory", "research"])
+        self.assertEqual(gaps[0]["samples"], 2)
 
     async def test_self_md_rendered_to_disk(self):
         rendered = (self.ctx.data_dir / "self" / "SELF.md").read_text()

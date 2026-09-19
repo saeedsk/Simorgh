@@ -21,7 +21,6 @@ from .competence import CompetenceTable
 from .config import Config
 from .correlator import Correlator
 from .outcomes import OutcomeRecorder
-from .pipeline import PatchPipeline
 
 VERSION = "0.1.0"
 
@@ -32,10 +31,10 @@ class Service:
     consumes = (
         topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
         topics.ACTION_RESULT, topics.ACTION_DENIED, topics.VERIFY_RESULT,
-        topics.LEARN_PIPELINE_RUN, topics.LEARN_STRATEGY_SUGGEST,
+        topics.LEARN_STRATEGY_SUGGEST,
     )
     produces = (
-        topics.LEARN_OUTCOME_RECORDED, topics.LEARN_COMPETENCE_UPDATED, topics.LEARN_PIPELINE_COMPLETED,
+        topics.LEARN_OUTCOME_RECORDED, topics.LEARN_COMPETENCE_UPDATED,
         topics.LEARN_STRATEGY_SUGGEST_REPLY, topics.LEARN_SELF_PATCH_APPLIED, topics.LEARN_SELF_PATCH_REVERTED,
         topics.LEARN_SKILL_ACQUIRED, topics.ACTION_PROPOSED, topics.VERIFY_REQUESTED, topics.MEMORY_STORE,
     )
@@ -48,7 +47,6 @@ class Service:
         self._action_correlator = Correlator(id_field="action_id")
         self._verify_correlator = Correlator(id_field="verification_id")
         self._subs: list = []
-        self._running_pipelines: dict[str, "PatchPipeline"] = {}
         self._degraded: str | None = None
 
     async def start(self, ctx: Context) -> None:
@@ -81,7 +79,6 @@ class Service:
         self._subs.append(await ctx.bus.subscribe(topics.VERIFY_RESULT, self._on_verify_result))
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_RESULT, self._on_action_result))
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_DENIED, self._on_action_denied))
-        self._subs.append(await ctx.bus.subscribe(topics.LEARN_PIPELINE_RUN, self._on_pipeline_run, group="learning"))
         self._subs.append(await ctx.bus.subscribe(topics.LEARN_STRATEGY_SUGGEST, self._on_strategy_suggest))
 
     async def stop(self) -> None:
@@ -91,38 +88,11 @@ class Service:
             await sub.unsubscribe()
         self._subs.clear()
 
-    #: Why this subsystem cannot currently do the thing it exists for.
-    #: Two independent reasons, both verified 2026-09-09 (wave-21
-    #: observer W21-12), either of which alone is fatal:
-    #:
-    #: 1. Nothing anywhere publishes `learn.pipeline.run` or
-    #:    `learn.strategy.suggest`. `PatchPipeline` is only ever built
-    #:    inside the handler for a message no subsystem sends. The real
-    #:    `improve <path> <description>` path goes through
-    #:    `TASK_CREATE` to Orchestration's ordinary agent loop and never
-    #:    touches Learning at all.
-    #: 2. Even if something did publish it, `PatchPipeline` proposes a
-    #:    `draft_candidate` action, and no such tool is registered --
-    #:    its drafting tools were never built (`fullsuiteran.py`'s own
-    #:    docstring records the same gap from the other side).
-    #:
-    #: Reporting `ok` here was the thing worth fixing first: a
-    #: subsystem that answers "0 pipelines running" is saying something
-    #: technically true and entirely misleading, and `status` showed
-    #: Learning green while its whole purpose was unreachable. Whether
-    #: to wire it up or retire it is a real decision with a real cost
-    #: either way; saying so out loud is not.
-    UNREACHABLE = (
-        "no publisher for learn.pipeline.run, and draft_candidate is not a registered tool -- "
-        "PatchPipeline cannot run; `improve` uses Orchestration's agent loop instead"
-    )
-
     async def health(self) -> Health:
         if self._degraded:
             return Health.degraded(self._degraded)
-        if self._running_pipelines:
-            return Health.ok(f"{len(self._running_pipelines)} pipeline(s) running")
-        return Health.degraded(self.UNREACHABLE)
+        skipped = self._outcomes.skipped_unknown if getattr(self, "_outcomes", None) is not None else 0
+        return Health.ok(f"recording outcomes; {skipped} untyped turn(s) skipped")
 
     # -- publish helper --------------------------------------------------------
     async def _publish(self, type_: str, payload: dict) -> None:
@@ -161,36 +131,6 @@ class Service:
         ctx = self._ctx
         assert ctx is not None
         await ctx.bus.reply(message, type=topics.LEARN_STRATEGY_SUGGEST_REPLY, payload=reply)
-
-    # -- pipeline dispatch --------------------------------------------------------
-    async def _on_pipeline_run(self, message: Message) -> None:
-        p = message.payload
-        task_id, kind = p["task_id"], p["kind"]
-        if kind == "evolve":
-            # Not yet built this pass (README build log) -- an honest floor
-            # outcome rather than a silent no-op or a fabricated result.
-            await self._publish(topics.LEARN_PIPELINE_COMPLETED, {
-                "task_id": task_id, "outcome": "floor",
-                "detail": "evolve batch pipeline is not implemented in this build",
-            })
-            return
-        if len(self._running_pipelines) >= self._config.max_concurrent_pipelines:
-            await self._publish(topics.LEARN_PIPELINE_COMPLETED, {
-                "task_id": task_id, "outcome": "floor", "detail": "max_concurrent_pipelines reached",
-            })
-            return
-        pipeline = PatchPipeline(
-            task_id=task_id, kind=kind, description=p["description"], subject=p.get("subject"),
-            prior_reasons=list(p.get("prior_reasons") or []), config=self._config, ledger=self._ctx.ledger,
-            clock=self._ctx.clock.now, propose_action=self._propose_action, request_verify=self._request_verify,
-            action_correlator=self._action_correlator, verify_correlator=self._verify_correlator,
-            publish=self._publish,
-        )
-        self._running_pipelines[task_id] = pipeline
-        try:
-            await pipeline.run()
-        finally:
-            self._running_pipelines.pop(task_id, None)
 
     async def _propose_action(self, *, action_id: str, tool: str, args: dict, scope: dict,
                                reversibility: str, rationale: str, task_id: str) -> None:

@@ -91,6 +91,7 @@ class Service:
             wall_clock=ctx.clock.now)
         self._git_state = GitStateFacet(self.config.repo_root)
         self._tools = ToolsFacet()
+        self._booted = False
         self._user_profile = UserProfileFacet()
         self._facets = {
             "capability_map": self._capability_map, "file_index": self._file_index,
@@ -274,9 +275,31 @@ class Service:
 
     async def _on_tool_registered(self, message: Message) -> None:
         self._tools.on_registered(message.payload.get("name", ""), message.payload)
+        await self._sync_tools()
 
     async def _on_tool_unavailable(self, message: Message) -> None:
         self._tools.on_unavailable(message.payload.get("name", ""), message.payload.get("reason", ""))
+        await self._sync_tools()
+
+    async def _sync_tools(self) -> None:
+        """`capabilities["tools"]` = the tools Execution has announced
+        and not withdrawn. Declared in the model since Phase 0 and never
+        written until 2026-09-19 (2026-09-18 evaluation): the Self Model
+        could not say which tools Sim has while 98 were registered. Not
+        folded during boot -- ~100 `tool.registered` arrive before
+        `system.started`, and one version bump per tool would be noise;
+        `_on_system_started` syncs once, and every change after that is
+        its own entry."""
+        if not self._booted:
+            return
+        names = self._tools.names()
+
+        def _set_tools(model, now):
+            if names == model.capabilities.get("tools"):
+                return model
+            return replace(model, capabilities={**model.capabilities, "tools": names}, updated_at=now)
+
+        await self._apply(_set_tools, section="capabilities", reason="tool.registered")
 
     async def _on_tool_probed(self, message: Message) -> None:
         """The recovery half of `tool.unavailable`.
@@ -293,6 +316,7 @@ class Service:
             return
         for name in payload.get("tools") or []:
             self._tools.on_available(str(name))
+        await self._sync_tools()
 
     async def _on_user_model_updated(self, message: Message) -> None:
         p = message.payload
@@ -359,6 +383,8 @@ class Service:
 
     async def _on_system_started(self, message: Message) -> None:
         self._restarts += 1
+        self._booted = True
+        await self._sync_tools()
         await self._apply(
             lambda m, now: bump_restarts(m, restarts=self._restarts, updated_at=now),
             section="continuity", reason=f"system.started (mode={message.payload.get('mode', '?')})",

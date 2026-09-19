@@ -17,17 +17,13 @@ from simorgh.learning.service import Service
 
 
 class TestLearningSaysWhatItCannotDo(unittest.IsolatedAsyncioTestCase):
-    async def test_an_idle_learning_reports_degraded_with_the_real_reason(self):
+    async def test_an_idle_learning_reports_ok_and_counts_untyped_turns(self):
+        # The PatchPipeline that kept this "degraded" was unreachable by
+        # construction and was retired on 2026-09-19. Learning's job is
+        # recording outcomes; it says how many turns it refused to type.
         health = await Service().health()
-        self.assertEqual(health.status, "degraded")
-        self.assertIn("learn.pipeline.run", health.detail)
-        self.assertIn("draft_candidate", health.detail)
-
-    async def test_the_reason_names_what_does_work_instead(self):
-        # A degraded report that leaves the reader stuck is only half
-        # honest: `improve` really does work, through another path.
-        health = await Service().health()
-        self.assertIn("improve", health.detail)
+        self.assertEqual(health.status, "ok")
+        self.assertIn("untyped", health.detail)
 
     def test_draft_candidate_is_genuinely_not_registered(self):
         # The claim in the health string, asserted rather than trusted.

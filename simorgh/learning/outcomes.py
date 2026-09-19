@@ -32,6 +32,13 @@ class OutcomeRecorder:
         self._competence = competence
         self._config = config
         self._clock = clock or time.time
+        # Turns with no task type (every chat turn: a `task:<id>` stream
+        # with no `created` event) used to be recorded as `unknown` with
+        # succeeded=True, whatever happened -- 2,466 of 2,714 rows, 91% of
+        # the learning signal, and the Self Model's competence table read
+        # "unknown 97%" (2026-09-18 evaluation, C2). They are not
+        # outcomes; they are skipped and counted so health can say so.
+        self.skipped_unknown = 0
         self._publish = publish  # async fn(type, payload) -> None; set by Service
         self._verify_cache: dict[str, dict] = {}
         self._verify_order: list[str] = []
@@ -116,6 +123,9 @@ class OutcomeRecorder:
         p = message.payload
         task_id = p["task_id"]
         task_type, strategy, cost_usd, duration_s, run = await self._task_facts(task_id)
+        if task_type == "unknown":
+            self.skipped_unknown += 1
+            return
         verdict = "unknown"
         vref = p.get("verification_ref")
         if vref and vref in self._verify_cache:
@@ -128,6 +138,9 @@ class OutcomeRecorder:
         p = message.payload
         task_id = p["task_id"]
         task_type, strategy, cost_usd, duration_s, run = await self._task_facts(task_id)
+        if task_type == "unknown":
+            self.skipped_unknown += 1
+            return
         await self._record(task_id=task_id, task_type=task_type, succeeded=False, weight=1.0,
                             verdict="failed", cost_usd=cost_usd, duration_s=duration_s, strategy=strategy,
                             stated_confidence=None, event_type="failed", run=run)

@@ -229,13 +229,25 @@ class Service:
         self._active_project.on_project_finished()
 
     async def _on_provider_status(self, message) -> None:
+        # Cognition reports calls/max_calls, spend_usd/max_spend_usd and
+        # exhausted (cognition/service.py). Until 2026-09-19 this read
+        # `remaining_fraction` and `free`, which nothing sends, so
+        # `worst_remaining` stayed None and exploration was never
+        # throttled by budget (2026-09-18 evaluation, C9). A provider
+        # with no cap configured is unknown, not free: it does not
+        # loosen the throttle.
         budget = message.payload.get("budget") or {}
-        remaining = budget.get("remaining_fraction")
-        free = bool(budget.get("free", False))
-        if free:
-            self._budget.any_free = True
-        if remaining is not None and not free:
-            self._budget.worst_remaining = remaining if self._budget.worst_remaining is None else min(self._budget.worst_remaining, remaining)
+        max_calls = float(budget.get("max_calls") or 0)
+        max_spend = float(budget.get("max_spend_usd") or 0)
+        if not max_calls and not max_spend:
+            return
+        used = 0.0
+        if max_calls:
+            used = max(used, float(budget.get("calls") or 0) / max_calls)
+        if max_spend:
+            used = max(used, float(budget.get("spend_usd") or 0) / max_spend)
+        remaining = 0.0 if budget.get("exhausted") else max(0.0, 1.0 - used)
+        self._budget.worst_remaining = remaining if self._budget.worst_remaining is None else min(self._budget.worst_remaining, remaining)
 
     async def _on_persona_state(self, message) -> None:
         self._mood = {"valence": message.payload["valence"], "arousal": message.payload["arousal"]}
@@ -580,6 +592,14 @@ class Service:
             payload["project"] = project
         if cognition_attempted is not None:
             payload["cognition_attempted"] = cognition_attempted
+        last = self._last_tick_record
+        if (skipped_reason is not None and not picked and not proposed and last is not None
+                and last.get("skipped_reason") == skipped_reason):
+            # Edge-triggered. A paused Curiosity wrote `autonomy_paused`
+            # on every 3 s idle tick: 161k events, 45 MB, the largest
+            # stream in the cognitive core (2026-09-18 evaluation, C4).
+            # The first skip for a reason is recorded; repeats are not.
+            return
         self._last_tick_record = payload
         await self._append(_TICKS_STREAM, "tick", payload)
 

@@ -33,7 +33,24 @@ _UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 # written inside a single day. A trace answers "why did Sim just do
 # that", which is a question asked within hours, so a week of them was
 # never read and only ever slowed the boot that had to stat them.
-DEFAULT_RETENTION: dict[str, str] = {"trace:": "2d", "dead:": "30d", "activity": "90d"}
+# Prefix -> window. A per-id stream (`action:<id>`) is deleted whole once
+# its last event is older than the window; a journal stream
+# (`metrics:history`) is truncated within. A stream with no entry here is
+# forever, and forever is truncated only below a snapshot -- so every
+# stream that grows on a timer and that no decision is rebuilt from
+# gets a window. Until 2026-09-19 only traces had one, and the three
+# largest streams on disk were a metrics snapshot every 10 s (114 MB), a
+# paused Curiosity's tick every 3 s (43 MB) and mood decay every 5 s
+# (17 MB) (2026-09-18 evaluation, B3/B19). Kept forever on purpose:
+# `task:` (resume, outcome typing), `learn:outcomes` (the competence
+# fold), `memory:*`, `guardian:rejected` (immunity), `self:*`.
+DEFAULT_RETENTION: dict[str, str] = {
+    "trace:": "2d", "dead:": "30d", "activity": "90d",
+    "metrics:history": "7d", "curiosity:ticks": "7d", "persona:state": "7d",
+    "execution:inflight": "7d", "execution:tools": "30d", "cognition:budget:": "3d",
+    "cognition:summaries:": "30d", "voice:turns": "30d",
+    "action:": "30d", "verify:": "90d", "reflect:": "90d",
+}
 
 
 def parse_duration(text: str | float | int | None) -> float | None:

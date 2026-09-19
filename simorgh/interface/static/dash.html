@@ -298,7 +298,7 @@ function nowPlaying(){const m=TV.mode||"none";if(m==="none"||!m)return {title:"N
   if(m==="grid")return {title:"Cameras",sub:(TV.titles||[]).join(" · "),tag:"live grid"};
   return {title:TV.title||TV.url||"",sub:m==="frame"?"framed inside Sim's page":"full screen on the TV",tag:m};}
 function camList(){return (DATA&&DATA.cameras)||[];}
-function camTile(c,tag){return c?thumb(esc(c.name)+' <span class="faint" style="font-size:12.5px;">· '+ago(c.at)+'</span>',tag||(c.kind==="ring"?"ring":"still"),c.url):thumb("no camera still yet <span class='faint' style='font-size:12.5px;'>· cameras snapshot &lt;name&gt;</span>","");}
+function camTile(c,tag){return c?thumb(esc(c.name)+' <span class="faint" style="font-size:12.5px;">· '+ago(c.at)+'</span>',tag||(c.kind==="ring"?"ring":"still"),q(c.url)):thumb("no camera still yet <span class='faint' style='font-size:12.5px;'>· cameras snapshot &lt;name&gt;</span>","");}
 function kv(k,v,c){return '<div class="tr"><span class="l">'+k+'</span><span class="'+(c||"")+'">'+v+'</span></div>';}
 
 // ---- views ----

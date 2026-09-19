@@ -70,7 +70,8 @@ class TestOutcomeRecorder(unittest.IsolatedAsyncioTestCase):
                                     "verification_ref": None})
         await self.recorder.on_task_completed(msg)
 
-        self.assertEqual(self.competence.samples("unknown"), 1)
+        self.assertEqual(self.competence.samples("unknown"), 0)  # untyped turns are skipped, not recorded (C2)
+        self.assertEqual(self.recorder.skipped_unknown, 1)
 
     async def test_chat_task_with_no_subject_uses_bare_kind_as_task_type(self):
         await self._seed_task("t4", kind="chat", subject=None)

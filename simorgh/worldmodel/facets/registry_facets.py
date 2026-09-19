@@ -20,6 +20,10 @@ class ToolsFacet:
             "provider": payload.get("provider", "builtin"), "available": True,
         }
 
+    def names(self, *, available_only: bool = True) -> list[str]:
+        """Sorted tool names, for the Self Model's `capabilities["tools"]`."""
+        return sorted(n for n, t in self._tools.items() if t.get("available") or not available_only)
+
     def on_unavailable(self, name: str, reason: str) -> None:
         if name in self._tools:
             self._tools[name]["available"] = False

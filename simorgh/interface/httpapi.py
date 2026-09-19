@@ -74,9 +74,17 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: check a monitor or a shell script polls, and it reveals only what the
 #: boot banner already prints. Everything else is gated
 #: (platform-connectors-design.md section 4).
+#: Routes served without the token: the pages themselves (which then
+#: fetch their data with the token the page was opened with), status,
+#: wallpapers, the logo. NOT the cameras: `/api/dash/streams` (every
+#: camera with a ready URL), `/cameras/snap/` (the newest still) and
+#: `/tv/hls/` (live video) were open until 2026-09-19, so anyone on the
+#: LAN could watch the house on a `0.0.0.0` bind (2026-09-18 evaluation,
+#: S15/V2). The dash and TV pages already append `?token=` to those URLs.
 _OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers", "/api/dash/data",
-                                          "/api/dash/state", "/api/dash/keys", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner",
-                                          "/api/dash/streams"})
+                                          "/api/dash/state", "/api/dash/keys", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner"})
+#: Prefix routes served without the token. Wallpapers only.
+_OPEN_PREFIXES: tuple[str, ...] = ("/wallpapers/",)
 
 #: The response to an unauthenticated request. A JSON body, because
 #: every other error on this server is JSON and a dashboard that got
@@ -471,7 +479,7 @@ class HttpApi:
                         "ring_cameras": self._feeds.ring_cameras(), "asked": self._cameras_live_last}
             return 200, json.dumps(body, default=str).encode("utf-8"), "application/json"
 
-        self.register_route("GET", "/api/dash/streams", _streams, auth=False)
+        self.register_route("GET", "/api/dash/streams", _streams, auth=True)
 
         async def _ring_live(_query, body, _headers):
             try:
@@ -601,7 +609,11 @@ class HttpApi:
         compared in constant time so the comparison itself cannot be
         used to guess the token a character at a time."""
         if not self._token:
-            return True
+            # No token configured: fine on this machine, where the only
+            # caller is the person at the keyboard; on any other bind a
+            # gated route is refused rather than served to the whole
+            # LAN. Set SIM_API_TOKEN to serve them (2026-09-19).
+            return self.loopback_bind
         supplied = headers.get("authorization", "")
         scheme, _, value = supplied.partition(" ")
         if scheme.lower() == "bearer" and hmac.compare_digest(value.strip(), self._token):
@@ -638,6 +650,11 @@ class HttpApi:
             return True
         hits.append(now)
         return False
+
+    @property
+    def loopback_bind(self) -> bool:
+        """True when only this machine can reach the server."""
+        return self._host.strip().lower() in ("127.0.0.1", "localhost", "::1")
 
     @property
     def requires_token(self) -> bool:
@@ -919,7 +936,7 @@ class HttpApi:
             for p_method, prefix, handler in self._prefixes:
                 if method == p_method and split.path.startswith(prefix):
                     rest = split.path[len(prefix):]
-                    open_ = prefix in ("/tv/hls/", "/tv/media/", "/wallpapers/", "/cameras/snap/")
+                    open_ = prefix in _OPEN_PREFIXES
                     route = Route(method=method, path=split.path, handler=handler, auth=not open_,
                                   max_body=_MAX_BODY_BYTES if method == "POST" else None, rate=None)
                     prefix_extra = {"name": rest.split("/", 1)[0]} if prefix == "/api/hooks/" else {"rest": rest}

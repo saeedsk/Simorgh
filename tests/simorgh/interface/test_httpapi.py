@@ -1005,14 +1005,16 @@ class HooksAndHlsTestCase(unittest.IsolatedAsyncioTestCase):
                 return resp.status, data
             status, _ = await asyncio.to_thread(_req, "POST", "/api/hooks/reolink", b"<xml>channel1</xml>")
             self.assertEqual(status, 401, "a hook needs the token too")
+            status, _ = await asyncio.to_thread(_req, "GET", "/tv/hls/7/index.m3u8")
+            self.assertEqual(status, 401, "live video needs the token too (2026-09-19)")
             status, body = await asyncio.to_thread(_req, "POST", "/api/hooks/reolink?token=tv-secret", b"<xml>channel1</xml>")
             self.assertEqual((status, body), (200, b"ok"))
             hooks = [m for m in bus.published if m.type == topics.UI_HOOK_RECEIVED]
             self.assertEqual(hooks[-1].payload["name"], "reolink")
             self.assertIn("channel1", hooks[-1].payload["body"])
-            status, body = await asyncio.to_thread(_req, "GET", "/tv/hls/7/index.m3u8")
-            self.assertEqual((status, body), (200, b"#EXTM3U\n"), "a live stream is open on the LAN")
-            status, _ = await asyncio.to_thread(_req, "GET", "/tv/hls/../secrets.toml")
+            status, body = await asyncio.to_thread(_req, "GET", "/tv/hls/7/index.m3u8?token=tv-secret")
+            self.assertEqual((status, body), (200, b"#EXTM3U\n"), "the TV page appends its token")
+            status, _ = await asyncio.to_thread(_req, "GET", "/tv/hls/../secrets.toml?token=tv-secret")
             self.assertEqual(status, 404)
 
     async def test_a_fetched_video_is_served_to_the_tv_in_ranges(self):
@@ -1038,24 +1040,24 @@ class HooksAndHlsTestCase(unittest.IsolatedAsyncioTestCase):
                 hdrs = {k.lower(): v for k, v in resp.getheaders()}
                 conn.close()
                 return resp.status, data, hdrs
-            status, body, hdrs = await asyncio.to_thread(_req, "/tv/media/abc.mp4")
+            status, body, hdrs = await asyncio.to_thread(_req, "/tv/media/abc.mp4?token=tv-secret")
             self.assertEqual((status, len(body), hdrs.get("content-type"), hdrs.get("accept-ranges")),
-                             (200, 100, "video/mp4", "bytes"), "open on the LAN, like the camera streams")
-            status, body, hdrs = await asyncio.to_thread(_req, "/tv/media/abc.mp4", "bytes=10-19")
+                             (200, 100, "video/mp4", "bytes"), "served to the TV page, which carries the token")
+            status, body, hdrs = await asyncio.to_thread(_req, "/tv/media/abc.mp4?token=tv-secret", "bytes=10-19")
             self.assertEqual((status, body, hdrs.get("content-range")), (206, bytes(range(10, 20)), "bytes 10-19/100"))
-            status, body, hdrs = await asyncio.to_thread(_req, "/tv/media/abc.mp4", "bytes=90-")
+            status, body, hdrs = await asyncio.to_thread(_req, "/tv/media/abc.mp4?token=tv-secret", "bytes=90-")
             self.assertEqual((status, body, hdrs.get("content-range")), (206, bytes(range(90, 100)), "bytes 90-99/100"))
-            status, _, _ = await asyncio.to_thread(_req, "/tv/media/abc.mp4", "bytes=500-")
+            status, _, _ = await asyncio.to_thread(_req, "/tv/media/abc.mp4?token=tv-secret", "bytes=500-")
             self.assertEqual(status, 416)
-            status, _, _ = await asyncio.to_thread(_req, "/tv/media/notes.txt")
+            status, _, _ = await asyncio.to_thread(_req, "/tv/media/notes.txt?token=tv-secret")
             self.assertEqual(status, 404, "only video")
-            status, _, _ = await asyncio.to_thread(_req, "/tv/media/../secrets.toml")
+            status, _, _ = await asyncio.to_thread(_req, "/tv/media/../secrets.toml?token=tv-secret")
             self.assertEqual(status, 404)
             # the state carries where the file is, or why it is not coming
             await api._on_tv_state(Message.new(topics.TV_STATE, source="execution", payload={  # noqa: SLF001
-                "mode": "frame", "url": "https://youtu.be/abc", "stream": "/tv/media/abc.mp4"}))
+                "mode": "frame", "url": "https://youtu.be/abc", "stream": "/tv/media/abc.mp4?token=tv-secret"}))
             self.assertEqual((api._tv_state["stream"], api._tv_state["problem"], api._tv_state["fetching"]),  # noqa: SLF001
-                             ("/tv/media/abc.mp4", "", False))
+                             ("/tv/media/abc.mp4?token=tv-secret", "", False))
 
 
 class DashAndWallpapersTestCase(unittest.IsolatedAsyncioTestCase):
@@ -1166,13 +1168,13 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((json.loads(b)["view"], json.loads(b)["symbol"]), ("cameras", "AMD"))
 
     async def test_a_same_origin_post_from_the_lan_address_is_not_mistaken_for_csrf(self):
-        api = HttpApi(_FakeBus(), host="0.0.0.0", port=0)
+        api = HttpApi(_FakeBus(), host="0.0.0.0", port=0, token="secret")
         await api.start(); self.addAsyncCleanup(api.stop)
         host = f"192.168.50.7:{api.port}"
-        st, _ = await asyncio.to_thread(self._p, api, "/api/dash/state", {"view": "news"},
+        st, _ = await asyncio.to_thread(self._p, api, "/api/dash/state?token=secret", {"view": "news"},
                                         {"Origin": f"http://{host}", "Host": host})
         self.assertEqual(st, 200)
-        st, _ = await asyncio.to_thread(self._p, api, "/api/dash/state", {"view": "news"},
+        st, _ = await asyncio.to_thread(self._p, api, "/api/dash/state?token=secret", {"view": "news"},
                                         {"Origin": "http://evil.example", "Host": host})
         self.assertEqual(st, 403)
 
@@ -1225,7 +1227,7 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0], ("cam_stream", {"camera": "all", "mode": "dash"}, "dash"))
         self.assertEqual(calls[1][0], "ring_live"); self.assertEqual(calls[1][1]["camera"], "Front Door")
 
-    async def test_the_relays_are_asked_for_after_boot_and_the_streams_route_is_small_and_open(self):
+    async def test_the_relays_are_asked_for_after_boot_and_the_streams_route_is_small(self):
         from simorgh.interface import dispatch as dispatch_mod
         calls = []
 
@@ -1257,7 +1259,7 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
             n = len(calls)
             await asyncio.sleep(0.2)
             self.assertLessEqual(len(calls), n + 1, "not asked again while a relay is live")
-            st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/streams")
+            st, b, _ = await asyncio.to_thread(self._g, api, "/api/dash/streams?token=secret")
             self.assertEqual(st, 200)
             body = json.loads(b)
             self.assertEqual(body["streams"][0]["name"], "Office"); self.assertIn("Office", body["asked"]["text"])
@@ -1308,13 +1310,13 @@ class DashDataStateAndRemoteTestCase(unittest.IsolatedAsyncioTestCase):
             os.utime(root / "Front_Door-20260912-100000.jpg", (2_000_000_000, 2_000_000_000))
             (root / "ring").mkdir(); (root / "ring" / "Porch-20260912-110000.jpg").write_bytes(b"ring")
             await api.start(); self.addAsyncCleanup(api.stop)
-            st, b, ct = await asyncio.to_thread(self._g, api, "/cameras/snap/Front_Door")
+            st, b, ct = await asyncio.to_thread(self._g, api, "/cameras/snap/Front_Door?token=secret")
             self.assertEqual((st, b, ct), (200, b"new", "image/jpeg"))
-            st, b, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/ring/Porch")
+            st, b, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/ring/Porch?token=secret")
             self.assertEqual((st, b), (200, b"ring"))
-            st, _, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/Garage")
+            st, _, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/Garage?token=secret")
             self.assertEqual(st, 404)
-            st, _, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/../secrets")
+            st, _, _ = await asyncio.to_thread(self._g, api, "/cameras/snap/../secrets?token=secret")
             self.assertEqual(st, 404)
 
 
