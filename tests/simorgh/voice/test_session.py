@@ -881,3 +881,20 @@ class TvAudioTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replies.asked, ["Sim, what time is it"], "the TV's line is not asked; a line naming Sim is")
         quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet")]
         self.assertIn("the TV is playing", quiet[0]["reason"])
+
+
+class ASupersededQuietTurnLeavesTheNewerTurnsAnswer(unittest.IsolatedAsyncioTestCase):
+    """The person spoke twice before Sim answered. The first turn's verdict
+    was QUIET; it must not hand the floor back while the second turn's
+    answer is still owed (2026-09-18 evaluation, V1: the newer answer was
+    refused as "the session is listening")."""
+
+    async def test_the_second_answer_is_spoken(self) -> None:
+        script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["QUIET", "Twelve."], delay=1.5)
+        session, bus, speaker, tts = _session(_config(backchannel=False), script, replies)
+        _distinct_questions(session, ["is the oven still on", "what is six times two"])
+        await _run_until(session, lambda: "Twelve." in tts.spoken, timeout=10.0)
+        self.assertEqual(len(replies.asked), 2, replies.asked)
+        self.assertIn("Twelve.", tts.spoken)
+        self.assertNotIn("QUIET", tts.spoken)

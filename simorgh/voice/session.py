@@ -1627,7 +1627,12 @@ class VoiceSession:
         if speak is not None:
             # A response was minted; it is over before it started.
             self.turns.handle_playback_state(PlaybackState("finished", str(speak.response_id)))
-        if self.turns.state == THINKING:
+        # Only the turn still owed an answer may hand the floor back. A
+        # superseded turn staying quiet used to flip THINKING to LISTENING
+        # while a NEWER turn was the one being thought about, and that
+        # turn's real answer was then refused as "the session is
+        # listening" (2026-09-18 evaluation, V1).
+        if self.turns.state == THINKING and self.turns.asked_turn in (0, turn_id):
             self.turns.state = LISTENING if self.turns.auto_listen else self.turns.state
         await self._announce(self.turns.state)
         self._answered.discard(turn_id)

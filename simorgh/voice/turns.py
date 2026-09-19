@@ -220,6 +220,11 @@ class TurnManager:
         if turn_id == self._asked_turn and self._superseded:
             self._asked_turn, self._superseded = self._superseded, 0
 
+    @property
+    def asked_turn(self) -> int:
+        """The turn whose answer is owed now (0 when none is)."""
+        return self._asked_turn
+
     def reply_ready(self, turn_id: int) -> list[Action]:
         """The model answered `turn_id`. Spoken if that is still the turn
         whose answer is owed; held if the person may be starting a new
