@@ -23,7 +23,7 @@ from typing import Any
 
 from simorgh.contracts.protocols import ProviderResponse
 
-from ..api import ProviderUnavailable
+from ..api import ProviderUnavailable, Capabilities
 
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_KEEP_ALIVE = "2m"
@@ -33,6 +33,8 @@ _PROBE_CACHE_S = 30.0
 
 class OllamaProvider:
     name = "ollama"
+    # Chat tools exist for capable models; images follow `vision_model`.
+    capabilities = Capabilities(supports_tools=True, supports_streaming=True)
 
     def __init__(
         self, model: str = "", *, base_url: str = DEFAULT_BASE_URL, keep_alive: str = DEFAULT_KEEP_ALIVE,

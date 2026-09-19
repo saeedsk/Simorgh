@@ -46,7 +46,7 @@ from typing import Callable
 
 from simorgh.contracts.protocols import ProviderResponse
 
-from ..api import ProviderUnavailable
+from ..api import ProviderUnavailable, Capabilities
 
 _CREDENTIAL_ENV_VARS_TO_STRIP = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
 
@@ -55,6 +55,8 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 class ClaudeCodeProvider:
     name = "claude_code_cli"
+    # A CLI wrapper: text in, text out; no tool calls or images over this path.
+    capabilities = Capabilities(context_window=200_000, cache_prefix=True)
     # The `claude` CLI picks its own model from the caller's
     # subscription; this provider never names one, so it says that
     # rather than guessing a version that may be wrong.

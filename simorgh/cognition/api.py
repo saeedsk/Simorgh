@@ -151,3 +151,34 @@ class Compactor(Protocol):
         self, messages: list[dict], *, limit_tokens: int, allow_summarize: bool = False,
         session_id: str | None = None, purpose: str | None = None,
     ) -> CompactedContext: ...
+
+
+@dataclass(frozen=True)
+class Capabilities:
+    """What a provider's API can do (stage 2 item 3). Describes the API,
+    not today's adapter: `supports_tools` is whether native tool calling
+    exists there, which `tool_dialect = "native"` (stage 2 item 9) needs
+    before it may be switched on for that provider. `context_window` 0 is
+    "unknown"."""
+    supports_tools: bool = False
+    supports_streaming: bool = False
+    supports_images: bool = False
+    context_window: int = 0
+    cache_prefix: bool = False
+
+
+NO_CAPABILITIES = Capabilities()
+
+
+def capabilities_of(provider) -> Capabilities:
+    """A provider's declared `capabilities`, or none. Ollama's image support
+    depends on its configured vision model, so a `supports_images`
+    property on the provider wins over the declared flag."""
+    declared = getattr(provider, "capabilities", None)
+    caps = declared if isinstance(declared, Capabilities) else NO_CAPABILITIES
+    images = getattr(provider, "supports_images", None)
+    if isinstance(images, bool) and images != caps.supports_images:
+        from dataclasses import replace
+
+        caps = replace(caps, supports_images=images)
+    return caps

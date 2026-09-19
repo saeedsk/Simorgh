@@ -44,7 +44,7 @@ from typing import Any
 
 from simorgh.contracts.protocols import ProviderResponse
 
-from ..api import ProviderUnavailable
+from ..api import ProviderUnavailable, Capabilities
 
 DEFAULT_MODEL = "zai-org/GLM-5.3-Flash"
 DEFAULT_BASE_URL = "https://api.together.ai/v1"
@@ -78,6 +78,9 @@ PRICE_CACHED_IN = 0.03
 
 class TogetherProvider:
     name = "together"
+    # OpenAI-compatible `tools`/`tool_choice` and streaming; the GLM chat
+    # models Sim uses read text only.
+    capabilities = Capabilities(supports_tools=True, supports_streaming=True, cache_prefix=True)
 
     def __init__(
         self, api_key: str | None = None, model: str = DEFAULT_MODEL, *,

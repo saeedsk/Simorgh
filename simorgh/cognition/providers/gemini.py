@@ -12,7 +12,7 @@ from typing import Any
 
 from simorgh.contracts.protocols import ProviderResponse
 
-from ..api import ProviderUnavailable
+from ..api import ProviderUnavailable, Capabilities
 
 DEFAULT_MODEL = "gemini-3.8-flash"
 # Output room for thought, on top of the caller's max_tokens (see _complete_sync).
@@ -21,6 +21,8 @@ THINKING_RESERVE_TOKENS = 2048
 
 class GeminiProvider:
     name = "gemini"
+    capabilities = Capabilities(supports_tools=True, supports_streaming=True, supports_images=True,
+                                context_window=1_000_000, cache_prefix=True)
 
     def __init__(self, api_key: str | None = None, model: str = DEFAULT_MODEL, client: Any | None = None) -> None:
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")

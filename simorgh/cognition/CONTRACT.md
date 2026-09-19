@@ -152,3 +152,5 @@ Lock it first (`python tools/modlock.py claim cognition --by <you> --task "..."`
 - Telemetry (stage 1 item 4, 2026-09-19): each provider call is a span `cognition.provider_call` (attrs `purpose`, `provider`, `tokens_in`, `tokens_out`), parented to the `cognition.think` message.
 
 - Deadline (stage 1 item 5, 2026-09-19): a think's time cap is shrunk to the request's `deadline` less 0.5 s, but never below the Router's one-candidate minimum (5 s), which would turn a short wait into a floor reply without dialling anyone.
+
+- Capabilities (stage 2 item 3, 2026-09-19): `api.Capabilities(supports_tools, supports_streaming, supports_images, context_window, cache_prefix)` declared as `capabilities` on each provider class and read with `api.capabilities_of(provider)` (undeclared = none; Ollama's `supports_images` property wins). They describe the provider's API, not the adapter: nothing reads them yet; stage 2 item 9's `tool_dialect = "native"` requires `supports_tools`. Floor and the Claude Code CLI wrapper: no tools.
