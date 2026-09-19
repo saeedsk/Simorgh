@@ -4,7 +4,7 @@ One-line status: layer 0 · 4,140 lines · 20 test files · lock: `kernel` in do
 
 ## Purpose
 
-The Kernel is the composition root and the process's owner: it loads `simorgh.toml`, builds the one Ledger client and the one bus backend, installs the reserved-topology policy, builds each subsystem's `Context` (its own `BusClient`, its config section, scoped secrets, a data directory), boots the subsystems in `registry.LAYERS` order waiting on each layer's health, and then runs the state machine, the tick scheduler, the status server, the health ticker and the signal handling. It holds no policy about work: ticks are unconditional (`scheduler.py` docstring) and it never decides whether to act on one. `registry.py` is the only module in the codebase allowed to import another subsystem's `Service`; everything else here depends only on contracts, the bus client and the ledger client. The shaping decision: every subsystem, the bus and the ledger included, is a `Subsystem` with `start(ctx)/stop()/health()` started by one `Supervisor`, so restart, pause-on-Guardian-down and ordered shutdown are one mechanism. It must never boot with an invalid `[runtime]` (a bad `mode` is a `ConfigError`, not a fallback) and never let a stuck thread keep the process alive after a stop (`cli.py` hard exit).
+The Kernel is the composition root and the process's owner: it loads `simorgh.toml`, builds the one Ledger client, the one telemetry store and the one bus backend, installs the reserved-topology policy, builds each subsystem's `Context` (its own `BusClient`, its config section, scoped secrets, a data directory), boots the subsystems in `registry.LAYERS` order waiting on each layer's health, and then runs the state machine, the tick scheduler, the status server, the health ticker and the signal handling. It holds no policy about work: ticks are unconditional (`scheduler.py` docstring) and it never decides whether to act on one. `registry.py` is the only module in the codebase allowed to import another subsystem's `Service`; everything else here depends only on contracts, the bus client and the ledger client. The shaping decision: every subsystem, the bus and the ledger included, is a `Subsystem` with `start(ctx)/stop()/health()` started by one `Supervisor`, so restart, pause-on-Guardian-down and ordered shutdown are one mechanism. It must never boot with an invalid `[runtime]` (a bad `mode` is a `ConfigError`, not a fallback) and never let a stuck thread keep the process alive after a stop (`cli.py` hard exit).
 
 ## Files
 
@@ -45,6 +45,7 @@ The Kernel is the composition root and the process's owner: it loads `simorgh.to
 | `percept.text.received` | `messages/percept.py::PerceptTextReceived` | simorgh/kernel/scheduler.py:189 | marks human activity (resets the idle clock) |
 | `system.schedule.add` | `messages/system.py::SystemScheduleAdd` | simorgh/kernel/scheduler.py:190 | records a durable schedule and arms it |
 | `system.schedule.cancel` | `messages/system.py::SystemScheduleCancel` | simorgh/kernel/scheduler.py:191 | records the cancel and disarms it |
+| `system.tick.sleep` | `messages/system.py::SystemTickSleep` | simorgh/kernel/service.py:335 (`_on_sleep_tick`) | one telemetry retention pass (`TelemetryService.on_sleep_tick`, skipped within `[telemetry] maintain_min_interval_s` of the last); only when telemetry is enabled |
 
 `selfcheck.py` subscribes to `action.proposed`, `action.approved`, `system.pause`, `system.resume` and publishes `action.*`/`system.pause|resume`, but only on its own private in-memory bus with stub `guardian`/`execution` sources during `--self-check`; nothing it does reaches the live bus.
 
@@ -74,11 +75,13 @@ The Kernel is the composition root and the process's owner: it loads `simorgh.to
 | `metrics:history` | simorgh/kernel/metrics.py:45 (a `MetricsTable` snapshot every `metrics_every_s`) | simorgh/interface/httpapi.py, simorgh/execution/tools.py, `simorgh status` offline (`statusread.py`, last sample only) | 7d in DEFAULT_RETENTION, but not applied while written (see ledger/CONTRACT.md) |
 | `trace:<id>` | read only, simorgh/kernel/cli.py:271 (`simorgh trace`) | written by bus/trace.py | 2d |
 
+Not a ledger stream: the Kernel opens `<data_dir>/telemetry.sqlite` (spans and samples, `simorgh/telemetry/CONTRACT.md`) at boot, after the ledger, and closes it at shutdown after the subsystems stop and before the bus backend and ledger.
+
 The Kernel also appends v1 records through `migrate_v1.py` (routes in ledger/migrate_v1.py). The `vault:`, `env:`, `bw:`, `ssm:` strings in `vault.py` are credential-reference prefixes, not ledger streams; the vault is an encrypted file (`vault.py::default_vault_path`).
 
 ## Config
 
-`[runtime]` in simorgh.toml; dataclass `RuntimeConfig` in `simorgh/kernel/api.py`, parsed by `kernel/config.py::load_runtime_config`. Every key is overridable by `SIMORGH_RUNTIME_<KEY>`. The Kernel also passes `[bus]`, `[ledger]`, `[execution]` and `[guardian]` to those packages, and every other section to its subsystem's `Context.config`.
+`[runtime]` in simorgh.toml; dataclass `RuntimeConfig` in `simorgh/kernel/api.py`, parsed by `kernel/config.py::load_runtime_config`. Every key is overridable by `SIMORGH_RUNTIME_<KEY>`. The Kernel also passes `[bus]`, `[ledger]`, `[telemetry]`, `[execution]` and `[guardian]` to those packages (`[telemetry]` keys are listed in `simorgh/telemetry/CONTRACT.md`; `enabled = false` hands every Context the no-op), and every other section to its subsystem's `Context.config`.
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -105,20 +108,22 @@ Other environment the package reads: `SIMORGH_CONFIG`, `SIMORGH_RUNTIME_DATA_DIR
 
 ## Public Python surface
 
-- `simorgh.kernel.Kernel` (`service.py:108`): implements `Subsystem` with `name="kernel"`; `Kernel(config: LoadedConfig, *, secrets=None, clock=None, interactive=False)`, `boot()`, `wait_for_stop()`, `shutdown()`, `health()`, `status_snapshot()`, attributes `bus`, `ledger`, `state`, `run_id`, `restart_requested`. `KernelBootError` when a layer fails or times out.
+- `simorgh.kernel.Kernel` (`service.py:108`): implements `Subsystem` with `name="kernel"`; `Kernel(config: LoadedConfig, *, secrets=None, clock=None, interactive=False)`, `boot()`, `wait_for_stop()`, `shutdown()`, `health()`, `status_snapshot()`, attributes `bus`, `ledger`, `telemetry` (the `TelemetryService`, or None when `[telemetry] enabled = false`), `state`, `run_id`, `restart_requested`. `KernelBootError` when a layer fails or times out.
 - `WorkerKernel` (`service.py:595`): one orchestration Worker per process in `local-multi` mode; unused live.
 - `kernel.config.load_config`, `LoadedConfig`, `ConfigError`; `kernel.api.RuntimeConfig`.
 - `kernel.registry.LAYERS`, `build_factories`, `known_layers`.
 - `kernel.selfcheck.run()` (the `--self-check` proof) and `kernel.vault.Vault`.
 - `kernel.statusread.read_status(config, *, timeout=2.0) -> (snapshot, source_line)`: what `simorgh status` prints. Never constructs a `Kernel`, never starts a Ledger client, never appends. It asks `GET /api/status` at `[interface] http_host`/`http_port` (a wildcard bind is asked on `127.0.0.1`) with `SIM_API_TOKEN` from the Kernel's secret chain, within `--timeout`; if nothing usable answers it reads the last `system.state` on `system` and the last `metrics:history` sample from the ledger files (`jsonl` read backwards, `sqlite` opened `immutable=1`, or `mode=ro` when a `-wal` is present; `memory`/`dynamodb` cannot be read offline and the command exits 1). The JSON on stdout carries `source: "live"` or `source: "ledger"` with `as_of`; the ledger form has `state`, `autonomous_paused`, `previous`/`reason`/`requested_by`, `mode` (from config) and `metrics`, and leaves out `run_id`, `uptime_seconds` and `subsystems`, which nothing records. One line on stderr says which source was used (`status: live, from <url>` or `status: from the ledger, as of <time> (<why not live>)`).
-- Other packages see the Kernel only through `simorgh.contracts.protocols` (`Context`, `Subsystem`, `Health`, `Clock`, `Logger`) and the topics above.
+- `kernel.context.ContextFactory(..., telemetry=None)`: the store every `Context.telemetry` gets; None means `contracts.protocols.NULL_TELEMETRY` (tests, `WorkerKernel`).
+- Other packages see the Kernel only through `simorgh.contracts.protocols` (`Context`, `Subsystem`, `Health`, `Clock`, `Logger`, `Telemetry`) and the topics above.
 - Module-level mutable state: `registry.DEFAULT_SECRETS` (a dict; mutating it changes every later boot in the process), `cli._HARD_EXIT` (patched by tests), `configcheck.KNOWN_DEAD_FIELDS`/`EFFECTIVE_DEFAULTS` (dicts read as tables). Process-wide side effect: `cli._configure_logging` installs a root logging handler.
 
 ## Invariants
 
 - The Kernel is the only non-`guardian` publisher allowed for `action.approved` and one of the allowed publishers of `system.pause`, `system.resume`, `system.stop`, `system.restart`, `system.reload` (`contracts/topics.py` `PUBLISH_ONLY_BY`); the policy that enforces the whole table (`bus.enforcement.ReservedTopologyPolicy`) is installed by the Kernel on every client it builds.
 - Layers start in `LAYERS` order and a layer starts only after the previous layer is healthy; a boot failure records `failed` on the `system` stream and raises `KernelBootError`.
-- Shutdown appends `stopped` to the `system` stream before any layer is stopped, then stops layers in reverse order, then the bus backend, then the ledger.
+- Shutdown appends `stopped` to the `system` stream before any layer is stopped, then stops layers in reverse order, then flushes and closes the telemetry store, then the bus backend, then the ledger.
+- Every `Context` the Kernel builds carries the same `telemetry` (the Kernel's `TelemetryService`, or `NULL_TELEMETRY` when disabled); the store is not a supervised subsystem and is not in `LAYERS`.
 - Every state transition is appended to the `system` stream before `system.state.changed` is published.
 - A scoped autonomous pause survives a restart: it is read back from the `system` stream before the boot `system.state.changed`, and the boot event asserts `autonomous_paused` only when true.
 - If `guardian` or `execution` is still `down` after its restart budget is spent, the system pauses (`supervisor.SAFETY_CRITICAL`, `supervisor.py:109`).
@@ -137,6 +142,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/kernel/test_registry.py` -- `LAYERS`, the factories, secret scoping tables.
 - `tests/simorgh/kernel/test_config.py` -- search order, `[runtime]` parsing, env overrides, `ConfigError` on bad values.
 - `tests/simorgh/kernel/test_context.py` -- one client per subsystem with its own source, scoped secrets, data dirs, shared metrics.
+- `tests/simorgh/telemetry/test_kernel_wiring.py` -- a booted Kernel puts its one telemetry store on every Context, the sleep tick runs retention, shutdown flushes, `enabled = false` hands out the no-op.
 - `tests/simorgh/kernel/test_scheduler.py` -- tick cadence and conditions, activity clock, durable schedules replayed at start.
 - `tests/simorgh/kernel/test_state.py` -- legal transitions, idempotent pause/resume, scoped autonomous pause.
 - `tests/simorgh/kernel/test_supervisor_restarts.py` -- a `down` service is restarted with a fresh Context; the ticker drives it (B10).
@@ -161,7 +167,6 @@ Found while writing this contract (not in the catalogue): `[runtime] subsystems`
 
 ## Planned changes (roadmap)
 
-- Stage 1 item 1: the Kernel injects a `Telemetry` implementation into every `Context` beside `bus` and `ledger`; `telemetry` joins `LAYERS` layer 0.
 - Stage 1 item 3: `MetricsHistoryWriter` writes telemetry samples instead of `metrics:history`.
 - Stage 1 item 8: `ContextFactory` builds a `LedgerClient` bound to each subsystem's `source`.
 - Stage 1 item 10: `WorkerKernel` (plan calls it `kernel/worker.py`; it lives in `service.py`) and the identity registry move under `simorgh/_frozen/`.

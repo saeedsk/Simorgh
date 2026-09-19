@@ -16,7 +16,7 @@ from typing import Any, Mapping
 
 from simorgh.bus.api import BusPolicy
 from simorgh.bus.client import BusClient
-from simorgh.contracts.protocols import Clock, Context, Ledger, Logger
+from simorgh.contracts.protocols import NULL_TELEMETRY, Clock, Context, Ledger, Logger, Telemetry
 from simorgh.contracts import security
 
 from .api import RuntimeConfig, SecretStore
@@ -72,6 +72,7 @@ class ContextFactory:
         identity_registry: Any | None = None,  # simorgh.bus.enforcement.IdentityRegistry, single mode: None
         trace: Any | None = None,  # simorgh.bus.trace.TraceWriter, shared by every client this builds
         metrics: Any | None = None,  # simorgh.bus.metrics.Metrics, shared for the same reason
+        telemetry: Telemetry | None = None,  # simorgh.telemetry.TelemetryService, the Kernel's one store
     ) -> None:
         from simorgh.bus.factory import make_client
 
@@ -93,6 +94,9 @@ class ContextFactory:
         # `backend.set_dead_letter_hook`, so whichever client was built
         # LAST owns it, and that is never the one being read.
         self._metrics = metrics
+        # Every Context carries the same store; None (tests, the worker
+        # kernel) means the no-op `NULL_TELEMETRY`.
+        self._telemetry = telemetry if telemetry is not None else NULL_TELEMETRY
         self._bus_backend = bus_backend
         self._ledger = ledger
         self._config = config
@@ -140,6 +144,7 @@ class ContextFactory:
             name=name, instance_id=instance_id, run_id=self._run_id, mode=self._runtime.mode,
             bus=bus, ledger=self._ledger, config=self._config.section(name), secrets=secrets,
             clock=self._clock, logger=make_logger(name), data_dir=data_dir, subsystem_token=token,
+            telemetry=self._telemetry,
         )
 
 

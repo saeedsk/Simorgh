@@ -209,6 +209,9 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
     # baseline/written comparison below still works with a plain dict.
     from simorgh.benchmark.config import Config as BenchmarkConfig
     from simorgh.bus.config import Config as BusConfig
+    # `[telemetry]` is the Kernel's own section (it builds the store), in
+    # `KERNEL_SECTIONS`; its class is listed so a typo there is reported.
+    from simorgh.telemetry.config import Config as TelemetryConfig
 
     return {
         "benchmark": BenchmarkConfig,
@@ -224,6 +227,7 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
         "persona": PersonaConfig,
         "planning": PlanningConfig,
         "reflection": ReflectionConfig,
+        "telemetry": TelemetryConfig,
         "verification": VerificationConfig,
         "worldmodel": WorldModelConfig,
     }

@@ -48,6 +48,12 @@ class TestSpottingASectionThatDoesNothing(unittest.TestCase):
         self.assertEqual(dead_sections(_Config({})), [])
         self.assertEqual(dead_sections(_Config({"planning": {}})), [])
 
+    def test_a_mistyped_telemetry_key_is_reported(self) -> None:
+        """`[telemetry]` is read by the Kernel, not a subsystem, but a
+        typo in it vanishes the same way."""
+        self.assertEqual(dead_sections(_Config({"telemetry": {"flush_intervall_s": 1}})), ["telemetry"])
+        self.assertEqual(dead_sections(_Config({"telemetry": {"flush_interval_s": 1}})), [])
+
     def test_several_sections_are_each_reported(self) -> None:
         dead = dead_sections(_Config({
             "planning": {"lease_secs": 99},

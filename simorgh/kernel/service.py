@@ -43,6 +43,9 @@ def _with_env_overrides(section: str, values: dict, model) -> dict:
     return _apply_env_overrides(section, values, fields)
 from simorgh.guardian.config import Config as GuardianConfig
 from simorgh.ledger.factory import make_ledger
+from simorgh.telemetry import FILENAME as TELEMETRY_FILENAME
+from simorgh.telemetry import Config as TelemetryConfig
+from simorgh.telemetry import TelemetryService
 
 from .bootprogress import make_boot_progress
 from .api import RuntimeConfig
@@ -135,7 +138,7 @@ class Kernel:
         topics.SYSTEM_PAUSE, topics.SYSTEM_RESUME, topics.SYSTEM_STOP, topics.SYSTEM_RESTART,
         topics.SYSTEM_STATUS_REQUEST,
         topics.SYSTEM_HEALTH, topics.SYSTEM_METRICS, topics.PERCEPT_TEXT_RECEIVED,
-        topics.SYSTEM_SCHEDULE_ADD, topics.SYSTEM_SCHEDULE_CANCEL,
+        topics.SYSTEM_SCHEDULE_ADD, topics.SYSTEM_SCHEDULE_CANCEL, topics.SYSTEM_TICK_SLEEP,
     )
     produces: tuple[str, ...] = (
         topics.SYSTEM_STARTED, topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_TICK_SECOND,
@@ -171,6 +174,10 @@ class Kernel:
         self._subs = []
         self._bus_backend = None
         self.ledger = None
+        # The telemetry store (spans and samples, stage 1 item 1): the
+        # Kernel's own like the ledger, on every Context as
+        # `ctx.telemetry`. None when `[telemetry] enabled = false`.
+        self.telemetry: TelemetryService | None = None
         self.bus = None  # the Kernel's own BusClient
         # Names each boot stage as it runs (the creator, 2026-09-07: "add
         # some progress bar at startup with details of what is being
@@ -186,6 +193,12 @@ class Kernel:
         self.ledger = make_ledger(self._ledger_mapping(), clock=self._clock)
         await self.ledger.start()
         self.progress.done(self._ledger_detail())
+        telemetry_config = TelemetryConfig.from_mapping(self.config.section("telemetry"))
+        if telemetry_config.enabled:
+            self.telemetry = TelemetryService(
+                self.runtime.data_dir / TELEMETRY_FILENAME, config=telemetry_config, clock=self._clock,
+                logger=make_logger("telemetry"))
+            await self.telemetry.start()
 
         # Reuses the same per-run secret for subsystem-identity tokens
         # (multi-process modes) as for approval tokens: both are HMAC
@@ -244,7 +257,7 @@ class Kernel:
             bus_backend=self._bus_backend, ledger=self.ledger, config=self.config, secrets=self._secrets,
             clock=self._clock, runtime=self.runtime, run_id=self.run_id, hmac_secret=self._hmac_secret,
             needs_hmac_secret=NEEDS_HMAC_SECRET, default_secrets=DEFAULT_SECRETS, bus_policy=policy, identity_registry=identities,
-            trace=self.bus.trace, metrics=self.bus.metrics,
+            trace=self.bus.trace, metrics=self.bus.metrics, telemetry=self.telemetry,
         )
         self._supervisor = Supervisor(
             clock=self._clock, logger=make_logger("kernel"), backoff_s=self.runtime.supervisor_backoff_s,
@@ -318,6 +331,8 @@ class Kernel:
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_RESUME, self._on_resume))
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_STOP, self._on_stop))
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_RESTART, self._on_restart))
+        if self.telemetry is not None:
+            self._subs.append(await self.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep_tick))
         # The health ticker: `[runtime] health_every_s` was parsed and
         # never read, and `Supervisor.poll_once` had no production caller,
         # so a subsystem that went `down` after boot was never restarted
@@ -557,6 +572,16 @@ class Kernel:
         except Exception as exc:  # noqa: BLE001 -- see the docstring
             make_logger("kernel").warning("config.effective_not_recorded", error=repr(exc))
 
+    async def _on_sleep_tick(self, message: Message) -> None:
+        """Telemetry retention rides the sleep tick, like ledger
+        compaction. Never raises into the bus."""
+        if self.telemetry is None:
+            return
+        try:
+            await self.telemetry.on_sleep_tick()
+        except Exception as exc:  # noqa: BLE001
+            make_logger("kernel").warning("telemetry_retention_failed", error=str(exc))
+
     async def _on_health_changed(self, supervised) -> None:
         health = supervised.last_health
         await self.bus.publish(validate(Message.new(
@@ -599,6 +624,10 @@ class Kernel:
         if self._supervisor is not None:
             await self._supervisor.stop_all(list(reversed(known_layers(
                 build_factories(bus_client=self.bus, ledger_client=self.ledger)))), grace_s=self.runtime.stop_grace_s)
+        # After the subsystems (their last spans are flushed), before the
+        # ledger, mirroring boot order.
+        if self.telemetry is not None:
+            await self.telemetry.stop()
         if self._bus_backend is not None:
             await self._bus_backend.stop()
         if self.ledger is not None:
