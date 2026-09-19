@@ -14,6 +14,11 @@ class Config:
     baseline_arousal: float = 0.0
     decay_half_life_s: float = 900.0
     decay_interval_s: float = 5.0
+    # Decay is announced (bus + ledger) only once the mood has drifted
+    # this far from the last ANNOUNCED state. It used to compare each
+    # 5 s tick with the one before, so a slow drift announced every tick:
+    # 44,444 of 47,784 persona:state events (2026-09-18 evaluation, V6).
+    decay_announce_delta: float = 0.02
     history_limit: int = 200
     lexicon_weight: float = 0.15
     exclamation_arousal: float = 0.10
@@ -56,6 +61,7 @@ class Config:
             baseline_arousal=float(baseline.get("arousal", 0.0)),
             decay_half_life_s=float(data.get("decay_half_life_s", 900.0)),
             decay_interval_s=float(data.get("decay_interval_s", 5.0)),
+            decay_announce_delta=float(data.get("decay_announce_delta", 0.02)),
             history_limit=int(data.get("history_limit", 200)),
             lexicon_weight=float(data.get("lexicon_weight", 0.15)),
             exclamation_arousal=float(data.get("exclamation_arousal", 0.10)),

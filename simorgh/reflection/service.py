@@ -343,8 +343,14 @@ class Service:
             "what_changed": critique.what_changed, "confidence": critique.confidence,
             "open_questions": critique.open_questions, "lesson": critique.lesson, "floor": critique.floor,
         })
+        # Procedural, not episodic: a critique is a lesson about how Sim
+        # works, not something a person said. As episodic it bypassed
+        # Memory's own "no task text in episodic memory" rule and, with
+        # no person tag, passed the voice ownership filter into family
+        # chat prompts (2026-09-18 evaluation, C7). Task sessions recall
+        # the procedural kind; chat does not.
         await self._publish(message, topics.MEMORY_STORE, {
-            "kind": "episodic", "content": critique.what_changed,
+            "kind": "procedural", "content": critique.what_changed,
             "tags": ["self_critique", f"task:{task_id}"], "source_ref": f"reflect:critique:{task_id}",
         })
         if critique.confidence is not None:

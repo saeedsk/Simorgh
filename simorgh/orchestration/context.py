@@ -262,9 +262,15 @@ class Assembler:
         A successful recall that matched nothing returns `("", "")` --
         silence is right there, because "I have no memory of this" is
         already what an absent block means."""
+        # A task also recalls procedural memory: Reflection's critiques of
+        # earlier tasks, the lessons a patch or research session should
+        # not have to relearn. A chat turn does not -- those are about
+        # Sim's work, not about the person (2026-09-18 evaluation, C7).
+        chat = getattr(session.profile, "scaffold", "") == "chat"
+        matched_kinds = ["episodic", "semantic"] if chat else ["episodic", "semantic", "procedural"]
         matched_call = self._request_with_reason(
             topics.MEMORY_RETRIEVE,
-            {"query": query, "kinds": ["episodic", "semantic"], "k": _MEMORY_MATCHED_K},
+            {"query": query, "kinds": matched_kinds, "k": _MEMORY_MATCHED_K},
             trace_id=session.task_id,
         )
         recent_call = self._request_with_reason(

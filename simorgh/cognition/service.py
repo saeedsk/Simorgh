@@ -239,6 +239,18 @@ class Service:
             if sub is not None:
                 await sub.unsubscribe()
 
+    def _note_reply(self, *, floor: bool) -> None:
+        """Start the "no real provider" clock on the FIRST floor reply;
+        a real reply stops it. It was reset to now on every floor reply,
+        so health() reported degraded only once 300 s had passed since
+        the LAST floor -- i.e. only after the system stopped asking
+        (2026-09-18 evaluation, C12)."""
+        if floor:
+            if self._no_real_provider_since is None:
+                self._no_real_provider_since = self._ctx.clock.now()
+        else:
+            self._no_real_provider_since = None
+
     async def health(self) -> Health:
         if self._no_real_provider_since is not None:
             elapsed = self._ctx.clock.now() - self._no_real_provider_since
@@ -371,7 +383,7 @@ class Service:
             await self._error_reply(message, "paused", "system paused mid-call", retryable=True)
             return
 
-        self._no_real_provider_since = self._ctx.clock.now() if floor else None
+        self._note_reply(floor=floor)
         parsed = self._parser.parse(response.text, _expected_spec(payload))
         await self._append_call_record(purpose, response, floor, compacted)
         # Not for a call that carried pictures: only one provider can see,

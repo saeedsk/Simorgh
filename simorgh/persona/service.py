@@ -208,6 +208,7 @@ class Service:
             "source": source,
             "previous": {"valence": previous.valence, "arousal": previous.arousal, "cognitive_load": previous.cognitive_load},
         }
+        self._announced = new
         await self._ctx.bus.publish(Message.new(topics.PERSONA_STATE_CHANGED, source=self._ctx.source, payload=payload))
         await self._persist("persona:state", topics.PERSONA_STATE_CHANGED, payload)
 
@@ -270,9 +271,15 @@ class Service:
             return
         self._last_decay_ts = now
         previous, new = self._mood.decay_toward_baseline(elapsed, half_life_s=self.config.decay_half_life_s)
-        if (abs(new.valence - previous.valence) >= _SIGNIFICANT_DELTA
-                or abs(new.arousal - previous.arousal) >= _SIGNIFICANT_DELTA):
-            await self._publish_state_changed(previous, new, "decay")
+        announced = getattr(self, "_announced", None)
+        if announced is None:
+            # Nothing announced yet: the state before this first decay is
+            # the reference, and it stays the reference until a change is
+            # big enough to announce (`_publish_state_changed` moves it).
+            announced = self._announced = previous
+        step = self.config.decay_announce_delta
+        if abs(new.valence - announced.valence) >= step or abs(new.arousal - announced.arousal) >= step:
+            await self._publish_state_changed(announced, new, "decay")
 
     async def _on_state_changed(self, message: Message) -> None:
         self._share_policy.suspend(message.payload.get("state") != "running")

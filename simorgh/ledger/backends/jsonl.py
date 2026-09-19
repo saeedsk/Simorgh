@@ -719,6 +719,13 @@ class JsonlBackend:
         return self._blobs.get(ref)
 
     async def sweep_unreferenced_blobs(self, *, grace_seconds: float = 3600.0) -> int:
+        """Off the event loop: the sweep reads every stream and snapshot
+        file (118k files, 390 MB measured 2026-09-18) and did so
+        synchronously on the loop, stalling voice, the TUI and every bus
+        handler 30 s after boot and every 6 h (evaluation B1)."""
+        return await asyncio.to_thread(self._sweep_unreferenced_blobs_sync, grace_seconds)
+
+    def _sweep_unreferenced_blobs_sync(self, grace_seconds: float) -> int:
         """Delete blobs no live stream or snapshot still references.
 
         Live-caught: `run_compaction` deletes/truncates *streams* per

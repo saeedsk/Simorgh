@@ -152,7 +152,7 @@ class Service:
                 Event(stream=COMPACTION_STREAM, type="ledger.compacted", ts=now,
                       trace_id=cause.trace_id if cause is not None else "",
                       causation_id=cause.id if cause is not None else None,
-                      payload={**report.as_payload(), "reason": reason}),
+                      payload={**payload, "reason": reason}),
             )
         await self.publish_metrics(cause=cause)
 

@@ -33,6 +33,7 @@ class RollingWindowBudget:
     the truth (principle 4.4)."""
 
     def __init__(self, provider: str, config: ProviderConfig, ledger: Ledger, *, clock: Clock) -> None:
+        self._cache: list[tuple[float, float]] | None = None
         self._provider = provider
         self._config = config
         self._ledger = ledger
@@ -46,8 +47,24 @@ class RollingWindowBudget:
             return False
         return True
 
+    async def _window(self) -> list[tuple[float, float]]:
+        """`(ts, cost)` of the calls in the rolling window. The stream is
+        read ONCE, at first use; after that `record` appends to the cache
+        and old entries are dropped here. It used to replay the whole
+        stream on every `can_spend` -- once per candidate per think -- on
+        a file kept forever (2026-09-18 evaluation, C13)."""
+        if self._cache is None:
+            events = await self._ledger.read(stream_for(self._provider))
+            self._cache = [(e.ts, float(e.payload.get("cost_usd", 0.0) or 0.0)) for e in events]
+        cutoff = self._clock.now() - self._config.window_seconds
+        if self._cache and self._cache[0][0] < cutoff:
+            self._cache = [c for c in self._cache if c[0] >= cutoff]
+        return self._cache
+
     async def record(self, response: ProviderResponse) -> None:
         cost = self._estimate_cost(response)
+        if self._cache is not None:
+            self._cache.append((self._clock.now(), cost))
         await self._ledger.append(
             stream_for(self._provider),
             Event(
@@ -58,10 +75,8 @@ class RollingWindowBudget:
         )
 
     async def status(self) -> BudgetStatus:
-        cutoff = self._clock.now() - self._config.window_seconds
-        events = await self._ledger.read(stream_for(self._provider))
-        recent = [e for e in events if e.ts >= cutoff]
-        spend = sum(e.payload.get("cost_usd", 0.0) for e in recent)
+        recent = await self._window()
+        spend = sum(cost for _, cost in recent)
         calls = len(recent)
         exhausted = (self._config.max_calls is not None and calls >= self._config.max_calls) or (
             self._config.max_spend_usd is not None and spend >= self._config.max_spend_usd
