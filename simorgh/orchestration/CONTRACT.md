@@ -92,14 +92,15 @@ Also written: blobs (`ledger.put_blob`) for the verify subject (`session.py:1905
 | `skills_catalog_max_chars` | `3000` | yes |
 | `skills_roots` | `('skills', '~/.simorgh/skills')` | yes |
 | `skills_channels` | `('', 'cli', 'http')` | yes |
-| `lease_seconds` | `600` | NO (declared, never read; the lease comes from the `task.available` payload, worker.py:304) |
 | `heartbeat_s` | `30` | yes |
-| `max_depth` | `3` | yes (delegation depth; the config.py docstring still says unread) |
+| `max_depth` | `3` | yes (delegation depth) |
 | `max_children_concurrent` | `4` | NO (declared, never read) |
 | `think_timeout_s` | `200.0` | yes |
 | `needs_human_timeout_s` | `600.0` | NO (declared, never read) |
 | `worktrees` | `True` | yes |
 | `metrics_interval_s` | `3.0` | yes |
+
+There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, carried on each `task.available` and read by `worker.py` from the payload. The unread copy here was removed on 2026-09-19, so writing it is now reported by `kernel/configcheck.py` as a section that changed nothing (`test_config.py`).
 
 ## Public Python surface
 
@@ -119,7 +120,7 @@ Also written: blobs (`ledger.put_blob`) for the verify subject (`session.py:1905
 4. A chat turn's conversation window is keyed by `contracts.settings.conversation_key(channel, speaker)` (`context.py:350`), the same function Memory feeds `WorkingMemory` under; the window (last 6 turns) is rendered before the memory block, and only for the `chat` scaffold.
 5. On a voice channel, memory items tagged `person:<x>` reach the prompt only when `<x>` is the current speaker (`context.py` `_theirs`).
 6. A context request (memory, world) that times out or errors is omitted and the prompt says why; it never stalls a session beyond `DEFAULT_TIMEOUT_S = 0.25` s.
-7. `_land` publishes `learn.self_patch.applied` with the landed commit whenever `worktree_land` succeeds (`session.py:793-812`). Not yet pinned by a test in this package.
+7. `_land` publishes `learn.self_patch.applied` with the landed commit whenever `worktree_land` succeeds (`session.py:793-812`; `test_worktree_flow.py`).
 8. A session never ends leaving an uncommitted edit it made in the live tree: `SessionRunner.run` discards it, or keeps it for the next attempt only when the outcome is `blocked` for continuation, verification, uncommitted or landing reasons and `attempt < KEEP_EDITS_UNTIL_ATTEMPT` (6) (`session.py:840-857`).
 9. A `completed` outcome whose text claims work the step log does not show, or with uncommitted edits, is turned into `blocked` (`session.py:684-735`).
 10. Patch and skill tasks in `execute` mode work in their own worktree when Execution offers `worktree_open` (`WORKTREE_KINDS`, `session.py:59`); chat, research and plan sessions edit the live tree (S10).

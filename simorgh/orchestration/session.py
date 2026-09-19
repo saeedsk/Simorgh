@@ -1,12 +1,15 @@
 """The session state machine (16 section 5): CLAIMED -> GATHER -> THINK ->
 (final -> VERIFY -> COMPLETED | tool_calls -> PROPOSE -> GATHER) with a
 bounded evaluator-optimizer revision loop. One action is proposed per
-step and awaited before the next THINK (section 7: "simpler resume and
-exact trajectories; cost: no parallel tool calls inside a step").
+step and awaited before the next THINK, except that up to
+`[orchestration] parallel_read_tools` read-only calls from one reply
+run together.
 
-Deliberately scoped down from the full spec this build: no Plan Mode
-artifact assembly, no delegation (fresh/fork), no steer injection, no
-reground-every-N-steps restatement. See the package README.
+Optional, each behind its own `[orchestration]` switch: re-grounding
+every `reground_every_steps` (`progress.py`), clean revisions, helper
+tasks through the `delegate` tool (`delegation`, bounded by
+`max_depth`), and strong-tier escalation (`escalate_from_attempt`).
+Not built: Plan Mode artifact assembly and steer injection.
 """
 
 from __future__ import annotations

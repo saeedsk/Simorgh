@@ -26,18 +26,17 @@ What each field really does once adopted:
   the task's own `lease_seconds` regardless of this value, so a short
   lease (a test, a tight deployment) is never outrun by a `heartbeat_s`
   sized for the 600s default.
-- `lease_seconds`, `max_depth`, `max_children_concurrent`,
-  `needs_human_timeout_s` -- declared so the config surface matches the
-  full `16-orchestration.md` spec, but **no code path reads them yet**,
-  in *either* single or multi-process mode (`[planning]`'s own
-  `lease_seconds` is the value that actually sets lease length; this
-  section's copy is unread). Wall-clock budgets and delegation
-  (fresh/fork sub-sessions with `depth`/concurrent children) are simply
-  not built yet (see `orchestration/README.md`'s "What this build
-  deliberately does NOT implement"). Changing these in `simorgh.toml`
-  will not (yet) change any observable behaviour -- wire them here, and
-  note it in this docstring, the day a `Worker` actually spawns a child
-  session.
+- `max_depth` -- read by `SessionRunner` when `delegation` is on: a
+  helper task may not be delegated deeper than this.
+- `max_children_concurrent`, `needs_human_timeout_s` -- declared so the
+  config surface matches the original spec, but **no code path reads
+  them**: nothing bounds concurrent helpers, and nothing times out a
+  `needs_human` wait here. Changing them changes nothing.
+- There is no `lease_seconds` here. The lease is Planning's: `[planning]
+  lease_seconds` goes out on every `task.available`, and the Worker reads
+  it from that payload. This section's copy was never read and was
+  removed on 2026-09-19; writing it now is reported by
+  `kernel/configcheck.py` as a section that changed nothing.
 """
 
 from __future__ import annotations
@@ -92,7 +91,6 @@ class Config:
     # should have the concept of being frugal where ever it is possible".
     # "" is the typed/CLI channel. Empty tuple: no catalog anywhere.
     skills_channels: tuple[str, ...] = ("", "cli", "http")
-    lease_seconds: int = 600
     heartbeat_s: int = 30
     max_depth: int = 3
     max_children_concurrent: int = 4
